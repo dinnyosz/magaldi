@@ -269,11 +269,11 @@ def run_processing(
                 done, tot, avg = type_stats[t]
                 remaining = tot - done
                 if remaining > 0:
-                    type_parts.append(f"{t}:{remaining}/{tot} ({avg:.1f}s)")
-        type_line = f"  Remaining: {' | '.join(type_parts)}" if type_parts else ""
+                    type_parts.append(f"[cyan]{t}[/]:[green]{remaining}/{tot}[/] [dim]({avg:.1f}s)[/]")
+        type_line = f"  [dim]Remaining:[/] {' [dim]|[/] '.join(type_parts)}" if type_parts else ""
 
         # Stats line
-        stats = f"  Avg: {state.timing.avg_wall_time:.1f}s total | {state.timing.avg_summarize_time:.1f}s summ | {state.timing.avg_embed_time:.1f}s embed"
+        stats = f"  [dim]Avg:[/] [green]{state.timing.avg_wall_time:.1f}s[/] total [dim]|[/] [green]{state.timing.avg_summarize_time:.1f}s[/] summ [dim]|[/] [green]{state.timing.avg_embed_time:.1f}s[/] embed"
 
         parts = [progress_line, worker_table]
         if type_line:
