@@ -31,6 +31,16 @@ from magaldi.processing.processor import (
 console = Console()
 
 
+def format_duration(seconds: float) -> str:
+    """Format duration as hh:mm:ss or mm:ss."""
+    total_secs = int(seconds)
+    hours, remainder = divmod(total_secs, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
 # =============================================================================
 # MAIN CLI GROUP
 # =============================================================================
@@ -230,9 +240,10 @@ def run_processing(
         # Progress info
         pct = (state.completed / state.total * 100) if state.total > 0 else 0
         eta = state.timing.eta_seconds(state.completed, state.total)
-        eta_str = f" | ~{int(eta // 60)}:{int(eta % 60):02d} ETA" if eta else ""
+        eta_str = f" | ~{format_duration(eta)} ETA" if eta else ""
+        elapsed_str = format_duration(state.timing.elapsed)
 
-        progress_line = f"  {state.completed}/{state.total} ({pct:.0f}%) | {state.timing.elapsed:.1f}s elapsed{eta_str}"
+        progress_line = f"  {state.completed}/{state.total} ({pct:.0f}%) | {elapsed_str} elapsed{eta_str}"
 
         # Worker table
         worker_table = Table(show_header=False, box=None, padding=(0, 1))
@@ -324,7 +335,7 @@ def print_processing_result(
     if skip_ai:
         parts.append("[yellow]AI skipped[/]")
     if elapsed > 0:
-        parts.append(f"{elapsed:.1f}s total")
+        parts.append(f"{format_duration(elapsed)} total")
     if avg_wall > 0:
         parts.append(f"avg: {avg_wall:.1f}s wall, {avg_api:.1f}s API")
     console.print(f"  {' | '.join(parts)}")
