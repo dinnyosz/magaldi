@@ -28,6 +28,8 @@ classifiers = [
 dependencies = [
     # CLI
     "click>=8.1.0",
+    # Environment
+    "python-dotenv>=1.0.0",
     "rich>=13.0.0",
     # Config
     "pyyaml>=6.0",

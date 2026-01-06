@@ -47,6 +47,8 @@ def clean_env():
     magaldi_vars = [k for k in os.environ if k.startswith("MAGALDI_")]
     for var in magaldi_vars:
         original_env[var] = os.environ.pop(var)
+    # Skip loading .env file during tests
+    os.environ["MAGALDI_SKIP_DOTENV"] = "1"
     yield
     # Remove any MAGALDI_ vars that were set during the test
     new_vars = [k for k in os.environ if k.startswith("MAGALDI_")]

@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from dotenv import load_dotenv
 
 
 class ConfigurationError(Exception):
@@ -214,8 +215,9 @@ def load_config(
 
     Configuration priority (highest to lowest):
     1. Environment variables (MAGALDI_*)
-    2. Configuration file
-    3. Dataclass defaults
+    2. .env file
+    3. Configuration file
+    4. Dataclass defaults
 
     Args:
         config_path: Path to configuration file. If None, searches standard locations.
@@ -231,6 +233,11 @@ def load_config(
 
     if _config is not None:
         return _config
+
+    # Load .env file if present (doesn't override existing env vars)
+    # Skip in tests by setting MAGALDI_SKIP_DOTENV=1
+    if not os.environ.get("MAGALDI_SKIP_DOTENV"):
+        load_dotenv()
 
     # Start with defaults
     config = MagaldiConfig()
