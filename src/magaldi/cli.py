@@ -281,18 +281,20 @@ def run_processing(
         workers=worker_status,
     )
 
-    def get_display() -> RenderableType:
-        """Called on every refresh to get current display."""
-        return build_display(current_state, workers)
+    class LiveDisplay:
+        """Wrapper that Rich can call to get current display."""
+        def __rich__(self) -> RenderableType:
+            return build_display(current_state, workers)
 
-    with Live(get_display, console=console, refresh_per_second=10) as live:
+    with Live(LiveDisplay(), console=console, refresh_per_second=10) as live:
         def on_progress(state: ProgressState) -> None:
             nonlocal current_state
             current_state = state
+            live.refresh()  # Force refresh on progress
 
         def on_status_change() -> None:
-            """Called when worker status changes - Live auto-refreshes."""
-            pass  # Live polls get_display automatically
+            """Called when worker status changes."""
+            live.refresh()  # Force refresh on status change
 
         result = process_elements(
             parsing_result.parsed_files,
