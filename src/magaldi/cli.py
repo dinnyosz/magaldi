@@ -261,9 +261,9 @@ def print_change_manifest(manifest: ChangeManifest) -> None:
 
 def print_parsing_result(result: ParsingResult) -> None:
     """Print parsing results."""
-    types = ", ".join(f"{t}:{c}" for t, c in sorted(result.elements_by_type.items()))
+    types = ", ".join(f"{t}:[green]{c}[/]" for t, c in sorted(result.elements_by_type.items()))
     failed = f" | [red]{len(result.failed_files)} failed[/]" if result.failed_files else ""
-    console.print(f"  {len(result.parsed_files)} files → {result.total_elements} elements ({types}){failed}")
+    console.print(f"  [green]{len(result.parsed_files)}[/] files → [green]{result.total_elements}[/] elements ({types}){failed}")
 
 
 def print_processing_result(processed: int, skipped: int, indexed: int, skip_ai: bool) -> None:
