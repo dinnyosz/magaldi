@@ -118,10 +118,10 @@ def parse(
 
         # Phase 4: Processing (summarize -> embed -> index)
         console.print("\n[bold blue]Phase 4:[/] Processing")
-        processed, skipped, indexed, avg_wall, avg_api, elapsed = run_processing(
+        processed, skipped, indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats = run_processing(
             parsing_result, manifest, config, dry_run, skip_ai, workers
         )
-        print_processing_result(processed, skipped, indexed, skip_ai, avg_wall, avg_api, elapsed)
+        print_processing_result(processed, skipped, indexed, skip_ai, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, workers)
 
         print_summary(discovery_result, manifest, processed, indexed, skip_ai)
 
@@ -207,16 +207,16 @@ def run_processing(
     dry_run: bool,
     skip_ai: bool,
     workers: int,
-) -> tuple[int, int, int, float, float, float]:
+) -> tuple[int, int, int, float, float, float, float, TimingStats | None]:
     """Run unified processing: summarize -> embed -> index.
 
     Returns:
-        Tuple of (processed, skipped, indexed, avg_wall, avg_api, elapsed).
+        Tuple of (processed, skipped, indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats).
     """
     if dry_run:
         total = parsing_result.total_elements
         console.print(f"  [dim]Dry run: would process {total} elements[/]")
-        return (0, 0, 0, 0.0, 0.0, 0.0)
+        return (0, 0, 0, 0.0, 0.0, 0.0, 0.0, None)
 
     from magaldi.db.elasticsearch import ElasticsearchRepository
 
@@ -328,10 +328,11 @@ def run_processing(
 
     # Get timing stats from current state
     avg_wall = current_state.timing.avg_wall_time
-    avg_api = current_state.timing.avg_api_time
+    avg_summ = current_state.timing.avg_summarize_time
+    avg_embed = current_state.timing.avg_embed_time
     elapsed = current_state.timing.elapsed
 
-    return (result.elements_processed, result.elements_skipped, result.indexed, avg_wall, avg_api, elapsed)
+    return (result.elements_processed, result.elements_skipped, result.indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats)
 
 
 # =============================================================================
@@ -365,7 +366,8 @@ def print_parsing_result(result: ParsingResult) -> None:
 
 def print_processing_result(
     processed: int, skipped: int, indexed: int, skip_ai: bool,
-    avg_wall: float = 0.0, avg_api: float = 0.0, elapsed: float = 0.0
+    avg_wall: float = 0.0, avg_summ: float = 0.0, avg_embed: float = 0.0, elapsed: float = 0.0,
+    timing_stats: TimingStats | None = None, num_workers: int = 4
 ) -> None:
     """Print processing results."""
     parts = []
@@ -378,10 +380,26 @@ def print_processing_result(
     if skip_ai:
         parts.append("[yellow]AI skipped[/]")
     if elapsed > 0:
-        parts.append(f"{format_duration(elapsed)} total")
+        parts.append(f"{format_duration(elapsed)} elapsed")
+        # Effective wall time (elapsed / processed) shows actual throughput
+        if processed > 0:
+            effective = elapsed / processed
+            parts.append(f"{effective:.2f}s/elem effective")
     if avg_wall > 0:
-        parts.append(f"avg: {avg_wall:.1f}s wall, {avg_api:.1f}s API")
+        parts.append(f"avg: {avg_wall:.1f}s total, {avg_summ:.1f}s summ, {avg_embed:.1f}s embed")
     console.print(f"  {' | '.join(parts)}")
+
+    # Show per-type stats
+    if timing_stats:
+        type_stats = timing_stats.get_type_stats()
+        type_parts = []
+        for t in ["file", "class", "function", "method", "variable"]:
+            if t in type_stats:
+                done, tot, avg = type_stats[t]
+                if done > 0:
+                    type_parts.append(f"[cyan]{t}[/]: {done} @ {avg:.1f}s")
+        if type_parts:
+            console.print(f"  [dim]Per-type:[/] {' | '.join(type_parts)}")
 
 
 def print_summary(
