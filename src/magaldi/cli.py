@@ -7,18 +7,18 @@ Commands:
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 import click
 from rich.console import Console
 from rich.table import Table
 
+from magaldi.config import MagaldiConfig, load_config
 from magaldi.parser.change_detection import (
     ChangeManifest,
     InMemoryFileStateRepository,
     detect_changes,
 )
-from magaldi.parser.code_parser import parse_files
+from magaldi.parser.code_parser import ParsingResult, parse_files
 from magaldi.parser.discovery import DiscoveryError, DiscoveryResult, discover
 from magaldi.embedding.embedding import (
     EmbeddingConfig,
@@ -65,22 +65,32 @@ def main() -> None:
 @click.argument("repo_path", type=click.Path(exists=True, file_okay=False, dir_okay=True))
 @click.option("--user", "-u", required=True, help="Username/branch (use 'main' for primary parse)")
 @click.option("--skip-ai", is_flag=True, help="Skip summarization and embedding (phases 5-6)")
-@click.option("--ollama-url", default="http://localhost:11434", help="Ollama API URL")
-def parse(repo_path: str, user: str, skip_ai: bool, ollama_url: str) -> None:
+@click.option("--dry-run", is_flag=True, help="Use in-memory storage (no database required)")
+@click.option("--ollama-url", default=None, help="Ollama API URL (default: from config)")
+def parse(
+    repo_path: str, user: str, skip_ai: bool, dry_run: bool, ollama_url: str | None
+) -> None:
     """Parse a repository and index its code elements.
 
     REPO_PATH is the path to the repository to parse.
     """
+    # Load configuration (skip validation in dry-run mode)
+    config = load_config(skip_validation=dry_run)
+    if ollama_url:
+        config.ollama.url = ollama_url
+
+    if dry_run:
+        console.print("[yellow]Dry run mode:[/] Using in-memory storage\n")
+
     try:
         # Phase 1: Discovery
-        console.print("\n[bold blue]Phase 1:[/] Discovery")
+        console.print("[bold blue]Phase 1:[/] Discovery")
         discovery_result = run_discovery(repo_path, user)
         print_discovery_result(discovery_result)
 
         # Phase 2: Change Detection
         console.print("\n[bold blue]Phase 2:[/] Change Detection")
-        file_state_repo = InMemoryFileStateRepository()
-        manifest = run_change_detection(discovery_result, file_state_repo)
+        manifest = run_change_detection(discovery_result, config, dry_run)
         print_change_manifest(manifest)
 
         if manifest.files_to_parse == 0:
@@ -94,9 +104,7 @@ def parse(repo_path: str, user: str, skip_ai: bool, ollama_url: str) -> None:
 
         # Phase 4: Storage
         console.print("\n[bold blue]Phase 4:[/] Storage")
-        db_repo = InMemoryDatabaseRepository()
-        search_repo = InMemorySearchRepository()
-        storage_result = run_storage(parsing_result, manifest, db_repo, search_repo)
+        storage_result = run_storage(parsing_result, manifest, config, dry_run)
         print_storage_result(storage_result)
 
         if skip_ai:
@@ -106,15 +114,11 @@ def parse(repo_path: str, user: str, skip_ai: bool, ollama_url: str) -> None:
 
         # Phase 5: Summarization
         console.print("\n[bold blue]Phase 5:[/] Summarization")
-        summarization_count = run_summarization(
-            parsing_result, db_repo, ollama_url
-        )
+        summarization_count = run_summarization(parsing_result, config, dry_run)
 
         # Phase 6: Embedding
         console.print("\n[bold blue]Phase 6:[/] Embedding")
-        embedding_count = run_embedding(
-            parsing_result, db_repo, ollama_url
-        )
+        embedding_count = run_embedding(parsing_result, config, dry_run)
 
         print_summary(
             discovery_result, manifest, storage_result, summarization_count, embedding_count
@@ -125,6 +129,8 @@ def parse(repo_path: str, user: str, skip_ai: bool, ollama_url: str) -> None:
         sys.exit(1)
     except Exception as e:
         console.print(f"\n[red]Error:[/] {e}")
+        if "--dry-run" not in sys.argv:
+            console.print("[dim]Hint: Use --dry-run to test without database[/]")
         sys.exit(1)
 
 
@@ -141,47 +147,71 @@ def run_discovery(repo_path: str, username: str) -> DiscoveryResult:
 
 def run_change_detection(
     discovery_result: DiscoveryResult,
-    file_state_repo: InMemoryFileStateRepository,
+    config: MagaldiConfig,
+    dry_run: bool,
 ) -> ChangeManifest:
     """Run Phase 2: Change Detection."""
     with console.status("Detecting changes..."):
+        if dry_run:
+            file_state_repo = InMemoryFileStateRepository()
+        else:
+            from magaldi.db.mysql import MySQLFileStateRepository
+            file_state_repo = MySQLFileStateRepository(config)
+
         return detect_changes(discovery_result, file_state_repo)
 
 
-def run_parsing(manifest: ChangeManifest):
+def run_parsing(manifest: ChangeManifest) -> ParsingResult:
     """Run Phase 3: Parsing."""
     with console.status(f"Parsing {manifest.files_to_parse} files..."):
         return parse_files(manifest)
 
 
 def run_storage(
-    parsing_result,
+    parsing_result: ParsingResult,
     manifest: ChangeManifest,
-    db_repo: InMemoryDatabaseRepository,
-    search_repo: InMemorySearchRepository,
+    config: MagaldiConfig,
+    dry_run: bool,
 ) -> StorageResult:
     """Run Phase 4: Storage."""
     with console.status("Storing elements..."):
+        if dry_run:
+            db_repo = InMemoryDatabaseRepository()
+            search_repo = InMemorySearchRepository()
+        else:
+            from magaldi.db.mysql import MySQLDatabaseRepository
+            from magaldi.db.elasticsearch import ElasticsearchRepository
+            db_repo = MySQLDatabaseRepository(config)
+            search_repo = ElasticsearchRepository(config)
+
         return store_storage_result(parsing_result, manifest, db_repo, search_repo)
 
 
 def run_summarization(
-    parsing_result,
-    db_repo: InMemoryDatabaseRepository,
-    ollama_url: str,
+    parsing_result: ParsingResult,
+    config: MagaldiConfig,
+    dry_run: bool,
 ) -> int:
     """Run Phase 5: Summarization."""
-    config = SummarizationConfig(ollama_url=ollama_url)
+    sum_config = SummarizationConfig(
+        ollama_url=config.ollama.url,
+        model=config.ollama.summarize_model,
+    )
 
     # Check Ollama availability
-    ollama = OllamaClient(config.ollama_url, config.model)
+    ollama = OllamaClient(sum_config.ollama_url, sum_config.model)
     if not ollama.verify_model():
-        console.print(f"[yellow]Warning:[/] Model {config.model} not available. Skipping summarization.")
+        console.print(f"[yellow]Warning:[/] Model {sum_config.model} not available. Skipping summarization.")
         return 0
 
-    # Build job and summary stores from parsed elements
-    job_repo = InMemoryJobRepository()
-    summary_store = InMemorySummaryStore()
+    # Create repositories
+    if dry_run:
+        job_repo = InMemoryJobRepository()
+        summary_store = InMemorySummaryStore()
+    else:
+        from magaldi.db.mysql import MySQLSummarizationJobRepository, MySQLSummaryStore
+        job_repo = MySQLSummarizationJobRepository(config)
+        summary_store = MySQLSummaryStore(config)
 
     # Populate stores from parsing result
     all_elements = []
@@ -189,7 +219,6 @@ def run_summarization(
         for elem in pf.elements:
             all_elements.append(elem)
             summary_store.store_element(elem)
-            # Add job (level 0 has no dependencies)
             job_repo.add_job(
                 element_id=elem.element_id,
                 level=elem.level,
@@ -209,10 +238,11 @@ def run_summarization(
 
             for job in jobs:
                 element_id = job["element_id"]
-                status.update(f"Summarizing: {element_id.split(':')[-2]}...")
+                name = element_id.split(":")[-2] if ":" in element_id else element_id
+                status.update(f"Summarizing: {name}...")
 
                 success = process_summarization_job(
-                    element_id, job_repo, summary_store, ollama, config
+                    element_id, job_repo, summary_store, ollama, sum_config
                 )
                 if success:
                     completed += 1
@@ -222,29 +252,37 @@ def run_summarization(
 
 
 def run_embedding(
-    parsing_result,
-    db_repo: InMemoryDatabaseRepository,
-    ollama_url: str,
+    parsing_result: ParsingResult,
+    config: MagaldiConfig,
+    dry_run: bool,
 ) -> int:
     """Run Phase 6: Embedding."""
-    config = EmbeddingConfig(ollama_url=ollama_url)
+    emb_config = EmbeddingConfig(
+        ollama_url=config.ollama.url,
+        model=config.ollama.embed_model,
+    )
 
     # Check Ollama availability
-    ollama = OllamaEmbedClient(config.ollama_url, config.model)
+    ollama = OllamaEmbedClient(emb_config.ollama_url, emb_config.model)
     if not ollama.verify_model():
-        console.print(f"[yellow]Warning:[/] Model {config.model} not available. Skipping embedding.")
+        console.print(f"[yellow]Warning:[/] Model {emb_config.model} not available. Skipping embedding.")
         return 0
 
-    # Build job and embedding stores
-    job_repo = InMemoryEmbeddingJobRepository()
-    embedding_store = InMemoryEmbeddingStore()
+    # Create repositories
+    if dry_run:
+        job_repo = InMemoryEmbeddingJobRepository()
+        embedding_store = InMemoryEmbeddingStore()
+    else:
+        from magaldi.db.mysql import MySQLEmbeddingJobRepository, MySQLEmbeddingStore
+        from magaldi.db.elasticsearch import ElasticsearchEmbeddingStore
+        job_repo = MySQLEmbeddingJobRepository(config)
+        embedding_store = ElasticsearchEmbeddingStore(config)
 
     # Populate stores from parsing result
     embeddable = []
     for pf in parsing_result.parsed_files:
         for elem in pf.elements:
             embedding_store.store_element(elem)
-            # Only embed certain element types
             if elem.element_type in ("file", "class", "function", "method"):
                 embeddable.append(elem)
                 job_repo.add_job(elem.element_id)
@@ -261,10 +299,11 @@ def run_embedding(
 
             for job in jobs:
                 element_id = job["element_id"]
-                status.update(f"Embedding: {element_id.split(':')[-2]}...")
+                name = element_id.split(":")[-2] if ":" in element_id else element_id
+                status.update(f"Embedding: {name}...")
 
                 success = process_embedding_job(
-                    element_id, job_repo, embedding_store, ollama, config
+                    element_id, job_repo, embedding_store, ollama, emb_config
                 )
                 if success:
                     completed += 1
@@ -303,7 +342,7 @@ def print_change_manifest(manifest: ChangeManifest) -> None:
         console.print(f"  Skipped (same as main): {manifest.skipped_count}")
 
 
-def print_parsing_result(result) -> None:
+def print_parsing_result(result: ParsingResult) -> None:
     """Print parsing results."""
     console.print(f"  Files parsed: [green]{len(result.parsed_files)}[/]")
     console.print(f"  Total elements: [green]{result.total_elements}[/]")

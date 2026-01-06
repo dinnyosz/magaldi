@@ -206,7 +206,10 @@ _config: MagaldiConfig | None = None
 # =============================================================================
 
 
-def load_config(config_path: str | Path | None = None) -> MagaldiConfig:
+def load_config(
+    config_path: str | Path | None = None,
+    skip_validation: bool = False,
+) -> MagaldiConfig:
     """Load configuration from file and environment variables.
 
     Configuration priority (highest to lowest):
@@ -216,6 +219,7 @@ def load_config(config_path: str | Path | None = None) -> MagaldiConfig:
 
     Args:
         config_path: Path to configuration file. If None, searches standard locations.
+        skip_validation: If True, skip validation (useful for dry-run mode).
 
     Returns:
         Loaded and validated MagaldiConfig instance.
@@ -243,8 +247,9 @@ def load_config(config_path: str | Path | None = None) -> MagaldiConfig:
     # Apply environment variable overrides
     config = _apply_env_overrides(config)
 
-    # Validate
-    _validate_config(config)
+    # Validate (unless skipped)
+    if not skip_validation:
+        _validate_config(config)
 
     _config = config
     return config

@@ -48,6 +48,11 @@ def clean_env():
     for var in magaldi_vars:
         original_env[var] = os.environ.pop(var)
     yield
+    # Remove any MAGALDI_ vars that were set during the test
+    new_vars = [k for k in os.environ if k.startswith("MAGALDI_")]
+    for var in new_vars:
+        os.environ.pop(var)
+    # Restore original vars
     os.environ.update(original_env)
 
 
