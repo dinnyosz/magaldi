@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from magaldi.parser.change_detection import ChangeManifest, FileInfo
 
@@ -837,11 +837,13 @@ def parse_file(
 
 def parse_files(
     manifest: ChangeManifest,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> ParsingResult:
     """Parse all files in a change manifest.
 
     Args:
         manifest: Change manifest from Phase 2.
+        on_progress: Optional callback(completed, total) for progress updates.
 
     Returns:
         ParsingResult with all parsed files and elements.
@@ -854,8 +856,9 @@ def parse_files(
 
     # Parse new and modified files
     files_to_parse = manifest.new_files + manifest.modified_files
+    total = len(files_to_parse)
 
-    for file_info in files_to_parse:
+    for i, file_info in enumerate(files_to_parse):
         try:
             parsed = parse_file(
                 file_info,
@@ -866,5 +869,8 @@ def parse_files(
             result.parsed_files.append(parsed)
         except Exception as e:
             result.failed_files.append((file_info, str(e)))
+
+        if on_progress:
+            on_progress(i + 1, total)
 
     return result

@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from magaldi.parser.change_detection import ChangeManifest, FileInfo
 from magaldi.parser.code_parser import CodeElement, ParsedFile, ParsingResult
@@ -445,18 +445,24 @@ def store_parsed_files(
 def index_elements(
     parsed_files: list[ParsedFile],
     search_repo: SearchRepository,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> int:
     """Index elements to search repository.
 
     Args:
         parsed_files: List of parsed files (includes file_hash).
         search_repo: Search repository.
+        on_progress: Optional callback(completed, total) for progress updates.
 
     Returns:
         Count of successfully indexed elements.
     """
     indexed = 0
     indexed_at = datetime.now()
+
+    # Count total elements
+    total = sum(len(pf.elements) for pf in parsed_files)
+    completed = 0
 
     for pf in parsed_files:
         file_hash = pf.file_info.hash
@@ -469,6 +475,10 @@ def index_elements(
             else:
                 if search_repo.index_element(element, indexed_at):
                     indexed += 1
+
+            completed += 1
+            if on_progress:
+                on_progress(completed, total)
 
     return indexed
 
@@ -581,6 +591,7 @@ def store_storage_result(
     manifest: ChangeManifest,
     db_repo: DatabaseRepository,
     search_repo: SearchRepository,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> StorageResult:
     """Execute the full storage pipeline.
 
@@ -589,6 +600,7 @@ def store_storage_result(
         manifest: Change manifest from Phase 2.
         db_repo: Database repository.
         search_repo: Search repository.
+        on_progress: Optional callback(completed, total) for progress updates.
 
     Returns:
         StorageResult with counts and any errors.
@@ -615,7 +627,9 @@ def store_storage_result(
         result.elements_stored = elements_stored
 
         # 4.3 Index to Elasticsearch (with file_hash for change detection)
-        result.elements_indexed = index_elements(parsing_result.parsed_files, search_repo)
+        result.elements_indexed = index_elements(
+            parsing_result.parsed_files, search_repo, on_progress
+        )
 
         # 4.4 Create jobs
         all_elements = []

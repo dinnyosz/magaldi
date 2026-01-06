@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 
 from magaldi.config import get_config
 from magaldi.parser.discovery import (
@@ -232,12 +232,14 @@ def compute_file_hash(file_path: Path, chunk_size: int = 65536) -> str | None:
 def compute_hashes_parallel(
     files: list[FileInfo],
     max_workers: int | None = None,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> list[FileInfo]:
     """Compute hashes for multiple files in parallel.
 
     Args:
         files: List of FileInfo objects to hash.
         max_workers: Maximum worker threads (default from config or 4).
+        on_progress: Optional callback(completed, total) for progress updates.
 
     Returns:
         Same list with hash field populated.
@@ -254,7 +256,6 @@ def compute_hashes_parallel(
 
     def hash_file(file_info: FileInfo) -> FileInfo:
         file_info.hash = compute_file_hash(file_info.absolute_path)
-        # Also get file size and line count
         try:
             file_info.file_size = file_info.absolute_path.stat().st_size
             with open(file_info.absolute_path, "r", encoding="utf-8", errors="replace") as f:
@@ -263,11 +264,15 @@ def compute_hashes_parallel(
             pass
         return file_info
 
+    total = len(files)
+    completed = 0
+
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(hash_file, f): f for f in files}
         for future in as_completed(futures):
-            # Results are already stored in the FileInfo objects
-            pass
+            completed += 1
+            if on_progress:
+                on_progress(completed, total)
 
     return files
 
@@ -401,12 +406,14 @@ def compare_user_branch(
 def detect_changes(
     discovery_result: DiscoveryResult,
     file_state_repo: FileStateRepository | None = None,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> ChangeManifest:
     """Run change detection on a discovered repository.
 
     Args:
         discovery_result: Result from Phase 1 Discovery.
         file_state_repo: Database interface (uses in-memory if None).
+        on_progress: Optional callback(completed, total) for progress updates.
 
     Returns:
         ChangeManifest with all change information.
@@ -439,7 +446,7 @@ def detect_changes(
     total_scanned = len(files)
 
     # 2.2 Compute hashes
-    files = compute_hashes_parallel(files)
+    files = compute_hashes_parallel(files, on_progress=on_progress)
 
     # Filter out files that couldn't be hashed
     files = [f for f in files if f.hash is not None]

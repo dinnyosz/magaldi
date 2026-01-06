@@ -10,6 +10,7 @@ import sys
 
 import click
 from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
 from rich.table import Table
 
 from magaldi.config import MagaldiConfig, load_config
@@ -141,7 +142,7 @@ def parse(
 
 def run_discovery(repo_path: str, username: str) -> DiscoveryResult:
     """Run Phase 1: Discovery."""
-    with console.status("Discovering repository..."):
+    with console.status("[bold blue]Discovering repository...[/]"):
         return discover(repo_path, username)
 
 
@@ -151,20 +152,52 @@ def run_change_detection(
     dry_run: bool,
 ) -> ChangeManifest:
     """Run Phase 2: Change Detection."""
-    with console.status("Detecting changes..."):
-        if dry_run:
-            file_state_repo = InMemoryFileStateRepository()
-        else:
-            from magaldi.db.elasticsearch import ElasticsearchFileStateRepository
-            file_state_repo = ElasticsearchFileStateRepository(config)
+    if dry_run:
+        file_state_repo = InMemoryFileStateRepository()
+    else:
+        from magaldi.db.elasticsearch import ElasticsearchFileStateRepository
+        file_state_repo = ElasticsearchFileStateRepository(config)
 
-        return detect_changes(discovery_result, file_state_repo)
+    total_files = discovery_result.total_files
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold blue]Hashing files[/]"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TextColumn("({task.completed}/{task.total})"),
+        TimeElapsedColumn(),
+        console=console,
+        transient=True,
+    ) as progress:
+        task = progress.add_task("hashing", total=total_files)
+
+        def on_progress(completed: int, total: int) -> None:
+            progress.update(task, completed=completed, total=total)
+
+        return detect_changes(discovery_result, file_state_repo, on_progress)
 
 
 def run_parsing(manifest: ChangeManifest) -> ParsingResult:
     """Run Phase 3: Parsing."""
-    with console.status(f"Parsing {manifest.files_to_parse} files..."):
-        return parse_files(manifest)
+    total_files = manifest.files_to_parse
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold blue]Parsing files[/]"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TextColumn("({task.completed}/{task.total})"),
+        TimeElapsedColumn(),
+        console=console,
+        transient=True,
+    ) as progress:
+        task = progress.add_task("parsing", total=total_files)
+
+        def on_progress(completed: int, total: int) -> None:
+            progress.update(task, completed=completed, total=total)
+
+        return parse_files(manifest, on_progress)
 
 
 def run_storage(
@@ -174,17 +207,32 @@ def run_storage(
     dry_run: bool,
 ) -> StorageResult:
     """Run Phase 4: Storage."""
-    with console.status("Storing elements..."):
-        if dry_run:
-            db_repo = InMemoryDatabaseRepository()
-            search_repo = InMemorySearchRepository()
-        else:
-            from magaldi.db.elasticsearch import ElasticsearchRepository
-            # Use ES for both storage and search (no MySQL)
-            db_repo = InMemoryDatabaseRepository()  # Not used for persistence
-            search_repo = ElasticsearchRepository(config)
+    if dry_run:
+        db_repo = InMemoryDatabaseRepository()
+        search_repo = InMemorySearchRepository()
+    else:
+        from magaldi.db.elasticsearch import ElasticsearchRepository
+        db_repo = InMemoryDatabaseRepository()  # Not used for persistence
+        search_repo = ElasticsearchRepository(config)
 
-        return store_storage_result(parsing_result, manifest, db_repo, search_repo)
+    total_elements = parsing_result.total_elements
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold blue]Indexing[/]"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TextColumn("({task.completed}/{task.total})"),
+        TimeElapsedColumn(),
+        console=console,
+        transient=True,
+    ) as progress:
+        task = progress.add_task("indexing", total=total_elements)
+
+        def on_progress(completed: int, total: int) -> None:
+            progress.update(task, completed=completed, total=total)
+
+        return store_storage_result(parsing_result, manifest, db_repo, search_repo, on_progress)
 
 
 def run_summarization(
@@ -232,7 +280,18 @@ def run_summarization(
     completed = 0
     total = len(all_elements)
 
-    with console.status(f"Summarizing {total} elements...") as status:
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold blue]Summarizing[/]"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TextColumn("({task.completed}/{task.total})"),
+        TimeElapsedColumn(),
+        console=console,
+        transient=True,
+    ) as progress:
+        task = progress.add_task("summarizing", total=total)
+
         while True:
             jobs = job_repo.claim_pending_jobs("cli-worker", batch_size=10)
             if not jobs:
@@ -240,19 +299,16 @@ def run_summarization(
 
             for job in jobs:
                 element_id = job["element_id"]
-                name = element_id.split(":")[-2] if ":" in element_id else element_id
-                status.update(f"Summarizing: {name}...")
-
                 success = process_summarization_job(
                     element_id, job_repo, summary_store, ollama, sum_config
                 )
                 if success:
                     completed += 1
-                    # Store summary in ES as well
                     if not dry_run:
                         summary = summary_store.get_summary(element_id)
                         if summary:
                             es_repo.store_summary(element_id, summary)
+                progress.update(task, completed=completed)
 
     console.print(f"  Summarized: [green]{completed}[/] elements")
     return completed
@@ -298,7 +354,18 @@ def run_embedding(
     completed = 0
     total = len(embeddable)
 
-    with console.status(f"Embedding {total} elements...") as status:
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold blue]Embedding[/]"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TextColumn("({task.completed}/{task.total})"),
+        TimeElapsedColumn(),
+        console=console,
+        transient=True,
+    ) as progress:
+        task = progress.add_task("embedding", total=total)
+
         while True:
             jobs = job_repo.claim_pending_jobs("cli-worker", batch_size=10)
             if not jobs:
@@ -306,14 +373,12 @@ def run_embedding(
 
             for job in jobs:
                 element_id = job["element_id"]
-                name = element_id.split(":")[-2] if ":" in element_id else element_id
-                status.update(f"Embedding: {name}...")
-
                 success = process_embedding_job(
                     element_id, job_repo, embedding_store, ollama, emb_config
                 )
                 if success:
                     completed += 1
+                progress.update(task, completed=completed)
 
     console.print(f"  Embedded: [green]{completed}[/] elements")
     return completed
@@ -326,53 +391,34 @@ def run_embedding(
 
 def print_discovery_result(result: DiscoveryResult) -> None:
     """Print discovery phase results."""
-    console.print(f"  Scope: [cyan]{result.scope}[/]")
-    console.print(f"  Repository: [cyan]{result.repository}[/]")
-    console.print(f"  User: [cyan]{result.username}[/]")
-    console.print(f"  Total files: [green]{result.total_files}[/]")
-    console.print(f"  Total lines: [green]{result.total_lines:,}[/]")
-
-    if result.languages:
-        console.print("  Languages:")
-        for lang, stats in sorted(result.languages.items(), key=lambda x: -x[1].files):
-            console.print(f"    {lang}: {stats.files} files, {stats.lines:,} lines")
+    langs = ", ".join(f"{lang}({s.files})" for lang, s in sorted(result.languages.items(), key=lambda x: -x[1].files))
+    console.print(f"  {result.scope}/{result.repository} @{result.username} | {result.total_files} files, {result.total_lines:,} lines | {langs}")
 
 
 def print_change_manifest(manifest: ChangeManifest) -> None:
     """Print change detection results."""
-    console.print(f"  Files scanned: [green]{manifest.total_files_scanned}[/]")
-    console.print(f"  New: [green]{len(manifest.new_files)}[/]")
-    console.print(f"  Modified: [yellow]{len(manifest.modified_files)}[/]")
-    console.print(f"  Deleted: [red]{len(manifest.deleted_files)}[/]")
-    console.print(f"  Unchanged: {manifest.unchanged_count}")
-    if manifest.skipped_count > 0:
-        console.print(f"  Skipped (same as main): {manifest.skipped_count}")
+    parts = [f"scanned {manifest.total_files_scanned}"]
+    if len(manifest.new_files): parts.append(f"[green]+{len(manifest.new_files)} new[/]")
+    if len(manifest.modified_files): parts.append(f"[yellow]~{len(manifest.modified_files)} mod[/]")
+    if len(manifest.deleted_files): parts.append(f"[red]-{len(manifest.deleted_files)} del[/]")
+    if manifest.unchanged_count: parts.append(f"={manifest.unchanged_count} unchanged")
+    if manifest.skipped_count: parts.append(f"skipped {manifest.skipped_count}")
+    console.print(f"  {' | '.join(parts)}")
 
 
 def print_parsing_result(result: ParsingResult) -> None:
     """Print parsing results."""
-    console.print(f"  Files parsed: [green]{len(result.parsed_files)}[/]")
-    console.print(f"  Total elements: [green]{result.total_elements}[/]")
-
-    if result.elements_by_type:
-        console.print("  By type:")
-        for etype, count in sorted(result.elements_by_type.items()):
-            console.print(f"    {etype}: {count}")
-
-    if result.failed_files:
-        console.print(f"  [red]Failed: {len(result.failed_files)}[/]")
+    types = ", ".join(f"{t}:{c}" for t, c in sorted(result.elements_by_type.items()))
+    failed = f" | [red]{len(result.failed_files)} failed[/]" if result.failed_files else ""
+    console.print(f"  {len(result.parsed_files)} files → {result.total_elements} elements ({types}){failed}")
 
 
 def print_storage_result(result: StorageResult) -> None:
     """Print storage results."""
-    console.print(f"  Files stored: [green]{result.files_stored}[/]")
-    console.print(f"  Elements stored: [green]{result.elements_stored}[/]")
-    console.print(f"  Elements indexed: [green]{result.elements_indexed}[/]")
-    if result.elements_deleted > 0:
-        console.print(f"  Elements deleted: [yellow]{result.elements_deleted}[/]")
-
-    if result.storage_errors:
-        console.print(f"  [red]Errors: {len(result.storage_errors)}[/]")
+    parts = [f"{result.files_stored} files", f"{result.elements_stored} stored", f"{result.elements_indexed} indexed"]
+    if result.elements_deleted: parts.append(f"[yellow]{result.elements_deleted} deleted[/]")
+    if result.storage_errors: parts.append(f"[red]{len(result.storage_errors)} errors[/]")
+    console.print(f"  {' | '.join(parts)}")
 
 
 def print_summary(
