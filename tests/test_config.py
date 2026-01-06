@@ -200,12 +200,12 @@ class TestLoadFromFile:
         assert config.elasticsearch.url == "http://localhost:9200"
 
     def test_load_nonexistent_file_uses_defaults(self, clean_env):
-        """Loading nonexistent file should use defaults (but fail validation)."""
-        with pytest.raises(ConfigurationError) as exc_info:
-            load_config("/nonexistent/path/config.yaml")
+        """Loading nonexistent file should use defaults."""
+        config = load_config("/nonexistent/path/config.yaml")
 
-        # Should fail because password is required
-        assert "password" in str(exc_info.value).lower()
+        # Should use default values
+        assert config.elasticsearch.host == "localhost"
+        assert config.redis.host == "localhost"
 
     def test_load_caches_config(self, clean_env):
         """Loading config should cache the result."""
@@ -310,13 +310,18 @@ class TestPriorityChain:
 class TestValidation:
     """Test configuration validation."""
 
-    def test_missing_mysql_password_raises_error(self, clean_env):
-        """Missing MySQL password should raise ConfigurationError."""
-        with pytest.raises(ConfigurationError) as exc_info:
-            load_config(FIXTURES_DIR / "invalid_missing_password.yaml")
+    def test_invalid_embed_dimensions_raises_error(self, clean_env):
+        """Invalid embed dimensions for snowflake model should raise ConfigurationError."""
+        # Load config and manually set invalid dimensions
+        config = load_config(FIXTURES_DIR / "valid.yaml", skip_validation=True)
+        config.ollama.embed_model = "snowflake-arctic-embed2"
+        config.ollama.embed_dimensions = 512  # Wrong for snowflake-arctic-embed2
 
-        assert "password" in str(exc_info.value).lower()
-        assert "required" in str(exc_info.value).lower() or "mysql" in str(exc_info.value).lower()
+        from magaldi.config import _validate_config
+        with pytest.raises(ConfigurationError) as exc_info:
+            _validate_config(config)
+
+        assert "embed_dimensions" in str(exc_info.value).lower()
 
     def test_valid_config_passes_validation(self, clean_env):
         """Valid config should not raise."""

@@ -449,10 +449,6 @@ def _validate_config(config: MagaldiConfig) -> None:
     """
     errors: list[str] = []
 
-    # Required values
-    if not config.mysql.password:
-        errors.append("MySQL password is required. Set MAGALDI_MYSQL_PASSWORD environment variable.")
-
     # Consistency checks
     if (
         config.ollama.embed_dimensions != 1024
@@ -464,8 +460,11 @@ def _validate_config(config: MagaldiConfig) -> None:
         )
 
     # Port range checks
-    if not (1 <= config.mysql.port <= 65535):
-        errors.append(f"MySQL port must be between 1 and 65535, got {config.mysql.port}")
+    if not (1 <= config.elasticsearch.port <= 65535):
+        errors.append(f"Elasticsearch port must be between 1 and 65535, got {config.elasticsearch.port}")
+
+    if not (1 <= config.redis.port <= 65535):
+        errors.append(f"Redis port must be between 1 and 65535, got {config.redis.port}")
 
     if not (1 <= config.web.port <= 65535):
         errors.append(f"Web port must be between 1 and 65535, got {config.web.port}")

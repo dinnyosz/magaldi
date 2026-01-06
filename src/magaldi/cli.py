@@ -155,8 +155,8 @@ def run_change_detection(
         if dry_run:
             file_state_repo = InMemoryFileStateRepository()
         else:
-            from magaldi.db.mysql import MySQLFileStateRepository
-            file_state_repo = MySQLFileStateRepository(config)
+            from magaldi.db.elasticsearch import ElasticsearchFileStateRepository
+            file_state_repo = ElasticsearchFileStateRepository(config)
 
         return detect_changes(discovery_result, file_state_repo)
 
@@ -179,9 +179,9 @@ def run_storage(
             db_repo = InMemoryDatabaseRepository()
             search_repo = InMemorySearchRepository()
         else:
-            from magaldi.db.mysql import MySQLDatabaseRepository
             from magaldi.db.elasticsearch import ElasticsearchRepository
-            db_repo = MySQLDatabaseRepository(config)
+            # Use ES for both storage and search (no MySQL)
+            db_repo = InMemoryDatabaseRepository()  # Not used for persistence
             search_repo = ElasticsearchRepository(config)
 
         return store_storage_result(parsing_result, manifest, db_repo, search_repo)
@@ -209,9 +209,11 @@ def run_summarization(
         job_repo = InMemoryJobRepository()
         summary_store = InMemorySummaryStore()
     else:
-        from magaldi.db.mysql import MySQLSummarizationJobRepository, MySQLSummaryStore
-        job_repo = MySQLSummarizationJobRepository(config)
-        summary_store = MySQLSummaryStore(config)
+        from magaldi.db.redis import RedisSummarizationJobRepository, RedisSummaryStore
+        from magaldi.db.elasticsearch import ElasticsearchRepository
+        job_repo = RedisSummarizationJobRepository(config)
+        summary_store = RedisSummaryStore(config)
+        es_repo = ElasticsearchRepository(config)
 
     # Populate stores from parsing result
     all_elements = []
@@ -246,6 +248,11 @@ def run_summarization(
                 )
                 if success:
                     completed += 1
+                    # Store summary in ES as well
+                    if not dry_run:
+                        summary = summary_store.get_summary(element_id)
+                        if summary:
+                            es_repo.store_summary(element_id, summary)
 
     console.print(f"  Summarized: [green]{completed}[/] elements")
     return completed
@@ -273,9 +280,9 @@ def run_embedding(
         job_repo = InMemoryEmbeddingJobRepository()
         embedding_store = InMemoryEmbeddingStore()
     else:
-        from magaldi.db.mysql import MySQLEmbeddingJobRepository, MySQLEmbeddingStore
+        from magaldi.db.redis import RedisEmbeddingJobRepository
         from magaldi.db.elasticsearch import ElasticsearchEmbeddingStore
-        job_repo = MySQLEmbeddingJobRepository(config)
+        job_repo = RedisEmbeddingJobRepository(config)
         embedding_store = ElasticsearchEmbeddingStore(config)
 
     # Populate stores from parsing result

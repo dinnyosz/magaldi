@@ -40,6 +40,7 @@ INDEX_MAPPING = {
             "decorators": {"type": "keyword"},
             "visibility": {"type": "keyword"},
             "is_async": {"type": "boolean"},
+            "file_hash": {"type": "keyword"},  # For change detection on file elements
             "indexed_at": {"type": "date"},
             "embedding": {
                 "type": "dense_vector",
@@ -91,13 +92,17 @@ class ElasticsearchRepository:
             self._client = None
 
     def index_element(
-        self, element: CodeElement, indexed_at: datetime | None = None
+        self,
+        element: CodeElement,
+        indexed_at: datetime | None = None,
+        file_hash: str | None = None,
     ) -> bool:
         """Index a code element.
 
         Args:
             element: Code element to index.
             indexed_at: Timestamp for indexing.
+            file_hash: File hash for change detection (only for file-level elements).
 
         Returns:
             True on success.
@@ -126,6 +131,10 @@ class ElasticsearchRepository:
             "is_async": element.is_async,
             "indexed_at": indexed_at.isoformat(),
         }
+
+        # Add file_hash for file-level elements (used for change detection)
+        if file_hash is not None:
+            doc["file_hash"] = file_hash
 
         client = self._get_client()
         client.index(index=INDEX_NAME, id=element.element_id, document=doc)
@@ -260,6 +269,81 @@ class ElasticsearchRepository:
 
         return [hit["_source"] for hit in result["hits"]["hits"]]
 
+    def get_file_states(
+        self, scope: str, repository: str, username: str
+    ) -> dict[str, dict[str, Any]]:
+        """Get file states for change detection.
+
+        Retrieves all file-level elements and their hashes.
+
+        Args:
+            scope: Scope to filter by.
+            repository: Repository to filter by.
+            username: Username to filter by.
+
+        Returns:
+            Dict mapping relative_path to {file_hash, is_deleted}.
+        """
+        client = self._get_client()
+
+        # Search for all file-level elements
+        result = client.search(
+            index=INDEX_NAME,
+            body={
+                "query": {
+                    "bool": {
+                        "must": [
+                            {"term": {"scope": scope}},
+                            {"term": {"repository": repository}},
+                            {"term": {"username": username}},
+                            {"term": {"element_type": "file"}},
+                        ]
+                    }
+                },
+                "size": 10000,  # Adjust if needed
+                "_source": ["relative_path", "file_hash"],
+            },
+        )
+
+        states = {}
+        for hit in result["hits"]["hits"]:
+            source = hit["_source"]
+            states[source["relative_path"]] = {
+                "file_hash": source.get("file_hash"),
+                "is_deleted": False,
+            }
+
+        return states
+
+    def main_branch_exists(self, scope: str, repository: str) -> bool:
+        """Check if main branch has been indexed.
+
+        Args:
+            scope: Scope to check.
+            repository: Repository to check.
+
+        Returns:
+            True if any elements exist for main branch.
+        """
+        client = self._get_client()
+
+        result = client.count(
+            index=INDEX_NAME,
+            body={
+                "query": {
+                    "bool": {
+                        "must": [
+                            {"term": {"scope": scope}},
+                            {"term": {"repository": repository}},
+                            {"term": {"username": "main"}},
+                        ]
+                    }
+                }
+            },
+        )
+
+        return result["count"] > 0
+
     def search_by_vector(
         self,
         embedding: list[float],
@@ -317,33 +401,117 @@ class ElasticsearchRepository:
         ]
 
 
+class ElasticsearchFileStateRepository:
+    """Elasticsearch-based file state repository for change detection."""
+
+    def __init__(self, config: MagaldiConfig | None = None):
+        self._es = ElasticsearchRepository(config)
+
+    def get_file_states(
+        self, scope: str, repository: str, username: str
+    ) -> dict[str, Any]:
+        """Get all file states for a scope/repo/user.
+
+        Returns dict mapping relative_path to DBFileState-like dict.
+        """
+        from magaldi.parser.change_detection import DBFileState
+
+        es_states = self._es.get_file_states(scope, repository, username)
+        return {
+            path: DBFileState(
+                relative_path=path,
+                file_hash=state.get("file_hash"),
+                is_deleted=state.get("is_deleted", False),
+            )
+            for path, state in es_states.items()
+        }
+
+    def main_branch_exists(self, scope: str, repository: str) -> bool:
+        """Check if main branch has been parsed."""
+        return self._es.main_branch_exists(scope, repository)
+
+    def close(self) -> None:
+        """Close ES connection."""
+        self._es.close()
+
+
 class ElasticsearchEmbeddingStore(ElasticsearchRepository):
-    """Elasticsearch-backed embedding store that also reads from MySQL for summaries."""
+    """Elasticsearch-backed embedding store (ES only, no MySQL)."""
 
     def __init__(self, config: MagaldiConfig | None = None):
         super().__init__(config)
-        # Import here to avoid circular imports
-        from magaldi.db.mysql import MySQLSummaryStore
-        self._mysql_store = MySQLSummaryStore(config)
+        # Cache for elements stored in this session
+        self._elements: dict[str, CodeElement] = {}
 
-    def store_element(self, element: CodeElement) -> None:
+    def store_element(self, element: CodeElement, file_hash: str | None = None) -> None:
         """Store a code element (index to ES)."""
-        self.index_element(element)
+        self._elements[element.element_id] = element
+        self.index_element(element, file_hash=file_hash)
 
     def get_element(self, element_id: str) -> CodeElement | None:
-        """Get element by ID from MySQL."""
-        return self._mysql_store.get_element(element_id)
+        """Get element by ID (from cache or reconstruct from ES)."""
+        if element_id in self._elements:
+            return self._elements[element_id]
+
+        doc = self.get_document(element_id)
+        if doc is None:
+            return None
+
+        return CodeElement(
+            element_id=doc["element_id"],
+            scope=doc["scope"],
+            repository=doc["repository"],
+            username=doc["username"],
+            relative_path=doc["relative_path"],
+            element_type=doc["element_type"],
+            name=doc["name"],
+            language=doc.get("language", ""),
+            line_start=doc["line_start"],
+            line_end=doc.get("line_end"),
+            raw_code=doc.get("raw_code"),
+            signature=doc.get("signature"),
+            docstring=doc.get("docstring"),
+            level=doc.get("level", 0),
+            parent_id=doc.get("parent_id"),
+            decorators=doc.get("decorators"),
+            visibility=doc.get("visibility"),
+            is_async=doc.get("is_async", False),
+        )
 
     def get_summary(self, element_id: str) -> str | None:
-        """Get summary from MySQL."""
-        return self._mysql_store.get_summary(element_id)
+        """Get summary from ES."""
+        doc = self.get_document(element_id)
+        if doc:
+            return doc.get("summary")
+        return None
 
     def get_file_summary(self, element: CodeElement) -> str | None:
-        """Get file summary from MySQL."""
-        summaries = self._mysql_store.get_parent_summaries(element)
-        return summaries.get("file")
+        """Get file summary from ES."""
+        # Build file element ID
+        file_id = f"{element.scope}:{element.repository}:{element.username}:{element.relative_path}:file:{element.relative_path.split('/')[-1]}:1"
+        return self.get_summary(file_id)
 
     def get_class_summary(self, element: CodeElement) -> str | None:
-        """Get class summary from MySQL."""
-        summaries = self._mysql_store.get_parent_summaries(element)
-        return summaries.get("class")
+        """Get class summary from ES (via parent_id chain)."""
+        if element.parent_id:
+            parent_doc = self.get_document(element.parent_id)
+            if parent_doc and parent_doc.get("element_type") == "class":
+                return parent_doc.get("summary")
+        return None
+
+    def get_parent_summaries(self, element: CodeElement) -> dict[str, str]:
+        """Get parent summaries for context."""
+        summaries: dict[str, str] = {}
+
+        # Get file summary
+        file_summary = self.get_file_summary(element)
+        if file_summary:
+            summaries["file"] = file_summary
+
+        # Get class summary if method
+        if element.element_type == "method":
+            class_summary = self.get_class_summary(element)
+            if class_summary:
+                summaries["class"] = class_summary
+
+        return summaries

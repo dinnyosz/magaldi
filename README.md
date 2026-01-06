@@ -36,7 +36,7 @@ cp .env.example .env
 python3 -m venv .venv
 .venv/bin/pip install -e .
 
-# Start Docker services (MySQL, Elasticsearch, Redis, Kibana)
+# Start Docker services (Elasticsearch, Redis, Kibana)
 docker compose up -d
 
 # Activate virtual environment
@@ -104,13 +104,6 @@ Magaldi uses a layered configuration system:
 ### Environment Variables
 
 ```bash
-# Required
-MAGALDI_MYSQL_PASSWORD=yourpassword
-
-# Optional overrides - MySQL
-MAGALDI_MYSQL_HOST=localhost
-MAGALDI_MYSQL_PORT=3306
-
 # Optional overrides - Elasticsearch
 MAGALDI_ELASTICSEARCH_HOST=localhost
 MAGALDI_ELASTICSEARCH_PORT=9200
@@ -184,11 +177,11 @@ python3 -m venv .venv
 
 **Start/Stop Services:**
 ```bash
-docker compose up -d              # Start MySQL, ES, Redis, Kibana
+docker compose up -d              # Start ES, Redis, Kibana
 docker compose --profile ollama up -d  # Include Ollama
 docker compose down               # Stop all services
 docker compose ps                 # Check status
-docker compose logs mysql         # View logs
+docker compose logs elasticsearch # View logs
 ```
 
 **Service URLs:**
@@ -252,10 +245,9 @@ ollama list                           # List installed models
 | Component | Technology |
 |-----------|------------|
 | Parser | Tree-sitter |
-| Database | MySQL 8.0 |
-| Vector Store | Elasticsearch 8.11.0 |
+| Storage & Search | Elasticsearch 8.11.0 |
+| Job Queues | Redis |
 | ES Dashboard | Kibana 8.11.0 |
-| Cache | Redis |
 | AI Models | Ollama (qwen2.5-coder:7b, snowflake-arctic-embed2) |
 | Web Framework | FastAPI |
 | MCP | Python MCP SDK |
@@ -268,7 +260,7 @@ Detailed design documents are in `plans/`:
 - `phase1_discovery.md` - Path validation, config loading
 - `phase2_change_detection.md` - SHA256 hashing, diff logic
 - `phase3_parsing.md` - Tree-sitter extraction
-- `phase4_storage.md` - MySQL/ES storage
+- `phase4_storage.md` - Elasticsearch storage
 - `phase5_summarization.md` - AI summarization
 - `phase6_embedding.md` - Vector generation
 - `phase7_mcp_server.md` - MCP tools
@@ -283,8 +275,8 @@ Detailed design documents are in `plans/`:
 docker compose ps
 
 # View logs
-docker compose logs mysql
 docker compose logs elasticsearch
+docker compose logs redis
 ```
 
 ### Elasticsearch Memory Issues
@@ -297,13 +289,10 @@ ES_HEAP_SIZE=2g
 sudo sysctl -w vm.max_map_count=262144
 ```
 
-### Database Connection Issues
+### Reset Data
 
 ```bash
-# Check MySQL is ready
-docker exec -it magaldi-mysql mysql -u magaldi -p -e "SELECT 1"
-
-# Reset database (WARNING: deletes all data)
+# Reset all data (WARNING: deletes everything)
 docker compose down -v
 docker compose up -d
 ```

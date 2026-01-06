@@ -3,27 +3,6 @@ services:
   # CORE SERVICES (always started)
   # ===========================================================================
 
-  mysql:
-    image: mysql:8.0
-    container_name: magaldi-mysql
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
-      MYSQL_DATABASE: magaldi
-      MYSQL_USER: magaldi
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-magaldipassword}
-    ports:
-      - "${MYSQL_PORT:-3306}:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-      - ./docker/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
   elasticsearch:
     image: elasticsearch:8.11.0
     container_name: magaldi-elasticsearch
@@ -129,8 +108,6 @@ services:
         echo "Models ready!"
 
 volumes:
-  mysql_data:
-    name: magaldi_mysql_data
   es_data:
     name: magaldi_es_data
   redis_data:

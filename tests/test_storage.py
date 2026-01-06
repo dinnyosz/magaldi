@@ -350,22 +350,35 @@ class TestIndexElements:
     def test_indexes_all_elements(
         self, sample_parsed_file: ParsedFile, search_repo: InMemorySearchRepository
     ):
-        all_elements = sample_parsed_file.elements
-        success = index_elements(all_elements, search_repo)
+        success = index_elements([sample_parsed_file], search_repo)
 
         assert success == 2  # file + function
 
-        for elem in all_elements:
+        for elem in sample_parsed_file.elements:
             doc = search_repo.get_document(elem.element_id)
             assert doc is not None
 
     def test_sets_indexed_at(
-        self, sample_element: CodeElement, search_repo: InMemorySearchRepository
+        self, sample_parsed_file: ParsedFile, search_repo: InMemorySearchRepository
     ):
-        index_elements([sample_element], search_repo)
+        index_elements([sample_parsed_file], search_repo)
 
-        doc = search_repo.get_document(sample_element.element_id)
+        doc = search_repo.get_document(sample_parsed_file.elements[0].element_id)
         assert "indexed_at" in doc
+
+    def test_stores_file_hash_on_file_elements(
+        self, sample_parsed_file: ParsedFile, search_repo: InMemorySearchRepository
+    ):
+        """Test that file_hash is stored on file-level elements."""
+        index_elements([sample_parsed_file], search_repo)
+
+        # Find the file element
+        file_elem = next(e for e in sample_parsed_file.elements if e.element_type == "file")
+        doc = search_repo.get_document(file_elem.element_id)
+
+        assert doc is not None
+        assert "file_hash" in doc
+        assert doc["file_hash"] == sample_parsed_file.file_info.hash
 
 
 # =============================================================================

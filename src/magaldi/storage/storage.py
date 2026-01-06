@@ -123,7 +123,12 @@ class DatabaseRepository(Protocol):
 class SearchRepository(Protocol):
     """Interface for search/indexing operations."""
 
-    def index_element(self, element: CodeElement, indexed_at: datetime | None = None) -> bool:
+    def index_element(
+        self,
+        element: CodeElement,
+        indexed_at: datetime | None = None,
+        file_hash: str | None = None,
+    ) -> bool:
         """Index an element. Returns True on success."""
         ...
 
@@ -259,12 +264,15 @@ class InMemorySearchRepository:
         self._documents: dict[str, dict[str, Any]] = {}
 
     def index_element(
-        self, element: CodeElement, indexed_at: datetime | None = None
+        self,
+        element: CodeElement,
+        indexed_at: datetime | None = None,
+        file_hash: str | None = None,
     ) -> bool:
         if indexed_at is None:
             indexed_at = datetime.now()
 
-        self._documents[element.element_id] = {
+        doc = {
             "element_id": element.element_id,
             "scope": element.scope,
             "repository": element.repository,
@@ -285,6 +293,10 @@ class InMemorySearchRepository:
             "is_async": element.is_async,
             "indexed_at": indexed_at.isoformat(),
         }
+        if file_hash is not None:
+            doc["file_hash"] = file_hash
+
+        self._documents[element.element_id] = doc
         return True
 
     def get_document(self, element_id: str) -> dict[str, Any] | None:
@@ -431,13 +443,13 @@ def store_parsed_files(
 
 
 def index_elements(
-    elements: list[CodeElement],
+    parsed_files: list[ParsedFile],
     search_repo: SearchRepository,
 ) -> int:
     """Index elements to search repository.
 
     Args:
-        elements: List of code elements.
+        parsed_files: List of parsed files (includes file_hash).
         search_repo: Search repository.
 
     Returns:
@@ -446,9 +458,17 @@ def index_elements(
     indexed = 0
     indexed_at = datetime.now()
 
-    for element in elements:
-        if search_repo.index_element(element, indexed_at):
-            indexed += 1
+    for pf in parsed_files:
+        file_hash = pf.file_info.hash
+
+        for element in pf.elements:
+            # Pass file_hash only for file-level elements
+            if element.element_type == "file":
+                if search_repo.index_element(element, indexed_at, file_hash=file_hash):
+                    indexed += 1
+            else:
+                if search_repo.index_element(element, indexed_at):
+                    indexed += 1
 
     return indexed
 
@@ -594,14 +614,14 @@ def store_storage_result(
         result.files_stored = files_stored
         result.elements_stored = elements_stored
 
-        # 4.3 Index to Elasticsearch
+        # 4.3 Index to Elasticsearch (with file_hash for change detection)
+        result.elements_indexed = index_elements(parsing_result.parsed_files, search_repo)
+
+        # 4.4 Create jobs
         all_elements = []
         for pf in parsing_result.parsed_files:
             all_elements.extend(pf.elements)
 
-        result.elements_indexed = index_elements(all_elements, search_repo)
-
-        # 4.4 Create jobs
         result.summarization_jobs_created = create_summarization_jobs(all_elements, db_repo)
         result.embedding_jobs_created = create_embedding_jobs(all_elements, db_repo)
 
