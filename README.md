@@ -36,7 +36,7 @@ cp .env.example .env
 python3 -m venv .venv
 .venv/bin/pip install -e .
 
-# Start Docker services (MySQL, Elasticsearch, Redis)
+# Start Docker services (MySQL, Elasticsearch, Redis, Kibana)
 docker compose up -d
 
 # Activate virtual environment
@@ -184,12 +184,16 @@ python3 -m venv .venv
 
 **Start/Stop Services:**
 ```bash
-docker compose up -d              # Start MySQL, ES, Redis
+docker compose up -d              # Start MySQL, ES, Redis, Kibana
 docker compose --profile ollama up -d  # Include Ollama
 docker compose down               # Stop all services
 docker compose ps                 # Check status
 docker compose logs mysql         # View logs
 ```
+
+**Service URLs:**
+- Kibana: http://localhost:5601
+- Elasticsearch: http://localhost:9200
 
 **Run Tests:**
 ```bash
@@ -248,8 +252,9 @@ ollama list                           # List installed models
 | Component | Technology |
 |-----------|------------|
 | Parser | Tree-sitter |
-| Database | Percona MySQL 8.0 |
+| Database | MySQL 8.0 |
 | Vector Store | Elasticsearch 8.11.0 |
+| ES Dashboard | Kibana 8.11.0 |
 | Cache | Redis |
 | AI Models | Ollama (qwen2.5-coder:7b, snowflake-arctic-embed2) |
 | Web Framework | FastAPI |
