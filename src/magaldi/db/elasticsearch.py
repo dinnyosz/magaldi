@@ -149,6 +149,42 @@ class ElasticsearchRepository:
         except NotFoundError:
             return None
 
+    def element_exists(self, element_id: str) -> bool:
+        """Check if element exists in ES (meaning it's fully processed).
+
+        Args:
+            element_id: Element ID to check.
+
+        Returns:
+            True if element exists (fully processed).
+        """
+        try:
+            client = self._get_client()
+            return client.exists(index=INDEX_NAME, id=element_id)
+        except Exception:
+            return False
+
+    def get_existing_element_ids(self, element_ids: list[str]) -> set[str]:
+        """Check which elements already exist in ES.
+
+        Args:
+            element_ids: List of element IDs to check.
+
+        Returns:
+            Set of element IDs that exist.
+        """
+        if not element_ids:
+            return set()
+
+        client = self._get_client()
+
+        # Use mget for efficient batch lookup
+        response = client.mget(index=INDEX_NAME, ids=element_ids, _source=False)
+
+        return {
+            doc["_id"] for doc in response["docs"] if doc.get("found", False)
+        }
+
     def delete_by_file(
         self, scope: str, repository: str, username: str, relative_path: str
     ) -> int:
