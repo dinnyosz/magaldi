@@ -21,25 +21,9 @@ from magaldi.parser.change_detection import (
 )
 from magaldi.parser.code_parser import ParsingResult, parse_files
 from magaldi.parser.discovery import DiscoveryError, DiscoveryResult, discover
-from magaldi.embedding.embedding import (
-    EmbeddingConfig,
-    InMemoryEmbeddingJobRepository,
-    InMemoryEmbeddingStore,
-    OllamaEmbedClient,
-    process_embedding_job,
-)
-from magaldi.storage.storage import (
-    InMemoryDatabaseRepository,
-    InMemorySearchRepository,
-    StorageResult,
-    store_storage_result,
-)
-from magaldi.summarization.summarization import (
-    InMemoryJobRepository,
-    InMemorySummaryStore,
-    OllamaClient,
-    SummarizationConfig,
-    process_summarization_job,
+from magaldi.processing.processor import (
+    ProcessingConfig,
+    process_elements,
 )
 
 console = Console()
@@ -65,7 +49,7 @@ def main() -> None:
 @main.command()
 @click.argument("repo_path", type=click.Path(exists=True, file_okay=False, dir_okay=True))
 @click.option("--user", "-u", required=True, help="Username/branch (use 'main' for primary parse)")
-@click.option("--skip-ai", is_flag=True, help="Skip summarization and embedding (phases 5-6)")
+@click.option("--skip-ai", is_flag=True, help="Skip AI processing (summarization and embedding)")
 @click.option("--dry-run", is_flag=True, help="Use in-memory storage (no database required)")
 @click.option("--ollama-url", default=None, help="Ollama API URL (default: from config)")
 def parse(
@@ -103,27 +87,14 @@ def parse(
         parsing_result = run_parsing(manifest)
         print_parsing_result(parsing_result)
 
-        # Phase 4: Storage
-        console.print("\n[bold blue]Phase 4:[/] Storage")
-        storage_result = run_storage(parsing_result, manifest, config, dry_run)
-        print_storage_result(storage_result)
-
-        if skip_ai:
-            console.print("\n[yellow]Skipping AI processing (--skip-ai flag)[/]")
-            print_summary(discovery_result, manifest, storage_result, None, None)
-            return
-
-        # Phase 5: Summarization
-        console.print("\n[bold blue]Phase 5:[/] Summarization")
-        summarization_count = run_summarization(parsing_result, config, dry_run)
-
-        # Phase 6: Embedding
-        console.print("\n[bold blue]Phase 6:[/] Embedding")
-        embedding_count = run_embedding(parsing_result, config, dry_run)
-
-        print_summary(
-            discovery_result, manifest, storage_result, summarization_count, embedding_count
+        # Phase 4: Processing (summarize -> embed -> index)
+        console.print("\n[bold blue]Phase 4:[/] Processing")
+        processed, skipped, indexed = run_processing(
+            parsing_result, manifest, config, dry_run, skip_ai
         )
+        print_processing_result(processed, skipped, indexed, skip_ai)
+
+        print_summary(discovery_result, manifest, processed, indexed, skip_ai)
 
     except DiscoveryError as e:
         console.print(f"\n[red]Discovery error:[/] {e}")
@@ -200,26 +171,46 @@ def run_parsing(manifest: ChangeManifest) -> ParsingResult:
         return parse_files(manifest, on_progress)
 
 
-def run_storage(
+def run_processing(
     parsing_result: ParsingResult,
     manifest: ChangeManifest,
     config: MagaldiConfig,
     dry_run: bool,
-) -> StorageResult:
-    """Run Phase 4: Storage."""
-    if dry_run:
-        db_repo = InMemoryDatabaseRepository()
-        search_repo = InMemorySearchRepository()
-    else:
-        from magaldi.db.elasticsearch import ElasticsearchRepository
-        db_repo = InMemoryDatabaseRepository()  # Not used for persistence
-        search_repo = ElasticsearchRepository(config)
+    skip_ai: bool,
+) -> tuple[int, int, int]:
+    """Run unified processing: summarize -> embed -> index.
 
-    total_elements = parsing_result.total_elements
+    Returns:
+        Tuple of (processed, skipped, indexed).
+    """
+    if dry_run:
+        total = parsing_result.total_elements
+        console.print(f"  [dim]Dry run: would process {total} elements[/]")
+        return (0, 0, 0)
+
+    from magaldi.db.elasticsearch import ElasticsearchRepository
+
+    es_repo = ElasticsearchRepository(config)
+
+    proc_config = ProcessingConfig(
+        summarize_model=config.ollama.summarize_model,
+        embed_model=config.ollama.embed_model,
+        ollama_url=config.ollama.url,
+        skip_ai=skip_ai,
+    )
+
+    total = parsing_result.total_elements
+
+    # Build file hashes dict from manifest
+    file_hashes: dict[str, str] = {}
+    for fi in manifest.new_files:
+        file_hashes[fi.relative_path] = fi.hash
+    for fi in manifest.modified_files:
+        file_hashes[fi.relative_path] = fi.hash
 
     with Progress(
         SpinnerColumn(),
-        TextColumn("[bold blue]Indexing[/]"),
+        TextColumn("[bold blue]Processing[/]"),
         BarColumn(),
         TaskProgressColumn(),
         TextColumn("({task.completed}/{task.total})"),
@@ -227,161 +218,23 @@ def run_storage(
         console=console,
         transient=True,
     ) as progress:
-        task = progress.add_task("indexing", total=total_elements)
+        task = progress.add_task("processing", total=total)
 
-        def on_progress(completed: int, total: int) -> None:
+        def on_progress(completed: int, total: int, name: str) -> None:
             progress.update(task, completed=completed, total=total)
 
-        return store_storage_result(parsing_result, manifest, db_repo, search_repo, on_progress)
+        result = process_elements(
+            parsing_result.parsed_files,
+            manifest.scope,
+            manifest.repository,
+            manifest.username,
+            es_repo,
+            proc_config,
+            on_progress,
+            file_hashes,
+        )
 
-
-def run_summarization(
-    parsing_result: ParsingResult,
-    config: MagaldiConfig,
-    dry_run: bool,
-) -> int:
-    """Run Phase 5: Summarization."""
-    sum_config = SummarizationConfig(
-        ollama_url=config.ollama.url,
-        model=config.ollama.summarize_model,
-    )
-
-    # Check Ollama availability
-    ollama = OllamaClient(sum_config.ollama_url, sum_config.model)
-    if not ollama.verify_model():
-        console.print(f"[yellow]Warning:[/] Model {sum_config.model} not available. Skipping summarization.")
-        return 0
-
-    # Create repositories
-    if dry_run:
-        job_repo = InMemoryJobRepository()
-        summary_store = InMemorySummaryStore()
-    else:
-        from magaldi.db.redis import RedisSummarizationJobRepository, RedisSummaryStore
-        from magaldi.db.elasticsearch import ElasticsearchRepository
-        job_repo = RedisSummarizationJobRepository(config)
-        summary_store = RedisSummaryStore(config)
-        es_repo = ElasticsearchRepository(config)
-
-    # Populate stores from parsing result
-    all_elements = []
-    for pf in parsing_result.parsed_files:
-        for elem in pf.elements:
-            all_elements.append(elem)
-            summary_store.store_element(elem)
-            job_repo.add_job(
-                element_id=elem.element_id,
-                level=elem.level,
-                parent_id=elem.parent_id,
-                dependencies_met=(elem.level == 0),
-            )
-
-    # Process jobs level by level
-    completed = 0
-    total = len(all_elements)
-
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[bold blue]Summarizing[/]"),
-        BarColumn(),
-        TaskProgressColumn(),
-        TextColumn("({task.completed}/{task.total})"),
-        TimeElapsedColumn(),
-        console=console,
-        transient=True,
-    ) as progress:
-        task = progress.add_task("summarizing", total=total)
-
-        while True:
-            jobs = job_repo.claim_pending_jobs("cli-worker", batch_size=10)
-            if not jobs:
-                break
-
-            for job in jobs:
-                element_id = job["element_id"]
-                success = process_summarization_job(
-                    element_id, job_repo, summary_store, ollama, sum_config
-                )
-                if success:
-                    completed += 1
-                    if not dry_run:
-                        summary = summary_store.get_summary(element_id)
-                        if summary:
-                            es_repo.store_summary(element_id, summary)
-                progress.update(task, completed=completed)
-
-    console.print(f"  Summarized: [green]{completed}[/] elements")
-    return completed
-
-
-def run_embedding(
-    parsing_result: ParsingResult,
-    config: MagaldiConfig,
-    dry_run: bool,
-) -> int:
-    """Run Phase 6: Embedding."""
-    emb_config = EmbeddingConfig(
-        ollama_url=config.ollama.url,
-        model=config.ollama.embed_model,
-    )
-
-    # Check Ollama availability
-    ollama = OllamaEmbedClient(emb_config.ollama_url, emb_config.model)
-    if not ollama.verify_model():
-        console.print(f"[yellow]Warning:[/] Model {emb_config.model} not available. Skipping embedding.")
-        return 0
-
-    # Create repositories
-    if dry_run:
-        job_repo = InMemoryEmbeddingJobRepository()
-        embedding_store = InMemoryEmbeddingStore()
-    else:
-        from magaldi.db.redis import RedisEmbeddingJobRepository
-        from magaldi.db.elasticsearch import ElasticsearchEmbeddingStore
-        job_repo = RedisEmbeddingJobRepository(config)
-        embedding_store = ElasticsearchEmbeddingStore(config)
-
-    # Populate stores from parsing result
-    embeddable = []
-    for pf in parsing_result.parsed_files:
-        for elem in pf.elements:
-            embedding_store.store_element(elem)
-            if elem.element_type in ("file", "class", "function", "method"):
-                embeddable.append(elem)
-                job_repo.add_job(elem.element_id)
-
-    # Process jobs
-    completed = 0
-    total = len(embeddable)
-
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[bold blue]Embedding[/]"),
-        BarColumn(),
-        TaskProgressColumn(),
-        TextColumn("({task.completed}/{task.total})"),
-        TimeElapsedColumn(),
-        console=console,
-        transient=True,
-    ) as progress:
-        task = progress.add_task("embedding", total=total)
-
-        while True:
-            jobs = job_repo.claim_pending_jobs("cli-worker", batch_size=10)
-            if not jobs:
-                break
-
-            for job in jobs:
-                element_id = job["element_id"]
-                success = process_embedding_job(
-                    element_id, job_repo, embedding_store, ollama, emb_config
-                )
-                if success:
-                    completed += 1
-                progress.update(task, completed=completed)
-
-    console.print(f"  Embedded: [green]{completed}[/] elements")
-    return completed
+    return (result.elements_processed, result.elements_skipped, result.indexed)
 
 
 # =============================================================================
@@ -413,20 +266,26 @@ def print_parsing_result(result: ParsingResult) -> None:
     console.print(f"  {len(result.parsed_files)} files → {result.total_elements} elements ({types}){failed}")
 
 
-def print_storage_result(result: StorageResult) -> None:
-    """Print storage results."""
-    parts = [f"{result.files_stored} files", f"{result.elements_stored} stored", f"{result.elements_indexed} indexed"]
-    if result.elements_deleted: parts.append(f"[yellow]{result.elements_deleted} deleted[/]")
-    if result.storage_errors: parts.append(f"[red]{len(result.storage_errors)} errors[/]")
+def print_processing_result(processed: int, skipped: int, indexed: int, skip_ai: bool) -> None:
+    """Print processing results."""
+    parts = []
+    if processed:
+        parts.append(f"[green]{processed} processed[/]")
+    if skipped:
+        parts.append(f"[dim]{skipped} skipped (already in ES)[/]")
+    if indexed:
+        parts.append(f"{indexed} indexed")
+    if skip_ai:
+        parts.append("[yellow]AI skipped[/]")
     console.print(f"  {' | '.join(parts)}")
 
 
 def print_summary(
     discovery: DiscoveryResult,
     manifest: ChangeManifest,
-    storage: StorageResult,
-    summarized: int | None,
-    embedded: int | None,
+    processed: int,
+    indexed: int,
+    skip_ai: bool,
 ) -> None:
     """Print final summary."""
     console.print("\n" + "=" * 60)
@@ -440,12 +299,11 @@ def print_summary(
     table.add_row("Repository", f"{discovery.scope}/{discovery.repository}")
     table.add_row("User", discovery.username)
     table.add_row("Files parsed", str(manifest.files_to_parse))
-    table.add_row("Elements stored", str(storage.elements_stored))
+    table.add_row("Elements processed", str(processed))
+    table.add_row("Elements indexed", str(indexed))
 
-    if summarized is not None:
-        table.add_row("Elements summarized", str(summarized))
-    if embedded is not None:
-        table.add_row("Elements embedded", str(embedded))
+    if skip_ai:
+        table.add_row("AI processing", "Skipped")
 
     console.print(table)
     console.print()
