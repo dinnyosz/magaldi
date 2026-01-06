@@ -552,6 +552,8 @@ def process_elements(
     on_progress: Callable[[ProgressState], None] | None = None,
     file_hashes: dict[str, str] | None = None,
     on_status_change: Callable[[], None] | None = None,
+    worker_status: WorkerStatus | None = None,
+    timing_stats: TimingStats | None = None,
 ) -> ProcessingResult:
     """Process elements: summarize -> embed -> index (atomic per element).
 
@@ -568,6 +570,8 @@ def process_elements(
         on_progress: Optional callback(ProgressState) for progress updates.
         file_hashes: Optional dict mapping relative_path to file hash.
         on_status_change: Optional callback when any worker status changes.
+        worker_status: Optional shared WorkerStatus (created if not provided).
+        timing_stats: Optional shared TimingStats (created if not provided).
 
     Returns:
         ProcessingResult with counts and errors.
@@ -629,11 +633,13 @@ def process_elements(
         ollama = OllamaClient(config.ollama_url, config.summarize_model)
         ollama_embed = OllamaEmbedClient(config.ollama_url, config.embed_model)
 
-    # Initialize tracking structures
+    # Initialize tracking structures (use provided or create new)
     dependency_tracker = DependencyTracker(elements_to_process)
-    timing_stats = TimingStats()
+    if timing_stats is None:
+        timing_stats = TimingStats()
     timing_stats.phase_start = time.time()
-    worker_status = WorkerStatus()
+    if worker_status is None:
+        worker_status = WorkerStatus()
 
     # Track completed/failed counts for progress
     completed_count = result.elements_skipped  # Start with skipped count

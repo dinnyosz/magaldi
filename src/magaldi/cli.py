@@ -25,6 +25,8 @@ from magaldi.parser.discovery import DiscoveryError, DiscoveryResult, discover
 from magaldi.processing.processor import (
     ProcessingConfig,
     ProgressState,
+    TimingStats,
+    WorkerStatus,
     process_elements,
 )
 
@@ -264,18 +266,30 @@ def run_processing(
 
         return Group(progress_line, worker_table, stats)
 
-    last_state: ProgressState | None = None
+    # Create shared state objects that will be updated by workers
+    timing_stats = TimingStats()
+    worker_status = WorkerStatus()
+    total = parsing_result.total_elements
+
+    # Initialize state so display works from the start
+    current_state = ProgressState(
+        total=total,
+        completed=0,
+        skipped=0,
+        failed=0,
+        timing=timing_stats,
+        workers=worker_status,
+    )
 
     with Live(console=console, refresh_per_second=4) as live:
         def on_progress(state: ProgressState) -> None:
-            nonlocal last_state
-            last_state = state
+            nonlocal current_state
+            current_state = state
             live.update(build_display(state, workers))
 
         def on_status_change() -> None:
             """Refresh display when worker status changes."""
-            if last_state:
-                live.update(build_display(last_state, workers))
+            live.update(build_display(current_state, workers))
 
         result = process_elements(
             parsing_result.parsed_files,
@@ -287,12 +301,14 @@ def run_processing(
             on_progress,
             file_hashes,
             on_status_change,
+            worker_status,
+            timing_stats,
         )
 
-    # Get timing stats from last state
-    avg_wall = last_state.timing.avg_wall_time if last_state else 0.0
-    avg_api = last_state.timing.avg_api_time if last_state else 0.0
-    elapsed = last_state.timing.elapsed if last_state else 0.0
+    # Get timing stats from current state
+    avg_wall = current_state.timing.avg_wall_time
+    avg_api = current_state.timing.avg_api_time
+    elapsed = current_state.timing.elapsed
 
     return (result.elements_processed, result.elements_skipped, result.indexed, avg_wall, avg_api, elapsed)
 
