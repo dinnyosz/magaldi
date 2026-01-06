@@ -281,15 +281,18 @@ def run_processing(
         workers=worker_status,
     )
 
-    with Live(console=console, refresh_per_second=4) as live:
+    def get_display() -> RenderableType:
+        """Called on every refresh to get current display."""
+        return build_display(current_state, workers)
+
+    with Live(get_display, console=console, refresh_per_second=10) as live:
         def on_progress(state: ProgressState) -> None:
             nonlocal current_state
             current_state = state
-            live.update(build_display(state, workers))
 
         def on_status_change() -> None:
-            """Refresh display when worker status changes."""
-            live.update(build_display(current_state, workers))
+            """Called when worker status changes - Live auto-refreshes."""
+            pass  # Live polls get_display automatically
 
         result = process_elements(
             parsing_result.parsed_files,
