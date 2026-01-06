@@ -11,6 +11,8 @@ Only indexes to ES after full processing, ensuring ES presence = completion.
 
 from __future__ import annotations
 
+import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable
@@ -78,6 +80,86 @@ class ProcessingResult:
 
     # Errors
     errors: list[str] = field(default_factory=list)
+
+
+@dataclass
+class TimingStats:
+    """Thread-safe timing statistics."""
+
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+
+    wall_times: list[float] = field(default_factory=list)
+    api_times: list[float] = field(default_factory=list)
+    phase_start: float = 0.0
+
+    def record(self, wall_time: float, api_time: float) -> None:
+        with self._lock:
+            self.wall_times.append(wall_time)
+            self.api_times.append(api_time)
+
+    @property
+    def avg_wall_time(self) -> float:
+        with self._lock:
+            return sum(self.wall_times) / len(self.wall_times) if self.wall_times else 0.0
+
+    @property
+    def avg_api_time(self) -> float:
+        with self._lock:
+            return sum(self.api_times) / len(self.api_times) if self.api_times else 0.0
+
+    @property
+    def elapsed(self) -> float:
+        return time.time() - self.phase_start
+
+    def eta_seconds(self, completed: int, total: int) -> float | None:
+        """Calculate ETA based on average wall time."""
+        if completed == 0:
+            return None
+        remaining = total - completed
+        return remaining * self.avg_wall_time
+
+
+@dataclass
+class WorkerStatus:
+    """Track what each worker is doing."""
+
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+    _status: dict[int, tuple[str, str]] = field(default_factory=dict)  # worker_id -> (element_name, stage)
+
+    def set(self, worker_id: int, element_name: str, stage: str) -> None:
+        with self._lock:
+            self._status[worker_id] = (element_name, stage)
+
+    def clear(self, worker_id: int) -> None:
+        with self._lock:
+            self._status.pop(worker_id, None)
+
+    def get_all(self) -> dict[int, tuple[str, str]]:
+        with self._lock:
+            return dict(self._status)
+
+
+@dataclass
+class ProgressState:
+    """Combined state for display updates."""
+
+    total: int
+    completed: int
+    skipped: int
+    failed: int
+    timing: TimingStats
+    workers: WorkerStatus
+
+
+@dataclass
+class ProcessedElement:
+    """Result from processing a single element."""
+
+    element_id: str
+    success: bool
+    wall_time: float
+    api_time: float
+    error: str | None = None
 
 
 # =============================================================================
