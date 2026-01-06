@@ -630,21 +630,27 @@ def process_elements(
     completed_count = result.elements_skipped  # Start with skipped count
     failed_count = 0
 
-    # Worker ID counter
-    worker_id_counter = 0
+    # Worker ID pool - reuse IDs 0 to num_workers-1
+    available_worker_ids: list[int] = list(range(config.num_workers))
     worker_id_lock = threading.Lock()
 
-    def get_worker_id() -> int:
-        nonlocal worker_id_counter
+    def acquire_worker_id() -> int:
+        """Get an available worker ID from the pool."""
         with worker_id_lock:
-            wid = worker_id_counter
-            worker_id_counter += 1
-            return wid
+            if available_worker_ids:
+                return available_worker_ids.pop(0)
+            return 0  # Fallback
 
-    def process_wrapper(element: CodeElement) -> ProcessedElement:
+    def release_worker_id(wid: int) -> None:
+        """Return a worker ID to the pool."""
+        with worker_id_lock:
+            if wid not in available_worker_ids:
+                available_worker_ids.append(wid)
+
+    def process_wrapper(element: CodeElement) -> tuple[ProcessedElement, int]:
         """Wrapper to assign worker ID and call _process_single_element."""
-        wid = get_worker_id()
-        return _process_single_element(
+        wid = acquire_worker_id()
+        proc_result = _process_single_element(
             element=element,
             summary_cache=summary_cache,
             ollama=ollama,
@@ -655,6 +661,7 @@ def process_elements(
             worker_id=wid,
             worker_status=worker_status,
         )
+        return (proc_result, wid)
 
     # Process elements in parallel using ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=config.num_workers) as executor:
@@ -682,7 +689,10 @@ def process_elements(
 
             for future in done:
                 element = future_to_element.pop(future)
-                processed = future.result()
+                processed, worker_id = future.result()
+
+                # Release worker ID back to pool
+                release_worker_id(worker_id)
 
                 # Record timing
                 timing_stats.record(processed.wall_time, processed.api_time)
