@@ -96,13 +96,36 @@ class TimingStats:
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     wall_times: list[float] = field(default_factory=list)
-    api_times: list[float] = field(default_factory=list)
+    summarize_times: list[float] = field(default_factory=list)
+    embed_times: list[float] = field(default_factory=list)
     phase_start: float = 0.0
 
-    def record(self, wall_time: float, api_time: float) -> None:
+    # Per-type tracking: type -> list of wall times
+    wall_times_by_type: dict[str, list[float]] = field(default_factory=dict)
+    counts_by_type: dict[str, int] = field(default_factory=dict)  # completed counts
+    totals_by_type: dict[str, int] = field(default_factory=dict)  # total counts
+
+    def set_totals_by_type(self, totals: dict[str, int]) -> None:
+        """Set total element counts by type."""
+        with self._lock:
+            self.totals_by_type = dict(totals)
+            # Initialize counts
+            for t in totals:
+                if t not in self.counts_by_type:
+                    self.counts_by_type[t] = 0
+                if t not in self.wall_times_by_type:
+                    self.wall_times_by_type[t] = []
+
+    def record(self, wall_time: float, summarize_time: float, embed_time: float, element_type: str = "") -> None:
         with self._lock:
             self.wall_times.append(wall_time)
-            self.api_times.append(api_time)
+            self.summarize_times.append(summarize_time)
+            self.embed_times.append(embed_time)
+            if element_type:
+                if element_type not in self.wall_times_by_type:
+                    self.wall_times_by_type[element_type] = []
+                self.wall_times_by_type[element_type].append(wall_time)
+                self.counts_by_type[element_type] = self.counts_by_type.get(element_type, 0) + 1
 
     @property
     def avg_wall_time(self) -> float:
@@ -110,20 +133,43 @@ class TimingStats:
             return sum(self.wall_times) / len(self.wall_times) if self.wall_times else 0.0
 
     @property
-    def avg_api_time(self) -> float:
+    def avg_summarize_time(self) -> float:
         with self._lock:
-            return sum(self.api_times) / len(self.api_times) if self.api_times else 0.0
+            return sum(self.summarize_times) / len(self.summarize_times) if self.summarize_times else 0.0
+
+    @property
+    def avg_embed_time(self) -> float:
+        with self._lock:
+            return sum(self.embed_times) / len(self.embed_times) if self.embed_times else 0.0
 
     @property
     def elapsed(self) -> float:
         return time.time() - self.phase_start
 
+    def get_type_stats(self) -> dict[str, tuple[int, int, float]]:
+        """Get per-type stats: type -> (completed, total, avg_time)."""
+        with self._lock:
+            result = {}
+            for t in self.totals_by_type:
+                completed = self.counts_by_type.get(t, 0)
+                total = self.totals_by_type.get(t, 0)
+                times = self.wall_times_by_type.get(t, [])
+                avg = sum(times) / len(times) if times else 0.0
+                result[t] = (completed, total, avg)
+            return result
+
     def eta_seconds(self, completed: int, total: int) -> float | None:
-        """Calculate ETA based on average wall time."""
-        if completed == 0:
-            return None
-        remaining = total - completed
-        return remaining * self.avg_wall_time
+        """Calculate ETA based on per-type averages."""
+        with self._lock:
+            if completed == 0:
+                return None
+            # Calculate ETA using per-type averages
+            eta = 0.0
+            for t, (done, tot, avg) in self.get_type_stats().items():
+                remaining = tot - done
+                if remaining > 0 and avg > 0:
+                    eta += remaining * avg
+            return eta if eta > 0 else None
 
 
 @dataclass
@@ -165,7 +211,8 @@ class ProcessedElement:
     element_id: str
     success: bool
     wall_time: float
-    api_time: float
+    summarize_time: float
+    embed_time: float
     error: str | None = None
 
 
@@ -475,10 +522,29 @@ def _process_single_element(
         ProcessedElement with timing info and success/error status.
     """
     start_wall = time.time()
-    api_time = 0.0
+    summarize_time = 0.0
+    embed_time = 0.0
+
+    # Build hierarchical display name: file.py → Class → method
+    def build_display_name() -> str:
+        parts = []
+        # Add filename (shortened)
+        filename = element.relative_path.split("/")[-1] if "/" in element.relative_path else element.relative_path
+        if element.element_type != "file":
+            parts.append(filename)
+        # Add parent class if method
+        if element.parent_id:
+            parent = summary_cache.get_element(element.parent_id)
+            if parent and parent.element_type == "class":
+                parts.append(parent.name)
+        # Add element name
+        parts.append(element.name)
+        return " → ".join(parts)
+
+    display_name = build_display_name()
 
     def update_status(stage: str) -> None:
-        worker_status.set(worker_id, element.name, stage)
+        worker_status.set(worker_id, display_name, stage)
         if on_status_change:
             on_status_change()
 
@@ -490,7 +556,7 @@ def _process_single_element(
         else:
             api_start = time.time()
             summary = _summarize_element(element, summary_cache, ollama, config)
-            api_time += time.time() - api_start
+            summarize_time = time.time() - api_start
 
         # Cache summary for children
         summary_cache.add_summary(element.element_id, summary)
@@ -505,7 +571,7 @@ def _process_single_element(
             else:
                 api_start = time.time()
                 embedding = _embed_element(element, summary_cache, ollama_embed, config)
-                api_time += time.time() - api_start
+                embed_time = time.time() - api_start
 
         # Step 3: Index to ES (only after summarize+embed complete)
         update_status("indexing")
@@ -522,7 +588,8 @@ def _process_single_element(
             element_id=element.element_id,
             success=True,
             wall_time=wall_time,
-            api_time=api_time,
+            summarize_time=summarize_time,
+            embed_time=embed_time,
         )
 
     except Exception as e:
@@ -532,7 +599,8 @@ def _process_single_element(
             element_id=element.element_id,
             success=False,
             wall_time=wall_time,
-            api_time=api_time,
+            summarize_time=summarize_time,
+            embed_time=embed_time,
             error=str(e),
         )
 
@@ -641,6 +709,12 @@ def process_elements(
     if worker_status is None:
         worker_status = WorkerStatus()
 
+    # Count elements by type for per-type ETA
+    totals_by_type: dict[str, int] = {}
+    for elem in elements_to_process:
+        totals_by_type[elem.element_type] = totals_by_type.get(elem.element_type, 0) + 1
+    timing_stats.set_totals_by_type(totals_by_type)
+
     # Track completed/failed counts for progress
     completed_count = result.elements_skipped  # Start with skipped count
     failed_count = 0
@@ -710,8 +784,8 @@ def process_elements(
                 # Release worker ID back to pool
                 release_worker_id(worker_id)
 
-                # Record timing
-                timing_stats.record(processed.wall_time, processed.api_time)
+                # Record timing with element type
+                timing_stats.record(processed.wall_time, processed.summarize_time, processed.embed_time, element.element_type)
 
                 if processed.success:
                     dependency_tracker.mark_complete(element.element_id)

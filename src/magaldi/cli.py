@@ -261,10 +261,26 @@ def run_processing(
             else:
                 worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "")
 
-        # Stats line
-        stats = f"  Avg: {state.timing.avg_wall_time:.1f}s wall | {state.timing.avg_api_time:.1f}s API"
+        # Per-type stats
+        type_stats = state.timing.get_type_stats()
+        type_parts = []
+        for t in ["file", "class", "function", "method", "variable"]:
+            if t in type_stats:
+                done, tot, avg = type_stats[t]
+                remaining = tot - done
+                if remaining > 0:
+                    type_parts.append(f"{t}:{remaining}/{tot} ({avg:.1f}s)")
+        type_line = f"  Remaining: {' | '.join(type_parts)}" if type_parts else ""
 
-        return Group(progress_line, worker_table, stats)
+        # Stats line
+        stats = f"  Avg: {state.timing.avg_wall_time:.1f}s total | {state.timing.avg_summarize_time:.1f}s summ | {state.timing.avg_embed_time:.1f}s embed"
+
+        parts = [progress_line, worker_table]
+        if type_line:
+            parts.append(type_line)
+        parts.append(stats)
+
+        return Group(*parts)
 
     # Create shared state objects that will be updated by workers
     timing_stats = TimingStats()
