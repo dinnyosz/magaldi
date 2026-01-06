@@ -233,11 +233,16 @@ class TestEnvOverrides:
         config = load_config(FIXTURES_DIR / "minimal.yaml")
         assert config.mysql.password == "secretpassword"
 
-    def test_env_overrides_elasticsearch_url(self, clean_env):
-        os.environ["MAGALDI_ELASTICSEARCH_URL"] = "http://eshost:9201"
+    def test_env_overrides_elasticsearch_host_port(self, clean_env):
+        os.environ["MAGALDI_ELASTICSEARCH_HOST"] = "eshost"
+        os.environ["MAGALDI_ELASTICSEARCH_PORT"] = "9201"
+        os.environ["MAGALDI_ELASTICSEARCH_SCHEME"] = "https"
         os.environ["MAGALDI_MYSQL_PASSWORD"] = "test"
         config = load_config(FIXTURES_DIR / "minimal.yaml")
-        assert config.elasticsearch.url == "http://eshost:9201"
+        assert config.elasticsearch.host == "eshost"
+        assert config.elasticsearch.port == 9201
+        assert config.elasticsearch.scheme == "https"
+        assert config.elasticsearch.url == "https://eshost:9201"
 
     def test_env_overrides_ollama_url(self, clean_env):
         os.environ["MAGALDI_OLLAMA_URL"] = "http://ollama:11435"

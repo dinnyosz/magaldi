@@ -16,11 +16,19 @@ mysql:
   pool_timeout: 30
 
 elasticsearch:
-  url: http://localhost:9200
+  host: localhost
+  port: 9200
+  scheme: http
   index: magaldi_code_elements
   timeout: 30
   retry_on_timeout: true
   max_retries: 3
+
+redis:
+  host: localhost
+  port: 6379
+  db: 0
+  # password: Set via MAGALDI_REDIS_PASSWORD if needed
 
 # =============================================================================
 # OLLAMA (AI MODELS)

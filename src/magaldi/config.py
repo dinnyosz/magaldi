@@ -55,11 +55,28 @@ class MySQLConfig:
 class ElasticsearchConfig:
     """Elasticsearch configuration."""
 
-    url: str = "http://localhost:9200"
+    host: str = "localhost"
+    port: int = 9200
+    scheme: str = "http"
     index: str = "magaldi_code_elements"
     timeout: int = 30
     retry_on_timeout: bool = True
     max_retries: int = 3
+
+    @property
+    def url(self) -> str:
+        """Build URL from components."""
+        return f"{self.scheme}://{self.host}:{self.port}"
+
+
+@dataclass
+class RedisConfig:
+    """Redis configuration."""
+
+    host: str = "localhost"
+    port: int = 6379
+    db: int = 0
+    password: str | None = None
 
 
 @dataclass
@@ -166,6 +183,7 @@ class MagaldiConfig:
 
     mysql: MySQLConfig = field(default_factory=MySQLConfig)
     elasticsearch: ElasticsearchConfig = field(default_factory=ElasticsearchConfig)
+    redis: RedisConfig = field(default_factory=RedisConfig)
     ollama: OllamaConfig = field(default_factory=OllamaConfig)
     workers: WorkersConfig = field(default_factory=WorkersConfig)
     parser: ParserConfig = field(default_factory=ParserConfig)
@@ -321,6 +339,7 @@ def _merge_config(config: MagaldiConfig, file_config: dict[str, Any]) -> Magaldi
     section_mapping = {
         "mysql": config.mysql,
         "elasticsearch": config.elasticsearch,
+        "redis": config.redis,
         "ollama": config.ollama,
         "parser": config.parser,
         "search": config.search,
@@ -373,9 +392,16 @@ def _apply_env_overrides(config: MagaldiConfig) -> MagaldiConfig:
         "MAGALDI_MYSQL_PASSWORD": ("mysql", "password"),
         "MAGALDI_MYSQL_POOL_SIZE": ("mysql", "pool_size", int),
         # Elasticsearch
-        "MAGALDI_ELASTICSEARCH_URL": ("elasticsearch", "url"),
+        "MAGALDI_ELASTICSEARCH_HOST": ("elasticsearch", "host"),
+        "MAGALDI_ELASTICSEARCH_PORT": ("elasticsearch", "port", int),
+        "MAGALDI_ELASTICSEARCH_SCHEME": ("elasticsearch", "scheme"),
         "MAGALDI_ELASTICSEARCH_INDEX": ("elasticsearch", "index"),
         "MAGALDI_ELASTICSEARCH_TIMEOUT": ("elasticsearch", "timeout", int),
+        # Redis
+        "MAGALDI_REDIS_HOST": ("redis", "host"),
+        "MAGALDI_REDIS_PORT": ("redis", "port", int),
+        "MAGALDI_REDIS_DB": ("redis", "db", int),
+        "MAGALDI_REDIS_PASSWORD": ("redis", "password"),
         # Ollama
         "MAGALDI_OLLAMA_URL": ("ollama", "url"),
         "MAGALDI_OLLAMA_SUMMARIZE_MODEL": ("ollama", "summarize_model"),
@@ -385,8 +411,6 @@ def _apply_env_overrides(config: MagaldiConfig) -> MagaldiConfig:
         # Web
         "MAGALDI_WEB_HOST": ("web", "host"),
         "MAGALDI_WEB_PORT": ("web", "port", int),
-        # Redis (stored in elasticsearch section for now, can add dedicated section later)
-        "MAGALDI_REDIS_URL": ("elasticsearch", "url"),  # placeholder
     }
 
     for env_var, mapping in env_mappings.items():

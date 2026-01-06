@@ -10,7 +10,9 @@ mysql:
   pool_timeout: 15
 
 elasticsearch:
-  url: http://testhost:9200
+  host: testhost
+  port: 9200
+  scheme: http
   index: magaldi_test_elements
   timeout: 15
   retry_on_timeout: false

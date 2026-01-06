@@ -1,0 +1,152 @@
+# Magaldi .gitignore
+
+# =============================================================================
+# PYTHON
+# =============================================================================
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+env/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+dist/
+build/
+eggs/
+*.egg-info/
+*.egg
+.eggs/
+wheels/
+pip-wheel-metadata/
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# =============================================================================
+# TESTING
+# =============================================================================
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# =============================================================================
+# TYPE CHECKING / LINTING
+# =============================================================================
+
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+
+# =============================================================================
+# IDE / EDITOR
+# =============================================================================
+
+# VSCode
+.vscode/
+
+# PyCharm
+.idea/
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+
+# =============================================================================
+# OS
+# =============================================================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+*~
+
+# =============================================================================
+# PROJECT SPECIFIC
+# =============================================================================
+
+# Environment files (contain secrets)
+.env
+.env.local
+.env.*.local
+
+# Local config overrides
+config/magaldi.local.yaml
+
+# Logs
+logs/
+*.log
+
+# Temporary files
+tmp/
+temp/
+
+# =============================================================================
+# DOCKER
+# =============================================================================
+
+# Docker compose override (local customizations)
+docker-compose.override.yml
+
+# Local data directories (if using bind mounts instead of volumes)
+data/
+
+# =============================================================================
+# CLAUDE CODE
+# =============================================================================
+
+# Claude Code local settings
+.claude/
+
+# =============================================================================
+# MISC
+# =============================================================================
+
+# SQLite databases (testing)
+*.db
+*.sqlite
+*.sqlite3
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Secrets (catch-all)
+*.pem
+*.key
+secrets/

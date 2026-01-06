@@ -107,10 +107,21 @@ Magaldi uses a layered configuration system:
 # Required
 MAGALDI_MYSQL_PASSWORD=yourpassword
 
-# Optional overrides
+# Optional overrides - MySQL
 MAGALDI_MYSQL_HOST=localhost
 MAGALDI_MYSQL_PORT=3306
-MAGALDI_ELASTICSEARCH_URL=http://localhost:9200
+
+# Optional overrides - Elasticsearch
+MAGALDI_ELASTICSEARCH_HOST=localhost
+MAGALDI_ELASTICSEARCH_PORT=9200
+MAGALDI_ELASTICSEARCH_SCHEME=http
+
+# Optional overrides - Redis
+MAGALDI_REDIS_HOST=localhost
+MAGALDI_REDIS_PORT=6379
+MAGALDI_REDIS_PASSWORD=  # If auth required
+
+# Optional overrides - Other
 MAGALDI_OLLAMA_URL=http://localhost:11434
 MAGALDI_LOG_LEVEL=INFO
 MAGALDI_WEB_PORT=8080
