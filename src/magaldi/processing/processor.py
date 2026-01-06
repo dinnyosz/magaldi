@@ -327,6 +327,17 @@ def process_elements(
 
     result = ProcessingResult(scope=scope, repository=repository, username=username)
 
+    # Handle deletions first - remove old elements for files being reprocessed
+    # This ensures modified files get their old elements removed before new ones are indexed
+    for pf in parsed_files:
+        if pf.elements:
+            es_repo.delete_by_file(
+                scope,
+                repository,
+                username,
+                pf.file_info.relative_path,
+            )
+
     # Collect all elements and organize by level
     all_elements: list[CodeElement] = []
     for pf in parsed_files:
