@@ -163,9 +163,13 @@ class TimingStats:
         with self._lock:
             if completed == 0:
                 return None
-            # Calculate ETA using per-type averages
+            # Calculate ETA using per-type averages (inline to avoid deadlock)
             eta = 0.0
-            for t, (done, tot, avg) in self.get_type_stats().items():
+            for t in self.totals_by_type:
+                done = self.counts_by_type.get(t, 0)
+                tot = self.totals_by_type.get(t, 0)
+                times = self.wall_times_by_type.get(t, [])
+                avg = sum(times) / len(times) if times else 0.0
                 remaining = tot - done
                 if remaining > 0 and avg > 0:
                     eta += remaining * avg
