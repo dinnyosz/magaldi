@@ -1,0 +1,521 @@
+"""Phase 6: Embedding - Generate vector embeddings using Ollama.
+
+This module handles:
+1. Ollama embedding client
+2. Context building with hierarchical enrichment
+3. Vector generation and validation
+4. Embedding storage
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any, Protocol
+
+import requests
+
+from magaldi.parser.code_parser import CodeElement
+
+
+class EmbeddingError(Exception):
+    """Raised when embedding generation fails."""
+
+    pass
+
+
+# =============================================================================
+# DATA CLASSES
+# =============================================================================
+
+
+@dataclass
+class EmbeddingConfig:
+    """Configuration for embedding generation."""
+
+    # Ollama settings
+    ollama_url: str = "http://localhost:11434"
+    model: str = "snowflake-arctic-embed2"
+
+    # Vector settings
+    dimensions: int = 1024
+    max_context: int = 8192
+
+    # Worker settings
+    batch_size: int = 20
+    es_batch_size: int = 100
+
+    # Retry settings
+    max_retries: int = 3
+    retry_delay: float = 2.0
+    timeout: int = 30
+
+
+@dataclass
+class EmbeddingResult:
+    """Result of embedding phase."""
+
+    scope: str
+    repository: str
+    username: str
+
+    # Counts
+    total_elements: int = 0
+    embedded_elements: int = 0
+    failed_elements: int = 0
+
+    # Errors
+    errors: list[str] = field(default_factory=list)
+
+
+# =============================================================================
+# OLLAMA EMBEDDING CLIENT
+# =============================================================================
+
+
+class OllamaEmbedClient:
+    """Client for Ollama embedding API."""
+
+    def __init__(self, url: str, model: str):
+        self.url = url.rstrip("/")
+        self.model = model
+        self.session = requests.Session()
+        self.session.headers["Content-Type"] = "application/json"
+
+    def verify_model(self) -> bool:
+        """Check if embedding model is available."""
+        try:
+            response = self.session.get(f"{self.url}/api/tags")
+            models = response.json().get("models", [])
+            return any(m.get("name") == self.model for m in models)
+        except Exception:
+            return False
+
+    def embed_single(self, text: str, timeout: int = 30) -> list[float]:
+        """Generate embedding for single text."""
+        response = self.session.post(
+            f"{self.url}/api/embed",
+            json={"model": self.model, "input": text},
+            timeout=timeout,
+        )
+        response.raise_for_status()
+
+        embeddings = response.json().get("embeddings", [])
+        if not embeddings:
+            raise EmbeddingError("No embedding returned from Ollama")
+        return embeddings[0]
+
+    def embed_batch(self, texts: list[str], timeout: int = 60) -> list[list[float]]:
+        """Generate embeddings for batch of texts."""
+        response = self.session.post(
+            f"{self.url}/api/embed",
+            json={"model": self.model, "input": texts},
+            timeout=timeout,
+        )
+        response.raise_for_status()
+
+        return response.json().get("embeddings", [])
+
+
+# =============================================================================
+# REPOSITORY PROTOCOLS
+# =============================================================================
+
+
+class EmbeddingJobRepository(Protocol):
+    """Interface for embedding job storage."""
+
+    def add_job(self, element_id: str) -> None:
+        """Add an embedding job."""
+        ...
+
+    def get_job(self, element_id: str) -> dict[str, Any] | None:
+        """Get job by element ID."""
+        ...
+
+    def claim_pending_jobs(
+        self, worker_id: str, batch_size: int
+    ) -> list[dict[str, Any]]:
+        """Claim pending jobs."""
+        ...
+
+    def mark_completed(self, element_id: str) -> None:
+        """Mark job as completed."""
+        ...
+
+    def mark_failed(self, element_id: str, error_message: str) -> None:
+        """Mark job as failed."""
+        ...
+
+
+class EmbeddingStore(Protocol):
+    """Interface for element and embedding storage."""
+
+    def store_element(self, element: CodeElement) -> None:
+        """Store a code element."""
+        ...
+
+    def get_element(self, element_id: str) -> CodeElement | None:
+        """Get element by ID."""
+        ...
+
+    def store_summary(self, element_id: str, summary: str) -> None:
+        """Store summary for an element."""
+        ...
+
+    def get_summary(self, element_id: str) -> str | None:
+        """Get summary for an element."""
+        ...
+
+    def store_embedding(self, element_id: str, embedding: list[float]) -> None:
+        """Store embedding vector for an element."""
+        ...
+
+    def get_embedding(self, element_id: str) -> list[float] | None:
+        """Get embedding vector for an element."""
+        ...
+
+    def get_file_summary(self, element: CodeElement) -> str | None:
+        """Get file summary for context enrichment."""
+        ...
+
+    def get_class_summary(self, element: CodeElement) -> str | None:
+        """Get class summary for context enrichment."""
+        ...
+
+
+# =============================================================================
+# IN-MEMORY IMPLEMENTATIONS
+# =============================================================================
+
+
+class InMemoryEmbeddingJobRepository:
+    """In-memory implementation of job repository for testing."""
+
+    def __init__(self) -> None:
+        self._jobs: dict[str, dict[str, Any]] = {}
+
+    def add_job(self, element_id: str) -> None:
+        self._jobs[element_id] = {
+            "element_id": element_id,
+            "status": "pending",
+            "worker_id": None,
+            "claimed_at": None,
+            "completed_at": None,
+            "error_message": None,
+        }
+
+    def get_job(self, element_id: str) -> dict[str, Any] | None:
+        return self._jobs.get(element_id)
+
+    def claim_pending_jobs(
+        self, worker_id: str, batch_size: int
+    ) -> list[dict[str, Any]]:
+        available = [
+            job for job in self._jobs.values() if job["status"] == "pending"
+        ]
+
+        claimed = available[:batch_size]
+        for job in claimed:
+            job["status"] = "running"
+            job["worker_id"] = worker_id
+            job["claimed_at"] = datetime.now()
+
+        return claimed
+
+    def mark_completed(self, element_id: str) -> None:
+        if element_id in self._jobs:
+            self._jobs[element_id]["status"] = "completed"
+            self._jobs[element_id]["completed_at"] = datetime.now()
+
+    def mark_failed(self, element_id: str, error_message: str) -> None:
+        if element_id in self._jobs:
+            self._jobs[element_id]["status"] = "failed"
+            self._jobs[element_id]["error_message"] = error_message
+            self._jobs[element_id]["completed_at"] = datetime.now()
+
+
+class InMemoryEmbeddingStore:
+    """In-memory implementation of embedding store for testing."""
+
+    def __init__(self) -> None:
+        self._elements: dict[str, CodeElement] = {}
+        self._summaries: dict[str, str] = {}
+        self._embeddings: dict[str, list[float]] = {}
+
+    def store_element(self, element: CodeElement) -> None:
+        self._elements[element.element_id] = element
+
+    def get_element(self, element_id: str) -> CodeElement | None:
+        return self._elements.get(element_id)
+
+    def store_summary(self, element_id: str, summary: str) -> None:
+        self._summaries[element_id] = summary
+
+    def get_summary(self, element_id: str) -> str | None:
+        return self._summaries.get(element_id)
+
+    def store_embedding(self, element_id: str, embedding: list[float]) -> None:
+        self._embeddings[element_id] = embedding
+
+    def get_embedding(self, element_id: str) -> list[float] | None:
+        return self._embeddings.get(element_id)
+
+    def get_file_summary(self, element: CodeElement) -> str | None:
+        # Find file element for this path
+        for eid, elem in self._elements.items():
+            if (
+                elem.scope == element.scope
+                and elem.repository == element.repository
+                and elem.username == element.username
+                and elem.relative_path == element.relative_path
+                and elem.element_type == "file"
+            ):
+                return self.get_summary(eid)
+        return None
+
+    def get_class_summary(self, element: CodeElement) -> str | None:
+        if not element.parent_id:
+            return None
+
+        parent = self.get_element(element.parent_id)
+        if parent and parent.element_type == "class":
+            return self.get_summary(element.parent_id)
+        return None
+
+
+# =============================================================================
+# TOKEN ESTIMATION
+# =============================================================================
+
+
+def estimate_tokens(text: str) -> int:
+    """Estimate token count (rough approximation).
+
+    Args:
+        text: Input text.
+
+    Returns:
+        Estimated token count.
+    """
+    if not text:
+        return 0
+    # Average: 1 token ~= 3 characters for code
+    return len(text) // 3
+
+
+def validate_context_length(text: str, max_tokens: int = 8000) -> str:
+    """Ensure text fits within model context.
+
+    Args:
+        text: Input text.
+        max_tokens: Maximum allowed tokens.
+
+    Returns:
+        Original or truncated text.
+    """
+    estimated = estimate_tokens(text)
+
+    if estimated <= max_tokens:
+        return text
+
+    # Truncate line by line
+    lines = text.split("\n")
+    truncated = []
+    token_count = 0
+
+    for line in lines:
+        line_tokens = estimate_tokens(line)
+        if token_count + line_tokens <= max_tokens * 0.9:
+            truncated.append(line)
+            token_count += line_tokens
+        else:
+            truncated.append("... (context truncated)")
+            break
+
+    return "\n".join(truncated)
+
+
+# =============================================================================
+# VECTOR OPERATIONS
+# =============================================================================
+
+
+def normalize_vector(vector: list[float]) -> list[float]:
+    """Normalize vector to unit length for cosine similarity.
+
+    Args:
+        vector: Input vector.
+
+    Returns:
+        Normalized vector.
+    """
+    magnitude = math.sqrt(sum(x * x for x in vector))
+
+    if magnitude == 0:
+        return vector
+
+    return [x / magnitude for x in vector]
+
+
+def validate_vector(vector: list[float], expected_dims: int) -> bool:
+    """Validate vector dimensions and values.
+
+    Args:
+        vector: Vector to validate.
+        expected_dims: Expected dimensions.
+
+    Returns:
+        True if valid.
+    """
+    if len(vector) != expected_dims:
+        return False
+
+    for v in vector:
+        if math.isnan(v) or math.isinf(v):
+            return False
+
+    return True
+
+
+# =============================================================================
+# EMBEDDING TEXT BUILDING
+# =============================================================================
+
+
+def build_embedding_text(
+    element: CodeElement,
+    embedding_store: EmbeddingStore,
+    max_tokens: int = 8000,
+) -> str:
+    """Build enriched text for embedding with hierarchical context.
+
+    Args:
+        element: Code element to embed.
+        embedding_store: Store for getting summaries.
+        max_tokens: Maximum context tokens.
+
+    Returns:
+        Formatted embedding text.
+    """
+    parts: list[str] = []
+
+    # Always include file path
+    parts.append(f"File: {element.relative_path}")
+
+    if element.element_type == "file":
+        parts.append(f"Language: {element.language}")
+        summary = embedding_store.get_summary(element.element_id)
+        parts.append(f"Summary: {summary or 'No summary available'}")
+
+    elif element.element_type == "class":
+        # Include file context
+        file_summary = embedding_store.get_file_summary(element)
+        if file_summary:
+            parts.append(f"File context: {file_summary}")
+
+        parts.append(f"Class: {element.name}")
+
+        summary = embedding_store.get_summary(element.element_id)
+        parts.append(f"Summary: {summary or 'No summary available'}")
+
+        if element.docstring:
+            parts.append(f"Docstring: {element.docstring[:500]}")
+
+    elif element.element_type in ("function", "method"):
+        # Include file context
+        file_summary = embedding_store.get_file_summary(element)
+        if file_summary:
+            parts.append(f"File context: {file_summary}")
+
+        # Include class context for methods
+        class_summary = embedding_store.get_class_summary(element)
+        if class_summary:
+            parts.append(f"Class context: {class_summary}")
+
+        parts.append(f"Function: {element.name}")
+
+        summary = embedding_store.get_summary(element.element_id)
+        parts.append(f"Summary: {summary or 'No summary available'}")
+
+        if element.signature:
+            parts.append(f"Signature: {element.signature}")
+
+        if element.docstring:
+            docstring = element.docstring[:500]
+            if len(element.docstring) > 500:
+                docstring += "..."
+            parts.append(f"Docstring: {docstring}")
+
+    else:
+        # Default for other types (variables, etc.)
+        parts.append(f"Name: {element.name}")
+        summary = embedding_store.get_summary(element.element_id)
+        if summary:
+            parts.append(f"Summary: {summary}")
+
+    text = "\n".join(parts)
+    return validate_context_length(text, max_tokens)
+
+
+# =============================================================================
+# EMBEDDING GENERATION
+# =============================================================================
+
+
+def process_embedding_job(
+    element_id: str,
+    job_repo: EmbeddingJobRepository,
+    embedding_store: EmbeddingStore,
+    ollama: OllamaEmbedClient,
+    config: EmbeddingConfig,
+) -> bool:
+    """Process a single embedding job.
+
+    Args:
+        element_id: Element ID to embed.
+        job_repo: Job repository.
+        embedding_store: Embedding store.
+        ollama: Ollama client.
+        config: Embedding config.
+
+    Returns:
+        True if successful, False otherwise.
+    """
+    try:
+        # Get element
+        element = embedding_store.get_element(element_id)
+        if element is None:
+            job_repo.mark_failed(element_id, f"Element not found: {element_id}")
+            return False
+
+        # Build embedding text with context
+        text = build_embedding_text(element, embedding_store, config.max_context)
+
+        # Generate embedding
+        embedding = ollama.embed_single(text, timeout=config.timeout)
+
+        # Validate dimensions
+        if not validate_vector(embedding, config.dimensions):
+            job_repo.mark_failed(
+                element_id,
+                f"Invalid embedding: expected {config.dimensions} dims, "
+                f"got {len(embedding)}",
+            )
+            return False
+
+        # Normalize for cosine similarity
+        embedding = normalize_vector(embedding)
+
+        # Store embedding
+        embedding_store.store_embedding(element_id, embedding)
+
+        # Mark job completed
+        job_repo.mark_completed(element_id)
+
+        return True
+
+    except Exception as e:
+        job_repo.mark_failed(element_id, str(e))
+        return False

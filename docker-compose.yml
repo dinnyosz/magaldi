@@ -1,0 +1,124 @@
+services:
+  # ===========================================================================
+  # CORE SERVICES (always started)
+  # ===========================================================================
+
+  mysql:
+    image: percona:8.0
+    container_name: magaldi-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: magaldi
+      MYSQL_USER: magaldi
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-magaldipassword}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./docker/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  elasticsearch:
+    image: elasticsearch:8.11.0
+    container_name: magaldi-elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.enrollment.enabled=false
+      - xpack.monitoring.collection.enabled=true
+      - xpack.monitoring.elasticsearch.collection.enabled=true
+      - "ES_JAVA_OPTS=-Xms${ES_HEAP_SIZE:-1g} -Xmx${ES_HEAP_SIZE:-1g}"
+    ports:
+      - "${ES_PORT:-9200}:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: magaldi-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===========================================================================
+  # OPTIONAL OLLAMA (start with --profile ollama)
+  # ===========================================================================
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: magaldi-ollama
+    restart: unless-stopped
+    profiles:
+      - ollama
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    # GPU support - uncomment for NVIDIA GPU
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  ollama-init:
+    image: curlimages/curl:latest
+    container_name: magaldi-ollama-init
+    profiles:
+      - ollama
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Pulling summarization model (qwen2.5-coder:7b)..."
+        curl -sf -X POST http://ollama:11434/api/pull -d '{"name": "qwen2.5-coder:7b"}' || exit 1
+        echo ""
+        echo "Pulling embedding model (snowflake-arctic-embed2)..."
+        curl -sf -X POST http://ollama:11434/api/pull -d '{"name": "snowflake-arctic-embed2"}' || exit 1
+        echo ""
+        echo "Models ready!"
+
+volumes:
+  mysql_data:
+    name: magaldi_mysql_data
+  es_data:
+    name: magaldi_es_data
+  redis_data:
+    name: magaldi_redis_data
+  ollama_data:
+    name: magaldi_ollama_data
+
+networks:
+  default:
+    name: magaldi-network

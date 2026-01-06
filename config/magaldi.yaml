@@ -1,0 +1,120 @@
+# Magaldi Configuration
+# Copy this file to customize your setup
+# Environment variables override these values (MAGALDI_*)
+
+# =============================================================================
+# DATABASE CONNECTIONS
+# =============================================================================
+
+mysql:
+  host: localhost
+  port: 3306
+  database: magaldi
+  user: magaldi
+  # password: Set via MAGALDI_MYSQL_PASSWORD environment variable
+  pool_size: 10
+  pool_timeout: 30
+
+elasticsearch:
+  url: http://localhost:9200
+  index: magaldi_code_elements
+  timeout: 30
+  retry_on_timeout: true
+  max_retries: 3
+
+# =============================================================================
+# OLLAMA (AI MODELS)
+# =============================================================================
+
+ollama:
+  url: http://localhost:11434
+
+  # Summarization model
+  summarize_model: qwen2.5-coder:7b
+  summarize_temperature: 0.3
+  summarize_max_tokens: 256
+  summarize_context_window: 8192
+
+  # Embedding model
+  embed_model: snowflake-arctic-embed2
+  embed_dimensions: 1024
+  embed_context_window: 8192
+
+# =============================================================================
+# WORKER POOLS
+# =============================================================================
+
+workers:
+  summarization:
+    count: 4
+    batch_size: 10
+    claim_timeout_seconds: 300
+    max_retries: 3
+    retry_delay_seconds: 5.0
+
+  embedding:
+    count: 4
+    batch_size: 20
+    claim_timeout_seconds: 300
+    max_retries: 3
+    retry_delay_seconds: 2.0
+
+# =============================================================================
+# PARSER SETTINGS
+# =============================================================================
+
+parser:
+  parallel_workers: 4
+  parse_timeout_seconds: 30
+  hash_algorithm: sha256
+  hash_workers: 4
+  hash_chunk_size: 65536
+  max_file_size_bytes: 10485760  # 10 MB
+  encoding_fallback: latin-1
+
+# =============================================================================
+# SEARCH SETTINGS
+# =============================================================================
+
+search:
+  default_limit: 10
+  max_limit: 50
+  query_cache_size: 1000
+  query_cache_ttl_seconds: 300
+
+# =============================================================================
+# WEB UI
+# =============================================================================
+
+web:
+  host: 0.0.0.0
+  port: 8080
+  cors_origins:
+    - http://localhost:3000
+  stats_cache_ttl_seconds: 30
+  file_tree_cache_ttl_seconds: 300
+
+# =============================================================================
+# MCP SERVER
+# =============================================================================
+
+mcp:
+  server_name: magaldi
+  server_version: "1.0.0"
+
+# =============================================================================
+# LOGGING
+# =============================================================================
+
+logging:
+  level: INFO  # DEBUG, INFO, WARNING, ERROR
+  format: "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+  # file: /var/log/magaldi/magaldi.log  # Uncomment to log to file
+
+# =============================================================================
+# USER DATA MANAGEMENT
+# =============================================================================
+
+user_data:
+  expiration_days: 30
+  cleanup_batch_size: 1000

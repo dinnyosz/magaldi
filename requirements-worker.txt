@@ -1,0 +1,14 @@
+# Magaldi - Worker Dependencies (ML/Data Science)
+# Install with: pip install -r requirements-worker.txt
+# These are needed for AI workers (summarization, embedding, visualization)
+
+-r requirements.txt
+
+# Numerical computing
+numpy>=1.24.0
+
+# Machine learning
+scikit-learn>=1.3.0
+
+# Dimensionality reduction (for vector visualization)
+umap-learn>=0.5.4

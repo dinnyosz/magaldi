@@ -1,0 +1,28 @@
+# Magaldi - Core Dependencies
+# Install with: pip install -r requirements.txt
+# Or use: pip install -e ".[dev]" for development
+
+# CLI
+click>=8.1.0
+rich>=13.0.0
+
+# Configuration
+pyyaml>=6.0
+
+# HTTP client
+requests>=2.31.0
+
+# Database
+mysql-connector-python>=8.2.0
+elasticsearch>=8.11.0
+redis>=5.0.0
+
+# Web framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# Parser
+tree-sitter>=0.21.0
+
+# MCP SDK
+mcp>=1.0.0

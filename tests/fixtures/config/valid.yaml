@@ -1,0 +1,78 @@
+# Valid test configuration with all sections
+
+mysql:
+  host: testhost
+  port: 3307
+  database: magaldi_test
+  user: testuser
+  password: testpassword
+  pool_size: 5
+  pool_timeout: 15
+
+elasticsearch:
+  url: http://testhost:9200
+  index: magaldi_test_elements
+  timeout: 15
+  retry_on_timeout: false
+  max_retries: 2
+
+ollama:
+  url: http://testhost:11434
+  summarize_model: test-model
+  summarize_temperature: 0.5
+  summarize_max_tokens: 128
+  summarize_context_window: 4096
+  embed_model: test-embed
+  embed_dimensions: 512
+  embed_context_window: 4096
+
+workers:
+  summarization:
+    count: 2
+    batch_size: 5
+    claim_timeout_seconds: 60
+    max_retries: 1
+    retry_delay_seconds: 1.0
+  embedding:
+    count: 2
+    batch_size: 10
+    claim_timeout_seconds: 60
+    max_retries: 1
+    retry_delay_seconds: 1.0
+
+parser:
+  parallel_workers: 2
+  parse_timeout_seconds: 15
+  hash_algorithm: sha256
+  hash_workers: 2
+  hash_chunk_size: 32768
+  max_file_size_bytes: 1048576
+  encoding_fallback: utf-8
+
+search:
+  default_limit: 5
+  max_limit: 20
+  query_cache_size: 100
+  query_cache_ttl_seconds: 60
+
+web:
+  host: 127.0.0.1
+  port: 8888
+  cors_origins:
+    - http://localhost:3000
+    - http://localhost:8080
+  stats_cache_ttl_seconds: 10
+  file_tree_cache_ttl_seconds: 60
+
+mcp:
+  server_name: magaldi-test
+  server_version: "0.1.0"
+
+logging:
+  level: DEBUG
+  format: "%(levelname)s - %(message)s"
+  file: /tmp/magaldi-test.log
+
+user_data:
+  expiration_days: 7
+  cleanup_batch_size: 100

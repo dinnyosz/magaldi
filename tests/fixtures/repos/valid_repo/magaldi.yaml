@@ -1,0 +1,14 @@
+# Test repository configuration
+scope: test-scope
+name: valid-repo
+description: "A valid test repository"
+tags:
+  - test
+  - fixture
+
+exclude_directories:
+  - node_modules
+  - __pycache__
+
+exclude_files:
+  - "*.min.js"
