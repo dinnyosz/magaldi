@@ -9,7 +9,8 @@ from __future__ import annotations
 import sys
 
 import click
-from rich.console import Console
+from rich.console import Console, Group, RenderableType
+from rich.live import Live
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
 from rich.table import Table
 
@@ -53,8 +54,11 @@ def main() -> None:
 @click.option("--skip-ai", is_flag=True, help="Skip AI processing (summarization and embedding)")
 @click.option("--dry-run", is_flag=True, help="Use in-memory storage (no database required)")
 @click.option("--ollama-url", default=None, help="Ollama API URL (default: from config)")
+@click.option("--workers", "-w", default=4, type=int, help="Number of parallel workers (default: 4)")
+@click.option("--force-clean", is_flag=True, help="Delete all indexed data for this repo/user before parsing")
 def parse(
-    repo_path: str, user: str, skip_ai: bool, dry_run: bool, ollama_url: str | None
+    repo_path: str, user: str, skip_ai: bool, dry_run: bool,
+    ollama_url: str | None, workers: int, force_clean: bool
 ) -> None:
     """Parse a repository and index its code elements.
 
@@ -74,6 +78,18 @@ def parse(
         discovery_result = run_discovery(repo_path, user)
         print_discovery_result(discovery_result)
 
+        # Force clean: Delete existing index data before change detection
+        if force_clean and not dry_run:
+            console.print("[yellow]Force clean:[/] Deleting existing index data...")
+            from magaldi.db.elasticsearch import ElasticsearchRepository
+            es_repo = ElasticsearchRepository(config)
+            deleted = es_repo.delete_by_repository(
+                scope=discovery_result.scope,
+                repository=discovery_result.repository,
+                username=user,
+            )
+            console.print(f"  Deleted {deleted} documents")
+
         # Phase 2: Change Detection
         console.print("\n[bold blue]Phase 2:[/] Change Detection")
         manifest = run_change_detection(discovery_result, config, dry_run)
@@ -90,10 +106,10 @@ def parse(
 
         # Phase 4: Processing (summarize -> embed -> index)
         console.print("\n[bold blue]Phase 4:[/] Processing")
-        processed, skipped, indexed = run_processing(
-            parsing_result, manifest, config, dry_run, skip_ai
+        processed, skipped, indexed, avg_wall, avg_api, elapsed = run_processing(
+            parsing_result, manifest, config, dry_run, skip_ai, workers
         )
-        print_processing_result(processed, skipped, indexed, skip_ai)
+        print_processing_result(processed, skipped, indexed, skip_ai, avg_wall, avg_api, elapsed)
 
         print_summary(discovery_result, manifest, processed, indexed, skip_ai)
 
@@ -178,16 +194,17 @@ def run_processing(
     config: MagaldiConfig,
     dry_run: bool,
     skip_ai: bool,
-) -> tuple[int, int, int]:
+    workers: int,
+) -> tuple[int, int, int, float, float, float]:
     """Run unified processing: summarize -> embed -> index.
 
     Returns:
-        Tuple of (processed, skipped, indexed).
+        Tuple of (processed, skipped, indexed, avg_wall, avg_api, elapsed).
     """
     if dry_run:
         total = parsing_result.total_elements
         console.print(f"  [dim]Dry run: would process {total} elements[/]")
-        return (0, 0, 0)
+        return (0, 0, 0, 0.0, 0.0, 0.0)
 
     from magaldi.db.elasticsearch import ElasticsearchRepository
 
@@ -198,9 +215,8 @@ def run_processing(
         embed_model=config.ollama.embed_model,
         ollama_url=config.ollama.url,
         skip_ai=skip_ai,
+        num_workers=workers,
     )
-
-    total = parsing_result.total_elements
 
     # Build file hashes dict from manifest
     file_hashes: dict[str, str] = {}
@@ -209,20 +225,41 @@ def run_processing(
     for fi in manifest.modified_files:
         file_hashes[fi.relative_path] = fi.hash
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[bold blue]Processing[/]"),
-        BarColumn(),
-        TaskProgressColumn(),
-        TextColumn("({task.completed}/{task.total})"),
-        TimeElapsedColumn(),
-        console=console,
-        transient=True,
-    ) as progress:
-        task = progress.add_task("processing", total=total)
+    def build_display(state: ProgressState, num_workers: int) -> RenderableType:
+        """Build Rich display from progress state."""
+        # Progress info
+        pct = (state.completed / state.total * 100) if state.total > 0 else 0
+        eta = state.timing.eta_seconds(state.completed, state.total)
+        eta_str = f" | ~{int(eta // 60)}:{int(eta % 60):02d} ETA" if eta else ""
 
+        progress_line = f"  {state.completed}/{state.total} ({pct:.0f}%) | {state.timing.elapsed:.1f}s elapsed{eta_str}"
+
+        # Worker table
+        worker_table = Table(show_header=False, box=None, padding=(0, 1))
+        worker_table.add_column("ID", style="dim", width=4)
+        worker_table.add_column("Stage", style="cyan", width=12)
+        worker_table.add_column("Element")
+
+        workers_data = state.workers.get_all()
+        for wid in range(num_workers):
+            if wid in workers_data:
+                elem, stage = workers_data[wid]
+                worker_table.add_row(f"[{wid}]", stage, elem)
+            else:
+                worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "")
+
+        # Stats line
+        stats = f"  Avg: {state.timing.avg_wall_time:.1f}s wall | {state.timing.avg_api_time:.1f}s API"
+
+        return Group(progress_line, worker_table, stats)
+
+    last_state: ProgressState | None = None
+
+    with Live(console=console, refresh_per_second=4) as live:
         def on_progress(state: ProgressState) -> None:
-            progress.update(task, completed=state.completed, total=state.total)
+            nonlocal last_state
+            last_state = state
+            live.update(build_display(state, workers))
 
         result = process_elements(
             parsing_result.parsed_files,
@@ -235,7 +272,12 @@ def run_processing(
             file_hashes,
         )
 
-    return (result.elements_processed, result.elements_skipped, result.indexed)
+    # Get timing stats from last state
+    avg_wall = last_state.timing.avg_wall_time if last_state else 0.0
+    avg_api = last_state.timing.avg_api_time if last_state else 0.0
+    elapsed = last_state.timing.elapsed if last_state else 0.0
+
+    return (result.elements_processed, result.elements_skipped, result.indexed, avg_wall, avg_api, elapsed)
 
 
 # =============================================================================
@@ -267,7 +309,10 @@ def print_parsing_result(result: ParsingResult) -> None:
     console.print(f"  [green]{len(result.parsed_files)}[/] files → [green]{result.total_elements}[/] elements ({types}){failed}")
 
 
-def print_processing_result(processed: int, skipped: int, indexed: int, skip_ai: bool) -> None:
+def print_processing_result(
+    processed: int, skipped: int, indexed: int, skip_ai: bool,
+    avg_wall: float = 0.0, avg_api: float = 0.0, elapsed: float = 0.0
+) -> None:
     """Print processing results."""
     parts = []
     if processed:
@@ -278,6 +323,10 @@ def print_processing_result(processed: int, skipped: int, indexed: int, skip_ai:
         parts.append(f"{indexed} indexed")
     if skip_ai:
         parts.append("[yellow]AI skipped[/]")
+    if elapsed > 0:
+        parts.append(f"{elapsed:.1f}s total")
+    if avg_wall > 0:
+        parts.append(f"avg: {avg_wall:.1f}s wall, {avg_api:.1f}s API")
     console.print(f"  {' | '.join(parts)}")
 
 
