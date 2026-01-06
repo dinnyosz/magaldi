@@ -162,6 +162,70 @@ class ProcessedElement:
     error: str | None = None
 
 
+class DependencyTracker:
+    """Track element dependencies for parallel processing.
+
+    Rules:
+    - Level 0 (files): Always ready
+    - Level 1 (classes): Ready when parent file done
+    - Level 2 (methods/functions): Ready when parent class done (or file if no class)
+    - Level 3 (variables): Ready when parent done
+    """
+
+    def __init__(self, elements: list[CodeElement]) -> None:
+        self._lock = threading.Lock()
+        self._elements = {e.element_id: e for e in elements}
+        self._completed: set[str] = set()
+        self._in_progress: set[str] = set()
+
+        # Build parent lookup: element_id -> parent_element_id
+        self._parents: dict[str, str | None] = {}
+        for e in elements:
+            self._parents[e.element_id] = e.parent_id
+
+    def get_ready_elements(self, max_count: int = 10) -> list[CodeElement]:
+        """Get elements ready for processing (parent done, not started)."""
+        with self._lock:
+            ready = []
+            for eid, element in self._elements.items():
+                if eid in self._completed or eid in self._in_progress:
+                    continue
+
+                parent_id = self._parents.get(eid)
+                if parent_id is None or parent_id in self._completed:
+                    ready.append(element)
+                    if len(ready) >= max_count:
+                        break
+
+            # Mark as in-progress
+            for e in ready:
+                self._in_progress.add(e.element_id)
+
+            return ready
+
+    def mark_complete(self, element_id: str) -> None:
+        """Mark element as completed."""
+        with self._lock:
+            self._in_progress.discard(element_id)
+            self._completed.add(element_id)
+
+    def mark_failed(self, element_id: str) -> None:
+        """Mark element as failed (won't block children)."""
+        with self._lock:
+            self._in_progress.discard(element_id)
+            self._completed.add(element_id)  # Treat as done so children can proceed
+
+    def is_complete(self) -> bool:
+        """Check if all elements are processed."""
+        with self._lock:
+            return len(self._completed) == len(self._elements)
+
+    def pending_count(self) -> int:
+        """Count elements not yet completed."""
+        with self._lock:
+            return len(self._elements) - len(self._completed)
+
+
 # =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
