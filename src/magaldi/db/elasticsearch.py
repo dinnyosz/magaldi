@@ -208,6 +208,30 @@ class ElasticsearchRepository:
         )
         return result.get("deleted", 0)
 
+    def delete_by_repository(self, scope: str, repository: str, username: str) -> int:
+        """Delete all elements for a repository/user combination.
+
+        Returns:
+            Number of documents deleted.
+        """
+        client = self._get_client()
+        response = client.delete_by_query(
+            index=INDEX_NAME,
+            body={
+                "query": {
+                    "bool": {
+                        "must": [
+                            {"term": {"scope": scope}},
+                            {"term": {"repository": repository}},
+                            {"term": {"username": username}},
+                        ]
+                    }
+                }
+            },
+            refresh=True,
+        )
+        return response.get("deleted", 0)
+
     def store_embedding(self, element_id: str, embedding: list[float]) -> bool:
         """Store embedding vector for an element.
 

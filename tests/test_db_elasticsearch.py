@@ -225,6 +225,97 @@ class TestElasticsearchRepository:
         doc = es_repo.get_document(multiple_elements[3].element_id)
         assert doc is not None
 
+    def test_delete_by_repository(self, es_repo, multiple_elements):
+        """Test deleting all documents for a repository/user combination."""
+        # Index elements
+        for elem in multiple_elements:
+            es_repo.index_element(elem)
+
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+
+        # Verify elements exist before deletion
+        doc = es_repo.get_document(multiple_elements[0].element_id)
+        assert doc is not None
+        doc = es_repo.get_document(multiple_elements[3].element_id)
+        assert doc is not None
+
+        # Delete all elements for test-es:test-repo:main
+        count = es_repo.delete_by_repository("test-es", "test-repo", "main")
+
+        # Should delete all 4 elements
+        assert count == 4
+
+        # Verify all documents are deleted
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+        for elem in multiple_elements:
+            doc = es_repo.get_document(elem.element_id)
+            assert doc is None
+
+    def test_delete_by_repository_only_deletes_matching(self, es_repo):
+        """Test that delete_by_repository only deletes matching scope/repo/user."""
+        # Create elements for different repos/users
+        elem1 = CodeElement(
+            element_id="test-del:repo-a:user1:src/a.py:function:func1:1",
+            scope="test-del",
+            repository="repo-a",
+            username="user1",
+            relative_path="src/a.py",
+            element_type="function",
+            name="func1",
+            language="python",
+            line_start=1,
+            line_end=10,
+            level=2,
+        )
+        elem2 = CodeElement(
+            element_id="test-del:repo-a:user2:src/b.py:function:func2:1",
+            scope="test-del",
+            repository="repo-a",
+            username="user2",
+            relative_path="src/b.py",
+            element_type="function",
+            name="func2",
+            language="python",
+            line_start=1,
+            line_end=10,
+            level=2,
+        )
+        elem3 = CodeElement(
+            element_id="test-del:repo-b:user1:src/c.py:function:func3:1",
+            scope="test-del",
+            repository="repo-b",
+            username="user1",
+            relative_path="src/c.py",
+            element_type="function",
+            name="func3",
+            language="python",
+            line_start=1,
+            line_end=10,
+            level=2,
+        )
+
+        es_repo.index_element(elem1)
+        es_repo.index_element(elem2)
+        es_repo.index_element(elem3)
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+
+        # Delete only repo-a:user1
+        count = es_repo.delete_by_repository("test-del", "repo-a", "user1")
+        assert count == 1
+
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+
+        # elem1 should be deleted
+        assert es_repo.get_document(elem1.element_id) is None
+
+        # elem2 (different user) and elem3 (different repo) should still exist
+        assert es_repo.get_document(elem2.element_id) is not None
+        assert es_repo.get_document(elem3.element_id) is not None
+
+        # Cleanup
+        es_repo.delete_by_repository("test-del", "repo-a", "user2")
+        es_repo.delete_by_repository("test-del", "repo-b", "user1")
+
 
 # =============================================================================
 # SUMMARY AND EMBEDDING STORAGE TESTS
