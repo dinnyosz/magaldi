@@ -159,17 +159,22 @@ class TimingStats:
             return result
 
     def eta_seconds(self, completed: int, total: int) -> float | None:
-        """Calculate ETA based on per-type averages."""
+        """Calculate ETA based on per-type averages, with global fallback."""
         with self._lock:
             if completed == 0:
                 return None
+
+            # Global average as fallback for types without data
+            global_avg = sum(self.wall_times) / len(self.wall_times) if self.wall_times else 0.0
+
             # Calculate ETA using per-type averages (inline to avoid deadlock)
             eta = 0.0
             for t in self.totals_by_type:
                 done = self.counts_by_type.get(t, 0)
                 tot = self.totals_by_type.get(t, 0)
                 times = self.wall_times_by_type.get(t, [])
-                avg = sum(times) / len(times) if times else 0.0
+                # Use type-specific avg if available, otherwise global avg
+                avg = sum(times) / len(times) if times else global_avg
                 remaining = tot - done
                 if remaining > 0 and avg > 0:
                     eta += remaining * avg
