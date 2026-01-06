@@ -455,6 +455,7 @@ def _process_single_element(
     es_repo: ElasticsearchRepository,
     worker_id: int,
     worker_status: WorkerStatus,
+    on_status_change: Callable[[], None] | None = None,
 ) -> ProcessedElement:
     """Process a single element: summarize -> embed -> index.
 
@@ -468,6 +469,7 @@ def _process_single_element(
         es_repo: Elasticsearch repository for indexing.
         worker_id: Worker thread ID.
         worker_status: Status tracker for workers.
+        on_status_change: Optional callback when worker status changes.
 
     Returns:
         ProcessedElement with timing info and success/error status.
@@ -475,9 +477,14 @@ def _process_single_element(
     start_wall = time.time()
     api_time = 0.0
 
+    def update_status(stage: str) -> None:
+        worker_status.set(worker_id, element.name, stage)
+        if on_status_change:
+            on_status_change()
+
     try:
         # Step 1: Summarize
-        worker_status.set(worker_id, element.name, "summarizing")
+        update_status("summarizing")
         if config.skip_ai:
             summary = f"{element.element_type.title()}: {element.name}"
         else:
@@ -489,7 +496,7 @@ def _process_single_element(
         summary_cache.add_summary(element.element_id, summary)
 
         # Step 2: Embed (if applicable)
-        worker_status.set(worker_id, element.name, "embedding")
+        update_status("embedding")
         embedding: list[float] | None = None
         if should_embed(element):
             if config.skip_ai:
@@ -501,7 +508,7 @@ def _process_single_element(
                 api_time += time.time() - api_start
 
         # Step 3: Index to ES (only after summarize+embed complete)
-        worker_status.set(worker_id, element.name, "indexing")
+        update_status("indexing")
         file_hash = None
         if element.element_type == "file" and file_hashes:
             file_hash = file_hashes.get(element.relative_path)
@@ -544,6 +551,7 @@ def process_elements(
     config: ProcessingConfig | None = None,
     on_progress: Callable[[ProgressState], None] | None = None,
     file_hashes: dict[str, str] | None = None,
+    on_status_change: Callable[[], None] | None = None,
 ) -> ProcessingResult:
     """Process elements: summarize -> embed -> index (atomic per element).
 
@@ -559,6 +567,7 @@ def process_elements(
         config: Processing configuration.
         on_progress: Optional callback(ProgressState) for progress updates.
         file_hashes: Optional dict mapping relative_path to file hash.
+        on_status_change: Optional callback when any worker status changes.
 
     Returns:
         ProcessingResult with counts and errors.
@@ -660,6 +669,7 @@ def process_elements(
             es_repo=es_repo,
             worker_id=wid,
             worker_status=worker_status,
+            on_status_change=on_status_change,
         )
         return (proc_result, wid)
 

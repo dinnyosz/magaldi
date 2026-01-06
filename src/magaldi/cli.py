@@ -272,6 +272,11 @@ def run_processing(
             last_state = state
             live.update(build_display(state, workers))
 
+        def on_status_change() -> None:
+            """Refresh display when worker status changes."""
+            if last_state:
+                live.update(build_display(last_state, workers))
+
         result = process_elements(
             parsing_result.parsed_files,
             manifest.scope,
@@ -281,6 +286,7 @@ def run_processing(
             proc_config,
             on_progress,
             file_hashes,
+            on_status_change,
         )
 
     # Get timing stats from last state
