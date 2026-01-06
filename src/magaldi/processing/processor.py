@@ -745,22 +745,24 @@ def process_elements(
             if wid not in available_worker_ids:
                 available_worker_ids.append(wid)
 
-    def process_wrapper(element: CodeElement) -> tuple[ProcessedElement, int]:
+    def process_wrapper(element: CodeElement) -> ProcessedElement:
         """Wrapper to assign worker ID and call _process_single_element."""
         wid = acquire_worker_id()
-        proc_result = _process_single_element(
-            element=element,
-            summary_cache=summary_cache,
-            ollama=ollama,
-            ollama_embed=ollama_embed,
-            config=config,
-            file_hashes=file_hashes,
-            es_repo=es_repo,
-            worker_id=wid,
-            worker_status=worker_status,
-            on_status_change=on_status_change,
-        )
-        return (proc_result, wid)
+        try:
+            return _process_single_element(
+                element=element,
+                summary_cache=summary_cache,
+                ollama=ollama,
+                ollama_embed=ollama_embed,
+                config=config,
+                file_hashes=file_hashes,
+                es_repo=es_repo,
+                worker_id=wid,
+                worker_status=worker_status,
+                on_status_change=on_status_change,
+            )
+        finally:
+            release_worker_id(wid)
 
     # Process elements in parallel using ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=config.num_workers) as executor:
@@ -788,10 +790,7 @@ def process_elements(
 
             for future in done:
                 element = future_to_element.pop(future)
-                processed, worker_id = future.result()
-
-                # Release worker ID back to pool
-                release_worker_id(worker_id)
+                processed = future.result()
 
                 # Record timing with element type
                 timing_stats.record(processed.wall_time, processed.summarize_time, processed.embed_time, element.element_type)
