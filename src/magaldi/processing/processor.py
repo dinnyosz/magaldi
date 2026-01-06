@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable
@@ -59,6 +60,9 @@ class ProcessingConfig:
     embed_max_context: int = 8192
     embed_timeout: int = 30
 
+    # Parallel processing
+    num_workers: int = 4
+
 
 @dataclass
 class ProcessingResult:
@@ -80,6 +84,9 @@ class ProcessingResult:
 
     # Errors
     errors: list[str] = field(default_factory=list)
+
+    # Failed elements with errors
+    failed_elements: list[tuple[str, str]] = field(default_factory=list)  # (element_id, error)
 
 
 @dataclass
@@ -263,10 +270,11 @@ class _SummaryCache:
     """In-memory cache that acts as EmbeddingStore for build_embedding_text.
 
     This adapter allows us to use build_embedding_text without requiring
-    elements to be stored in ES first.
+    elements to be stored in ES first. Thread-safe for parallel processing.
     """
 
     def __init__(self) -> None:
+        self._lock = threading.Lock()
         self._elements: dict[str, CodeElement] = {}
         self._summaries: dict[str, str] = {}
 
@@ -276,7 +284,8 @@ class _SummaryCache:
 
     def add_summary(self, element_id: str, summary: str) -> None:
         """Add summary to cache."""
-        self._summaries[element_id] = summary
+        with self._lock:
+            self._summaries[element_id] = summary
 
     def get_element(self, element_id: str) -> CodeElement | None:
         """Get element from cache."""
@@ -284,7 +293,8 @@ class _SummaryCache:
 
     def get_summary(self, element_id: str) -> str | None:
         """Get summary from cache."""
-        return self._summaries.get(element_id)
+        with self._lock:
+            return self._summaries.get(element_id)
 
     def get_file_summary(self, element: CodeElement) -> str | None:
         """Get file summary for an element."""
@@ -435,6 +445,91 @@ def _index_element(
     return True
 
 
+def _process_single_element(
+    element: CodeElement,
+    summary_cache: _SummaryCache,
+    ollama: OllamaClient | None,
+    ollama_embed: OllamaEmbedClient | None,
+    config: ProcessingConfig,
+    file_hashes: dict[str, str] | None,
+    es_repo: ElasticsearchRepository,
+    worker_id: int,
+    worker_status: WorkerStatus,
+) -> ProcessedElement:
+    """Process a single element: summarize -> embed -> index.
+
+    Args:
+        element: Element to process.
+        summary_cache: Cache for summaries.
+        ollama: Ollama client for summarization (None if skip_ai).
+        ollama_embed: Ollama client for embeddings (None if skip_ai).
+        config: Processing configuration.
+        file_hashes: Optional dict mapping relative_path to file hash.
+        es_repo: Elasticsearch repository for indexing.
+        worker_id: Worker thread ID.
+        worker_status: Status tracker for workers.
+
+    Returns:
+        ProcessedElement with timing info and success/error status.
+    """
+    start_wall = time.time()
+    api_time = 0.0
+
+    try:
+        # Step 1: Summarize
+        worker_status.set(worker_id, element.name, "summarizing")
+        if config.skip_ai:
+            summary = f"{element.element_type.title()}: {element.name}"
+        else:
+            api_start = time.time()
+            summary = _summarize_element(element, summary_cache, ollama, config)
+            api_time += time.time() - api_start
+
+        # Cache summary for children
+        summary_cache.add_summary(element.element_id, summary)
+
+        # Step 2: Embed (if applicable)
+        worker_status.set(worker_id, element.name, "embedding")
+        embedding: list[float] | None = None
+        if should_embed(element):
+            if config.skip_ai:
+                # Generate dummy embedding for testing
+                embedding = [0.0] * config.embed_dimensions
+            else:
+                api_start = time.time()
+                embedding = _embed_element(element, summary_cache, ollama_embed, config)
+                api_time += time.time() - api_start
+
+        # Step 3: Index to ES (only after summarize+embed complete)
+        worker_status.set(worker_id, element.name, "indexing")
+        file_hash = None
+        if element.element_type == "file" and file_hashes:
+            file_hash = file_hashes.get(element.relative_path)
+
+        _index_element(element, summary, embedding, es_repo, file_hash)
+
+        worker_status.clear(worker_id)
+        wall_time = time.time() - start_wall
+
+        return ProcessedElement(
+            element_id=element.element_id,
+            success=True,
+            wall_time=wall_time,
+            api_time=api_time,
+        )
+
+    except Exception as e:
+        worker_status.clear(worker_id)
+        wall_time = time.time() - start_wall
+        return ProcessedElement(
+            element_id=element.element_id,
+            success=False,
+            wall_time=wall_time,
+            api_time=api_time,
+            error=str(e),
+        )
+
+
 # =============================================================================
 # MAIN PROCESSING FUNCTION
 # =============================================================================
@@ -447,13 +542,13 @@ def process_elements(
     username: str,
     es_repo: ElasticsearchRepository,
     config: ProcessingConfig | None = None,
-    on_progress: Callable[[int, int, str], None] | None = None,
+    on_progress: Callable[[ProgressState], None] | None = None,
     file_hashes: dict[str, str] | None = None,
 ) -> ProcessingResult:
     """Process elements: summarize -> embed -> index (atomic per element).
 
-    Processes elements level-by-level (0->1->2->3) to ensure parent
-    summaries exist when processing children.
+    Uses DependencyTracker and ThreadPoolExecutor for parallel processing
+    while respecting parent-child dependencies.
 
     Args:
         parsed_files: List of parsed files from Phase 3.
@@ -462,7 +557,7 @@ def process_elements(
         username: Username/branch.
         es_repo: Elasticsearch repository for indexing.
         config: Processing configuration.
-        on_progress: Optional callback(completed, total, element_name).
+        on_progress: Optional callback(ProgressState) for progress updates.
         file_hashes: Optional dict mapping relative_path to file hash.
 
     Returns:
@@ -484,22 +579,31 @@ def process_elements(
                 pf.file_info.relative_path,
             )
 
-    # Collect all elements and organize by level
+    # Collect all elements
     all_elements: list[CodeElement] = []
     for pf in parsed_files:
         all_elements.extend(pf.elements)
 
-    # Group by level for hierarchical processing
-    elements_by_level: dict[int, list[CodeElement]] = {}
-    for elem in all_elements:
-        level = elem.level
-        if level not in elements_by_level:
-            elements_by_level[level] = []
-        elements_by_level[level].append(elem)
+    if not all_elements:
+        return result
 
     # Get all element IDs to check which already exist in ES
     all_element_ids = [e.element_id for e in all_elements]
     existing_ids = es_repo.get_existing_element_ids(all_element_ids)
+
+    # Filter out already-existing elements and count skipped
+    elements_to_process = []
+    for elem in all_elements:
+        if elem.element_id in existing_ids:
+            result.elements_skipped += 1
+        else:
+            elements_to_process.append(elem)
+
+    total = len(all_elements)
+
+    if not elements_to_process:
+        # All elements already exist
+        return result
 
     # Summary cache for hierarchical context
     summary_cache = _SummaryCache()
@@ -516,64 +620,100 @@ def process_elements(
         ollama = OllamaClient(config.ollama_url, config.summarize_model)
         ollama_embed = OllamaEmbedClient(config.ollama_url, config.embed_model)
 
-    total = len(all_elements)
-    processed_count = 0
+    # Initialize tracking structures
+    dependency_tracker = DependencyTracker(elements_to_process)
+    timing_stats = TimingStats()
+    timing_stats.phase_start = time.time()
+    worker_status = WorkerStatus()
 
-    # Process level by level (0, 1, 2, 3)
-    for level in sorted(elements_by_level.keys()):
-        for element in elements_by_level[level]:
-            processed_count += 1
+    # Track completed/failed counts for progress
+    completed_count = result.elements_skipped  # Start with skipped count
+    failed_count = 0
 
-            # Skip if already in ES (fully processed)
-            if element.element_id in existing_ids:
-                result.elements_skipped += 1
-                if on_progress:
-                    on_progress(processed_count, total, f"[skip] {element.name}")
-                continue
+    # Worker ID counter
+    worker_id_counter = 0
+    worker_id_lock = threading.Lock()
 
-            try:
-                # Step 1: Summarize
-                if config.skip_ai:
-                    summary = f"{element.element_type.title()}: {element.name}"
+    def get_worker_id() -> int:
+        nonlocal worker_id_counter
+        with worker_id_lock:
+            wid = worker_id_counter
+            worker_id_counter += 1
+            return wid
+
+    def process_wrapper(element: CodeElement) -> ProcessedElement:
+        """Wrapper to assign worker ID and call _process_single_element."""
+        wid = get_worker_id()
+        return _process_single_element(
+            element=element,
+            summary_cache=summary_cache,
+            ollama=ollama,
+            ollama_embed=ollama_embed,
+            config=config,
+            file_hashes=file_hashes,
+            es_repo=es_repo,
+            worker_id=wid,
+            worker_status=worker_status,
+        )
+
+    # Process elements in parallel using ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=config.num_workers) as executor:
+        # Map of future -> element for tracking
+        future_to_element: dict = {}
+
+        while not dependency_tracker.is_complete():
+            # Get elements that are ready (parents completed)
+            ready_elements = dependency_tracker.get_ready_elements(
+                max_count=config.num_workers * 2
+            )
+
+            # Submit new tasks for ready elements
+            for element in ready_elements:
+                future = executor.submit(process_wrapper, element)
+                future_to_element[future] = element
+
+            if not future_to_element:
+                # No futures pending and not complete - shouldn't happen
+                # but break to avoid infinite loop
+                break
+
+            # Wait for at least one to complete
+            done, _ = wait(future_to_element.keys(), return_when=FIRST_COMPLETED)
+
+            for future in done:
+                element = future_to_element.pop(future)
+                processed = future.result()
+
+                # Record timing
+                timing_stats.record(processed.wall_time, processed.api_time)
+
+                if processed.success:
+                    dependency_tracker.mark_complete(element.element_id)
+                    result.elements_processed += 1
+                    result.indexed += 1
+                    if not config.skip_ai:
+                        result.summarized += 1
+                        if should_embed(element):
+                            result.embedded += 1
+                    completed_count += 1
                 else:
-                    summary = _summarize_element(
-                        element, summary_cache, ollama, config
+                    dependency_tracker.mark_failed(element.element_id)
+                    result.elements_failed += 1
+                    failed_count += 1
+                    error_msg = f"Failed to process {element.element_id}: {processed.error}"
+                    result.errors.append(error_msg)
+                    result.failed_elements.append((element.element_id, processed.error or "Unknown error"))
+
+                # Report progress
+                if on_progress:
+                    progress_state = ProgressState(
+                        total=total,
+                        completed=completed_count,
+                        skipped=result.elements_skipped,
+                        failed=failed_count,
+                        timing=timing_stats,
+                        workers=worker_status,
                     )
-                    result.summarized += 1
-
-                # Cache summary for children
-                summary_cache.add_summary(element.element_id, summary)
-
-                # Step 2: Embed (if applicable)
-                embedding: list[float] | None = None
-                if should_embed(element):
-                    if config.skip_ai:
-                        # Generate dummy embedding for testing
-                        embedding = [0.0] * config.embed_dimensions
-                    else:
-                        embedding = _embed_element(
-                            element, summary_cache, ollama_embed, config
-                        )
-                        result.embedded += 1
-
-                # Step 3: Index to ES (only after summarize+embed complete)
-                file_hash = None
-                if element.element_type == "file" and file_hashes:
-                    file_hash = file_hashes.get(element.relative_path)
-
-                _index_element(element, summary, embedding, es_repo, file_hash)
-                result.indexed += 1
-                result.elements_processed += 1
-
-                if on_progress:
-                    on_progress(processed_count, total, element.name)
-
-            except Exception as e:
-                result.elements_failed += 1
-                error_msg = f"Failed to process {element.element_id}: {e}"
-                result.errors.append(error_msg)
-
-                if on_progress:
-                    on_progress(processed_count, total, f"[error] {element.name}")
+                    on_progress(progress_state)
 
     return result

@@ -23,6 +23,7 @@ from magaldi.parser.code_parser import ParsingResult, parse_files
 from magaldi.parser.discovery import DiscoveryError, DiscoveryResult, discover
 from magaldi.processing.processor import (
     ProcessingConfig,
+    ProgressState,
     process_elements,
 )
 
@@ -220,8 +221,8 @@ def run_processing(
     ) as progress:
         task = progress.add_task("processing", total=total)
 
-        def on_progress(completed: int, total: int, name: str) -> None:
-            progress.update(task, completed=completed, total=total)
+        def on_progress(state: ProgressState) -> None:
+            progress.update(task, completed=state.completed, total=state.total)
 
         result = process_elements(
             parsing_result.parsed_files,
