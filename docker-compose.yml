@@ -4,7 +4,7 @@ services:
   # ===========================================================================
 
   mysql:
-    image: percona:8.0
+    image: mysql:8.0
     container_name: magaldi-mysql
     restart: unless-stopped
     environment:

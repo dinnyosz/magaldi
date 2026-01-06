@@ -1,8 +1,8 @@
 # Magaldi Makefile
 # Common development commands
 
-.PHONY: help setup setup-dev setup-worker services services-full services-down \
-        test test-cov lint format typecheck check clean install dev \
+.PHONY: help setup services services-full services-down \
+        test test-cov lint format typecheck check clean dev \
         ollama-pull db-reset logs
 
 # Default target
@@ -10,9 +10,7 @@ help:
 	@echo "Magaldi Development Commands"
 	@echo ""
 	@echo "Setup:"
-	@echo "  make setup        Create venv and install base dependencies"
-	@echo "  make setup-dev    Create venv and install dev dependencies"
-	@echo "  make setup-worker Create venv and install worker (ML) dependencies"
+	@echo "  make setup        Create venv and install all dependencies"
 	@echo ""
 	@echo "Services:"
 	@echo "  make services      Start core Docker services (mysql, es, redis)"
@@ -46,24 +44,9 @@ $(VENV)/bin/activate:
 	$(PIP) install --upgrade pip
 
 setup: $(VENV)/bin/activate
-	$(PIP) install -r requirements.txt
 	$(PIP) install -e .
 	@echo ""
 	@echo "Setup complete! Activate with: source $(VENV)/bin/activate"
-
-setup-dev: $(VENV)/bin/activate
-	$(PIP) install -r requirements-dev.txt
-	$(PIP) install -e ".[dev]"
-	@echo ""
-	@echo "Dev setup complete! Activate with: source $(VENV)/bin/activate"
-
-setup-worker: $(VENV)/bin/activate
-	$(PIP) install -r requirements-worker.txt
-	$(PIP) install -e ".[worker]"
-	@echo ""
-	@echo "Worker setup complete! Activate with: source $(VENV)/bin/activate"
-
-install: setup-dev
 
 # =============================================================================
 # DOCKER SERVICES

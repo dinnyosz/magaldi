@@ -34,7 +34,7 @@ cp .env.example .env
 
 # Create virtual environment and install dependencies
 python3 -m venv .venv
-.venv/bin/pip install -e ".[dev]"
+.venv/bin/pip install -e .
 
 # Start Docker services (MySQL, Elasticsearch, Redis)
 docker compose up -d
@@ -179,7 +179,7 @@ magaldi/
 **Setup:**
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install -e ".[dev]"
+.venv/bin/pip install -e .
 ```
 
 **Start/Stop Services:**
