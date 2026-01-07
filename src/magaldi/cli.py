@@ -264,7 +264,7 @@ def run_processing(
         # Per-type stats
         type_stats = state.timing.get_type_stats()
         type_parts = []
-        for t in ["file", "class", "function", "method", "variable"]:
+        for t in ["file", "class", "function", "method", "constant", "variable"]:
             if t in type_stats:
                 done, tot, avg = type_stats[t]
                 remaining = tot - done
@@ -393,7 +393,7 @@ def print_processing_result(
     if timing_stats:
         type_stats = timing_stats.get_type_stats()
         type_parts = []
-        for t in ["file", "class", "function", "method", "variable"]:
+        for t in ["file", "class", "function", "method", "constant", "variable"]:
             if t in type_stats:
                 done, tot, avg = type_stats[t]
                 if done > 0:

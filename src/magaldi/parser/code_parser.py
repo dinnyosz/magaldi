@@ -43,7 +43,7 @@ class CodeElement:
     relative_path: str = ""
 
     # Element info
-    element_type: str = ""  # 'file', 'class', 'function', 'method', 'variable'
+    element_type: str = ""  # 'file', 'class', 'function', 'method', 'constant', 'variable'
     name: str = ""
     language: str = ""
 
@@ -209,9 +209,13 @@ class PythonParser:
         func_elements = self._parse_functions(content, lines, file_info, scope, repository, username, class_elements)
         elements.extend(func_elements)
 
-        # Parse module-level variables
-        var_elements = self._parse_variables(content, lines, file_info, scope, repository, username)
-        elements.extend(var_elements)
+        # Parse module-level constants (UPPER_CASE)
+        const_elements = self._parse_constants(content, lines, file_info, scope, repository, username)
+        elements.extend(const_elements)
+
+        # Parse class variables
+        class_var_elements = self._parse_class_variables(content, lines, file_info, scope, repository, username, class_elements)
+        elements.extend(class_var_elements)
 
         # Set parent IDs
         self._set_hierarchy(elements, file_element)
@@ -480,7 +484,7 @@ class PythonParser:
 
         return usages
 
-    def _parse_variables(
+    def _parse_constants(
         self,
         content: str,
         lines: list[str],
@@ -505,7 +509,7 @@ class PythonParser:
             name = match.group("name")
             value = match.group("value").strip()
 
-            # Find usages of this variable in the file
+            # Find usages of this constant in the file
             usages = self._find_variable_usages(name, lines, line_start)
 
             element = CodeElement(
@@ -513,7 +517,7 @@ class PythonParser:
                 repository=repository,
                 username=username,
                 relative_path=file_info.relative_path,
-                element_type="variable",
+                element_type="constant",
                 name=name,
                 language="python",
                 line_start=line_start,
@@ -525,9 +529,105 @@ class PythonParser:
             )
             element.element_id = generate_element_id(
                 scope, repository, username, file_info.relative_path,
-                "variable", name, line_start
+                "constant", name, line_start
             )
             elements.append(element)
+
+        return elements
+
+    # Pattern for class variables: name = value or name: type = value (with indentation)
+    CLASS_VAR_PATTERN = re.compile(
+        r'^(?P<indent>\s+)(?P<name>[a-zA-Z_][a-zA-Z0-9_]*)\s*(?::\s*[^=]+)?\s*=\s*(?P<value>.+)$',
+        re.MULTILINE
+    )
+
+    def _parse_class_variables(
+        self,
+        content: str,
+        lines: list[str],
+        file_info: FileInfo,
+        scope: str,
+        repository: str,
+        username: str,
+        class_elements: list[CodeElement],
+    ) -> list[CodeElement]:
+        """Extract class-level variables (attributes defined in class body, not in methods)."""
+        elements = []
+
+        for class_elem in class_elements:
+            if class_elem.element_type != "class":
+                continue
+
+            class_start = class_elem.line_start
+            class_end = class_elem.line_end
+            class_indent = len(lines[class_start - 1]) - len(lines[class_start - 1].lstrip())
+            body_indent = class_indent + 4  # Expected indentation for class body
+
+            # Track method ranges to exclude variables inside methods
+            method_ranges = []
+            for match in self.FUNCTION_PATTERN.finditer(class_elem.raw_code):
+                method_start_rel = class_elem.raw_code[:match.start()].count("\n")
+                method_start_abs = class_start + method_start_rel
+                method_end_abs = self._find_block_end(lines, method_start_abs - 1, body_indent)
+                method_ranges.append((method_start_abs, method_end_abs))
+
+            # Scan class body for variable assignments
+            for line_num in range(class_start, class_end):
+                line = lines[line_num] if line_num < len(lines) else ""
+                stripped = line.strip()
+
+                # Skip empty, comments, decorators, def, class
+                if not stripped or stripped.startswith('#') or stripped.startswith('@'):
+                    continue
+                if stripped.startswith('def ') or stripped.startswith('class '):
+                    continue
+
+                # Skip if inside a method
+                abs_line = line_num + 1
+                in_method = any(start <= abs_line <= end for start, end in method_ranges)
+                if in_method:
+                    continue
+
+                # Check indentation - should be exactly class body level
+                current_indent = len(line) - len(line.lstrip())
+                if current_indent != body_indent:
+                    continue
+
+                # Match variable assignment pattern
+                var_match = re.match(r'^([a-zA-Z_][a-zA-Z0-9_]*)\s*(?::\s*[^=]+)?\s*=\s*(.+)$', stripped)
+                if not var_match:
+                    continue
+
+                name = var_match.group(1)
+                # Skip dunder and private that look like methods
+                if name.startswith('__') and name.endswith('__'):
+                    continue
+
+                # Find usages within the class
+                class_lines = lines[class_start - 1:class_end]
+                usages = self._find_variable_usages(name, class_lines, line_num - class_start + 2, max_usages=5)
+
+                element = CodeElement(
+                    scope=scope,
+                    repository=repository,
+                    username=username,
+                    relative_path=file_info.relative_path,
+                    element_type="variable",
+                    name=name,
+                    language="python",
+                    line_start=abs_line,
+                    line_end=abs_line,
+                    raw_code=stripped,
+                    level=3,
+                    visibility="private" if name.startswith("_") else "public",
+                    parent_id=class_elem.element_id,
+                    context_usages=usages,
+                )
+                element.element_id = generate_element_id(
+                    scope, repository, username, file_info.relative_path,
+                    "variable", name, abs_line
+                )
+                elements.append(element)
 
         return elements
 

@@ -307,11 +307,15 @@ def should_embed(element: CodeElement) -> bool:
     if element.element_type in ("file", "class", "function", "method"):
         return True
 
-    # Variables only if UPPER_CASE constants or have docstrings
+    # Constants (UPPER_CASE module-level) always get embedded
+    if element.element_type == "constant":
+        return True
+
+    # Variables (class variables, etc.) - embed if they have docstrings or usages
     if element.element_type == "variable":
-        if element.name.isupper():
-            return True
         if element.docstring:
+            return True
+        if element.context_usages:  # Has usages = likely important
             return True
 
     return False

@@ -400,9 +400,19 @@ Code:
 {code}
 
 Summary:""",
-    "variable": """Describe this {language} variable/constant in one sentence. Focus on its purpose and how it's used.
+    "constant": """Describe this {language} constant in one sentence. Focus on its purpose and how it's used.
 
 File: {file_path}
+Name: {name}
+Value:
+{code}
+{usages_section}
+Description:""",
+    "variable": """Describe this {language} class variable in one sentence. Focus on its purpose and how it's used.
+
+File context: {file_summary}
+Class context: {class_summary}
+
 Name: {name}
 Value:
 {code}
