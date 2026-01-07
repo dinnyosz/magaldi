@@ -69,6 +69,9 @@ class CodeElement:
     return_type: str | None = None
     parameters: list[dict[str, Any]] = field(default_factory=list)
 
+    # Context (for variables - how they're used)
+    context_usages: list[str] = field(default_factory=list)
+
 
 @dataclass
 class ParsedFile:
@@ -441,6 +444,42 @@ class PythonParser:
 
         return elements
 
+    def _find_variable_usages(
+        self, name: str, lines: list[str], declaration_line: int, max_usages: int = 5
+    ) -> list[str]:
+        """Find lines where a variable is used (excluding declaration).
+
+        Args:
+            name: Variable name to search for.
+            lines: All lines in the file.
+            declaration_line: Line number of the declaration (1-indexed).
+            max_usages: Maximum number of usages to return.
+
+        Returns:
+            List of "line N: <code>" strings showing usages.
+        """
+        usages = []
+        # Pattern to match the variable name as a whole word
+        pattern = re.compile(rf'\b{re.escape(name)}\b')
+
+        for i, line in enumerate(lines):
+            line_num = i + 1
+            if line_num == declaration_line:
+                continue  # Skip the declaration itself
+
+            stripped = line.strip()
+            if not stripped or stripped.startswith('#'):
+                continue  # Skip empty lines and comments
+
+            if pattern.search(line):
+                # Truncate long lines
+                display_line = stripped[:80] + '...' if len(stripped) > 80 else stripped
+                usages.append(f"line {line_num}: {display_line}")
+                if len(usages) >= max_usages:
+                    break
+
+        return usages
+
     def _parse_variables(
         self,
         content: str,
@@ -466,6 +505,9 @@ class PythonParser:
             name = match.group("name")
             value = match.group("value").strip()
 
+            # Find usages of this variable in the file
+            usages = self._find_variable_usages(name, lines, line_start)
+
             element = CodeElement(
                 scope=scope,
                 repository=repository,
@@ -479,6 +521,7 @@ class PythonParser:
                 raw_code=line.strip(),
                 level=3,
                 visibility="public",
+                context_usages=usages,
             )
             element.element_id = generate_element_id(
                 scope, repository, username, file_info.relative_path,

@@ -400,13 +400,13 @@ Code:
 {code}
 
 Summary:""",
-    "variable": """Describe this {language} variable/constant in one sentence.
+    "variable": """Describe this {language} variable/constant in one sentence. Focus on its purpose and how it's used.
 
 File: {file_path}
 Name: {name}
 Value:
 {code}
-
+{usages_section}
 Description:""",
 }
 
@@ -452,6 +452,11 @@ def build_prompt(
     if element.decorators:
         decorators = f"Decorators: {', '.join(element.decorators)}"
 
+    # Build usages section for variables/constants
+    usages_section = ""
+    if element.context_usages:
+        usages_section = "\nUsed in:\n" + "\n".join(f"- {u}" for u in element.context_usages)
+
     # Truncate code
     code = truncate_code(element.raw_code or "", max_code_tokens)
 
@@ -469,6 +474,7 @@ def build_prompt(
         docstring_section=docstring_section,
         decorators=decorators,
         code=code,
+        usages_section=usages_section,
     )
 
 
