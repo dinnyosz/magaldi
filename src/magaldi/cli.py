@@ -262,7 +262,7 @@ def run_processing(
             else:
                 worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "")
 
-        # Per-type stats
+        # Per-type stats - show remaining count and per-element times
         type_stats = state.timing.get_type_stats()
         type_parts = []
         for t in ["file", "class", "function", "method", "constant", "variable"]:
@@ -271,7 +271,8 @@ def run_processing(
                 remaining = tot - done
                 if remaining > 0:
                     api_time = avg_summ + avg_embed
-                    type_parts.append(f"[cyan]{t}[/]:[green]{remaining}/{tot}[/] [dim]({avg_wall:.1f}s wall, {api_time:.1f}s api)[/]")
+                    # Show per-element time for ETA estimation
+                    type_parts.append(f"[cyan]{t}[/]:[green]{remaining}/{tot}[/] [dim]({avg_wall:.1f}s/elem)[/]")
         type_line = f"  [dim]Remaining:[/] {' [dim]|[/] '.join(type_parts)}" if type_parts else ""
 
         # Stats line - effective wall time (elapsed/done) and API times
