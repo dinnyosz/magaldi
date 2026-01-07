@@ -554,13 +554,15 @@ def _process_single_element(
     summarize_time = 0.0
     embed_time = 0.0
 
-    # Build hierarchical display name: file.py → Class → method
-    def build_display_name() -> str:
+    # Build hierarchical display name: .../path/file.py → Class → method
+    def build_display_name(max_path_len: int = 40) -> str:
         parts = []
-        # Add filename (shortened)
-        filename = element.relative_path.split("/")[-1] if "/" in element.relative_path else element.relative_path
+        # Add path (truncated from left if too long)
+        path = element.relative_path
+        if len(path) > max_path_len:
+            path = "..." + path[-(max_path_len - 3):]
         if element.element_type != "file":
-            parts.append(filename)
+            parts.append(path)
         # Add parent class if method
         if element.parent_id:
             parent = summary_cache.get_element(element.parent_id)
