@@ -11,8 +11,9 @@ import sys
 import click
 from rich.console import Console, Group, RenderableType
 from rich.live import Live
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn, ProgressBar
 from rich.table import Table
+from rich.text import Text
 
 from magaldi.config import MagaldiConfig, load_config
 from magaldi.parser.change_detection import (
@@ -191,7 +192,7 @@ def run_parsing(manifest: ChangeManifest) -> ParsingResult:
         TextColumn("({task.completed}/{task.total})"),
         TimeElapsedColumn(),
         console=console,
-        transient=True,
+        transient=False,
     ) as progress:
         task = progress.add_task("parsing", total=total_files)
 
@@ -246,7 +247,16 @@ def run_processing(
         eta_str = f" | ~{format_duration(eta)} ETA" if eta else ""
         elapsed_str = format_duration(state.timing.elapsed)
 
-        progress_line = f"  {state.completed}/{state.total} ({pct:.0f}%) | {elapsed_str} elapsed{eta_str}"
+        # Build visual progress bar
+        bar_width = 30
+        filled = int(bar_width * pct / 100)
+        bar = "━" * filled + "╺" + "─" * (bar_width - filled - 1) if filled < bar_width else "━" * bar_width
+        bar_text = Text()
+        bar_text.append("  ")
+        bar_text.append(bar[:filled], style="green")
+        if filled < bar_width:
+            bar_text.append(bar[filled:], style="dim")
+        bar_text.append(f" {state.completed}/{state.total} ({pct:.0f}%) | {elapsed_str} elapsed{eta_str}")
 
         # Worker table
         worker_table = Table(show_header=False, box=None, padding=(0, 1))
@@ -279,7 +289,7 @@ def run_processing(
         total_api = state.timing.avg_summarize_time + state.timing.avg_embed_time
         stats = f"  [dim]Throughput:[/] [green]{effective_wall:.2f}s[/]/elem [dim]|[/] [dim]API:[/] [green]{total_api:.1f}s[/]/elem [dim]([/][green]{state.timing.avg_summarize_time:.1f}s[/] summ + [green]{state.timing.avg_embed_time:.1f}s[/] embed[dim])[/]"
 
-        parts = [progress_line, worker_table]
+        parts: list[RenderableType] = [bar_text, worker_table]
         if type_line:
             parts.append(type_line)
         parts.append(stats)
@@ -343,10 +353,11 @@ def run_processing(
         result.errors.append("Processing interrupted by user")
 
     # Get timing stats from current state
-    avg_wall = current_state.timing.avg_wall_time
     avg_summ = current_state.timing.avg_summarize_time
     avg_embed = current_state.timing.avg_embed_time
     elapsed = current_state.timing.elapsed
+    # Effective wall time = elapsed / processed (shows throughput with parallelism)
+    avg_wall = elapsed / result.elements_processed if result.elements_processed > 0 else 0.0
 
     return (result.elements_processed, result.elements_skipped, result.indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats)
 

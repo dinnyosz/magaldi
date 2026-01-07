@@ -91,106 +91,119 @@ class ProcessingResult:
 
 @dataclass
 class TimingStats:
-    """Thread-safe timing statistics."""
+    """Thread-safe timing statistics using running totals."""
 
     _lock: threading.Lock = field(default_factory=threading.Lock)
-
-    wall_times: list[float] = field(default_factory=list)
-    summarize_times: list[float] = field(default_factory=list)
-    embed_times: list[float] = field(default_factory=list)
     phase_start: float = 0.0
 
     # Per-type tracking
-    wall_times_by_type: dict[str, list[float]] = field(default_factory=dict)
-    summarize_times_by_type: dict[str, list[float]] = field(default_factory=dict)
-    embed_times_by_type: dict[str, list[float]] = field(default_factory=dict)
-    counts_by_type: dict[str, int] = field(default_factory=dict)  # completed counts
-    totals_by_type: dict[str, int] = field(default_factory=dict)  # total counts
+    total_summarize_by_type: dict[str, float] = field(default_factory=dict)
+    total_embed_by_type: dict[str, float] = field(default_factory=dict)
+    summarize_counts_by_type: dict[str, int] = field(default_factory=dict)  # count of summarized
+    embed_counts_by_type: dict[str, int] = field(default_factory=dict)  # count of embedded
+    totals_by_type: dict[str, int] = field(default_factory=dict)  # total element counts
 
     def set_totals_by_type(self, totals: dict[str, int]) -> None:
         """Set total element counts by type."""
         with self._lock:
             self.totals_by_type = dict(totals)
-            # Initialize counts
+            # Initialize per-type tracking
             for t in totals:
-                if t not in self.counts_by_type:
-                    self.counts_by_type[t] = 0
-                if t not in self.wall_times_by_type:
-                    self.wall_times_by_type[t] = []
-                if t not in self.summarize_times_by_type:
-                    self.summarize_times_by_type[t] = []
-                if t not in self.embed_times_by_type:
-                    self.embed_times_by_type[t] = []
+                if t not in self.summarize_counts_by_type:
+                    self.summarize_counts_by_type[t] = 0
+                if t not in self.embed_counts_by_type:
+                    self.embed_counts_by_type[t] = 0
+                if t not in self.total_summarize_by_type:
+                    self.total_summarize_by_type[t] = 0.0
+                if t not in self.total_embed_by_type:
+                    self.total_embed_by_type[t] = 0.0
 
-    def record(self, wall_time: float, summarize_time: float, embed_time: float, element_type: str = "") -> None:
+    def record(self, wall_time: float, summarize_time: float, embed_time: float, element_type: str = "", was_embedded: bool = True) -> None:
+        """Record timing for a completed element."""
         with self._lock:
-            self.wall_times.append(wall_time)
-            self.summarize_times.append(summarize_time)
-            self.embed_times.append(embed_time)
             if element_type:
-                if element_type not in self.wall_times_by_type:
-                    self.wall_times_by_type[element_type] = []
-                if element_type not in self.summarize_times_by_type:
-                    self.summarize_times_by_type[element_type] = []
-                if element_type not in self.embed_times_by_type:
-                    self.embed_times_by_type[element_type] = []
-                self.wall_times_by_type[element_type].append(wall_time)
-                self.summarize_times_by_type[element_type].append(summarize_time)
-                self.embed_times_by_type[element_type].append(embed_time)
-                self.counts_by_type[element_type] = self.counts_by_type.get(element_type, 0) + 1
+                if element_type not in self.total_summarize_by_type:
+                    self.total_summarize_by_type[element_type] = 0.0
+                if element_type not in self.total_embed_by_type:
+                    self.total_embed_by_type[element_type] = 0.0
+                # Always record summarize time (every element is summarized)
+                self.total_summarize_by_type[element_type] += summarize_time
+                self.summarize_counts_by_type[element_type] = self.summarize_counts_by_type.get(element_type, 0) + 1
+                # Only record embed time if element was actually embedded
+                if was_embedded and embed_time > 0:
+                    self.total_embed_by_type[element_type] += embed_time
+                    self.embed_counts_by_type[element_type] = self.embed_counts_by_type.get(element_type, 0) + 1
 
     @property
-    def avg_wall_time(self) -> float:
+    def total_summarize_count(self) -> int:
+        """Total number of elements summarized."""
         with self._lock:
-            return sum(self.wall_times) / len(self.wall_times) if self.wall_times else 0.0
+            return sum(self.summarize_counts_by_type.values())
+
+    @property
+    def total_embed_count(self) -> int:
+        """Total number of elements embedded."""
+        with self._lock:
+            return sum(self.embed_counts_by_type.values())
 
     @property
     def avg_summarize_time(self) -> float:
+        """Global average summarize time = sum(all type totals) / sum(all summarize counts)."""
         with self._lock:
-            return sum(self.summarize_times) / len(self.summarize_times) if self.summarize_times else 0.0
+            total_time = sum(self.total_summarize_by_type.values())
+            total_count = sum(self.summarize_counts_by_type.values())
+            return total_time / total_count if total_count > 0 else 0.0
 
     @property
     def avg_embed_time(self) -> float:
+        """Global average embed time = sum(all type totals) / sum(all embed counts)."""
         with self._lock:
-            return sum(self.embed_times) / len(self.embed_times) if self.embed_times else 0.0
+            total_time = sum(self.total_embed_by_type.values())
+            total_count = sum(self.embed_counts_by_type.values())
+            return total_time / total_count if total_count > 0 else 0.0
 
     @property
     def elapsed(self) -> float:
         return time.time() - self.phase_start
 
     def get_type_stats(self) -> dict[str, tuple[int, int, float, float, float]]:
-        """Get per-type stats: type -> (completed, total, avg_wall, avg_summ, avg_embed)."""
+        """Get per-type stats: type -> (completed, total, avg_api, avg_summ, avg_embed)."""
         with self._lock:
             result = {}
             for t in self.totals_by_type:
-                completed = self.counts_by_type.get(t, 0)
+                completed = self.summarize_counts_by_type.get(t, 0)  # Use summarize count as "completed"
                 total = self.totals_by_type.get(t, 0)
-                wall_times = self.wall_times_by_type.get(t, [])
-                summ_times = self.summarize_times_by_type.get(t, [])
-                embed_times = self.embed_times_by_type.get(t, [])
-                avg_wall = sum(wall_times) / len(wall_times) if wall_times else 0.0
-                avg_summ = sum(summ_times) / len(summ_times) if summ_times else 0.0
-                avg_embed = sum(embed_times) / len(embed_times) if embed_times else 0.0
-                result[t] = (completed, total, avg_wall, avg_summ, avg_embed)
+                total_summ = self.total_summarize_by_type.get(t, 0.0)
+                total_embed = self.total_embed_by_type.get(t, 0.0)
+                summ_count = self.summarize_counts_by_type.get(t, 0)
+                embed_count = self.embed_counts_by_type.get(t, 0)
+                avg_summ = total_summ / summ_count if summ_count > 0 else 0.0
+                avg_embed = total_embed / embed_count if embed_count > 0 else 0.0
+                avg_api = avg_summ + avg_embed  # Use API time as "wall" for ETA
+                result[t] = (completed, total, avg_api, avg_summ, avg_embed)
             return result
 
     def eta_seconds(self, completed: int, total: int) -> float | None:
-        """Calculate ETA based on per-type averages, with global fallback."""
+        """Calculate ETA based on per-type API time averages."""
         with self._lock:
             if completed == 0:
                 return None
 
-            # Global average as fallback for types without data
-            global_avg = sum(self.wall_times) / len(self.wall_times) if self.wall_times else 0.0
+            # Global average API time as fallback
+            total_api_time = sum(self.total_summarize_by_type.values()) + sum(self.total_embed_by_type.values())
+            total_count = sum(self.summarize_counts_by_type.values())
+            global_avg = total_api_time / total_count if total_count > 0 else 0.0
 
-            # Calculate ETA using per-type averages (inline to avoid deadlock)
+            # Calculate ETA using per-type averages
             eta = 0.0
             for t in self.totals_by_type:
-                done = self.counts_by_type.get(t, 0)
+                done = self.summarize_counts_by_type.get(t, 0)
                 tot = self.totals_by_type.get(t, 0)
-                times = self.wall_times_by_type.get(t, [])
-                # Use type-specific avg if available, otherwise global avg
-                avg = sum(times) / len(times) if times else global_avg
+                if done > 0:
+                    type_total = self.total_summarize_by_type.get(t, 0.0) + self.total_embed_by_type.get(t, 0.0)
+                    avg = type_total / done
+                else:
+                    avg = global_avg
                 remaining = tot - done
                 if remaining > 0 and avg > 0:
                     eta += remaining * avg
@@ -816,7 +829,7 @@ def process_elements(
                 processed = future.result()
 
                 # Record timing with element type
-                timing_stats.record(processed.wall_time, processed.summarize_time, processed.embed_time, element.element_type)
+                timing_stats.record(processed.wall_time, processed.summarize_time, processed.embed_time, element.element_type, was_embedded=should_embed(element))
 
                 if processed.success:
                     dependency_tracker.mark_complete(element.element_id)
