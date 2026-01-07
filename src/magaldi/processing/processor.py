@@ -100,8 +100,10 @@ class TimingStats:
     embed_times: list[float] = field(default_factory=list)
     phase_start: float = 0.0
 
-    # Per-type tracking: type -> list of wall times
+    # Per-type tracking
     wall_times_by_type: dict[str, list[float]] = field(default_factory=dict)
+    summarize_times_by_type: dict[str, list[float]] = field(default_factory=dict)
+    embed_times_by_type: dict[str, list[float]] = field(default_factory=dict)
     counts_by_type: dict[str, int] = field(default_factory=dict)  # completed counts
     totals_by_type: dict[str, int] = field(default_factory=dict)  # total counts
 
@@ -115,6 +117,10 @@ class TimingStats:
                     self.counts_by_type[t] = 0
                 if t not in self.wall_times_by_type:
                     self.wall_times_by_type[t] = []
+                if t not in self.summarize_times_by_type:
+                    self.summarize_times_by_type[t] = []
+                if t not in self.embed_times_by_type:
+                    self.embed_times_by_type[t] = []
 
     def record(self, wall_time: float, summarize_time: float, embed_time: float, element_type: str = "") -> None:
         with self._lock:
@@ -124,7 +130,13 @@ class TimingStats:
             if element_type:
                 if element_type not in self.wall_times_by_type:
                     self.wall_times_by_type[element_type] = []
+                if element_type not in self.summarize_times_by_type:
+                    self.summarize_times_by_type[element_type] = []
+                if element_type not in self.embed_times_by_type:
+                    self.embed_times_by_type[element_type] = []
                 self.wall_times_by_type[element_type].append(wall_time)
+                self.summarize_times_by_type[element_type].append(summarize_time)
+                self.embed_times_by_type[element_type].append(embed_time)
                 self.counts_by_type[element_type] = self.counts_by_type.get(element_type, 0) + 1
 
     @property
@@ -146,16 +158,20 @@ class TimingStats:
     def elapsed(self) -> float:
         return time.time() - self.phase_start
 
-    def get_type_stats(self) -> dict[str, tuple[int, int, float]]:
-        """Get per-type stats: type -> (completed, total, avg_time)."""
+    def get_type_stats(self) -> dict[str, tuple[int, int, float, float, float]]:
+        """Get per-type stats: type -> (completed, total, avg_wall, avg_summ, avg_embed)."""
         with self._lock:
             result = {}
             for t in self.totals_by_type:
                 completed = self.counts_by_type.get(t, 0)
                 total = self.totals_by_type.get(t, 0)
-                times = self.wall_times_by_type.get(t, [])
-                avg = sum(times) / len(times) if times else 0.0
-                result[t] = (completed, total, avg)
+                wall_times = self.wall_times_by_type.get(t, [])
+                summ_times = self.summarize_times_by_type.get(t, [])
+                embed_times = self.embed_times_by_type.get(t, [])
+                avg_wall = sum(wall_times) / len(wall_times) if wall_times else 0.0
+                avg_summ = sum(summ_times) / len(summ_times) if summ_times else 0.0
+                avg_embed = sum(embed_times) / len(embed_times) if embed_times else 0.0
+                result[t] = (completed, total, avg_wall, avg_summ, avg_embed)
             return result
 
     def eta_seconds(self, completed: int, total: int) -> float | None:

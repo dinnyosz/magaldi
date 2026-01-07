@@ -267,10 +267,11 @@ def run_processing(
         type_parts = []
         for t in ["file", "class", "function", "method", "constant", "variable"]:
             if t in type_stats:
-                done, tot, avg = type_stats[t]
+                done, tot, avg_wall, avg_summ, avg_embed = type_stats[t]
                 remaining = tot - done
                 if remaining > 0:
-                    type_parts.append(f"[cyan]{t}[/]:[green]{remaining}/{tot}[/] [dim]({avg:.1f}s)[/]")
+                    api_time = avg_summ + avg_embed
+                    type_parts.append(f"[cyan]{t}[/]:[green]{remaining}/{tot}[/] [dim]({avg_wall:.1f}s wall, {api_time:.1f}s api)[/]")
         type_line = f"  [dim]Remaining:[/] {' [dim]|[/] '.join(type_parts)}" if type_parts else ""
 
         # Stats line - effective wall time (elapsed/done) and API times
@@ -409,9 +410,10 @@ def print_processing_result(
         type_parts = []
         for t in ["file", "class", "function", "method", "constant", "variable"]:
             if t in type_stats:
-                done, tot, avg = type_stats[t]
+                done, tot, avg_wall, avg_summ, avg_embed = type_stats[t]
                 if done > 0:
-                    type_parts.append(f"[cyan]{t}[/]: {done} @ {avg:.1f}s")
+                    api_time = avg_summ + avg_embed
+                    type_parts.append(f"[cyan]{t}[/]: {done} @ {avg_wall:.1f}s wall, {api_time:.1f}s api")
         if type_parts:
             console.print(f"  [dim]Per-type:[/] {' | '.join(type_parts)}")
 
