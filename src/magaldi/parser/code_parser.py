@@ -158,8 +158,15 @@ class PythonParser:
         re.MULTILINE
     )
 
-    VARIABLE_PATTERN = re.compile(
+    # UPPER_CASE constants
+    CONSTANT_PATTERN = re.compile(
         r'^(?P<name>[A-Z][A-Z0-9_]*)\s*(?::\s*[^=]+)?\s*=\s*(?P<value>.+)$',
+        re.MULTILINE
+    )
+
+    # Module-level variables (lowercase, not starting with _)
+    MODULE_VAR_PATTERN = re.compile(
+        r'^(?P<name>[a-z][a-zA-Z0-9_]*)\s*(?::\s*[^=]+)?\s*=\s*(?P<value>.+)$',
         re.MULTILINE
     )
 
@@ -216,6 +223,10 @@ class PythonParser:
         # Parse class variables
         class_var_elements = self._parse_class_variables(content, lines, file_info, scope, repository, username, class_elements)
         elements.extend(class_var_elements)
+
+        # Parse module-level variables (lowercase)
+        mod_var_elements = self._parse_module_variables(content, lines, file_info, scope, repository, username)
+        elements.extend(mod_var_elements)
 
         # Set parent IDs
         self._set_hierarchy(elements, file_element)
@@ -496,7 +507,7 @@ class PythonParser:
         """Extract module-level constants (UPPER_CASE variables)."""
         elements = []
 
-        for match in self.VARIABLE_PATTERN.finditer(content):
+        for match in self.CONSTANT_PATTERN.finditer(content):
             # Only match at module level (no indentation)
             start_pos = match.start()
             line_start = content[:start_pos].count("\n") + 1
@@ -530,6 +541,60 @@ class PythonParser:
             element.element_id = generate_element_id(
                 scope, repository, username, file_info.relative_path,
                 "constant", name, line_start
+            )
+            elements.append(element)
+
+        return elements
+
+    def _parse_module_variables(
+        self,
+        content: str,
+        lines: list[str],
+        file_info: FileInfo,
+        scope: str,
+        repository: str,
+        username: str,
+    ) -> list[CodeElement]:
+        """Extract module-level variables (lowercase, not constants)."""
+        elements = []
+
+        for match in self.MODULE_VAR_PATTERN.finditer(content):
+            # Only match at module level (no indentation)
+            start_pos = match.start()
+            line_start = content[:start_pos].count("\n") + 1
+
+            # Check if at start of line or only whitespace before
+            line = lines[line_start - 1]
+            if line.lstrip() != line:
+                continue  # Skip indented
+
+            name = match.group("name")
+
+            # Skip common non-interesting patterns
+            if name in ('i', 'j', 'k', 'x', 'y', 'z', '_'):
+                continue
+
+            # Find usages of this variable in the file
+            usages = self._find_variable_usages(name, lines, line_start)
+
+            element = CodeElement(
+                scope=scope,
+                repository=repository,
+                username=username,
+                relative_path=file_info.relative_path,
+                element_type="variable",
+                name=name,
+                language="python",
+                line_start=line_start,
+                line_end=line_start,
+                raw_code=line.strip(),
+                level=3,
+                visibility="private" if name.startswith("_") else "public",
+                context_usages=usages,
+            )
+            element.element_id = generate_element_id(
+                scope, repository, username, file_info.relative_path,
+                "variable", name, line_start
             )
             elements.append(element)
 
