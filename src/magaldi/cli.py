@@ -262,7 +262,7 @@ def run_processing(
             else:
                 worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "")
 
-        # Per-type stats - show remaining count and per-element times
+        # Per-type stats - show remaining count and API time per element
         type_stats = state.timing.get_type_stats()
         type_parts = []
         for t in ["file", "class", "function", "method", "constant", "variable"]:
@@ -271,13 +271,13 @@ def run_processing(
                 remaining = tot - done
                 if remaining > 0:
                     api_time = avg_summ + avg_embed
-                    # Show per-element time for ETA estimation
-                    type_parts.append(f"[cyan]{t}[/]:[green]{remaining}/{tot}[/] [dim]({avg_wall:.1f}s/elem)[/]")
+                    type_parts.append(f"[cyan]{t}[/]:[green]{remaining}/{tot}[/] [dim]({api_time:.1f}s)[/]")
         type_line = f"  [dim]Remaining:[/] {' [dim]|[/] '.join(type_parts)}" if type_parts else ""
 
-        # Stats line - effective wall time (elapsed/done) and API times
+        # Stats line - effective wall time (elapsed/done) = actual throughput with parallelism
         effective_wall = state.timing.elapsed / state.completed if state.completed > 0 else 0.0
-        stats = f"  [dim]Avg:[/] [green]{effective_wall:.2f}s[/] effective [dim]|[/] [green]{state.timing.avg_wall_time:.1f}s[/] per-elem [dim]|[/] [green]{state.timing.avg_summarize_time:.1f}s[/] summ [dim]|[/] [green]{state.timing.avg_embed_time:.1f}s[/] embed"
+        total_api = state.timing.avg_summarize_time + state.timing.avg_embed_time
+        stats = f"  [dim]Throughput:[/] [green]{effective_wall:.2f}s[/]/elem [dim]|[/] [dim]API:[/] [green]{total_api:.1f}s[/]/elem [dim]([/][green]{state.timing.avg_summarize_time:.1f}s[/] summ + [green]{state.timing.avg_embed_time:.1f}s[/] embed[dim])[/]"
 
         parts = [progress_line, worker_table]
         if type_line:

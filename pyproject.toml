@@ -42,8 +42,13 @@ dependencies = [
     # Web
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
-    # Parser
+    # Parser (tree-sitter with language grammars)
     "tree-sitter>=0.21.0",
+    "tree-sitter-python>=0.21.0",
+    "tree-sitter-javascript>=0.21.0",
+    "tree-sitter-typescript>=0.21.0",
+    "tree-sitter-php>=0.23.0",
+    "tree-sitter-rust>=0.21.0",
     # MCP
     "mcp>=1.0.0",
     # ML/Visualization
@@ -133,6 +138,11 @@ explicit_package_bases = true
 [[tool.mypy.overrides]]
 module = [
     "tree_sitter.*",
+    "tree_sitter_python.*",
+    "tree_sitter_javascript.*",
+    "tree_sitter_typescript.*",
+    "tree_sitter_php.*",
+    "tree_sitter_rust.*",
     "elasticsearch.*",
     "redis.*",
     "umap.*",
