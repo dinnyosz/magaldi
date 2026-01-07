@@ -554,7 +554,7 @@ def _process_single_element(
     summarize_time = 0.0
     embed_time = 0.0
 
-    # Build hierarchical display name: .../path/file.py → Class → method
+    # Build hierarchical display name: [type] .../path/file.py → Class → method
     def build_display_name(max_path_len: int = 40) -> str:
         parts = []
         # Add path (truncated from left if too long)
@@ -570,7 +570,8 @@ def _process_single_element(
                 parts.append(parent.name)
         # Add element name
         parts.append(element.name)
-        return " → ".join(parts)
+        # Prefix with element type (use angle brackets to avoid Rich markup interpretation)
+        return f"<{element.element_type}> " + " → ".join(parts)
 
     display_name = build_display_name()
 
