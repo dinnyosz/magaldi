@@ -24,6 +24,7 @@ from magaldi.parser.code_parser import ParsingResult, parse_files
 from magaldi.parser.discovery import DiscoveryError, DiscoveryResult, discover
 from magaldi.processing.processor import (
     ProcessingConfig,
+    ProcessingResult,
     ProgressState,
     TimingStats,
     WorkerStatus,
@@ -302,29 +303,41 @@ def run_processing(
         def __rich__(self) -> RenderableType:
             return build_display(current_state, workers)
 
-    with Live(LiveDisplay(), console=console, refresh_per_second=10) as live:
-        def on_progress(state: ProgressState) -> None:
-            nonlocal current_state
-            current_state = state
-            live.refresh()  # Force refresh on progress
+    interrupted = False
+    try:
+        with Live(LiveDisplay(), console=console, refresh_per_second=10) as live:
+            def on_progress(state: ProgressState) -> None:
+                nonlocal current_state
+                current_state = state
+                live.refresh()  # Force refresh on progress
 
-        def on_status_change() -> None:
-            """Called when worker status changes."""
-            live.refresh()  # Force refresh on status change
+            def on_status_change() -> None:
+                """Called when worker status changes."""
+                live.refresh()  # Force refresh on status change
 
-        result = process_elements(
-            parsing_result.parsed_files,
-            manifest.scope,
-            manifest.repository,
-            manifest.username,
-            es_repo,
-            proc_config,
-            on_progress,
-            file_hashes,
-            on_status_change,
-            worker_status,
-            timing_stats,
+            result = process_elements(
+                parsing_result.parsed_files,
+                manifest.scope,
+                manifest.repository,
+                manifest.username,
+                es_repo,
+                proc_config,
+                on_progress,
+                file_hashes,
+                on_status_change,
+                worker_status,
+                timing_stats,
+            )
+    except KeyboardInterrupt:
+        interrupted = True
+        console.print("\n[yellow]Interrupted by user[/]")
+        # Create partial result
+        result = ProcessingResult(
+            scope=manifest.scope,
+            repository=manifest.repository,
+            username=manifest.username,
         )
+        result.errors.append("Processing interrupted by user")
 
     # Get timing stats from current state
     avg_wall = current_state.timing.avg_wall_time

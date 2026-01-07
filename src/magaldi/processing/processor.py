@@ -769,63 +769,73 @@ def process_elements(
             release_worker_id(wid)
 
     # Process elements in parallel using ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=config.num_workers) as executor:
-        # Map of future -> element for tracking
-        future_to_element: dict = {}
+    try:
+        with ThreadPoolExecutor(max_workers=config.num_workers) as executor:
+            # Map of future -> element for tracking
+            future_to_element: dict = {}
 
-        while not dependency_tracker.is_complete():
-            # Get elements that are ready (parents completed)
-            ready_elements = dependency_tracker.get_ready_elements(
-                max_count=config.num_workers * 2
-            )
+            while not dependency_tracker.is_complete():
+                # Get elements that are ready (parents completed)
+                ready_elements = dependency_tracker.get_ready_elements(
+                    max_count=config.num_workers * 2
+                )
 
-            # Submit new tasks for ready elements
-            for element in ready_elements:
-                future = executor.submit(process_wrapper, element)
-                future_to_element[future] = element
+                # Submit new tasks for ready elements
+                for element in ready_elements:
+                    future = executor.submit(process_wrapper, element)
+                    future_to_element[future] = element
 
-            if not future_to_element:
-                # No futures pending and not complete - shouldn't happen
-                # but break to avoid infinite loop
-                break
+                if not future_to_element:
+                    # No futures pending and not complete - shouldn't happen
+                    # but break to avoid infinite loop
+                    break
 
-            # Wait for at least one to complete
-            done, _ = wait(future_to_element.keys(), return_when=FIRST_COMPLETED)
+                # Wait for at least one to complete
+                done, _ = wait(future_to_element.keys(), return_when=FIRST_COMPLETED)
 
-            for future in done:
-                element = future_to_element.pop(future)
-                processed = future.result()
+                for future in done:
+                    element = future_to_element.pop(future)
+                    processed = future.result()
 
-                # Record timing with element type
-                timing_stats.record(processed.wall_time, processed.summarize_time, processed.embed_time, element.element_type)
+                    # Record timing with element type
+                    timing_stats.record(processed.wall_time, processed.summarize_time, processed.embed_time, element.element_type)
 
-                if processed.success:
-                    dependency_tracker.mark_complete(element.element_id)
-                    result.elements_processed += 1
-                    result.indexed += 1
-                    if not config.skip_ai:
-                        result.summarized += 1
-                        if should_embed(element):
-                            result.embedded += 1
-                    completed_count += 1
-                else:
-                    dependency_tracker.mark_failed(element.element_id)
-                    result.elements_failed += 1
-                    failed_count += 1
-                    error_msg = f"Failed to process {element.element_id}: {processed.error}"
-                    result.errors.append(error_msg)
-                    result.failed_elements.append((element.element_id, processed.error or "Unknown error"))
+                    if processed.success:
+                        dependency_tracker.mark_complete(element.element_id)
+                        result.elements_processed += 1
+                        result.indexed += 1
+                        if not config.skip_ai:
+                            result.summarized += 1
+                            if should_embed(element):
+                                result.embedded += 1
+                        completed_count += 1
+                    else:
+                        dependency_tracker.mark_failed(element.element_id)
+                        result.elements_failed += 1
+                        failed_count += 1
+                        error_msg = f"Failed to process {element.element_id}: {processed.error}"
+                        result.errors.append(error_msg)
+                        result.failed_elements.append((element.element_id, processed.error or "Unknown error"))
 
-                # Report progress
-                if on_progress:
-                    progress_state = ProgressState(
-                        total=total,
-                        completed=completed_count,
-                        skipped=result.elements_skipped,
-                        failed=failed_count,
-                        timing=timing_stats,
-                        workers=worker_status,
-                    )
-                    on_progress(progress_state)
+                    # Report progress
+                    if on_progress:
+                        progress_state = ProgressState(
+                            total=total,
+                            completed=completed_count,
+                            skipped=result.elements_skipped,
+                            failed=failed_count,
+                            timing=timing_stats,
+                            workers=worker_status,
+                        )
+                        on_progress(progress_state)
+
+    except KeyboardInterrupt:
+        # Graceful shutdown on Ctrl+C - cancel pending futures
+        for future in future_to_element:
+            future.cancel()
+        # Clear worker status display
+        for wid in range(config.num_workers):
+            worker_status.clear(wid)
+        result.errors.append("Processing interrupted by user")
 
     return result
