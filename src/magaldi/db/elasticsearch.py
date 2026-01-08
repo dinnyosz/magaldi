@@ -45,6 +45,8 @@ INDEX_MAPPING = {
             "indexed_at": {"type": "date"},
             "cluster_id": {"type": "keyword"},  # Feature cluster ID
             "cluster_label": {"type": "keyword"},  # Human-readable cluster label
+            "member_count": {"type": "integer"},  # Number of elements in feature (for feature docs)
+            "member_ids": {"type": "keyword"},  # Element IDs of members (for feature docs)
             "embedding": {
                 "type": "dense_vector",
                 "dims": 1024,
@@ -743,6 +745,127 @@ class ElasticsearchRepository:
         )
 
         return response.get("updated", 0)
+
+    def get_summaries_batch(
+        self,
+        element_ids: list[str],
+    ) -> dict[str, str]:
+        """Get summaries for multiple elements in batch.
+
+        Args:
+            element_ids: List of element IDs to fetch summaries for.
+
+        Returns:
+            Dict mapping element_id to summary (only for elements with summaries).
+        """
+        if not element_ids:
+            return {}
+
+        client = self._get_client()
+
+        # Use mget for efficient batch lookup
+        response = client.mget(
+            index=INDEX_NAME,
+            ids=element_ids,
+            _source=["summary"],
+        )
+
+        result: dict[str, str] = {}
+        for doc in response.get("docs", []):
+            if doc.get("found") and doc.get("_source", {}).get("summary"):
+                result[doc["_id"]] = doc["_source"]["summary"]
+
+        return result
+
+    def index_feature(
+        self,
+        feature_id: str,
+        scope: str,
+        repository: str,
+        username: str,
+        cluster_id: str,
+        label: str,
+        summary: str,
+        embedding: list[float] | None,
+        member_ids: list[str],
+    ) -> bool:
+        """Index a feature document.
+
+        Args:
+            feature_id: Unique feature ID.
+            scope: Repository scope.
+            repository: Repository name.
+            username: Username/branch.
+            cluster_id: Cluster ID from HDBSCAN.
+            label: Feature label (e.g., "authentication").
+            summary: Generated summary of the feature.
+            embedding: Embedding vector for the feature.
+            member_ids: List of element IDs belonging to this feature.
+
+        Returns:
+            True on success.
+        """
+        from datetime import datetime
+
+        doc: dict[str, Any] = {
+            "element_id": feature_id,
+            "scope": scope,
+            "repository": repository,
+            "username": username,
+            "element_type": "feature",
+            "name": label,
+            "cluster_id": cluster_id,
+            "cluster_label": label,
+            "summary": summary,
+            "member_count": len(member_ids),
+            "member_ids": member_ids,
+            "indexed_at": datetime.now().isoformat(),
+            "level": -1,  # Features are above files in hierarchy
+        }
+
+        if embedding is not None:
+            doc["embedding"] = embedding
+
+        client = self._get_client()
+        client.index(index=INDEX_NAME, id=feature_id, document=doc)
+        return True
+
+    def delete_features(
+        self,
+        scope: str,
+        repository: str,
+        username: str,
+    ) -> int:
+        """Delete all feature documents for a repository.
+
+        Args:
+            scope: Scope to filter by.
+            repository: Repository to filter by.
+            username: Username to filter by.
+
+        Returns:
+            Number of features deleted.
+        """
+        client = self._get_client()
+
+        response = client.delete_by_query(
+            index=INDEX_NAME,
+            body={
+                "query": {
+                    "bool": {
+                        "must": [
+                            {"term": {"scope": scope}},
+                            {"term": {"repository": repository}},
+                            {"term": {"username": username}},
+                            {"term": {"element_type": "feature"}},
+                        ]
+                    }
+                }
+            },
+            refresh=True,
+        )
+
+        return response.get("deleted", 0)
 
 
 class ElasticsearchFileStateRepository:

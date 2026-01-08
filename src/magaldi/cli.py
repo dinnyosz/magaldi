@@ -140,6 +140,7 @@ def parse(
                 discovery_result.repository,
                 user,
                 config,
+                workers=workers,
             )
             if feature_result:
                 print_feature_result(feature_result)
@@ -174,12 +175,14 @@ def parse(
 @click.option("--min-cluster-size", default=5, type=int, help="Minimum elements per feature (default: 5)")
 @click.option("--min-samples", default=3, type=int, help="HDBSCAN min_samples parameter (default: 3)")
 @click.option("--skip-labeling", is_flag=True, help="Skip Ollama feature labeling")
+@click.option("--workers", "-w", default=4, type=int, help="Number of parallel workers (default: 4)")
 def extract_features(
     repo_path: str,
     user: str,
     min_cluster_size: int,
     min_samples: int,
     skip_labeling: bool,
+    workers: int,
 ) -> None:
     """Extract features from indexed code elements.
 
@@ -217,6 +220,7 @@ def extract_features(
             min_cluster_size=min_cluster_size,
             min_samples=min_samples,
             skip_labeling=skip_labeling,
+            workers=workers,
         )
 
         if result:
@@ -281,6 +285,7 @@ def run_feature_extraction(
     min_cluster_size: int = 5,
     min_samples: int = 3,
     skip_labeling: bool = False,
+    workers: int = 4,
 ) -> dict | None:
     """Run Phase 5: Feature Extraction.
 
@@ -288,6 +293,13 @@ def run_feature_extraction(
         Dict with feature extraction results or None if no elements to extract.
     """
     from magaldi.clustering import ClusterConfig, FeatureClusterer
+    from magaldi.clustering.feature_processor import (
+        FeatureProcessingConfig,
+        FeatureProgressState,
+        FeatureTimingStats,
+        FeatureWorkerStatus,
+        process_features,
+    )
     from magaldi.db.elasticsearch import ElasticsearchRepository
 
     es_repo = ElasticsearchRepository(config)
@@ -318,22 +330,41 @@ def run_feature_extraction(
 
         clusterer = FeatureClusterer(cluster_config)
 
-        with console.status("[bold blue]Extracting features...[/]"):
-            result = clusterer.cluster(elements)
+        with console.status("[bold blue]Clustering...[/]"):
+            clustering_result = clusterer.cluster(elements)
 
-        console.print(f"  Found {result.cluster_count} features ({result.outlier_count} unclustered)")
+        # Calculate coverage stats
+        elements_in_features = sum(c.size for c in clustering_result.clusters)
+        coverage_pct = (elements_in_features / clustering_result.total_elements * 100) if clustering_result.total_elements > 0 else 0
 
-        # Label features with Ollama
-        if not skip_labeling and result.clusters:
-            with console.status("[bold blue]Labeling features with Ollama...[/]"):
-                result = clusterer.label_clusters(result)
+        console.print(
+            f"  Found [green]{clustering_result.cluster_count}[/] features "
+            f"covering [green]{elements_in_features}[/]/{clustering_result.total_elements} "
+            f"functions/methods ([green]{coverage_pct:.0f}%[/]) | "
+            f"{clustering_result.outlier_count} unclustered"
+        )
+
+        if not clustering_result.clusters:
+            return {
+                "cluster_count": 0,
+                "outlier_count": clustering_result.outlier_count,
+                "total_elements": clustering_result.total_elements,
+                "elements_covered": 0,
+                "coverage_pct": 0,
+                "clusters": [],
+            }
+
+        # Label features with Ollama (quick labels)
+        if not skip_labeling:
+            with console.status("[bold blue]Labeling features...[/]"):
+                clustering_result = clusterer.label_clusters(clustering_result)
 
         # Clear existing feature assignments
         es_repo.clear_cluster_assignments(scope, repository, username)
 
         # Build assignments for ES update
         assignments = []
-        for cluster in result.clusters:
+        for cluster in clustering_result.clusters:
             for element_id in cluster.element_ids:
                 assignments.append({
                     "element_id": element_id,
@@ -343,14 +374,114 @@ def run_feature_extraction(
 
         # Update ES with feature assignments
         if assignments:
-            with console.status("[bold blue]Saving feature assignments...[/]"):
-                updated = es_repo.update_cluster_assignments(assignments)
-            console.print(f"  Updated {updated} elements with feature assignments")
+            with console.status("[bold blue]Saving cluster assignments...[/]"):
+                es_repo.update_cluster_assignments(assignments)
+
+        # Process features: summarize -> embed -> index (with progress)
+        console.print(f"  Processing {clustering_result.cluster_count} features with {workers} workers...")
+
+        proc_config = FeatureProcessingConfig(
+            summarize_model=config.ollama.summarize_model,
+            embed_model=config.ollama.embed_model,
+            ollama_url=config.ollama.url,
+            num_workers=workers,
+        )
+
+        timing_stats = FeatureTimingStats()
+        worker_status = FeatureWorkerStatus()
+
+        def build_feature_display(state: FeatureProgressState, num_workers: int) -> RenderableType:
+            """Build Rich display for feature processing progress."""
+            pct = (state.completed / state.total * 100) if state.total > 0 else 0
+            eta = state.timing.eta_seconds(state.completed, state.total, state.num_workers)
+            elapsed_str = format_duration(state.timing.elapsed)
+
+            # Progress bar
+            bar_width = 30
+            filled = int(bar_width * pct / 100)
+            bar = "━" * filled + "╺" + "─" * (bar_width - filled - 1) if filled < bar_width else "━" * bar_width
+            bar_text = Text()
+            bar_text.append("  ")
+            bar_text.append(bar[:filled], style="green")
+            if filled < bar_width:
+                bar_text.append(bar[filled:], style="dim")
+            bar_text.append(" ")
+            bar_text.append(f"{state.completed}", style="green")
+            bar_text.append("/", style="dim")
+            bar_text.append(f"{state.total}", style="cyan")
+            bar_text.append(f" ({pct:.0f}%)", style="green")
+            bar_text.append(" | ", style="dim")
+            bar_text.append(elapsed_str, style="cyan")
+            bar_text.append(" elapsed", style="dim")
+            if eta:
+                bar_text.append(" | ~", style="dim")
+                bar_text.append(format_duration(eta), style="yellow")
+                bar_text.append(" ETA", style="dim")
+
+            # Worker table
+            worker_table = Table(show_header=False, box=None, padding=(0, 1))
+            worker_table.add_column("ID", style="dim", width=4)
+            worker_table.add_column("Stage", style="cyan", width=12)
+            worker_table.add_column("Feature")
+
+            workers_data = state.workers.get_all()
+            for wid in range(num_workers):
+                if wid in workers_data:
+                    feature_name, stage = workers_data[wid]
+                    worker_table.add_row(f"[{wid}]", stage, feature_name)
+                else:
+                    worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "")
+
+            # Stats line
+            avg_api = state.timing.avg_summarize_time + state.timing.avg_embed_time
+            stats = f"  [dim]Avg:[/] [green]{avg_api:.1f}s[/]/feature [dim]([/][green]{state.timing.avg_summarize_time:.1f}s[/] summ + [green]{state.timing.avg_embed_time:.1f}s[/] embed[dim])[/]"
+
+            return Group(bar_text, worker_table, stats)
+
+        current_state = FeatureProgressState(
+            total=clustering_result.cluster_count,
+            completed=0,
+            failed=0,
+            timing=timing_stats,
+            workers=worker_status,
+            num_workers=workers,
+        )
+
+        class LiveFeatureDisplay:
+            def __rich__(self) -> RenderableType:
+                return build_feature_display(current_state, workers)
+
+        with Live(LiveFeatureDisplay(), console=console, refresh_per_second=10) as live:
+            def on_progress(state: FeatureProgressState) -> None:
+                nonlocal current_state
+                current_state = state
+                live.refresh()
+
+            def on_status_change() -> None:
+                live.refresh()
+
+            proc_result = process_features(
+                clustering_result=clustering_result,
+                scope=scope,
+                repository=repository,
+                username=username,
+                es_repo=es_repo,
+                config=proc_config,
+                on_progress=on_progress,
+                on_status_change=on_status_change,
+                worker_status=worker_status,
+                timing_stats=timing_stats,
+            )
 
         return {
-            "cluster_count": result.cluster_count,
-            "outlier_count": result.outlier_count,
-            "total_elements": result.total_elements,
+            "cluster_count": clustering_result.cluster_count,
+            "outlier_count": clustering_result.outlier_count,
+            "total_elements": clustering_result.total_elements,
+            "elements_covered": elements_in_features,
+            "coverage_pct": coverage_pct,
+            "processed": proc_result.get("processed", 0),
+            "failed": proc_result.get("failed", 0),
+            "elapsed": proc_result.get("elapsed", 0),
             "clusters": [
                 {
                     "cluster_id": c.cluster_id,
@@ -358,7 +489,7 @@ def run_feature_extraction(
                     "size": c.size,
                     "sample_names": c.element_names[:5],
                 }
-                for c in result.clusters
+                for c in clustering_result.clusters
             ],
         }
 
@@ -585,7 +716,22 @@ def print_feature_result(result: dict) -> None:
     if not result:
         return
 
-    console.print(f"  [green]{result['cluster_count']} features[/] | {result['outlier_count']} unclustered | {result['total_elements']} total elements")
+    coverage = result.get("elements_covered", 0)
+    total = result.get("total_elements", 0)
+    pct = result.get("coverage_pct", 0)
+    failed = result.get("failed", 0)
+    elapsed = result.get("elapsed", 0)
+
+    # Summary line
+    parts = [
+        f"[green]{result['cluster_count']} features[/]",
+        f"covering {coverage}/{total} ({pct:.0f}%)",
+    ]
+    if failed > 0:
+        parts.append(f"[red]{failed} failed[/]")
+    if elapsed > 0:
+        parts.append(f"{format_duration(elapsed)} elapsed")
+    console.print(f"  {' | '.join(parts)}")
 
     # Show top features with their labels
     if result.get("clusters"):
