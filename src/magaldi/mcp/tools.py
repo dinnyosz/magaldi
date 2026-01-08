@@ -60,26 +60,25 @@ def search_code(
         size=limit,
     )
 
-    # Format results
+    # Format results (search_by_vector returns flattened dicts with _score)
     formatted = []
-    for hit in results:
-        source = hit["_source"]
+    for result in results:
         # Filter by language if specified
-        if language and source.get("language") != language:
+        if language and result.get("language") != language:
             continue
 
         formatted.append({
-            "element_id": source.get("element_id"),
-            "name": source.get("name"),
-            "type": source.get("element_type"),
-            "file": source.get("relative_path"),
-            "line": source.get("line_start"),
-            "language": source.get("language"),
-            "summary": source.get("summary", ""),
-            "signature": source.get("signature", ""),
-            "score": hit.get("_score", 0),
-            "scope": source.get("scope"),
-            "repository": source.get("repository"),
+            "element_id": result.get("element_id"),
+            "name": result.get("name"),
+            "type": result.get("element_type"),
+            "file": result.get("relative_path"),
+            "line": result.get("line_start"),
+            "language": result.get("language"),
+            "summary": result.get("summary", ""),
+            "signature": result.get("signature", ""),
+            "score": result.get("_score", 0),
+            "scope": result.get("scope"),
+            "repository": result.get("repository"),
         })
 
     return formatted[:limit]
@@ -124,17 +123,16 @@ def search_features(
     )
 
     formatted = []
-    for hit in results:
-        source = hit["_source"]
+    for result in results:
         formatted.append({
-            "feature_id": source.get("element_id"),
-            "label": source.get("cluster_label", source.get("name")),
-            "summary": source.get("summary", ""),
-            "member_count": source.get("member_count", 0),
-            "member_ids": source.get("member_ids", [])[:5],  # Sample
-            "score": hit.get("_score", 0),
-            "scope": source.get("scope"),
-            "repository": source.get("repository"),
+            "feature_id": result.get("element_id"),
+            "label": result.get("cluster_label", result.get("name")),
+            "summary": result.get("summary", ""),
+            "member_count": result.get("member_count", 0),
+            "member_ids": result.get("member_ids", [])[:5],  # Sample
+            "score": result.get("_score", 0),
+            "scope": result.get("scope"),
+            "repository": result.get("repository"),
         })
 
     return formatted
@@ -182,23 +180,22 @@ def find_similar(
     )
 
     formatted = []
-    for hit in results:
-        source = hit["_source"]
+    for result in results:
         # Skip self
-        if source.get("element_id") == element_id:
+        if result.get("element_id") == element_id:
             continue
 
         formatted.append({
-            "element_id": source.get("element_id"),
-            "name": source.get("name"),
-            "type": source.get("element_type"),
-            "file": source.get("relative_path"),
-            "line": source.get("line_start"),
-            "language": source.get("language"),
-            "summary": source.get("summary", ""),
-            "similarity": hit.get("_score", 0),
-            "scope": source.get("scope"),
-            "repository": source.get("repository"),
+            "element_id": result.get("element_id"),
+            "name": result.get("name"),
+            "type": result.get("element_type"),
+            "file": result.get("relative_path"),
+            "line": result.get("line_start"),
+            "language": result.get("language"),
+            "summary": result.get("summary", ""),
+            "similarity": result.get("_score", 0),
+            "scope": result.get("scope"),
+            "repository": result.get("repository"),
         })
 
         if len(formatted) >= limit:
