@@ -80,12 +80,12 @@ class ClusteringResult:
 # CLUSTER LABELING PROMPT
 # =============================================================================
 
-LABEL_PROMPT = """Given these function/method names from a code cluster, generate a short label (1-3 words) that describes the common feature or functionality they share.
+LABEL_PROMPT = """Given these function/method names from a code cluster, generate a short label (1-5 words) that describes the common feature or functionality they share.
 
 Function names:
 {names}
 
-Generate ONLY a short label like: "authentication", "database queries", "API handlers", "file processing", "error handling", "data validation", etc.
+Generate ONLY a short label like: "user authentication", "database query handling", "REST API endpoints", "file processing utilities", "input validation", etc.
 
 Label:"""
 

@@ -448,8 +448,24 @@ def build_embedding_text(
                 docstring += "..."
             parts.append(f"Docstring: {docstring}")
 
+    elif element.element_type in ("variable", "constant"):
+        # Variables and constants get hierarchical context
+        file_summary = embedding_store.get_file_summary(element)
+        if file_summary:
+            parts.append(f"File context: {file_summary}")
+
+        class_summary = embedding_store.get_class_summary(element)
+        if class_summary:
+            parts.append(f"Class context: {class_summary}")
+
+        parts.append(f"Name: {element.name}")
+        parts.append(f"Type: {element.element_type}")
+
+        summary = embedding_store.get_summary(element.element_id)
+        parts.append(f"Summary: {summary or 'No summary available'}")
+
     else:
-        # Default for other types (variables, etc.)
+        # Default for other types
         parts.append(f"Name: {element.name}")
         summary = embedding_store.get_summary(element.element_id)
         if summary:

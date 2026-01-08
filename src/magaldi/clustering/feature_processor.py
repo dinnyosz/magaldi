@@ -154,8 +154,8 @@ class ProcessedFeature:
 # =============================================================================
 
 
-FEATURE_SUMMARY_PROMPT = """You are analyzing a code feature cluster containing related functions/methods.
-Based on the summaries of the member functions below, generate a comprehensive summary of what this feature does.
+FEATURE_SUMMARY_PROMPT = """You are analyzing a code feature containing related functions/methods.
+Based on the member function summaries below, describe what this feature does.
 
 Feature name: {label}
 Number of members: {member_count}
@@ -163,10 +163,9 @@ Number of members: {member_count}
 Member function summaries:
 {member_summaries}
 
-Write a 2-4 sentence summary that describes:
-1. The main purpose/responsibility of this feature
-2. Key capabilities it provides
-3. How the functions work together
+Write a 2-4 sentence summary describing:
+1. The overall purpose of this feature
+2. The key operations it provides
 
 Summary:"""
 

@@ -352,9 +352,11 @@ def truncate_code(code: str, max_tokens: int = 4000) -> str:
 
 PROMPTS = {
     "file": """Summarize this {language} file in 2-3 sentences. Focus on:
-- Primary purpose and responsibility
-- Key classes/functions it provides
-- Notable patterns or design choices
+- The overall purpose and role of this module in the system
+- What problem domain or functionality it addresses
+- Key design decisions or architectural patterns used
+
+Do NOT list individual classes or functions - those are documented separately.
 
 File: {file_path}
 
@@ -362,8 +364,12 @@ Code:
 {code}
 
 Summary:""",
-    "class": """Summarize this {language} class in 2-3 sentences. Include its purpose,
-key responsibilities, and notable patterns.
+    "class": """Summarize this {language} class in 2-3 sentences. Focus on:
+- What this class represents or models
+- Its role and responsibility in the system
+- How it fits into the broader architecture
+
+Do NOT list individual methods - those are documented separately.
 
 File context: {file_summary}
 
@@ -374,7 +380,9 @@ Code:
 {code}
 
 Summary:""",
-    "function": """Summarize what this function does in 1-2 concise sentences.
+    "function": """Describe what this function does in 1-2 sentences. Be specific about:
+- The inputs it accepts and outputs it returns
+- The exact operation, transformation, or side effect it performs
 
 File context: {file_summary}
 {class_context}
@@ -387,7 +395,9 @@ Code:
 {code}
 
 Summary:""",
-    "method": """Summarize what this method does in 1-2 concise sentences.
+    "method": """Describe what this method does in 1-2 sentences. Be specific about:
+- The inputs it accepts and outputs it returns
+- The exact operation it performs or how it modifies the object's state
 
 File context: {file_summary}
 Class context: {class_summary}
@@ -400,15 +410,17 @@ Code:
 {code}
 
 Summary:""",
-    "constant": """Describe this {language} constant in one sentence. Focus on its purpose and how it's used.
+    "constant": """Describe this constant in one sentence: what value or configuration does it represent and what is it used for?
 
-File: {file_path}
+File context: {file_summary}
+
 Name: {name}
 Value:
 {code}
 {usages_section}
+
 Description:""",
-    "variable": """Describe this {language} class variable in one sentence. Focus on its purpose and how it's used.
+    "variable": """Describe this variable in one sentence: what data or state does it hold and what is it used for?
 
 File context: {file_summary}
 Class context: {class_summary}
@@ -417,6 +429,7 @@ Name: {name}
 Value:
 {code}
 {usages_section}
+
 Description:""",
 }
 
