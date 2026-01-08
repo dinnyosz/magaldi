@@ -475,7 +475,7 @@ class ElasticsearchRepository:
         username: str | None = None,
         element_types: list[str] | None = None,
         size: int = 10,
-        min_score: float = 0.7,
+        min_score: float = 0.3,
     ) -> list[dict[str, Any]]:
         """Search elements by vector similarity.
 
