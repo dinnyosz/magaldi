@@ -1,0 +1,641 @@
+"""MCP Tool implementations for Magaldi.
+
+Each tool function takes an ElasticsearchRepository and optional OllamaEmbedClient,
+plus tool-specific parameters, and returns a dict or list result.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from magaldi.db.elasticsearch import ElasticsearchRepository
+from magaldi.embedding.embedding import OllamaEmbedClient
+
+
+# =============================================================================
+# SEARCH TOOLS
+# =============================================================================
+
+
+def search_code(
+    es: ElasticsearchRepository,
+    ollama: OllamaEmbedClient,
+    query: str,
+    scope: str | None = None,
+    repository: str | None = None,
+    username: str = "main",
+    element_types: list[str] | None = None,
+    language: str | None = None,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """Semantic search for code elements.
+
+    Args:
+        es: Elasticsearch repository.
+        ollama: Ollama client for query embedding.
+        query: Natural language search query.
+        scope: Filter by scope.
+        repository: Filter by repository.
+        username: User branch to search.
+        element_types: Filter by element types.
+        language: Filter by programming language.
+        limit: Maximum results.
+
+    Returns:
+        List of matching code elements.
+    """
+    # Validate limit
+    limit = max(1, min(limit, 50))
+
+    # Generate query embedding
+    query_embedding = ollama.embed_single(query)
+
+    # Search by vector
+    results = es.search_by_vector(
+        embedding=query_embedding,
+        scope=scope,
+        repository=repository,
+        username=username,
+        element_types=element_types,
+        size=limit,
+    )
+
+    # Format results
+    formatted = []
+    for hit in results:
+        source = hit["_source"]
+        # Filter by language if specified
+        if language and source.get("language") != language:
+            continue
+
+        formatted.append({
+            "element_id": source.get("element_id"),
+            "name": source.get("name"),
+            "type": source.get("element_type"),
+            "file": source.get("relative_path"),
+            "line": source.get("line_start"),
+            "language": source.get("language"),
+            "summary": source.get("summary", ""),
+            "signature": source.get("signature", ""),
+            "score": hit.get("_score", 0),
+            "scope": source.get("scope"),
+            "repository": source.get("repository"),
+        })
+
+    return formatted[:limit]
+
+
+def search_features(
+    es: ElasticsearchRepository,
+    ollama: OllamaEmbedClient,
+    query: str,
+    scope: str | None = None,
+    repository: str | None = None,
+    username: str = "main",
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """Search for features/capabilities.
+
+    Args:
+        es: Elasticsearch repository.
+        ollama: Ollama client for query embedding.
+        query: Search query for features.
+        scope: Filter by scope.
+        repository: Filter by repository.
+        username: User branch.
+        limit: Maximum results.
+
+    Returns:
+        List of matching features.
+    """
+    limit = max(1, min(limit, 50))
+
+    # Generate query embedding
+    query_embedding = ollama.embed_single(query)
+
+    # Search features only
+    results = es.search_by_vector(
+        embedding=query_embedding,
+        scope=scope,
+        repository=repository,
+        username=username,
+        element_types=["feature"],
+        size=limit,
+    )
+
+    formatted = []
+    for hit in results:
+        source = hit["_source"]
+        formatted.append({
+            "feature_id": source.get("element_id"),
+            "label": source.get("cluster_label", source.get("name")),
+            "summary": source.get("summary", ""),
+            "member_count": source.get("member_count", 0),
+            "member_ids": source.get("member_ids", [])[:5],  # Sample
+            "score": hit.get("_score", 0),
+            "scope": source.get("scope"),
+            "repository": source.get("repository"),
+        })
+
+    return formatted
+
+
+def find_similar(
+    es: ElasticsearchRepository,
+    element_id: str,
+    limit: int = 10,
+    same_repo_only: bool = False,
+) -> list[dict[str, Any]]:
+    """Find code elements similar to a given element.
+
+    Args:
+        es: Elasticsearch repository.
+        element_id: Source element ID.
+        limit: Maximum results.
+        same_repo_only: Only search within same repository.
+
+    Returns:
+        List of similar elements with similarity scores.
+    """
+    limit = max(1, min(limit, 50))
+
+    # Get source element
+    doc = es.get_document(element_id)
+    if not doc:
+        raise ValueError(f"Element not found: {element_id}")
+
+    embedding = doc.get("embedding")
+    if not embedding:
+        raise ValueError(f"Element has no embedding: {element_id}")
+
+    # Build search filters
+    scope = doc.get("scope") if same_repo_only else None
+    repository = doc.get("repository") if same_repo_only else None
+
+    # Search excluding self
+    results = es.search_by_vector(
+        embedding=embedding,
+        scope=scope,
+        repository=repository,
+        username=doc.get("username", "main"),
+        size=limit + 1,  # Get one extra to filter out self
+    )
+
+    formatted = []
+    for hit in results:
+        source = hit["_source"]
+        # Skip self
+        if source.get("element_id") == element_id:
+            continue
+
+        formatted.append({
+            "element_id": source.get("element_id"),
+            "name": source.get("name"),
+            "type": source.get("element_type"),
+            "file": source.get("relative_path"),
+            "line": source.get("line_start"),
+            "language": source.get("language"),
+            "summary": source.get("summary", ""),
+            "similarity": hit.get("_score", 0),
+            "scope": source.get("scope"),
+            "repository": source.get("repository"),
+        })
+
+        if len(formatted) >= limit:
+            break
+
+    return formatted
+
+
+# =============================================================================
+# CONTEXT TOOLS
+# =============================================================================
+
+
+def get_element(
+    es: ElasticsearchRepository,
+    element_id: str,
+    include_code: bool = False,
+) -> dict[str, Any]:
+    """Get full details of a code element.
+
+    Args:
+        es: Elasticsearch repository.
+        element_id: Element ID.
+        include_code: Include raw source code.
+
+    Returns:
+        Element details.
+    """
+    doc = es.get_document(element_id)
+    if not doc:
+        raise ValueError(f"Element not found: {element_id}")
+
+    result = {
+        "element_id": doc.get("element_id"),
+        "name": doc.get("name"),
+        "type": doc.get("element_type"),
+        "file": doc.get("relative_path"),
+        "line_start": doc.get("line_start"),
+        "line_end": doc.get("line_end"),
+        "language": doc.get("language"),
+        "summary": doc.get("summary", ""),
+        "signature": doc.get("signature", ""),
+        "docstring": doc.get("docstring", ""),
+        "decorators": doc.get("decorators", []),
+        "visibility": doc.get("visibility", "public"),
+        "is_async": doc.get("is_async", False),
+        "parent_id": doc.get("parent_id"),
+        "scope": doc.get("scope"),
+        "repository": doc.get("repository"),
+    }
+
+    if include_code:
+        result["code"] = doc.get("raw_code", "")
+
+    return result
+
+
+def get_context(
+    es: ElasticsearchRepository,
+    element_id: str,
+    include_siblings: bool = False,
+    include_children: bool = True,
+) -> dict[str, Any]:
+    """Get hierarchical context for an element.
+
+    Args:
+        es: Elasticsearch repository.
+        element_id: Element ID.
+        include_siblings: Include sibling elements.
+        include_children: Include child elements.
+
+    Returns:
+        Hierarchical context.
+    """
+    doc = es.get_document(element_id)
+    if not doc:
+        raise ValueError(f"Element not found: {element_id}")
+
+    context: dict[str, Any] = {
+        "element": {
+            "id": doc.get("element_id"),
+            "name": doc.get("name"),
+            "type": doc.get("element_type"),
+            "file": doc.get("relative_path"),
+            "line_start": doc.get("line_start"),
+            "line_end": doc.get("line_end"),
+            "summary": doc.get("summary", ""),
+            "signature": doc.get("signature", ""),
+        },
+        "file": None,
+        "parent": None,
+        "siblings": [],
+        "children": [],
+    }
+
+    scope = doc.get("scope")
+    repository = doc.get("repository")
+    username = doc.get("username", "main")
+    relative_path = doc.get("relative_path")
+    parent_id = doc.get("parent_id")
+
+    # Get file context
+    file_doc = _find_file_element(es, scope, repository, username, relative_path)
+    if file_doc:
+        context["file"] = {
+            "id": file_doc.get("element_id"),
+            "name": file_doc.get("name"),
+            "summary": file_doc.get("summary", ""),
+        }
+
+    # Get parent context
+    if parent_id:
+        parent_doc = es.get_document(parent_id)
+        if parent_doc:
+            context["parent"] = {
+                "id": parent_doc.get("element_id"),
+                "name": parent_doc.get("name"),
+                "type": parent_doc.get("element_type"),
+                "summary": parent_doc.get("summary", ""),
+                "signature": parent_doc.get("signature", ""),
+            }
+
+    # Get siblings
+    if include_siblings and parent_id:
+        siblings = _find_children(es, parent_id)
+        context["siblings"] = [
+            {
+                "id": s.get("element_id"),
+                "name": s.get("name"),
+                "type": s.get("element_type"),
+                "line": s.get("line_start"),
+                "summary": s.get("summary", ""),
+            }
+            for s in siblings
+            if s.get("element_id") != element_id
+        ]
+
+    # Get children
+    if include_children:
+        children = _find_children(es, element_id)
+        context["children"] = [
+            {
+                "id": c.get("element_id"),
+                "name": c.get("name"),
+                "type": c.get("element_type"),
+                "line": c.get("line_start"),
+                "summary": c.get("summary", ""),
+                "signature": c.get("signature", ""),
+            }
+            for c in children
+        ]
+
+    return context
+
+
+def get_file_structure(
+    es: ElasticsearchRepository,
+    scope: str,
+    repository: str,
+    file_path: str,
+    username: str = "main",
+) -> dict[str, Any]:
+    """Get full structure of a file.
+
+    Args:
+        es: Elasticsearch repository.
+        scope: Repository scope.
+        repository: Repository name.
+        file_path: Relative file path.
+        username: User branch.
+
+    Returns:
+        File structure with nested elements.
+    """
+    # Get file element
+    file_doc = _find_file_element(es, scope, repository, username, file_path)
+    if not file_doc:
+        raise ValueError(f"File not found: {file_path}")
+
+    # Get all elements in file
+    elements = _find_elements_in_file(es, scope, repository, username, file_path)
+
+    # Build tree structure
+    def build_tree(parent_id: str | None) -> list[dict]:
+        children = []
+        for elem in elements:
+            if elem.get("parent_id") == parent_id:
+                node = {
+                    "id": elem.get("element_id"),
+                    "name": elem.get("name"),
+                    "type": elem.get("element_type"),
+                    "line_start": elem.get("line_start"),
+                    "line_end": elem.get("line_end"),
+                    "summary": elem.get("summary", ""),
+                    "signature": elem.get("signature", ""),
+                    "children": build_tree(elem.get("element_id")),
+                }
+                children.append(node)
+        return sorted(children, key=lambda x: x.get("line_start", 0))
+
+    file_id = file_doc.get("element_id")
+
+    return {
+        "file": {
+            "path": file_path,
+            "language": file_doc.get("language"),
+            "summary": file_doc.get("summary", ""),
+            "line_count": file_doc.get("line_end", 0),
+        },
+        "structure": build_tree(file_id),
+        "stats": {
+            "classes": sum(1 for e in elements if e.get("element_type") == "class"),
+            "functions": sum(1 for e in elements if e.get("element_type") == "function"),
+            "methods": sum(1 for e in elements if e.get("element_type") == "method"),
+            "total": len(elements),
+        },
+    }
+
+
+# =============================================================================
+# DISCOVERY TOOLS
+# =============================================================================
+
+
+def list_repos(
+    es: ElasticsearchRepository,
+    scope: str | None = None,
+) -> list[dict[str, Any]]:
+    """List all indexed repositories.
+
+    Args:
+        es: Elasticsearch repository.
+        scope: Filter by scope.
+
+    Returns:
+        List of repositories with statistics.
+    """
+    return es.get_indexed_repositories(scope=scope)
+
+
+def list_features(
+    es: ElasticsearchRepository,
+    scope: str,
+    repository: str,
+    username: str = "main",
+) -> list[dict[str, Any]]:
+    """List all features for a repository.
+
+    Args:
+        es: Elasticsearch repository.
+        scope: Repository scope.
+        repository: Repository name.
+        username: User branch.
+
+    Returns:
+        List of features.
+    """
+    return es.get_features(scope, repository, username)
+
+
+def get_repo_stats(
+    es: ElasticsearchRepository,
+    scope: str,
+    repository: str,
+    username: str = "main",
+) -> dict[str, Any]:
+    """Get statistics for a repository.
+
+    Args:
+        es: Elasticsearch repository.
+        scope: Repository scope.
+        repository: Repository name.
+        username: User branch.
+
+    Returns:
+        Repository statistics.
+    """
+    return es.get_repository_stats(scope, repository, username)
+
+
+# =============================================================================
+# NAVIGATION TOOLS
+# =============================================================================
+
+
+def get_children(
+    es: ElasticsearchRepository,
+    element_id: str,
+) -> list[dict[str, Any]]:
+    """Get child elements of a parent.
+
+    Args:
+        es: Elasticsearch repository.
+        element_id: Parent element ID.
+
+    Returns:
+        List of child elements.
+    """
+    children = _find_children(es, element_id)
+    return [
+        {
+            "element_id": c.get("element_id"),
+            "name": c.get("name"),
+            "type": c.get("element_type"),
+            "line_start": c.get("line_start"),
+            "line_end": c.get("line_end"),
+            "summary": c.get("summary", ""),
+            "signature": c.get("signature", ""),
+        }
+        for c in children
+    ]
+
+
+def get_feature_members(
+    es: ElasticsearchRepository,
+    feature_id: str,
+) -> list[dict[str, Any]]:
+    """Get all members of a feature cluster.
+
+    Args:
+        es: Elasticsearch repository.
+        feature_id: Feature ID.
+
+    Returns:
+        List of member elements.
+    """
+    # Get feature document
+    feature = es.get_document(feature_id)
+    if not feature:
+        raise ValueError(f"Feature not found: {feature_id}")
+
+    member_ids = feature.get("member_ids", [])
+    if not member_ids:
+        return []
+
+    # Fetch member documents
+    members = []
+    for member_id in member_ids:
+        doc = es.get_document(member_id)
+        if doc:
+            members.append({
+                "element_id": doc.get("element_id"),
+                "name": doc.get("name"),
+                "type": doc.get("element_type"),
+                "file": doc.get("relative_path"),
+                "line": doc.get("line_start"),
+                "summary": doc.get("summary", ""),
+                "signature": doc.get("signature", ""),
+            })
+
+    return members
+
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+
+def _find_file_element(
+    es: ElasticsearchRepository,
+    scope: str,
+    repository: str,
+    username: str,
+    relative_path: str,
+) -> dict[str, Any] | None:
+    """Find the file element for a given path."""
+    client = es._get_client()
+    result = client.search(
+        index="magaldi-code-elements",
+        body={
+            "query": {
+                "bool": {
+                    "filter": [
+                        {"term": {"scope": scope}},
+                        {"term": {"repository": repository}},
+                        {"term": {"username": username}},
+                        {"term": {"relative_path": relative_path}},
+                        {"term": {"element_type": "file"}},
+                    ]
+                }
+            },
+            "size": 1,
+        },
+    )
+
+    hits = result.get("hits", {}).get("hits", [])
+    return hits[0]["_source"] if hits else None
+
+
+def _find_children(
+    es: ElasticsearchRepository,
+    parent_id: str,
+) -> list[dict[str, Any]]:
+    """Find all children of an element."""
+    client = es._get_client()
+    result = client.search(
+        index="magaldi-code-elements",
+        body={
+            "query": {
+                "term": {"parent_id": parent_id}
+            },
+            "size": 100,
+            "sort": [{"line_start": "asc"}],
+        },
+    )
+
+    return [hit["_source"] for hit in result.get("hits", {}).get("hits", [])]
+
+
+def _find_elements_in_file(
+    es: ElasticsearchRepository,
+    scope: str,
+    repository: str,
+    username: str,
+    relative_path: str,
+) -> list[dict[str, Any]]:
+    """Find all elements in a file."""
+    client = es._get_client()
+    result = client.search(
+        index="magaldi-code-elements",
+        body={
+            "query": {
+                "bool": {
+                    "filter": [
+                        {"term": {"scope": scope}},
+                        {"term": {"repository": repository}},
+                        {"term": {"username": username}},
+                        {"term": {"relative_path": relative_path}},
+                    ],
+                    "must_not": [
+                        {"term": {"element_type": "file"}},
+                    ],
+                }
+            },
+            "size": 500,
+            "sort": [{"line_start": "asc"}],
+        },
+    )
+
+    return [hit["_source"] for hit in result.get("hits", {}).get("hits", [])]

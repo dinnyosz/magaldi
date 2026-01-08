@@ -867,6 +867,205 @@ class ElasticsearchRepository:
 
         return response.get("deleted", 0)
 
+    def get_indexed_repositories(
+        self,
+        scope: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get all indexed repositories with statistics.
+
+        Args:
+            scope: Filter by scope (optional).
+
+        Returns:
+            List of repositories with file/element counts.
+        """
+        client = self._get_client()
+
+        # Build filter
+        filters = [{"term": {"username": "main"}}]
+        if scope:
+            filters.append({"term": {"scope": scope}})
+
+        # Aggregate by scope and repository
+        result = client.search(
+            index=INDEX_NAME,
+            body={
+                "size": 0,
+                "query": {
+                    "bool": {
+                        "filter": filters,
+                        "must_not": [{"term": {"element_type": "feature"}}],
+                    }
+                },
+                "aggs": {
+                    "repos": {
+                        "composite": {
+                            "size": 1000,
+                            "sources": [
+                                {"scope": {"terms": {"field": "scope"}}},
+                                {"repository": {"terms": {"field": "repository"}}},
+                            ],
+                        },
+                        "aggs": {
+                            "file_count": {
+                                "filter": {"term": {"element_type": "file"}},
+                            },
+                            "languages": {
+                                "terms": {"field": "language", "size": 20},
+                            },
+                        },
+                    }
+                },
+            },
+        )
+
+        repos = []
+        for bucket in result.get("aggregations", {}).get("repos", {}).get("buckets", []):
+            repos.append({
+                "scope": bucket["key"]["scope"],
+                "repository": bucket["key"]["repository"],
+                "element_count": bucket["doc_count"],
+                "file_count": bucket["file_count"]["doc_count"],
+                "languages": [
+                    lang["key"]
+                    for lang in bucket.get("languages", {}).get("buckets", [])
+                    if lang["key"]
+                ],
+            })
+
+        return repos
+
+    def get_features(
+        self,
+        scope: str,
+        repository: str,
+        username: str = "main",
+    ) -> list[dict[str, Any]]:
+        """Get all features for a repository.
+
+        Args:
+            scope: Repository scope.
+            repository: Repository name.
+            username: User branch.
+
+        Returns:
+            List of features with summaries and member counts.
+        """
+        client = self._get_client()
+
+        result = client.search(
+            index=INDEX_NAME,
+            body={
+                "query": {
+                    "bool": {
+                        "filter": [
+                            {"term": {"scope": scope}},
+                            {"term": {"repository": repository}},
+                            {"term": {"username": username}},
+                            {"term": {"element_type": "feature"}},
+                        ]
+                    }
+                },
+                "size": 100,
+                "sort": [{"member_count": "desc"}],
+                "_source": [
+                    "element_id",
+                    "cluster_id",
+                    "cluster_label",
+                    "summary",
+                    "member_count",
+                    "member_ids",
+                ],
+            },
+        )
+
+        features = []
+        for hit in result.get("hits", {}).get("hits", []):
+            source = hit["_source"]
+            features.append({
+                "feature_id": source.get("element_id"),
+                "label": source.get("cluster_label"),
+                "summary": source.get("summary", ""),
+                "member_count": source.get("member_count", 0),
+                "member_ids": source.get("member_ids", []),
+            })
+
+        return features
+
+    def get_repository_stats(
+        self,
+        scope: str,
+        repository: str,
+        username: str = "main",
+    ) -> dict[str, Any]:
+        """Get statistics for a repository.
+
+        Args:
+            scope: Repository scope.
+            repository: Repository name.
+            username: User branch.
+
+        Returns:
+            Dictionary with element counts, language breakdown, feature count.
+        """
+        client = self._get_client()
+
+        # Get element stats
+        result = client.search(
+            index=INDEX_NAME,
+            body={
+                "size": 0,
+                "query": {
+                    "bool": {
+                        "filter": [
+                            {"term": {"scope": scope}},
+                            {"term": {"repository": repository}},
+                            {"term": {"username": username}},
+                        ]
+                    }
+                },
+                "aggs": {
+                    "by_type": {
+                        "terms": {"field": "element_type", "size": 20},
+                    },
+                    "by_language": {
+                        "terms": {"field": "language", "size": 20},
+                    },
+                    "total_lines": {
+                        "filter": {"term": {"element_type": "file"}},
+                        "aggs": {
+                            "lines": {"sum": {"field": "line_end"}},
+                        },
+                    },
+                },
+            },
+        )
+
+        aggs = result.get("aggregations", {})
+
+        # Build type counts
+        type_counts = {}
+        for bucket in aggs.get("by_type", {}).get("buckets", []):
+            type_counts[bucket["key"]] = bucket["doc_count"]
+
+        # Build language counts
+        language_counts = {}
+        for bucket in aggs.get("by_language", {}).get("buckets", []):
+            if bucket["key"]:  # Skip empty language
+                language_counts[bucket["key"]] = bucket["doc_count"]
+
+        feature_count = type_counts.pop("feature", 0)
+
+        return {
+            "scope": scope,
+            "repository": repository,
+            "elements_by_type": type_counts,
+            "elements_by_language": language_counts,
+            "total_elements": sum(type_counts.values()),
+            "total_lines": int(aggs.get("total_lines", {}).get("lines", {}).get("value", 0)),
+            "feature_count": feature_count,
+        }
+
 
 class ElasticsearchFileStateRepository:
     """Elasticsearch-based file state repository for change detection."""
