@@ -11,7 +11,14 @@ import sys
 import click
 from rich.console import Console, Group, RenderableType
 from rich.live import Live
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn, ProgressBar
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+    TimeElapsedColumn,
+)
 from rich.table import Table
 from rich.text import Text
 
@@ -25,7 +32,6 @@ from magaldi.parser.code_parser import ParsingResult, parse_files
 from magaldi.parser.discovery import DiscoveryError, DiscoveryResult, discover
 from magaldi.processing.processor import (
     ProcessingConfig,
-    ProcessingResult,
     ProgressState,
     TimingStats,
     WorkerStatus,
@@ -66,12 +72,13 @@ def main() -> None:
 @click.argument("repo_path", type=click.Path(exists=True, file_okay=False, dir_okay=True))
 @click.option("--user", "-u", required=True, help="Username/branch (use 'main' for primary parse)")
 @click.option("--skip-ai", is_flag=True, help="Skip AI processing (summarization and embedding)")
+@click.option("--skip-features", is_flag=True, help="Skip feature extraction after processing")
 @click.option("--dry-run", is_flag=True, help="Use in-memory storage (no database required)")
 @click.option("--ollama-url", default=None, help="Ollama API URL (default: from config)")
 @click.option("--workers", "-w", default=4, type=int, help="Number of parallel workers (default: 4)")
 @click.option("--force-clean", is_flag=True, help="Delete all indexed data for this repo/user before parsing")
 def parse(
-    repo_path: str, user: str, skip_ai: bool, dry_run: bool,
+    repo_path: str, user: str, skip_ai: bool, skip_features: bool, dry_run: bool,
     ollama_url: str | None, workers: int, force_clean: bool
 ) -> None:
     """Parse a repository and index its code elements.
@@ -125,6 +132,18 @@ def parse(
         )
         print_processing_result(processed, skipped, indexed, skip_ai, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, workers)
 
+        # Phase 5: Feature Extraction (optional)
+        if not skip_features and not skip_ai and not dry_run and processed > 0:
+            console.print("\n[bold blue]Phase 5:[/] Feature Extraction")
+            feature_result = run_feature_extraction(
+                discovery_result.scope,
+                discovery_result.repository,
+                user,
+                config,
+            )
+            if feature_result:
+                print_feature_result(feature_result)
+
         print_summary(discovery_result, manifest, processed, indexed, skip_ai)
 
     except KeyboardInterrupt:
@@ -141,6 +160,73 @@ def parse(
         console.print(f"\n[red]Error:[/] {e}")
         if "--dry-run" not in sys.argv:
             console.print("[dim]Hint: Use --dry-run to test without database[/]")
+        sys.exit(1)
+
+
+# =============================================================================
+# EXTRACT-FEATURES COMMAND
+# =============================================================================
+
+
+@main.command("extract-features")
+@click.argument("repo_path", type=click.Path(exists=True, file_okay=False, dir_okay=True))
+@click.option("--user", "-u", required=True, help="Username/branch to extract features from")
+@click.option("--min-cluster-size", default=5, type=int, help="Minimum elements per feature (default: 5)")
+@click.option("--min-samples", default=3, type=int, help="HDBSCAN min_samples parameter (default: 3)")
+@click.option("--skip-labeling", is_flag=True, help="Skip Ollama feature labeling")
+def extract_features(
+    repo_path: str,
+    user: str,
+    min_cluster_size: int,
+    min_samples: int,
+    skip_labeling: bool,
+) -> None:
+    """Extract features from indexed code elements.
+
+    Groups semantically similar functions/methods into features
+    using HDBSCAN clustering on vector embeddings.
+
+    REPO_PATH is the path to the repository (used to load magaldi.yaml).
+    """
+    from pathlib import Path
+
+    from magaldi.parser.discovery import load_repo_config
+
+    config = load_config(skip_validation=False)
+
+    # Load repo config to get scope/repository
+    repo_config_path = Path(repo_path) / "magaldi.yaml"
+    if not repo_config_path.exists():
+        console.print(f"[red]Error:[/] magaldi.yaml not found in {repo_path}")
+        sys.exit(1)
+
+    repo_config = load_repo_config(repo_config_path)
+    scope = repo_config["scope"]
+    repository = Path(repo_path).name
+
+    console.print("[bold blue]Feature Extraction[/]")
+    console.print(f"  Repository: {scope}/{repository} @{user}")
+    console.print()
+
+    try:
+        result = run_feature_extraction(
+            scope=scope,
+            repository=repository,
+            username=user,
+            config=config,
+            min_cluster_size=min_cluster_size,
+            min_samples=min_samples,
+            skip_labeling=skip_labeling,
+        )
+
+        if result:
+            print_feature_result(result)
+            console.print("\n[green]Feature extraction complete.[/]")
+        else:
+            console.print("[yellow]No elements to extract features from.[/]")
+
+    except Exception as e:
+        console.print(f"\n[red]Error:[/] {e}")
         sys.exit(1)
 
 
@@ -185,6 +271,99 @@ def run_change_detection(
             progress.update(task, completed=completed, total=total)
 
         return detect_changes(discovery_result, file_state_repo, on_progress)
+
+
+def run_feature_extraction(
+    scope: str,
+    repository: str,
+    username: str,
+    config: MagaldiConfig,
+    min_cluster_size: int = 5,
+    min_samples: int = 3,
+    skip_labeling: bool = False,
+) -> dict | None:
+    """Run Phase 5: Feature Extraction.
+
+    Returns:
+        Dict with feature extraction results or None if no elements to extract.
+    """
+    from magaldi.clustering import ClusterConfig, FeatureClusterer
+    from magaldi.db.elasticsearch import ElasticsearchRepository
+
+    es_repo = ElasticsearchRepository(config)
+
+    try:
+        # Fetch embeddings for functions/methods only
+        with console.status("[bold blue]Fetching embeddings...[/]"):
+            elements = es_repo.get_all_embeddings(
+                scope=scope,
+                repository=repository,
+                username=username,
+                element_types=["function", "method"],
+            )
+
+        if not elements:
+            console.print("  [dim]No functions/methods with embeddings found[/]")
+            return None
+
+        console.print(f"  Found {len(elements)} functions/methods with embeddings")
+
+        # Run HDBSCAN clustering
+        cluster_config = ClusterConfig(
+            min_cluster_size=min_cluster_size,
+            min_samples=min_samples,
+            ollama_url=config.ollama.url,
+            ollama_model=config.ollama.summarize_model,
+        )
+
+        clusterer = FeatureClusterer(cluster_config)
+
+        with console.status("[bold blue]Extracting features...[/]"):
+            result = clusterer.cluster(elements)
+
+        console.print(f"  Found {result.cluster_count} features ({result.outlier_count} unclustered)")
+
+        # Label features with Ollama
+        if not skip_labeling and result.clusters:
+            with console.status("[bold blue]Labeling features with Ollama...[/]"):
+                result = clusterer.label_clusters(result)
+
+        # Clear existing feature assignments
+        es_repo.clear_cluster_assignments(scope, repository, username)
+
+        # Build assignments for ES update
+        assignments = []
+        for cluster in result.clusters:
+            for element_id in cluster.element_ids:
+                assignments.append({
+                    "element_id": element_id,
+                    "cluster_id": str(cluster.cluster_id),
+                    "cluster_label": cluster.label,
+                })
+
+        # Update ES with feature assignments
+        if assignments:
+            with console.status("[bold blue]Saving feature assignments...[/]"):
+                updated = es_repo.update_cluster_assignments(assignments)
+            console.print(f"  Updated {updated} elements with feature assignments")
+
+        return {
+            "cluster_count": result.cluster_count,
+            "outlier_count": result.outlier_count,
+            "total_elements": result.total_elements,
+            "clusters": [
+                {
+                    "cluster_id": c.cluster_id,
+                    "label": c.label,
+                    "size": c.size,
+                    "sample_names": c.element_names[:5],
+                }
+                for c in result.clusters
+            ],
+        }
+
+    finally:
+        es_repo.close()
 
 
 def run_parsing(manifest: ChangeManifest) -> ParsingResult:
@@ -399,6 +578,22 @@ def print_parsing_result(result: ParsingResult) -> None:
     types = ", ".join(f"{t}:[green]{c}[/]" for t, c in sorted(result.elements_by_type.items()))
     failed = f" | [red]{len(result.failed_files)} failed[/]" if result.failed_files else ""
     console.print(f"  [green]{len(result.parsed_files)}[/] files → [green]{result.total_elements}[/] elements ({types}){failed}")
+
+
+def print_feature_result(result: dict) -> None:
+    """Print feature extraction results."""
+    if not result:
+        return
+
+    console.print(f"  [green]{result['cluster_count']} features[/] | {result['outlier_count']} unclustered | {result['total_elements']} total elements")
+
+    # Show top features with their labels
+    if result.get("clusters"):
+        console.print("  [dim]Top features:[/]")
+        for cluster in result["clusters"][:5]:
+            label = cluster.get("label") or f"feature_{cluster['cluster_id']}"
+            names = ", ".join(cluster.get("sample_names", [])[:3])
+            console.print(f"    [cyan]{label}[/] ({cluster['size']} elements): {names}...")
 
 
 def print_processing_result(

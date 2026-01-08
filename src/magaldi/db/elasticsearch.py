@@ -43,6 +43,8 @@ INDEX_MAPPING = {
             "file_hash": {"type": "keyword"},  # For change detection (stored on all elements)
             "element_count": {"type": "integer"},  # Total elements in file (only on file elements)
             "indexed_at": {"type": "date"},
+            "cluster_id": {"type": "keyword"},  # Feature cluster ID
+            "cluster_label": {"type": "keyword"},  # Human-readable cluster label
             "embedding": {
                 "type": "dense_vector",
                 "dims": 1024,
@@ -521,6 +523,226 @@ class ElasticsearchRepository:
             {**hit["_source"], "_score": hit["_score"] - 1.0}
             for hit in result["hits"]["hits"]
         ]
+
+    def get_all_embeddings(
+        self,
+        scope: str,
+        repository: str,
+        username: str,
+        element_types: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fetch all elements with embeddings for clustering.
+
+        Args:
+            scope: Scope to filter by.
+            repository: Repository to filter by.
+            username: Username to filter by.
+            element_types: Filter by element types (e.g., ["function", "method"]).
+
+        Returns:
+            List of dicts with element_id, embedding, element_type, name, relative_path.
+        """
+        must_clauses: list[dict[str, Any]] = [
+            {"term": {"scope": scope}},
+            {"term": {"repository": repository}},
+            {"term": {"username": username}},
+            {"exists": {"field": "embedding"}},
+        ]
+
+        if element_types:
+            must_clauses.append({"terms": {"element_type": element_types}})
+
+        client = self._get_client()
+
+        # Use scroll for large result sets
+        results: list[dict[str, Any]] = []
+        response = client.search(
+            index=INDEX_NAME,
+            body={
+                "query": {"bool": {"must": must_clauses}},
+                "size": 1000,
+                "_source": ["element_id", "embedding", "element_type", "name", "relative_path"],
+            },
+            scroll="2m",
+        )
+
+        scroll_id = response.get("_scroll_id")
+        hits = response["hits"]["hits"]
+
+        while hits:
+            for hit in hits:
+                results.append(hit["_source"])
+
+            response = client.scroll(scroll_id=scroll_id, scroll="2m")
+            scroll_id = response.get("_scroll_id")
+            hits = response["hits"]["hits"]
+
+        # Clear scroll
+        if scroll_id:
+            client.clear_scroll(scroll_id=scroll_id)
+
+        return results
+
+    def update_cluster_assignments(
+        self,
+        assignments: list[dict[str, Any]],
+    ) -> int:
+        """Bulk update cluster assignments for elements.
+
+        Args:
+            assignments: List of {element_id, cluster_id, cluster_label}.
+
+        Returns:
+            Number of elements updated.
+        """
+        if not assignments:
+            return 0
+
+        client = self._get_client()
+
+        # Build bulk update body
+        bulk_body: list[dict[str, Any]] = []
+        for assignment in assignments:
+            bulk_body.append({
+                "update": {
+                    "_index": INDEX_NAME,
+                    "_id": assignment["element_id"],
+                }
+            })
+            bulk_body.append({
+                "doc": {
+                    "cluster_id": assignment["cluster_id"],
+                    "cluster_label": assignment.get("cluster_label"),
+                }
+            })
+
+        response = client.bulk(body=bulk_body, refresh=True)
+
+        # Count successful updates
+        updated = 0
+        for item in response.get("items", []):
+            if item.get("update", {}).get("result") in ["updated", "noop"]:
+                updated += 1
+
+        return updated
+
+    def get_clusters(
+        self,
+        scope: str,
+        repository: str,
+        username: str,
+    ) -> list[dict[str, Any]]:
+        """Get all clusters with their elements.
+
+        Args:
+            scope: Scope to filter by.
+            repository: Repository to filter by.
+            username: Username to filter by.
+
+        Returns:
+            List of cluster dicts with cluster_id, cluster_label, element_count, elements.
+        """
+        client = self._get_client()
+
+        # Aggregate by cluster_id
+        response = client.search(
+            index=INDEX_NAME,
+            body={
+                "query": {
+                    "bool": {
+                        "must": [
+                            {"term": {"scope": scope}},
+                            {"term": {"repository": repository}},
+                            {"term": {"username": username}},
+                            {"exists": {"field": "cluster_id"}},
+                        ]
+                    }
+                },
+                "size": 0,
+                "aggs": {
+                    "clusters": {
+                        "terms": {
+                            "field": "cluster_id",
+                            "size": 1000,
+                        },
+                        "aggs": {
+                            "cluster_label": {
+                                "terms": {
+                                    "field": "cluster_label",
+                                    "size": 1,
+                                }
+                            },
+                            "sample_elements": {
+                                "top_hits": {
+                                    "size": 5,
+                                    "_source": ["element_id", "name", "element_type", "relative_path"],
+                                }
+                            },
+                        },
+                    }
+                },
+            },
+        )
+
+        clusters = []
+        for bucket in response["aggregations"]["clusters"]["buckets"]:
+            cluster_id = bucket["key"]
+            label_buckets = bucket["cluster_label"]["buckets"]
+            cluster_label = label_buckets[0]["key"] if label_buckets else None
+
+            sample_elements = [
+                hit["_source"] for hit in bucket["sample_elements"]["hits"]["hits"]
+            ]
+
+            clusters.append({
+                "cluster_id": cluster_id,
+                "cluster_label": cluster_label,
+                "element_count": bucket["doc_count"],
+                "elements": sample_elements,
+            })
+
+        return clusters
+
+    def clear_cluster_assignments(
+        self,
+        scope: str,
+        repository: str,
+        username: str,
+    ) -> int:
+        """Clear all cluster assignments for a repository.
+
+        Args:
+            scope: Scope to filter by.
+            repository: Repository to filter by.
+            username: Username to filter by.
+
+        Returns:
+            Number of elements updated.
+        """
+        client = self._get_client()
+
+        response = client.update_by_query(
+            index=INDEX_NAME,
+            body={
+                "query": {
+                    "bool": {
+                        "must": [
+                            {"term": {"scope": scope}},
+                            {"term": {"repository": repository}},
+                            {"term": {"username": username}},
+                            {"exists": {"field": "cluster_id"}},
+                        ]
+                    }
+                },
+                "script": {
+                    "source": "ctx._source.remove('cluster_id'); ctx._source.remove('cluster_label')",
+                    "lang": "painless",
+                },
+            },
+            refresh=True,
+        )
+
+        return response.get("updated", 0)
 
 
 class ElasticsearchFileStateRepository:
