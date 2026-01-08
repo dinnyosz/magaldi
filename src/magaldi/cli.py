@@ -256,7 +256,18 @@ def run_processing(
         bar_text.append(bar[:filled], style="green")
         if filled < bar_width:
             bar_text.append(bar[filled:], style="dim")
-        bar_text.append(f" {state.completed}/{state.total} ({pct:.0f}%) | {elapsed_str} elapsed{eta_str}")
+        bar_text.append(" ")
+        bar_text.append(f"{state.completed}", style="green")
+        bar_text.append("/", style="dim")
+        bar_text.append(f"{state.total}", style="cyan")
+        bar_text.append(f" ({pct:.0f}%)", style="green")
+        bar_text.append(" | ", style="dim")
+        bar_text.append(elapsed_str, style="cyan")
+        bar_text.append(" elapsed", style="dim")
+        if eta:
+            bar_text.append(" | ~", style="dim")
+            bar_text.append(format_duration(eta), style="yellow")
+            bar_text.append(" ETA", style="dim")
 
         # Worker table
         worker_table = Table(show_header=False, box=None, padding=(0, 1))
