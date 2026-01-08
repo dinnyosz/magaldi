@@ -23,10 +23,15 @@ log = logging.getLogger(__name__)
 class MagaldiMCPServer:
     """MCP Server for Magaldi code discovery."""
 
-    def __init__(self, default_username: str = "main") -> None:
+    def __init__(
+        self,
+        default_username: str = "main",
+        repo_root: str | None = None,
+    ) -> None:
         self.server = Server("magaldi")
         self.config = get_config()
         self.default_username = default_username
+        self.repo_root = repo_root  # For read_file and find_files tools
         self.es_repo: ElasticsearchRepository | None = None
         self.ollama_embed: OllamaEmbedClient | None = None
 
@@ -56,268 +61,234 @@ class MagaldiMCPServer:
         async def list_tools() -> list[Tool]:
             """List available tools."""
             return [
+                # =============================================================
+                # SEARCH - Start here to find code
+                # =============================================================
                 Tool(
                     name="search_code",
-                    description="Semantic search for code elements using natural language. "
-                    "Find functions, classes, methods by describing what they do.",
+                    description="FIND CODE: Search for functions, classes, methods by what they do. "
+                    "Use this first to locate relevant code. Returns name, file, line, summary. "
+                    "Use include_code=true to see implementation. Use brief=true for exploration.",
                     inputSchema={
                         "type": "object",
                         "properties": {
                             "query": {
                                 "type": "string",
-                                "description": "Natural language search query (e.g., 'authentication handler', 'database connection')",
-                            },
-                            "scope": {
-                                "type": "string",
-                                "description": "Filter by scope (optional)",
-                            },
-                            "repository": {
-                                "type": "string",
-                                "description": "Filter by repository name (optional)",
-                            },
-                            "username": {
-                                "type": "string",
-                                "description": "User branch to search (default: 'main')",
-                                "default": "main",
+                                "description": "What the code does (e.g., 'handle authentication', 'parse JSON', 'validate email')",
                             },
                             "element_types": {
                                 "type": "array",
                                 "items": {"type": "string"},
-                                "description": "Filter by element types: file, class, function, method (optional)",
-                            },
-                            "language": {
-                                "type": "string",
-                                "description": "Filter by programming language (optional)",
-                            },
-                            "limit": {
-                                "type": "integer",
-                                "description": "Maximum results (1-50, default: 20)",
-                                "default": 20,
+                                "description": "Filter: file, class, function, method",
                             },
                             "include_code": {
                                 "type": "boolean",
-                                "description": "Include source code in results (default: false)",
+                                "description": "Include source code in results",
                                 "default": False,
                             },
+                            "brief": {
+                                "type": "boolean",
+                                "description": "Minimal output (name, file, line only) - use for broad exploration",
+                                "default": False,
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Max results (default: 20)",
+                                "default": 20,
+                            },
+                            "repository": {"type": "string", "description": "Filter by repo"},
+                            "scope": {"type": "string", "description": "Filter by scope"},
                         },
                         "required": ["query"],
                     },
                 ),
                 Tool(
                     name="search_features",
-                    description="Search for code features/capabilities. Features are groups of "
-                    "related functions that implement a common functionality.",
+                    description="FIND CAPABILITIES: Search for high-level features (groups of related functions). "
+                    "Use when you need to understand what the codebase CAN DO, not specific implementations.",
                     inputSchema={
                         "type": "object",
                         "properties": {
                             "query": {
                                 "type": "string",
-                                "description": "Search query for features (e.g., 'authentication', 'data validation')",
+                                "description": "What capability you need (e.g., 'authentication', 'caching', 'validation')",
                             },
-                            "scope": {
-                                "type": "string",
-                                "description": "Filter by scope (optional)",
-                            },
-                            "repository": {
-                                "type": "string",
-                                "description": "Filter by repository (optional)",
-                            },
-                            "username": {
-                                "type": "string",
-                                "description": "User branch (default: 'main')",
-                                "default": "main",
-                            },
-                            "limit": {
-                                "type": "integer",
-                                "description": "Maximum results (default: 10)",
-                                "default": 10,
-                            },
+                            "limit": {"type": "integer", "default": 20},
+                            "repository": {"type": "string"},
+                            "scope": {"type": "string"},
                         },
                         "required": ["query"],
                     },
                 ),
                 Tool(
                     name="find_similar",
-                    description="Find code elements similar to a given element. "
-                    "Useful for finding related implementations or patterns.",
+                    description="FIND RELATED CODE: Given an element_id, find similar implementations. "
+                    "Use after search_code to find related patterns or alternative approaches.",
                     inputSchema={
                         "type": "object",
                         "properties": {
-                            "element_id": {
-                                "type": "string",
-                                "description": "Element ID to find similar code for",
-                            },
-                            "limit": {
-                                "type": "integer",
-                                "description": "Maximum results (default: 10)",
-                                "default": 10,
-                            },
-                            "same_repo_only": {
-                                "type": "boolean",
-                                "description": "Only search within same repository (default: false)",
-                                "default": False,
-                            },
+                            "element_id": {"type": "string", "description": "Element ID from search results"},
+                            "limit": {"type": "integer", "default": 10},
+                            "same_repo_only": {"type": "boolean", "default": False},
+                        },
+                        "required": ["element_id"],
+                    },
+                ),
+                # =============================================================
+                # INSPECT - Look at specific code
+                # =============================================================
+                Tool(
+                    name="get_element",
+                    description="INSPECT ELEMENT: Get full details of a specific element by ID. "
+                    "Use after search_code to see complete info. Use include_code=true for source.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "element_id": {"type": "string", "description": "Element ID from search results"},
+                            "include_code": {"type": "boolean", "default": False},
                         },
                         "required": ["element_id"],
                     },
                 ),
                 Tool(
-                    name="get_element",
-                    description="Get full details of a code element by its ID.",
+                    name="batch_get_elements",
+                    description="INSPECT MULTIPLE: Get several elements at once by their IDs. "
+                    "More efficient than multiple get_element calls.",
                     inputSchema={
                         "type": "object",
                         "properties": {
-                            "element_id": {
-                                "type": "string",
-                                "description": "The element ID",
+                            "element_ids": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "List of element IDs",
                             },
-                            "include_code": {
-                                "type": "boolean",
-                                "description": "Include raw source code (default: false)",
-                                "default": False,
-                            },
+                            "include_code": {"type": "boolean", "default": False},
                         },
-                        "required": ["element_id"],
+                        "required": ["element_ids"],
                     },
                 ),
                 Tool(
                     name="get_context",
-                    description="Get hierarchical context for a code element. "
-                    "Returns file summary, parent class/function, and optionally children/siblings.",
+                    description="UNDERSTAND CONTEXT: See where an element fits - its parent class, "
+                    "siblings, and children. Use to understand code structure around a function.",
                     inputSchema={
                         "type": "object",
                         "properties": {
-                            "element_id": {
-                                "type": "string",
-                                "description": "Element ID to get context for",
-                            },
-                            "include_siblings": {
-                                "type": "boolean",
-                                "description": "Include sibling elements (default: false)",
-                                "default": False,
-                            },
-                            "include_children": {
-                                "type": "boolean",
-                                "description": "Include child elements (default: true)",
-                                "default": True,
-                            },
+                            "element_id": {"type": "string"},
+                            "include_children": {"type": "boolean", "default": True},
+                            "include_siblings": {"type": "boolean", "default": False},
                         },
                         "required": ["element_id"],
                     },
                 ),
                 Tool(
-                    name="get_file_structure",
-                    description="Get the structure of a file with all contained elements.",
+                    name="get_children",
+                    description="LIST CHILDREN: Get all child elements (methods in a class, etc). "
+                    "Use to explore what a class contains.",
                     inputSchema={
                         "type": "object",
                         "properties": {
-                            "scope": {
-                                "type": "string",
-                                "description": "Repository scope",
-                            },
-                            "repository": {
-                                "type": "string",
-                                "description": "Repository name",
-                            },
-                            "file_path": {
-                                "type": "string",
-                                "description": "Relative file path",
-                            },
-                            "username": {
-                                "type": "string",
-                                "description": "User branch (default: 'main')",
-                                "default": "main",
-                            },
+                            "element_id": {"type": "string", "description": "Parent element ID"},
+                        },
+                        "required": ["element_id"],
+                    },
+                ),
+                # =============================================================
+                # FILES - Work with actual files
+                # =============================================================
+                Tool(
+                    name="read_file",
+                    description="READ FILE: Get actual file contents from disk. "
+                    "Use when you need the full file or specific line ranges.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "file_path": {"type": "string", "description": "Relative path (e.g., 'src/main.py')"},
+                            "start_line": {"type": "integer", "description": "Start line (1-indexed)"},
+                            "end_line": {"type": "integer", "description": "End line (1-indexed)"},
+                        },
+                        "required": ["file_path"],
+                    },
+                ),
+                Tool(
+                    name="find_files",
+                    description="FIND FILES: Search for files by glob pattern. "
+                    "Use to discover file structure (e.g., '**/*.py', 'src/**/*.ts').",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "pattern": {"type": "string", "description": "Glob pattern"},
+                            "limit": {"type": "integer", "default": 50},
+                        },
+                        "required": ["pattern"],
+                    },
+                ),
+                Tool(
+                    name="get_file_structure",
+                    description="FILE OVERVIEW: Get the structure of a file (all classes, functions, methods). "
+                    "Use to understand what's in a file without reading it.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "file_path": {"type": "string", "description": "Relative file path"},
+                            "scope": {"type": "string"},
+                            "repository": {"type": "string"},
                         },
                         "required": ["scope", "repository", "file_path"],
                     },
                 ),
+                # =============================================================
+                # FEATURES - High-level code organization
+                # =============================================================
                 Tool(
-                    name="list_repos",
-                    description="List all indexed repositories.",
+                    name="list_features",
+                    description="LIST ALL FEATURES: See all extracted features/capabilities in a repo. "
+                    "Use to get a high-level understanding of what the codebase does.",
                     inputSchema={
                         "type": "object",
                         "properties": {
-                            "scope": {
-                                "type": "string",
-                                "description": "Filter by scope (optional)",
-                            },
+                            "scope": {"type": "string"},
+                            "repository": {"type": "string"},
+                        },
+                        "required": ["scope", "repository"],
+                    },
+                ),
+                Tool(
+                    name="get_feature_members",
+                    description="FEATURE DETAILS: Get all functions that belong to a feature. "
+                    "Use after list_features or search_features to see implementations.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "feature_id": {"type": "string"},
+                        },
+                        "required": ["feature_id"],
+                    },
+                ),
+                # =============================================================
+                # META - Repository information
+                # =============================================================
+                Tool(
+                    name="list_repos",
+                    description="LIST REPOSITORIES: See all indexed codebases.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "scope": {"type": "string"},
                         },
                         "required": [],
                     },
                 ),
                 Tool(
-                    name="list_features",
-                    description="List all extracted features for a repository.",
-                    inputSchema={
-                        "type": "object",
-                        "properties": {
-                            "scope": {
-                                "type": "string",
-                                "description": "Repository scope",
-                            },
-                            "repository": {
-                                "type": "string",
-                                "description": "Repository name",
-                            },
-                            "username": {
-                                "type": "string",
-                                "description": "User branch (default: 'main')",
-                                "default": "main",
-                            },
-                        },
-                        "required": ["scope", "repository"],
-                    },
-                ),
-                Tool(
                     name="get_repo_stats",
-                    description="Get statistics for a repository.",
+                    description="REPO OVERVIEW: Get statistics (element counts, languages, etc).",
                     inputSchema={
                         "type": "object",
                         "properties": {
-                            "scope": {
-                                "type": "string",
-                                "description": "Repository scope",
-                            },
-                            "repository": {
-                                "type": "string",
-                                "description": "Repository name",
-                            },
-                            "username": {
-                                "type": "string",
-                                "description": "User branch (default: 'main')",
-                                "default": "main",
-                            },
+                            "scope": {"type": "string"},
+                            "repository": {"type": "string"},
                         },
                         "required": ["scope", "repository"],
-                    },
-                ),
-                Tool(
-                    name="get_children",
-                    description="Get child elements of a parent element.",
-                    inputSchema={
-                        "type": "object",
-                        "properties": {
-                            "element_id": {
-                                "type": "string",
-                                "description": "Parent element ID",
-                            },
-                        },
-                        "required": ["element_id"],
-                    },
-                ),
-                Tool(
-                    name="get_feature_members",
-                    description="Get all members of a feature cluster.",
-                    inputSchema={
-                        "type": "object",
-                        "properties": {
-                            "feature_id": {
-                                "type": "string",
-                                "description": "Feature ID",
-                            },
-                        },
-                        "required": ["feature_id"],
                     },
                 ),
             ]
@@ -335,6 +306,8 @@ class MagaldiMCPServer:
     async def _handle_tool(self, name: str, args: dict[str, Any]) -> Any:
         """Dispatch tool call to implementation."""
         from magaldi.mcp.tools import (
+            batch_get_elements,
+            find_files,
             find_similar,
             get_children,
             get_context,
@@ -344,6 +317,7 @@ class MagaldiMCPServer:
             get_repo_stats,
             list_features,
             list_repos,
+            read_file,
             search_code,
             search_features,
         )
@@ -364,6 +338,7 @@ class MagaldiMCPServer:
                 language=args.get("language"),
                 limit=args.get("limit", 20),
                 include_code=args.get("include_code", False),
+                brief=args.get("brief", False),
             )
         elif name == "search_features":
             return await asyncio.to_thread(
@@ -442,6 +417,32 @@ class MagaldiMCPServer:
                 es,
                 feature_id=args["feature_id"],
             )
+        elif name == "batch_get_elements":
+            return await asyncio.to_thread(
+                batch_get_elements,
+                es,
+                element_ids=args["element_ids"],
+                include_code=args.get("include_code", False),
+            )
+        elif name == "read_file":
+            if not self.repo_root:
+                raise ValueError("read_file requires MAGALDI_REPO_ROOT to be set")
+            return await asyncio.to_thread(
+                read_file,
+                self.repo_root,
+                file_path=args["file_path"],
+                start_line=args.get("start_line"),
+                end_line=args.get("end_line"),
+            )
+        elif name == "find_files":
+            if not self.repo_root:
+                raise ValueError("find_files requires MAGALDI_REPO_ROOT to be set")
+            return await asyncio.to_thread(
+                find_files,
+                self.repo_root,
+                pattern=args["pattern"],
+                limit=args.get("limit", 50),
+            )
         else:
             raise ValueError(f"Unknown tool: {name}")
 
@@ -507,8 +508,23 @@ def _format_result(result: Any) -> str:
                 lines.append(f"  {r.get('scope')}/{r.get('repository')}: {r.get('element_count')} elements, {r.get('file_count')} files")
             return "\n".join(lines)
 
-    # Single dict results (get_element, get_context, etc.)
+        # File list (find_files)
+        if "path" in first and "size" in first and "element_id" not in first:
+            lines = [f"Found {len(result)} files:\n"]
+            for r in result:
+                lines.append(f"  {r.get('path')} ({r.get('size')} bytes)")
+            return "\n".join(lines)
+
+    # Single dict results (get_element, get_context, read_file, etc.)
     if isinstance(result, dict):
+        # File read result
+        if "content" in result and "path" in result:
+            lines = [f"File: {result.get('path')} ({result.get('lines_returned')}/{result.get('total_lines')} lines)"]
+            lines.append("```")
+            lines.append(result.get("content", ""))
+            lines.append("```")
+            return "\n".join(lines)
+
         # Element details
         if "element_id" in result and "type" in result:
             lines = [f"[{result.get('type')}] {result.get('name')}"]
@@ -550,6 +566,11 @@ def run_server() -> None:
         default=os.environ.get("MAGALDI_USER", "main"),
         help="Default username for searches (default: MAGALDI_USER env or 'main')",
     )
+    parser.add_argument(
+        "--repo-root", "-r",
+        default=os.environ.get("MAGALDI_REPO_ROOT"),
+        help="Repository root for file tools (default: MAGALDI_REPO_ROOT env)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -560,5 +581,8 @@ def run_server() -> None:
     # Load configuration first
     load_config()
 
-    server = MagaldiMCPServer(default_username=args.user)
+    server = MagaldiMCPServer(
+        default_username=args.user,
+        repo_root=args.repo_root,
+    )
     asyncio.run(server.run())

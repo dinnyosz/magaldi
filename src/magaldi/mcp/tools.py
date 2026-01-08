@@ -28,6 +28,7 @@ def search_code(
     language: str | None = None,
     limit: int = 20,
     include_code: bool = False,
+    brief: bool = False,
 ) -> list[dict[str, Any]]:
     """Semantic search for code elements.
 
@@ -44,6 +45,7 @@ def search_code(
         language: Filter by programming language.
         limit: Maximum results.
         include_code: Include source code in results (for detailed inspection).
+        brief: Minimal output - just name, type, file, line (for exploration).
 
     Returns:
         List of matching code elements.
@@ -85,22 +87,32 @@ def search_code(
         if language and result.get("language") != language:
             continue
 
+        # Build qualified name: ClassName.method_name for methods
+        name = result.get("name")
+        if result.get("element_type") == "method" and result.get("parent_id"):
+            # Try to get parent class name from parent_id
+            parent_doc = es.get_document(result["parent_id"])
+            if parent_doc and parent_doc.get("element_type") == "class":
+                name = f"{parent_doc.get('name')}.{name}"
+
         entry: dict[str, Any] = {
-            "name": result.get("name"),
+            "name": name,
             "type": result.get("element_type"),
             "file": result.get("relative_path"),
             "line": result.get("line_start"),
-            "summary": result.get("summary", ""),
+            "element_id": result.get("element_id"),
         }
-        # Only include signature if present and non-empty
-        sig = result.get("signature")
-        if sig:
-            entry["signature"] = sig
-        # Include element_id for follow-up queries
-        entry["element_id"] = result.get("element_id")
-        # Include code if requested
-        if include_code and result.get("raw_code"):
-            entry["code"] = result["raw_code"]
+
+        # Brief mode: just the basics for exploration
+        if not brief:
+            entry["summary"] = result.get("summary", "")
+            # Only include signature if present and non-empty
+            sig = result.get("signature")
+            if sig:
+                entry["signature"] = sig
+            # Include code if requested
+            if include_code and result.get("raw_code"):
+                entry["code"] = result["raw_code"]
 
         formatted.append(entry)
 
@@ -581,6 +593,123 @@ def get_feature_members(
             })
 
     return members
+
+
+# =============================================================================
+# FILE TOOLS
+# =============================================================================
+
+
+def read_file(
+    repo_root: str,
+    file_path: str,
+    start_line: int | None = None,
+    end_line: int | None = None,
+) -> dict[str, Any]:
+    """Read file contents from disk.
+
+    Args:
+        repo_root: Repository root path.
+        file_path: Relative path to file.
+        start_line: Start line (1-indexed, optional).
+        end_line: End line (1-indexed, optional).
+
+    Returns:
+        File contents with metadata.
+    """
+    from pathlib import Path
+
+    full_path = Path(repo_root) / file_path
+    if not full_path.exists():
+        raise ValueError(f"File not found: {file_path}")
+    if not full_path.is_file():
+        raise ValueError(f"Not a file: {file_path}")
+
+    content = full_path.read_text()
+    lines = content.splitlines()
+    total_lines = len(lines)
+
+    # Apply line range if specified
+    if start_line is not None or end_line is not None:
+        start_idx = (start_line - 1) if start_line else 0
+        end_idx = end_line if end_line else total_lines
+        lines = lines[start_idx:end_idx]
+        content = "\n".join(lines)
+
+    return {
+        "path": file_path,
+        "content": content,
+        "total_lines": total_lines,
+        "lines_returned": len(lines),
+    }
+
+
+def find_files(
+    repo_root: str,
+    pattern: str,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Find files by glob pattern.
+
+    Args:
+        repo_root: Repository root path.
+        pattern: Glob pattern (e.g., '**/*.py', 'src/**/*.ts').
+        limit: Maximum files to return.
+
+    Returns:
+        List of matching files with basic info.
+    """
+    from pathlib import Path
+
+    root = Path(repo_root)
+    matches = []
+
+    for path in root.glob(pattern):
+        if path.is_file() and not any(p.startswith('.') for p in path.parts):
+            rel_path = path.relative_to(root)
+            matches.append({
+                "path": str(rel_path),
+                "size": path.stat().st_size,
+            })
+            if len(matches) >= limit:
+                break
+
+    return sorted(matches, key=lambda x: x["path"])
+
+
+def batch_get_elements(
+    es: ElasticsearchRepository,
+    element_ids: list[str],
+    include_code: bool = False,
+) -> list[dict[str, Any]]:
+    """Get multiple elements by ID in one call.
+
+    Args:
+        es: Elasticsearch repository.
+        element_ids: List of element IDs.
+        include_code: Include source code.
+
+    Returns:
+        List of elements (preserves order, skips missing).
+    """
+    results = []
+    for eid in element_ids:
+        doc = es.get_document(eid)
+        if doc:
+            entry: dict[str, Any] = {
+                "name": doc.get("name"),
+                "type": doc.get("element_type"),
+                "file": doc.get("relative_path"),
+                "line": doc.get("line_start"),
+                "summary": doc.get("summary", ""),
+                "element_id": eid,
+            }
+            if doc.get("signature"):
+                entry["signature"] = doc["signature"]
+            if include_code and doc.get("raw_code"):
+                entry["code"] = doc["raw_code"]
+            results.append(entry)
+    return results
 
 
 # =============================================================================
