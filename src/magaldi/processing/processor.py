@@ -864,12 +864,10 @@ def process_elements(
         # Graceful shutdown on Ctrl+C - cancel pending futures
         for future in future_to_element:
             future.cancel()
-        # Shutdown executor and wait briefly for threads to finish
-        executor.shutdown(wait=True, cancel_futures=True)
-        # Clear worker status display
+        # Clear worker status display first (so Live display is clean)
         for wid in range(config.num_workers):
             worker_status.clear(wid)
-        # Re-raise so CLI can handle exit
+        # Re-raise so CLI can handle the wait message and exit
         raise
     else:
         # Normal completion - shutdown and wait

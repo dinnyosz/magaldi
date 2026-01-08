@@ -128,8 +128,12 @@ def parse(
         print_summary(discovery_result, manifest, processed, indexed, skip_ai)
 
     except KeyboardInterrupt:
-        console.print("\n[yellow]Interrupted[/]")
-        sys.exit(130)  # Standard exit code for Ctrl+C (128 + SIGINT)
+        console.print("\n[yellow]Interrupted, cancelling workers...[/]")
+        # Force immediate exit - os._exit skips Python cleanup (no threading errors)
+        import os
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(130)
     except DiscoveryError as e:
         console.print(f"\n[red]Discovery error:[/] {e}")
         sys.exit(1)
