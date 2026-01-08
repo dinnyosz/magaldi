@@ -74,7 +74,7 @@ class OllamaConfig:
     url: str = "http://localhost:11434"
 
     # Summarization model
-    summarize_model: str = "qwen2.5-coder:7b"
+    summarize_model: str = "qwen2.5-coder:3b"
     summarize_temperature: float = 0.3
     summarize_max_tokens: int = 256
     summarize_context_window: int = 8192

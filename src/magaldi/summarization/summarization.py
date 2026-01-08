@@ -36,7 +36,7 @@ class SummarizationConfig:
 
     # Ollama settings
     ollama_url: str = "http://localhost:11434"
-    model: str = "qwen2.5-coder:7b"
+    model: str = "qwen2.5-coder:3b"
 
     # Generation settings
     temperature: float = 0.3

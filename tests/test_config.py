@@ -95,7 +95,7 @@ class TestOllamaConfigDefaults:
 
     def test_default_summarize_model(self):
         config = OllamaConfig()
-        assert config.summarize_model == "qwen2.5-coder:7b"
+        assert config.summarize_model == "qwen2.5-coder:3b"
 
     def test_default_summarize_temperature(self):
         config = OllamaConfig()

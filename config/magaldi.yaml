@@ -38,7 +38,7 @@ ollama:
   url: http://localhost:11434
 
   # Summarization model
-  summarize_model: qwen2.5-coder:7b
+  summarize_model: qwen2.5-coder:3b
   summarize_temperature: 0.3
   summarize_max_tokens: 256
   summarize_context_window: 8192

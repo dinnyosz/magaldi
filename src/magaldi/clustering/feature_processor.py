@@ -34,7 +34,7 @@ from magaldi.summarization.summarization import OllamaClient
 class FeatureProcessingConfig:
     """Configuration for feature processing."""
 
-    summarize_model: str = "qwen2.5-coder:7b"
+    summarize_model: str = "qwen2.5-coder:3b"
     embed_model: str = "snowflake-arctic-embed2"
     ollama_url: str = "http://localhost:11434"
 

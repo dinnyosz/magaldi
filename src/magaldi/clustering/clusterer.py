@@ -39,7 +39,7 @@ class ClusterConfig:
 
     # Ollama settings for labeling
     ollama_url: str = "http://localhost:11434"
-    ollama_model: str = "qwen2.5-coder:7b"
+    ollama_model: str = "qwen2.5-coder:3b"
     label_temperature: float = 0.3
     label_max_tokens: int = 32
     label_timeout: int = 30

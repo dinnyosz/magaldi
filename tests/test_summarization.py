@@ -475,7 +475,7 @@ class TestSummarizationConfig:
     def test_default_values(self):
         config = SummarizationConfig()
 
-        assert config.model == "qwen2.5-coder:7b"
+        assert config.model == "qwen2.5-coder:3b"
         assert config.temperature == 0.3
         assert config.max_tokens == 256
         assert config.max_retries == 3
