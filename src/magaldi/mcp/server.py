@@ -479,6 +479,11 @@ def _format_result(result: Any) -> str:
                     if len(summary) > 200:
                         summary = summary[:200] + "..."
                     lines.append(f"  {summary}")
+                if r.get('code'):
+                    # Include code block
+                    lines.append(f"  ```")
+                    lines.append(r['code'])
+                    lines.append(f"  ```")
                 lines.append("")
             return "\n".join(lines)
 
