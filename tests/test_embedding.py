@@ -341,36 +341,36 @@ class TestInMemoryEmbeddingJobRepository:
     """Tests for in-memory job repository."""
 
     def test_add_and_get_job(self, job_repo: InMemoryEmbeddingJobRepository):
-        job_repo.add_job("test:id")
+        job_repo.add_job("test:id", "main")
 
-        job = job_repo.get_job("test:id")
+        job = job_repo.get_job("test:id", "main")
         assert job is not None
         assert job["status"] == "pending"
 
     def test_claim_jobs(self, job_repo: InMemoryEmbeddingJobRepository):
-        job_repo.add_job("job1")
-        job_repo.add_job("job2")
-        job_repo.add_job("job3")
+        job_repo.add_job("job1", "main")
+        job_repo.add_job("job2", "main")
+        job_repo.add_job("job3", "main")
 
-        claimed = job_repo.claim_pending_jobs(worker_id="w1", batch_size=2)
+        claimed = job_repo.claim_pending_jobs(worker_id="w1", username="main", batch_size=2)
         assert len(claimed) == 2
 
         # Remaining jobs still pending
-        remaining = job_repo.claim_pending_jobs(worker_id="w1", batch_size=2)
+        remaining = job_repo.claim_pending_jobs(worker_id="w1", username="main", batch_size=2)
         assert len(remaining) == 1
 
     def test_mark_completed(self, job_repo: InMemoryEmbeddingJobRepository):
-        job_repo.add_job("test:id")
-        job_repo.mark_completed("test:id")
+        job_repo.add_job("test:id", "main")
+        job_repo.mark_completed("test:id", "main")
 
-        job = job_repo.get_job("test:id")
+        job = job_repo.get_job("test:id", "main")
         assert job["status"] == "completed"
 
     def test_mark_failed(self, job_repo: InMemoryEmbeddingJobRepository):
-        job_repo.add_job("test:id")
-        job_repo.mark_failed("test:id", "Some error")
+        job_repo.add_job("test:id", "main")
+        job_repo.mark_failed("test:id", "main", "Some error")
 
-        job = job_repo.get_job("test:id")
+        job = job_repo.get_job("test:id", "main")
         assert job["status"] == "failed"
         assert job["error_message"] == "Some error"
 
@@ -451,7 +451,7 @@ class TestProcessEmbeddingJob:
         # Setup
         embedding_store.store_element(file_element)
         embedding_store.store_summary(file_element.element_id, "Main module.")
-        job_repo.add_job(file_element.element_id)
+        job_repo.add_job(file_element.element_id, "main")
 
         # Mock Ollama
         mock_ollama = MagicMock()
@@ -460,6 +460,7 @@ class TestProcessEmbeddingJob:
         # Process
         success = process_embedding_job(
             element_id=file_element.element_id,
+            username="main",
             job_repo=job_repo,
             embedding_store=embedding_store,
             ollama=mock_ollama,
@@ -467,7 +468,7 @@ class TestProcessEmbeddingJob:
         )
 
         assert success is True
-        assert job_repo.get_job(file_element.element_id)["status"] == "completed"
+        assert job_repo.get_job(file_element.element_id, "main")["status"] == "completed"
         assert embedding_store.get_embedding(file_element.element_id) is not None
 
     def test_handles_ollama_error(
@@ -479,7 +480,7 @@ class TestProcessEmbeddingJob:
     ):
         # Setup
         embedding_store.store_element(file_element)
-        job_repo.add_job(file_element.element_id)
+        job_repo.add_job(file_element.element_id, "main")
 
         # Mock Ollama with error
         mock_ollama = MagicMock()
@@ -488,6 +489,7 @@ class TestProcessEmbeddingJob:
         # Process
         success = process_embedding_job(
             element_id=file_element.element_id,
+            username="main",
             job_repo=job_repo,
             embedding_store=embedding_store,
             ollama=mock_ollama,
@@ -495,7 +497,7 @@ class TestProcessEmbeddingJob:
         )
 
         assert success is False
-        job = job_repo.get_job(file_element.element_id)
+        job = job_repo.get_job(file_element.element_id, "main")
         assert job["status"] == "failed"
         assert "Connection refused" in job["error_message"]
 
@@ -508,7 +510,7 @@ class TestProcessEmbeddingJob:
     ):
         # Setup
         embedding_store.store_element(file_element)
-        job_repo.add_job(file_element.element_id)
+        job_repo.add_job(file_element.element_id, "main")
 
         # Mock Ollama with wrong dimensions
         mock_ollama = MagicMock()
@@ -517,6 +519,7 @@ class TestProcessEmbeddingJob:
         # Process
         success = process_embedding_job(
             element_id=file_element.element_id,
+            username="main",
             job_repo=job_repo,
             embedding_store=embedding_store,
             ollama=mock_ollama,
@@ -524,7 +527,7 @@ class TestProcessEmbeddingJob:
         )
 
         assert success is False
-        job = job_repo.get_job(file_element.element_id)
+        job = job_repo.get_job(file_element.element_id, "main")
         assert job["status"] == "failed"
 
 

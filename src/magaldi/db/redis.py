@@ -15,14 +15,19 @@ import redis
 from magaldi.config import MagaldiConfig, get_config
 
 
-# Redis key prefixes
-SUMMARIZATION_QUEUE = "magaldi:summarization:queue"
-SUMMARIZATION_RUNNING = "magaldi:summarization:running"
-SUMMARIZATION_JOBS = "magaldi:summarization:jobs"
+# Redis key prefixes (with {username} placeholder for user isolation)
+SUMMARIZATION_QUEUE = "magaldi:summarization:queue:{username}"
+SUMMARIZATION_RUNNING = "magaldi:summarization:running:{username}"
+SUMMARIZATION_JOBS = "magaldi:summarization:jobs:{username}"
 
-EMBEDDING_QUEUE = "magaldi:embedding:queue"
-EMBEDDING_RUNNING = "magaldi:embedding:running"
-EMBEDDING_JOBS = "magaldi:embedding:jobs"
+EMBEDDING_QUEUE = "magaldi:embedding:queue:{username}"
+EMBEDDING_RUNNING = "magaldi:embedding:running:{username}"
+EMBEDDING_JOBS = "magaldi:embedding:jobs:{username}"
+
+
+def _key(template: str, username: str) -> str:
+    """Format a key template with username."""
+    return template.format(username=username)
 
 
 class RedisRepository:
@@ -53,20 +58,22 @@ class RedisRepository:
 
 
 class RedisSummarizationJobRepository(RedisRepository):
-    """Redis-based summarization job queue."""
+    """Redis-based summarization job queue with user isolation."""
 
     def add_job(
         self,
         element_id: str,
+        username: str,
         level: int,
         parent_id: str | None,
         dependencies_met: bool = False,
         priority: int = 0,
     ) -> None:
-        """Add a summarization job to the queue.
+        """Add a summarization job to the user's queue.
 
         Args:
             element_id: Element to summarize.
+            username: User who owns this job (for queue isolation).
             level: Hierarchy level (0=file, 1=class, 2=function).
             parent_id: Parent element ID (for dependency tracking).
             dependencies_met: Whether dependencies are satisfied.
@@ -76,6 +83,7 @@ class RedisSummarizationJobRepository(RedisRepository):
 
         job_data = {
             "element_id": element_id,
+            "username": username,
             "level": level,
             "parent_id": parent_id,
             "dependencies_met": dependencies_met,
@@ -89,30 +97,36 @@ class RedisSummarizationJobRepository(RedisRepository):
             "retry_count": 0,
         }
 
-        # Store job data
-        client.hset(SUMMARIZATION_JOBS, element_id, json.dumps(job_data))
+        # Store job data in user's job hash
+        client.hset(_key(SUMMARIZATION_JOBS, username), element_id, json.dumps(job_data))
 
-        # Add to queue if dependencies are met (sorted by level desc, then priority)
+        # Add to user's queue if dependencies are met (sorted by level desc, then priority)
         if dependencies_met:
             # Score: level * 1000 + priority (process higher levels first)
             score = level * 1000 + priority
-            client.zadd(SUMMARIZATION_QUEUE, {element_id: score})
+            client.zadd(_key(SUMMARIZATION_QUEUE, username), {element_id: score})
 
-    def get_job(self, element_id: str) -> dict[str, Any] | None:
-        """Get job data by element ID."""
+    def get_job(self, element_id: str, username: str) -> dict[str, Any] | None:
+        """Get job data by element ID from user's queue.
+
+        Args:
+            element_id: Element ID.
+            username: User who owns this job.
+        """
         client = self._get_client()
-        data = client.hget(SUMMARIZATION_JOBS, element_id)
+        data = client.hget(_key(SUMMARIZATION_JOBS, username), element_id)
         if data:
             return json.loads(data)
         return None
 
     def claim_pending_jobs(
-        self, worker_id: str, batch_size: int = 10
+        self, worker_id: str, username: str, batch_size: int = 10
     ) -> list[dict[str, Any]]:
-        """Claim pending jobs for processing.
+        """Claim pending jobs from a user's queue.
 
         Args:
             worker_id: ID of the claiming worker.
+            username: User whose queue to process.
             batch_size: Maximum jobs to claim.
 
         Returns:
@@ -121,56 +135,72 @@ class RedisSummarizationJobRepository(RedisRepository):
         client = self._get_client()
         claimed = []
 
+        queue_key = _key(SUMMARIZATION_QUEUE, username)
+        jobs_key = _key(SUMMARIZATION_JOBS, username)
+        running_key = _key(SUMMARIZATION_RUNNING, username)
+
         # Get highest priority jobs (highest scores first)
-        element_ids = client.zrevrange(SUMMARIZATION_QUEUE, 0, batch_size - 1)
+        element_ids = client.zrevrange(queue_key, 0, batch_size - 1)
 
         for element_id in element_ids:
             # Atomically move from queue to running
-            removed = client.zrem(SUMMARIZATION_QUEUE, element_id)
+            removed = client.zrem(queue_key, element_id)
             if removed:
                 # Update job status
-                job_data = self.get_job(element_id)
+                job_data = self.get_job(element_id, username)
                 if job_data:
                     job_data["status"] = "running"
                     job_data["worker_id"] = worker_id
                     job_data["claimed_at"] = datetime.now().isoformat()
-                    client.hset(SUMMARIZATION_JOBS, element_id, json.dumps(job_data))
-                    client.sadd(SUMMARIZATION_RUNNING, element_id)
+                    client.hset(jobs_key, element_id, json.dumps(job_data))
+                    client.sadd(running_key, element_id)
                     claimed.append(job_data)
 
         return claimed
 
-    def mark_completed(self, element_id: str) -> None:
-        """Mark a job as completed."""
+    def mark_completed(self, element_id: str, username: str) -> None:
+        """Mark a job as completed.
+
+        Args:
+            element_id: Element ID.
+            username: User who owns this job.
+        """
         client = self._get_client()
 
-        job_data = self.get_job(element_id)
+        job_data = self.get_job(element_id, username)
         if job_data:
             job_data["status"] = "completed"
             job_data["completed_at"] = datetime.now().isoformat()
-            client.hset(SUMMARIZATION_JOBS, element_id, json.dumps(job_data))
-            client.srem(SUMMARIZATION_RUNNING, element_id)
+            client.hset(_key(SUMMARIZATION_JOBS, username), element_id, json.dumps(job_data))
+            client.srem(_key(SUMMARIZATION_RUNNING, username), element_id)
 
             # Unlock dependent jobs
-            self.unlock_dependencies(element_id)
+            self.unlock_dependencies(element_id, username)
 
-    def mark_failed(self, element_id: str, error_message: str) -> None:
-        """Mark a job as failed."""
+    def mark_failed(self, element_id: str, username: str, error_message: str) -> None:
+        """Mark a job as failed.
+
+        Args:
+            element_id: Element ID.
+            username: User who owns this job.
+            error_message: Error description.
+        """
         client = self._get_client()
 
-        job_data = self.get_job(element_id)
+        job_data = self.get_job(element_id, username)
         if job_data:
             job_data["status"] = "failed"
             job_data["error_message"] = error_message
             job_data["retry_count"] = job_data.get("retry_count", 0) + 1
-            client.hset(SUMMARIZATION_JOBS, element_id, json.dumps(job_data))
-            client.srem(SUMMARIZATION_RUNNING, element_id)
+            client.hset(_key(SUMMARIZATION_JOBS, username), element_id, json.dumps(job_data))
+            client.srem(_key(SUMMARIZATION_RUNNING, username), element_id)
 
-    def unlock_dependencies(self, parent_id: str) -> int:
+    def unlock_dependencies(self, parent_id: str, username: str) -> int:
         """Unlock jobs that depend on the completed parent.
 
         Args:
             parent_id: ID of completed parent element.
+            username: User who owns these jobs.
 
         Returns:
             Number of jobs unlocked.
@@ -178,8 +208,11 @@ class RedisSummarizationJobRepository(RedisRepository):
         client = self._get_client()
         unlocked = 0
 
-        # Scan all jobs to find children
-        all_jobs = client.hgetall(SUMMARIZATION_JOBS)
+        jobs_key = _key(SUMMARIZATION_JOBS, username)
+        queue_key = _key(SUMMARIZATION_QUEUE, username)
+
+        # Scan user's jobs to find children
+        all_jobs = client.hgetall(jobs_key)
         for element_id, data in all_jobs.items():
             job_data = json.loads(data)
             if (
@@ -189,25 +222,31 @@ class RedisSummarizationJobRepository(RedisRepository):
             ):
                 # Unlock this job
                 job_data["dependencies_met"] = True
-                client.hset(SUMMARIZATION_JOBS, element_id, json.dumps(job_data))
+                client.hset(jobs_key, element_id, json.dumps(job_data))
 
                 # Add to queue
                 score = job_data["level"] * 1000 + job_data.get("priority", 0)
-                client.zadd(SUMMARIZATION_QUEUE, {element_id: score})
+                client.zadd(queue_key, {element_id: score})
                 unlocked += 1
 
         return unlocked
 
 
 class RedisEmbeddingJobRepository(RedisRepository):
-    """Redis-based embedding job queue."""
+    """Redis-based embedding job queue with user isolation."""
 
-    def add_job(self, element_id: str) -> None:
-        """Add an embedding job to the queue."""
+    def add_job(self, element_id: str, username: str) -> None:
+        """Add an embedding job to the user's queue.
+
+        Args:
+            element_id: Element to embed.
+            username: User who owns this job.
+        """
         client = self._get_client()
 
         job_data = {
             "element_id": element_id,
+            "username": username,
             "status": "pending",
             "created_at": datetime.now().isoformat(),
             "worker_id": None,
@@ -217,66 +256,95 @@ class RedisEmbeddingJobRepository(RedisRepository):
             "retry_count": 0,
         }
 
-        # Store job data
-        client.hset(EMBEDDING_JOBS, element_id, json.dumps(job_data))
+        # Store job data in user's job hash
+        client.hset(_key(EMBEDDING_JOBS, username), element_id, json.dumps(job_data))
 
-        # Add to queue (FIFO order using timestamp as score)
-        client.zadd(EMBEDDING_QUEUE, {element_id: time.time()})
+        # Add to user's queue (FIFO order using timestamp as score)
+        client.zadd(_key(EMBEDDING_QUEUE, username), {element_id: time.time()})
 
-    def get_job(self, element_id: str) -> dict[str, Any] | None:
-        """Get job data by element ID."""
+    def get_job(self, element_id: str, username: str) -> dict[str, Any] | None:
+        """Get job data by element ID from user's queue.
+
+        Args:
+            element_id: Element ID.
+            username: User who owns this job.
+        """
         client = self._get_client()
-        data = client.hget(EMBEDDING_JOBS, element_id)
+        data = client.hget(_key(EMBEDDING_JOBS, username), element_id)
         if data:
             return json.loads(data)
         return None
 
     def claim_pending_jobs(
-        self, worker_id: str, batch_size: int = 10
+        self, worker_id: str, username: str, batch_size: int = 10
     ) -> list[dict[str, Any]]:
-        """Claim pending jobs for processing."""
+        """Claim pending jobs from a user's queue.
+
+        Args:
+            worker_id: ID of the claiming worker.
+            username: User whose queue to process.
+            batch_size: Maximum jobs to claim.
+
+        Returns:
+            List of claimed job data.
+        """
         client = self._get_client()
         claimed = []
 
+        queue_key = _key(EMBEDDING_QUEUE, username)
+        jobs_key = _key(EMBEDDING_JOBS, username)
+        running_key = _key(EMBEDDING_RUNNING, username)
+
         # Get oldest jobs first (FIFO)
-        element_ids = client.zrange(EMBEDDING_QUEUE, 0, batch_size - 1)
+        element_ids = client.zrange(queue_key, 0, batch_size - 1)
 
         for element_id in element_ids:
-            removed = client.zrem(EMBEDDING_QUEUE, element_id)
+            removed = client.zrem(queue_key, element_id)
             if removed:
-                job_data = self.get_job(element_id)
+                job_data = self.get_job(element_id, username)
                 if job_data:
                     job_data["status"] = "running"
                     job_data["worker_id"] = worker_id
                     job_data["claimed_at"] = datetime.now().isoformat()
-                    client.hset(EMBEDDING_JOBS, element_id, json.dumps(job_data))
-                    client.sadd(EMBEDDING_RUNNING, element_id)
+                    client.hset(jobs_key, element_id, json.dumps(job_data))
+                    client.sadd(running_key, element_id)
                     claimed.append(job_data)
 
         return claimed
 
-    def mark_completed(self, element_id: str) -> None:
-        """Mark a job as completed."""
+    def mark_completed(self, element_id: str, username: str) -> None:
+        """Mark a job as completed.
+
+        Args:
+            element_id: Element ID.
+            username: User who owns this job.
+        """
         client = self._get_client()
 
-        job_data = self.get_job(element_id)
+        job_data = self.get_job(element_id, username)
         if job_data:
             job_data["status"] = "completed"
             job_data["completed_at"] = datetime.now().isoformat()
-            client.hset(EMBEDDING_JOBS, element_id, json.dumps(job_data))
-            client.srem(EMBEDDING_RUNNING, element_id)
+            client.hset(_key(EMBEDDING_JOBS, username), element_id, json.dumps(job_data))
+            client.srem(_key(EMBEDDING_RUNNING, username), element_id)
 
-    def mark_failed(self, element_id: str, error_message: str) -> None:
-        """Mark a job as failed."""
+    def mark_failed(self, element_id: str, username: str, error_message: str) -> None:
+        """Mark a job as failed.
+
+        Args:
+            element_id: Element ID.
+            username: User who owns this job.
+            error_message: Error description.
+        """
         client = self._get_client()
 
-        job_data = self.get_job(element_id)
+        job_data = self.get_job(element_id, username)
         if job_data:
             job_data["status"] = "failed"
             job_data["error_message"] = error_message
             job_data["retry_count"] = job_data.get("retry_count", 0) + 1
-            client.hset(EMBEDDING_JOBS, element_id, json.dumps(job_data))
-            client.srem(EMBEDDING_RUNNING, element_id)
+            client.hset(_key(EMBEDDING_JOBS, username), element_id, json.dumps(job_data))
+            client.srem(_key(EMBEDDING_RUNNING, username), element_id)
 
 
 class RedisSummaryStore(RedisRepository):

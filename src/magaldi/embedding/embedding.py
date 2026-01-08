@@ -124,28 +124,31 @@ class OllamaEmbedClient:
 
 
 class EmbeddingJobRepository(Protocol):
-    """Interface for embedding job storage."""
+    """Interface for embedding job storage.
 
-    def add_job(self, element_id: str) -> None:
-        """Add an embedding job."""
+    All methods require username for user-isolated queues.
+    """
+
+    def add_job(self, element_id: str, username: str) -> None:
+        """Add an embedding job to user's queue."""
         ...
 
-    def get_job(self, element_id: str) -> dict[str, Any] | None:
-        """Get job by element ID."""
+    def get_job(self, element_id: str, username: str) -> dict[str, Any] | None:
+        """Get job by element ID from user's queue."""
         ...
 
     def claim_pending_jobs(
-        self, worker_id: str, batch_size: int
+        self, worker_id: str, username: str, batch_size: int
     ) -> list[dict[str, Any]]:
-        """Claim pending jobs."""
+        """Claim pending jobs from user's queue."""
         ...
 
-    def mark_completed(self, element_id: str) -> None:
-        """Mark job as completed."""
+    def mark_completed(self, element_id: str, username: str) -> None:
+        """Mark job as completed in user's queue."""
         ...
 
-    def mark_failed(self, element_id: str, error_message: str) -> None:
-        """Mark job as failed."""
+    def mark_failed(self, element_id: str, username: str, error_message: str) -> None:
+        """Mark job as failed in user's queue."""
         ...
 
 
@@ -191,14 +194,19 @@ class EmbeddingStore(Protocol):
 
 
 class InMemoryEmbeddingJobRepository:
-    """In-memory implementation of job repository for testing."""
+    """In-memory implementation of job repository for testing.
+
+    Note: This simple implementation stores all jobs globally.
+    The username parameter is accepted for interface compatibility.
+    """
 
     def __init__(self) -> None:
         self._jobs: dict[str, dict[str, Any]] = {}
 
-    def add_job(self, element_id: str) -> None:
+    def add_job(self, element_id: str, username: str) -> None:
         self._jobs[element_id] = {
             "element_id": element_id,
+            "username": username,
             "status": "pending",
             "worker_id": None,
             "claimed_at": None,
@@ -206,11 +214,11 @@ class InMemoryEmbeddingJobRepository:
             "error_message": None,
         }
 
-    def get_job(self, element_id: str) -> dict[str, Any] | None:
+    def get_job(self, element_id: str, username: str) -> dict[str, Any] | None:
         return self._jobs.get(element_id)
 
     def claim_pending_jobs(
-        self, worker_id: str, batch_size: int
+        self, worker_id: str, username: str, batch_size: int
     ) -> list[dict[str, Any]]:
         available = [
             job for job in self._jobs.values() if job["status"] == "pending"
@@ -224,12 +232,12 @@ class InMemoryEmbeddingJobRepository:
 
         return claimed
 
-    def mark_completed(self, element_id: str) -> None:
+    def mark_completed(self, element_id: str, username: str) -> None:
         if element_id in self._jobs:
             self._jobs[element_id]["status"] = "completed"
             self._jobs[element_id]["completed_at"] = datetime.now()
 
-    def mark_failed(self, element_id: str, error_message: str) -> None:
+    def mark_failed(self, element_id: str, username: str, error_message: str) -> None:
         if element_id in self._jobs:
             self._jobs[element_id]["status"] = "failed"
             self._jobs[element_id]["error_message"] = error_message
@@ -482,6 +490,7 @@ def build_embedding_text(
 
 def process_embedding_job(
     element_id: str,
+    username: str,
     job_repo: EmbeddingJobRepository,
     embedding_store: EmbeddingStore,
     ollama: OllamaEmbedClient,
@@ -491,6 +500,7 @@ def process_embedding_job(
 
     Args:
         element_id: Element ID to embed.
+        username: User who owns this job.
         job_repo: Job repository.
         embedding_store: Embedding store.
         ollama: Ollama client.
@@ -503,7 +513,7 @@ def process_embedding_job(
         # Get element
         element = embedding_store.get_element(element_id)
         if element is None:
-            job_repo.mark_failed(element_id, f"Element not found: {element_id}")
+            job_repo.mark_failed(element_id, username, f"Element not found: {element_id}")
             return False
 
         # Build embedding text with context
@@ -516,6 +526,7 @@ def process_embedding_job(
         if not validate_vector(embedding, config.dimensions):
             job_repo.mark_failed(
                 element_id,
+                username,
                 f"Invalid embedding: expected {config.dimensions} dims, "
                 f"got {len(embedding)}",
             )
@@ -528,10 +539,10 @@ def process_embedding_job(
         embedding_store.store_embedding(element_id, embedding)
 
         # Mark job completed
-        job_repo.mark_completed(element_id)
+        job_repo.mark_completed(element_id, username)
 
         return True
 
     except Exception as e:
-        job_repo.mark_failed(element_id, str(e))
+        job_repo.mark_failed(element_id, username, str(e))
         return False

@@ -131,37 +131,41 @@ class OllamaClient:
 
 
 class JobRepository(Protocol):
-    """Interface for summarization job storage."""
+    """Interface for summarization job storage.
+
+    All methods require username for user-isolated queues.
+    """
 
     def add_job(
         self,
         element_id: str,
+        username: str,
         level: int,
         parent_id: str | None,
         dependencies_met: bool,
     ) -> None:
-        """Add a summarization job."""
+        """Add a summarization job to user's queue."""
         ...
 
-    def get_job(self, element_id: str) -> dict[str, Any] | None:
-        """Get job by element ID."""
+    def get_job(self, element_id: str, username: str) -> dict[str, Any] | None:
+        """Get job by element ID from user's queue."""
         ...
 
     def claim_pending_jobs(
-        self, worker_id: str, batch_size: int
+        self, worker_id: str, username: str, batch_size: int
     ) -> list[dict[str, Any]]:
-        """Claim pending jobs that have dependencies met."""
+        """Claim pending jobs from user's queue."""
         ...
 
-    def mark_completed(self, element_id: str) -> None:
-        """Mark job as completed."""
+    def mark_completed(self, element_id: str, username: str) -> None:
+        """Mark job as completed in user's queue."""
         ...
 
-    def mark_failed(self, element_id: str, error_message: str) -> None:
-        """Mark job as failed."""
+    def mark_failed(self, element_id: str, username: str, error_message: str) -> None:
+        """Mark job as failed in user's queue."""
         ...
 
-    def unlock_dependencies(self, parent_element_id: str) -> int:
+    def unlock_dependencies(self, parent_element_id: str, username: str) -> int:
         """Unlock jobs that depend on this element. Returns count unlocked."""
         ...
 
@@ -196,7 +200,11 @@ class SummaryStore(Protocol):
 
 
 class InMemoryJobRepository:
-    """In-memory implementation of job repository for testing."""
+    """In-memory implementation of job repository for testing.
+
+    Note: This simple implementation stores all jobs globally.
+    The username parameter is accepted for interface compatibility.
+    """
 
     def __init__(self) -> None:
         self._jobs: dict[str, dict[str, Any]] = {}
@@ -204,12 +212,14 @@ class InMemoryJobRepository:
     def add_job(
         self,
         element_id: str,
+        username: str,
         level: int,
         parent_id: str | None,
         dependencies_met: bool,
     ) -> None:
         self._jobs[element_id] = {
             "element_id": element_id,
+            "username": username,
             "level": level,
             "parent_id": parent_id,
             "dependencies_met": dependencies_met,
@@ -221,11 +231,11 @@ class InMemoryJobRepository:
             "priority": 100 - level,
         }
 
-    def get_job(self, element_id: str) -> dict[str, Any] | None:
+    def get_job(self, element_id: str, username: str) -> dict[str, Any] | None:
         return self._jobs.get(element_id)
 
     def claim_pending_jobs(
-        self, worker_id: str, batch_size: int
+        self, worker_id: str, username: str, batch_size: int
     ) -> list[dict[str, Any]]:
         # Find pending jobs with dependencies met, sorted by level then priority
         available = [
@@ -243,18 +253,18 @@ class InMemoryJobRepository:
 
         return claimed
 
-    def mark_completed(self, element_id: str) -> None:
+    def mark_completed(self, element_id: str, username: str) -> None:
         if element_id in self._jobs:
             self._jobs[element_id]["status"] = "completed"
             self._jobs[element_id]["completed_at"] = datetime.now()
 
-    def mark_failed(self, element_id: str, error_message: str) -> None:
+    def mark_failed(self, element_id: str, username: str, error_message: str) -> None:
         if element_id in self._jobs:
             self._jobs[element_id]["status"] = "failed"
             self._jobs[element_id]["error_message"] = error_message
             self._jobs[element_id]["completed_at"] = datetime.now()
 
-    def unlock_dependencies(self, parent_element_id: str) -> int:
+    def unlock_dependencies(self, parent_element_id: str, username: str) -> int:
         count = 0
         for job in self._jobs.values():
             if (
@@ -551,18 +561,19 @@ def clean_summary(summary: str) -> str:
 
 
 def update_dependencies_after_completion(
-    element_id: str, job_repo: JobRepository
+    element_id: str, username: str, job_repo: JobRepository
 ) -> int:
     """Mark dependent jobs as ready when parent completes.
 
     Args:
         element_id: Completed element ID.
+        username: User who owns the jobs.
         job_repo: Job repository.
 
     Returns:
         Count of jobs unlocked.
     """
-    return job_repo.unlock_dependencies(element_id)
+    return job_repo.unlock_dependencies(element_id, username)
 
 
 # =============================================================================
@@ -607,6 +618,7 @@ def generate_summary(
 
 def process_summarization_job(
     element_id: str,
+    username: str,
     job_repo: JobRepository,
     summary_store: SummaryStore,
     ollama: OllamaClient,
@@ -616,6 +628,7 @@ def process_summarization_job(
 
     Args:
         element_id: Element ID to summarize.
+        username: User who owns this job.
         job_repo: Job repository.
         summary_store: Summary store.
         ollama: Ollama client.
@@ -628,7 +641,7 @@ def process_summarization_job(
         # Get element
         element = summary_store.get_element(element_id)
         if element is None:
-            job_repo.mark_failed(element_id, f"Element not found: {element_id}")
+            job_repo.mark_failed(element_id, username, f"Element not found: {element_id}")
             return False
 
         # Generate summary
@@ -638,13 +651,13 @@ def process_summarization_job(
         summary_store.store_summary(element_id, summary)
 
         # Mark job completed
-        job_repo.mark_completed(element_id)
+        job_repo.mark_completed(element_id, username)
 
         # Unlock dependent jobs
-        update_dependencies_after_completion(element_id, job_repo)
+        update_dependencies_after_completion(element_id, username, job_repo)
 
         return True
 
     except Exception as e:
-        job_repo.mark_failed(element_id, str(e))
+        job_repo.mark_failed(element_id, username, str(e))
         return False
