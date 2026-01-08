@@ -127,6 +127,9 @@ def parse(
 
         print_summary(discovery_result, manifest, processed, indexed, skip_ai)
 
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Interrupted[/]")
+        sys.exit(130)  # Standard exit code for Ctrl+C (128 + SIGINT)
     except DiscoveryError as e:
         console.print(f"\n[red]Discovery error:[/] {e}")
         sys.exit(1)
@@ -327,41 +330,29 @@ def run_processing(
         def __rich__(self) -> RenderableType:
             return build_display(current_state, workers)
 
-    interrupted = False
-    try:
-        with Live(LiveDisplay(), console=console, refresh_per_second=10) as live:
-            def on_progress(state: ProgressState) -> None:
-                nonlocal current_state
-                current_state = state
-                live.refresh()  # Force refresh on progress
+    with Live(LiveDisplay(), console=console, refresh_per_second=10) as live:
+        def on_progress(state: ProgressState) -> None:
+            nonlocal current_state
+            current_state = state
+            live.refresh()  # Force refresh on progress
 
-            def on_status_change() -> None:
-                """Called when worker status changes."""
-                live.refresh()  # Force refresh on status change
+        def on_status_change() -> None:
+            """Called when worker status changes."""
+            live.refresh()  # Force refresh on status change
 
-            result = process_elements(
-                parsing_result.parsed_files,
-                manifest.scope,
-                manifest.repository,
-                manifest.username,
-                es_repo,
-                proc_config,
-                on_progress,
-                file_hashes,
-                on_status_change,
-                worker_status,
-                timing_stats,
-            )
-    except KeyboardInterrupt:
-        interrupted = True
-        console.print("\n[yellow]Interrupted by user[/]")
-        # Create partial result
-        result = ProcessingResult(
-            scope=manifest.scope,
-            repository=manifest.repository,
-            username=manifest.username,
+        result = process_elements(
+            parsing_result.parsed_files,
+            manifest.scope,
+            manifest.repository,
+            manifest.username,
+            es_repo,
+            proc_config,
+            on_progress,
+            file_hashes,
+            on_status_change,
+            worker_status,
+            timing_stats,
         )
-        result.errors.append("Processing interrupted by user")
 
     # Get timing stats from current state
     avg_summ = current_state.timing.avg_summarize_time

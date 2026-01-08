@@ -861,14 +861,16 @@ def process_elements(
                     on_progress(progress_state)
 
     except KeyboardInterrupt:
-        # Graceful shutdown on Ctrl+C - cancel pending and don't wait
+        # Graceful shutdown on Ctrl+C - cancel pending futures
         for future in future_to_element:
             future.cancel()
-        executor.shutdown(wait=False, cancel_futures=True)
+        # Shutdown executor and wait briefly for threads to finish
+        executor.shutdown(wait=True, cancel_futures=True)
         # Clear worker status display
         for wid in range(config.num_workers):
             worker_status.clear(wid)
-        result.errors.append("Processing interrupted by user")
+        # Re-raise so CLI can handle exit
+        raise
     else:
         # Normal completion - shutdown and wait
         executor.shutdown(wait=True)
