@@ -1,8 +1,7 @@
 """Storage module for Magaldi (Phase 4).
 
 This module handles:
-- Storing parsed files and elements to MySQL
-- Indexing elements to Elasticsearch
+- Storing parsed files and elements to Elasticsearch
 - Creating summarization and embedding jobs
 """
 

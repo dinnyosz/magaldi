@@ -94,6 +94,7 @@ class DBFileState:
     relative_path: str
     file_hash: str | None
     is_deleted: bool = False
+    element_count: int | None = None  # Expected element count for completeness verification
 
 
 class FileStateRepository(Protocol):

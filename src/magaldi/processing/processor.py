@@ -508,6 +508,7 @@ def _index_element(
     embedding: list[float] | None,
     es_repo: ElasticsearchRepository,
     file_hash: str | None = None,
+    element_count: int | None = None,
 ) -> bool:
     """Index element to Elasticsearch with summary and embedding.
 
@@ -516,13 +517,14 @@ def _index_element(
         summary: Generated summary.
         embedding: Embedding vector (or None if not embedded).
         es_repo: Elasticsearch repository.
-        file_hash: File hash for file-level elements.
+        file_hash: File hash for all elements.
+        element_count: Total element count in file (only for file-level elements).
 
     Returns:
         True on success.
     """
     # Index the element
-    es_repo.index_element(element, indexed_at=datetime.now(), file_hash=file_hash)
+    es_repo.index_element(element, indexed_at=datetime.now(), file_hash=file_hash, element_count=element_count)
 
     # Store summary
     es_repo.store_summary(element.element_id, summary)
@@ -541,6 +543,7 @@ def _process_single_element(
     ollama_embed: OllamaEmbedClient | None,
     config: ProcessingConfig,
     file_hashes: dict[str, str] | None,
+    element_counts: dict[str, int] | None,
     es_repo: ElasticsearchRepository,
     worker_id: int,
     worker_status: WorkerStatus,
@@ -555,6 +558,7 @@ def _process_single_element(
         ollama_embed: Ollama client for embeddings (None if skip_ai).
         config: Processing configuration.
         file_hashes: Optional dict mapping relative_path to file hash.
+        element_counts: Optional dict mapping relative_path to element count.
         es_repo: Elasticsearch repository for indexing.
         worker_id: Worker thread ID.
         worker_status: Status tracker for workers.
@@ -620,11 +624,15 @@ def _process_single_element(
 
         # Step 3: Index to ES (only after summarize+embed complete)
         update_status("indexing")
-        file_hash = None
-        if element.element_type == "file" and file_hashes:
-            file_hash = file_hashes.get(element.relative_path)
+        # Store file_hash on ALL elements (not just file elements) for change detection
+        # This allows us to delete all elements by file_hash if needed
+        file_hash = file_hashes.get(element.relative_path) if file_hashes else None
+        # Store element_count only on FILE elements for completeness verification
+        element_count = None
+        if element.element_type == "file" and element_counts:
+            element_count = element_counts.get(element.relative_path)
 
-        _index_element(element, summary, embedding, es_repo, file_hash)
+        _index_element(element, summary, embedding, es_repo, file_hash, element_count)
 
         worker_status.clear(worker_id)
         wall_time = time.time() - start_wall
@@ -705,10 +713,12 @@ def process_elements(
                 pf.file_info.relative_path,
             )
 
-    # Collect all elements
+    # Collect all elements and compute element counts per file
     all_elements: list[CodeElement] = []
+    element_counts: dict[str, int] = {}
     for pf in parsed_files:
         all_elements.extend(pf.elements)
+        element_counts[pf.file_info.relative_path] = len(pf.elements)
 
     if not all_elements:
         return result
@@ -792,6 +802,7 @@ def process_elements(
                 ollama_embed=ollama_embed,
                 config=config,
                 file_hashes=file_hashes,
+                element_counts=element_counts,
                 es_repo=es_repo,
                 worker_id=wid,
                 worker_status=worker_status,

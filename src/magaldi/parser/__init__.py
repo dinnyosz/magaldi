@@ -4,7 +4,7 @@ The parser pipeline consists of:
 - Phase 1: Discovery - Path validation, config loading, language enumeration
 - Phase 2: Change Detection - SHA256 hashing, diff logic
 - Phase 3: Parsing - Tree-sitter extraction
-- Phase 4: Storage - MySQL/ES storage, job creation
+- Phase 4: Storage - ES storage, job creation
 """
 
 from magaldi.parser.discovery import (

@@ -1,10 +1,8 @@
-"""Phase 4: Storage - Persist elements to MySQL and Elasticsearch.
+"""Phase 4: Storage - Persist elements to Elasticsearch.
 
 This module handles:
 1. Handle deletions - Remove old elements before inserting new
-2. Store to MySQL - File states and code elements
-3. Index to Elasticsearch - For semantic search
-4. Create jobs - Summarization and embedding jobs
+2. Index to Elasticsearch - All elements with summaries and embeddings
 """
 
 from __future__ import annotations
@@ -379,6 +377,18 @@ def handle_deletions(
         )
         total_deleted += count
 
+    # 3. Handle new files (defensive cleanup for interrupted previous runs)
+    # If a previous run was interrupted after storing some elements but before
+    # storing the file hash, the file will appear as "new" but have orphaned elements
+    for file_info in manifest.new_files:
+        count = db_repo.delete_elements_by_file(
+            manifest.scope, manifest.repository, manifest.username, file_info.relative_path
+        )
+        search_repo.delete_by_file(
+            manifest.scope, manifest.repository, manifest.username, file_info.relative_path
+        )
+        total_deleted += count
+
     return total_deleted
 
 
@@ -411,7 +421,18 @@ def store_parsed_files(
     for parsed_file in parsed_files:
         file_info = parsed_file.file_info
 
-        # Store file state
+        # Store elements FIRST (parents first to satisfy foreign key constraints)
+        # Sort by level to ensure parents are inserted before children
+        # This must happen BEFORE file_state so interrupted runs will reparse
+        sorted_elements = sorted(parsed_file.elements, key=lambda e: e.level)
+
+        for element in sorted_elements:
+            db_repo.store_element(element)
+            elements_stored += 1
+
+        # Store file state LAST as the "commit" marker
+        # This ensures that if interrupted during element storage, the file hash
+        # won't be saved and the file will be reparsed on the next run
         db_repo.store_file_state(
             scope=parsed_file.elements[0].scope if parsed_file.elements else "",
             repository=parsed_file.elements[0].repository if parsed_file.elements else "",
@@ -425,14 +446,6 @@ def store_parsed_files(
             expires_at=expires_at,
         )
         files_stored += 1
-
-        # Store elements (parents first to satisfy foreign key constraints)
-        # Sort by level to ensure parents are inserted before children
-        sorted_elements = sorted(parsed_file.elements, key=lambda e: e.level)
-
-        for element in sorted_elements:
-            db_repo.store_element(element)
-            elements_stored += 1
 
     return files_stored, elements_stored
 
@@ -619,7 +632,7 @@ def store_storage_result(
         # 4.1 Handle deletions first
         result.elements_deleted = handle_deletions(manifest, db_repo, search_repo)
 
-        # 4.2 Store to MySQL
+        # 4.2 Store parsed files
         files_stored, elements_stored = store_parsed_files(
             parsing_result.parsed_files, parsing_result.username, db_repo
         )

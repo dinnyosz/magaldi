@@ -40,7 +40,8 @@ INDEX_MAPPING = {
             "decorators": {"type": "keyword"},
             "visibility": {"type": "keyword"},
             "is_async": {"type": "boolean"},
-            "file_hash": {"type": "keyword"},  # For change detection on file elements
+            "file_hash": {"type": "keyword"},  # For change detection (stored on all elements)
+            "element_count": {"type": "integer"},  # Total elements in file (only on file elements)
             "indexed_at": {"type": "date"},
             "embedding": {
                 "type": "dense_vector",
@@ -96,13 +97,15 @@ class ElasticsearchRepository:
         element: CodeElement,
         indexed_at: datetime | None = None,
         file_hash: str | None = None,
+        element_count: int | None = None,
     ) -> bool:
         """Index a code element.
 
         Args:
             element: Code element to index.
             indexed_at: Timestamp for indexing.
-            file_hash: File hash for change detection (only for file-level elements).
+            file_hash: File hash for change detection (stored on all elements).
+            element_count: Total element count in file (only for file-level elements).
 
         Returns:
             True on success.
@@ -132,9 +135,13 @@ class ElasticsearchRepository:
             "indexed_at": indexed_at.isoformat(),
         }
 
-        # Add file_hash for file-level elements (used for change detection)
+        # Add file_hash for all elements (used for change detection and cleanup)
         if file_hash is not None:
             doc["file_hash"] = file_hash
+
+        # Add element_count for file-level elements (used for completeness verification)
+        if element_count is not None:
+            doc["element_count"] = element_count
 
         client = self._get_client()
         client.index(index=INDEX_NAME, id=element.element_id, document=doc)
@@ -200,6 +207,57 @@ class ElasticsearchRepository:
                             {"term": {"repository": repository}},
                             {"term": {"username": username}},
                             {"term": {"relative_path": relative_path}},
+                        ]
+                    }
+                }
+            },
+            refresh=True,
+        )
+        return result.get("deleted", 0)
+
+    def count_elements_by_file_hash(
+        self, scope: str, repository: str, username: str, file_hash: str
+    ) -> int:
+        """Count elements with a specific file hash.
+
+        Used for completeness verification - compare to expected element_count.
+        """
+        client = self._get_client()
+        result = client.count(
+            index=INDEX_NAME,
+            body={
+                "query": {
+                    "bool": {
+                        "must": [
+                            {"term": {"scope": scope}},
+                            {"term": {"repository": repository}},
+                            {"term": {"username": username}},
+                            {"term": {"file_hash": file_hash}},
+                        ]
+                    }
+                }
+            },
+        )
+        return result.get("count", 0)
+
+    def delete_by_file_hash(
+        self, scope: str, repository: str, username: str, file_hash: str
+    ) -> int:
+        """Delete all elements with a specific file hash.
+
+        Used for cleanup when file needs to be reprocessed.
+        """
+        client = self._get_client()
+        result = client.delete_by_query(
+            index=INDEX_NAME,
+            body={
+                "query": {
+                    "bool": {
+                        "must": [
+                            {"term": {"scope": scope}},
+                            {"term": {"repository": repository}},
+                            {"term": {"username": username}},
+                            {"term": {"file_hash": file_hash}},
                         ]
                     }
                 }
@@ -342,7 +400,7 @@ class ElasticsearchRepository:
             username: Username to filter by.
 
         Returns:
-            Dict mapping relative_path to {file_hash, is_deleted}.
+            Dict mapping relative_path to {file_hash, is_deleted, element_count}.
         """
         client = self._get_client()
 
@@ -361,7 +419,7 @@ class ElasticsearchRepository:
                     }
                 },
                 "size": 10000,  # Adjust if needed
-                "_source": ["relative_path", "file_hash"],
+                "_source": ["relative_path", "file_hash", "element_count"],
             },
         )
 
@@ -371,6 +429,7 @@ class ElasticsearchRepository:
             states[source["relative_path"]] = {
                 "file_hash": source.get("file_hash"),
                 "is_deleted": False,
+                "element_count": source.get("element_count"),
             }
 
         return states
@@ -466,6 +525,7 @@ class ElasticsearchFileStateRepository:
 
     def __init__(self, config: MagaldiConfig | None = None):
         self._es = ElasticsearchRepository(config)
+        self._config = config
 
     def get_file_states(
         self, scope: str, repository: str, username: str
@@ -473,18 +533,38 @@ class ElasticsearchFileStateRepository:
         """Get all file states for a scope/repo/user.
 
         Returns dict mapping relative_path to DBFileState-like dict.
+
+        IMPORTANT: Verifies completeness - if expected element_count doesn't match
+        actual count of elements with that file_hash, returns None for file_hash
+        so the file will be treated as needing reprocessing.
         """
         from magaldi.parser.change_detection import DBFileState
 
         es_states = self._es.get_file_states(scope, repository, username)
-        return {
-            path: DBFileState(
+        result = {}
+
+        for path, state in es_states.items():
+            file_hash = state.get("file_hash")
+            element_count = state.get("element_count")
+
+            # Verify completeness: if we have both file_hash and element_count,
+            # check that actual element count matches expected
+            if file_hash and element_count is not None:
+                actual_count = self._es.count_elements_by_file_hash(
+                    scope, repository, username, file_hash
+                )
+                if actual_count != element_count:
+                    # Incomplete - set file_hash to None so it's treated as modified
+                    file_hash = None
+
+            result[path] = DBFileState(
                 relative_path=path,
-                file_hash=state.get("file_hash"),
+                file_hash=file_hash,
                 is_deleted=state.get("is_deleted", False),
+                element_count=element_count,
             )
-            for path, state in es_states.items()
-        }
+
+        return result
 
     def main_branch_exists(self, scope: str, repository: str) -> bool:
         """Check if main branch has been parsed."""

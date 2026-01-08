@@ -290,17 +290,20 @@ def run_processing(
             else:
                 worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "")
 
-        # Per-type stats - show remaining count and API time per element
+        # Per-type stats - show progress count and API time per element
         type_stats = state.timing.get_type_stats()
         type_parts = []
         for t in ["file", "class", "function", "method", "constant", "variable"]:
             if t in type_stats:
                 done, tot, avg_wall, avg_summ, avg_embed = type_stats[t]
-                remaining = tot - done
-                if remaining > 0:
-                    api_time = avg_summ + avg_embed
-                    type_parts.append(f"[cyan]{t}[/]:[green]{remaining}/{tot}[/] [dim]({api_time:.1f}s)[/]")
-        type_line = f"  [dim]Remaining:[/] {' [dim]|[/] '.join(type_parts)}" if type_parts else ""
+                api_time = avg_summ + avg_embed
+                if done >= tot:
+                    # Completed - green
+                    type_parts.append(f"[green]{t}[/]:[green]{done}/{tot}[/] [dim]({api_time:.1f}s)[/]")
+                else:
+                    # In progress - yellow
+                    type_parts.append(f"[yellow]{t}[/]:[yellow]{done}/{tot}[/] [dim]({api_time:.1f}s)[/]")
+        type_line = f"  [dim]Progress:[/] {' [dim]|[/] '.join(type_parts)}" if type_parts else ""
 
         # Stats line - effective wall time (elapsed/done) = actual throughput with parallelism
         effective_wall = state.timing.elapsed / state.completed if state.completed > 0 else 0.0
