@@ -183,8 +183,17 @@ class TimingStats:
                 result[t] = (completed, total, avg_api, avg_summ, avg_embed)
             return result
 
-    def eta_seconds(self, completed: int, total: int) -> float | None:
-        """Calculate ETA based on per-type API time averages."""
+    def eta_seconds(self, completed: int, total: int, num_workers: int = 1) -> float | None:
+        """Calculate ETA based on per-type API time averages.
+
+        Args:
+            completed: Number of elements completed.
+            total: Total number of elements.
+            num_workers: Number of parallel workers (divides total work time).
+
+        Returns:
+            Estimated seconds remaining, or None if cannot estimate.
+        """
         with self._lock:
             if completed == 0:
                 return None
@@ -194,8 +203,8 @@ class TimingStats:
             total_count = sum(self.summarize_counts_by_type.values())
             global_avg = total_api_time / total_count if total_count > 0 else 0.0
 
-            # Calculate ETA using per-type averages
-            eta = 0.0
+            # Calculate total remaining work time using per-type averages
+            total_work_time = 0.0
             for t in self.totals_by_type:
                 done = self.summarize_counts_by_type.get(t, 0)
                 tot = self.totals_by_type.get(t, 0)
@@ -206,8 +215,15 @@ class TimingStats:
                     avg = global_avg
                 remaining = tot - done
                 if remaining > 0 and avg > 0:
-                    eta += remaining * avg
-            return eta if eta > 0 else None
+                    total_work_time += remaining * avg
+
+            if total_work_time <= 0:
+                return None
+
+            # Divide by number of workers to get wall clock time
+            # (parallel workers process elements concurrently)
+            eta = total_work_time / max(num_workers, 1)
+            return eta
 
 
 @dataclass
@@ -240,6 +256,7 @@ class ProgressState:
     failed: int
     timing: TimingStats
     workers: WorkerStatus
+    num_workers: int = 1
 
 
 @dataclass
@@ -868,6 +885,7 @@ def process_elements(
                         failed=failed_count,
                         timing=timing_stats,
                         workers=worker_status,
+                        num_workers=config.num_workers,
                     )
                     on_progress(progress_state)
 

@@ -250,7 +250,7 @@ def run_processing(
         """Build Rich display from progress state."""
         # Progress info
         pct = (state.completed / state.total * 100) if state.total > 0 else 0
-        eta = state.timing.eta_seconds(state.completed, state.total)
+        eta = state.timing.eta_seconds(state.completed, state.total, state.num_workers)
         eta_str = f" | ~{format_duration(eta)} ETA" if eta else ""
         elapsed_str = format_duration(state.timing.elapsed)
 
@@ -330,6 +330,7 @@ def run_processing(
         failed=0,
         timing=timing_stats,
         workers=worker_status,
+        num_workers=workers,
     )
 
     class LiveDisplay:
