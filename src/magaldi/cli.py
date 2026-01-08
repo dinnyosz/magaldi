@@ -292,7 +292,12 @@ def run_feature_extraction(
     Returns:
         Dict with feature extraction results or None if no elements to extract.
     """
-    from magaldi.clustering import ClusterConfig, FeatureClusterer
+    from magaldi.clustering import (
+        ClusterConfig,
+        FeatureClusterer,
+        LabelingProgressState,
+        LabelingTimingStats,
+    )
     from magaldi.clustering.feature_processor import (
         FeatureProcessingConfig,
         FeatureProgressState,
@@ -356,8 +361,86 @@ def run_feature_extraction(
 
         # Label features with Ollama (quick labels)
         if not skip_labeling:
-            with console.status("[bold blue]Labeling features...[/]"):
-                clustering_result = clusterer.label_clusters(clustering_result)
+            console.print(f"  Labeling {clustering_result.cluster_count} features...")
+
+            labeling_timing = LabelingTimingStats()
+
+            def build_labeling_display(state: LabelingProgressState) -> RenderableType:
+                """Build Rich display for labeling progress."""
+                pct = (state.completed / state.total * 100) if state.total > 0 else 0
+                eta = state.timing.eta_seconds(state.completed, state.total)
+                elapsed_str = format_duration(state.timing.elapsed)
+
+                # Progress bar
+                bar_width = 30
+                filled = int(bar_width * pct / 100)
+                bar = "━" * filled + "╺" + "─" * (bar_width - filled - 1) if filled < bar_width else "━" * bar_width
+                bar_text = Text()
+                bar_text.append("  ")
+                bar_text.append(bar[:filled], style="green")
+                if filled < bar_width:
+                    bar_text.append(bar[filled:], style="dim")
+                bar_text.append(" ")
+                bar_text.append(f"{state.completed}", style="green")
+                bar_text.append("/", style="dim")
+                bar_text.append(f"{state.total}", style="cyan")
+                bar_text.append(f" ({pct:.0f}%)", style="green")
+                bar_text.append(" | ", style="dim")
+                bar_text.append(elapsed_str, style="cyan")
+                bar_text.append(" elapsed", style="dim")
+                if eta:
+                    bar_text.append(" | ~", style="dim")
+                    bar_text.append(format_duration(eta), style="yellow")
+                    bar_text.append(" ETA", style="dim")
+
+                # Current cluster line
+                current_text = Text()
+                if state.current_cluster:
+                    current_text.append("  [labeling] ", style="cyan")
+                    current_text.append(state.current_cluster, style="white")
+                else:
+                    current_text.append("  ", style="dim")
+
+                # Stats line
+                stats_text = Text()
+                if state.timing.label_count > 0:
+                    stats_text.append("  ")
+                    stats_text.append("Avg: ", style="dim")
+                    stats_text.append(f"{state.timing.avg_label_time:.1f}s", style="green")
+                    stats_text.append("/label", style="dim")
+                    if state.skipped > 0:
+                        stats_text.append(" | ", style="dim")
+                        stats_text.append(f"{state.skipped} skipped", style="yellow")
+                    if state.failed > 0:
+                        stats_text.append(" | ", style="dim")
+                        stats_text.append(f"{state.failed} failed", style="red")
+
+                return Group(bar_text, current_text, stats_text)
+
+            labeling_state = LabelingProgressState(
+                total=clustering_result.cluster_count,
+                completed=0,
+                skipped=0,
+                failed=0,
+                timing=labeling_timing,
+                current_cluster="",
+            )
+
+            class LiveLabelingDisplay:
+                def __rich__(self) -> RenderableType:
+                    return build_labeling_display(labeling_state)
+
+            with Live(LiveLabelingDisplay(), console=console, refresh_per_second=10) as live:
+                def on_labeling_progress(state: LabelingProgressState) -> None:
+                    nonlocal labeling_state
+                    labeling_state = state
+                    live.refresh()
+
+                clustering_result = clusterer.label_clusters(
+                    clustering_result,
+                    on_progress=on_labeling_progress,
+                    timing_stats=labeling_timing,
+                )
 
         # Clear existing feature assignments
         es_repo.clear_cluster_assignments(scope, repository, username)

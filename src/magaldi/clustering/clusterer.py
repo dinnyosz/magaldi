@@ -6,6 +6,8 @@ with optional Ollama-based labeling.
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -74,6 +76,54 @@ class ClusteringResult:
     def cluster_count(self) -> int:
         """Number of clusters found (excluding outliers)."""
         return len(self.clusters)
+
+
+# =============================================================================
+# LABELING PROGRESS TRACKING
+# =============================================================================
+
+
+@dataclass
+class LabelingTimingStats:
+    """Timing statistics for labeling phase."""
+
+    phase_start: float = 0.0
+    total_label_time: float = 0.0
+    label_count: int = 0
+
+    def record(self, label_time: float) -> None:
+        """Record timing for a completed label."""
+        self.total_label_time += label_time
+        self.label_count += 1
+
+    @property
+    def avg_label_time(self) -> float:
+        """Average time per label API call."""
+        return self.total_label_time / self.label_count if self.label_count > 0 else 0.0
+
+    @property
+    def elapsed(self) -> float:
+        """Elapsed time since phase start."""
+        return time.time() - self.phase_start
+
+    def eta_seconds(self, completed: int, total: int) -> float | None:
+        """Calculate ETA based on average label time."""
+        if self.label_count == 0 or total <= completed:
+            return None
+        remaining = total - completed
+        return remaining * self.avg_label_time
+
+
+@dataclass
+class LabelingProgressState:
+    """Progress state for labeling display."""
+
+    total: int
+    completed: int
+    skipped: int  # Clusters with no names to label
+    failed: int
+    timing: LabelingTimingStats
+    current_cluster: str = ""  # Currently being labeled
 
 
 # =============================================================================
@@ -206,44 +256,100 @@ class FeatureClusterer:
         self,
         result: ClusteringResult,
         max_names_per_prompt: int = 15,
+        on_progress: Callable[[LabelingProgressState], None] | None = None,
+        timing_stats: LabelingTimingStats | None = None,
     ) -> ClusteringResult:
         """Generate labels for clusters using Ollama.
 
         Args:
             result: Clustering result to label.
             max_names_per_prompt: Max function names to include in prompt.
+            on_progress: Optional callback for progress updates.
+            timing_stats: Optional timing stats (created if not provided).
 
         Returns:
             Updated ClusteringResult with labels.
         """
         ollama = self._get_ollama()
 
+        # Initialize timing stats
+        if timing_stats is None:
+            timing_stats = LabelingTimingStats()
+        timing_stats.phase_start = time.time()
+
+        total = len(result.clusters)
+        completed = 0
+        skipped = 0
+        failed = 0
+
         for cluster in result.clusters:
             # Get sample of function names
             names = cluster.element_names[:max_names_per_prompt]
             names_str = "\n".join(f"- {name}" for name in names if name)
 
+            # Build display name for progress
+            current_name = f"cluster_{cluster.cluster_id} ({cluster.size} members)"
+
             if not names_str:
                 cluster.label = f"cluster_{cluster.cluster_id}"
+                skipped += 1
+                completed += 1
+                if on_progress:
+                    on_progress(LabelingProgressState(
+                        total=total,
+                        completed=completed,
+                        skipped=skipped,
+                        failed=failed,
+                        timing=timing_stats,
+                        current_cluster="",
+                    ))
                 continue
+
+            # Report current cluster being labeled
+            if on_progress:
+                on_progress(LabelingProgressState(
+                    total=total,
+                    completed=completed,
+                    skipped=skipped,
+                    failed=failed,
+                    timing=timing_stats,
+                    current_cluster=current_name,
+                ))
 
             prompt = LABEL_PROMPT.format(names=names_str)
 
             try:
+                api_start = time.time()
                 raw_label = ollama.generate(
                     prompt=prompt,
                     temperature=self.config.label_temperature,
                     max_tokens=self.config.label_max_tokens,
                     timeout=self.config.label_timeout,
                 )
+                label_time = time.time() - api_start
+                timing_stats.record(label_time)
 
                 # Clean label
                 label = self._clean_label(raw_label)
                 cluster.label = label or f"cluster_{cluster.cluster_id}"
+                completed += 1
 
             except Exception:
                 # Fall back to numbered label
                 cluster.label = f"cluster_{cluster.cluster_id}"
+                failed += 1
+                completed += 1
+
+            # Report progress after each cluster
+            if on_progress:
+                on_progress(LabelingProgressState(
+                    total=total,
+                    completed=completed,
+                    skipped=skipped,
+                    failed=failed,
+                    timing=timing_stats,
+                    current_cluster="",
+                ))
 
         return result
 

@@ -7,6 +7,14 @@ from magaldi.clustering.clusterer import (
     ClusterConfig,
     ClusterResult,
     FeatureClusterer,
+    LabelingProgressState,
+    LabelingTimingStats,
 )
 
-__all__ = ["ClusterConfig", "ClusterResult", "FeatureClusterer"]
+__all__ = [
+    "ClusterConfig",
+    "ClusterResult",
+    "FeatureClusterer",
+    "LabelingProgressState",
+    "LabelingTimingStats",
+]
