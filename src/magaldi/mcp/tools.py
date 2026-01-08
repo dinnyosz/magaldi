@@ -799,3 +799,334 @@ def _find_elements_in_file(
     )
 
     return [hit["_source"] for hit in result.get("hits", {}).get("hits", [])]
+
+
+# =============================================================================
+# CODE SEARCH TOOLS (regex/grep-based)
+# =============================================================================
+
+
+def grep_code(
+    repo_root: str,
+    pattern: str,
+    glob: str | None = None,
+    context_lines: int = 0,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Search code with regex pattern (like grep/ripgrep).
+
+    Args:
+        repo_root: Repository root path.
+        pattern: Regex pattern to search.
+        glob: File glob filter (e.g., '*.py', '*.ts').
+        context_lines: Lines of context before/after match.
+        limit: Maximum matches to return.
+
+    Returns:
+        List of matches with file, line, content, and context.
+    """
+    import re
+    import subprocess
+    from pathlib import Path
+
+    root = Path(repo_root)
+    results: list[dict[str, Any]] = []
+
+    # Try ripgrep first (faster), fall back to manual search
+    try:
+        cmd = ["rg", "--json", "-n", "--max-count", str(limit * 2)]
+        if context_lines > 0:
+            cmd.extend(["-C", str(context_lines)])
+        if glob:
+            cmd.extend(["--glob", glob])
+        cmd.extend([pattern, str(root)])
+
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+        # Parse ripgrep JSON output
+        for line in proc.stdout.splitlines():
+            try:
+                import json
+                obj = json.loads(line)
+                if obj.get("type") == "match":
+                    data = obj["data"]
+                    path = data["path"]["text"]
+                    rel_path = str(Path(path).relative_to(root))
+                    line_num = data["line_number"]
+                    text = data["lines"]["text"].rstrip("\n")
+
+                    results.append({
+                        "file": rel_path,
+                        "line": line_num,
+                        "content": text,
+                        "match": data.get("submatches", [{}])[0].get("match", {}).get("text", ""),
+                    })
+
+                    if len(results) >= limit:
+                        break
+            except (json.JSONDecodeError, KeyError):
+                continue
+
+        return results
+
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass  # Fall back to manual search
+
+    # Manual fallback (slower but always works)
+    compiled = re.compile(pattern)
+    file_pattern = glob if glob else "**/*"
+
+    for path in root.glob(file_pattern):
+        if not path.is_file():
+            continue
+        if any(p.startswith('.') for p in path.parts):
+            continue
+
+        try:
+            content = path.read_text(errors="ignore")
+            lines = content.splitlines()
+
+            for i, line in enumerate(lines):
+                match = compiled.search(line)
+                if match:
+                    rel_path = str(path.relative_to(root))
+                    entry: dict[str, Any] = {
+                        "file": rel_path,
+                        "line": i + 1,
+                        "content": line,
+                        "match": match.group(0),
+                    }
+
+                    # Add context if requested
+                    if context_lines > 0:
+                        start = max(0, i - context_lines)
+                        end = min(len(lines), i + context_lines + 1)
+                        entry["context_before"] = lines[start:i]
+                        entry["context_after"] = lines[i + 1:end]
+
+                    results.append(entry)
+
+                    if len(results) >= limit:
+                        return results
+
+        except (OSError, UnicodeDecodeError):
+            continue
+
+    return results
+
+
+def find_usages(
+    repo_root: str,
+    es: ElasticsearchRepository,
+    element_id: str,
+    limit: int = 30,
+) -> list[dict[str, Any]]:
+    """Find where an element is used/called/referenced.
+
+    Args:
+        repo_root: Repository root path.
+        es: Elasticsearch repository.
+        element_id: Element to find usages of.
+        limit: Maximum usages to return.
+
+    Returns:
+        List of usage locations with context.
+    """
+    import re
+
+    # Get the element to find its name
+    doc = es.get_document(element_id)
+    if not doc:
+        raise ValueError(f"Element not found: {element_id}")
+
+    name = doc.get("name")
+    element_type = doc.get("element_type")
+    defining_file = doc.get("relative_path")
+    defining_line = doc.get("line_start")
+
+    # Build search pattern based on element type
+    if element_type == "function":
+        # Function calls: name(
+        pattern = rf"\b{re.escape(name)}\s*\("
+    elif element_type == "method":
+        # Method calls: .name( or self.name(
+        pattern = rf"\.{re.escape(name)}\s*\("
+    elif element_type == "class":
+        # Class references: inheritance, instantiation, type hints
+        pattern = rf"\b{re.escape(name)}\b"
+    else:
+        # Generic: just the name as word boundary
+        pattern = rf"\b{re.escape(name)}\b"
+
+    # Search with grep_code
+    matches = grep_code(
+        repo_root=repo_root,
+        pattern=pattern,
+        glob="**/*.py",  # TODO: detect language from element
+        context_lines=1,
+        limit=limit + 10,  # Get extra to filter out definition
+    )
+
+    # Filter out the definition itself
+    usages = []
+    for match in matches:
+        # Skip if it's the definition line
+        if match["file"] == defining_file and match["line"] == defining_line:
+            continue
+
+        # Skip if it looks like a definition (def/class keyword)
+        content = match["content"].strip()
+        if element_type == "function" and content.startswith("def "):
+            continue
+        if element_type == "class" and content.startswith("class "):
+            continue
+        if element_type == "method" and content.startswith("def "):
+            continue
+
+        usages.append({
+            "file": match["file"],
+            "line": match["line"],
+            "content": match["content"],
+            "context_before": match.get("context_before", []),
+            "context_after": match.get("context_after", []),
+        })
+
+        if len(usages) >= limit:
+            break
+
+    return usages
+
+
+def find_implementations(
+    repo_root: str,
+    es: ElasticsearchRepository,
+    element_id: str | None = None,
+    class_name: str | None = None,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """Find classes that implement/inherit from a protocol or base class.
+
+    Args:
+        repo_root: Repository root path.
+        es: Elasticsearch repository.
+        element_id: Element ID of the protocol/base class.
+        class_name: Or just the class name to search for.
+        limit: Maximum implementations to return.
+
+    Returns:
+        List of implementing classes with their info.
+    """
+    import re
+
+    # Get the name to search for
+    if element_id:
+        doc = es.get_document(element_id)
+        if not doc:
+            raise ValueError(f"Element not found: {element_id}")
+        name = doc.get("name")
+    elif class_name:
+        name = class_name
+    else:
+        raise ValueError("Either element_id or class_name required")
+
+    # Search for class definitions that inherit from this name
+    # Pattern: class SomeClass(Name) or class SomeClass(Name, Other)
+    pattern = rf"class\s+\w+\s*\([^)]*\b{re.escape(name)}\b"
+
+    matches = grep_code(
+        repo_root=repo_root,
+        pattern=pattern,
+        glob="**/*.py",
+        context_lines=2,
+        limit=limit,
+    )
+
+    results = []
+    for match in matches:
+        # Extract class name from the match
+        class_match = re.search(r"class\s+(\w+)", match["content"])
+        impl_name = class_match.group(1) if class_match else "Unknown"
+
+        results.append({
+            "class_name": impl_name,
+            "file": match["file"],
+            "line": match["line"],
+            "definition": match["content"].strip(),
+            "context_after": match.get("context_after", []),
+        })
+
+    return results
+
+
+def get_call_graph(
+    repo_root: str,
+    es: ElasticsearchRepository,
+    element_id: str,
+    direction: str = "both",
+) -> dict[str, Any]:
+    """Get callers and/or callees of a function/method.
+
+    Args:
+        repo_root: Repository root path.
+        es: Elasticsearch repository.
+        element_id: Function/method element ID.
+        direction: 'callers', 'callees', or 'both'.
+
+    Returns:
+        Call graph with callers and callees lists.
+    """
+    doc = es.get_document(element_id)
+    if not doc:
+        raise ValueError(f"Element not found: {element_id}")
+
+    name = doc.get("name")
+    element_type = doc.get("element_type")
+    raw_code = doc.get("raw_code", "")
+    defining_file = doc.get("relative_path")
+
+    result: dict[str, Any] = {
+        "element": {
+            "name": name,
+            "type": element_type,
+            "file": defining_file,
+        },
+        "callers": [],
+        "callees": [],
+    }
+
+    # Find callers (who calls this function)
+    if direction in ("callers", "both"):
+        usages = find_usages(repo_root, es, element_id, limit=20)
+        for usage in usages:
+            result["callers"].append({
+                "file": usage["file"],
+                "line": usage["line"],
+                "content": usage["content"],
+            })
+
+    # Find callees (what this function calls)
+    if direction in ("callees", "both") and raw_code:
+        # Extract function/method calls from the code
+        import re
+
+        # Match function calls: name( but not def name(
+        call_pattern = r"(?<!def\s)(?<!class\s)\b(\w+)\s*\("
+        calls = re.findall(call_pattern, raw_code)
+
+        # Deduplicate and filter builtins
+        builtins = {"print", "len", "str", "int", "float", "list", "dict", "set",
+                    "range", "enumerate", "zip", "map", "filter", "sorted", "type",
+                    "isinstance", "hasattr", "getattr", "setattr", "super", "open"}
+
+        seen = set()
+        for call_name in calls:
+            if call_name in seen or call_name in builtins:
+                continue
+            seen.add(call_name)
+
+            result["callees"].append({
+                "name": call_name,
+                "type": "call",
+            })
+
+    return result

@@ -291,6 +291,65 @@ class MagaldiMCPServer:
                         "required": ["scope", "repository"],
                     },
                 ),
+                # =============================================================
+                # CODE SEARCH - Regex/grep-based search
+                # =============================================================
+                Tool(
+                    name="grep_code",
+                    description="GREP CODE: Search with regex pattern (like ripgrep). "
+                    "Use for literal patterns, finding usages, or when semantic search isn't precise enough. "
+                    "Supports context lines before/after matches.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "pattern": {"type": "string", "description": "Regex pattern to search"},
+                            "glob": {"type": "string", "description": "File filter (e.g., '*.py', 'src/**/*.ts')"},
+                            "context_lines": {"type": "integer", "default": 0, "description": "Lines of context around match"},
+                            "limit": {"type": "integer", "default": 50},
+                        },
+                        "required": ["pattern"],
+                    },
+                ),
+                Tool(
+                    name="find_usages",
+                    description="FIND USAGES: Find where a function/class/method is called or referenced. "
+                    "Use after search_code to see how something is used throughout the codebase.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "element_id": {"type": "string", "description": "Element ID from search results"},
+                            "limit": {"type": "integer", "default": 30},
+                        },
+                        "required": ["element_id"],
+                    },
+                ),
+                Tool(
+                    name="find_implementations",
+                    description="FIND IMPLEMENTATIONS: Find classes that inherit from or implement a protocol/base class. "
+                    "Use to find concrete implementations of abstract classes or protocols.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "element_id": {"type": "string", "description": "Element ID of the protocol/base class"},
+                            "class_name": {"type": "string", "description": "Or just the class name to search for"},
+                            "limit": {"type": "integer", "default": 20},
+                        },
+                        "required": [],
+                    },
+                ),
+                Tool(
+                    name="get_call_graph",
+                    description="CALL GRAPH: Get callers (who calls this) and callees (what it calls) for a function. "
+                    "Use to understand dependencies and impact of changes.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "element_id": {"type": "string", "description": "Function/method element ID"},
+                            "direction": {"type": "string", "enum": ["callers", "callees", "both"], "default": "both"},
+                        },
+                        "required": ["element_id"],
+                    },
+                ),
             ]
 
         @self.server.call_tool()
@@ -308,13 +367,17 @@ class MagaldiMCPServer:
         from magaldi.mcp.tools import (
             batch_get_elements,
             find_files,
+            find_implementations,
             find_similar,
+            find_usages,
+            get_call_graph,
             get_children,
             get_context,
             get_element,
             get_feature_members,
             get_file_structure,
             get_repo_stats,
+            grep_code,
             list_features,
             list_repos,
             read_file,
@@ -443,6 +506,48 @@ class MagaldiMCPServer:
                 pattern=args["pattern"],
                 limit=args.get("limit", 50),
             )
+        elif name == "grep_code":
+            if not self.repo_root:
+                raise ValueError("grep_code requires MAGALDI_REPO_ROOT to be set")
+            return await asyncio.to_thread(
+                grep_code,
+                self.repo_root,
+                pattern=args["pattern"],
+                glob=args.get("glob"),
+                context_lines=args.get("context_lines", 0),
+                limit=args.get("limit", 50),
+            )
+        elif name == "find_usages":
+            if not self.repo_root:
+                raise ValueError("find_usages requires MAGALDI_REPO_ROOT to be set")
+            return await asyncio.to_thread(
+                find_usages,
+                self.repo_root,
+                es,
+                element_id=args["element_id"],
+                limit=args.get("limit", 30),
+            )
+        elif name == "find_implementations":
+            if not self.repo_root:
+                raise ValueError("find_implementations requires MAGALDI_REPO_ROOT to be set")
+            return await asyncio.to_thread(
+                find_implementations,
+                self.repo_root,
+                es,
+                element_id=args.get("element_id"),
+                class_name=args.get("class_name"),
+                limit=args.get("limit", 20),
+            )
+        elif name == "get_call_graph":
+            if not self.repo_root:
+                raise ValueError("get_call_graph requires MAGALDI_REPO_ROOT to be set")
+            return await asyncio.to_thread(
+                get_call_graph,
+                self.repo_root,
+                es,
+                element_id=args["element_id"],
+                direction=args.get("direction", "both"),
+            )
         else:
             raise ValueError(f"Unknown tool: {name}")
 
@@ -515,6 +620,44 @@ def _format_result(result: Any) -> str:
                 lines.append(f"  {r.get('path')} ({r.get('size')} bytes)")
             return "\n".join(lines)
 
+        # Grep results
+        if "file" in first and "content" in first and "line" in first:
+            lines = [f"Found {len(result)} matches:\n"]
+            for r in result:
+                lines.append(f"{r.get('file')}:{r.get('line')}")
+                # Show context before
+                for ctx in r.get("context_before", []):
+                    lines.append(f"  | {ctx}")
+                # Highlight the match line
+                lines.append(f"  > {r.get('content')}")
+                # Show context after
+                for ctx in r.get("context_after", []):
+                    lines.append(f"  | {ctx}")
+                lines.append("")
+            return "\n".join(lines)
+
+        # Usage results (find_usages)
+        if "file" in first and "content" in first and "context_before" in first:
+            lines = [f"Found {len(result)} usages:\n"]
+            for r in result:
+                lines.append(f"{r.get('file')}:{r.get('line')}")
+                for ctx in r.get("context_before", []):
+                    lines.append(f"  | {ctx}")
+                lines.append(f"  > {r.get('content')}")
+                for ctx in r.get("context_after", []):
+                    lines.append(f"  | {ctx}")
+                lines.append("")
+            return "\n".join(lines)
+
+        # Implementation results
+        if "class_name" in first and "definition" in first:
+            lines = [f"Found {len(result)} implementations:\n"]
+            for r in result:
+                lines.append(f"[class] {r.get('class_name')} ({r.get('file')}:{r.get('line')})")
+                lines.append(f"  {r.get('definition')}")
+                lines.append("")
+            return "\n".join(lines)
+
     # Single dict results (get_element, get_context, read_file, etc.)
     if isinstance(result, dict):
         # File read result
@@ -544,6 +687,25 @@ def _format_result(result: Any) -> str:
             lines.append(f"  Total lines: {result.get('total_lines')}")
             lines.append(f"  Features: {result.get('feature_count')}")
             lines.append(f"  By type: {result.get('elements_by_type')}")
+            return "\n".join(lines)
+
+        # Call graph
+        if "callers" in result and "callees" in result:
+            elem = result.get("element", {})
+            lines = [f"Call graph for [{elem.get('type')}] {elem.get('name')} ({elem.get('file')})\n"]
+
+            if result.get("callers"):
+                lines.append(f"Callers ({len(result['callers'])}):")
+                for c in result["callers"]:
+                    lines.append(f"  {c.get('file')}:{c.get('line')}")
+                    lines.append(f"    > {c.get('content', '').strip()}")
+                lines.append("")
+
+            if result.get("callees"):
+                lines.append(f"Callees ({len(result['callees'])}):")
+                for c in result["callees"]:
+                    lines.append(f"  {c.get('name')}")
+
             return "\n".join(lines)
 
         # Fallback to JSON for other dicts
