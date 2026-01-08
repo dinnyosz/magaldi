@@ -526,6 +526,71 @@ class ElasticsearchRepository:
             for hit in result["hits"]["hits"]
         ]
 
+    def search_by_keyword(
+        self,
+        query: str,
+        scope: str | None = None,
+        repository: str | None = None,
+        username: str | None = None,
+        element_types: list[str] | None = None,
+        size: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Search elements by keyword matching (BM25).
+
+        Fallback search when vector embeddings are unavailable.
+
+        Args:
+            query: Search query string.
+            scope: Filter by scope.
+            repository: Filter by repository.
+            username: Filter by username.
+            element_types: Filter by element types.
+            size: Maximum results to return.
+
+        Returns:
+            List of matching documents with scores.
+        """
+        filter_clauses: list[dict[str, Any]] = []
+
+        if scope:
+            filter_clauses.append({"term": {"scope": scope}})
+        if repository:
+            filter_clauses.append({"term": {"repository": repository}})
+        if username:
+            filter_clauses.append({"term": {"username": username}})
+        if element_types:
+            filter_clauses.append({"terms": {"element_type": element_types}})
+
+        # Multi-match across name, summary, and signature fields
+        must_clause: dict[str, Any] = {
+            "multi_match": {
+                "query": query,
+                "fields": ["name^3", "summary^2", "signature", "docstring"],
+                "type": "best_fields",
+                "fuzziness": "AUTO",
+            }
+        }
+
+        es_query: dict[str, Any] = {
+            "bool": {
+                "must": [must_clause],
+            }
+        }
+
+        if filter_clauses:
+            es_query["bool"]["filter"] = filter_clauses
+
+        client = self._get_client()
+        result = client.search(
+            index=INDEX_NAME,
+            body={"query": es_query, "size": size},
+        )
+
+        return [
+            {**hit["_source"], "_score": hit["_score"]}
+            for hit in result["hits"]["hits"]
+        ]
+
     def get_all_embeddings(
         self,
         scope: str,

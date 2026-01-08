@@ -19,7 +19,7 @@ from magaldi.embedding.embedding import OllamaEmbedClient
 
 def search_code(
     es: ElasticsearchRepository,
-    ollama: OllamaEmbedClient,
+    ollama: OllamaEmbedClient | None,
     query: str,
     scope: str | None = None,
     repository: str | None = None,
@@ -30,9 +30,11 @@ def search_code(
 ) -> list[dict[str, Any]]:
     """Semantic search for code elements.
 
+    Tries vector search first, falls back to keyword search if Ollama unavailable.
+
     Args:
         es: Elasticsearch repository.
-        ollama: Ollama client for query embedding.
+        ollama: Ollama client for query embedding (optional, falls back to keyword).
         query: Natural language search query.
         scope: Filter by scope.
         repository: Filter by repository.
@@ -47,18 +49,32 @@ def search_code(
     # Validate limit
     limit = max(1, min(limit, 50))
 
-    # Generate query embedding
-    query_embedding = ollama.embed_single(query)
+    # Try vector search first, fall back to keyword search
+    results = []
+    if ollama is not None:
+        try:
+            query_embedding = ollama.embed_single(query)
+            results = es.search_by_vector(
+                embedding=query_embedding,
+                scope=scope,
+                repository=repository,
+                username=username,
+                element_types=element_types,
+                size=limit,
+            )
+        except Exception:
+            pass  # Fall through to keyword search
 
-    # Search by vector
-    results = es.search_by_vector(
-        embedding=query_embedding,
-        scope=scope,
-        repository=repository,
-        username=username,
-        element_types=element_types,
-        size=limit,
-    )
+    # Fallback to keyword search if vector search failed or unavailable
+    if not results:
+        results = es.search_by_keyword(
+            query=query,
+            scope=scope,
+            repository=repository,
+            username=username,
+            element_types=element_types,
+            size=limit,
+        )
 
     # Format results (search_by_vector returns flattened dicts with _score)
     formatted = []
@@ -86,7 +102,7 @@ def search_code(
 
 def search_features(
     es: ElasticsearchRepository,
-    ollama: OllamaEmbedClient,
+    ollama: OllamaEmbedClient | None,
     query: str,
     scope: str | None = None,
     repository: str | None = None,
@@ -95,9 +111,11 @@ def search_features(
 ) -> list[dict[str, Any]]:
     """Search for features/capabilities.
 
+    Tries vector search first, falls back to keyword search if Ollama unavailable.
+
     Args:
         es: Elasticsearch repository.
-        ollama: Ollama client for query embedding.
+        ollama: Ollama client for query embedding (optional, falls back to keyword).
         query: Search query for features.
         scope: Filter by scope.
         repository: Filter by repository.
@@ -109,18 +127,32 @@ def search_features(
     """
     limit = max(1, min(limit, 50))
 
-    # Generate query embedding
-    query_embedding = ollama.embed_single(query)
+    # Try vector search first, fall back to keyword search
+    results = []
+    if ollama is not None:
+        try:
+            query_embedding = ollama.embed_single(query)
+            results = es.search_by_vector(
+                embedding=query_embedding,
+                scope=scope,
+                repository=repository,
+                username=username,
+                element_types=["feature"],
+                size=limit,
+            )
+        except Exception:
+            pass  # Fall through to keyword search
 
-    # Search features only
-    results = es.search_by_vector(
-        embedding=query_embedding,
-        scope=scope,
-        repository=repository,
-        username=username,
-        element_types=["feature"],
-        size=limit,
-    )
+    # Fallback to keyword search if vector search failed or unavailable
+    if not results:
+        results = es.search_by_keyword(
+            query=query,
+            scope=scope,
+            repository=repository,
+            username=username,
+            element_types=["feature"],
+            size=limit,
+        )
 
     formatted = []
     for result in results:
