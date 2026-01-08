@@ -13,7 +13,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
-from magaldi.config import get_config
+from magaldi.config import get_config, load_config
 from magaldi.db.elasticsearch import ElasticsearchRepository
 from magaldi.embedding.embedding import OllamaEmbedClient
 
@@ -23,9 +23,10 @@ log = logging.getLogger(__name__)
 class MagaldiMCPServer:
     """MCP Server for Magaldi code discovery."""
 
-    def __init__(self) -> None:
+    def __init__(self, default_username: str = "main") -> None:
         self.server = Server("magaldi")
         self.config = get_config()
+        self.default_username = default_username
         self.es_repo: ElasticsearchRepository | None = None
         self.ollama_embed: OllamaEmbedClient | None = None
 
@@ -353,7 +354,7 @@ class MagaldiMCPServer:
                 query=args["query"],
                 scope=args.get("scope"),
                 repository=args.get("repository"),
-                username=args.get("username", "main"),
+                username=args.get("username", self.default_username),
                 element_types=args.get("element_types"),
                 language=args.get("language"),
                 limit=args.get("limit", 10),
@@ -366,7 +367,7 @@ class MagaldiMCPServer:
                 query=args["query"],
                 scope=args.get("scope"),
                 repository=args.get("repository"),
-                username=args.get("username", "main"),
+                username=args.get("username", self.default_username),
                 limit=args.get("limit", 10),
             )
         elif name == "find_similar":
@@ -399,7 +400,7 @@ class MagaldiMCPServer:
                 scope=args["scope"],
                 repository=args["repository"],
                 file_path=args["file_path"],
-                username=args.get("username", "main"),
+                username=args.get("username", self.default_username),
             )
         elif name == "list_repos":
             return await asyncio.to_thread(
@@ -413,7 +414,7 @@ class MagaldiMCPServer:
                 es,
                 scope=args["scope"],
                 repository=args["repository"],
-                username=args.get("username", "main"),
+                username=args.get("username", self.default_username),
             )
         elif name == "get_repo_stats":
             return await asyncio.to_thread(
@@ -421,7 +422,7 @@ class MagaldiMCPServer:
                 es,
                 scope=args["scope"],
                 repository=args["repository"],
-                username=args.get("username", "main"),
+                username=args.get("username", self.default_username),
             )
         elif name == "get_children":
             return await asyncio.to_thread(
@@ -461,10 +462,24 @@ def _format_result(result: Any) -> str:
 
 def run_server() -> None:
     """Entry point to run the MCP server."""
+    import argparse
+    import os
+
+    parser = argparse.ArgumentParser(description="Magaldi MCP Server")
+    parser.add_argument(
+        "--user", "-u",
+        default=os.environ.get("MAGALDI_USER", "main"),
+        help="Default username for searches (default: MAGALDI_USER env or 'main')",
+    )
+    args = parser.parse_args()
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
 
-    server = MagaldiMCPServer()
+    # Load configuration first
+    load_config()
+
+    server = MagaldiMCPServer(default_username=args.user)
     asyncio.run(server.run())
