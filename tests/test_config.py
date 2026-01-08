@@ -11,7 +11,6 @@ from magaldi.config import (
     LoggingConfig,
     MagaldiConfig,
     MCPConfig,
-    MySQLConfig,
     OllamaConfig,
     ParserConfig,
     SearchConfig,
@@ -61,38 +60,6 @@ def clean_env():
 # =============================================================================
 # DATACLASS DEFAULTS
 # =============================================================================
-
-
-class TestMySQLConfigDefaults:
-    """Test MySQLConfig dataclass defaults."""
-
-    def test_default_host(self):
-        config = MySQLConfig()
-        assert config.host == "localhost"
-
-    def test_default_port(self):
-        config = MySQLConfig()
-        assert config.port == 3306
-
-    def test_default_database(self):
-        config = MySQLConfig()
-        assert config.database == "magaldi"
-
-    def test_default_user(self):
-        config = MySQLConfig()
-        assert config.user == "magaldi"
-
-    def test_default_password_empty(self):
-        config = MySQLConfig()
-        assert config.password == ""
-
-    def test_default_pool_size(self):
-        config = MySQLConfig()
-        assert config.pool_size == 10
-
-    def test_default_pool_timeout(self):
-        config = MySQLConfig()
-        assert config.pool_timeout == 30
 
 
 class TestElasticsearchConfigDefaults:
@@ -179,9 +146,8 @@ class TestLoadFromFile:
         """Load a fully specified config file."""
         config = load_config(FIXTURES_DIR / "valid.yaml")
 
-        assert config.mysql.host == "testhost"
-        assert config.mysql.port == 3307
-        assert config.mysql.password == "testpassword"
+        assert config.elasticsearch.host == "testhost"
+        assert config.elasticsearch.port == 9200
         assert config.elasticsearch.url == "http://testhost:9200"
         assert config.ollama.summarize_model == "test-model"
         assert config.workers.summarization.count == 2
@@ -192,11 +158,10 @@ class TestLoadFromFile:
         config = load_config(FIXTURES_DIR / "minimal.yaml")
 
         # Specified value
-        assert config.mysql.password == "minimalpassword"
+        assert config.elasticsearch.host == "localhost"
 
         # Default values
-        assert config.mysql.host == "localhost"
-        assert config.mysql.port == 3306
+        assert config.elasticsearch.port == 9200
         assert config.elasticsearch.url == "http://localhost:9200"
 
     def test_load_nonexistent_file_uses_defaults(self, clean_env):
@@ -222,29 +187,10 @@ class TestLoadFromFile:
 class TestEnvOverrides:
     """Test environment variable overrides."""
 
-    def test_env_overrides_mysql_host(self, clean_env):
-        os.environ["MAGALDI_MYSQL_HOST"] = "envhost"
-        os.environ["MAGALDI_MYSQL_PASSWORD"] = "envpassword"
-        config = load_config(FIXTURES_DIR / "valid.yaml")
-        assert config.mysql.host == "envhost"
-
-    def test_env_overrides_mysql_port_converts_to_int(self, clean_env):
-        os.environ["MAGALDI_MYSQL_PORT"] = "3308"
-        os.environ["MAGALDI_MYSQL_PASSWORD"] = "envpassword"
-        config = load_config(FIXTURES_DIR / "valid.yaml")
-        assert config.mysql.port == 3308
-        assert isinstance(config.mysql.port, int)
-
-    def test_env_overrides_mysql_password(self, clean_env):
-        os.environ["MAGALDI_MYSQL_PASSWORD"] = "secretpassword"
-        config = load_config(FIXTURES_DIR / "minimal.yaml")
-        assert config.mysql.password == "secretpassword"
-
     def test_env_overrides_elasticsearch_host_port(self, clean_env):
         os.environ["MAGALDI_ELASTICSEARCH_HOST"] = "eshost"
         os.environ["MAGALDI_ELASTICSEARCH_PORT"] = "9201"
         os.environ["MAGALDI_ELASTICSEARCH_SCHEME"] = "https"
-        os.environ["MAGALDI_MYSQL_PASSWORD"] = "test"
         config = load_config(FIXTURES_DIR / "minimal.yaml")
         assert config.elasticsearch.host == "eshost"
         assert config.elasticsearch.port == 9201
@@ -253,19 +199,16 @@ class TestEnvOverrides:
 
     def test_env_overrides_ollama_url(self, clean_env):
         os.environ["MAGALDI_OLLAMA_URL"] = "http://ollama:11435"
-        os.environ["MAGALDI_MYSQL_PASSWORD"] = "test"
         config = load_config(FIXTURES_DIR / "minimal.yaml")
         assert config.ollama.url == "http://ollama:11435"
 
     def test_env_overrides_log_level(self, clean_env):
         os.environ["MAGALDI_LOG_LEVEL"] = "WARNING"
-        os.environ["MAGALDI_MYSQL_PASSWORD"] = "test"
         config = load_config(FIXTURES_DIR / "minimal.yaml")
         assert config.logging.level == "WARNING"
 
     def test_env_overrides_web_port(self, clean_env):
         os.environ["MAGALDI_WEB_PORT"] = "9000"
-        os.environ["MAGALDI_MYSQL_PASSWORD"] = "test"
         config = load_config(FIXTURES_DIR / "minimal.yaml")
         assert config.web.port == 9000
 
@@ -280,22 +223,21 @@ class TestPriorityChain:
 
     def test_env_overrides_file(self, clean_env):
         """Environment should override file values."""
-        os.environ["MAGALDI_MYSQL_HOST"] = "env-host"
+        os.environ["MAGALDI_ELASTICSEARCH_HOST"] = "env-host"
         config = load_config(FIXTURES_DIR / "valid.yaml")
 
         # File says "testhost", env says "env-host"
-        assert config.mysql.host == "env-host"
+        assert config.elasticsearch.host == "env-host"
 
     def test_file_overrides_defaults(self, clean_env):
         """File should override default values."""
         config = load_config(FIXTURES_DIR / "valid.yaml")
 
         # Default is "localhost", file says "testhost"
-        assert config.mysql.host == "testhost"
+        assert config.elasticsearch.host == "testhost"
 
     def test_defaults_used_when_not_specified(self, clean_env):
         """Defaults should be used when not specified anywhere."""
-        os.environ["MAGALDI_MYSQL_PASSWORD"] = "test"
         config = load_config(FIXTURES_DIR / "minimal.yaml")
 
         # Not in file, not in env, should be default
@@ -378,14 +320,13 @@ class TestResetConfig:
         """Should be able to load a different config after reset."""
         load_config(FIXTURES_DIR / "valid.yaml")
         config1 = get_config()
-        assert config1.mysql.host == "testhost"
+        assert config1.elasticsearch.host == "testhost"
 
         reset_config()
 
-        os.environ["MAGALDI_MYSQL_PASSWORD"] = "test"
         load_config(FIXTURES_DIR / "minimal.yaml")
         config2 = get_config()
-        assert config2.mysql.host == "localhost"  # Default
+        assert config2.elasticsearch.host == "localhost"  # Default
 
 
 # =============================================================================
@@ -400,7 +341,6 @@ class TestMagaldiConfigRoot:
         """MagaldiConfig should have all expected sections."""
         config = load_config(FIXTURES_DIR / "valid.yaml")
 
-        assert hasattr(config, "mysql")
         assert hasattr(config, "elasticsearch")
         assert hasattr(config, "ollama")
         assert hasattr(config, "workers")
@@ -415,7 +355,6 @@ class TestMagaldiConfigRoot:
         """Each section should be the correct type."""
         config = load_config(FIXTURES_DIR / "valid.yaml")
 
-        assert isinstance(config.mysql, MySQLConfig)
         assert isinstance(config.elasticsearch, ElasticsearchConfig)
         assert isinstance(config.ollama, OllamaConfig)
         assert isinstance(config.workers, WorkersConfig)

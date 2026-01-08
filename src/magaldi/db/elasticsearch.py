@@ -487,7 +487,10 @@ class ElasticsearchRepository:
         Returns:
             List of matching documents with scores.
         """
-        filter_clauses: list[dict[str, Any]] = []
+        filter_clauses: list[dict[str, Any]] = [
+            # Only search documents that have embeddings
+            {"exists": {"field": "embedding"}}
+        ]
 
         if scope:
             filter_clauses.append({"term": {"scope": scope}})
@@ -500,7 +503,7 @@ class ElasticsearchRepository:
 
         query: dict[str, Any] = {
             "script_score": {
-                "query": {"bool": {"filter": filter_clauses}} if filter_clauses else {"match_all": {}},
+                "query": {"bool": {"filter": filter_clauses}},
                 "script": {
                     "source": "cosineSimilarity(params.query_vector, 'embedding') + 1.0",
                     "params": {"query_vector": embedding},
@@ -547,15 +550,20 @@ class ElasticsearchFileStateRepository:
             file_hash = state.get("file_hash")
             element_count = state.get("element_count")
 
-            # Verify completeness: if we have both file_hash and element_count,
-            # check that actual element count matches expected
-            if file_hash and element_count is not None:
-                actual_count = self._es.count_elements_by_file_hash(
-                    scope, repository, username, file_hash
-                )
-                if actual_count != element_count:
-                    # Incomplete - set file_hash to None so it's treated as modified
+            # Verify completeness when we have a file_hash
+            if file_hash:
+                if element_count is None:
+                    # Old data without element_count - treat as incomplete
+                    # This forces reindexing of data from before completeness tracking
                     file_hash = None
+                else:
+                    # Check that actual element count matches expected
+                    actual_count = self._es.count_elements_by_file_hash(
+                        scope, repository, username, file_hash
+                    )
+                    if actual_count != element_count:
+                        # Incomplete - set file_hash to None so it's treated as modified
+                        file_hash = None
 
             result[path] = DBFileState(
                 relative_path=path,

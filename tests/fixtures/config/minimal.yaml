@@ -1,5 +1,5 @@
 # Minimal test configuration - only required fields
 # All other fields should use defaults
 
-mysql:
-  password: minimalpassword
+elasticsearch:
+  host: localhost

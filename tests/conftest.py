@@ -14,7 +14,6 @@ from magaldi.config import (
     LoggingConfig,
     MagaldiConfig,
     MCPConfig,
-    MySQLConfig,
     OllamaConfig,
     ParserConfig,
     SearchConfig,
@@ -51,24 +50,12 @@ def reset_global_config() -> Generator[None, None, None]:
 
 
 @pytest.fixture
-def test_mysql_config() -> MySQLConfig:
-    """Provide a test MySQL configuration."""
-    return MySQLConfig(
-        host="localhost",
-        port=3307,
-        database="magaldi_test",
-        user="test",
-        password="testpassword",
-        pool_size=5,
-        pool_timeout=10,
-    )
-
-
-@pytest.fixture
 def test_elasticsearch_config() -> ElasticsearchConfig:
     """Provide a test Elasticsearch configuration."""
     return ElasticsearchConfig(
-        url="http://localhost:9200",
+        host="localhost",
+        port=9200,
+        scheme="http",
         index="magaldi_test_elements",
         timeout=10,
         retry_on_timeout=False,
@@ -114,14 +101,12 @@ def test_workers_config() -> WorkersConfig:
 
 @pytest.fixture
 def test_config(
-    test_mysql_config: MySQLConfig,
     test_elasticsearch_config: ElasticsearchConfig,
     test_ollama_config: OllamaConfig,
     test_workers_config: WorkersConfig,
 ) -> MagaldiConfig:
     """Provide a complete test configuration."""
     return MagaldiConfig(
-        mysql=test_mysql_config,
         elasticsearch=test_elasticsearch_config,
         ollama=test_ollama_config,
         workers=test_workers_config,
@@ -171,14 +156,6 @@ def clean_magaldi_env() -> Generator[None, None, None]:
     os.environ.update(original_env)
 
 
-@pytest.fixture
-def env_with_password(clean_magaldi_env: None) -> Generator[None, None, None]:
-    """Provide environment with MySQL password set."""
-    os.environ["MAGALDI_MYSQL_PASSWORD"] = "testpassword"
-    yield
-    os.environ.pop("MAGALDI_MYSQL_PASSWORD", None)
-
-
 # =============================================================================
 # PATH FIXTURES
 # =============================================================================
@@ -196,12 +173,6 @@ def minimal_config_path() -> Path:
     return CONFIG_FIXTURES_DIR / "minimal.yaml"
 
 
-@pytest.fixture
-def invalid_config_path() -> Path:
-    """Path to invalid test config file (missing password)."""
-    return CONFIG_FIXTURES_DIR / "invalid_missing_password.yaml"
-
-
 # =============================================================================
 # TEMPORARY FILE FIXTURES
 # =============================================================================
@@ -213,9 +184,9 @@ def temp_config_file(tmp_path: Path) -> Generator[Path, None, None]:
     config_file = tmp_path / "magaldi.yaml"
     config_file.write_text(
         """
-mysql:
-  password: temppassword
+elasticsearch:
   host: temphost
+  port: 9200
 """
     )
     yield config_file
@@ -230,5 +201,5 @@ def pytest_configure(config: pytest.Config) -> None:
     """Register custom markers."""
     config.addinivalue_line("markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')")
     config.addinivalue_line(
-        "markers", "integration: marks tests that require external services (MySQL, ES, etc.)"
+        "markers", "integration: marks tests that require external services (ES, Ollama, etc.)"
     )

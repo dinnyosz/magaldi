@@ -518,3 +518,220 @@ class TestElasticsearchEmbeddingStore:
         # Cleanup
         store.delete_by_file("test-es-store", "test-repo", "main", "src/test.py")
         store.close()
+
+
+# =============================================================================
+# INTERRUPTED RUN DETECTION TESTS
+# =============================================================================
+
+
+class TestInterruptedRunDetection:
+    """Tests for detecting and handling interrupted processing runs."""
+
+    def test_incomplete_file_detected_when_element_count_mismatch(self, config):
+        """Test that files with mismatched element_count are detected as incomplete."""
+        from magaldi.db.elasticsearch import (
+            ElasticsearchRepository,
+            ElasticsearchFileStateRepository,
+        )
+
+        es_repo = ElasticsearchRepository(config)
+        file_state_repo = ElasticsearchFileStateRepository(config)
+
+        scope = "test-interrupted"
+        repo = "test-repo"
+        username = "main"
+        file_path = "src/test_module.py"
+        file_hash = "abc123hash"
+
+        # Create a FILE element with element_count=4 (expecting FILE + 3 children = 4 total)
+        # But we'll only index FILE + 2 children = 3 elements (simulating interrupted run)
+        file_elem = CodeElement(
+            element_id=f"{scope}:{repo}:{username}:{file_path}:file:{file_path}:1",
+            scope=scope,
+            repository=repo,
+            username=username,
+            relative_path=file_path,
+            element_type="file",
+            name=file_path,
+            language="python",
+            line_start=1,
+            line_end=100,
+            level=0,
+        )
+        es_repo.index_element(file_elem, file_hash=file_hash, element_count=4)
+
+        # Create only 2 child elements (3 total with FILE), but expected 4
+        func1 = CodeElement(
+            element_id=f"{scope}:{repo}:{username}:{file_path}:function:func1:10",
+            scope=scope,
+            repository=repo,
+            username=username,
+            relative_path=file_path,
+            element_type="function",
+            name="func1",
+            language="python",
+            line_start=10,
+            line_end=20,
+            level=2,
+        )
+        es_repo.index_element(func1, file_hash=file_hash)
+
+        func2 = CodeElement(
+            element_id=f"{scope}:{repo}:{username}:{file_path}:function:func2:25",
+            scope=scope,
+            repository=repo,
+            username=username,
+            relative_path=file_path,
+            element_type="function",
+            name="func2",
+            language="python",
+            line_start=25,
+            line_end=35,
+            level=2,
+        )
+        es_repo.index_element(func2, file_hash=file_hash)
+
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+
+        # Get file states - incomplete file should have file_hash=None
+        file_states = file_state_repo.get_file_states(scope, repo, username)
+
+        # The file should be detected as incomplete (element_count=4 but only 3 elements)
+        assert file_path in file_states
+        state = file_states[file_path]
+        # file_hash should be None since actual count (3) != expected count (4)
+        assert state.file_hash is None
+
+        # Cleanup
+        es_repo.delete_by_file(scope, repo, username, file_path)
+        es_repo.close()
+        file_state_repo.close()
+
+    def test_complete_file_has_valid_hash(self, config):
+        """Test that files with matching element_count are detected as complete."""
+        from magaldi.db.elasticsearch import (
+            ElasticsearchRepository,
+            ElasticsearchFileStateRepository,
+        )
+
+        es_repo = ElasticsearchRepository(config)
+        file_state_repo = ElasticsearchFileStateRepository(config)
+
+        scope = "test-complete"
+        repo = "test-repo"
+        username = "main"
+        file_path = "src/complete_module.py"
+        file_hash = "def456hash"
+
+        # Create a FILE element with element_count=3 (FILE + 2 children = 3 total)
+        file_elem = CodeElement(
+            element_id=f"{scope}:{repo}:{username}:{file_path}:file:{file_path}:1",
+            scope=scope,
+            repository=repo,
+            username=username,
+            relative_path=file_path,
+            element_type="file",
+            name=file_path,
+            language="python",
+            line_start=1,
+            line_end=50,
+            level=0,
+        )
+        es_repo.index_element(file_elem, file_hash=file_hash, element_count=3)
+
+        # Create exactly 2 child elements (3 total with FILE, matching element_count)
+        func1 = CodeElement(
+            element_id=f"{scope}:{repo}:{username}:{file_path}:function:func1:10",
+            scope=scope,
+            repository=repo,
+            username=username,
+            relative_path=file_path,
+            element_type="function",
+            name="func1",
+            language="python",
+            line_start=10,
+            line_end=20,
+            level=2,
+        )
+        es_repo.index_element(func1, file_hash=file_hash)
+
+        func2 = CodeElement(
+            element_id=f"{scope}:{repo}:{username}:{file_path}:function:func2:25",
+            scope=scope,
+            repository=repo,
+            username=username,
+            relative_path=file_path,
+            element_type="function",
+            name="func2",
+            language="python",
+            line_start=25,
+            line_end=35,
+            level=2,
+        )
+        es_repo.index_element(func2, file_hash=file_hash)
+
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+
+        # Get file states - complete file should have valid file_hash
+        file_states = file_state_repo.get_file_states(scope, repo, username)
+
+        # The file should be detected as complete
+        assert file_path in file_states
+        state = file_states[file_path]
+        # file_hash should be preserved since actual count (3) == expected count (3)
+        assert state.file_hash == file_hash
+
+        # Cleanup
+        es_repo.delete_by_file(scope, repo, username, file_path)
+        es_repo.close()
+        file_state_repo.close()
+
+    def test_old_data_without_element_count_treated_as_incomplete(self, config):
+        """Test that files without element_count (old data) are treated as incomplete."""
+        from magaldi.db.elasticsearch import (
+            ElasticsearchRepository,
+            ElasticsearchFileStateRepository,
+        )
+
+        es_repo = ElasticsearchRepository(config)
+        file_state_repo = ElasticsearchFileStateRepository(config)
+
+        scope = "test-old-data"
+        repo = "test-repo"
+        username = "main"
+        file_path = "src/old_module.py"
+        file_hash = "ghi789hash"
+
+        # Create a FILE element WITHOUT element_count (simulating old data)
+        file_elem = CodeElement(
+            element_id=f"{scope}:{repo}:{username}:{file_path}:file:{file_path}:1",
+            scope=scope,
+            repository=repo,
+            username=username,
+            relative_path=file_path,
+            element_type="file",
+            name=file_path,
+            language="python",
+            line_start=1,
+            line_end=50,
+            level=0,
+        )
+        # Index without element_count
+        es_repo.index_element(file_elem, file_hash=file_hash, element_count=None)
+
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+
+        # Get file states - old data should be treated as incomplete
+        file_states = file_state_repo.get_file_states(scope, repo, username)
+
+        # The file should be detected as incomplete (no element_count)
+        assert file_path in file_states
+        state = file_states[file_path]
+        # file_hash should be None since element_count is None
+        assert state.file_hash is None
+
+        # Cleanup
+        es_repo.delete_by_file(scope, repo, username, file_path)
+        es_repo.close()
+        file_state_repo.close()

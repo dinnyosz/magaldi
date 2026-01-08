@@ -237,7 +237,7 @@ class TestPythonParser:
         assert "static_method" in method_names
         assert "_private_method" in method_names
 
-    def test_extracts_variables(self, python_code: str):
+    def test_extracts_constants(self, python_code: str):
         parser = PythonParser()
         file_info = FileInfo(
             relative_path="module.py",
@@ -247,11 +247,12 @@ class TestPythonParser:
 
         elements = parser.parse(python_code, file_info, "scope", "repo", "main")
 
-        variables = [e for e in elements if e.element_type == "variable"]
-        var_names = [v.name for v in variables]
+        # CONSTANT and MAX_SIZE are uppercase, so they're extracted as 'constant' type
+        constants = [e for e in elements if e.element_type == "constant"]
+        const_names = [c.name for c in constants]
 
-        assert "CONSTANT" in var_names
-        assert "MAX_SIZE" in var_names
+        assert "CONSTANT" in const_names
+        assert "MAX_SIZE" in const_names
 
     def test_async_function_detection(self, python_code: str):
         parser = PythonParser()
@@ -279,14 +280,15 @@ class TestPythonParser:
 
         elements = parser.parse(python_code, file_info, "scope", "repo", "main")
 
-        private_class = next(e for e in elements if e.name == "_PrivateClass")
-        assert private_class.visibility == "private"
+        # Single underscore = protected (by Python convention)
+        protected_class = next(e for e in elements if e.name == "_PrivateClass")
+        assert protected_class.visibility == "protected"
 
         public_class = next(e for e in elements if e.name == "MyClass")
         assert public_class.visibility == "public"
 
-        private_method = next(e for e in elements if e.name == "_private_method")
-        assert private_method.visibility == "protected"
+        protected_method = next(e for e in elements if e.name == "_private_method")
+        assert protected_method.visibility == "protected"
 
     def test_decorator_extraction(self, python_code: str):
         parser = PythonParser()
@@ -352,8 +354,9 @@ class TestPythonParser:
         func_elem = next(e for e in elements if e.element_type == "function")
         assert func_elem.level == 2
 
-        var_elem = next(e for e in elements if e.element_type == "variable")
-        assert var_elem.level == 3
+        # CONSTANT and MAX_SIZE are uppercase, so they're 'constant' type
+        const_elem = next(e for e in elements if e.element_type == "constant")
+        assert const_elem.level == 3
 
 
 # =============================================================================

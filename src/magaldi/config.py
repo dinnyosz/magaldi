@@ -14,7 +14,7 @@ Usage:
 
     # In any module
     config = get_config()
-    print(config.mysql.host)
+    print(config.elasticsearch.host)
 """
 
 from __future__ import annotations
@@ -37,19 +37,6 @@ class ConfigurationError(Exception):
 # =============================================================================
 # CONFIGURATION DATACLASSES
 # =============================================================================
-
-
-@dataclass
-class MySQLConfig:
-    """MySQL database configuration."""
-
-    host: str = "localhost"
-    port: int = 3306
-    database: str = "magaldi"
-    user: str = "magaldi"
-    password: str = ""
-    pool_size: int = 10
-    pool_timeout: int = 30
 
 
 @dataclass
@@ -182,7 +169,6 @@ class UserDataConfig:
 class MagaldiConfig:
     """Root configuration object containing all sections."""
 
-    mysql: MySQLConfig = field(default_factory=MySQLConfig)
     elasticsearch: ElasticsearchConfig = field(default_factory=ElasticsearchConfig)
     redis: RedisConfig = field(default_factory=RedisConfig)
     ollama: OllamaConfig = field(default_factory=OllamaConfig)
@@ -349,7 +335,6 @@ def _merge_config(config: MagaldiConfig, file_config: dict[str, Any]) -> Magaldi
         Config with file values merged in.
     """
     section_mapping = {
-        "mysql": config.mysql,
         "elasticsearch": config.elasticsearch,
         "redis": config.redis,
         "ollama": config.ollama,
@@ -396,13 +381,6 @@ def _apply_env_overrides(config: MagaldiConfig) -> MagaldiConfig:
     """
     # Define mappings: env_var -> (section_attr, key, converter)
     env_mappings: dict[str, tuple[str, str] | tuple[str, str, type]] = {
-        # MySQL
-        "MAGALDI_MYSQL_HOST": ("mysql", "host"),
-        "MAGALDI_MYSQL_PORT": ("mysql", "port", int),
-        "MAGALDI_MYSQL_DATABASE": ("mysql", "database"),
-        "MAGALDI_MYSQL_USER": ("mysql", "user"),
-        "MAGALDI_MYSQL_PASSWORD": ("mysql", "password"),
-        "MAGALDI_MYSQL_POOL_SIZE": ("mysql", "pool_size", int),
         # Elasticsearch
         "MAGALDI_ELASTICSEARCH_HOST": ("elasticsearch", "host"),
         "MAGALDI_ELASTICSEARCH_PORT": ("elasticsearch", "port", int),
