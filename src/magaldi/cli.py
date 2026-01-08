@@ -426,19 +426,6 @@ def print_processing_result(
         parts.append(f"avg: {avg_wall:.1f}s total, {avg_summ:.1f}s summ, {avg_embed:.1f}s embed")
     console.print(f"  {' | '.join(parts)}")
 
-    # Show per-type stats
-    if timing_stats:
-        type_stats = timing_stats.get_type_stats()
-        type_parts = []
-        for t in ["file", "class", "function", "method", "constant", "variable"]:
-            if t in type_stats:
-                done, tot, avg_wall, avg_summ, avg_embed = type_stats[t]
-                if done > 0:
-                    api_time = avg_summ + avg_embed
-                    type_parts.append(f"[cyan]{t}[/]: {done} @ {avg_wall:.1f}s wall, {api_time:.1f}s api")
-        if type_parts:
-            console.print(f"  [dim]Per-type:[/] {' | '.join(type_parts)}")
-
 
 def print_summary(
     discovery: DiscoveryResult,
