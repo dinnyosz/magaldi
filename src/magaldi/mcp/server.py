@@ -91,8 +91,13 @@ class MagaldiMCPServer:
                             },
                             "limit": {
                                 "type": "integer",
-                                "description": "Maximum results (1-50, default: 10)",
-                                "default": 10,
+                                "description": "Maximum results (1-50, default: 20)",
+                                "default": 20,
+                            },
+                            "include_code": {
+                                "type": "boolean",
+                                "description": "Include source code in results (default: false)",
+                                "default": False,
                             },
                         },
                         "required": ["query"],
@@ -357,7 +362,8 @@ class MagaldiMCPServer:
                 username=args.get("username", self.default_username),
                 element_types=args.get("element_types"),
                 language=args.get("language"),
-                limit=args.get("limit", 10),
+                limit=args.get("limit", 20),
+                include_code=args.get("include_code", False),
             )
         elif name == "search_features":
             return await asyncio.to_thread(
@@ -455,8 +461,76 @@ def _format_result(result: Any) -> str:
     """Format tool result as readable text."""
     import json
 
-    if isinstance(result, (dict, list)):
+    # Format search results as readable text
+    if isinstance(result, list) and result:
+        first = result[0]
+
+        # Code search results
+        if "element_id" in first and "type" in first:
+            lines = [f"Found {len(result)} results:\n"]
+            for r in result:
+                loc = f"{r.get('file', '?')}:{r.get('line', '?')}" if r.get('file') else "N/A"
+                lines.append(f"[{r.get('type', '?')}] {r.get('name', '?')} ({loc})")
+                if r.get('signature'):
+                    lines.append(f"  {r['signature']}")
+                if r.get('summary'):
+                    # Truncate long summaries
+                    summary = r['summary']
+                    if len(summary) > 200:
+                        summary = summary[:200] + "..."
+                    lines.append(f"  {summary}")
+                lines.append("")
+            return "\n".join(lines)
+
+        # Feature search results
+        if "feature_id" in first:
+            lines = [f"Found {len(result)} features:\n"]
+            for r in result:
+                lines.append(f"[feature] {r.get('label', '?')} ({r.get('member_count', 0)} members)")
+                if r.get('summary'):
+                    summary = r['summary']
+                    if len(summary) > 200:
+                        summary = summary[:200] + "..."
+                    lines.append(f"  {summary}")
+                lines.append("")
+            return "\n".join(lines)
+
+        # Repository list
+        if "element_count" in first and "scope" in first:
+            lines = ["Indexed repositories:\n"]
+            for r in result:
+                lines.append(f"  {r.get('scope')}/{r.get('repository')}: {r.get('element_count')} elements, {r.get('file_count')} files")
+            return "\n".join(lines)
+
+    # Single dict results (get_element, get_context, etc.)
+    if isinstance(result, dict):
+        # Element details
+        if "element_id" in result and "type" in result:
+            lines = [f"[{result.get('type')}] {result.get('name')}"]
+            lines.append(f"  File: {result.get('file')}:{result.get('line_start')}-{result.get('line_end')}")
+            if result.get('signature'):
+                lines.append(f"  Signature: {result['signature']}")
+            if result.get('summary'):
+                lines.append(f"  Summary: {result['summary']}")
+            if result.get('code'):
+                lines.append(f"  Code:\n{result['code']}")
+            return "\n".join(lines)
+
+        # Stats
+        if "elements_by_type" in result:
+            lines = [f"Repository stats:"]
+            lines.append(f"  Total elements: {result.get('total_elements')}")
+            lines.append(f"  Total lines: {result.get('total_lines')}")
+            lines.append(f"  Features: {result.get('feature_count')}")
+            lines.append(f"  By type: {result.get('elements_by_type')}")
+            return "\n".join(lines)
+
+        # Fallback to JSON for other dicts
         return json.dumps(result, indent=2, default=str)
+
+    if isinstance(result, list):
+        return json.dumps(result, indent=2, default=str)
+
     return str(result)
 
 

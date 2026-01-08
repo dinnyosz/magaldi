@@ -26,7 +26,8 @@ def search_code(
     username: str = "main",
     element_types: list[str] | None = None,
     language: str | None = None,
-    limit: int = 10,
+    limit: int = 20,
+    include_code: bool = False,
 ) -> list[dict[str, Any]]:
     """Semantic search for code elements.
 
@@ -42,6 +43,7 @@ def search_code(
         element_types: Filter by element types.
         language: Filter by programming language.
         limit: Maximum results.
+        include_code: Include source code in results (for detailed inspection).
 
     Returns:
         List of matching code elements.
@@ -76,26 +78,31 @@ def search_code(
             size=limit,
         )
 
-    # Format results (search_by_vector returns flattened dicts with _score)
+    # Format results - keep only essential fields
     formatted = []
     for result in results:
         # Filter by language if specified
         if language and result.get("language") != language:
             continue
 
-        formatted.append({
-            "element_id": result.get("element_id"),
+        entry: dict[str, Any] = {
             "name": result.get("name"),
             "type": result.get("element_type"),
             "file": result.get("relative_path"),
             "line": result.get("line_start"),
-            "language": result.get("language"),
             "summary": result.get("summary", ""),
-            "signature": result.get("signature", ""),
-            "score": result.get("_score", 0),
-            "scope": result.get("scope"),
-            "repository": result.get("repository"),
-        })
+        }
+        # Only include signature if present and non-empty
+        sig = result.get("signature")
+        if sig:
+            entry["signature"] = sig
+        # Include element_id for follow-up queries
+        entry["element_id"] = result.get("element_id")
+        # Include code if requested
+        if include_code and result.get("raw_code"):
+            entry["code"] = result["raw_code"]
+
+        formatted.append(entry)
 
     return formatted[:limit]
 
@@ -107,7 +114,7 @@ def search_features(
     scope: str | None = None,
     repository: str | None = None,
     username: str = "main",
-    limit: int = 10,
+    limit: int = 20,
 ) -> list[dict[str, Any]]:
     """Search for features/capabilities.
 
@@ -157,14 +164,10 @@ def search_features(
     formatted = []
     for result in results:
         formatted.append({
-            "feature_id": result.get("element_id"),
             "label": result.get("cluster_label", result.get("name")),
             "summary": result.get("summary", ""),
             "member_count": result.get("member_count", 0),
-            "member_ids": result.get("member_ids", [])[:5],  # Sample
-            "score": result.get("_score", 0),
-            "scope": result.get("scope"),
-            "repository": result.get("repository"),
+            "feature_id": result.get("element_id"),  # For follow-up queries
         })
 
     return formatted
@@ -217,18 +220,15 @@ def find_similar(
         if result.get("element_id") == element_id:
             continue
 
-        formatted.append({
-            "element_id": result.get("element_id"),
+        entry: dict[str, Any] = {
             "name": result.get("name"),
             "type": result.get("element_type"),
             "file": result.get("relative_path"),
             "line": result.get("line_start"),
-            "language": result.get("language"),
             "summary": result.get("summary", ""),
-            "similarity": result.get("_score", 0),
-            "scope": result.get("scope"),
-            "repository": result.get("repository"),
-        })
+            "element_id": result.get("element_id"),
+        }
+        formatted.append(entry)
 
         if len(formatted) >= limit:
             break
@@ -260,24 +260,26 @@ def get_element(
     if not doc:
         raise ValueError(f"Element not found: {element_id}")
 
-    result = {
-        "element_id": doc.get("element_id"),
+    result: dict[str, Any] = {
         "name": doc.get("name"),
         "type": doc.get("element_type"),
         "file": doc.get("relative_path"),
         "line_start": doc.get("line_start"),
         "line_end": doc.get("line_end"),
-        "language": doc.get("language"),
         "summary": doc.get("summary", ""),
-        "signature": doc.get("signature", ""),
-        "docstring": doc.get("docstring", ""),
-        "decorators": doc.get("decorators", []),
-        "visibility": doc.get("visibility", "public"),
-        "is_async": doc.get("is_async", False),
-        "parent_id": doc.get("parent_id"),
-        "scope": doc.get("scope"),
-        "repository": doc.get("repository"),
     }
+
+    # Only include if present and meaningful
+    if doc.get("signature"):
+        result["signature"] = doc["signature"]
+    if doc.get("docstring"):
+        result["docstring"] = doc["docstring"]
+    if doc.get("decorators"):
+        result["decorators"] = doc["decorators"]
+    if doc.get("is_async"):
+        result["is_async"] = True
+    if doc.get("parent_id"):
+        result["parent_id"] = doc["parent_id"]
 
     if include_code:
         result["code"] = doc.get("raw_code", "")
