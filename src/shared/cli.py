@@ -75,6 +75,20 @@ def check_ollama_models(config: MagaldiConfig, skip_ai: bool) -> list[str]:
     except Exception as e:
         return [f"Error connecting to Ollama: {e}"]
 
+    def model_available(model: str) -> bool:
+        """Check if model is available (handles :latest tag)."""
+        if model in available_models:
+            return True
+        # Try with :latest suffix
+        if f"{model}:latest" in available_models:
+            return True
+        # Try without tag if model has one
+        if ":" in model:
+            base = model.rsplit(":", 1)[0]
+            if base in available_models or f"{base}:latest" in available_models:
+                return True
+        return False
+
     # Check required models
     required_models = [
         config.ollama.summarize_model,
@@ -83,7 +97,7 @@ def check_ollama_models(config: MagaldiConfig, skip_ai: bool) -> list[str]:
     ]
 
     for model in required_models:
-        if model not in available_models:
+        if not model_available(model):
             errors.append(f"Model '{model}' not found. Run: ollama pull {model}")
 
     return errors
