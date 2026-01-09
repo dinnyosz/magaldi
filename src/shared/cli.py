@@ -921,10 +921,11 @@ def print_feature_result(result: dict) -> None:
         parts.append(f"{format_duration(elapsed)} elapsed")
     console.print(f"  {' | '.join(parts)}")
 
-    # Show top features with their labels
+    # Show top features with their labels (sorted by element count)
     if result.get("clusters"):
-        console.print("  [dim]Top features:[/]")
-        for cluster in result["clusters"][:5]:
+        console.print("  [dim]Top features (by element count):[/]")
+        sorted_clusters = sorted(result["clusters"], key=lambda c: c.get("size", 0), reverse=True)
+        for cluster in sorted_clusters[:5]:
             label = cluster.get("label") or f"feature_{cluster['cluster_id']}"
             names = ", ".join(cluster.get("sample_names", [])[:3])
             console.print(f"    [cyan]{label}[/] ({cluster['size']} elements): {names}...")
