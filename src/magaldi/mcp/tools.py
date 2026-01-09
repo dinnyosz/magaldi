@@ -1058,6 +1058,166 @@ def find_implementations(
     return results
 
 
+def generate_skill(
+    project_root: str | None = None,
+    skill_name: str = "magaldi",
+) -> dict[str, Any]:
+    """Generate a SKILL.md file that teaches LLMs how to use this MCP effectively.
+
+    The skill is placed in: <project_root>/.claude/skills/<skill_name>/SKILL.md
+
+    Args:
+        project_root: Project root directory. If None, returns content only.
+        skill_name: Name of the skill (default: "magaldi").
+
+    Returns:
+        Dict with skill content and metadata.
+    """
+    from pathlib import Path
+
+    skill_content = '''---
+name: magaldi-code-discovery
+description: Use when exploring, understanding, or searching codebases. Provides semantic search, usage tracking, and call graph analysis.
+---
+
+# Magaldi Code Discovery
+
+Use this skill when the user asks to:
+- Find code, functions, or classes
+- Understand how something works
+- Find where something is used
+- Explore a codebase structure
+- Refactor or modify existing code
+
+## Core Principle: Semantic First, Details Later
+
+**NEVER start by reading files or grepping.** Always use semantic search first.
+
+```
+WRONG: Read the file to understand it
+RIGHT: search_code("what does this do") → then read specific parts
+```
+
+## Tool Priority (Use in This Order)
+
+### 1. DISCOVER: Semantic Search (Start Here)
+```
+search_code(query="authentication logic", brief=true, limit=10)
+```
+- Use natural language: "function that validates tokens"
+- Use `brief=true` for exploration (saves tokens)
+- Returns summaries, not code
+
+### 2. NARROW: Get Specific Elements
+```
+get_element(element_id="...", include_code=true)
+```
+- Only after you found relevant elements via search
+- Use `include_code=true` only when you need implementation
+
+### 3. TRACE: Find Relationships
+```
+find_usages(element_id="...")      # Where is this called?
+find_implementations(class_name="Protocol")  # What implements this?
+get_call_graph(element_id="...")   # Callers and callees
+```
+- Use for refactoring impact analysis
+- Use before modifying shared code
+
+### 4. PATTERN: Literal Search (Last Resort)
+```
+grep_code(pattern="\\.add_job\\(", context_lines=2)
+```
+- Only for exact patterns semantic search can't find
+- Regex, specific strings, symbol occurrences
+
+## Token Efficiency Rules
+
+| DO | DON'T |
+|----|-------|
+| `search_code(brief=true)` | `search_code()` with full summaries |
+| `get_element(one_id)` | `batch_get_elements(many_ids)` |
+| `read_file(start_line=10, end_line=20)` | `read_file()` entire file |
+| Search → narrow → read | Read everything then search |
+
+## Workflow Examples
+
+### "How does X work?"
+```
+1. search_code("X functionality", brief=true)
+2. get_element(best_match, include_code=true)
+3. get_context(element_id) if need surrounding code
+```
+
+### "Find all places that call X"
+```
+1. search_code("X", element_types=["function"])
+2. find_usages(element_id)
+```
+
+### "What implements interface Y?"
+```
+1. find_implementations(class_name="Y")
+2. get_element(each implementation) for details
+```
+
+### "Refactor function Z"
+```
+1. search_code("Z")
+2. find_usages(element_id)  # Impact analysis
+3. get_call_graph(element_id)  # Dependencies
+4. THEN make changes
+```
+
+## Anti-Patterns (Never Do These)
+
+1. **Don't grep first** - Wastes tokens, returns noise
+2. **Don't read whole files** - Use line ranges or get_element
+3. **Don't skip semantic search** - It's your best tool
+4. **Don't ignore summaries** - They're pre-computed understanding
+5. **Don't batch when you can iterate** - One element at a time
+
+## Available Tools Reference
+
+| Tool | Purpose | When to Use |
+|------|---------|-------------|
+| `search_code` | Semantic search for code | First step, always |
+| `search_features` | Find high-level capabilities | Understanding architecture |
+| `get_element` | Get one element's details | After search found it |
+| `get_context` | See element in its surroundings | Understanding hierarchy |
+| `find_usages` | Where is this used? | Before refactoring |
+| `find_implementations` | What implements this? | Finding concrete classes |
+| `get_call_graph` | Callers and callees | Dependency analysis |
+| `grep_code` | Regex pattern search | Literal matches only |
+| `read_file` | Get file contents | Last resort, use line ranges |
+
+## Remember
+
+The index has already done the hard work:
+- Code is parsed and structured
+- Summaries explain what code does
+- Embeddings enable semantic search
+
+**Use the index. Don't re-read what's already understood.**
+'''
+
+    result = {
+        "skill_name": skill_name,
+        "content": skill_content,
+        "version": "1.0.0",
+    }
+
+    if project_root:
+        # Structure: <project>/.claude/skills/<skill_name>/SKILL.md
+        skill_dir = Path(project_root) / ".claude" / "skills" / skill_name
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        skill_path = skill_dir / "SKILL.md"
+        skill_path.write_text(skill_content)
+        result["written_to"] = str(skill_path)
+
+    return result
+
+
 def get_call_graph(
     repo_root: str,
     es: ElasticsearchRepository,

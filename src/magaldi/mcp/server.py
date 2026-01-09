@@ -350,6 +350,23 @@ class MagaldiMCPServer:
                         "required": ["element_id"],
                     },
                 ),
+                # =============================================================
+                # META - Self-documentation
+                # =============================================================
+                Tool(
+                    name="generate_skill",
+                    description="GENERATE SKILL: Create a SKILL.md file that teaches LLMs how to use this MCP effectively. "
+                    "The skill file documents best practices, workflows, and anti-patterns for token-efficient code discovery. "
+                    "Writes to: <project>/.claude/skills/magaldi/SKILL.md",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "project_root": {"type": "string", "description": "Project root directory to install skill into"},
+                            "skill_name": {"type": "string", "default": "magaldi", "description": "Name of the skill directory"},
+                        },
+                        "required": [],
+                    },
+                ),
             ]
 
         @self.server.call_tool()
@@ -370,6 +387,7 @@ class MagaldiMCPServer:
             find_implementations,
             find_similar,
             find_usages,
+            generate_skill,
             get_call_graph,
             get_children,
             get_context,
@@ -547,6 +565,12 @@ class MagaldiMCPServer:
                 es,
                 element_id=args["element_id"],
                 direction=args.get("direction", "both"),
+            )
+        elif name == "generate_skill":
+            return await asyncio.to_thread(
+                generate_skill,
+                project_root=args.get("project_root"),
+                skill_name=args.get("skill_name", "magaldi"),
             )
         else:
             raise ValueError(f"Unknown tool: {name}")
