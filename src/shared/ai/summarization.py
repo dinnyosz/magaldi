@@ -113,6 +113,10 @@ class OllamaClient:
             max_tokens: Maximum tokens to generate.
             timeout: Request timeout in seconds.
             model: Optional model override (uses default if not specified).
+
+        Raises:
+            ValueError: If response is empty or contains an error.
+            requests.HTTPError: If the API request fails.
         """
         use_model = model or self.model
         payload = {
@@ -132,7 +136,19 @@ class OllamaClient:
         )
         response.raise_for_status()
 
-        return response.json().get("response", "").strip()
+        data = response.json()
+
+        # Check for error in response body
+        if "error" in data:
+            raise ValueError(f"Ollama error for model '{use_model}': {data['error']}")
+
+        result = data.get("response", "").strip()
+
+        # Check for empty response
+        if not result:
+            raise ValueError(f"Empty response from Ollama model '{use_model}'")
+
+        return result
 
 
 # =============================================================================
