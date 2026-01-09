@@ -107,6 +107,41 @@ services:
         echo ""
         echo "Models ready!"
 
+  # ===========================================================================
+  # WEB UI (start with --profile web)
+  # ===========================================================================
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+    container_name: magaldi-web
+    restart: unless-stopped
+    profiles:
+      - web
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    environment:
+      - MAGALDI_ES_HOST=elasticsearch
+      - MAGALDI_ES_PORT=9200
+      - MAGALDI_REDIS_HOST=redis
+      - MAGALDI_REDIS_PORT=6379
+      - MAGALDI_OLLAMA_HOST=ollama
+      - MAGALDI_OLLAMA_PORT=11434
+      - MAGALDI_WEB_HOST=0.0.0.0
+      - MAGALDI_WEB_PORT=8080
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/api/v1/admin/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
 volumes:
   es_data:
     name: magaldi_es_data

@@ -22,8 +22,8 @@ The system consists of two pipelines:
 | Component | Technology |
 |-----------|------------|
 | Parser | Tree-sitter with S-expression queries |
-| Database | Percona MySQL 8.0 (source of truth) |
-| Vector Store | Elasticsearch 8.11.0 (dense_vector) |
+| Storage & Search | Elasticsearch 8.11.0 (dense_vector) |
+| Job Queue | Redis |
 | AI Models | Ollama (qwen2.5-coder:7b + snowflake-arctic-embed2) |
 | MCP | Python MCP SDK for Claude Code integration |
 
@@ -48,7 +48,7 @@ All design documents are in `plans/`:
 - `phase1_discovery.md` - Path validation, config loading
 - `phase2_change_detection.md` - SHA256 hashing, diff logic
 - `phase3_parsing.md` - Tree-sitter extraction
-- `phase4_storage.md` - MySQL/ES storage, job creation
+- `phase4_storage.md` - Elasticsearch storage, job creation
 - `ollama_model_research.md` - Model selection rationale
 - `magaldi_project_plan.md` - Complete implementation plan
 

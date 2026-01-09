@@ -73,8 +73,34 @@ magaldi parse /path/to/your/repo --user alice
 
 ### Start the Web UI
 
+**Local Development:**
 ```bash
+# Start the backend (with hot reload)
+magaldi web serve --reload
+
+# In a separate terminal, start the frontend dev server
+cd src/magaldi_web/frontend
+npm install
+npm run dev
+# Open http://localhost:5173 (Vite dev server with HMR)
+```
+
+**Production Mode:**
+```bash
+# Build the frontend first
+cd src/magaldi_web/frontend
+npm install && npm run build
+cd ../../..
+
+# Start the server (serves built frontend)
 magaldi web serve
+# Open http://localhost:8080
+```
+
+**With Docker:**
+```bash
+# Start web service with all dependencies
+docker compose --profile web up -d
 # Open http://localhost:8080
 ```
 
@@ -229,7 +255,7 @@ ollama list                           # List installed models
 │                           PARSER PIPELINE                                    │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  Discovery  →  Change Detection  →  Parsing  →  Storage                     │
-│  (paths)       (SHA256 hash)        (Tree-sitter) (MySQL + ES)              │
+│  (paths)       (SHA256 hash)        (Tree-sitter) (Elasticsearch)           │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐

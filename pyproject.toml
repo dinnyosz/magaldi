@@ -36,7 +36,6 @@ dependencies = [
     # HTTP
     "requests>=2.31.0",
     # Database
-    "mysql-connector-python>=8.2.0",
     "elasticsearch>=8.11.0,<9.0.0",
     "redis>=5.0.0",
     # Web
@@ -70,6 +69,7 @@ dependencies = [
 [project.scripts]
 magaldi = "shared.cli:main"
 magaldi-mcp = "magaldi_mcp.server:run_server"
+magaldi-web = "magaldi_web.app:run_server"
 
 [project.urls]
 Homepage = "https://github.com/magaldi/magaldi"
@@ -79,7 +79,7 @@ Issues = "https://github.com/magaldi/magaldi/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["magaldi_core*", "magaldi_mcp*", "shared*"]
+include = ["magaldi_core*", "magaldi_mcp*", "magaldi_web*", "shared*"]
 
 [tool.setuptools.package-data]
 "*" = ["py.typed"]
@@ -112,7 +112,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["magaldi_core", "magaldi_mcp", "shared"]
+known-first-party = ["magaldi_core", "magaldi_mcp", "magaldi_web", "shared"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -178,7 +178,7 @@ asyncio_mode = "auto"
 # =============================================================================
 
 [tool.coverage.run]
-source = ["src/magaldi_core", "src/magaldi_mcp", "src/shared"]
+source = ["src/magaldi_core", "src/magaldi_mcp", "src/magaldi_web", "src/shared"]
 branch = true
 omit = [
     "*/tests/*",
