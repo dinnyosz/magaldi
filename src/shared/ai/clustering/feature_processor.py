@@ -14,9 +14,12 @@ import time
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from shared.ai.clustering.clusterer import ClusteringResult, ClusterResult
+
+if TYPE_CHECKING:
+    from shared.config import MagaldiConfig
 from shared.db.elasticsearch import ElasticsearchRepository
 from shared.ai.embedding import (
     OllamaEmbedClient,
@@ -356,6 +359,7 @@ def process_features(
     on_status_change: Callable[[], None] | None = None,
     worker_status: FeatureWorkerStatus | None = None,
     timing_stats: FeatureTimingStats | None = None,
+    magaldi_config: "MagaldiConfig | None" = None,
 ) -> dict[str, Any]:
     """Process features: summarize -> embed -> index (parallel).
 
@@ -370,6 +374,7 @@ def process_features(
         on_status_change: Optional callback when worker status changes.
         worker_status: Optional shared worker status tracker.
         timing_stats: Optional shared timing stats.
+        magaldi_config: Optional config for Redis job tracking.
 
     Returns:
         Dict with processing results.
@@ -380,6 +385,17 @@ def process_features(
     clusters = clustering_result.clusters
     if not clusters:
         return {"processed": 0, "failed": 0}
+
+    # Initialize Redis job tracking if config provided
+    redis_repo = None
+    if magaldi_config:
+        from shared.db.redis import RedisFeatureJobRepository
+        redis_repo = RedisFeatureJobRepository(magaldi_config)
+        # Add all clusters as pending jobs
+        for cluster in clusters:
+            label = cluster.label or f"cluster_{cluster.cluster_id}"
+            feature_id = f"{scope}:{repository}:{username}:feature:{label}:{cluster.cluster_id}"
+            redis_repo.add_job(feature_id, scope, repository, username, label)
 
     # Delete existing feature documents
     es_repo.delete_features(scope, repository, username)
@@ -424,8 +440,15 @@ def process_features(
 
     def process_wrapper(cluster: ClusterResult) -> ProcessedFeature:
         wid = acquire_worker_id()
+        label = cluster.label or f"cluster_{cluster.cluster_id}"
+        feature_id = f"{scope}:{repository}:{username}:feature:{label}:{cluster.cluster_id}"
+
+        # Mark as running in Redis
+        if redis_repo:
+            redis_repo.mark_running(feature_id, scope, repository, username)
+
         try:
-            return _process_single_feature(
+            result = _process_single_feature(
                 cluster=cluster,
                 member_summaries=member_summaries,
                 scope=scope,
@@ -439,6 +462,13 @@ def process_features(
                 worker_status=worker_status,
                 on_status_change=on_status_change,
             )
+            # Mark as completed or failed in Redis based on result
+            if redis_repo:
+                if result.success:
+                    redis_repo.mark_completed(feature_id, scope, repository, username)
+                else:
+                    redis_repo.mark_failed(feature_id, scope, repository, username, result.error or "Unknown error")
+            return result
         finally:
             release_worker_id(wid)
 

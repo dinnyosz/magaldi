@@ -9,12 +9,15 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import hdbscan
 import numpy as np
 
 from shared.ai.summarization import OllamaClient
+
+if TYPE_CHECKING:
+    from shared.config import MagaldiConfig
 
 
 class ClusteringError(Exception):
@@ -258,6 +261,10 @@ class FeatureClusterer:
         max_names_per_prompt: int = 15,
         on_progress: Callable[[LabelingProgressState], None] | None = None,
         timing_stats: LabelingTimingStats | None = None,
+        scope: str | None = None,
+        repository: str | None = None,
+        username: str | None = None,
+        magaldi_config: "MagaldiConfig | None" = None,
     ) -> ClusteringResult:
         """Generate labels for clusters using Ollama.
 
@@ -266,11 +273,24 @@ class FeatureClusterer:
             max_names_per_prompt: Max function names to include in prompt.
             on_progress: Optional callback for progress updates.
             timing_stats: Optional timing stats (created if not provided).
+            scope: Repository scope (for Redis tracking).
+            repository: Repository name (for Redis tracking).
+            username: Username/branch (for Redis tracking).
+            magaldi_config: Optional config for Redis job tracking.
 
         Returns:
             Updated ClusteringResult with labels.
         """
         ollama = self._get_ollama()
+
+        # Initialize Redis job tracking if config provided
+        redis_repo = None
+        if magaldi_config and scope and repository and username:
+            from shared.db.redis import RedisLabelingJobRepository
+            redis_repo = RedisLabelingJobRepository(magaldi_config)
+            # Add all clusters as pending jobs
+            for cluster in result.clusters:
+                redis_repo.add_job(cluster.cluster_id, scope, repository, username)
 
         # Initialize timing stats
         if timing_stats is None:
@@ -283,6 +303,9 @@ class FeatureClusterer:
         failed = 0
 
         for cluster in result.clusters:
+            # Mark as running in Redis
+            if redis_repo and scope and repository and username:
+                redis_repo.mark_running(cluster.cluster_id, scope, repository, username)
             # Get sample of function names
             names = cluster.element_names[:max_names_per_prompt]
             names_str = "\n".join(f"- {name}" for name in names if name)
@@ -294,6 +317,9 @@ class FeatureClusterer:
                 cluster.label = f"cluster_{cluster.cluster_id}"
                 skipped += 1
                 completed += 1
+                # Mark as completed in Redis (skipped still counts as completed)
+                if redis_repo and scope and repository and username:
+                    redis_repo.mark_completed(cluster.cluster_id, scope, repository, username)
                 if on_progress:
                     on_progress(LabelingProgressState(
                         total=total,
@@ -333,12 +359,18 @@ class FeatureClusterer:
                 label = self._clean_label(raw_label)
                 cluster.label = label or f"cluster_{cluster.cluster_id}"
                 completed += 1
+                # Mark as completed in Redis
+                if redis_repo and scope and repository and username:
+                    redis_repo.mark_completed(cluster.cluster_id, scope, repository, username)
 
-            except Exception:
+            except Exception as e:
                 # Fall back to numbered label
                 cluster.label = f"cluster_{cluster.cluster_id}"
                 failed += 1
                 completed += 1
+                # Mark as failed in Redis
+                if redis_repo and scope and repository and username:
+                    redis_repo.mark_failed(cluster.cluster_id, scope, repository, username, str(e))
 
             # Report progress after each cluster
             if on_progress:

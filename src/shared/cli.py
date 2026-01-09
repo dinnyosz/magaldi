@@ -440,6 +440,10 @@ def run_feature_extraction(
                     clustering_result,
                     on_progress=on_labeling_progress,
                     timing_stats=labeling_timing,
+                    scope=scope,
+                    repository=repository,
+                    username=username,
+                    magaldi_config=config,
                 )
 
         # Clear existing feature assignments
@@ -554,6 +558,7 @@ def run_feature_extraction(
                 on_status_change=on_status_change,
                 worker_status=worker_status,
                 timing_stats=timing_stats,
+                magaldi_config=config,
             )
 
         return {
@@ -684,18 +689,28 @@ def run_processing(
                 worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "")
 
         # Per-type stats - show progress count and API time per element
+        # Each element type has a distinct color for visual differentiation
+        type_colors = {
+            "file": "cyan",
+            "class": "magenta",
+            "function": "blue",
+            "method": "green",
+            "constant": "yellow",
+            "variable": "red",
+        }
         type_stats = state.timing.get_type_stats()
         type_parts = []
         for t in ["file", "class", "function", "method", "constant", "variable"]:
             if t in type_stats:
                 done, tot, avg_wall, avg_summ, avg_embed = type_stats[t]
                 api_time = avg_summ + avg_embed
+                color = type_colors.get(t, "white")
                 if done >= tot:
-                    # Completed - green
-                    type_parts.append(f"[green]{t}[/]:[green]{done}/{tot}[/] [dim]({api_time:.1f}s)[/]")
+                    # Completed - green for counts
+                    type_parts.append(f"[{color}]{t}[/]:[green]{done}/{tot}[/] [dim]({api_time:.1f}s)[/]")
                 else:
-                    # In progress - yellow
-                    type_parts.append(f"[yellow]{t}[/]:[yellow]{done}/{tot}[/] [dim]({api_time:.1f}s)[/]")
+                    # In progress - yellow for counts
+                    type_parts.append(f"[{color}]{t}[/]:[yellow]{done}/{tot}[/] [dim]({api_time:.1f}s)[/]")
         type_line = f"  [dim]Progress:[/] {' [dim]|[/] '.join(type_parts)}" if type_parts else ""
 
         # Stats line - effective wall time (elapsed/done) = actual throughput with parallelism
@@ -753,6 +768,7 @@ def run_processing(
             on_status_change,
             worker_status,
             timing_stats,
+            magaldi_config=config if not dry_run else None,
         )
 
     # Get timing stats from current state
@@ -878,6 +894,37 @@ def print_summary(
 
     console.print(table)
     console.print()
+
+
+# =============================================================================
+# WEB COMMANDS
+# =============================================================================
+
+
+@main.group()
+def web() -> None:
+    """Web UI commands."""
+    pass
+
+
+@web.command("serve")
+@click.option("--host", "-h", default=None, help="Host to bind to (default: from config)")
+@click.option("--port", "-p", default=None, type=int, help="Port to bind to (default: from config)")
+@click.option("--reload", "-r", is_flag=True, help="Enable auto-reload for development")
+def web_serve(host: str | None, port: int | None, reload: bool) -> None:
+    """Start the web server."""
+    from magaldi_web.app import run_server
+
+    config = load_config()
+    host = host or config.web.host
+    port = port or config.web.port
+
+    console.print(f"[bold blue]Starting Magaldi Web UI[/]")
+    console.print(f"  URL: http://{host}:{port}")
+    console.print(f"  Auto-reload: {'enabled' if reload else 'disabled'}")
+    console.print()
+
+    run_server(host=host, port=port, reload=reload)
 
 
 # =============================================================================
