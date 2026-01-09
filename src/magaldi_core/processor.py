@@ -49,6 +49,7 @@ class ProcessingConfig:
     """Configuration for unified processing."""
 
     summarize_model: str = "qwen2.5-coder:3b"
+    summarize_model_small: str = "qwen2.5-coder:1.5b"  # For functions, methods, variables, constants
     embed_model: str = "snowflake-arctic-embed2"
     ollama_url: str = "http://localhost:11434"
     skip_ai: bool = False
@@ -66,6 +67,16 @@ class ProcessingConfig:
 
     # Parallel processing
     num_workers: int = 4
+
+    def get_model_for_element_type(self, element_type: str) -> str:
+        """Get the appropriate model for an element type.
+
+        Uses small model for functions, methods, variables, constants.
+        Uses main model for files, classes.
+        """
+        if element_type in ("function", "method", "variable", "constant"):
+            return self.summarize_model_small
+        return self.summarize_model
 
 
 @dataclass
@@ -578,12 +589,14 @@ def _summarize_element(
     # Build prompt with context
     prompt = build_prompt(element, parent_summaries, config.max_code_tokens)
 
-    # Generate with Ollama
+    # Generate with Ollama (select model based on element type)
+    model = config.get_model_for_element_type(element.element_type)
     raw_summary = ollama.generate(
         prompt=prompt,
         temperature=config.summarize_temperature,
         max_tokens=config.summarize_max_tokens,
         timeout=config.summarize_timeout,
+        model=model,
     )
 
     # Clean and return

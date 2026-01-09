@@ -37,8 +37,10 @@ redis:
 ollama:
   url: http://localhost:11434
 
-  # Summarization model
+  # Summarization model (for files, classes, features)
   summarize_model: qwen2.5-coder:3b
+  # Smaller model for functions, methods, variables, constants (faster)
+  summarize_model_small: qwen2.5-coder:1.5b
   summarize_temperature: 0.3
   summarize_max_tokens: 256
   summarize_context_window: 8192

@@ -631,6 +631,7 @@ def run_processing(
 
     proc_config = ProcessingConfig(
         summarize_model=config.ollama.summarize_model,
+        summarize_model_small=config.ollama.summarize_model_small,
         embed_model=config.ollama.embed_model,
         ollama_url=config.ollama.url,
         skip_ai=skip_ai,

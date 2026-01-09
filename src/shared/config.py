@@ -73,8 +73,10 @@ class OllamaConfig:
 
     url: str = "http://localhost:11434"
 
-    # Summarization model
+    # Summarization model (for files, classes, features)
     summarize_model: str = "qwen2.5-coder:3b"
+    # Smaller model for functions, methods, variables, constants
+    summarize_model_small: str = "qwen2.5-coder:1.5b"
     summarize_temperature: float = 0.3
     summarize_max_tokens: int = 256
     summarize_context_window: int = 8192
@@ -83,6 +85,16 @@ class OllamaConfig:
     embed_model: str = "snowflake-arctic-embed2"
     embed_dimensions: int = 1024
     embed_context_window: int = 8192
+
+    def get_model_for_element_type(self, element_type: str) -> str:
+        """Get the appropriate model for an element type.
+
+        Uses small model for functions, methods, variables, constants.
+        Uses main model for files, classes.
+        """
+        if element_type in ("function", "method", "variable", "constant"):
+            return self.summarize_model_small
+        return self.summarize_model
 
 
 @dataclass

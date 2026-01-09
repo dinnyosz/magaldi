@@ -103,10 +103,20 @@ class OllamaClient:
         temperature: float = 0.3,
         max_tokens: int = 256,
         timeout: int = 60,
+        model: str | None = None,
     ) -> str:
-        """Generate completion from Ollama."""
+        """Generate completion from Ollama.
+
+        Args:
+            prompt: The prompt to send to the model.
+            temperature: Sampling temperature.
+            max_tokens: Maximum tokens to generate.
+            timeout: Request timeout in seconds.
+            model: Optional model override (uses default if not specified).
+        """
+        use_model = model or self.model
         payload = {
-            "model": self.model,
+            "model": use_model,
             "prompt": prompt,
             "stream": False,
             "options": {
