@@ -154,17 +154,95 @@ class FeatureProgressState:
 
 
 @dataclass
+class SubfeatureTimingStats:
+    """Thread-safe timing statistics for subfeature processing."""
+
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+    phase_start: float = 0.0
+
+    total_summarize_time: float = 0.0
+    total_embed_time: float = 0.0
+    summarize_count: int = 0
+    embed_count: int = 0
+
+    def record(self, summarize_time: float, embed_time: float) -> None:
+        """Record timing for a completed subfeature."""
+        with self._lock:
+            self.total_summarize_time += summarize_time
+            self.total_embed_time += embed_time
+            self.summarize_count += 1
+            if embed_time > 0:
+                self.embed_count += 1
+
+    @property
+    def avg_summarize_time(self) -> float:
+        with self._lock:
+            return self.total_summarize_time / self.summarize_count if self.summarize_count > 0 else 0.0
+
+    @property
+    def avg_embed_time(self) -> float:
+        with self._lock:
+            return self.total_embed_time / self.embed_count if self.embed_count > 0 else 0.0
+
+    @property
+    def elapsed(self) -> float:
+        return time.time() - self.phase_start
+
+    def eta_seconds(self, completed: int, total: int, num_workers: int = 1) -> float | None:
+        """Calculate ETA based on average times."""
+        with self._lock:
+            if self.summarize_count == 0:
+                return None
+
+            avg_time = (self.total_summarize_time + self.total_embed_time) / self.summarize_count
+            remaining = total - completed
+            if remaining <= 0:
+                return 0.0
+
+            return (remaining * avg_time) / max(num_workers, 1)
+
+
+@dataclass
+class SubfeatureWorkerStatus:
+    """Track what each worker is doing for subfeature processing."""
+
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+    _status: dict[int, tuple[str, str, str, str]] = field(default_factory=dict)  # worker_id -> (parent_feature, stage, model, subfeature)
+
+    def set(self, worker_id: int, parent_feature: str, stage: str, model: str = "", subfeature: str = "") -> None:
+        with self._lock:
+            self._status[worker_id] = (parent_feature, stage, model, subfeature)
+
+    def clear(self, worker_id: int) -> None:
+        with self._lock:
+            self._status.pop(worker_id, None)
+
+    def get_all(self) -> dict[int, tuple[str, str, str, str]]:
+        with self._lock:
+            return dict(self._status)
+
+
+@dataclass
 class SubfeatureProgressState:
     """Progress state for subfeature processing."""
 
-    total_parent_features: int
-    completed_parent_features: int
-    total_subfeatures: int
-    completed_subfeatures: int
+    total: int  # Total subfeatures to process
+    completed: int
     failed: int
-    current_parent: str = ""
-    current_stage: str = ""  # "clustering", "labeling", "summarizing", "embedding", "indexing"
-    elapsed: float = 0.0
+    timing: SubfeatureTimingStats
+    workers: SubfeatureWorkerStatus
+    num_workers: int = 1
+
+
+@dataclass
+class SubfeatureLabelingState:
+    """Progress state for subfeature labeling during discovery."""
+
+    total_features: int  # Total large features to process
+    features_processed: int  # Large features processed so far
+    current_feature: str  # Current feature being labeled
+    subclusters_labeled: int  # Total subclusters labeled so far
+    model: str = ""  # Model used for labeling
 
 
 @dataclass
@@ -177,6 +255,28 @@ class ProcessedFeature:
     embed_time: float
     label: str = ""
     summary: str = ""
+    error: str | None = None
+
+
+@dataclass
+class SubfeatureWorkItem:
+    """Work item for queue-based subfeature processing."""
+
+    parent_label: str
+    parent_summary: str
+    sub_cluster: Any  # ClusterResult
+    member_summaries: dict[str, str]  # element_id -> summary
+
+
+@dataclass
+class ProcessedSubfeature:
+    """Result from processing a single subfeature."""
+
+    parent_label: str
+    sub_label: str
+    success: bool
+    summarize_time: float
+    embed_time: float
     error: str | None = None
 
 
@@ -647,6 +747,104 @@ def _generate_subfeature_summary(
     return summary
 
 
+def _process_single_subfeature(
+    work_item: SubfeatureWorkItem,
+    scope: str,
+    repository: str,
+    username: str,
+    es_repo: "ElasticsearchRepository",
+    ollama: OllamaClient,
+    ollama_embed: OllamaEmbedClient,
+    config: FeatureProcessingConfig,
+    worker_id: int,
+    worker_status: SubfeatureWorkerStatus,
+    on_status_change: Callable[[], None] | None = None,
+) -> ProcessedSubfeature:
+    """Process a single subfeature: summarize -> embed -> index."""
+    sub_label = work_item.sub_cluster.label or f"subcluster_{work_item.sub_cluster.cluster_id}"
+    start_time = time.time()
+    summarize_time = 0.0
+    embed_time = 0.0
+
+    try:
+        # Update status: summarizing
+        worker_status.set(worker_id, work_item.parent_label, "summarize", config.summarize_model, sub_label)
+        if on_status_change:
+            on_status_change()
+
+        # Generate subfeature summary
+        summ_start = time.time()
+        summary = _generate_subfeature_summary(
+            work_item.sub_cluster, work_item.member_summaries,
+            work_item.parent_label, work_item.parent_summary,
+            ollama, config,
+        )
+        summarize_time = time.time() - summ_start
+
+        # Update status: embedding
+        worker_status.set(worker_id, work_item.parent_label, "embed", config.embed_model, sub_label)
+        if on_status_change:
+            on_status_change()
+
+        # Embed subfeature
+        embed_start = time.time()
+        embedding = ollama_embed.embed_single(summary, timeout=config.embed_timeout)
+        if validate_vector(embedding, config.embed_dimensions):
+            embedding = normalize_vector(embedding)
+        else:
+            embedding = None
+        embed_time = time.time() - embed_start
+
+        # Update status: indexing
+        worker_status.set(worker_id, work_item.parent_label, "index", "", sub_label)
+        if on_status_change:
+            on_status_change()
+
+        # Build subfeature ID
+        subfeature_id = f"{scope}:{repository}:{username}:subfeature:{work_item.parent_label}:{sub_label}:{work_item.sub_cluster.cluster_id}"
+
+        # Index subfeature
+        es_repo.index_subfeature(
+            subfeature_id=subfeature_id,
+            scope=scope,
+            repository=repository,
+            username=username,
+            cluster_id=str(work_item.sub_cluster.cluster_id),
+            label=sub_label,
+            summary=summary,
+            embedding=embedding,
+            member_ids=work_item.sub_cluster.element_ids,
+            parent_feature_label=work_item.parent_label,
+            parent_feature_summary=work_item.parent_summary,
+        )
+
+        worker_status.clear(worker_id)
+        if on_status_change:
+            on_status_change()
+
+        return ProcessedSubfeature(
+            parent_label=work_item.parent_label,
+            sub_label=sub_label,
+            success=True,
+            summarize_time=summarize_time,
+            embed_time=embed_time,
+        )
+
+    except Exception as e:
+        worker_status.clear(worker_id)
+        if on_status_change:
+            on_status_change()
+
+        return ProcessedSubfeature(
+            parent_label=work_item.parent_label,
+            sub_label=sub_label,
+            success=False,
+            summarize_time=summarize_time,
+            embed_time=embed_time,
+            error=str(e),
+        )
+
+
 def process_subfeatures(
     clustering_result: ClusteringResult,
     processed_features: dict[int, tuple[str, str]],
@@ -657,9 +855,14 @@ def process_subfeatures(
     config: FeatureProcessingConfig | None = None,
     subcluster_config: SubClusterConfig | None = None,
     on_progress: Callable[[SubfeatureProgressState], None] | None = None,
+    on_labeling_progress: Callable[[SubfeatureLabelingState], None] | None = None,
     magaldi_config: "MagaldiConfig | None" = None,
+    timing_stats: SubfeatureTimingStats | None = None,
+    worker_status: SubfeatureWorkerStatus | None = None,
 ) -> dict[str, Any]:
     """Process subfeatures for large features (>20 members).
+
+    Uses queue-based parallel processing with workers.
 
     Args:
         clustering_result: Result from main clustering.
@@ -670,8 +873,11 @@ def process_subfeatures(
         es_repo: Elasticsearch repository.
         config: Feature processing configuration.
         subcluster_config: Sub-clustering configuration.
-        on_progress: Optional callback for progress updates.
+        on_progress: Optional callback for processing progress updates.
+        on_labeling_progress: Optional callback for labeling progress updates.
         magaldi_config: Optional config for Redis job tracking.
+        timing_stats: Optional timing stats (created if not provided).
+        worker_status: Optional worker status (created if not provided).
 
     Returns:
         Dict with processing results.
@@ -690,10 +896,20 @@ def process_subfeatures(
     ]
 
     if not large_clusters:
-        return {"subfeatures_created": 0, "parent_features_processed": 0}
+        return {"subfeatures_created": 0, "parent_features_processed": 0, "errors": []}
 
     # Delete existing subfeatures
     es_repo.delete_subfeatures(scope, repository, username)
+
+    # Initialize Redis job tracking if config provided
+    redis_repo = None
+    if magaldi_config:
+        from shared.db.redis import RedisSubfeatureJobRepository
+        redis_repo = RedisSubfeatureJobRepository(magaldi_config)
+        # Clear stale subfeature queue data
+        client = redis_repo._get_client()
+        for key_type in ["jobs", "running", "queue"]:
+            client.delete(f"magaldi:subfeature:{key_type}:{scope}:{repository}:{username}")
 
     # Initialize Ollama clients
     ollama = OllamaClient(config.ollama_url, config.summarize_model)
@@ -708,30 +924,34 @@ def process_subfeatures(
     )
     sub_clusterer = FeatureClusterer(cluster_config)
 
-    subfeatures_created = 0
-    parent_features_processed = 0
-    errors: list[str] = []
-    start_time = time.time()
+    # Initialize timing and worker tracking
+    if timing_stats is None:
+        timing_stats = SubfeatureTimingStats()
+    timing_stats.phase_start = time.time()
+    if worker_status is None:
+        worker_status = SubfeatureWorkerStatus()
 
-    def report_progress(current_parent: str, stage: str, total_subs: int = 0) -> None:
-        if on_progress:
-            on_progress(SubfeatureProgressState(
-                total_parent_features=len(large_clusters),
-                completed_parent_features=parent_features_processed,
-                total_subfeatures=total_subs,
-                completed_subfeatures=subfeatures_created,
-                failed=len(errors),
-                current_parent=current_parent,
-                current_stage=stage,
-                elapsed=time.time() - start_time,
-            ))
+    # Phase 1: Discovery - identify all subfeatures to process
+    work_queue: list[SubfeatureWorkItem] = []
+    parents_with_subfeatures: set[str] = set()
+    features_processed = 0
+    subclusters_labeled = 0
+    total_large_features = len(large_clusters)
 
     for cluster in large_clusters:
         parent_label, parent_summary = processed_features.get(
             cluster.cluster_id, (cluster.label or f"cluster_{cluster.cluster_id}", "")
         )
 
-        report_progress(parent_label, "fetching")
+        # Update labeling progress - starting this feature
+        if on_labeling_progress:
+            on_labeling_progress(SubfeatureLabelingState(
+                total_features=total_large_features,
+                features_processed=features_processed,
+                current_feature=parent_label,
+                subclusters_labeled=subclusters_labeled,
+                model=config.summarize_model,
+            ))
 
         # Fetch embeddings for cluster members
         member_docs = es_repo.get_documents_batch(cluster.element_ids)
@@ -750,19 +970,30 @@ def process_subfeatures(
                 })
 
         if len(elements_with_embeddings) < subcluster_config.min_cluster_size:
+            features_processed += 1
             continue
 
         try:
             # Run sub-clustering
-            report_progress(parent_label, "clustering")
             sub_result = sub_clusterer.cluster(elements_with_embeddings)
 
             if not sub_result.clusters:
+                features_processed += 1
                 continue
 
             # Label sub-clusters
-            report_progress(parent_label, "labeling", len(sub_result.clusters))
             sub_result = sub_clusterer.label_clusters(sub_result)
+            subclusters_labeled += len(sub_result.clusters)
+
+            # Update labeling progress - after labeling this feature's subclusters
+            if on_labeling_progress:
+                on_labeling_progress(SubfeatureLabelingState(
+                    total_features=total_large_features,
+                    features_processed=features_processed,
+                    current_feature=parent_label,
+                    subclusters_labeled=subclusters_labeled,
+                    model=config.summarize_model,
+                ))
 
             # Fetch member summaries for all sub-cluster members
             all_sub_member_ids = []
@@ -770,60 +1001,130 @@ def process_subfeatures(
                 all_sub_member_ids.extend(sub_cluster.element_ids)
             member_summaries = es_repo.get_summaries_batch(all_sub_member_ids)
 
-            # Process each sub-cluster
+            # Add each sub-cluster to the work queue
             for sub_cluster in sub_result.clusters:
-                try:
-                    sub_label = sub_cluster.label or f"subcluster_{sub_cluster.cluster_id}"
-                    report_progress(parent_label, f"summarizing: {sub_label}", len(sub_result.clusters))
+                sub_label = sub_cluster.label or f"subcluster_{sub_cluster.cluster_id}"
+                work_queue.append(SubfeatureWorkItem(
+                    parent_label=parent_label,
+                    parent_summary=parent_summary,
+                    sub_cluster=sub_cluster,
+                    member_summaries=member_summaries,
+                ))
+                parents_with_subfeatures.add(parent_label)
 
-                    # Generate subfeature summary
-                    summary = _generate_subfeature_summary(
-                        sub_cluster, member_summaries,
-                        parent_label, parent_summary,
-                        ollama, config,
-                    )
-
-                    report_progress(parent_label, f"embedding: {sub_label}", len(sub_result.clusters))
-                    # Embed subfeature
-                    embedding = ollama_embed.embed_single(summary, timeout=config.embed_timeout)
-                    if validate_vector(embedding, config.embed_dimensions):
-                        embedding = normalize_vector(embedding)
-                    else:
-                        embedding = None
-
-                    # Build subfeature ID
+                # Add to Redis queue
+                if redis_repo:
                     subfeature_id = f"{scope}:{repository}:{username}:subfeature:{parent_label}:{sub_label}:{sub_cluster.cluster_id}"
+                    redis_repo.add_job(subfeature_id, scope, repository, username, sub_label, parent_label)
 
-                    report_progress(parent_label, f"indexing: {sub_label}", len(sub_result.clusters))
-                    # Index subfeature
-                    es_repo.index_subfeature(
-                        subfeature_id=subfeature_id,
-                        scope=scope,
-                        repository=repository,
-                        username=username,
-                        cluster_id=str(sub_cluster.cluster_id),
-                        label=sub_label,
-                        summary=summary,
-                        embedding=embedding,
-                        member_ids=sub_cluster.element_ids,
-                        parent_feature_label=parent_label,
-                        parent_feature_summary=parent_summary,
-                    )
+            features_processed += 1
 
-                    subfeatures_created += 1
-                    report_progress(parent_label, "", len(sub_result.clusters))
+        except Exception:
+            # Skip this cluster if sub-clustering fails
+            features_processed += 1
+            continue
 
-                except Exception as e:
-                    errors.append(f"Subfeature {sub_cluster.cluster_id} of {parent_label}: {e}")
+    if not work_queue:
+        return {"subfeatures_created": 0, "parent_features_processed": 0, "errors": []}
 
-            parent_features_processed += 1
-            report_progress("", "", 0)
+    # Phase 2: Process subfeatures in parallel with workers
+    total = len(work_queue)
+    completed_count = 0
+    failed_count = 0
+    errors: list[str] = []
 
-        except Exception as e:
-            errors.append(f"Sub-clustering {parent_label}: {e}")
+    # Worker ID pool
+    available_worker_ids: list[int] = list(range(config.num_workers))
+    worker_id_lock = threading.Lock()
+
+    def acquire_worker_id() -> int:
+        with worker_id_lock:
+            if available_worker_ids:
+                return available_worker_ids.pop(0)
+            return 0
+
+    def release_worker_id(wid: int) -> None:
+        with worker_id_lock:
+            if wid not in available_worker_ids:
+                available_worker_ids.append(wid)
+
+    def on_status_change() -> None:
+        if on_progress:
+            on_progress(SubfeatureProgressState(
+                total=total,
+                completed=completed_count,
+                failed=failed_count,
+                timing=timing_stats,
+                workers=worker_status,
+                num_workers=config.num_workers,
+            ))
+
+    def process_wrapper(work_item: SubfeatureWorkItem) -> ProcessedSubfeature:
+        wid = acquire_worker_id()
+        sub_label = work_item.sub_cluster.label or f"subcluster_{work_item.sub_cluster.cluster_id}"
+        subfeature_id = f"{scope}:{repository}:{username}:subfeature:{work_item.parent_label}:{sub_label}:{work_item.sub_cluster.cluster_id}"
+
+        # Mark as running in Redis
+        if redis_repo:
+            redis_repo.mark_running(subfeature_id, scope, repository, username)
+
+        try:
+            result = _process_single_subfeature(
+                work_item=work_item,
+                scope=scope,
+                repository=repository,
+                username=username,
+                es_repo=es_repo,
+                ollama=ollama,
+                ollama_embed=ollama_embed,
+                config=config,
+                worker_id=wid,
+                worker_status=worker_status,
+                on_status_change=on_status_change,
+            )
+            # Mark as completed or failed in Redis based on result
+            if redis_repo:
+                if result.success:
+                    redis_repo.mark_completed(subfeature_id, scope, repository, username)
+                else:
+                    redis_repo.mark_failed(subfeature_id, scope, repository, username, result.error or "Unknown error")
+            return result
+        finally:
+            release_worker_id(wid)
+
+    # Process subfeatures in parallel
+    executor = ThreadPoolExecutor(max_workers=config.num_workers)
+    future_to_work: dict = {}
+
+    try:
+        # Submit all work items
+        for work_item in work_queue:
+            future = executor.submit(process_wrapper, work_item)
+            future_to_work[future] = work_item
+
+        while future_to_work:
+            done, _ = wait(future_to_work.keys(), return_when=FIRST_COMPLETED)
+
+            for future in done:
+                work_item = future_to_work.pop(future)
+                processed = future.result()
+
+                timing_stats.record(processed.summarize_time, processed.embed_time)
+
+                if processed.success:
+                    completed_count += 1
+                else:
+                    failed_count += 1
+                    if processed.error:
+                        errors.append(f"Subfeature {processed.sub_label} of {processed.parent_label}: {processed.error}")
+
+                on_status_change()
+
+    finally:
+        executor.shutdown(wait=True)
 
     return {
-        "subfeatures_created": subfeatures_created,
-        "parent_features_processed": parent_features_processed,
+        "subfeatures_created": completed_count,
+        "parent_features_processed": len(parents_with_subfeatures),
         "errors": errors,
     }

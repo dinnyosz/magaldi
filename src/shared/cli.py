@@ -374,7 +374,10 @@ def run_feature_extraction(
         FeatureTimingStats,
         FeatureWorkerStatus,
         SubClusterConfig,
+        SubfeatureLabelingState,
         SubfeatureProgressState,
+        SubfeatureTimingStats,
+        SubfeatureWorkerStatus,
         process_features,
         process_subfeatures,
     )
@@ -648,10 +651,21 @@ def run_feature_extraction(
         if large_cluster_count > 0:
             console.print(f"\n[bold cyan]Phase 6: Sub-feature Processing[/] ({large_cluster_count} large features)")
 
-            def build_subfeature_display(state: SubfeatureProgressState) -> RenderableType:
-                """Build Rich display for subfeature processing progress."""
-                pct = (state.completed_parent_features / state.total_parent_features * 100) if state.total_parent_features > 0 else 0
-                elapsed_str = format_duration(state.elapsed)
+            sub_timing_stats = SubfeatureTimingStats()
+            sub_worker_status = SubfeatureWorkerStatus()
+
+            # Labeling state for discovery phase
+            current_labeling_state = SubfeatureLabelingState(
+                total_features=large_cluster_count,
+                features_processed=0,
+                current_feature="",
+                subclusters_labeled=0,
+                model="",
+            )
+
+            def build_labeling_display(state: SubfeatureLabelingState) -> RenderableType:
+                """Build Rich display for subfeature labeling progress."""
+                pct = (state.features_processed / state.total_features * 100) if state.total_features > 0 else 0
 
                 # Progress bar
                 bar_width = 30
@@ -663,42 +677,131 @@ def run_feature_extraction(
                 if filled < bar_width:
                     bar_text.append(bar[filled:], style="dim")
                 bar_text.append(" ")
-                bar_text.append(f"{state.completed_parent_features}", style="green")
+                bar_text.append(f"{state.features_processed}", style="green")
                 bar_text.append("/", style="dim")
-                bar_text.append(f"{state.total_parent_features}", style="cyan")
-                bar_text.append(f" features ({pct:.0f}%)", style="green")
-                bar_text.append(" | ", style="dim")
-                bar_text.append(f"{state.completed_subfeatures}", style="yellow")
-                bar_text.append(" subfeatures", style="dim")
+                bar_text.append(f"{state.total_features}", style="cyan")
+                bar_text.append(f" ({pct:.0f}%)", style="green")
+                bar_text.append(" features", style="dim")
+
+                # Current feature and model
+                current_text = Text()
+                if state.current_feature:
+                    current_text.append("  [labeling] ", style="cyan")
+                    if state.model:
+                        current_text.append(f"[{state.model}] ", style="yellow")
+                    current_text.append(state.current_feature, style="white")
+                else:
+                    current_text.append("  ", style="dim")
+
+                # Stats line
+                stats_text = Text()
+                if state.subclusters_labeled > 0:
+                    stats_text.append("  ")
+                    stats_text.append(f"{state.subclusters_labeled} subclusters labeled", style="green")
+
+                return Group(bar_text, current_text, stats_text)
+
+            # Combined live display will be set later
+            combined_live = None
+
+            def on_labeling_progress(state: SubfeatureLabelingState) -> None:
+                nonlocal current_labeling_state
+                current_labeling_state = state
+                if combined_live:
+                    combined_live.refresh()
+
+            console.print("  Labeling and processing sub-features with {workers} workers...".format(workers=workers))
+
+            def build_subfeature_display(state: SubfeatureProgressState, num_workers: int) -> RenderableType:
+                """Build Rich display for subfeature processing progress (matches Phase 5)."""
+                pct = (state.completed / state.total * 100) if state.total > 0 else 0
+                eta = state.timing.eta_seconds(state.completed, state.total, state.num_workers)
+                elapsed_str = format_duration(state.timing.elapsed)
+
+                # Progress bar
+                bar_width = 30
+                filled = int(bar_width * pct / 100)
+                bar = "━" * filled + "╺" + "─" * (bar_width - filled - 1) if filled < bar_width else "━" * bar_width
+                bar_text = Text()
+                bar_text.append("  ")
+                bar_text.append(bar[:filled], style="green")
+                if filled < bar_width:
+                    bar_text.append(bar[filled:], style="dim")
+                bar_text.append(" ")
+                bar_text.append(f"{state.completed}", style="green")
+                bar_text.append("/", style="dim")
+                bar_text.append(f"{state.total}", style="cyan")
+                bar_text.append(f" ({pct:.0f}%)", style="green")
                 bar_text.append(" | ", style="dim")
                 bar_text.append(elapsed_str, style="cyan")
                 bar_text.append(" elapsed", style="dim")
+                if eta:
+                    bar_text.append(" | ~", style="dim")
+                    bar_text.append(format_duration(eta), style="yellow")
+                    bar_text.append(" ETA", style="dim")
 
-                # Current activity
-                activity = Text()
-                if state.current_parent:
-                    activity.append("  [", style="dim")
-                    activity.append(state.current_parent, style="cyan")
-                    activity.append("] ", style="dim")
-                    activity.append(state.current_stage, style="yellow")
+                # Worker table
+                worker_table = Table(show_header=False, box=None, padding=(0, 1))
+                worker_table.add_column("ID", style="dim", width=4)
+                worker_table.add_column("Stage", style="cyan", width=12)
+                worker_table.add_column("Model", style="yellow", width=22)
+                worker_table.add_column("Parent", style="magenta", width=20)
+                worker_table.add_column("Subfeature")
 
-                return Group(bar_text, activity)
+                workers_data = state.workers.get_all()
+                for wid in range(num_workers):
+                    if wid in workers_data:
+                        parent_feature, stage, model, subfeature = workers_data[wid]
+                        display_model = model[:19] + "..." if len(model) > 22 else model
+                        display_parent = parent_feature[:17] + "..." if len(parent_feature) > 20 else parent_feature
+                        display_sub = subfeature[:28] + "..." if len(subfeature) > 31 else subfeature
+                        worker_table.add_row(f"[{wid}]", stage, display_model, display_parent, display_sub)
+                    else:
+                        worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "", "")
+
+                # Stats line
+                avg_api = state.timing.avg_summarize_time + state.timing.avg_embed_time
+                stats_text = Text()
+                if state.timing.summarize_count > 0:
+                    stats_text.append("  ")
+                    stats_text.append("Avg: ", style="dim")
+                    stats_text.append(f"{avg_api:.1f}s", style="green")
+                    stats_text.append("/subfeature (", style="dim")
+                    stats_text.append(f"{state.timing.avg_summarize_time:.1f}s", style="cyan")
+                    stats_text.append(" summ + ", style="dim")
+                    stats_text.append(f"{state.timing.avg_embed_time:.1f}s", style="cyan")
+                    stats_text.append(" embed)", style="dim")
+                    if state.failed > 0:
+                        stats_text.append(" | ", style="dim")
+                        stats_text.append(f"{state.failed} failed", style="red")
+
+                return Group(bar_text, worker_table, stats_text)
 
             current_sub_state = SubfeatureProgressState(
-                total_parent_features=large_cluster_count,
-                completed_parent_features=0,
-                total_subfeatures=0,
-                completed_subfeatures=0,
+                total=0,
+                completed=0,
                 failed=0,
+                timing=sub_timing_stats,
+                workers=sub_worker_status,
+                num_workers=workers,
             )
+
+            # Track which phase we're in
+            in_processing_phase = False
 
             class LiveSubfeatureDisplay:
                 def __rich__(self) -> RenderableType:
-                    return build_subfeature_display(current_sub_state)
+                    if in_processing_phase:
+                        return build_subfeature_display(current_sub_state, workers)
+                    else:
+                        return build_labeling_display(current_labeling_state)
 
             with Live(LiveSubfeatureDisplay(), console=console, refresh_per_second=10) as live:
+                combined_live = live  # Make accessible to on_labeling_progress
                 def on_sub_progress(state: SubfeatureProgressState) -> None:
-                    nonlocal current_sub_state
+                    nonlocal current_sub_state, in_processing_phase
+                    if not in_processing_phase:
+                        in_processing_phase = True
                     current_sub_state = state
                     live.refresh()
 
@@ -712,7 +815,10 @@ def run_feature_extraction(
                     config=proc_config,
                     subcluster_config=SubClusterConfig(),
                     on_progress=on_sub_progress,
+                    on_labeling_progress=on_labeling_progress,
                     magaldi_config=config,
+                    timing_stats=sub_timing_stats,
+                    worker_status=sub_worker_status,
                 )
 
             if subfeature_result.get("subfeatures_created", 0) > 0:
@@ -998,12 +1104,15 @@ def print_feature_result(result: dict) -> None:
     pct = result.get("coverage_pct", 0)
     failed = result.get("failed", 0)
     elapsed = result.get("elapsed", 0)
+    subfeatures = result.get("subfeatures_created", 0)
 
     # Summary line
     parts = [
         f"[green]{result['cluster_count']} features[/]",
-        f"covering {coverage}/{total} ({pct:.0f}%)",
     ]
+    if subfeatures > 0:
+        parts.append(f"[yellow]{subfeatures} sub-features[/]")
+    parts.append(f"covering {coverage}/{total} ({pct:.0f}%)")
     if failed > 0:
         parts.append(f"[red]{failed} failed[/]")
     if elapsed > 0:
