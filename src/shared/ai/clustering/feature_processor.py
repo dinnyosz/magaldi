@@ -391,6 +391,10 @@ def process_features(
     if magaldi_config:
         from shared.db.redis import RedisFeatureJobRepository
         redis_repo = RedisFeatureJobRepository(magaldi_config)
+        # Clear stale feature queue data
+        client = redis_repo._get_client()
+        for key_type in ["jobs", "running", "queue"]:
+            client.delete(f"magaldi:feature:{key_type}:{scope}:{repository}:{username}")
         # Add all clusters as pending jobs
         for cluster in clusters:
             label = cluster.label or f"cluster_{cluster.cluster_id}"

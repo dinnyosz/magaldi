@@ -288,6 +288,10 @@ class FeatureClusterer:
         if magaldi_config and scope and repository and username:
             from shared.db.redis import RedisLabelingJobRepository
             redis_repo = RedisLabelingJobRepository(magaldi_config)
+            # Clear stale labeling queue data
+            client = redis_repo._get_client()
+            for key_type in ["jobs", "running", "queue"]:
+                client.delete(f"magaldi:labeling:{key_type}:{scope}:{repository}:{username}")
             # Add all clusters as pending jobs (convert numpy int64 to Python int)
             for cluster in result.clusters:
                 redis_repo.add_job(int(cluster.cluster_id), scope, repository, username)

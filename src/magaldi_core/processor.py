@@ -409,6 +409,23 @@ class RedisJobTracker:
         self._emb_repo = RedisEmbeddingJobRepository(config)
         self._lock = threading.Lock()
 
+    def clear_queues(self) -> None:
+        """Clear all Redis queue keys for this scope/repository/username."""
+        client = self._sum_repo._get_client()
+
+        # Keys to delete for summarization and embedding
+        keys_to_delete = [
+            f"magaldi:summarization:jobs:{self._scope}:{self._repository}:{self._username}",
+            f"magaldi:summarization:running:{self._scope}:{self._repository}:{self._username}",
+            f"magaldi:summarization:queue:{self._scope}:{self._repository}:{self._username}",
+            f"magaldi:embedding:jobs:{self._scope}:{self._repository}:{self._username}",
+            f"magaldi:embedding:running:{self._scope}:{self._repository}:{self._username}",
+            f"magaldi:embedding:queue:{self._scope}:{self._repository}:{self._username}",
+        ]
+
+        for key in keys_to_delete:
+            client.delete(key)
+
     def add_pending_jobs(self, elements: list["CodeElement"]) -> None:
         """Add all elements as pending jobs to Redis."""
         for element in elements:
@@ -923,6 +940,7 @@ def process_elements(
     if magaldi_config is not None:
         try:
             redis_tracker = RedisJobTracker(magaldi_config, scope, repository, username)
+            redis_tracker.clear_queues()  # Clear stale data before adding new jobs
             redis_tracker.add_pending_jobs(elements_to_process)
         except Exception:
             # Redis unavailable - continue without tracking
