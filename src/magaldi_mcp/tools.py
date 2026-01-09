@@ -156,7 +156,7 @@ def search_features(
                 scope=scope,
                 repository=repository,
                 username=username,
-                element_types=["feature"],
+                element_types=["feature", "subfeature"],
                 size=limit,
             )
         except Exception:
@@ -169,18 +169,24 @@ def search_features(
             scope=scope,
             repository=repository,
             username=username,
-            element_types=["feature"],
+            element_types=["feature", "subfeature"],
             size=limit,
         )
 
     formatted = []
     for result in results:
-        formatted.append({
+        entry = {
             "label": result.get("cluster_label", result.get("name")),
             "summary": result.get("summary", ""),
             "member_count": result.get("member_count", 0),
             "feature_id": result.get("element_id"),  # For follow-up queries
-        })
+            "type": result.get("element_type", "feature"),  # "feature" or "subfeature"
+        }
+        # Include parent feature info for subfeatures
+        if result.get("element_type") == "subfeature":
+            entry["parent_feature_label"] = result.get("parent_feature_label", "")
+            entry["parent_feature_summary"] = result.get("parent_feature_summary", "")
+        formatted.append(entry)
 
     return formatted
 
@@ -488,7 +494,7 @@ def list_features(
     repository: str,
     username: str = "main",
 ) -> list[dict[str, Any]]:
-    """List all features for a repository.
+    """List all features and subfeatures for a repository.
 
     Args:
         es: Elasticsearch repository.
@@ -497,9 +503,23 @@ def list_features(
         username: User branch.
 
     Returns:
-        List of features.
+        List of features and subfeatures with parent info.
     """
-    return es.get_features(scope, repository, username)
+    # Get features
+    features = es.get_features(scope, repository, username)
+    for f in features:
+        f["type"] = "feature"
+
+    # Get subfeatures
+    subfeatures = es.get_subfeatures(scope, repository, username)
+    for sf in subfeatures:
+        sf["type"] = "subfeature"
+
+    # Combine and sort by member count
+    all_features = features + subfeatures
+    all_features.sort(key=lambda x: x.get("member_count", 0), reverse=True)
+
+    return all_features
 
 
 def get_repo_stats(
@@ -559,19 +579,19 @@ def get_feature_members(
     es: ElasticsearchRepository,
     feature_id: str,
 ) -> list[dict[str, Any]]:
-    """Get all members of a feature cluster.
+    """Get all members of a feature or subfeature cluster.
 
     Args:
         es: Elasticsearch repository.
-        feature_id: Feature ID.
+        feature_id: Feature or subfeature ID.
 
     Returns:
         List of member elements.
     """
-    # Get feature document
+    # Get feature/subfeature document
     feature = es.get_document(feature_id)
     if not feature:
-        raise ValueError(f"Feature not found: {feature_id}")
+        raise ValueError(f"Feature/subfeature not found: {feature_id}")
 
     member_ids = feature.get("member_ids", [])
     if not member_ids:
