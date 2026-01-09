@@ -128,6 +128,14 @@ async def get_dashboard(
         user: QueueInfo(**info)
         for user, info in queue_stats.get("embedding", {}).items()
     }
+    labeling_queues = {
+        user: QueueInfo(**info)
+        for user, info in queue_stats.get("labeling", {}).items()
+    }
+    feature_queues = {
+        user: QueueInfo(**info)
+        for user, info in queue_stats.get("feature", {}).items()
+    }
 
     return DashboardResponse(
         stats=DashboardStats(
@@ -145,6 +153,8 @@ async def get_dashboard(
         queue_status=QueueStatus(
             summarization=summarization_queues,
             embedding=embedding_queues,
+            labeling=labeling_queues,
+            feature=feature_queues,
             total_pending=queue_stats.get("total_pending", 0),
             total_running=queue_stats.get("total_running", 0),
         ),

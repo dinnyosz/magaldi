@@ -87,6 +87,8 @@ class QueueStatus(BaseModel):
 
     summarization: dict[str, QueueInfo] = Field(default_factory=dict)
     embedding: dict[str, QueueInfo] = Field(default_factory=dict)
+    labeling: dict[str, QueueInfo] = Field(default_factory=dict)
+    feature: dict[str, QueueInfo] = Field(default_factory=dict)
     total_pending: int = 0
     total_running: int = 0
 
