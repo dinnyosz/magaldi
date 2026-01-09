@@ -136,6 +136,10 @@ async def get_dashboard(
         user: QueueInfo(**info)
         for user, info in queue_stats.get("feature", {}).items()
     }
+    subfeature_queues = {
+        user: QueueInfo(**info)
+        for user, info in queue_stats.get("subfeature", {}).items()
+    }
 
     return DashboardResponse(
         stats=DashboardStats(
@@ -148,6 +152,7 @@ async def get_dashboard(
             variable_count=type_counts.get("variable", 0),
             constant_count=type_counts.get("constant", 0),
             feature_count=type_counts.get("feature", 0),
+            subfeature_count=type_counts.get("subfeature", 0),
         ),
         recent_repos=recent_repos,
         queue_status=QueueStatus(
@@ -155,6 +160,7 @@ async def get_dashboard(
             embedding=embedding_queues,
             labeling=labeling_queues,
             feature=feature_queues,
+            subfeature=subfeature_queues,
             total_pending=queue_stats.get("total_pending", 0),
             total_running=queue_stats.get("total_running", 0),
         ),

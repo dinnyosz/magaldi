@@ -92,6 +92,7 @@ async def get_redis_queue_stats(config: MagaldiConfig) -> dict:
         "embedding": {},
         "labeling": {},
         "feature": {},
+        "subfeature": {},
         "total_pending": 0,
         "total_running": 0,
     }
@@ -219,6 +220,36 @@ async def get_redis_queue_stats(config: MagaldiConfig) -> dict:
 
                 if pending_count > 0 or running_count > 0:
                     result["feature"][queue_id] = {
+                        "pending": pending_count,
+                        "running": running_count,
+                    }
+                    result["total_pending"] += pending_count
+                    result["total_running"] += running_count
+
+        # Scan for subfeature job keys
+        # Pattern: magaldi:subfeature:jobs:{scope}:{repository}:{username}
+        for jobs_key in r.scan_iter("magaldi:subfeature:jobs:*"):
+            parts = jobs_key.split(":")
+            if len(parts) >= 6:
+                scope, repo, username = parts[3], parts[4], parts[5]
+                queue_id = f"{scope}/{repo}/{username}"
+
+                # Count pending jobs in the hash
+                pending_count = 0
+                for job_data in r.hvals(jobs_key):
+                    try:
+                        job = json.loads(job_data)
+                        if job.get("status") == "pending":
+                            pending_count += 1
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+                # Count running jobs
+                running_key = f"magaldi:subfeature:running:{scope}:{repo}:{username}"
+                running_count = r.scard(running_key)
+
+                if pending_count > 0 or running_count > 0:
+                    result["subfeature"][queue_id] = {
                         "pending": pending_count,
                         "running": running_count,
                     }

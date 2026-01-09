@@ -73,6 +73,7 @@ class DashboardStats(BaseModel):
     variable_count: int = 0
     constant_count: int = 0
     feature_count: int = 0
+    subfeature_count: int = 0
 
 
 class QueueInfo(BaseModel):
@@ -89,6 +90,7 @@ class QueueStatus(BaseModel):
     embedding: dict[str, QueueInfo] = Field(default_factory=dict)
     labeling: dict[str, QueueInfo] = Field(default_factory=dict)
     feature: dict[str, QueueInfo] = Field(default_factory=dict)
+    subfeature: dict[str, QueueInfo] = Field(default_factory=dict)
     total_pending: int = 0
     total_running: int = 0
 
