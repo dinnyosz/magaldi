@@ -16,7 +16,7 @@ from typing import Any, Protocol
 
 import requests
 
-from magaldi.parser.code_parser import CodeElement
+from magaldi_core.code_parser import CodeElement
 
 
 class EmbeddingError(Exception):

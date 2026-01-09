@@ -15,8 +15,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from magaldi.parser.change_detection import ChangeManifest, FileInfo
-from magaldi.parser.tree_sitter_manager import (
+from magaldi_core.change_detection import ChangeManifest, FileInfo
+from magaldi_core.tree_sitter_manager import (
     ExtractedElement,
     extract_javascript_class_members,
     extract_javascript_elements,

@@ -8,8 +8,8 @@ from typing import Generator
 
 import pytest
 
-from magaldi import config as config_module
-from magaldi.config import (
+from shared import config as config_module
+from shared.config import (
     ElasticsearchConfig,
     LoggingConfig,
     MagaldiConfig,

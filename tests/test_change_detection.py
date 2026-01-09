@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from magaldi.parser.change_detection import (
+from magaldi_core.change_detection import (
     ChangeDetectionError,
     ChangeManifest,
     DBFileState,
@@ -18,7 +18,7 @@ from magaldi.parser.change_detection import (
     detect_changes,
     enumerate_files,
 )
-from magaldi.parser.discovery import DiscoveryResult, LanguageStats
+from magaldi_core.discovery import DiscoveryResult, LanguageStats
 
 
 # =============================================================================

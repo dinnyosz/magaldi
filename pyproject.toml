@@ -68,8 +68,8 @@ dependencies = [
 ]
 
 [project.scripts]
-magaldi = "magaldi.cli:main"
-magaldi-mcp = "magaldi.mcp:main"
+magaldi = "shared.cli:main"
+magaldi-mcp = "magaldi_mcp.server:main"
 
 [project.urls]
 Homepage = "https://github.com/magaldi/magaldi"
@@ -79,9 +79,10 @@ Issues = "https://github.com/magaldi/magaldi/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["magaldi_core*", "magaldi_mcp*", "shared*"]
 
 [tool.setuptools.package-data]
-magaldi = ["py.typed"]
+"*" = ["py.typed"]
 
 # =============================================================================
 # RUFF (linting + formatting)
@@ -111,7 +112,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["magaldi"]
+known-first-party = ["magaldi_core", "magaldi_mcp", "shared"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -177,7 +178,7 @@ asyncio_mode = "auto"
 # =============================================================================
 
 [tool.coverage.run]
-source = ["src/magaldi"]
+source = ["src/magaldi_core", "src/magaldi_mcp", "src/shared"]
 branch = true
 omit = [
     "*/tests/*",

@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from magaldi.parser.change_detection import ChangeManifest, FileInfo
-from magaldi.parser.code_parser import CodeElement, ParsedFile, ParsingResult
-from magaldi.storage import (
+from magaldi_core.change_detection import ChangeManifest, FileInfo
+from magaldi_core.code_parser import CodeElement, ParsedFile, ParsingResult
+from magaldi_core.storage import (
     InMemoryDatabaseRepository,
     InMemorySearchRepository,
     StorageError,

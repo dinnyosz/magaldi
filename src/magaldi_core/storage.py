@@ -12,8 +12,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Callable, Protocol
 
-from magaldi.parser.change_detection import ChangeManifest, FileInfo
-from magaldi.parser.code_parser import CodeElement, ParsedFile, ParsingResult
+from magaldi_core.change_detection import ChangeManifest, FileInfo
+from magaldi_core.code_parser import CodeElement, ParsedFile, ParsingResult
 
 
 class StorageError(Exception):

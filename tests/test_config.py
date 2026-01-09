@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from magaldi.config import (
+from shared.config import (
     ConfigurationError,
     ElasticsearchConfig,
     LoggingConfig,
@@ -259,7 +259,7 @@ class TestValidation:
         config.ollama.embed_model = "snowflake-arctic-embed2"
         config.ollama.embed_dimensions = 512  # Wrong for snowflake-arctic-embed2
 
-        from magaldi.config import _validate_config
+        from shared.config import _validate_config
         with pytest.raises(ConfigurationError) as exc_info:
             _validate_config(config)
 

@@ -5,8 +5,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from magaldi.clustering import ClusterConfig, ClusterResult, FeatureClusterer
-from magaldi.clustering.clusterer import ClusteringError, ClusteringResult
+from shared.ai.clustering.clusterer import (
+    ClusterConfig,
+    ClusterResult,
+    ClusteringError,
+    ClusteringResult,
+    FeatureClusterer,
+)
 
 
 # =============================================================================

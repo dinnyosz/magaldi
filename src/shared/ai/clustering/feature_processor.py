@@ -16,14 +16,14 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from typing import Any
 
-from magaldi.clustering.clusterer import ClusteringResult, ClusterResult
-from magaldi.db.elasticsearch import ElasticsearchRepository
-from magaldi.embedding.embedding import (
+from shared.ai.clustering.clusterer import ClusteringResult, ClusterResult
+from shared.db.elasticsearch import ElasticsearchRepository
+from shared.ai.embedding import (
     OllamaEmbedClient,
     normalize_vector,
     validate_vector,
 )
-from magaldi.summarization.summarization import OllamaClient
+from shared.ai.summarization import OllamaClient
 
 # =============================================================================
 # DATA CLASSES

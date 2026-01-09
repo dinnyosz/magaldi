@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from magaldi.parser.code_parser import CodeElement
-from magaldi.summarization import (
+from magaldi_core.code_parser import CodeElement
+from shared.ai.summarization import (
     InMemoryJobRepository,
     InMemorySummaryStore,
     OllamaClient,

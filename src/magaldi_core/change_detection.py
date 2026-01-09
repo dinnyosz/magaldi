@@ -17,8 +17,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Protocol
 
-from magaldi.config import get_config
-from magaldi.parser.discovery import (
+from shared.config import get_config
+from magaldi_core.discovery import (
     SUPPORTED_EXTENSIONS,
     DiscoveryResult,
     RepoConfig,

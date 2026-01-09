@@ -13,9 +13,9 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
-from magaldi.config import get_config, load_config
-from magaldi.db.elasticsearch import ElasticsearchRepository
-from magaldi.embedding.embedding import OllamaEmbedClient
+from shared.config import get_config, load_config
+from shared.db.elasticsearch import ElasticsearchRepository
+from shared.ai.embedding import OllamaEmbedClient
 
 log = logging.getLogger(__name__)
 
@@ -387,7 +387,7 @@ class MagaldiMCPServer:
 
     async def _handle_tool(self, name: str, args: dict[str, Any]) -> Any:
         """Dispatch tool call to implementation."""
-        from magaldi.mcp.tools import (
+        from magaldi_mcp.tools import (
             batch_get_elements,
             find_files,
             find_implementations,

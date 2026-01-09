@@ -22,15 +22,15 @@ from rich.progress import (
 from rich.table import Table
 from rich.text import Text
 
-from magaldi.config import MagaldiConfig, load_config
-from magaldi.parser.change_detection import (
+from shared.config import MagaldiConfig, load_config
+from magaldi_core.change_detection import (
     ChangeManifest,
     InMemoryFileStateRepository,
     detect_changes,
 )
-from magaldi.parser.code_parser import ParsingResult, parse_files
-from magaldi.parser.discovery import DiscoveryError, DiscoveryResult, discover
-from magaldi.processing.processor import (
+from magaldi_core.code_parser import ParsingResult, parse_files
+from magaldi_core.discovery import DiscoveryError, DiscoveryResult, discover
+from magaldi_core.processor import (
     ProcessingConfig,
     ProgressState,
     TimingStats,
@@ -102,7 +102,7 @@ def parse(
         # Force clean: Delete existing index data before change detection
         if force_clean and not dry_run:
             console.print("[yellow]Force clean:[/] Deleting existing index data...")
-            from magaldi.db.elasticsearch import ElasticsearchRepository
+            from shared.db.elasticsearch import ElasticsearchRepository
             es_repo = ElasticsearchRepository(config)
             deleted = es_repo.delete_by_repository(
                 scope=discovery_result.scope,
@@ -193,7 +193,7 @@ def extract_features(
     """
     from pathlib import Path
 
-    from magaldi.parser.discovery import load_repo_config
+    from magaldi_core.discovery import load_repo_config
 
     config = load_config(skip_validation=False)
 
@@ -254,7 +254,7 @@ def run_change_detection(
     if dry_run:
         file_state_repo = InMemoryFileStateRepository()
     else:
-        from magaldi.db.elasticsearch import ElasticsearchFileStateRepository
+        from shared.db.elasticsearch import ElasticsearchFileStateRepository
         file_state_repo = ElasticsearchFileStateRepository(config)
 
     total_files = discovery_result.total_files
@@ -292,20 +292,20 @@ def run_feature_extraction(
     Returns:
         Dict with feature extraction results or None if no elements to extract.
     """
-    from magaldi.clustering import (
+    from shared.ai.clustering.clusterer import (
         ClusterConfig,
         FeatureClusterer,
         LabelingProgressState,
         LabelingTimingStats,
     )
-    from magaldi.clustering.feature_processor import (
+    from shared.ai.clustering.feature_processor import (
         FeatureProcessingConfig,
         FeatureProgressState,
         FeatureTimingStats,
         FeatureWorkerStatus,
         process_features,
     )
-    from magaldi.db.elasticsearch import ElasticsearchRepository
+    from shared.db.elasticsearch import ElasticsearchRepository
 
     es_repo = ElasticsearchRepository(config)
 
@@ -620,7 +620,7 @@ def run_processing(
         console.print(f"  [dim]Dry run: would process {total} elements[/]")
         return (0, 0, 0, 0.0, 0.0, 0.0, 0.0, None)
 
-    from magaldi.db.elasticsearch import ElasticsearchRepository
+    from shared.db.elasticsearch import ElasticsearchRepository
 
     es_repo = ElasticsearchRepository(config)
 

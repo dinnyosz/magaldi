@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from magaldi.parser.discovery import (
+from magaldi_core.discovery import (
     DEFAULT_EXCLUDE_DIRECTORIES,
     DEFAULT_EXCLUDE_FILES,
     SUPPORTED_EXTENSIONS,

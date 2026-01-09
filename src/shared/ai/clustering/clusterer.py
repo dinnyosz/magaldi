@@ -14,7 +14,7 @@ from typing import Any
 import hdbscan
 import numpy as np
 
-from magaldi.summarization.summarization import OllamaClient
+from shared.ai.summarization import OllamaClient
 
 
 class ClusteringError(Exception):

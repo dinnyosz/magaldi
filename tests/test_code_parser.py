@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from magaldi.parser.change_detection import ChangeManifest, FileInfo
-from magaldi.parser.code_parser import (
+from magaldi_core.change_detection import ChangeManifest, FileInfo
+from magaldi_core.code_parser import (
     CodeElement,
     JavaScriptParser,
     ParsedFile,

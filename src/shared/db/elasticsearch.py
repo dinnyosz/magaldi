@@ -10,8 +10,8 @@ from typing import Any
 
 from elasticsearch import Elasticsearch, NotFoundError
 
-from magaldi.config import MagaldiConfig, get_config
-from magaldi.parser.code_parser import CodeElement
+from shared.config import MagaldiConfig, get_config
+from magaldi_core.code_parser import CodeElement
 
 
 # Index name for code elements
@@ -1150,7 +1150,7 @@ class ElasticsearchFileStateRepository:
         actual count of elements with that file_hash, returns None for file_hash
         so the file will be treated as needing reprocessing.
         """
-        from magaldi.parser.change_detection import DBFileState
+        from magaldi_core.change_detection import DBFileState
 
         es_states = self._es.get_file_states(scope, repository, username)
         result = {}

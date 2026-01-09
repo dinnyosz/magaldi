@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from magaldi.parser.code_parser import CodeElement
-from magaldi.embedding import (
+from magaldi_core.code_parser import CodeElement
+from shared.ai.embedding import (
     EmbeddingConfig,
     EmbeddingResult,
     InMemoryEmbeddingJobRepository,

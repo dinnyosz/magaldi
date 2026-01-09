@@ -10,9 +10,9 @@ import time
 
 import pytest
 
-from magaldi.config import load_config
-from magaldi.db.elasticsearch import INDEX_NAME
-from magaldi.parser.code_parser import CodeElement
+from shared.config import load_config
+from shared.db.elasticsearch import INDEX_NAME
+from magaldi_core.code_parser import CodeElement
 
 
 # Skip all tests if Elasticsearch is not available
@@ -23,7 +23,7 @@ pytestmark = pytest.mark.integration
 def config():
     """Load config for ES connection."""
     import os
-    from magaldi.config import reset_config, MagaldiConfig, ElasticsearchConfig
+    from shared.config import reset_config, MagaldiConfig, ElasticsearchConfig
 
     # Reset config singleton
     reset_config()
@@ -41,7 +41,7 @@ def config():
 @pytest.fixture
 def es_repo(config):
     """Create ES repository and clean up test data."""
-    from magaldi.db.elasticsearch import ElasticsearchRepository
+    from shared.db.elasticsearch import ElasticsearchRepository
 
     repo = ElasticsearchRepository(config)
 
@@ -489,7 +489,7 @@ class TestElasticsearchEmbeddingStore:
 
     def test_store_element_indexes_to_es(self, config):
         """Test that store_element indexes to Elasticsearch."""
-        from magaldi.db.elasticsearch import ElasticsearchEmbeddingStore
+        from shared.db.elasticsearch import ElasticsearchEmbeddingStore
 
         store = ElasticsearchEmbeddingStore(config)
 
@@ -530,7 +530,7 @@ class TestInterruptedRunDetection:
 
     def test_incomplete_file_detected_when_element_count_mismatch(self, config):
         """Test that files with mismatched element_count are detected as incomplete."""
-        from magaldi.db.elasticsearch import (
+        from shared.db.elasticsearch import (
             ElasticsearchRepository,
             ElasticsearchFileStateRepository,
         )
@@ -610,7 +610,7 @@ class TestInterruptedRunDetection:
 
     def test_complete_file_has_valid_hash(self, config):
         """Test that files with matching element_count are detected as complete."""
-        from magaldi.db.elasticsearch import (
+        from shared.db.elasticsearch import (
             ElasticsearchRepository,
             ElasticsearchFileStateRepository,
         )
@@ -689,7 +689,7 @@ class TestInterruptedRunDetection:
 
     def test_old_data_without_element_count_treated_as_incomplete(self, config):
         """Test that files without element_count (old data) are treated as incomplete."""
-        from magaldi.db.elasticsearch import (
+        from shared.db.elasticsearch import (
             ElasticsearchRepository,
             ElasticsearchFileStateRepository,
         )

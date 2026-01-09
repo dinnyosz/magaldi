@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from magaldi.db.elasticsearch import ElasticsearchRepository
-from magaldi.embedding.embedding import OllamaEmbedClient
+from shared.db.elasticsearch import ElasticsearchRepository
+from shared.ai.embedding import OllamaEmbedClient
 
 
 # =============================================================================

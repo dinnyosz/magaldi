@@ -12,7 +12,7 @@ from typing import Any
 
 import redis
 
-from magaldi.config import MagaldiConfig, get_config
+from shared.config import MagaldiConfig, get_config
 
 
 # Redis key prefixes (with {username} placeholder for user isolation)
@@ -355,7 +355,7 @@ class RedisSummaryStore(RedisRepository):
 
     def store_element(self, element: Any) -> None:
         """Store element data for later retrieval."""
-        from magaldi.parser.code_parser import CodeElement
+        from magaldi_core.code_parser import CodeElement
 
         if isinstance(element, CodeElement):
             client = self._get_client()
@@ -375,7 +375,7 @@ class RedisSummaryStore(RedisRepository):
 
     def get_element(self, element_id: str) -> Any | None:
         """Get element data."""
-        from magaldi.parser.code_parser import CodeElement
+        from magaldi_core.code_parser import CodeElement
 
         client = self._get_client()
         data = client.hget(self.ELEMENTS_KEY, element_id)

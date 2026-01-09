@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from magaldi.cli import main
+from shared.cli import main
 
 
 # =============================================================================
@@ -172,8 +172,8 @@ class TestForceClean:
 
     def test_force_clean_deletes_existing_data(self, cli_runner: CliRunner):
         """Test that --force-clean deletes existing indexed data."""
-        from magaldi.config import load_config, reset_config
-        from magaldi.db.elasticsearch import ElasticsearchRepository
+        from shared.config import load_config, reset_config
+        from shared.db.elasticsearch import ElasticsearchRepository
 
         # First run: index some data as main
         result1 = cli_runner.invoke(
@@ -199,8 +199,8 @@ class TestForceClean:
 
     def test_force_clean_without_existing_data(self, cli_runner: CliRunner):
         """Test --force-clean when no data exists (fresh start)."""
-        from magaldi.config import load_config, reset_config
-        from magaldi.db.elasticsearch import ElasticsearchRepository
+        from shared.config import load_config, reset_config
+        from shared.db.elasticsearch import ElasticsearchRepository
 
         # Clean up any existing data first
         reset_config()
@@ -245,8 +245,8 @@ class TestElasticsearchIndexing:
 
     def test_elements_indexed_to_elasticsearch(self, cli_runner: CliRunner):
         """Test that elements are indexed to Elasticsearch."""
-        from magaldi.config import load_config, reset_config
-        from magaldi.db.elasticsearch import ElasticsearchRepository
+        from shared.config import load_config, reset_config
+        from shared.db.elasticsearch import ElasticsearchRepository
 
         # Run parsing as main user with --force-clean to ensure fresh indexing
         result = cli_runner.invoke(
@@ -261,7 +261,7 @@ class TestElasticsearchIndexing:
 
         try:
             # Refresh the index to make sure all documents are searchable
-            from magaldi.db.elasticsearch import INDEX_NAME
+            from shared.db.elasticsearch import INDEX_NAME
             es_repo._get_client().indices.refresh(index=INDEX_NAME)
 
             # Search for indexed elements using a broad query
@@ -292,8 +292,8 @@ class TestParallelProcessing:
 
     def test_workers_process_in_parallel(self, cli_runner: CliRunner):
         """Test that multiple workers process elements."""
-        from magaldi.config import load_config, reset_config
-        from magaldi.db.elasticsearch import ElasticsearchRepository
+        from shared.config import load_config, reset_config
+        from shared.db.elasticsearch import ElasticsearchRepository
 
         # Run with 4 workers as main user
         result = cli_runner.invoke(
@@ -314,8 +314,8 @@ class TestParallelProcessing:
 
     def test_single_worker_mode(self, cli_runner: CliRunner):
         """Test processing with a single worker."""
-        from magaldi.config import load_config, reset_config
-        from magaldi.db.elasticsearch import ElasticsearchRepository
+        from shared.config import load_config, reset_config
+        from shared.db.elasticsearch import ElasticsearchRepository
 
         result = cli_runner.invoke(
             main,

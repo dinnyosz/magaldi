@@ -18,16 +18,16 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable
 
-from magaldi.db.elasticsearch import ElasticsearchRepository
-from magaldi.embedding.embedding import (
+from shared.db.elasticsearch import ElasticsearchRepository
+from shared.ai.embedding import (
     EmbeddingConfig,
     OllamaEmbedClient,
     build_embedding_text,
     normalize_vector,
     validate_vector,
 )
-from magaldi.parser.code_parser import CodeElement, ParsedFile
-from magaldi.summarization.summarization import (
+from magaldi_core.code_parser import CodeElement, ParsedFile
+from shared.ai.summarization import (
     OllamaClient,
     SummarizationConfig,
     build_prompt,

@@ -7,7 +7,7 @@ Configuration is loaded with the following priority (highest to lowest):
 3. Dataclass defaults
 
 Usage:
-    from magaldi.config import load_config, get_config
+    from shared.config import load_config, get_config
 
     # At application startup
     load_config()  # Or load_config("/path/to/config.yaml")
