@@ -47,6 +47,8 @@ INDEX_MAPPING = {
             "cluster_label": {"type": "keyword"},  # Human-readable cluster label
             "member_count": {"type": "integer"},  # Number of elements in feature (for feature docs)
             "member_ids": {"type": "keyword"},  # Element IDs of members (for feature docs)
+            "parent_feature_label": {"type": "keyword"},  # Parent feature label (for subfeatures)
+            "parent_feature_summary": {"type": "text"},  # Parent feature summary (for subfeatures)
             "embedding": {
                 "type": "dense_vector",
                 "dims": 1024,
@@ -842,6 +844,36 @@ class ElasticsearchRepository:
 
         return result
 
+    def get_documents_batch(
+        self,
+        element_ids: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Get full documents for multiple elements in batch.
+
+        Args:
+            element_ids: List of element IDs to fetch.
+
+        Returns:
+            Dict mapping element_id to document (only for found elements).
+        """
+        if not element_ids:
+            return {}
+
+        client = self._get_client()
+
+        # Use mget for efficient batch lookup
+        response = client.mget(
+            index=INDEX_NAME,
+            ids=element_ids,
+        )
+
+        result: dict[str, dict[str, Any]] = {}
+        for doc in response.get("docs", []):
+            if doc.get("found") and doc.get("_source"):
+                result[doc["_id"]] = doc["_source"]
+
+        return result
+
     def index_feature(
         self,
         feature_id: str,
@@ -895,6 +927,65 @@ class ElasticsearchRepository:
         client.index(index=INDEX_NAME, id=feature_id, document=doc)
         return True
 
+    def index_subfeature(
+        self,
+        subfeature_id: str,
+        scope: str,
+        repository: str,
+        username: str,
+        cluster_id: str,
+        label: str,
+        summary: str,
+        embedding: list[float] | None,
+        member_ids: list[str],
+        parent_feature_label: str,
+        parent_feature_summary: str,
+    ) -> bool:
+        """Index a subfeature document.
+
+        Args:
+            subfeature_id: Unique subfeature ID.
+            scope: Repository scope.
+            repository: Repository name.
+            username: Username/branch.
+            cluster_id: Sub-cluster ID from HDBSCAN.
+            label: Subfeature label.
+            summary: Generated summary of the subfeature.
+            embedding: Embedding vector for the subfeature.
+            member_ids: List of element IDs belonging to this subfeature.
+            parent_feature_label: Label of the parent feature.
+            parent_feature_summary: Summary of the parent feature.
+
+        Returns:
+            True on success.
+        """
+        from datetime import datetime
+
+        doc: dict[str, Any] = {
+            "element_id": subfeature_id,
+            "scope": scope,
+            "repository": repository,
+            "username": username,
+            "element_type": "subfeature",
+            "name": label,
+            "cluster_id": cluster_id,
+            "cluster_label": label,
+            "summary": summary,
+            "member_count": len(member_ids),
+            "member_ids": member_ids,
+            "parent_feature_label": parent_feature_label,
+            "parent_feature_summary": parent_feature_summary,
+            "indexed_at": datetime.now().isoformat(),
+            "level": -2,  # Subfeatures are below features in hierarchy
+        }
+
+        if embedding is not None:
+            doc["embedding"] = embedding
+
+        client = self._get_client()
+        client.index(index=INDEX_NAME, id=subfeature_id, document=doc)
+        return True
+
     def delete_features(
         self,
         scope: str,
@@ -923,6 +1014,43 @@ class ElasticsearchRepository:
                             {"term": {"repository": repository}},
                             {"term": {"username": username}},
                             {"term": {"element_type": "feature"}},
+                        ]
+                    }
+                }
+            },
+            refresh=True,
+        )
+
+        return response.get("deleted", 0)
+
+    def delete_subfeatures(
+        self,
+        scope: str,
+        repository: str,
+        username: str,
+    ) -> int:
+        """Delete all subfeature documents for a repository.
+
+        Args:
+            scope: Scope to filter by.
+            repository: Repository to filter by.
+            username: Username to filter by.
+
+        Returns:
+            Number of subfeatures deleted.
+        """
+        client = self._get_client()
+
+        response = client.delete_by_query(
+            index=INDEX_NAME,
+            body={
+                "query": {
+                    "bool": {
+                        "must": [
+                            {"term": {"scope": scope}},
+                            {"term": {"repository": repository}},
+                            {"term": {"username": username}},
+                            {"term": {"element_type": "subfeature"}},
                         ]
                     }
                 }
@@ -1056,6 +1184,74 @@ class ElasticsearchRepository:
             })
 
         return features
+
+    def get_subfeatures(
+        self,
+        scope: str,
+        repository: str,
+        username: str = "main",
+        parent_feature_label: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get all subfeatures for a repository.
+
+        Args:
+            scope: Repository scope.
+            repository: Repository name.
+            username: User branch.
+            parent_feature_label: Optional filter by parent feature label.
+
+        Returns:
+            List of subfeatures with parent feature info.
+        """
+        client = self._get_client()
+
+        filters = [
+            {"term": {"scope": scope}},
+            {"term": {"repository": repository}},
+            {"term": {"username": username}},
+            {"term": {"element_type": "subfeature"}},
+        ]
+
+        if parent_feature_label:
+            filters.append({"term": {"parent_feature_label": parent_feature_label}})
+
+        result = client.search(
+            index=INDEX_NAME,
+            body={
+                "query": {
+                    "bool": {
+                        "filter": filters
+                    }
+                },
+                "size": 500,
+                "sort": [{"member_count": "desc"}],
+                "_source": [
+                    "element_id",
+                    "cluster_id",
+                    "cluster_label",
+                    "summary",
+                    "member_count",
+                    "member_ids",
+                    "parent_feature_label",
+                    "parent_feature_summary",
+                ],
+            },
+        )
+
+        subfeatures = []
+        for hit in result.get("hits", {}).get("hits", []):
+            source = hit["_source"]
+            subfeatures.append({
+                "subfeature_id": source.get("element_id"),
+                "label": source.get("cluster_label"),
+                "summary": source.get("summary", ""),
+                "member_count": source.get("member_count", 0),
+                "member_ids": source.get("member_ids", []),
+                "parent_feature_label": source.get("parent_feature_label", ""),
+                "parent_feature_summary": source.get("parent_feature_summary", ""),
+            })
+
+        return subfeatures
 
     def get_repository_stats(
         self,

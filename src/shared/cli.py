@@ -373,7 +373,10 @@ def run_feature_extraction(
         FeatureProgressState,
         FeatureTimingStats,
         FeatureWorkerStatus,
+        SubClusterConfig,
+        SubfeatureProgressState,
         process_features,
+        process_subfeatures,
     )
     from shared.db.elasticsearch import ElasticsearchRepository
 
@@ -634,6 +637,90 @@ def run_feature_extraction(
                 magaldi_config=config,
             )
 
+        # Process sub-features for large clusters (>20 members)
+        processed_features = proc_result.get("processed_features", {})
+        large_cluster_count = sum(
+            1 for c in clustering_result.clusters
+            if c.size > 20
+        )
+
+        subfeature_result = {"subfeatures_created": 0, "parent_features_processed": 0}
+        if large_cluster_count > 0:
+            console.print(f"\n[bold cyan]Phase 6: Sub-feature Processing[/] ({large_cluster_count} large features)")
+
+            def build_subfeature_display(state: SubfeatureProgressState) -> RenderableType:
+                """Build Rich display for subfeature processing progress."""
+                pct = (state.completed_parent_features / state.total_parent_features * 100) if state.total_parent_features > 0 else 0
+                elapsed_str = format_duration(state.elapsed)
+
+                # Progress bar
+                bar_width = 30
+                filled = int(bar_width * pct / 100)
+                bar = "━" * filled + "╺" + "─" * (bar_width - filled - 1) if filled < bar_width else "━" * bar_width
+                bar_text = Text()
+                bar_text.append("  ")
+                bar_text.append(bar[:filled], style="green")
+                if filled < bar_width:
+                    bar_text.append(bar[filled:], style="dim")
+                bar_text.append(" ")
+                bar_text.append(f"{state.completed_parent_features}", style="green")
+                bar_text.append("/", style="dim")
+                bar_text.append(f"{state.total_parent_features}", style="cyan")
+                bar_text.append(f" features ({pct:.0f}%)", style="green")
+                bar_text.append(" | ", style="dim")
+                bar_text.append(f"{state.completed_subfeatures}", style="yellow")
+                bar_text.append(" subfeatures", style="dim")
+                bar_text.append(" | ", style="dim")
+                bar_text.append(elapsed_str, style="cyan")
+                bar_text.append(" elapsed", style="dim")
+
+                # Current activity
+                activity = Text()
+                if state.current_parent:
+                    activity.append("  [", style="dim")
+                    activity.append(state.current_parent, style="cyan")
+                    activity.append("] ", style="dim")
+                    activity.append(state.current_stage, style="yellow")
+
+                return Group(bar_text, activity)
+
+            current_sub_state = SubfeatureProgressState(
+                total_parent_features=large_cluster_count,
+                completed_parent_features=0,
+                total_subfeatures=0,
+                completed_subfeatures=0,
+                failed=0,
+            )
+
+            class LiveSubfeatureDisplay:
+                def __rich__(self) -> RenderableType:
+                    return build_subfeature_display(current_sub_state)
+
+            with Live(LiveSubfeatureDisplay(), console=console, refresh_per_second=10) as live:
+                def on_sub_progress(state: SubfeatureProgressState) -> None:
+                    nonlocal current_sub_state
+                    current_sub_state = state
+                    live.refresh()
+
+                subfeature_result = process_subfeatures(
+                    clustering_result=clustering_result,
+                    processed_features=processed_features,
+                    scope=scope,
+                    repository=repository,
+                    username=username,
+                    es_repo=es_repo,
+                    config=proc_config,
+                    subcluster_config=SubClusterConfig(),
+                    on_progress=on_sub_progress,
+                    magaldi_config=config,
+                )
+
+            if subfeature_result.get("subfeatures_created", 0) > 0:
+                console.print(
+                    f"  [green]Created {subfeature_result['subfeatures_created']} sub-features "
+                    f"from {subfeature_result['parent_features_processed']} large features[/]"
+                )
+
         return {
             "cluster_count": clustering_result.cluster_count,
             "outlier_count": clustering_result.outlier_count,
@@ -643,6 +730,8 @@ def run_feature_extraction(
             "processed": proc_result.get("processed", 0),
             "failed": proc_result.get("failed", 0),
             "elapsed": proc_result.get("elapsed", 0),
+            "subfeatures_created": subfeature_result.get("subfeatures_created", 0),
+            "parent_features_with_subfeatures": subfeature_result.get("parent_features_processed", 0),
             "clusters": [
                 {
                     "cluster_id": c.cluster_id,
@@ -782,10 +871,10 @@ def run_processing(
                 color = type_colors.get(t, "white")
                 if done >= tot:
                     # Completed - green for counts
-                    type_parts.append(f"[{color}]{t}[/]:[green]{done}/{tot}[/] [dim]({api_time:.1f}s)[/]")
+                    type_parts.append(f"[{color}]{t}[/]: [green]{done}/{tot}[/] [dim]({api_time:.1f}s)[/]")
                 else:
                     # In progress - yellow for counts
-                    type_parts.append(f"[{color}]{t}[/]:[yellow]{done}/{tot}[/] [dim]({api_time:.1f}s)[/]")
+                    type_parts.append(f"[{color}]{t}[/]: [yellow]{done}/{tot}[/] [dim]({api_time:.1f}s)[/]")
         type_line = f"  [dim]Progress:[/] {' [dim]|[/] '.join(type_parts)}" if type_parts else ""
 
         # Stats line - effective wall time (elapsed/done) = actual throughput with parallelism

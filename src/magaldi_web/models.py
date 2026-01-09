@@ -417,6 +417,15 @@ class ClusterRepresentative(BaseModel):
     summary: str | None = None
 
 
+class Subfeature(BaseModel):
+    """A subfeature within a larger feature."""
+
+    subfeature_id: str
+    label: str
+    summary: str | None = None
+    member_count: int = 0
+
+
 class Cluster(BaseModel):
     """A semantic cluster of code elements."""
 
@@ -424,6 +433,7 @@ class Cluster(BaseModel):
     size: int
     representative: ClusterRepresentative
     members: list[ClusterMember] = Field(default_factory=list)
+    subfeatures: list[Subfeature] = Field(default_factory=list)
 
 
 class ClustersResponse(BaseModel):

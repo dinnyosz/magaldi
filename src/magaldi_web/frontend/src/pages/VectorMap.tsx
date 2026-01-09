@@ -11,6 +11,7 @@ import {
   Alert,
   ListGroup,
   Breadcrumb,
+  Accordion,
 } from 'react-bootstrap'
 import {
   ScatterChart,
@@ -226,21 +227,57 @@ function VectorMap() {
                 <i className="bi bi-collection me-2"></i>
                 Features ({clusters.clusters.length})
               </Card.Header>
-              <ListGroup
-                variant="flush"
-                style={{ maxHeight: '300px', overflowY: 'auto' }}
+              <Accordion
+                flush
+                style={{ maxHeight: '400px', overflowY: 'auto' }}
               >
                 {clusters.clusters.map((cluster) => (
-                  <ListGroup.Item key={cluster.cluster_id}>
-                    <div className="fw-bold">{cluster.representative.name}</div>
-                    {cluster.representative.summary && (
-                      <small className="text-muted d-block">
-                        {cluster.representative.summary.slice(0, 100)}...
-                      </small>
-                    )}
-                  </ListGroup.Item>
+                  <Accordion.Item
+                    key={cluster.cluster_id}
+                    eventKey={String(cluster.cluster_id)}
+                  >
+                    <Accordion.Header>
+                      <div className="d-flex flex-column">
+                        <span className="fw-bold">{cluster.representative.name}</span>
+                        {cluster.subfeatures.length > 0 && (
+                          <small className="text-muted">
+                            {cluster.subfeatures.length} sub-features
+                          </small>
+                        )}
+                      </div>
+                    </Accordion.Header>
+                    <Accordion.Body className="p-2">
+                      {cluster.representative.summary && (
+                        <p className="text-muted small mb-2">
+                          {cluster.representative.summary}
+                        </p>
+                      )}
+                      {cluster.subfeatures.length > 0 && (
+                        <ListGroup variant="flush" className="small">
+                          {cluster.subfeatures.map((sub) => (
+                            <ListGroup.Item
+                              key={sub.subfeature_id}
+                              className="py-1 px-2"
+                            >
+                              <div className="d-flex justify-content-between align-items-start">
+                                <span>{sub.label}</span>
+                                <Badge bg="secondary" pill className="ms-2">
+                                  {sub.member_count}
+                                </Badge>
+                              </div>
+                              {sub.summary && (
+                                <small className="text-muted d-block">
+                                  {sub.summary.slice(0, 80)}...
+                                </small>
+                              )}
+                            </ListGroup.Item>
+                          ))}
+                        </ListGroup>
+                      )}
+                    </Accordion.Body>
+                  </Accordion.Item>
                 ))}
-              </ListGroup>
+              </Accordion>
             </Card>
           )}
 

@@ -158,6 +158,13 @@ export interface ClusterMember {
   element_type: string
 }
 
+export interface Subfeature {
+  subfeature_id: string
+  label: string
+  summary: string | null
+  member_count: number
+}
+
 export interface Cluster {
   cluster_id: number
   size: number
@@ -168,6 +175,7 @@ export interface Cluster {
     summary: string | null
   }
   members: ClusterMember[]
+  subfeatures: Subfeature[]
 }
 
 export interface ClustersResponse {

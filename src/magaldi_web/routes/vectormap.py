@@ -13,6 +13,7 @@ from magaldi_web.models import (
     ClusterMember,
     ClusterRepresentative,
     ClustersResponse,
+    Subfeature,
     VectorMapResponse,
     VectorPoint,
 )
@@ -241,26 +242,64 @@ async def get_clusters(
     if not hits:
         return ClustersResponse(clusters=[], total_elements=0)
 
+    # Fetch subfeatures for this repository
+    subfeatures_result = client.search(
+        index=INDEX_NAME,
+        body={
+            "size": 500,
+            "query": {
+                "bool": {
+                    "filter": [
+                        {"term": {"scope": scope}},
+                        {"term": {"repository": repository}},
+                        {"term": {"username": username}},
+                        {"term": {"element_type": "subfeature"}},
+                    ],
+                },
+            },
+            "_source": [
+                "element_id",
+                "name",
+                "summary",
+                "member_count",
+                "parent_feature_label",
+            ],
+        },
+    )
+
+    # Group subfeatures by parent feature label
+    subfeatures_by_parent: dict[str, list[Subfeature]] = {}
+    for sub_hit in subfeatures_result.get("hits", {}).get("hits", []):
+        sub_source = sub_hit["_source"]
+        parent_label = sub_source.get("parent_feature_label", "")
+        if parent_label not in subfeatures_by_parent:
+            subfeatures_by_parent[parent_label] = []
+        subfeatures_by_parent[parent_label].append(
+            Subfeature(
+                subfeature_id=sub_source["element_id"],
+                label=sub_source["name"],
+                summary=sub_source.get("summary"),
+                member_count=sub_source.get("member_count", 0),
+            )
+        )
+
     # Build clusters from pre-extracted HDBSCAN features
-    # Each feature document represents a cluster with its member elements
     clusters = []
 
     for idx, hit in enumerate(hits):
         source = hit["_source"]
 
-        # Feature documents have: name (feature name), summary (description),
-        # and we need to get the member elements for this feature
         feature_id = source["element_id"]
         feature_name = source["name"]
         feature_summary = source.get("summary")
 
-        # Get member elements for this feature (stored as children or via feature_id reference)
-        # For now, create a cluster with the feature as its own representative
-        # TODO: Query for elements that belong to this feature cluster
+        # Get subfeatures for this feature
+        feature_subfeatures = subfeatures_by_parent.get(feature_name, [])
+
         clusters.append(
             Cluster(
                 cluster_id=idx,
-                size=1,  # Will be updated when we have member counts
+                size=1,
                 representative=ClusterRepresentative(
                     name=feature_name,
                     element_type="feature",
@@ -274,6 +313,7 @@ async def get_clusters(
                         element_type="feature",
                     )
                 ],
+                subfeatures=feature_subfeatures,
             )
         )
 
