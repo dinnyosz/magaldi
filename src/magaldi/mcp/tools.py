@@ -1061,14 +1061,14 @@ def find_implementations(
 def generate_skill(
     project_root: str | None = None,
     skill_name: str = "magaldi",
+    scope: str = "project",
 ) -> dict[str, Any]:
     """Generate a SKILL.md file that teaches LLMs how to use this MCP effectively.
 
-    The skill is placed in: <project_root>/.claude/skills/<skill_name>/SKILL.md
-
     Args:
-        project_root: Project root directory. If None, returns content only.
+        project_root: Project root directory (required for scope="project").
         skill_name: Name of the skill (default: "magaldi").
+        scope: Where to install - "project" (.claude/skills in project) or "global" (~/.claude/skills).
 
     Returns:
         Dict with skill content and metadata.
@@ -1205,15 +1205,43 @@ The index has already done the hard work:
         "skill_name": skill_name,
         "content": skill_content,
         "version": "1.0.0",
+        "scope": scope,
     }
 
-    if project_root:
-        # Structure: <project>/.claude/skills/<skill_name>/SKILL.md
-        skill_dir = Path(project_root) / ".claude" / "skills" / skill_name
-        skill_dir.mkdir(parents=True, exist_ok=True)
+    # Determine target path based on scope
+    if scope == "global":
+        skill_dir = Path.home() / ".claude" / "skills" / skill_name
         skill_path = skill_dir / "SKILL.md"
-        skill_path.write_text(skill_content)
-        result["written_to"] = str(skill_path)
+    elif scope == "project":
+        if not project_root:
+            result["error"] = "project_root is required for scope='project'"
+            return result
+        skill_dir = Path(project_root) / ".claude" / "skills" / skill_name
+        skill_path = skill_dir / "SKILL.md"
+    else:
+        result["error"] = f"Invalid scope '{scope}'. Use 'project' or 'global'."
+        return result
+
+    # Check for existing skill in both locations to avoid duplication
+    global_path = Path.home() / ".claude" / "skills" / skill_name / "SKILL.md"
+    project_path = Path(project_root) / ".claude" / "skills" / skill_name / "SKILL.md" if project_root else None
+
+    if skill_path.exists():
+        result["skipped"] = True
+        result["reason"] = f"Skill already exists at: {skill_path}"
+        result["path"] = str(skill_path)
+        return result
+
+    # Warn if exists in the other location
+    if scope == "project" and global_path.exists():
+        result["warning"] = f"Note: Skill also exists globally at {global_path}"
+    elif scope == "global" and project_path and project_path.exists():
+        result["warning"] = f"Note: Skill also exists in project at {project_path}"
+
+    # Write the skill file
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    skill_path.write_text(skill_content)
+    result["written_to"] = str(skill_path)
 
     return result
 
