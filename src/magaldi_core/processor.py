@@ -16,9 +16,13 @@ import time
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Callable
+from typing import Callable, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from shared.config import MagaldiConfig
 
 from shared.db.elasticsearch import ElasticsearchRepository
+from shared.db.redis import RedisSummarizationJobRepository, RedisEmbeddingJobRepository
 from shared.ai.embedding import (
     EmbeddingConfig,
     OllamaEmbedClient,
@@ -368,6 +372,110 @@ def should_embed(element: CodeElement) -> bool:
 
 
 # =============================================================================
+# REDIS JOB TRACKER
+# =============================================================================
+
+
+class RedisJobTracker:
+    """Track processing jobs in Redis for dashboard monitoring.
+
+    This writes job status to Redis so the dashboard can show queue activity
+    during synchronous processing.
+    """
+
+    def __init__(
+        self,
+        config: "MagaldiConfig",
+        scope: str,
+        repository: str,
+        username: str,
+    ) -> None:
+        self._scope = scope
+        self._repository = repository
+        self._username = username
+        self._sum_repo = RedisSummarizationJobRepository(config)
+        self._emb_repo = RedisEmbeddingJobRepository(config)
+        self._lock = threading.Lock()
+
+    def add_pending_jobs(self, elements: list["CodeElement"]) -> None:
+        """Add all elements as pending jobs to Redis."""
+        for element in elements:
+            # Add summarization job (all elements get summarized)
+            self._sum_repo.add_job(
+                element_id=element.element_id,
+                scope=self._scope,
+                repository=self._repository,
+                username=self._username,
+                level=element.level,
+                parent_id=element.parent_id,
+                dependencies_met=True,  # We handle dependencies in processor
+                priority=100 - element.level,
+            )
+            # Add embedding job (only for embeddable elements)
+            if should_embed(element):
+                self._emb_repo.add_job(
+                    element_id=element.element_id,
+                    scope=self._scope,
+                    repository=self._repository,
+                    username=self._username,
+                )
+
+    def mark_running(self, element_id: str, was_embedded: bool = True) -> None:
+        """Mark element as running in Redis."""
+        with self._lock:
+            # Update job status to running and add to running set
+            client = self._sum_repo._get_client()
+            jobs_key = f"magaldi:summarization:jobs:{self._scope}:{self._repository}:{self._username}"
+            running_key = f"magaldi:summarization:running:{self._scope}:{self._repository}:{self._username}"
+
+            # Update status in job hash
+            import json
+            job_data = client.hget(jobs_key, element_id)
+            if job_data:
+                job = json.loads(job_data)
+                job["status"] = "running"
+                client.hset(jobs_key, element_id, json.dumps(job))
+                client.sadd(running_key, element_id)
+
+            if was_embedded:
+                emb_jobs_key = f"magaldi:embedding:jobs:{self._scope}:{self._repository}:{self._username}"
+                emb_running_key = f"magaldi:embedding:running:{self._scope}:{self._repository}:{self._username}"
+                emb_data = client.hget(emb_jobs_key, element_id)
+                if emb_data:
+                    emb_job = json.loads(emb_data)
+                    emb_job["status"] = "running"
+                    client.hset(emb_jobs_key, element_id, json.dumps(emb_job))
+                    client.sadd(emb_running_key, element_id)
+
+    def mark_completed(self, element_id: str, was_embedded: bool = True) -> None:
+        """Mark element as completed in Redis."""
+        with self._lock:
+            self._sum_repo.mark_completed(
+                element_id, self._scope, self._repository, self._username
+            )
+            if was_embedded:
+                self._emb_repo.mark_completed(
+                    element_id, self._scope, self._repository, self._username
+                )
+
+    def mark_failed(self, element_id: str, error: str, was_embedded: bool = True) -> None:
+        """Mark element as failed in Redis."""
+        with self._lock:
+            self._sum_repo.mark_failed(
+                element_id, self._scope, self._repository, self._username, error
+            )
+            if was_embedded:
+                self._emb_repo.mark_failed(
+                    element_id, self._scope, self._repository, self._username, error
+                )
+
+    def close(self) -> None:
+        """Close Redis connections."""
+        self._sum_repo.close()
+        self._emb_repo.close()
+
+
+# =============================================================================
 # INTERNAL STORE ADAPTER
 # =============================================================================
 
@@ -692,6 +800,7 @@ def process_elements(
     on_status_change: Callable[[], None] | None = None,
     worker_status: WorkerStatus | None = None,
     timing_stats: TimingStats | None = None,
+    magaldi_config: "MagaldiConfig | None" = None,
 ) -> ProcessingResult:
     """Process elements: summarize -> embed -> index (atomic per element).
 
@@ -710,6 +819,7 @@ def process_elements(
         on_status_change: Optional callback when any worker status changes.
         worker_status: Optional shared WorkerStatus (created if not provided).
         timing_stats: Optional shared TimingStats (created if not provided).
+        magaldi_config: Optional Magaldi config for Redis job tracking.
 
     Returns:
         ProcessingResult with counts and errors.
@@ -791,6 +901,16 @@ def process_elements(
     completed_count = result.elements_skipped  # Start with skipped count
     failed_count = 0
 
+    # Initialize Redis job tracker if config provided
+    redis_tracker: RedisJobTracker | None = None
+    if magaldi_config is not None:
+        try:
+            redis_tracker = RedisJobTracker(magaldi_config, scope, repository, username)
+            redis_tracker.add_pending_jobs(elements_to_process)
+        except Exception:
+            # Redis unavailable - continue without tracking
+            redis_tracker = None
+
     # Worker ID pool - reuse IDs 0 to num_workers-1
     available_worker_ids: list[int] = list(range(config.num_workers))
     worker_id_lock = threading.Lock()
@@ -811,6 +931,12 @@ def process_elements(
     def process_wrapper(element: CodeElement) -> ProcessedElement:
         """Wrapper to assign worker ID and call _process_single_element."""
         wid = acquire_worker_id()
+        # Mark as running in Redis before processing
+        if redis_tracker:
+            try:
+                redis_tracker.mark_running(element.element_id, should_embed(element))
+            except Exception:
+                pass
         try:
             return _process_single_element(
                 element=element,
@@ -859,15 +985,22 @@ def process_elements(
                 # Record timing with element type
                 timing_stats.record(processed.wall_time, processed.summarize_time, processed.embed_time, element.element_type, was_embedded=should_embed(element))
 
+                was_embedded = should_embed(element)
                 if processed.success:
                     dependency_tracker.mark_complete(element.element_id)
                     result.elements_processed += 1
                     result.indexed += 1
                     if not config.skip_ai:
                         result.summarized += 1
-                        if should_embed(element):
+                        if was_embedded:
                             result.embedded += 1
                     completed_count += 1
+                    # Update Redis job status
+                    if redis_tracker:
+                        try:
+                            redis_tracker.mark_completed(element.element_id, was_embedded)
+                        except Exception:
+                            pass  # Don't fail processing if Redis update fails
                 else:
                     dependency_tracker.mark_failed(element.element_id)
                     result.elements_failed += 1
@@ -875,6 +1008,12 @@ def process_elements(
                     error_msg = f"Failed to process {element.element_id}: {processed.error}"
                     result.errors.append(error_msg)
                     result.failed_elements.append((element.element_id, processed.error or "Unknown error"))
+                    # Update Redis job status
+                    if redis_tracker:
+                        try:
+                            redis_tracker.mark_failed(element.element_id, processed.error or "Unknown", was_embedded)
+                        except Exception:
+                            pass
 
                 # Report progress
                 if on_progress:
@@ -896,10 +1035,23 @@ def process_elements(
         # Clear worker status display first (so Live display is clean)
         for wid in range(config.num_workers):
             worker_status.clear(wid)
+        # Clean up Redis tracker
+        if redis_tracker:
+            try:
+                redis_tracker.close()
+            except Exception:
+                pass
         # Re-raise so CLI can handle the wait message and exit
         raise
     else:
         # Normal completion - shutdown and wait
         executor.shutdown(wait=True)
+
+    # Clean up Redis tracker
+    if redis_tracker:
+        try:
+            redis_tracker.close()
+        except Exception:
+            pass
 
     return result
