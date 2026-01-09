@@ -288,9 +288,9 @@ class FeatureClusterer:
         if magaldi_config and scope and repository and username:
             from shared.db.redis import RedisLabelingJobRepository
             redis_repo = RedisLabelingJobRepository(magaldi_config)
-            # Add all clusters as pending jobs
+            # Add all clusters as pending jobs (convert numpy int64 to Python int)
             for cluster in result.clusters:
-                redis_repo.add_job(cluster.cluster_id, scope, repository, username)
+                redis_repo.add_job(int(cluster.cluster_id), scope, repository, username)
 
         # Initialize timing stats
         if timing_stats is None:
@@ -303,9 +303,9 @@ class FeatureClusterer:
         failed = 0
 
         for cluster in result.clusters:
-            # Mark as running in Redis
+            # Mark as running in Redis (convert numpy int64 to Python int)
             if redis_repo and scope and repository and username:
-                redis_repo.mark_running(cluster.cluster_id, scope, repository, username)
+                redis_repo.mark_running(int(cluster.cluster_id), scope, repository, username)
             # Get sample of function names
             names = cluster.element_names[:max_names_per_prompt]
             names_str = "\n".join(f"- {name}" for name in names if name)
@@ -319,7 +319,7 @@ class FeatureClusterer:
                 completed += 1
                 # Mark as completed in Redis (skipped still counts as completed)
                 if redis_repo and scope and repository and username:
-                    redis_repo.mark_completed(cluster.cluster_id, scope, repository, username)
+                    redis_repo.mark_completed(int(cluster.cluster_id), scope, repository, username)
                 if on_progress:
                     on_progress(LabelingProgressState(
                         total=total,
@@ -361,7 +361,7 @@ class FeatureClusterer:
                 completed += 1
                 # Mark as completed in Redis
                 if redis_repo and scope and repository and username:
-                    redis_repo.mark_completed(cluster.cluster_id, scope, repository, username)
+                    redis_repo.mark_completed(int(cluster.cluster_id), scope, repository, username)
 
             except Exception as e:
                 # Fall back to numbered label
@@ -370,7 +370,7 @@ class FeatureClusterer:
                 completed += 1
                 # Mark as failed in Redis
                 if redis_repo and scope and repository and username:
-                    redis_repo.mark_failed(cluster.cluster_id, scope, repository, username, str(e))
+                    redis_repo.mark_failed(int(cluster.cluster_id), scope, repository, username, str(e))
 
             # Report progress after each cluster
             if on_progress:
