@@ -69,7 +69,7 @@ dependencies = [
 
 [project.scripts]
 magaldi = "shared.cli:main"
-magaldi-mcp = "magaldi_mcp.server:main"
+magaldi-mcp = "magaldi_mcp.server:run_server"
 
 [project.urls]
 Homepage = "https://github.com/magaldi/magaldi"
