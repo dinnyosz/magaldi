@@ -51,6 +51,44 @@ def format_duration(seconds: float) -> str:
     return f"{minutes}:{secs:02d}"
 
 
+def check_ollama_models(config: MagaldiConfig, skip_ai: bool) -> list[str]:
+    """Check if required Ollama models are available.
+
+    Returns:
+        List of error messages (empty if all models are available).
+    """
+    if skip_ai:
+        return []
+
+    import requests
+
+    errors = []
+    url = config.ollama.url.rstrip("/")
+
+    # Check Ollama server is running
+    try:
+        response = requests.get(f"{url}/api/tags", timeout=5)
+        response.raise_for_status()
+        available_models = {m.get("name") for m in response.json().get("models", [])}
+    except requests.exceptions.ConnectionError:
+        return [f"Cannot connect to Ollama at {url}. Is it running?"]
+    except Exception as e:
+        return [f"Error connecting to Ollama: {e}"]
+
+    # Check required models
+    required_models = [
+        config.ollama.summarize_model,
+        config.ollama.summarize_model_small,
+        config.ollama.embed_model,
+    ]
+
+    for model in required_models:
+        if model not in available_models:
+            errors.append(f"Model '{model}' not found. Run: ollama pull {model}")
+
+    return errors
+
+
 # =============================================================================
 # MAIN CLI GROUP
 # =============================================================================
@@ -125,12 +163,30 @@ def parse(
         parsing_result = run_parsing(manifest)
         print_parsing_result(parsing_result)
 
+        # Pre-flight check: Verify Ollama models are available
+        if not dry_run and not skip_ai:
+            model_errors = check_ollama_models(config, skip_ai)
+            if model_errors:
+                console.print("\n[red]Pre-flight check failed:[/]")
+                for err in model_errors:
+                    console.print(f"  [red]✗[/] {err}")
+                sys.exit(1)
+
         # Phase 4: Processing (summarize -> embed -> index)
         console.print("\n[bold blue]Phase 4:[/] Processing")
-        processed, skipped, indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats = run_processing(
+        processed, skipped, indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, failed_elements = run_processing(
             parsing_result, manifest, config, dry_run, skip_ai, workers
         )
         print_processing_result(processed, skipped, indexed, skip_ai, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, workers)
+        # Display errors if any
+        if failed_elements:
+            console.print(f"\n  [red]Errors ({len(failed_elements)}):[/]")
+            for element_id, error in failed_elements[:10]:  # Show first 10
+                # Shorten element_id for display
+                short_id = element_id.split(":")[-3:]  # type:name:line
+                console.print(f"    [dim]{':'.join(short_id)}[/] → [red]{error}[/]")
+            if len(failed_elements) > 10:
+                console.print(f"    [dim]... and {len(failed_elements) - 10} more errors[/]")
 
         # Phase 5: Feature Extraction (optional)
         if not skip_features and not skip_ai and not dry_run and processed > 0:
@@ -615,16 +671,16 @@ def run_processing(
     dry_run: bool,
     skip_ai: bool,
     workers: int,
-) -> tuple[int, int, int, float, float, float, float, TimingStats | None]:
+) -> tuple[int, int, int, float, float, float, float, TimingStats | None, list[tuple[str, str]]]:
     """Run unified processing: summarize -> embed -> index.
 
     Returns:
-        Tuple of (processed, skipped, indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats).
+        Tuple of (processed, skipped, indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, failed_elements).
     """
     if dry_run:
         total = parsing_result.total_elements
         console.print(f"  [dim]Dry run: would process {total} elements[/]")
-        return (0, 0, 0, 0.0, 0.0, 0.0, 0.0, None)
+        return (0, 0, 0, 0.0, 0.0, 0.0, 0.0, None, [])
 
     from shared.db.elasticsearch import ElasticsearchRepository
 
@@ -726,6 +782,20 @@ def run_processing(
             parts.append(type_line)
         parts.append(stats)
 
+        # Show recent errors if any
+        if state.recent_errors:
+            error_text = Text()
+            error_text.append("  Errors: ", style="red bold")
+            for i, (elem_name, error) in enumerate(state.recent_errors):
+                if i > 0:
+                    error_text.append(" | ", style="dim")
+                error_text.append(f"{elem_name}", style="dim")
+                error_text.append(": ", style="dim")
+                # Truncate long error messages
+                short_error = error[:50] + "..." if len(error) > 50 else error
+                error_text.append(short_error, style="red")
+            parts.append(error_text)
+
         return Group(*parts)
 
     # Create shared state objects that will be updated by workers
@@ -781,7 +851,7 @@ def run_processing(
     # Effective wall time = elapsed / processed (shows throughput with parallelism)
     avg_wall = elapsed / result.elements_processed if result.elements_processed > 0 else 0.0
 
-    return (result.elements_processed, result.elements_skipped, result.indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats)
+    return (result.elements_processed, result.elements_skipped, result.indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, result.failed_elements)
 
 
 # =============================================================================

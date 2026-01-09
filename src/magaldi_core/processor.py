@@ -272,6 +272,7 @@ class ProgressState:
     timing: TimingStats
     workers: WorkerStatus
     num_workers: int = 1
+    recent_errors: list[tuple[str, str]] = field(default_factory=list)  # (element_name, error)
 
 
 @dataclass
@@ -915,6 +916,7 @@ def process_elements(
     # Track completed/failed counts for progress
     completed_count = result.elements_skipped  # Start with skipped count
     failed_count = 0
+    recent_errors: list[tuple[str, str]] = []  # Track recent errors for display
 
     # Initialize Redis job tracker if config provided
     redis_tracker: RedisJobTracker | None = None
@@ -1023,6 +1025,11 @@ def process_elements(
                     error_msg = f"Failed to process {element.element_id}: {processed.error}"
                     result.errors.append(error_msg)
                     result.failed_elements.append((element.element_id, processed.error or "Unknown error"))
+                    # Add to recent errors for display (keep last 3)
+                    short_name = f"{element.element_type}:{element.name}"
+                    recent_errors.append((short_name, processed.error or "Unknown error"))
+                    if len(recent_errors) > 3:
+                        recent_errors.pop(0)
                     # Update Redis job status
                     if redis_tracker:
                         try:
@@ -1040,6 +1047,7 @@ def process_elements(
                         timing=timing_stats,
                         workers=worker_status,
                         num_workers=config.num_workers,
+                        recent_errors=list(recent_errors),
                     )
                     on_progress(progress_state)
 
