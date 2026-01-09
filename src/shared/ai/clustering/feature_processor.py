@@ -114,17 +114,17 @@ class FeatureWorkerStatus:
     """Track what each worker is doing."""
 
     _lock: threading.Lock = field(default_factory=threading.Lock)
-    _status: dict[int, tuple[str, str]] = field(default_factory=dict)  # worker_id -> (feature_name, stage)
+    _status: dict[int, tuple[str, str, str]] = field(default_factory=dict)  # worker_id -> (feature_name, stage, model)
 
-    def set(self, worker_id: int, feature_name: str, stage: str) -> None:
+    def set(self, worker_id: int, feature_name: str, stage: str, model: str = "") -> None:
         with self._lock:
-            self._status[worker_id] = (feature_name, stage)
+            self._status[worker_id] = (feature_name, stage, model)
 
     def clear(self, worker_id: int) -> None:
         with self._lock:
             self._status.pop(worker_id, None)
 
-    def get_all(self) -> dict[int, tuple[str, str]]:
+    def get_all(self) -> dict[int, tuple[str, str, str]]:
         with self._lock:
             return dict(self._status)
 
@@ -295,14 +295,14 @@ def _process_single_feature(
     label = cluster.label or f"cluster_{cluster.cluster_id}"
     display_name = f"{label} ({cluster.size} members)"
 
-    def update_status(stage: str) -> None:
-        worker_status.set(worker_id, display_name, stage)
+    def update_status(stage: str, model: str = "") -> None:
+        worker_status.set(worker_id, display_name, stage, model)
         if on_status_change:
             on_status_change()
 
     try:
         # Step 1: Generate feature summary
-        update_status("summarizing")
+        update_status("summarizing", config.summarize_model)
         api_start = time.time()
         summary = _generate_feature_summary(cluster, member_summaries, ollama, config)
         summarize_time = time.time() - api_start

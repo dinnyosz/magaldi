@@ -246,17 +246,17 @@ class WorkerStatus:
     """Track what each worker is doing."""
 
     _lock: threading.Lock = field(default_factory=threading.Lock)
-    _status: dict[int, tuple[str, str]] = field(default_factory=dict)  # worker_id -> (element_name, stage)
+    _status: dict[int, tuple[str, str, str]] = field(default_factory=dict)  # worker_id -> (element_name, stage, model)
 
-    def set(self, worker_id: int, element_name: str, stage: str) -> None:
+    def set(self, worker_id: int, element_name: str, stage: str, model: str = "") -> None:
         with self._lock:
-            self._status[worker_id] = (element_name, stage)
+            self._status[worker_id] = (element_name, stage, model)
 
     def clear(self, worker_id: int) -> None:
         with self._lock:
             self._status.pop(worker_id, None)
 
-    def get_all(self) -> dict[int, tuple[str, str]]:
+    def get_all(self) -> dict[int, tuple[str, str, str]]:
         with self._lock:
             return dict(self._status)
 
@@ -729,15 +729,17 @@ def _process_single_element(
         return f"<{element.element_type}> " + " → ".join(parts)
 
     display_name = build_display_name()
+    # Get model for this element type
+    element_model = config.get_model_for_element_type(element.element_type)
 
-    def update_status(stage: str) -> None:
-        worker_status.set(worker_id, display_name, stage)
+    def update_status(stage: str, model: str = "") -> None:
+        worker_status.set(worker_id, display_name, stage, model)
         if on_status_change:
             on_status_change()
 
     try:
         # Step 1: Summarize
-        update_status("summarizing")
+        update_status("summarizing", element_model)
         if config.skip_ai:
             summary = f"{element.element_type.title()}: {element.name}"
         else:

@@ -509,15 +509,16 @@ def run_feature_extraction(
             worker_table = Table(show_header=False, box=None, padding=(0, 1))
             worker_table.add_column("ID", style="dim", width=4)
             worker_table.add_column("Stage", style="cyan", width=12)
+            worker_table.add_column("Model", style="yellow")
             worker_table.add_column("Feature")
 
             workers_data = state.workers.get_all()
             for wid in range(num_workers):
                 if wid in workers_data:
-                    feature_name, stage = workers_data[wid]
-                    worker_table.add_row(f"[{wid}]", stage, feature_name)
+                    feature_name, stage, model = workers_data[wid]
+                    worker_table.add_row(f"[{wid}]", stage, model, feature_name)
                 else:
-                    worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "")
+                    worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "")
 
             # Stats line
             avg_api = state.timing.avg_summarize_time + state.timing.avg_embed_time
@@ -679,15 +680,16 @@ def run_processing(
         worker_table = Table(show_header=False, box=None, padding=(0, 1))
         worker_table.add_column("ID", style="dim", width=4)
         worker_table.add_column("Stage", style="cyan", width=12)
+        worker_table.add_column("Model", style="yellow")
         worker_table.add_column("Element")
 
         workers_data = state.workers.get_all()
         for wid in range(num_workers):
             if wid in workers_data:
-                elem, stage = workers_data[wid]
-                worker_table.add_row(f"[{wid}]", stage, elem)
+                elem, stage, model = workers_data[wid]
+                worker_table.add_row(f"[{wid}]", stage, model, elem)
             else:
-                worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "")
+                worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "")
 
         # Per-type stats - show progress count and API time per element
         # Each element type has a distinct color for visual differentiation
