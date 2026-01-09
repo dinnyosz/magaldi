@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from fastapi import APIRouter, Depends, Query
 
 from magaldi_web.dependencies import get_es_repository
@@ -100,6 +101,8 @@ async def browse_elements(
                 "visibility",
                 "is_async",
                 "docstring",
+                "decorators",
+                "level",
             ],
         },
     )
@@ -108,9 +111,40 @@ async def browse_elements(
     hits = result.get("hits", {})
     total = hits.get("total", {}).get("value", 0)
 
+    # Collect parent_ids to resolve container names
+    parent_ids = set()
+    for hit in hits.get("hits", []):
+        pid = hit["_source"].get("parent_id")
+        if pid:
+            parent_ids.add(pid)
+
+    # Batch fetch parent info
+    parent_info: dict[str, dict] = {}
+    if parent_ids:
+        parent_result = client.mget(
+            index=INDEX_NAME,
+            ids=list(parent_ids),
+            _source=["name", "element_type", "relative_path"],
+        )
+        for doc in parent_result.get("docs", []):
+            if doc.get("found") and doc.get("_source"):
+                parent_info[doc["_id"]] = doc["_source"]
+
     elements = []
     for hit in hits.get("hits", []):
         source = hit["_source"]
+        parent_id = source.get("parent_id")
+
+        # Build container info from parent
+        container = None
+        if parent_id and parent_id in parent_info:
+            pinfo = parent_info[parent_id]
+            container = {
+                "element_id": parent_id,
+                "name": pinfo.get("name"),
+                "element_type": pinfo.get("element_type"),
+            }
+
         elements.append({
             "element_id": source["element_id"],
             "name": source["name"],
@@ -123,10 +157,13 @@ async def browse_elements(
             "signature": source.get("signature"),
             "repository": source["repository"],
             "scope": source["scope"],
-            "parent_id": source.get("parent_id"),
+            "parent_id": parent_id,
+            "container": container,
             "visibility": source.get("visibility"),
             "is_async": source.get("is_async", False),
             "has_docstring": bool(source.get("docstring")),
+            "decorators": source.get("decorators", []),
+            "level": source.get("level", 0),
         })
 
     return {
@@ -345,3 +382,168 @@ async def get_browse_stats(
         "language_counts": language_counts,
         "total": sum(type_counts.values()),
     }
+
+
+@router.get("/browse/element/{element_id}/details")
+async def get_element_details(
+    element_id: str,
+    include_call_graph: bool = False,
+    username: str = "main",
+    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+) -> dict:
+    """Get detailed information about an element.
+
+    Args:
+        element_id: Element ID to fetch.
+        include_call_graph: Whether to compute callers/callees (expensive).
+        username: User branch.
+
+    Returns:
+        Detailed element info including container hierarchy and optionally call graph.
+    """
+    from urllib.parse import unquote
+    element_id = unquote(element_id)
+
+    client = es_repo._get_client()
+
+    # Fetch the element
+    try:
+        doc = client.get(index=INDEX_NAME, id=element_id)
+        source = doc["_source"]
+    except Exception:
+        return {"error": "Element not found"}
+
+    # Build container chain (parent -> grandparent -> ...)
+    containers = []
+    current_parent = source.get("parent_id")
+    seen = {element_id}  # Prevent infinite loops
+
+    while current_parent and current_parent not in seen:
+        seen.add(current_parent)
+        try:
+            parent_doc = client.get(
+                index=INDEX_NAME,
+                id=current_parent,
+                _source=["element_id", "name", "element_type", "relative_path", "line_start"],
+            )
+            psource = parent_doc["_source"]
+            containers.append({
+                "element_id": psource.get("element_id"),
+                "name": psource.get("name"),
+                "element_type": psource.get("element_type"),
+                "file_path": psource.get("relative_path"),
+                "line_start": psource.get("line_start"),
+            })
+            current_parent = psource.get("parent_id") if "parent_id" in psource else None
+        except Exception:
+            break
+
+    # Get child count
+    children_result = client.count(
+        index=INDEX_NAME,
+        body={"query": {"term": {"parent_id": element_id}}},
+    )
+    child_count = children_result.get("count", 0)
+
+    result = {
+        "element_id": source.get("element_id"),
+        "name": source.get("name"),
+        "element_type": source.get("element_type"),
+        "file_path": source.get("relative_path"),
+        "line_start": source.get("line_start"),
+        "line_end": source.get("line_end"),
+        "language": source.get("language"),
+        "summary": source.get("summary"),
+        "signature": source.get("signature"),
+        "docstring": source.get("docstring"),
+        "visibility": source.get("visibility"),
+        "is_async": source.get("is_async", False),
+        "decorators": source.get("decorators", []),
+        "level": source.get("level", 0),
+        "repository": source.get("repository"),
+        "scope": source.get("scope"),
+        "containers": containers,  # Parent chain from immediate to file
+        "child_count": child_count,
+    }
+
+    # Compute call graph if requested (expensive operation)
+    if include_call_graph and source.get("element_type") in ("function", "method"):
+        raw_code = source.get("raw_code", "")
+        func_name = source.get("name", "")
+
+        # Find callers (elements that reference this function)
+        callers = []
+        if func_name:
+            # Search for references to this function in other code
+            caller_result = client.search(
+                index=INDEX_NAME,
+                body={
+                    "size": 20,
+                    "query": {
+                        "bool": {
+                            "must": [
+                                {"match": {"raw_code": func_name}},
+                            ],
+                            "must_not": [
+                                {"term": {"element_id": element_id}},
+                            ],
+                            "filter": [
+                                {"terms": {"element_type": ["function", "method"]}},
+                            ],
+                        },
+                    },
+                    "_source": ["element_id", "name", "element_type", "relative_path", "line_start"],
+                },
+            )
+            for hit in caller_result.get("hits", {}).get("hits", []):
+                s = hit["_source"]
+                callers.append({
+                    "element_id": s.get("element_id"),
+                    "name": s.get("name"),
+                    "element_type": s.get("element_type"),
+                    "file_path": s.get("relative_path"),
+                    "line_start": s.get("line_start"),
+                })
+
+        # Find callees (functions called by this code)
+        callees = []
+        if raw_code:
+            # Extract function calls using regex
+            call_pattern = re.compile(r'\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\(')
+            called_names = set(call_pattern.findall(raw_code))
+            # Remove common keywords/builtins
+            called_names -= {"if", "for", "while", "with", "return", "print", "len", "str", "int", "float", "list", "dict", "set", "range", "enumerate", "zip", "map", "filter", "sorted", "reversed", "any", "all", "sum", "min", "max", "abs", "round", "isinstance", "type", "getattr", "setattr", "hasattr", "super", func_name}
+
+            if called_names:
+                # Search for these function names
+                callee_result = client.search(
+                    index=INDEX_NAME,
+                    body={
+                        "size": 50,
+                        "query": {
+                            "bool": {
+                                "must": [
+                                    {"terms": {"name.keyword": list(called_names)}},
+                                ],
+                                "filter": [
+                                    {"terms": {"element_type": ["function", "method", "class"]}},
+                                ],
+                            },
+                        },
+                        "_source": ["element_id", "name", "element_type", "relative_path", "line_start"],
+                    },
+                )
+                for hit in callee_result.get("hits", {}).get("hits", []):
+                    s = hit["_source"]
+                    callees.append({
+                        "element_id": s.get("element_id"),
+                        "name": s.get("name"),
+                        "element_type": s.get("element_type"),
+                        "file_path": s.get("relative_path"),
+                        "line_start": s.get("line_start"),
+                    })
+
+        result["callers"] = callers
+        result["callees"] = callees
+
+    return result

@@ -330,6 +330,12 @@ export interface BrowseFilters {
   usernames: string[]
 }
 
+export interface ContainerInfo {
+  element_id: string
+  name: string
+  element_type: string
+}
+
 export interface BrowseElement {
   element_id: string
   name: string
@@ -343,9 +349,12 @@ export interface BrowseElement {
   repository: string
   scope: string
   parent_id: string | null
+  container: ContainerInfo | null
   visibility: string | null
   is_async: boolean
   has_docstring: boolean
+  decorators: string[]
+  level: number
 }
 
 export interface BrowseResponse {
@@ -424,4 +433,54 @@ export async function getElementChildren(elementId: string, username?: string): 
   const encodedId = encodeURIComponent(elementId)
   const params = username ? `?username=${username}` : ''
   return fetchJson(`${API_BASE}/browse/element/${encodedId}/children${params}`)
+}
+
+export interface CallGraphEntry {
+  element_id: string
+  name: string
+  element_type: string
+  file_path: string
+  line_start: number
+}
+
+export interface ElementDetailsResponse {
+  element_id: string
+  name: string
+  element_type: string
+  file_path: string
+  line_start: number
+  line_end: number | null
+  language: string
+  summary: string | null
+  signature: string | null
+  docstring: string | null
+  visibility: string | null
+  is_async: boolean
+  decorators: string[]
+  level: number
+  repository: string
+  scope: string
+  containers: Array<{
+    element_id: string
+    name: string
+    element_type: string
+    file_path: string
+    line_start: number
+  }>
+  child_count: number
+  callers?: CallGraphEntry[]
+  callees?: CallGraphEntry[]
+  error?: string
+}
+
+export async function getElementDetails(
+  elementId: string,
+  options?: { includeCallGraph?: boolean; username?: string }
+): Promise<ElementDetailsResponse> {
+  const encodedId = encodeURIComponent(elementId)
+  const params = new URLSearchParams()
+  if (options?.includeCallGraph) params.set('include_call_graph', 'true')
+  if (options?.username) params.set('username', options.username)
+  const query = params.toString() ? `?${params.toString()}` : ''
+  return fetchJson(`${API_BASE}/browse/element/${encodedId}/details${query}`)
 }

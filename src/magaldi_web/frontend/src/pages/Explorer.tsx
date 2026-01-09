@@ -21,6 +21,7 @@ import {
   browseElements,
   getBrowseStats,
   getElementChildren,
+  getElementDetails,
   BrowseElement,
 } from '../api'
 
@@ -38,6 +39,7 @@ const typeConfig: Record<string, { icon: string; color: string }> = {
 
 function ElementRow({ element, username }: { element: BrowseElement; username: string }) {
   const [expanded, setExpanded] = useState(false)
+  const [showDetails, setShowDetails] = useState(false)
 
   const { data: children, isLoading: childrenLoading } = useQuery({
     queryKey: ['element-children', element.element_id, username],
@@ -45,8 +47,15 @@ function ElementRow({ element, username }: { element: BrowseElement; username: s
     enabled: expanded && (element.element_type === 'file' || element.element_type === 'class'),
   })
 
+  const { data: details, isLoading: detailsLoading } = useQuery({
+    queryKey: ['element-details', element.element_id, username],
+    queryFn: () => getElementDetails(element.element_id, { includeCallGraph: true, username }),
+    enabled: showDetails && (element.element_type === 'function' || element.element_type === 'method'),
+  })
+
   const config = typeConfig[element.element_type] || { icon: 'bi-dot', color: 'secondary' }
   const hasChildren = element.element_type === 'file' || element.element_type === 'class'
+  const canShowDetails = element.element_type === 'function' || element.element_type === 'method'
 
   return (
     <>
@@ -62,12 +71,36 @@ function ElementRow({ element, username }: { element: BrowseElement; username: s
               <i className={`bi ${expanded ? 'bi-chevron-down' : 'bi-chevron-right'}`}></i>
             </Button>
           )}
+          {canShowDetails && (
+            <Button
+              variant="link"
+              size="sm"
+              className="p-0 text-muted"
+              onClick={() => setShowDetails(!showDetails)}
+            >
+              <i className={`bi ${showDetails ? 'bi-chevron-down' : 'bi-chevron-right'}`}></i>
+            </Button>
+          )}
         </td>
         <td>
+          {/* Decorators */}
+          {element.decorators && element.decorators.length > 0 && (
+            <div className="small text-muted mb-1">
+              {element.decorators.map((d, i) => (
+                <span key={i} className="me-1 text-info">@{d}</span>
+              ))}
+            </div>
+          )}
           <i className={`bi ${config.icon} me-2 text-${config.color}`}></i>
           <Link to={`/element/${encodeURIComponent(element.element_id)}`} className="text-decoration-none">
             <strong>{element.name}</strong>
           </Link>
+          {/* Signature for functions/methods */}
+          {element.signature && (element.element_type === 'function' || element.element_type === 'method') && (
+            <code className="ms-1 small text-muted">
+              {element.signature.length > 60 ? element.signature.substring(0, 60) + '...' : element.signature}
+            </code>
+          )}
           {element.visibility && element.visibility !== 'public' && (
             <Badge bg="secondary" className="ms-2" pill>
               {element.visibility}
@@ -78,14 +111,34 @@ function ElementRow({ element, username }: { element: BrowseElement; username: s
               async
             </Badge>
           )}
+          {element.has_docstring && (
+            <Badge bg="success" className="ms-2" pill title="Has docstring">
+              <i className="bi bi-file-text"></i>
+            </Badge>
+          )}
         </td>
         <td>
           <Badge bg={config.color}>{element.element_type}</Badge>
         </td>
         <td>
+          {/* Container info for methods */}
+          {element.container && (
+            <div className="small">
+              <i className={`bi ${typeConfig[element.container.element_type]?.icon || 'bi-dot'} me-1 text-${typeConfig[element.container.element_type]?.color || 'secondary'}`}></i>
+              <Link
+                to={`/element/${encodeURIComponent(element.container.element_id)}`}
+                className="text-decoration-none text-primary"
+              >
+                {element.container.name}
+              </Link>
+            </div>
+          )}
           <code className="small text-muted">{element.file_path}</code>
           {element.line_start > 0 && (
             <span className="text-muted small ms-1">:{element.line_start}</span>
+          )}
+          {element.line_end && element.line_end !== element.line_start && (
+            <span className="text-muted small">-{element.line_end}</span>
           )}
         </td>
         <td>
@@ -106,6 +159,8 @@ function ElementRow({ element, username }: { element: BrowseElement; username: s
           )}
         </td>
       </tr>
+
+      {/* Children panel for files/classes */}
       {hasChildren && (
         <tr>
           <td colSpan={6} className="p-0 border-0">
@@ -158,6 +213,99 @@ function ElementRow({ element, username }: { element: BrowseElement; username: s
                 ) : expanded ? (
                   <div className="p-3 ps-5 bg-light text-muted small">
                     No child elements
+                  </div>
+                ) : null}
+              </div>
+            </Collapse>
+          </td>
+        </tr>
+      )}
+
+      {/* Details panel for functions/methods with call graph */}
+      {canShowDetails && (
+        <tr>
+          <td colSpan={6} className="p-0 border-0">
+            <Collapse in={showDetails}>
+              <div className="ps-5 py-2 bg-light border-bottom">
+                {detailsLoading ? (
+                  <div className="p-2">
+                    <Spinner size="sm" animation="border" /> Loading details...
+                  </div>
+                ) : details && !details.error ? (
+                  <div className="row">
+                    {/* Containers (parent hierarchy) */}
+                    {details.containers && details.containers.length > 0 && (
+                      <div className="col-md-3 mb-2">
+                        <small className="text-uppercase text-muted fw-bold d-block mb-1">Container Hierarchy</small>
+                        {details.containers.map((c, i) => (
+                          <div key={c.element_id} className="small" style={{ paddingLeft: `${i * 10}px` }}>
+                            <i className={`bi ${typeConfig[c.element_type]?.icon || 'bi-dot'} me-1 text-${typeConfig[c.element_type]?.color || 'secondary'}`}></i>
+                            <Link to={`/element/${encodeURIComponent(c.element_id)}`} className="text-decoration-none">
+                              {c.name}
+                            </Link>
+                            <span className="text-muted ms-1">({c.element_type})</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Callers */}
+                    <div className="col-md-4 mb-2">
+                      <small className="text-uppercase text-muted fw-bold d-block mb-1">
+                        <i className="bi bi-arrow-left-circle me-1"></i>
+                        Called by ({details.callers?.length || 0})
+                      </small>
+                      {details.callers && details.callers.length > 0 ? (
+                        <div className="small" style={{ maxHeight: '150px', overflowY: 'auto' }}>
+                          {details.callers.map((caller) => (
+                            <div key={caller.element_id} className="py-1">
+                              <Link
+                                to={`/element/${encodeURIComponent(caller.element_id)}`}
+                                className="text-decoration-none"
+                              >
+                                {caller.name}
+                              </Link>
+                              <span className="text-muted ms-1">
+                                in {caller.file_path.split('/').pop()}:{caller.line_start}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-muted small fst-italic">No callers found</span>
+                      )}
+                    </div>
+
+                    {/* Callees */}
+                    <div className="col-md-4 mb-2">
+                      <small className="text-uppercase text-muted fw-bold d-block mb-1">
+                        <i className="bi bi-arrow-right-circle me-1"></i>
+                        Calls ({details.callees?.length || 0})
+                      </small>
+                      {details.callees && details.callees.length > 0 ? (
+                        <div className="small" style={{ maxHeight: '150px', overflowY: 'auto' }}>
+                          {details.callees.map((callee) => (
+                            <div key={callee.element_id} className="py-1">
+                              <Link
+                                to={`/element/${encodeURIComponent(callee.element_id)}`}
+                                className="text-decoration-none"
+                              >
+                                {callee.name}
+                              </Link>
+                              <span className="text-muted ms-1">
+                                in {callee.file_path.split('/').pop()}:{callee.line_start}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-muted small fst-italic">No calls found</span>
+                      )}
+                    </div>
+                  </div>
+                ) : showDetails ? (
+                  <div className="p-2 text-muted small">
+                    {details?.error || 'Could not load details'}
                   </div>
                 ) : null}
               </div>
