@@ -15,6 +15,7 @@ export interface DashboardStats {
     variable_count: number
     constant_count: number
     feature_count: number
+    subfeature_count: number
   }
   recent_repos: Array<{
     scope: string
@@ -34,6 +35,9 @@ export interface DashboardStats {
   queue_status: {
     summarization: Record<string, { pending: number; running: number }>
     embedding: Record<string, { pending: number; running: number }>
+    labeling: Record<string, { pending: number; running: number }>
+    feature: Record<string, { pending: number; running: number }>
+    subfeature: Record<string, { pending: number; running: number }>
     total_pending: number
     total_running: number
   }
@@ -314,4 +318,110 @@ export async function getJobs(status?: string, limit = 50): Promise<JobsResponse
 
 export async function getIndexStats(): Promise<IndexStats> {
   return fetchJson(`${API_BASE}/admin/index-stats`)
+}
+
+// Browse API
+
+export interface BrowseFilters {
+  scopes: string[]
+  repositories: Array<{ scope: string; repository: string }>
+  element_types: string[]
+  languages: string[]
+  usernames: string[]
+}
+
+export interface BrowseElement {
+  element_id: string
+  name: string
+  element_type: string
+  file_path: string
+  line_start: number
+  line_end: number | null
+  language: string
+  summary: string | null
+  signature: string | null
+  repository: string
+  scope: string
+  parent_id: string | null
+  visibility: string | null
+  is_async: boolean
+  has_docstring: boolean
+}
+
+export interface BrowseResponse {
+  elements: BrowseElement[]
+  total: number
+  page: number
+  limit: number
+  total_pages: number
+}
+
+export interface BrowseStats {
+  type_counts: Record<string, number>
+  language_counts: Record<string, number>
+  total: number
+}
+
+export interface ElementChildren {
+  element_id: string
+  children: Record<string, Array<{
+    element_id: string
+    name: string
+    element_type: string
+    line_start: number
+    line_end: number | null
+    summary: string | null
+    signature: string | null
+    visibility: string | null
+    is_async: boolean
+  }>>
+  total_children: number
+}
+
+export async function getBrowseFilters(): Promise<BrowseFilters> {
+  return fetchJson(`${API_BASE}/browse/filters`)
+}
+
+export async function browseElements(params: {
+  scope?: string
+  repository?: string
+  username?: string
+  element_type?: string
+  parent_id?: string
+  language?: string
+  page?: number
+  limit?: number
+}): Promise<BrowseResponse> {
+  const searchParams = new URLSearchParams()
+  if (params.scope) searchParams.set('scope', params.scope)
+  if (params.repository) searchParams.set('repository', params.repository)
+  if (params.username) searchParams.set('username', params.username)
+  if (params.element_type) searchParams.set('element_type', params.element_type)
+  if (params.parent_id) searchParams.set('parent_id', params.parent_id)
+  if (params.language) searchParams.set('language', params.language)
+  if (params.page) searchParams.set('page', String(params.page))
+  if (params.limit) searchParams.set('limit', String(params.limit))
+
+  const query = searchParams.toString() ? `?${searchParams.toString()}` : ''
+  return fetchJson(`${API_BASE}/browse/elements${query}`)
+}
+
+export async function getBrowseStats(params: {
+  scope?: string
+  repository?: string
+  username?: string
+}): Promise<BrowseStats> {
+  const searchParams = new URLSearchParams()
+  if (params.scope) searchParams.set('scope', params.scope)
+  if (params.repository) searchParams.set('repository', params.repository)
+  if (params.username) searchParams.set('username', params.username)
+
+  const query = searchParams.toString() ? `?${searchParams.toString()}` : ''
+  return fetchJson(`${API_BASE}/browse/stats${query}`)
+}
+
+export async function getElementChildren(elementId: string, username?: string): Promise<ElementChildren> {
+  const encodedId = encodeURIComponent(elementId)
+  const params = username ? `?username=${username}` : ''
+  return fetchJson(`${API_BASE}/browse/element/${encodedId}/children${params}`)
 }

@@ -4,6 +4,7 @@ import Dashboard from './pages/Dashboard'
 import Search from './pages/Search'
 import Repository from './pages/Repository'
 import Element from './pages/Element'
+import Explorer from './pages/Explorer'
 import VectorMap from './pages/VectorMap'
 import Admin from './pages/Admin'
 
@@ -37,6 +38,13 @@ function App() {
               </Nav.Link>
               <Nav.Link
                 as={Link}
+                to="/explorer"
+                active={location.pathname.startsWith('/explorer')}
+              >
+                Explorer
+              </Nav.Link>
+              <Nav.Link
+                as={Link}
                 to="/repos"
                 active={location.pathname.startsWith('/repos')}
               >
@@ -65,6 +73,7 @@ function App() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/search" element={<Search />} />
+          <Route path="/explorer" element={<Explorer />} />
           <Route path="/repos" element={<Repository />} />
           <Route path="/repos/:scope/:repository/*" element={<Repository />} />
           <Route path="/element/:elementId" element={<Element />} />

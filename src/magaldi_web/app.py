@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from magaldi_web.routes import admin, dashboard, elements, repos, search, vectormap
+from magaldi_web.routes import admin, browse, dashboard, elements, repos, search, vectormap
 from shared.config import MagaldiConfig, get_config, load_config
 
 if TYPE_CHECKING:
@@ -71,6 +71,7 @@ def create_app(config: MagaldiConfig | None = None) -> FastAPI:
     app.include_router(elements.router, prefix="/api/v1", tags=["elements"])
     app.include_router(admin.router, prefix="/api/v1", tags=["admin"])
     app.include_router(vectormap.router, prefix="/api/v1", tags=["vectormap"])
+    app.include_router(browse.router, prefix="/api/v1", tags=["browse"])
 
     # Serve static files for frontend (if built)
     frontend_dist = Path(__file__).parent / "frontend" / "dist"

@@ -98,7 +98,11 @@ function Dashboard() {
           </Card>
         </Col>
         <Col>
-          <Card className="text-center h-100">
+          <Card
+            className="text-center h-100"
+            style={{ cursor: 'pointer' }}
+            onClick={() => navigate('/explorer?type=file')}
+          >
             <Card.Body className="py-3">
               <h3 className="mb-0 text-info">
                 {dashboard?.stats?.file_count?.toLocaleString() ?? 0}
@@ -108,7 +112,11 @@ function Dashboard() {
           </Card>
         </Col>
         <Col>
-          <Card className="text-center h-100">
+          <Card
+            className="text-center h-100"
+            style={{ cursor: 'pointer' }}
+            onClick={() => navigate('/explorer?type=class')}
+          >
             <Card.Body className="py-3">
               <h3 className="mb-0" style={{ color: '#6f42c1' }}>
                 {dashboard?.stats?.class_count?.toLocaleString() ?? 0}
@@ -118,7 +126,11 @@ function Dashboard() {
           </Card>
         </Col>
         <Col>
-          <Card className="text-center h-100">
+          <Card
+            className="text-center h-100"
+            style={{ cursor: 'pointer' }}
+            onClick={() => navigate('/explorer?type=function')}
+          >
             <Card.Body className="py-3">
               <h3 className="mb-0" style={{ color: '#0d6efd' }}>
                 {dashboard?.stats?.function_count?.toLocaleString() ?? 0}
@@ -128,7 +140,11 @@ function Dashboard() {
           </Card>
         </Col>
         <Col>
-          <Card className="text-center h-100">
+          <Card
+            className="text-center h-100"
+            style={{ cursor: 'pointer' }}
+            onClick={() => navigate('/explorer?type=method')}
+          >
             <Card.Body className="py-3">
               <h3 className="mb-0 text-success">
                 {dashboard?.stats?.method_count?.toLocaleString() ?? 0}
@@ -138,7 +154,11 @@ function Dashboard() {
           </Card>
         </Col>
         <Col>
-          <Card className="text-center h-100">
+          <Card
+            className="text-center h-100"
+            style={{ cursor: 'pointer' }}
+            onClick={() => navigate('/explorer?type=variable')}
+          >
             <Card.Body className="py-3">
               <h3 className="mb-0 text-warning">
                 {dashboard?.stats?.variable_count?.toLocaleString() ?? 0}
@@ -148,7 +168,11 @@ function Dashboard() {
           </Card>
         </Col>
         <Col>
-          <Card className="text-center h-100">
+          <Card
+            className="text-center h-100"
+            style={{ cursor: 'pointer' }}
+            onClick={() => navigate('/explorer?type=constant')}
+          >
             <Card.Body className="py-3">
               <h3 className="mb-0" style={{ color: '#fd7e14' }}>
                 {dashboard?.stats?.constant_count?.toLocaleString() ?? 0}
@@ -168,7 +192,21 @@ function Dashboard() {
           </Card>
         </Col>
         <Col>
-          <Card className="text-center h-100 bg-light">
+          <Card className="text-center h-100">
+            <Card.Body className="py-3">
+              <h3 className="mb-0" style={{ color: '#17a2b8' }}>
+                {dashboard?.stats?.subfeature_count?.toLocaleString() ?? 0}
+              </h3>
+              <small className="text-muted">Subfeatures</small>
+            </Card.Body>
+          </Card>
+        </Col>
+        <Col>
+          <Card
+            className="text-center h-100 bg-light"
+            style={{ cursor: 'pointer' }}
+            onClick={() => navigate('/explorer')}
+          >
             <Card.Body className="py-3">
               <h3 className="mb-0 text-secondary">
                 {dashboard?.stats?.element_count?.toLocaleString() ?? 0}
@@ -393,6 +431,54 @@ function Dashboard() {
                           </thead>
                           <tbody>
                             {Object.entries(dashboard?.queue_status?.feature || {}).map(
+                              ([queueId, info]) => {
+                                const [scope, repo, user] = queueId.split('/')
+                                return (
+                                  <tr key={queueId}>
+                                    <td><code>{scope}</code></td>
+                                    <td><code>{repo}</code></td>
+                                    <td><code>{user}</code></td>
+                                    <td className="text-end">
+                                      {info.pending > 0 ? (
+                                        <Badge bg="warning">{info.pending}</Badge>
+                                      ) : (
+                                        <span className="text-muted">0</span>
+                                      )}
+                                    </td>
+                                    <td className="text-end">
+                                      {info.running > 0 ? (
+                                        <Badge bg="primary">{info.running}</Badge>
+                                      ) : (
+                                        <span className="text-muted">0</span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                )
+                              }
+                            )}
+                          </tbody>
+                        </Table>
+                      ) : (
+                        <p className="text-muted small mb-0">No pending jobs</p>
+                      )}
+                    </Col>
+                  </Row>
+                  <Row>
+                    <Col md={6}>
+                      <h6 className="text-muted mb-2">Subfeature Processing</h6>
+                      {Object.keys(dashboard?.queue_status?.subfeature || {}).length > 0 ? (
+                        <Table size="sm" className="mb-0">
+                          <thead>
+                            <tr>
+                              <th>Scope</th>
+                              <th>Repository</th>
+                              <th>User</th>
+                              <th className="text-end">Pending</th>
+                              <th className="text-end">Running</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Object.entries(dashboard?.queue_status?.subfeature || {}).map(
                               ([queueId, info]) => {
                                 const [scope, repo, user] = queueId.split('/')
                                 return (
