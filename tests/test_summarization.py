@@ -260,39 +260,41 @@ class TestInMemoryJobRepository:
     def test_add_and_get_job(self, job_repo: InMemoryJobRepository):
         job_repo.add_job(
             element_id="test:id",
+            scope="scope",
+            repository="repo",
             username="main",
             level=1,
             parent_id="parent:id",
             dependencies_met=False,
         )
 
-        job = job_repo.get_job("test:id", "main")
+        job = job_repo.get_job("test:id", "scope", "repo", "main")
         assert job is not None
         assert job["level"] == 1
         assert job["status"] == "pending"
 
     def test_claim_jobs_by_level(self, job_repo: InMemoryJobRepository):
         # Add jobs at different levels
-        job_repo.add_job("level0:job", username="main", level=0, parent_id=None, dependencies_met=True)
-        job_repo.add_job("level1:job", username="main", level=1, parent_id="level0:job", dependencies_met=False)
+        job_repo.add_job("level0:job", scope="scope", repository="repo", username="main", level=0, parent_id=None, dependencies_met=True)
+        job_repo.add_job("level1:job", scope="scope", repository="repo", username="main", level=1, parent_id="level0:job", dependencies_met=False)
 
         # Should only get level 0 job (dependencies met)
-        claimed = job_repo.claim_pending_jobs(worker_id="w1", username="main", batch_size=10)
+        claimed = job_repo.claim_pending_jobs(worker_id="w1", scope="scope", repository="repo", username="main", batch_size=10)
         assert len(claimed) == 1
         assert claimed[0]["element_id"] == "level0:job"
 
     def test_mark_job_completed(self, job_repo: InMemoryJobRepository):
-        job_repo.add_job("test:id", username="main", level=0, parent_id=None, dependencies_met=True)
-        job_repo.mark_completed("test:id", "main")
+        job_repo.add_job("test:id", scope="scope", repository="repo", username="main", level=0, parent_id=None, dependencies_met=True)
+        job_repo.mark_completed("test:id", "scope", "repo", "main")
 
-        job = job_repo.get_job("test:id", "main")
+        job = job_repo.get_job("test:id", "scope", "repo", "main")
         assert job["status"] == "completed"
 
     def test_mark_job_failed(self, job_repo: InMemoryJobRepository):
-        job_repo.add_job("test:id", username="main", level=0, parent_id=None, dependencies_met=True)
-        job_repo.mark_failed("test:id", "main", "Some error")
+        job_repo.add_job("test:id", scope="scope", repository="repo", username="main", level=0, parent_id=None, dependencies_met=True)
+        job_repo.mark_failed("test:id", "scope", "repo", "main", "Some error")
 
-        job = job_repo.get_job("test:id", "main")
+        job = job_repo.get_job("test:id", "scope", "repo", "main")
         assert job["status"] == "failed"
         assert job["error_message"] == "Some error"
 
@@ -348,15 +350,15 @@ class TestUpdateDependencies:
 
     def test_unlocks_child_jobs(self, job_repo: InMemoryJobRepository):
         # Parent job
-        job_repo.add_job("parent:id", username="main", level=0, parent_id=None, dependencies_met=True)
+        job_repo.add_job("parent:id", scope="scope", repository="repo", username="main", level=0, parent_id=None, dependencies_met=True)
         # Child job
-        job_repo.add_job("child:id", username="main", level=1, parent_id="parent:id", dependencies_met=False)
+        job_repo.add_job("child:id", scope="scope", repository="repo", username="main", level=1, parent_id="parent:id", dependencies_met=False)
 
         # Complete parent
-        update_dependencies_after_completion("parent:id", "main", job_repo)
+        update_dependencies_after_completion("parent:id", "scope", "repo", "main", job_repo)
 
         # Child should now be unlocked
-        child = job_repo.get_job("child:id", "main")
+        child = job_repo.get_job("child:id", "scope", "repo", "main")
         assert child["dependencies_met"] is True
 
 
@@ -378,7 +380,7 @@ class TestProcessSummarizationJob:
         # Setup
         summary_store.store_element(file_element)
         job_repo.add_job(
-            file_element.element_id, username="main", level=0, parent_id=None, dependencies_met=True
+            file_element.element_id, scope="scope", repository="repo", username="main", level=0, parent_id=None, dependencies_met=True
         )
 
         # Mock Ollama
@@ -388,6 +390,8 @@ class TestProcessSummarizationJob:
         # Process
         success = process_summarization_job(
             element_id=file_element.element_id,
+            scope="scope",
+            repository="repo",
             username="main",
             job_repo=job_repo,
             summary_store=summary_store,
@@ -396,7 +400,7 @@ class TestProcessSummarizationJob:
         )
 
         assert success is True
-        assert job_repo.get_job(file_element.element_id, "main")["status"] == "completed"
+        assert job_repo.get_job(file_element.element_id, "scope", "repo", "main")["status"] == "completed"
         assert summary_store.get_summary(file_element.element_id) is not None
 
     def test_handles_ollama_error(
@@ -409,7 +413,7 @@ class TestProcessSummarizationJob:
         # Setup
         summary_store.store_element(file_element)
         job_repo.add_job(
-            file_element.element_id, username="main", level=0, parent_id=None, dependencies_met=True
+            file_element.element_id, scope="scope", repository="repo", username="main", level=0, parent_id=None, dependencies_met=True
         )
 
         # Mock Ollama with error
@@ -419,6 +423,8 @@ class TestProcessSummarizationJob:
         # Process - should handle error gracefully
         success = process_summarization_job(
             element_id=file_element.element_id,
+            scope="scope",
+            repository="repo",
             username="main",
             job_repo=job_repo,
             summary_store=summary_store,
@@ -427,7 +433,7 @@ class TestProcessSummarizationJob:
         )
 
         assert success is False
-        job = job_repo.get_job(file_element.element_id, "main")
+        job = job_repo.get_job(file_element.element_id, "scope", "repo", "main")
         assert job["status"] == "failed"
         assert "Connection refused" in job["error_message"]
 
