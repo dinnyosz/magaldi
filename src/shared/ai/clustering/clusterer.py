@@ -127,6 +127,7 @@ class LabelingProgressState:
     failed: int
     timing: LabelingTimingStats
     current_cluster: str = ""  # Currently being labeled
+    model: str = ""  # Model being used for labeling
 
 
 # =============================================================================
@@ -305,6 +306,7 @@ class FeatureClusterer:
         completed = 0
         skipped = 0
         failed = 0
+        labeling_model = self.config.ollama_model  # Model used for labeling
 
         for cluster in result.clusters:
             # Mark as running in Redis (convert numpy int64 to Python int)
@@ -332,6 +334,7 @@ class FeatureClusterer:
                         failed=failed,
                         timing=timing_stats,
                         current_cluster="",
+                        model=labeling_model,
                     ))
                 continue
 
@@ -344,6 +347,7 @@ class FeatureClusterer:
                     failed=failed,
                     timing=timing_stats,
                     current_cluster=current_name,
+                    model=labeling_model,
                 ))
 
             prompt = LABEL_PROMPT.format(names=names_str)
@@ -385,6 +389,7 @@ class FeatureClusterer:
                     failed=failed,
                     timing=timing_stats,
                     current_cluster="",
+                    model=labeling_model,
                 ))
 
         return result
