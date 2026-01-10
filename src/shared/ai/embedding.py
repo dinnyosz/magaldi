@@ -1,10 +1,15 @@
-"""Phase 6: Embedding - Generate vector embeddings using Ollama.
+"""Phase 6: Embedding - Generate vector embeddings using LLM providers.
 
 This module handles:
-1. Ollama embedding client
+1. LLM embedding client (via LiteLLM)
 2. Context building with hierarchical enrichment
 3. Vector generation and validation
 4. Embedding storage
+
+Supports multiple embedding providers through LiteLLM:
+- Ollama (local)
+- OpenAI
+- And many more
 """
 
 from __future__ import annotations
@@ -14,9 +19,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Protocol
 
-import requests
-
 from magaldi_core.code_parser import CodeElement
+
+# Import the new embedding client
+from shared.ai.llm_client import EmbeddingClient, LLMError
 
 
 class EmbeddingError(Exception):
@@ -34,9 +40,11 @@ class EmbeddingError(Exception):
 class EmbeddingConfig:
     """Configuration for embedding generation."""
 
-    # Ollama settings
-    ollama_url: str = "http://localhost:11434"
+    # LLM settings (supports any LiteLLM provider)
+    ollama_url: str = "http://localhost:11434"  # For Ollama provider
     model: str = "snowflake-arctic-embed2"
+    provider: str = "ollama"  # ollama, openai, etc.
+    api_key: str | None = None  # For cloud providers
 
     # Vector settings
     dimensions: int = 1024
@@ -70,52 +78,97 @@ class EmbeddingResult:
 
 
 # =============================================================================
-# OLLAMA EMBEDDING CLIENT
+# EMBEDDING CLIENT (Wrapper for backward compatibility)
 # =============================================================================
 
 
 class OllamaEmbedClient:
-    """Client for Ollama embedding API."""
+    """Client for LLM embedding generation.
 
-    def __init__(self, url: str, model: str):
+    This class wraps the new LiteLLM-based EmbeddingClient for backward compatibility.
+    Supports multiple providers: Ollama, OpenAI, and more.
+    """
+
+    def __init__(
+        self,
+        url: str,
+        model: str,
+        provider: str = "ollama",
+        api_key: str | None = None,
+        dimensions: int = 1024,
+    ):
+        """Initialize embedding client.
+
+        Args:
+            url: API base URL (for Ollama: "http://localhost:11434")
+            model: Model name (e.g., "snowflake-arctic-embed2", "text-embedding-3-small")
+            provider: Embedding provider (ollama, openai, etc.)
+            api_key: API key for cloud providers
+            dimensions: Expected embedding dimensions
+        """
         self.url = url.rstrip("/")
         self.model = model
-        self.session = requests.Session()
-        self.session.headers["Content-Type"] = "application/json"
+        self.provider = provider
+        self.api_key = api_key
+        self.dimensions = dimensions
+
+        # Build full model identifier for LiteLLM
+        if provider == "ollama":
+            full_model = f"ollama/{model}"
+            api_base = url
+        elif provider == "openai":
+            full_model = model
+            api_base = None
+        else:
+            full_model = f"{provider}/{model}"
+            api_base = None
+
+        self._client = EmbeddingClient(
+            model=full_model,
+            api_base=api_base,
+            api_key=api_key,
+            dimensions=dimensions,
+        )
 
     def verify_model(self) -> bool:
         """Check if embedding model is available."""
-        try:
-            response = self.session.get(f"{self.url}/api/tags")
-            models = response.json().get("models", [])
-            return any(m.get("name") == self.model for m in models)
-        except Exception:
-            return False
+        return self._client.verify_model()
 
     def embed_single(self, text: str, timeout: int = 30) -> list[float]:
-        """Generate embedding for single text."""
-        response = self.session.post(
-            f"{self.url}/api/embed",
-            json={"model": self.model, "input": text},
-            timeout=timeout,
-        )
-        response.raise_for_status()
+        """Generate embedding for single text.
 
-        embeddings = response.json().get("embeddings", [])
-        if not embeddings:
-            raise EmbeddingError("No embedding returned from Ollama")
-        return embeddings[0]
+        Args:
+            text: Text to embed.
+            timeout: Request timeout in seconds.
+
+        Returns:
+            Embedding vector as list of floats.
+
+        Raises:
+            EmbeddingError: If embedding generation fails.
+        """
+        try:
+            return self._client.embed(text, timeout=timeout)
+        except LLMError as e:
+            raise EmbeddingError(str(e)) from e
 
     def embed_batch(self, texts: list[str], timeout: int = 60) -> list[list[float]]:
-        """Generate embeddings for batch of texts."""
-        response = self.session.post(
-            f"{self.url}/api/embed",
-            json={"model": self.model, "input": texts},
-            timeout=timeout,
-        )
-        response.raise_for_status()
+        """Generate embeddings for batch of texts.
 
-        return response.json().get("embeddings", [])
+        Args:
+            texts: List of texts to embed.
+            timeout: Request timeout in seconds.
+
+        Returns:
+            List of embedding vectors.
+
+        Raises:
+            EmbeddingError: If embedding generation fails.
+        """
+        try:
+            return self._client.embed_batch(texts, timeout=timeout)
+        except LLMError as e:
+            raise EmbeddingError(str(e)) from e
 
 
 # =============================================================================

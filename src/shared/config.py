@@ -68,10 +68,27 @@ class RedisConfig:
 
 
 @dataclass
-class OllamaConfig:
-    """Ollama AI model configuration."""
+class LLMConfig:
+    """LLM provider configuration.
 
-    url: str = "http://localhost:11434"
+    Supports multiple providers through LiteLLM:
+    - "ollama": Local Ollama server
+    - "openai": OpenAI API
+    - "anthropic": Anthropic API
+    - And many more (see LiteLLM docs)
+
+    Model format depends on provider:
+    - ollama: Just the model name (e.g., "qwen2.5-coder:3b")
+    - openai: Model name (e.g., "gpt-4o-mini")
+    - anthropic: Model name (e.g., "claude-3-haiku-20240307")
+    """
+
+    # Provider selection
+    provider: str = "ollama"  # ollama, openai, anthropic, etc.
+
+    # API configuration
+    url: str = "http://localhost:11434"  # For Ollama
+    api_key: str | None = None  # For cloud providers (or set via env vars)
 
     # Summarization model (for files, classes, features)
     summarize_model: str = "qwen2.5-coder:3b"
@@ -86,6 +103,10 @@ class OllamaConfig:
     embed_dimensions: int = 1024
     embed_context_window: int = 8192
 
+    # Embedding provider (can be different from summarization)
+    embed_provider: str | None = None  # If None, uses same as provider
+    embed_api_key: str | None = None  # If None, uses same as api_key
+
     def get_model_for_element_type(self, element_type: str) -> str:
         """Get the appropriate model for an element type.
 
@@ -95,6 +116,36 @@ class OllamaConfig:
         if element_type in ("function", "method", "variable", "constant"):
             return self.summarize_model_small
         return self.summarize_model
+
+    def get_litellm_model(self, model_name: str) -> str:
+        """Get the full LiteLLM model identifier.
+
+        Args:
+            model_name: The model name (e.g., "qwen2.5-coder:3b")
+
+        Returns:
+            Full model identifier for LiteLLM (e.g., "ollama/qwen2.5-coder:3b")
+        """
+        if self.provider == "ollama":
+            return f"ollama/{model_name}"
+        elif self.provider == "openai":
+            return model_name  # OpenAI models don't need prefix
+        else:
+            return f"{self.provider}/{model_name}"
+
+    def get_embed_litellm_model(self) -> str:
+        """Get the full LiteLLM embedding model identifier."""
+        provider = self.embed_provider or self.provider
+        if provider == "ollama":
+            return f"ollama/{self.embed_model}"
+        elif provider == "openai":
+            return self.embed_model
+        else:
+            return f"{provider}/{self.embed_model}"
+
+
+# Backward compatibility alias
+OllamaConfig = LLMConfig
 
 
 @dataclass
@@ -404,7 +455,13 @@ def _apply_env_overrides(config: MagaldiConfig) -> MagaldiConfig:
         "MAGALDI_REDIS_PORT": ("redis", "port", int),
         "MAGALDI_REDIS_DB": ("redis", "db", int),
         "MAGALDI_REDIS_PASSWORD": ("redis", "password"),
-        # Ollama
+        # LLM/Ollama
+        "MAGALDI_LLM_PROVIDER": ("ollama", "provider"),
+        "MAGALDI_LLM_URL": ("ollama", "url"),
+        "MAGALDI_LLM_API_KEY": ("ollama", "api_key"),
+        "MAGALDI_LLM_SUMMARIZE_MODEL": ("ollama", "summarize_model"),
+        "MAGALDI_LLM_EMBED_MODEL": ("ollama", "embed_model"),
+        # Legacy Ollama env vars (backward compatibility)
         "MAGALDI_OLLAMA_URL": ("ollama", "url"),
         "MAGALDI_OLLAMA_SUMMARIZE_MODEL": ("ollama", "summarize_model"),
         "MAGALDI_OLLAMA_EMBED_MODEL": ("ollama", "embed_model"),

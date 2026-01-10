@@ -1,10 +1,16 @@
-"""Phase 5: Summarization - Generate summaries using Ollama.
+"""Phase 5: Summarization - Generate summaries using LLM.
 
 This module handles:
-1. Ollama client for LLM interactions
+1. LLM client for text generation (via LiteLLM)
 2. Prompt building for different element types
 3. Hierarchical job processing
 4. Summary storage
+
+Supports multiple LLM providers through LiteLLM:
+- Ollama (local)
+- OpenAI
+- Anthropic
+- And many more
 """
 
 from __future__ import annotations
@@ -14,9 +20,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Protocol
 
-import requests
-
 from magaldi_core.code_parser import CodeElement
+
+# Import the new LLM client
+from shared.ai.llm_client import LLMClient, LLMError
 
 
 class SummarizationError(Exception):
@@ -34,9 +41,11 @@ class SummarizationError(Exception):
 class SummarizationConfig:
     """Configuration for summarization."""
 
-    # Ollama settings
-    ollama_url: str = "http://localhost:11434"
+    # LLM settings (supports any LiteLLM provider)
+    ollama_url: str = "http://localhost:11434"  # For Ollama provider
     model: str = "qwen2.5-coder:3b"
+    provider: str = "ollama"  # ollama, openai, anthropic, etc.
+    api_key: str | None = None  # For cloud providers
 
     # Generation settings
     temperature: float = 0.3
@@ -75,27 +84,57 @@ class SummarizationResult:
 
 
 # =============================================================================
-# OLLAMA CLIENT
+# LLM CLIENT (Wrapper for backward compatibility)
 # =============================================================================
 
 
 class OllamaClient:
-    """Client for Ollama API interactions."""
+    """Client for LLM text generation.
 
-    def __init__(self, url: str, model: str):
+    This class wraps the new LiteLLM-based LLMClient for backward compatibility.
+    Supports multiple providers: Ollama, OpenAI, Anthropic, and more.
+    """
+
+    def __init__(
+        self,
+        url: str,
+        model: str,
+        provider: str = "ollama",
+        api_key: str | None = None,
+    ):
+        """Initialize LLM client.
+
+        Args:
+            url: API base URL (for Ollama: "http://localhost:11434")
+            model: Model name (e.g., "qwen2.5-coder:3b", "gpt-4o-mini")
+            provider: LLM provider (ollama, openai, anthropic, etc.)
+            api_key: API key for cloud providers
+        """
         self.url = url.rstrip("/")
         self.model = model
-        self.session = requests.Session()
-        self.session.headers["Content-Type"] = "application/json"
+        self.provider = provider
+        self.api_key = api_key
+
+        # Build full model identifier for LiteLLM
+        if provider == "ollama":
+            full_model = f"ollama/{model}"
+            api_base = url
+        elif provider == "openai":
+            full_model = model
+            api_base = None
+        else:
+            full_model = f"{provider}/{model}"
+            api_base = None
+
+        self._client = LLMClient(
+            model=full_model,
+            api_base=api_base,
+            api_key=api_key,
+        )
 
     def verify_model(self) -> bool:
         """Check if model is available."""
-        try:
-            response = self.session.get(f"{self.url}/api/tags")
-            models = response.json().get("models", [])
-            return any(m.get("name") == self.model for m in models)
-        except Exception:
-            return False
+        return self._client.verify_model()
 
     def generate(
         self,
@@ -105,7 +144,7 @@ class OllamaClient:
         timeout: int = 60,
         model: str | None = None,
     ) -> str:
-        """Generate completion from Ollama.
+        """Generate completion from LLM.
 
         Args:
             prompt: The prompt to send to the model.
@@ -114,41 +153,32 @@ class OllamaClient:
             timeout: Request timeout in seconds.
             model: Optional model override (uses default if not specified).
 
+        Returns:
+            Generated text.
+
         Raises:
             ValueError: If response is empty or contains an error.
-            requests.HTTPError: If the API request fails.
         """
-        use_model = model or self.model
-        payload = {
-            "model": use_model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": temperature,
-                "num_predict": max_tokens,
-            },
-        }
+        # Build model identifier for override if provided
+        use_model = None
+        if model:
+            if self.provider == "ollama":
+                use_model = f"ollama/{model}"
+            elif self.provider == "openai":
+                use_model = model
+            else:
+                use_model = f"{self.provider}/{model}"
 
-        response = self.session.post(
-            f"{self.url}/api/generate",
-            json=payload,
-            timeout=timeout,
-        )
-        response.raise_for_status()
-
-        data = response.json()
-
-        # Check for error in response body
-        if "error" in data:
-            raise ValueError(f"Ollama error for model '{use_model}': {data['error']}")
-
-        result = data.get("response", "").strip()
-
-        # Check for empty response
-        if not result:
-            raise ValueError(f"Empty response from Ollama model '{use_model}'")
-
-        return result
+        try:
+            return self._client.generate(
+                prompt=prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout=timeout,
+                model=use_model,
+            )
+        except LLMError as e:
+            raise ValueError(str(e)) from e
 
 
 # =============================================================================
