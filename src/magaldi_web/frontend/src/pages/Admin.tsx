@@ -7,9 +7,8 @@ import {
   Spinner,
   Alert,
   Table,
-  ProgressBar,
 } from 'react-bootstrap'
-import { getHealth, getJobs, getIndexStats } from '../api'
+import { getHealth, getIndexStats, getDashboard } from '../api'
 
 function Admin() {
   const { data: health, isLoading: healthLoading } = useQuery({
@@ -18,9 +17,9 @@ function Admin() {
     refetchInterval: 10000,
   })
 
-  const { data: jobs, isLoading: jobsLoading } = useQuery({
-    queryKey: ['jobs'],
-    queryFn: getJobs,
+  const { data: dashboard, isLoading: dashboardLoading } = useQuery({
+    queryKey: ['dashboard'],
+    queryFn: getDashboard,
     refetchInterval: 5000,
   })
 
@@ -171,84 +170,315 @@ function Admin() {
         </Col>
       </Row>
 
-      {/* Job Queue Stats */}
+      {/* Processing Queues */}
       <Card>
-        <Card.Header>
-          <i className="bi bi-list-task me-2"></i>
-          Job Queues
+        <Card.Header className="d-flex justify-content-between align-items-center">
+          <span>
+            <i className="bi bi-list-task me-2"></i>
+            Processing Queues
+          </span>
+          {(dashboard?.queue_status?.total_pending ?? 0) > 0 && (
+            <Badge bg="warning">
+              {dashboard?.queue_status?.total_pending} pending
+            </Badge>
+          )}
         </Card.Header>
         <Card.Body>
-          {jobsLoading ? (
+          {dashboardLoading ? (
             <div className="text-center py-3">
               <Spinner animation="border" size="sm" />
             </div>
-          ) : jobs ? (
-            <Row>
-              <Col md={6}>
-                <h6>Summarization</h6>
-                <Table size="sm" bordered>
-                  <tbody>
-                    <tr>
-                      <td>Pending</td>
-                      <td className="text-end">
-                        <Badge bg="secondary">{jobs.summarization.pending}</Badge>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>Running</td>
-                      <td className="text-end">
-                        <Badge bg="primary">{jobs.summarization.running}</Badge>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>Completed</td>
-                      <td className="text-end">
-                        <Badge bg="success">{jobs.summarization.completed}</Badge>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>Failed</td>
-                      <td className="text-end">
-                        <Badge bg="danger">{jobs.summarization.failed}</Badge>
-                      </td>
-                    </tr>
-                  </tbody>
-                </Table>
-              </Col>
-              <Col md={6}>
-                <h6>Embedding</h6>
-                <Table size="sm" bordered>
-                  <tbody>
-                    <tr>
-                      <td>Pending</td>
-                      <td className="text-end">
-                        <Badge bg="secondary">{jobs.embedding.pending}</Badge>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>Running</td>
-                      <td className="text-end">
-                        <Badge bg="primary">{jobs.embedding.running}</Badge>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>Completed</td>
-                      <td className="text-end">
-                        <Badge bg="success">{jobs.embedding.completed}</Badge>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>Failed</td>
-                      <td className="text-end">
-                        <Badge bg="danger">{jobs.embedding.failed}</Badge>
-                      </td>
-                    </tr>
-                  </tbody>
-                </Table>
-              </Col>
-            </Row>
+          ) : (dashboard?.queue_status?.total_pending ?? 0) === 0 &&
+             (dashboard?.queue_status?.total_running ?? 0) === 0 ? (
+            <p className="text-muted mb-0 text-center">
+              <i className="bi bi-check-circle text-success me-2"></i>
+              All queues empty - no pending jobs
+            </p>
           ) : (
-            <p className="text-muted text-center mb-0">Unable to load job stats</p>
+            <>
+              <Row className="mb-3">
+                <Col md={6}>
+                  <h6 className="text-muted mb-2">Summarization</h6>
+                  {Object.keys(dashboard?.queue_status?.summarization || {}).length > 0 ? (
+                    <Table size="sm" className="mb-0">
+                      <thead>
+                        <tr>
+                          <th>Scope</th>
+                          <th>Repository</th>
+                          <th>User</th>
+                          <th className="text-end">Pending</th>
+                          <th className="text-end">Running</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Object.entries(dashboard?.queue_status?.summarization || {}).map(
+                          ([queueId, info]) => {
+                            const [scope, repo, user] = queueId.split('/')
+                            return (
+                              <tr key={queueId}>
+                                <td><code>{scope}</code></td>
+                                <td><code>{repo}</code></td>
+                                <td><code>{user}</code></td>
+                                <td className="text-end">
+                                  {info.pending > 0 ? (
+                                    <Badge bg="warning">{info.pending}</Badge>
+                                  ) : (
+                                    <span className="text-muted">0</span>
+                                  )}
+                                </td>
+                                <td className="text-end">
+                                  {info.running > 0 ? (
+                                    <Badge bg="primary">{info.running}</Badge>
+                                  ) : (
+                                    <span className="text-muted">0</span>
+                                  )}
+                                </td>
+                              </tr>
+                            )
+                          }
+                        )}
+                      </tbody>
+                    </Table>
+                  ) : (
+                    <p className="text-muted small mb-0">No pending jobs</p>
+                  )}
+                </Col>
+                <Col md={6}>
+                  <h6 className="text-muted mb-2">Embedding</h6>
+                  {Object.keys(dashboard?.queue_status?.embedding || {}).length > 0 ? (
+                    <Table size="sm" className="mb-0">
+                      <thead>
+                        <tr>
+                          <th>Scope</th>
+                          <th>Repository</th>
+                          <th>User</th>
+                          <th className="text-end">Pending</th>
+                          <th className="text-end">Running</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Object.entries(dashboard?.queue_status?.embedding || {}).map(
+                          ([queueId, info]) => {
+                            const [scope, repo, user] = queueId.split('/')
+                            return (
+                              <tr key={queueId}>
+                                <td><code>{scope}</code></td>
+                                <td><code>{repo}</code></td>
+                                <td><code>{user}</code></td>
+                                <td className="text-end">
+                                  {info.pending > 0 ? (
+                                    <Badge bg="warning">{info.pending}</Badge>
+                                  ) : (
+                                    <span className="text-muted">0</span>
+                                  )}
+                                </td>
+                                <td className="text-end">
+                                  {info.running > 0 ? (
+                                    <Badge bg="primary">{info.running}</Badge>
+                                  ) : (
+                                    <span className="text-muted">0</span>
+                                  )}
+                                </td>
+                              </tr>
+                            )
+                          }
+                        )}
+                      </tbody>
+                    </Table>
+                  ) : (
+                    <p className="text-muted small mb-0">No pending jobs</p>
+                  )}
+                </Col>
+              </Row>
+              <Row className="mb-3">
+                <Col md={6}>
+                  <h6 className="text-muted mb-2">Labeling</h6>
+                  {Object.keys(dashboard?.queue_status?.labeling || {}).length > 0 ? (
+                    <Table size="sm" className="mb-0">
+                      <thead>
+                        <tr>
+                          <th>Scope</th>
+                          <th>Repository</th>
+                          <th>User</th>
+                          <th className="text-end">Pending</th>
+                          <th className="text-end">Running</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Object.entries(dashboard?.queue_status?.labeling || {}).map(
+                          ([queueId, info]) => {
+                            const [scope, repo, user] = queueId.split('/')
+                            return (
+                              <tr key={queueId}>
+                                <td><code>{scope}</code></td>
+                                <td><code>{repo}</code></td>
+                                <td><code>{user}</code></td>
+                                <td className="text-end">
+                                  {info.pending > 0 ? (
+                                    <Badge bg="warning">{info.pending}</Badge>
+                                  ) : (
+                                    <span className="text-muted">0</span>
+                                  )}
+                                </td>
+                                <td className="text-end">
+                                  {info.running > 0 ? (
+                                    <Badge bg="primary">{info.running}</Badge>
+                                  ) : (
+                                    <span className="text-muted">0</span>
+                                  )}
+                                </td>
+                              </tr>
+                            )
+                          }
+                        )}
+                      </tbody>
+                    </Table>
+                  ) : (
+                    <p className="text-muted small mb-0">No pending jobs</p>
+                  )}
+                </Col>
+                <Col md={6}>
+                  <h6 className="text-muted mb-2">Feature Processing</h6>
+                  {Object.keys(dashboard?.queue_status?.feature || {}).length > 0 ? (
+                    <Table size="sm" className="mb-0">
+                      <thead>
+                        <tr>
+                          <th>Scope</th>
+                          <th>Repository</th>
+                          <th>User</th>
+                          <th className="text-end">Pending</th>
+                          <th className="text-end">Running</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Object.entries(dashboard?.queue_status?.feature || {}).map(
+                          ([queueId, info]) => {
+                            const [scope, repo, user] = queueId.split('/')
+                            return (
+                              <tr key={queueId}>
+                                <td><code>{scope}</code></td>
+                                <td><code>{repo}</code></td>
+                                <td><code>{user}</code></td>
+                                <td className="text-end">
+                                  {info.pending > 0 ? (
+                                    <Badge bg="warning">{info.pending}</Badge>
+                                  ) : (
+                                    <span className="text-muted">0</span>
+                                  )}
+                                </td>
+                                <td className="text-end">
+                                  {info.running > 0 ? (
+                                    <Badge bg="primary">{info.running}</Badge>
+                                  ) : (
+                                    <span className="text-muted">0</span>
+                                  )}
+                                </td>
+                              </tr>
+                            )
+                          }
+                        )}
+                      </tbody>
+                    </Table>
+                  ) : (
+                    <p className="text-muted small mb-0">No pending jobs</p>
+                  )}
+                </Col>
+              </Row>
+              <Row>
+                <Col md={6}>
+                  <h6 className="text-muted mb-2">Subfeature Processing</h6>
+                  {Object.keys(dashboard?.queue_status?.subfeature || {}).length > 0 ? (
+                    <Table size="sm" className="mb-0">
+                      <thead>
+                        <tr>
+                          <th>Scope</th>
+                          <th>Repository</th>
+                          <th>User</th>
+                          <th className="text-end">Pending</th>
+                          <th className="text-end">Running</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Object.entries(dashboard?.queue_status?.subfeature || {}).map(
+                          ([queueId, info]) => {
+                            const [scope, repo, user] = queueId.split('/')
+                            return (
+                              <tr key={queueId}>
+                                <td><code>{scope}</code></td>
+                                <td><code>{repo}</code></td>
+                                <td><code>{user}</code></td>
+                                <td className="text-end">
+                                  {info.pending > 0 ? (
+                                    <Badge bg="warning">{info.pending}</Badge>
+                                  ) : (
+                                    <span className="text-muted">0</span>
+                                  )}
+                                </td>
+                                <td className="text-end">
+                                  {info.running > 0 ? (
+                                    <Badge bg="primary">{info.running}</Badge>
+                                  ) : (
+                                    <span className="text-muted">0</span>
+                                  )}
+                                </td>
+                              </tr>
+                            )
+                          }
+                        )}
+                      </tbody>
+                    </Table>
+                  ) : (
+                    <p className="text-muted small mb-0">No pending jobs</p>
+                  )}
+                </Col>
+                <Col md={6}>
+                  <h6 className="text-muted mb-2">Subfeature Labeling</h6>
+                  {Object.keys(dashboard?.queue_status?.subfeature_labeling || {}).length > 0 ? (
+                    <Table size="sm" className="mb-0">
+                      <thead>
+                        <tr>
+                          <th>Scope</th>
+                          <th>Repository</th>
+                          <th>User</th>
+                          <th className="text-end">Pending</th>
+                          <th className="text-end">Running</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Object.entries(dashboard?.queue_status?.subfeature_labeling || {}).map(
+                          ([queueId, info]) => {
+                            const [scope, repo, user] = queueId.split('/')
+                            return (
+                              <tr key={queueId}>
+                                <td><code>{scope}</code></td>
+                                <td><code>{repo}</code></td>
+                                <td><code>{user}</code></td>
+                                <td className="text-end">
+                                  {info.pending > 0 ? (
+                                    <Badge bg="warning">{info.pending}</Badge>
+                                  ) : (
+                                    <span className="text-muted">0</span>
+                                  )}
+                                </td>
+                                <td className="text-end">
+                                  {info.running > 0 ? (
+                                    <Badge bg="primary">{info.running}</Badge>
+                                  ) : (
+                                    <span className="text-muted">0</span>
+                                  )}
+                                </td>
+                              </tr>
+                            )
+                          }
+                        )}
+                      </tbody>
+                    </Table>
+                  ) : (
+                    <p className="text-muted small mb-0">No pending jobs</p>
+                  )}
+                </Col>
+              </Row>
+            </>
           )}
         </Card.Body>
       </Card>
