@@ -253,8 +253,22 @@ export async function search(params: SearchRequest): Promise<SearchResponse> {
 }
 
 // Repositories
-export async function getRepositories(): Promise<Array<{ scope: string; repository: string; element_count: number }>> {
-  return fetchJson(`${API_BASE}/repos`)
+export interface RepoListItem {
+  scope: string
+  name: string
+  file_count: number
+  element_count: number
+  languages: string[]
+}
+
+interface RepoListResponse {
+  repos: RepoListItem[]
+  total: number
+}
+
+export async function getRepositories(): Promise<RepoListItem[]> {
+  const response = await fetchJson<RepoListResponse>(`${API_BASE}/repos`)
+  return response.repos
 }
 
 export async function getFileTree(scope: string, repository: string): Promise<FileTreeResponse> {

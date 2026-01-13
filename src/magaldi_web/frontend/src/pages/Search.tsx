@@ -113,8 +113,8 @@ function Search() {
                 >
                   <option value="">All repositories</option>
                   {repos?.map((r) => (
-                    <option key={`${r.scope}/${r.repository}`} value={`${r.scope}/${r.repository}`}>
-                      {r.scope}/{r.repository}
+                    <option key={`${r.scope}/${r.name}`} value={`${r.scope}/${r.name}`}>
+                      {r.scope}/{r.name}
                     </option>
                   ))}
                 </Form.Select>

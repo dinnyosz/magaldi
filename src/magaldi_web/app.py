@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from magaldi_web.routes import admin, browse, dashboard, elements, repos, search, vectormap
@@ -76,7 +77,29 @@ def create_app(config: MagaldiConfig | None = None) -> FastAPI:
     # Serve static files for frontend (if built)
     frontend_dist = Path(__file__).parent / "frontend" / "dist"
     if frontend_dist.exists():
-        app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")
+        index_html = frontend_dist / "index.html"
+
+        # Mount static assets (js, css, images, etc.)
+        assets_dir = frontend_dist / "assets"
+        if assets_dir.exists():
+            app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+        # Serve other static files at root (favicon, etc.)
+        @app.get("/vite.svg")
+        async def vite_svg() -> FileResponse:
+            return FileResponse(frontend_dist / "vite.svg")
+
+        # SPA catch-all: serve index.html for any non-API route
+        @app.get("/{full_path:path}")
+        async def serve_spa(full_path: str) -> FileResponse:
+            """Serve index.html for SPA client-side routing."""
+            # Check if it's a file that exists in dist
+            file_path = frontend_dist / full_path
+            if file_path.is_file():
+                return FileResponse(file_path)
+            # Otherwise serve index.html for client-side routing
+            return FileResponse(index_html)
+
         logger.info(f"Serving frontend from {frontend_dist}")
 
     return app
