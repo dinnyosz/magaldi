@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from magaldi_web.dependencies import get_cached_config, get_es_repository
@@ -9,6 +11,18 @@ from magaldi_web.models import SearchRequest, SearchResponse, SearchResult
 from shared.db.elasticsearch import ElasticsearchRepository, INDEX_NAME
 
 router = APIRouter()
+
+
+def cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
+    """Compute cosine similarity between two vectors."""
+    if not vec1 or not vec2 or len(vec1) != len(vec2):
+        return 0.0
+    dot_product = sum(a * b for a, b in zip(vec1, vec2))
+    norm1 = math.sqrt(sum(a * a for a in vec1))
+    norm2 = math.sqrt(sum(b * b for b in vec2))
+    if norm1 == 0 or norm2 == 0:
+        return 0.0
+    return dot_product / (norm1 * norm2)
 
 
 @router.post("/search", response_model=SearchResponse)
@@ -28,6 +42,11 @@ async def search(
     if request.username and request.username != "main":
         usernames.append(request.username)
     filters.append({"terms": {"username": usernames}})
+
+    # Exclude feature and subfeature types (they don't have file paths)
+    filters.append(
+        {"bool": {"must_not": {"terms": {"element_type": ["feature", "subfeature"]}}}}
+    )
 
     if request.scope:
         filters.append({"term": {"scope": request.scope}})
@@ -49,7 +68,7 @@ async def search(
             provider=config.llm.provider,
             api_key=config.llm.embed_api_key or config.llm.api_key,
         )
-        query_embedding = embed_client.embed(request.query)
+        query_embedding = embed_client.embed_single(request.query)
     except Exception:
         # Fall back to text-only search if embedding fails
         pass
@@ -110,6 +129,7 @@ async def search(
                 "signature",
                 "repository",
                 "scope",
+                "embedding",
             ],
         },
     )
@@ -120,11 +140,52 @@ async def search(
     took_ms = result.get("took", 0)
     max_score = hits.get("max_score") or 1.0
 
-    results = []
+    # Find max scores for normalization
+    max_vector_score = 0.0
+    max_text_score = 0.0
+
+    # First pass: compute individual scores
+    processed_hits = []
     for hit in hits.get("hits", []):
         source = hit["_source"]
         score = hit.get("_score", 0)
         highlights = hit.get("highlight", {})
+        result_embedding = source.get("embedding")
+
+        # Compute vector similarity (0-1 range)
+        vector_score = None
+        text_score = None
+        if query_embedding and result_embedding:
+            vector_score = cosine_similarity(query_embedding, result_embedding)
+            # Vector contribution to total: (similarity + 1) * 2, range 0-4
+            vector_contribution = (vector_score + 1.0) * 2
+            # Text score is the remainder
+            text_score = max(0, score - vector_contribution)
+            max_vector_score = max(max_vector_score, vector_score)
+            max_text_score = max(max_text_score, text_score)
+        else:
+            # No vector search, all score is from text
+            text_score = score
+            max_text_score = max(max_text_score, text_score)
+
+        processed_hits.append({
+            "source": source,
+            "score": score,
+            "highlights": highlights,
+            "vector_score": vector_score,
+            "text_score": text_score,
+        })
+
+    # Second pass: normalize and build results
+    results = []
+    for hit_data in processed_hits:
+        source = hit_data["source"]
+        vector_score = hit_data["vector_score"]
+        text_score = hit_data["text_score"]
+
+        # Normalize to percentages (0-100)
+        vector_pct = round(vector_score * 100, 1) if vector_score is not None else None
+        text_pct = round((text_score / max_text_score) * 100, 1) if max_text_score and text_score else None
 
         results.append(
             SearchResult(
@@ -138,9 +199,11 @@ async def search(
                 signature=source.get("signature"),
                 repository=source["repository"],
                 scope=source["scope"],
-                score=score,
-                relevance_pct=round((score / max_score) * 100, 1) if max_score else 0,
-                highlights=highlights,
+                score=hit_data["score"],
+                relevance_pct=round((hit_data["score"] / max_score) * 100, 1) if max_score else 0,
+                text_score=text_pct,
+                vector_score=vector_pct,
+                highlights=hit_data["highlights"],
             )
         )
 

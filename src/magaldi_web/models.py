@@ -137,6 +137,8 @@ class SearchResult(BaseModel):
     scope: str
     score: float
     relevance_pct: float
+    text_score: float | None = None
+    vector_score: float | None = None
     highlights: dict[str, list[str]] = Field(default_factory=dict)
 
 

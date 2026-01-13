@@ -65,6 +65,9 @@ export interface SearchResult {
   line: number
   summary: string | null
   score: number
+  relevance_pct: number
+  text_score: number | null
+  vector_score: number | null
   code_snippet?: string
 }
 

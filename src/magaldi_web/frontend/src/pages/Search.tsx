@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useSearchParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -12,50 +12,78 @@ import {
   Spinner,
   Alert,
   ListGroup,
+  OverlayTrigger,
+  Tooltip,
 } from 'react-bootstrap'
 import { search, getRepositories, type SearchResult } from '../api'
 
 const ELEMENT_TYPES = ['file', 'class', 'function', 'method', 'variable', 'constant']
+const DEBOUNCE_MS = 300
 
 function Search() {
   const [searchParams, setSearchParams] = useSearchParams()
   const initialQuery = searchParams.get('q') || ''
 
   const [query, setQuery] = useState(initialQuery)
+  const [debouncedQuery, setDebouncedQuery] = useState(initialQuery)
   const [selectedScope, setSelectedScope] = useState<string>('')
   const [selectedRepo, setSelectedRepo] = useState<string>('')
   const [selectedTypes, setSelectedTypes] = useState<string[]>([])
   const [limit, setLimit] = useState(20)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const { data: repos } = useQuery({
     queryKey: ['repositories'],
     queryFn: getRepositories,
   })
 
-  const { data: searchResult, isLoading, error, refetch } = useQuery({
-    queryKey: ['search', query, selectedScope, selectedRepo, selectedTypes, limit],
+  const { data: searchResult, isLoading, error } = useQuery({
+    queryKey: ['search', debouncedQuery, selectedScope, selectedRepo, selectedTypes, limit],
     queryFn: () =>
       search({
-        query,
+        query: debouncedQuery,
         scope: selectedScope || undefined,
         repository: selectedRepo || undefined,
         element_types: selectedTypes.length > 0 ? selectedTypes : undefined,
         limit,
       }),
-    enabled: query.length > 0,
+    enabled: debouncedQuery.length > 0,
   })
+
+  // Debounce query changes
+  useEffect(() => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current)
+    }
+    debounceRef.current = setTimeout(() => {
+      setDebouncedQuery(query)
+      if (query.trim()) {
+        setSearchParams({ q: query })
+      }
+    }, DEBOUNCE_MS)
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current)
+      }
+    }
+  }, [query, setSearchParams])
 
   useEffect(() => {
     if (initialQuery && initialQuery !== query) {
       setQuery(initialQuery)
+      setDebouncedQuery(initialQuery)
     }
   }, [initialQuery])
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
     if (query.trim()) {
+      // Immediate search on submit
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current)
+      }
+      setDebouncedQuery(query)
       setSearchParams({ q: query })
-      refetch()
     }
   }
 
@@ -217,9 +245,24 @@ function Search() {
                             {result.file_path}:{result.line}
                           </small>
                         </div>
-                        <Badge bg="secondary">
-                          {(result.score * 100).toFixed(1)}%
-                        </Badge>
+                        <div className="d-flex gap-1">
+                          {result.text_score !== null && (
+                            <OverlayTrigger
+                              placement="top"
+                              overlay={<Tooltip>Text match score</Tooltip>}
+                            >
+                              <Badge bg="info">T:{result.text_score.toFixed(0)}%</Badge>
+                            </OverlayTrigger>
+                          )}
+                          {result.vector_score !== null && (
+                            <OverlayTrigger
+                              placement="top"
+                              overlay={<Tooltip>Semantic similarity</Tooltip>}
+                            >
+                              <Badge bg="success">V:{result.vector_score.toFixed(0)}%</Badge>
+                            </OverlayTrigger>
+                          )}
+                        </div>
                       </div>
                       {result.summary && (
                         <p className="mb-1 mt-2 text-muted small">{result.summary}</p>
