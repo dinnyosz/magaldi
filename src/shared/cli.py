@@ -681,17 +681,27 @@ def run_feature_extraction(
             sub_worker_status = SubfeatureWorkerStatus()
 
             # Labeling state for discovery phase
+            import time as time_mod
+            labeling_phase_start = time_mod.time()
             current_labeling_state = SubfeatureLabelingState(
                 total_features=large_cluster_count,
                 features_processed=0,
                 current_feature="",
                 subclusters_labeled=0,
                 model="",
+                phase_start=labeling_phase_start,
             )
 
             def build_labeling_display(state: SubfeatureLabelingState) -> RenderableType:
                 """Build Rich display for subfeature labeling progress."""
+                import time as time_mod
                 pct = (state.features_processed / state.total_features * 100) if state.total_features > 0 else 0
+                elapsed = time_mod.time() - state.phase_start if state.phase_start > 0 else 0
+                elapsed_str = format_duration(elapsed)
+
+                # Header
+                header_text = Text()
+                header_text.append("  Labeling subclusters for large features...", style="cyan")
 
                 # Progress bar
                 bar_width = 30
@@ -707,7 +717,9 @@ def run_feature_extraction(
                 bar_text.append("/", style="dim")
                 bar_text.append(f"{state.total_features}", style="cyan")
                 bar_text.append(f" ({pct:.0f}%)", style="green")
-                bar_text.append(" features", style="dim")
+                bar_text.append(" | ", style="dim")
+                bar_text.append(elapsed_str, style="cyan")
+                bar_text.append(" elapsed", style="dim")
 
                 # Current feature and model
                 current_text = Text()
@@ -725,7 +737,7 @@ def run_feature_extraction(
                     stats_text.append("  ")
                     stats_text.append(f"{state.subclusters_labeled} subclusters labeled", style="green")
 
-                return Group(bar_text, current_text, stats_text)
+                return Group(header_text, bar_text, current_text, stats_text)
 
             # Combined live display will be set later
             combined_live = None
@@ -736,13 +748,15 @@ def run_feature_extraction(
                 if combined_live:
                     combined_live.refresh()
 
-            console.print("  Labeling and processing sub-features with {workers} workers...".format(workers=workers))
-
             def build_subfeature_display(state: SubfeatureProgressState, num_workers: int) -> RenderableType:
                 """Build Rich display for subfeature processing progress (matches Phase 5)."""
                 pct = (state.completed / state.total * 100) if state.total > 0 else 0
                 eta = state.timing.eta_seconds(state.completed, state.total, state.num_workers)
                 elapsed_str = format_duration(state.timing.elapsed)
+
+                # Header
+                header_text = Text()
+                header_text.append(f"  Processing {state.total} sub-features with {num_workers} workers...", style="cyan")
 
                 # Progress bar
                 bar_width = 30
@@ -801,7 +815,7 @@ def run_feature_extraction(
                         stats_text.append(" | ", style="dim")
                         stats_text.append(f"{state.failed} failed", style="red")
 
-                return Group(bar_text, worker_table, stats_text)
+                return Group(header_text, bar_text, worker_table, stats_text)
 
             current_sub_state = SubfeatureProgressState(
                 total=0,

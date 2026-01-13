@@ -245,6 +245,7 @@ class SubfeatureLabelingState:
     current_feature: str  # Current feature being labeled
     subclusters_labeled: int  # Total subclusters labeled so far
     model: str = ""  # Model used for labeling
+    phase_start: float = 0.0  # Start time for elapsed calculation
 
 
 @dataclass
@@ -963,6 +964,7 @@ def process_subfeatures(
     features_processed = 0
     subclusters_labeled = 0
     total_large_features = len(large_clusters)
+    labeling_start = time.time()  # Track labeling phase start
 
     for cluster in large_clusters:
         parent_label, parent_summary = processed_features.get(
@@ -982,6 +984,7 @@ def process_subfeatures(
                 current_feature=parent_label,
                 subclusters_labeled=subclusters_labeled,
                 model=config.summarize_model,
+                phase_start=labeling_start,
             ))
 
         # Fetch embeddings for cluster members
@@ -1032,6 +1035,7 @@ def process_subfeatures(
                     current_feature=parent_label,
                     subclusters_labeled=subclusters_labeled,
                     model=config.summarize_model,
+                    phase_start=labeling_start,
                 ))
 
             # Fetch member summaries for all sub-cluster members
