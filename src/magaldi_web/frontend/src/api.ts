@@ -110,6 +110,38 @@ export interface FileDetailResponse {
   elements: FileElement[]
 }
 
+export interface ElementDetailChild {
+  element_id: string
+  hash_id: string | null
+  name: string
+  element_type: string
+  line: number
+  summary: string | null
+  signature: string | null
+}
+
+export interface ElementDetailSibling {
+  element_id: string
+  hash_id: string | null
+  name: string
+  element_type: string
+  line: number
+  summary: string | null
+}
+
+export interface ElementDetailParent {
+  element_id: string
+  name: string
+  element_type: string
+  summary: string | null
+}
+
+export interface ElementDetailFile {
+  element_id: string
+  name: string
+  summary: string | null
+}
+
 export interface ElementDetail {
   element_id: string
   hash_id: string | null
@@ -117,16 +149,25 @@ export interface ElementDetail {
   element_type: string
   file_path: string
   line_start: number
-  line_end: number
-  code: string
+  line_end: number | null
+  language: string
   summary: string | null
-  parent_id: string | null
-  children: Array<{
-    element_id: string
-    hash_id: string | null
+  signature: string | null
+  docstring: string | null
+  raw_code: string | null
+  decorators: string[]
+  visibility: string | null
+  is_async: boolean
+  context: {
+    file: ElementDetailFile | null
+    parent: ElementDetailParent | null
+    children: ElementDetailChild[]
+    siblings: ElementDetailSibling[]
+  }
+  repository: {
+    scope: string
     name: string
-    element_type: string
-  }>
+  }
 }
 
 export interface SimilarElement {
