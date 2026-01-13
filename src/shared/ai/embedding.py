@@ -78,15 +78,14 @@ class EmbeddingResult:
 
 
 # =============================================================================
-# EMBEDDING CLIENT (Wrapper for backward compatibility)
+# EMBEDDING CLIENT
 # =============================================================================
 
 
-class OllamaEmbedClient:
+class CodeEmbeddingClient:
     """Client for LLM embedding generation.
 
-    This class wraps the new LiteLLM-based EmbeddingClient for backward compatibility.
-    Supports multiple providers: Ollama, OpenAI, and more.
+    Supports multiple providers through LiteLLM: Ollama, OpenAI, and more.
     """
 
     def __init__(
@@ -566,7 +565,7 @@ def process_embedding_job(
     username: str,
     job_repo: EmbeddingJobRepository,
     embedding_store: EmbeddingStore,
-    ollama: OllamaEmbedClient,
+    embed_client: CodeEmbeddingClient,
     config: EmbeddingConfig,
 ) -> bool:
     """Process a single embedding job.
@@ -578,7 +577,7 @@ def process_embedding_job(
         username: User who owns this job.
         job_repo: Job repository.
         embedding_store: Embedding store.
-        ollama: Ollama client.
+        embed_client: Embedding client.
         config: Embedding config.
 
     Returns:
@@ -598,7 +597,7 @@ def process_embedding_job(
         text = build_embedding_text(element, embedding_store, config.max_context)
 
         # Generate embedding
-        embedding = ollama.embed_single(text, timeout=config.timeout)
+        embedding = embed_client.embed_single(text, timeout=config.timeout)
 
         # Validate dimensions
         if not validate_vector(embedding, config.dimensions):

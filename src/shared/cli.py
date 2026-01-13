@@ -6,6 +6,30 @@ Commands:
 
 from __future__ import annotations
 
+# Suppress warnings from LiteLLM/aiohttp before any imports
+import warnings
+warnings.filterwarnings("ignore", category=ResourceWarning, message=".*[Uu]nclosed.*")
+warnings.filterwarnings("ignore", message="Pydantic serializer warnings")
+
+# Patch aiohttp to not emit unclosed session warnings
+# This is necessary because aiohttp uses both warnings.warn AND loop.call_exception_handler
+import aiohttp.client
+import aiohttp.connector
+
+_original_client_del = aiohttp.client.ClientSession.__del__
+_original_connector_del = aiohttp.connector.BaseConnector.__del__
+
+def _quiet_client_del(self, _warnings=None):
+    """Suppress unclosed session warning."""
+    pass  # Do nothing - session will be GC'd anyway
+
+def _quiet_connector_del(self, _warnings=None):
+    """Suppress unclosed connector warning."""
+    pass  # Do nothing - connector will be GC'd anyway
+
+aiohttp.client.ClientSession.__del__ = _quiet_client_del
+aiohttp.connector.BaseConnector.__del__ = _quiet_connector_del
+
 import sys
 
 import click
@@ -63,7 +87,7 @@ def check_ollama_models(config: MagaldiConfig, skip_ai: bool) -> list[str]:
     import requests
 
     errors = []
-    url = config.ollama.url.rstrip("/")
+    url = config.llm.url.rstrip("/")
 
     # Check Ollama server is running
     try:
@@ -91,9 +115,9 @@ def check_ollama_models(config: MagaldiConfig, skip_ai: bool) -> list[str]:
 
     # Check required models
     required_models = [
-        config.ollama.summarize_model,
-        config.ollama.summarize_model_small,
-        config.ollama.embed_model,
+        config.llm.summarize_model,
+        config.llm.summarize_model_small,
+        config.llm.embed_model,
     ]
 
     for model in required_models:
@@ -126,12 +150,12 @@ def main() -> None:
 @click.option("--skip-ai", is_flag=True, help="Skip AI processing (summarization and embedding)")
 @click.option("--skip-features", is_flag=True, help="Skip feature extraction after processing")
 @click.option("--dry-run", is_flag=True, help="Use in-memory storage (no database required)")
-@click.option("--ollama-url", default=None, help="Ollama API URL (default: from config)")
+@click.option("--llm-url", default=None, help="LLM API URL (default: from config)")
 @click.option("--workers", "-w", default=4, type=int, help="Number of parallel workers (default: 4)")
 @click.option("--force-clean", is_flag=True, help="Delete all indexed data for this repo/user before parsing")
 def parse(
     repo_path: str, user: str, skip_ai: bool, skip_features: bool, dry_run: bool,
-    ollama_url: str | None, workers: int, force_clean: bool
+    llm_url: str | None, workers: int, force_clean: bool
 ) -> None:
     """Parse a repository and index its code elements.
 
@@ -139,8 +163,8 @@ def parse(
     """
     # Load configuration (skip validation in dry-run mode)
     config = load_config(skip_validation=dry_run)
-    if ollama_url:
-        config.ollama.url = ollama_url
+    if llm_url:
+        config.llm.url = llm_url
 
     if dry_run:
         console.print("[yellow]Dry run mode:[/] Using in-memory storage\n")
@@ -405,8 +429,8 @@ def run_feature_extraction(
         cluster_config = ClusterConfig(
             min_cluster_size=min_cluster_size,
             min_samples=min_samples,
-            ollama_url=config.ollama.url,
-            ollama_model=config.ollama.summarize_model,
+            api_base=config.llm.url,
+            labeling_model=config.llm.summarize_model,
         )
 
         clusterer = FeatureClusterer(cluster_config)
@@ -546,9 +570,11 @@ def run_feature_extraction(
         console.print(f"  Processing {clustering_result.cluster_count} features with {workers} workers...")
 
         proc_config = FeatureProcessingConfig(
-            summarize_model=config.ollama.summarize_model,
-            embed_model=config.ollama.embed_model,
-            ollama_url=config.ollama.url,
+            summarize_model=config.llm.summarize_model,
+            embed_model=config.llm.embed_model,
+            api_base=config.llm.url,
+            provider=config.llm.provider,
+            api_key=config.llm.api_key,
             num_workers=workers,
         )
 
@@ -898,10 +924,12 @@ def run_processing(
     es_repo = ElasticsearchRepository(config)
 
     proc_config = ProcessingConfig(
-        summarize_model=config.ollama.summarize_model,
-        summarize_model_small=config.ollama.summarize_model_small,
-        embed_model=config.ollama.embed_model,
-        ollama_url=config.ollama.url,
+        summarize_model=config.llm.summarize_model,
+        summarize_model_small=config.llm.summarize_model_small,
+        embed_model=config.llm.embed_model,
+        api_base=config.llm.url,
+        provider=config.llm.provider,
+        api_key=config.llm.api_key,
         skip_ai=skip_ai,
         num_workers=workers,
     )

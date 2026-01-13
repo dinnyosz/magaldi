@@ -1,6 +1,6 @@
 """MCP Tool implementations for Magaldi.
 
-Each tool function takes an ElasticsearchRepository and optional OllamaEmbedClient,
+Each tool function takes an ElasticsearchRepository and optional CodeEmbeddingClient,
 plus tool-specific parameters, and returns a dict or list result.
 """
 
@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from shared.db.elasticsearch import ElasticsearchRepository
-from shared.ai.embedding import OllamaEmbedClient
+from shared.ai.embedding import CodeEmbeddingClient
 
 
 # =============================================================================
@@ -19,7 +19,7 @@ from shared.ai.embedding import OllamaEmbedClient
 
 def search_code(
     es: ElasticsearchRepository,
-    ollama: OllamaEmbedClient | None,
+    embed_client: CodeEmbeddingClient | None,
     query: str,
     scope: str | None = None,
     repository: str | None = None,
@@ -36,7 +36,7 @@ def search_code(
 
     Args:
         es: Elasticsearch repository.
-        ollama: Ollama client for query embedding (optional, falls back to keyword).
+        embed_client: Embedding client for query (optional, falls back to keyword).
         query: Natural language search query.
         scope: Filter by scope.
         repository: Filter by repository.
@@ -55,9 +55,9 @@ def search_code(
 
     # Try vector search first, fall back to keyword search
     results = []
-    if ollama is not None:
+    if embed_client is not None:
         try:
-            query_embedding = ollama.embed_single(query)
+            query_embedding = embed_client.embed_single(query)
             results = es.search_by_vector(
                 embedding=query_embedding,
                 scope=scope,
@@ -121,7 +121,7 @@ def search_code(
 
 def search_features(
     es: ElasticsearchRepository,
-    ollama: OllamaEmbedClient | None,
+    embed_client: CodeEmbeddingClient | None,
     query: str,
     scope: str | None = None,
     repository: str | None = None,
@@ -134,7 +134,7 @@ def search_features(
 
     Args:
         es: Elasticsearch repository.
-        ollama: Ollama client for query embedding (optional, falls back to keyword).
+        embed_client: Embedding client for query (optional, falls back to keyword).
         query: Search query for features.
         scope: Filter by scope.
         repository: Filter by repository.
@@ -148,9 +148,9 @@ def search_features(
 
     # Try vector search first, fall back to keyword search
     results = []
-    if ollama is not None:
+    if embed_client is not None:
         try:
-            query_embedding = ollama.embed_single(query)
+            query_embedding = embed_client.embed_single(query)
             results = es.search_by_vector(
                 embedding=query_embedding,
                 scope=scope,

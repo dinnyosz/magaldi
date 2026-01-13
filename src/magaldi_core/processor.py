@@ -25,14 +25,14 @@ from shared.db.elasticsearch import ElasticsearchRepository
 from shared.db.redis import RedisSummarizationJobRepository, RedisEmbeddingJobRepository
 from shared.ai.embedding import (
     EmbeddingConfig,
-    OllamaEmbedClient,
+    CodeEmbeddingClient,
     build_embedding_text,
     normalize_vector,
     validate_vector,
 )
 from magaldi_core.code_parser import CodeElement, ParsedFile
 from shared.ai.summarization import (
-    OllamaClient,
+    SummarizationLLMClient,
     SummarizationConfig,
     build_prompt,
     clean_summary,
@@ -51,7 +51,9 @@ class ProcessingConfig:
     summarize_model: str = "qwen2.5-coder:3b"
     summarize_model_small: str = "qwen2.5-coder:1.5b"  # For functions, methods, variables, constants
     embed_model: str = "snowflake-arctic-embed2"
-    ollama_url: str = "http://localhost:11434"
+    api_base: str = "http://localhost:11434"  # API base URL (for Ollama or custom endpoints)
+    provider: str = "ollama"  # LLM provider: ollama, openai, anthropic, etc.
+    api_key: str | None = None  # API key for cloud providers
     skip_ai: bool = False
 
     # Summarization settings
@@ -587,7 +589,7 @@ class _SummaryCache:
 def _summarize_element(
     element: CodeElement,
     summary_cache: _SummaryCache,
-    ollama: OllamaClient,
+    llm_client: SummarizationLLMClient,
     config: ProcessingConfig,
 ) -> str:
     """Generate summary for an element.
@@ -595,7 +597,7 @@ def _summarize_element(
     Args:
         element: Element to summarize.
         summary_cache: Cache with parent summaries.
-        ollama: Ollama client for LLM.
+        llm_client: LLM client for text generation.
         config: Processing configuration.
 
     Returns:
@@ -607,9 +609,9 @@ def _summarize_element(
     # Build prompt with context
     prompt = build_prompt(element, parent_summaries, config.max_code_tokens)
 
-    # Generate with Ollama (select model based on element type)
+    # Generate summary (select model based on element type)
     model = config.get_model_for_element_type(element.element_type)
-    raw_summary = ollama.generate(
+    raw_summary = llm_client.generate(
         prompt=prompt,
         temperature=config.summarize_temperature,
         max_tokens=config.summarize_max_tokens,
@@ -624,7 +626,7 @@ def _summarize_element(
 def _embed_element(
     element: CodeElement,
     summary_cache: _SummaryCache,
-    ollama_embed: OllamaEmbedClient,
+    embed_client: CodeEmbeddingClient,
     config: ProcessingConfig,
 ) -> list[float]:
     """Generate embedding for an element.
@@ -632,7 +634,7 @@ def _embed_element(
     Args:
         element: Element to embed.
         summary_cache: Cache with summaries for context.
-        ollama_embed: Ollama embedding client.
+        embed_client: Embedding client.
         config: Processing configuration.
 
     Returns:
@@ -645,7 +647,7 @@ def _embed_element(
     text = build_embedding_text(element, summary_cache, config.embed_max_context)
 
     # Generate embedding
-    embedding = ollama_embed.embed_single(text, timeout=config.embed_timeout)
+    embedding = embed_client.embed_single(text, timeout=config.embed_timeout)
 
     # Validate dimensions
     if not validate_vector(embedding, config.embed_dimensions):
@@ -695,8 +697,8 @@ def _index_element(
 def _process_single_element(
     element: CodeElement,
     summary_cache: _SummaryCache,
-    ollama: OllamaClient | None,
-    ollama_embed: OllamaEmbedClient | None,
+    llm_client: SummarizationLLMClient | None,
+    embed_client: CodeEmbeddingClient | None,
     config: ProcessingConfig,
     file_hashes: dict[str, str] | None,
     element_counts: dict[str, int] | None,
@@ -710,8 +712,8 @@ def _process_single_element(
     Args:
         element: Element to process.
         summary_cache: Cache for summaries.
-        ollama: Ollama client for summarization (None if skip_ai).
-        ollama_embed: Ollama client for embeddings (None if skip_ai).
+        llm_client: LLM client for summarization (None if skip_ai).
+        embed_client: Embedding client (None if skip_ai).
         config: Processing configuration.
         file_hashes: Optional dict mapping relative_path to file hash.
         element_counts: Optional dict mapping relative_path to element count.
@@ -762,7 +764,7 @@ def _process_single_element(
             summary = f"{element.element_type.title()}: {element.name}"
         else:
             api_start = time.time()
-            summary = _summarize_element(element, summary_cache, ollama, config)
+            summary = _summarize_element(element, summary_cache, llm_client, config)
             summarize_time = time.time() - api_start
 
         # Cache summary for children
@@ -777,7 +779,7 @@ def _process_single_element(
                 embedding = [0.0] * config.embed_dimensions
             else:
                 api_start = time.time()
-                embedding = _embed_element(element, summary_cache, ollama_embed, config)
+                embedding = _embed_element(element, summary_cache, embed_client, config)
                 embed_time = time.time() - api_start
 
         # Step 3: Index to ES (only after summarize+embed complete)
@@ -908,13 +910,23 @@ def process_elements(
     for elem in all_elements:
         summary_cache.add_element(elem)
 
-    # Initialize Ollama clients (only if not skipping AI)
-    ollama: OllamaClient | None = None
-    ollama_embed: OllamaEmbedClient | None = None
+    # Initialize LLM clients (only if not skipping AI)
+    llm_client: SummarizationLLMClient | None = None
+    embed_client: CodeEmbeddingClient | None = None
 
     if not config.skip_ai:
-        ollama = OllamaClient(config.ollama_url, config.summarize_model)
-        ollama_embed = OllamaEmbedClient(config.ollama_url, config.embed_model)
+        llm_client = SummarizationLLMClient(
+            url=config.api_base,
+            model=config.summarize_model,
+            provider=config.provider,
+            api_key=config.api_key,
+        )
+        embed_client = CodeEmbeddingClient(
+            url=config.api_base,
+            model=config.embed_model,
+            provider=config.provider,
+            api_key=config.api_key,
+        )
 
     # Initialize tracking structures (use provided or create new)
     dependency_tracker = DependencyTracker(elements_to_process)
@@ -976,8 +988,8 @@ def process_elements(
             return _process_single_element(
                 element=element,
                 summary_cache=summary_cache,
-                ollama=ollama,
-                ollama_embed=ollama_embed,
+                llm_client=llm_client,
+                embed_client=embed_client,
                 config=config,
                 file_hashes=file_hashes,
                 element_counts=element_counts,
@@ -1070,9 +1082,10 @@ def process_elements(
                     on_progress(progress_state)
 
     except KeyboardInterrupt:
-        # Graceful shutdown on Ctrl+C - cancel pending futures
+        # Graceful shutdown on Ctrl+C - cancel pending futures and stop executor
         for future in future_to_element:
             future.cancel()
+        executor.shutdown(wait=False, cancel_futures=True)
         # Clear worker status display first (so Live display is clean)
         for wid in range(config.num_workers):
             worker_status.clear(wid)

@@ -235,9 +235,9 @@ function Dashboard() {
                     </td>
                   </tr>
                   <tr>
-                    <td>Ollama</td>
+                    <td>LLM</td>
                     <td className="text-end">
-                      {getHealthBadge(dashboard?.health?.ollama?.status)}
+                      {getHealthBadge(dashboard?.health?.llm?.status)}
                     </td>
                   </tr>
                   <tr>

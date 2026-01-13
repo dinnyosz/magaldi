@@ -25,7 +25,7 @@ class HealthStatus(BaseModel):
     """Overall system health status."""
 
     elasticsearch: ServiceHealth
-    ollama: ServiceHealth
+    llm: ServiceHealth
     redis: ServiceHealth
 
 

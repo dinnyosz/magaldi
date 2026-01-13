@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 
 from magaldi_web.dependencies import (
     check_elasticsearch_health,
-    check_ollama_health,
+    check_llm_health,
     check_redis_health,
     get_cached_config,
     get_es_repository,
@@ -115,7 +115,7 @@ async def get_dashboard(
 
     # Check service health and queue stats
     es_health = await check_elasticsearch_health(es_repo)
-    ollama_health = await check_ollama_health(config)
+    llm_health = await check_llm_health(config)
     redis_health = await check_redis_health(config)
     queue_stats = await get_redis_queue_stats(config)
 
@@ -172,9 +172,9 @@ async def get_dashboard(
                     "nodes": es_health.get("number_of_nodes"),
                 },
             ),
-            ollama=ServiceHealth(
-                status=ollama_health.get("status", "unknown"),
-                details={"models": ollama_health.get("models_loaded", [])},
+            llm=ServiceHealth(
+                status=llm_health.get("status", "unknown"),
+                details={"models": llm_health.get("models_loaded", [])},
             ),
             redis=ServiceHealth(
                 status=redis_health.get("status", "unknown"),

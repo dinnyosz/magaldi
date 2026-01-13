@@ -41,11 +41,13 @@ async def search(
     # Generate query embedding for semantic search
     query_embedding = None
     try:
-        from shared.ai.embedding import OllamaEmbedClient
+        from shared.ai.embedding import CodeEmbeddingClient
 
-        embed_client = OllamaEmbedClient(
-            base_url=config.ollama.url,
-            model=config.ollama.embed_model,
+        embed_client = CodeEmbeddingClient(
+            url=config.llm.url,
+            model=config.llm.embed_model,
+            provider=config.llm.provider,
+            api_key=config.llm.embed_api_key or config.llm.api_key,
         )
         query_embedding = embed_client.embed(request.query)
     except Exception:

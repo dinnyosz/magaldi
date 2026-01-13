@@ -22,11 +22,11 @@ if TYPE_CHECKING:
     from shared.config import MagaldiConfig
 from shared.db.elasticsearch import ElasticsearchRepository
 from shared.ai.embedding import (
-    OllamaEmbedClient,
+    CodeEmbeddingClient,
     normalize_vector,
     validate_vector,
 )
-from shared.ai.summarization import OllamaClient
+from shared.ai.summarization import SummarizationLLMClient
 
 # =============================================================================
 # DATA CLASSES
@@ -39,7 +39,9 @@ class FeatureProcessingConfig:
 
     summarize_model: str = "qwen2.5-coder:3b"
     embed_model: str = "snowflake-arctic-embed2"
-    ollama_url: str = "http://localhost:11434"
+    api_base: str = "http://localhost:11434"  # API base URL (for Ollama or custom endpoints)
+    provider: str = "ollama"  # LLM provider: ollama, openai, anthropic, etc.
+    api_key: str | None = None  # API key for cloud providers
 
     # Summarization settings
     summarize_temperature: float = 0.3
@@ -309,7 +311,7 @@ Summary:"""
 def _generate_feature_summary(
     cluster: ClusterResult,
     member_summaries: dict[str, str],
-    ollama: OllamaClient,
+    llm_client: SummarizationLLMClient,
     config: FeatureProcessingConfig,
 ) -> str:
     """Generate summary for a feature based on member summaries.
@@ -317,7 +319,7 @@ def _generate_feature_summary(
     Args:
         cluster: Cluster result with member info.
         member_summaries: Dict mapping element_id to summary.
-        ollama: Ollama client for LLM.
+        llm_client: LLM client for text generation.
         config: Processing configuration.
 
     Returns:
@@ -341,7 +343,7 @@ def _generate_feature_summary(
         member_summaries="\n".join(summaries_text),
     )
 
-    raw_summary = ollama.generate(
+    raw_summary = llm_client.generate(
         prompt=prompt,
         temperature=config.summarize_temperature,
         max_tokens=config.summarize_max_tokens,
@@ -360,20 +362,20 @@ def _generate_feature_summary(
 
 def _embed_feature(
     summary: str,
-    ollama_embed: OllamaEmbedClient,
+    embed_client: CodeEmbeddingClient,
     config: FeatureProcessingConfig,
 ) -> list[float]:
     """Generate embedding for feature summary.
 
     Args:
         summary: Feature summary text.
-        ollama_embed: Ollama embedding client.
+        embed_client: Embedding client.
         config: Processing configuration.
 
     Returns:
         Embedding vector.
     """
-    embedding = ollama_embed.embed_single(summary, timeout=config.embed_timeout)
+    embedding = embed_client.embed_single(summary, timeout=config.embed_timeout)
 
     if not validate_vector(embedding, config.embed_dimensions):
         raise ValueError(
@@ -391,8 +393,8 @@ def _process_single_feature(
     repository: str,
     username: str,
     es_repo: ElasticsearchRepository,
-    ollama: OllamaClient,
-    ollama_embed: OllamaEmbedClient,
+    llm_client: SummarizationLLMClient,
+    embed_client: CodeEmbeddingClient,
     config: FeatureProcessingConfig,
     worker_id: int,
     worker_status: FeatureWorkerStatus,
@@ -407,8 +409,8 @@ def _process_single_feature(
         repository: Repository name.
         username: Username/branch.
         es_repo: Elasticsearch repository.
-        ollama: Ollama client for summarization.
-        ollama_embed: Ollama client for embeddings.
+        llm_client: LLM client for summarization.
+        embed_client: Embedding client.
         config: Processing configuration.
         worker_id: Worker thread ID.
         worker_status: Status tracker for workers.
@@ -432,13 +434,13 @@ def _process_single_feature(
         # Step 1: Generate feature summary
         update_status("summarizing", config.summarize_model)
         api_start = time.time()
-        summary = _generate_feature_summary(cluster, member_summaries, ollama, config)
+        summary = _generate_feature_summary(cluster, member_summaries, llm_client, config)
         summarize_time = time.time() - api_start
 
         # Step 2: Embed feature summary
         update_status("embedding")
         api_start = time.time()
-        embedding = _embed_feature(summary, ollama_embed, config)
+        embedding = _embed_feature(summary, embed_client, config)
         embed_time = time.time() - api_start
 
         # Step 3: Index feature document
@@ -541,9 +543,19 @@ def process_features(
 
     member_summaries = es_repo.get_summaries_batch(all_member_ids)
 
-    # Initialize Ollama clients
-    ollama = OllamaClient(config.ollama_url, config.summarize_model)
-    ollama_embed = OllamaEmbedClient(config.ollama_url, config.embed_model)
+    # Initialize LLM clients
+    llm_client = SummarizationLLMClient(
+        url=config.api_base,
+        model=config.summarize_model,
+        provider=config.provider,
+        api_key=config.api_key,
+    )
+    embed_client = CodeEmbeddingClient(
+        url=config.api_base,
+        model=config.embed_model,
+        provider=config.provider,
+        api_key=config.api_key,
+    )
 
     # Initialize tracking structures
     if timing_stats is None:
@@ -590,8 +602,8 @@ def process_features(
                 repository=repository,
                 username=username,
                 es_repo=es_repo,
-                ollama=ollama,
-                ollama_embed=ollama_embed,
+                llm_client=llm_client,
+                embed_client=embed_client,
                 config=config,
                 worker_id=wid,
                 worker_status=worker_status,
@@ -648,6 +660,7 @@ def process_features(
     except KeyboardInterrupt:
         for future in future_to_cluster:
             future.cancel()
+        executor.shutdown(wait=False, cancel_futures=True)
         for wid in range(config.num_workers):
             worker_status.clear(wid)
         raise
@@ -695,7 +708,7 @@ def _generate_subfeature_summary(
     member_summaries: dict[str, str],
     parent_label: str,
     parent_summary: str,
-    ollama: OllamaClient,
+    llm_client: SummarizationLLMClient,
     config: FeatureProcessingConfig,
 ) -> str:
     """Generate summary for a subfeature based on member summaries.
@@ -705,7 +718,7 @@ def _generate_subfeature_summary(
         member_summaries: Dict mapping element_id to summary.
         parent_label: Label of the parent feature.
         parent_summary: Summary of the parent feature.
-        ollama: Ollama client for LLM.
+        llm_client: LLM client for text generation.
         config: Processing configuration.
 
     Returns:
@@ -730,7 +743,7 @@ def _generate_subfeature_summary(
         member_summaries="\n".join(summaries_text),
     )
 
-    raw_summary = ollama.generate(
+    raw_summary = llm_client.generate(
         prompt=prompt,
         temperature=config.summarize_temperature,
         max_tokens=config.summarize_max_tokens,
@@ -753,8 +766,8 @@ def _process_single_subfeature(
     repository: str,
     username: str,
     es_repo: "ElasticsearchRepository",
-    ollama: OllamaClient,
-    ollama_embed: OllamaEmbedClient,
+    llm_client: SummarizationLLMClient,
+    embed_client: CodeEmbeddingClient,
     config: FeatureProcessingConfig,
     worker_id: int,
     worker_status: SubfeatureWorkerStatus,
@@ -777,7 +790,7 @@ def _process_single_subfeature(
         summary = _generate_subfeature_summary(
             work_item.sub_cluster, work_item.member_summaries,
             work_item.parent_label, work_item.parent_summary,
-            ollama, config,
+            llm_client, config,
         )
         summarize_time = time.time() - summ_start
 
@@ -788,7 +801,7 @@ def _process_single_subfeature(
 
         # Embed subfeature
         embed_start = time.time()
-        embedding = ollama_embed.embed_single(summary, timeout=config.embed_timeout)
+        embedding = embed_client.embed_single(summary, timeout=config.embed_timeout)
         if validate_vector(embedding, config.embed_dimensions):
             embedding = normalize_vector(embedding)
         else:
@@ -911,16 +924,26 @@ def process_subfeatures(
         for key_type in ["jobs", "running", "queue"]:
             client.delete(f"magaldi:subfeature:{key_type}:{scope}:{repository}:{username}")
 
-    # Initialize Ollama clients
-    ollama = OllamaClient(config.ollama_url, config.summarize_model)
-    ollama_embed = OllamaEmbedClient(config.ollama_url, config.embed_model)
+    # Initialize LLM clients
+    llm_client = SummarizationLLMClient(
+        url=config.api_base,
+        model=config.summarize_model,
+        provider=config.provider,
+        api_key=config.api_key,
+    )
+    embed_client = CodeEmbeddingClient(
+        url=config.api_base,
+        model=config.embed_model,
+        provider=config.provider,
+        api_key=config.api_key,
+    )
 
     # Sub-clustering config
     cluster_config = ClusterConfig(
         min_cluster_size=subcluster_config.min_cluster_size,
         min_samples=subcluster_config.min_samples,
-        ollama_url=config.ollama_url,
-        ollama_model=config.summarize_model,
+        api_base=config.api_base,
+        labeling_model=config.summarize_model,
     )
     sub_clusterer = FeatureClusterer(cluster_config)
 
@@ -1075,8 +1098,8 @@ def process_subfeatures(
                 repository=repository,
                 username=username,
                 es_repo=es_repo,
-                ollama=ollama,
-                ollama_embed=ollama_embed,
+                llm_client=llm_client,
+                embed_client=embed_client,
                 config=config,
                 worker_id=wid,
                 worker_status=worker_status,

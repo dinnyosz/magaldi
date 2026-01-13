@@ -18,6 +18,7 @@ Usage:
 from __future__ import annotations
 
 import os
+import warnings
 from dataclasses import dataclass
 from typing import Any
 
@@ -26,6 +27,12 @@ from litellm import completion, embedding
 
 # Disable LiteLLM telemetry
 litellm.telemetry = False
+
+# Suppress LiteLLM internal warnings:
+# - Pydantic 2.12+ serialization warnings (https://github.com/BerriAI/litellm/issues/11759)
+# - Unclosed aiohttp sessions from Ollama provider
+warnings.filterwarnings("ignore", message="Pydantic serializer warnings")
+warnings.filterwarnings("ignore", category=ResourceWarning, message=".*[Uu]nclosed.*")
 
 
 class LLMError(Exception):
@@ -399,13 +406,8 @@ class EmbeddingClient:
 
 
 # =============================================================================
-# BACKWARD COMPATIBILITY ALIASES
+# FACTORY FUNCTIONS
 # =============================================================================
-
-
-# These aliases maintain backward compatibility with existing code
-OllamaClient = LLMClient
-OllamaEmbedClient = EmbeddingClient
 
 
 def create_llm_client_from_config(

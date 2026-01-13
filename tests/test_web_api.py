@@ -233,7 +233,7 @@ class TestSearchEndpoint:
         }
 
         # Mock the embedding client to avoid external calls
-        with patch("shared.ai.embedding.OllamaEmbedClient") as mock_embed:
+        with patch("shared.ai.embedding.CodeEmbeddingClient") as mock_embed:
             mock_embed.return_value.embed.side_effect = Exception("Skip embedding")
 
             response = client.post(
@@ -257,7 +257,7 @@ class TestSearchEndpoint:
             "hits": {"total": {"value": 0}, "max_score": None, "hits": []},
         }
 
-        with patch("shared.ai.embedding.OllamaEmbedClient") as mock_embed:
+        with patch("shared.ai.embedding.CodeEmbeddingClient") as mock_embed:
             mock_embed.return_value.embed.side_effect = Exception("Skip embedding")
 
             response = client.post(

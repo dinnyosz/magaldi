@@ -24,7 +24,7 @@ The system consists of two pipelines:
 | Parser | Tree-sitter with S-expression queries |
 | Storage & Search | Elasticsearch 8.11.0 (dense_vector) |
 | Job Queue | Redis |
-| AI Models | Ollama (qwen2.5-coder:7b + snowflake-arctic-embed2) |
+| AI Models | LiteLLM (supports Ollama, OpenAI, Anthropic, etc.) |
 | MCP | Python MCP SDK for Claude Code integration |
 
 ### Key Data Model
@@ -59,3 +59,7 @@ Python, JavaScript, TypeScript, PHP, Rust (via Tree-sitter grammars)
 ## Configuration
 
 Repository config file: `magaldi.yaml` in repo root with required `scope` field.
+
+## TODOs
+
+- [ ] **LiteLLM warnings**: Check if [issue #11759](https://github.com/BerriAI/litellm/issues/11759) (Pydantic serialization) and unclosed aiohttp session issues are resolved, then remove warning suppression from `src/shared/ai/llm_client.py`

@@ -9,7 +9,7 @@ from magaldi_core.code_parser import CodeElement
 from shared.ai.summarization import (
     InMemoryJobRepository,
     InMemorySummaryStore,
-    OllamaClient,
+    SummarizationLLMClient,
     SummarizationConfig,
     SummarizationResult,
     build_prompt,
@@ -111,7 +111,7 @@ def summary_store() -> InMemorySummaryStore:
 # =============================================================================
 
 
-class TestOllamaClient:
+class TestSummarizationLLMClient:
     """Tests for Ollama client."""
 
     def test_generate_returns_response(self):
@@ -124,7 +124,7 @@ class TestOllamaClient:
             mock_response.raise_for_status = MagicMock()
             mock_session.post.return_value = mock_response
 
-            client = OllamaClient("http://localhost:11434", "qwen2.5-coder:7b")
+            client = SummarizationLLMClient("http://localhost:11434", "qwen2.5-coder:7b")
             result = client.generate("Summarize this code")
 
             assert result == "This is a summary."
@@ -140,7 +140,7 @@ class TestOllamaClient:
             }
             mock_session.get.return_value = mock_response
 
-            client = OllamaClient("http://localhost:11434", "qwen2.5-coder:7b")
+            client = SummarizationLLMClient("http://localhost:11434", "qwen2.5-coder:7b")
             assert client.verify_model() is True
 
     def test_verify_model_returns_false_when_unavailable(self):
@@ -152,7 +152,7 @@ class TestOllamaClient:
             mock_response.json.return_value = {"models": [{"name": "other:model"}]}
             mock_session.get.return_value = mock_response
 
-            client = OllamaClient("http://localhost:11434", "qwen2.5-coder:7b")
+            client = SummarizationLLMClient("http://localhost:11434", "qwen2.5-coder:7b")
             assert client.verify_model() is False
 
 

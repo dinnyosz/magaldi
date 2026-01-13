@@ -45,12 +45,12 @@ async def check_elasticsearch_health(es_repo: ElasticsearchRepository) -> dict:
         return {"status": "unhealthy", "error": str(e)}
 
 
-async def check_ollama_health(config: MagaldiConfig) -> dict:
-    """Check Ollama health."""
+async def check_llm_health(config: MagaldiConfig) -> dict:
+    """Check LLM provider health (Ollama-style API)."""
     import requests
 
     try:
-        response = requests.get(f"{config.ollama.url}/api/tags", timeout=5)
+        response = requests.get(f"{config.llm.url}/api/tags", timeout=5)
         if response.ok:
             data = response.json()
             models = [m.get("name", "") for m in data.get("models", [])]

@@ -105,10 +105,10 @@ function Admin() {
                       <tr>
                         <td>
                           <i className="bi bi-robot me-2"></i>
-                          Ollama
+                          LLM
                         </td>
                         <td className="text-end">
-                          {getStatusBadge(health.services.ollama.status)}
+                          {getStatusBadge(health.services.llm.status)}
                         </td>
                       </tr>
                       <tr>

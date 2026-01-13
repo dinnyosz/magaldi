@@ -15,7 +15,7 @@ from mcp.types import TextContent, Tool
 
 from shared.config import get_config, load_config
 from shared.db.elasticsearch import ElasticsearchRepository
-from shared.ai.embedding import OllamaEmbedClient
+from shared.ai.embedding import CodeEmbeddingClient
 
 log = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ class MagaldiMCPServer:
         self.default_username = default_username
         self.repo_root = repo_root  # For read_file and find_files tools
         self.es_repo: ElasticsearchRepository | None = None
-        self.ollama_embed: OllamaEmbedClient | None = None
+        self.embed_client: CodeEmbeddingClient | None = None
 
         # Register handlers
         self._register_tools()
@@ -44,15 +44,17 @@ class MagaldiMCPServer:
             self.es_repo = ElasticsearchRepository(self.config)
         return self.es_repo
 
-    def _get_ollama(self) -> OllamaEmbedClient:
-        """Get or create Ollama embedding client."""
-        if self.ollama_embed is None:
-            ollama_config = self.config.ollama
-            self.ollama_embed = OllamaEmbedClient(
-                url=ollama_config.url,
-                model=ollama_config.embed_model,
+    def _get_embed_client(self) -> CodeEmbeddingClient:
+        """Get or create embedding client."""
+        if self.embed_client is None:
+            llm_config = self.config.llm
+            self.embed_client = CodeEmbeddingClient(
+                url=llm_config.url,
+                model=llm_config.embed_model,
+                provider=llm_config.embed_provider or llm_config.provider,
+                api_key=llm_config.embed_api_key or llm_config.api_key,
             )
-        return self.ollama_embed
+        return self.embed_client
 
     def _register_tools(self) -> None:
         """Register all MCP tools."""
@@ -410,13 +412,13 @@ class MagaldiMCPServer:
         )
 
         es = self._get_es()
-        ollama = self._get_ollama()
+        embed_client = self._get_embed_client()
 
         if name == "search_code":
             return await asyncio.to_thread(
                 search_code,
                 es,
-                ollama,
+                embed_client,
                 query=args["query"],
                 scope=args.get("scope"),
                 repository=args.get("repository"),
@@ -431,7 +433,7 @@ class MagaldiMCPServer:
             return await asyncio.to_thread(
                 search_features,
                 es,
-                ollama,
+                embed_client,
                 query=args["query"],
                 scope=args.get("scope"),
                 repository=args.get("repository"),

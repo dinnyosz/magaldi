@@ -144,8 +144,6 @@ class LLMConfig:
             return f"{provider}/{self.embed_model}"
 
 
-# Backward compatibility alias
-OllamaConfig = LLMConfig
 
 
 @dataclass
@@ -234,7 +232,7 @@ class MagaldiConfig:
 
     elasticsearch: ElasticsearchConfig = field(default_factory=ElasticsearchConfig)
     redis: RedisConfig = field(default_factory=RedisConfig)
-    ollama: OllamaConfig = field(default_factory=OllamaConfig)
+    llm: LLMConfig = field(default_factory=LLMConfig)
     workers: WorkersConfig = field(default_factory=WorkersConfig)
     parser: ParserConfig = field(default_factory=ParserConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
@@ -400,7 +398,7 @@ def _merge_config(config: MagaldiConfig, file_config: dict[str, Any]) -> Magaldi
     section_mapping = {
         "elasticsearch": config.elasticsearch,
         "redis": config.redis,
-        "ollama": config.ollama,
+        "llm": config.llm,
         "parser": config.parser,
         "search": config.search,
         "web": config.web,
@@ -455,16 +453,12 @@ def _apply_env_overrides(config: MagaldiConfig) -> MagaldiConfig:
         "MAGALDI_REDIS_PORT": ("redis", "port", int),
         "MAGALDI_REDIS_DB": ("redis", "db", int),
         "MAGALDI_REDIS_PASSWORD": ("redis", "password"),
-        # LLM/Ollama
-        "MAGALDI_LLM_PROVIDER": ("ollama", "provider"),
-        "MAGALDI_LLM_URL": ("ollama", "url"),
-        "MAGALDI_LLM_API_KEY": ("ollama", "api_key"),
-        "MAGALDI_LLM_SUMMARIZE_MODEL": ("ollama", "summarize_model"),
-        "MAGALDI_LLM_EMBED_MODEL": ("ollama", "embed_model"),
-        # Legacy Ollama env vars (backward compatibility)
-        "MAGALDI_OLLAMA_URL": ("ollama", "url"),
-        "MAGALDI_OLLAMA_SUMMARIZE_MODEL": ("ollama", "summarize_model"),
-        "MAGALDI_OLLAMA_EMBED_MODEL": ("ollama", "embed_model"),
+        # LLM configuration
+        "MAGALDI_LLM_PROVIDER": ("llm", "provider"),
+        "MAGALDI_LLM_URL": ("llm", "url"),
+        "MAGALDI_LLM_API_KEY": ("llm", "api_key"),
+        "MAGALDI_LLM_SUMMARIZE_MODEL": ("llm", "summarize_model"),
+        "MAGALDI_LLM_EMBED_MODEL": ("llm", "embed_model"),
         # Logging
         "MAGALDI_LOG_LEVEL": ("logging", "level"),
         # Web
@@ -498,12 +492,12 @@ def _validate_config(config: MagaldiConfig) -> None:
 
     # Consistency checks
     if (
-        config.ollama.embed_dimensions != 1024
-        and config.ollama.embed_model == "snowflake-arctic-embed2"
+        config.llm.embed_dimensions != 1024
+        and config.llm.embed_model == "snowflake-arctic-embed2"
     ):
         errors.append(
             f"snowflake-arctic-embed2 requires embed_dimensions=1024, "
-            f"got {config.ollama.embed_dimensions}"
+            f"got {config.llm.embed_dimensions}"
         )
 
     # Port range checks

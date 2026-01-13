@@ -12,7 +12,7 @@ from shared.ai.embedding import (
     EmbeddingResult,
     InMemoryEmbeddingJobRepository,
     InMemoryEmbeddingStore,
-    OllamaEmbedClient,
+    CodeEmbeddingClient,
     build_embedding_text,
     estimate_tokens,
     normalize_vector,
@@ -108,7 +108,7 @@ def embedding_store() -> InMemoryEmbeddingStore:
 # =============================================================================
 
 
-class TestOllamaEmbedClient:
+class TestCodeEmbeddingClient:
     """Tests for Ollama embedding client."""
 
     def test_embed_single_returns_vector(self):
@@ -121,7 +121,7 @@ class TestOllamaEmbedClient:
             mock_response.raise_for_status = MagicMock()
             mock_session.post.return_value = mock_response
 
-            client = OllamaEmbedClient("http://localhost:11434", "test-model")
+            client = CodeEmbeddingClient("http://localhost:11434", "test-model")
             result = client.embed_single("test text")
 
             assert result == [0.1, 0.2, 0.3]
@@ -138,7 +138,7 @@ class TestOllamaEmbedClient:
             mock_response.raise_for_status = MagicMock()
             mock_session.post.return_value = mock_response
 
-            client = OllamaEmbedClient("http://localhost:11434", "test-model")
+            client = CodeEmbeddingClient("http://localhost:11434", "test-model")
             result = client.embed_batch(["text1", "text2", "text3"])
 
             assert len(result) == 3
@@ -155,7 +155,7 @@ class TestOllamaEmbedClient:
             }
             mock_session.get.return_value = mock_response
 
-            client = OllamaEmbedClient("http://localhost:11434", "snowflake-arctic-embed2")
+            client = CodeEmbeddingClient("http://localhost:11434", "snowflake-arctic-embed2")
             assert client.verify_model() is True
 
 

@@ -84,15 +84,18 @@ class SummarizationResult:
 
 
 # =============================================================================
-# LLM CLIENT (Wrapper for backward compatibility)
+# LLM CLIENT FOR SUMMARIZATION
 # =============================================================================
 
 
-class OllamaClient:
-    """Client for LLM text generation.
+class SummarizationLLMClient:
+    """Client for LLM text generation used in summarization.
 
-    This class wraps the new LiteLLM-based LLMClient for backward compatibility.
-    Supports multiple providers: Ollama, OpenAI, Anthropic, and more.
+    Supports multiple providers through LiteLLM:
+    - Ollama (local)
+    - OpenAI
+    - Anthropic
+    - And many more
     """
 
     def __init__(
@@ -110,7 +113,7 @@ class OllamaClient:
             provider: LLM provider (ollama, openai, anthropic, etc.)
             api_key: API key for cloud providers
         """
-        self.url = url.rstrip("/")
+        self.url = url.rstrip("/") if url else ""
         self.model = model
         self.provider = provider
         self.api_key = api_key
@@ -670,7 +673,7 @@ def update_dependencies_after_completion(
 def generate_summary(
     element: CodeElement,
     summary_store: SummaryStore,
-    ollama: OllamaClient,
+    llm_client: SummarizationLLMClient,
     config: SummarizationConfig,
 ) -> str:
     """Generate summary for a single element.
@@ -678,7 +681,7 @@ def generate_summary(
     Args:
         element: Code element to summarize.
         summary_store: Summary store for parent context.
-        ollama: Ollama client.
+        llm_client: LLM client for text generation.
         config: Summarization config.
 
     Returns:
@@ -690,8 +693,8 @@ def generate_summary(
     # Build prompt
     prompt = build_prompt(element, parent_summaries, config.max_code_tokens)
 
-    # Generate with Ollama
-    raw_summary = ollama.generate(
+    # Generate summary
+    raw_summary = llm_client.generate(
         prompt=prompt,
         temperature=config.temperature,
         max_tokens=config.max_tokens,
@@ -709,7 +712,7 @@ def process_summarization_job(
     username: str,
     job_repo: JobRepository,
     summary_store: SummaryStore,
-    ollama: OllamaClient,
+    llm_client: SummarizationLLMClient,
     config: SummarizationConfig,
 ) -> bool:
     """Process a single summarization job.
@@ -721,7 +724,7 @@ def process_summarization_job(
         username: User who owns this job.
         job_repo: Job repository.
         summary_store: Summary store.
-        ollama: Ollama client.
+        llm_client: LLM client for text generation.
         config: Summarization config.
 
     Returns:

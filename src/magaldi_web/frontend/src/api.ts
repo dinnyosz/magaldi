@@ -43,7 +43,7 @@ export interface DashboardStats {
   }
   health: {
     elasticsearch: { status: string; details?: Record<string, unknown> }
-    ollama: { status: string; details?: Record<string, unknown> }
+    llm: { status: string; details?: Record<string, unknown> }
     redis: { status: string; details?: Record<string, unknown> }
   }
 }
@@ -191,7 +191,7 @@ export interface HealthStatus {
   status: 'healthy' | 'degraded' | 'unhealthy'
   services: {
     elasticsearch: { status: string; details?: Record<string, unknown> }
-    ollama: { status: string; details?: Record<string, unknown> }
+    llm: { status: string; details?: Record<string, unknown> }
     redis: { status: string; details?: Record<string, unknown> }
   }
   timestamp: string

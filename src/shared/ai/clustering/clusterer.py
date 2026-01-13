@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 import hdbscan
 import numpy as np
 
-from shared.ai.summarization import OllamaClient
+from shared.ai.summarization import SummarizationLLMClient
 
 if TYPE_CHECKING:
     from shared.config import MagaldiConfig
@@ -42,9 +42,9 @@ class ClusterConfig:
     # Element types to cluster
     element_types: list[str] = field(default_factory=lambda: ["function", "method"])
 
-    # Ollama settings for labeling
-    ollama_url: str = "http://localhost:11434"
-    ollama_model: str = "qwen2.5-coder:3b"
+    # LLM settings for labeling
+    api_base: str = "http://localhost:11434"
+    labeling_model: str = "qwen2.5-coder:3b"
     label_temperature: float = 0.3
     label_max_tokens: int = 32
     label_timeout: int = 30
@@ -155,25 +155,25 @@ class FeatureClusterer:
     def __init__(
         self,
         config: ClusterConfig | None = None,
-        ollama_client: OllamaClient | None = None,
+        llm_client: SummarizationLLMClient | None = None,
     ):
         """Initialize clusterer.
 
         Args:
             config: Clustering configuration.
-            ollama_client: Optional Ollama client for labeling.
+            llm_client: Optional LLM client for labeling.
         """
         self.config = config or ClusterConfig()
-        self._ollama = ollama_client
+        self._llm_client = llm_client
 
-    def _get_ollama(self) -> OllamaClient:
-        """Get or create Ollama client."""
-        if self._ollama is None:
-            self._ollama = OllamaClient(
-                url=self.config.ollama_url,
-                model=self.config.ollama_model,
+    def _get_llm_client(self) -> SummarizationLLMClient:
+        """Get or create LLM client."""
+        if self._llm_client is None:
+            self._llm_client = SummarizationLLMClient(
+                url=self.config.api_base,
+                model=self.config.labeling_model,
             )
-        return self._ollama
+        return self._llm_client
 
     def cluster(
         self,
@@ -282,7 +282,7 @@ class FeatureClusterer:
         Returns:
             Updated ClusteringResult with labels.
         """
-        ollama = self._get_ollama()
+        llm_client = self._get_llm_client()
 
         # Initialize Redis job tracking if config provided
         redis_repo = None
@@ -306,7 +306,7 @@ class FeatureClusterer:
         completed = 0
         skipped = 0
         failed = 0
-        labeling_model = self.config.ollama_model  # Model used for labeling
+        labeling_model = self.config.labeling_model
 
         for cluster in result.clusters:
             # Mark as running in Redis (convert numpy int64 to Python int)
@@ -354,7 +354,7 @@ class FeatureClusterer:
 
             try:
                 api_start = time.time()
-                raw_label = ollama.generate(
+                raw_label = llm_client.generate(
                     prompt=prompt,
                     temperature=self.config.label_temperature,
                     max_tokens=self.config.label_max_tokens,
