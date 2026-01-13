@@ -610,7 +610,7 @@ def run_feature_extraction(
                 bar_text.append(" ETA", style="dim")
 
             # Worker table
-            worker_table = Table(show_header=False, box=None, padding=(0, 1))
+            worker_table = Table(show_header=False, box=None, padding=0)
             worker_table.add_column("ID", style="dim", width=4)
             worker_table.add_column("Stage", style="cyan", width=12)
             worker_table.add_column("Model", style="yellow")
@@ -777,7 +777,7 @@ def run_feature_extraction(
                     bar_text.append(" ETA", style="dim")
 
                 # Worker table
-                worker_table = Table(show_header=False, box=None, padding=(0, 1))
+                worker_table = Table(show_header=False, box=None, padding=0)
                 worker_table.add_column("ID", style="dim", width=4)
                 worker_table.add_column("Stage", style="cyan", width=12)
                 worker_table.add_column("Model", style="yellow", width=22)
@@ -1009,7 +1009,7 @@ def run_processing(
             bar_text.append(" ETA", style="dim")
 
         # Worker table
-        worker_table = Table(show_header=False, box=None, padding=(0, 1))
+        worker_table = Table(show_header=False, box=None, padding=0)
         worker_table.add_column("ID", style="dim", width=4)
         worker_table.add_column("Stage", style="cyan", width=12)
         worker_table.add_column("Model", style="yellow")
