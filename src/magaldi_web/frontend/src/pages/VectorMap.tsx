@@ -118,16 +118,16 @@ function VectorMap() {
         {repos?.length ? (
           <Row>
             {repos.map((repo) => (
-              <Col key={`${repo.scope}/${repo.repository}`} md={4} className="mb-4">
+              <Col key={`${repo.scope}/${repo.name}`} md={4} className="mb-4">
                 <Card
                   className="h-100"
                   style={{ cursor: 'pointer' }}
-                  onClick={() => navigate(`/vector-map/${repo.scope}/${repo.repository}`)}
+                  onClick={() => navigate(`/vector-map/${repo.scope}/${repo.name}`)}
                 >
                   <Card.Body>
                     <Card.Title>
                       <i className="bi bi-diagram-3 me-2 text-primary"></i>
-                      {repo.repository}
+                      {repo.name}
                     </Card.Title>
                     <Card.Subtitle className="mb-2 text-muted">
                       {repo.scope}
