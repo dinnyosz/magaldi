@@ -43,10 +43,6 @@ async def search(
         usernames.append(request.username)
     filters.append({"terms": {"username": usernames}})
 
-    # Exclude feature and subfeature types (they don't have file paths)
-    filters.append(
-        {"bool": {"must_not": {"terms": {"element_type": ["feature", "subfeature"]}}}}
-    )
 
     if request.scope:
         filters.append({"term": {"scope": request.scope}})
@@ -192,9 +188,9 @@ async def search(
                 element_id=source["element_id"],
                 name=source["name"],
                 element_type=source["element_type"],
-                file_path=source["relative_path"],
-                line=source["line_start"],
-                language=source["language"],
+                file_path=source.get("relative_path", ""),
+                line=source.get("line_start", 0),
+                language=source.get("language", ""),
                 summary=source.get("summary"),
                 signature=source.get("signature"),
                 repository=source["repository"],

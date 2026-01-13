@@ -15,9 +15,9 @@ import {
   OverlayTrigger,
   Tooltip,
 } from 'react-bootstrap'
-import { search, getRepositories, type SearchResult } from '../api'
+import { search, getRepositories, getBrowseFilters, type SearchResult } from '../api'
 
-const ELEMENT_TYPES = ['file', 'class', 'function', 'method', 'variable', 'constant']
+const ELEMENT_TYPES = ['file', 'class', 'function', 'method', 'variable', 'constant', 'feature', 'subfeature']
 const DEBOUNCE_MS = 300
 
 function Search() {
@@ -29,6 +29,7 @@ function Search() {
   const [selectedScope, setSelectedScope] = useState<string>('')
   const [selectedRepo, setSelectedRepo] = useState<string>('')
   const [selectedTypes, setSelectedTypes] = useState<string[]>([])
+  const [selectedUsername, setSelectedUsername] = useState<string>('')
   const [limit, setLimit] = useState(20)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -37,14 +38,20 @@ function Search() {
     queryFn: getRepositories,
   })
 
+  const { data: filters } = useQuery({
+    queryKey: ['browse-filters'],
+    queryFn: getBrowseFilters,
+  })
+
   const { data: searchResult, isLoading, error } = useQuery({
-    queryKey: ['search', debouncedQuery, selectedScope, selectedRepo, selectedTypes, limit],
+    queryKey: ['search', debouncedQuery, selectedScope, selectedRepo, selectedTypes, selectedUsername, limit],
     queryFn: () =>
       search({
         query: debouncedQuery,
         scope: selectedScope || undefined,
         repository: selectedRepo || undefined,
         element_types: selectedTypes.length > 0 ? selectedTypes : undefined,
+        username: selectedUsername || undefined,
         limit,
       }),
     enabled: debouncedQuery.length > 0,
@@ -162,6 +169,21 @@ function Search() {
                     />
                   ))}
                 </div>
+              </Form.Group>
+
+              <Form.Group className="mb-3">
+                <Form.Label>User Branch</Form.Label>
+                <Form.Select
+                  value={selectedUsername}
+                  onChange={(e) => setSelectedUsername(e.target.value)}
+                >
+                  <option value="">All users (main + branches)</option>
+                  {filters?.usernames?.map((username) => (
+                    <option key={username} value={username}>
+                      {username}
+                    </option>
+                  ))}
+                </Form.Select>
               </Form.Group>
 
               <Form.Group className="mb-3">

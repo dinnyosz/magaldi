@@ -53,6 +53,7 @@ export interface SearchRequest {
   scope?: string
   repository?: string
   element_types?: string[]
+  username?: string
   limit?: number
   offset?: number
 }
