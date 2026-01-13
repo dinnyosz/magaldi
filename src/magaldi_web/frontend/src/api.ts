@@ -245,40 +245,37 @@ export interface ClustersResponse {
   total_elements: number
 }
 
-export interface HealthStatus {
-  status: 'healthy' | 'degraded' | 'unhealthy'
-  services: {
-    elasticsearch: { status: string; details?: Record<string, unknown> }
-    llm: { status: string; details?: Record<string, unknown> }
-    redis: { status: string; details?: Record<string, unknown> }
-  }
-  timestamp: string
-}
-
-export interface JobInfo {
-  job_id: string
-  job_type: string
+export interface ServiceHealth {
   status: string
-  created_at: string
-  started_at: string | null
-  completed_at: string | null
-  progress: number
-  error: string | null
+  latency_ms: number | null
+  details?: Record<string, unknown>
 }
 
-export interface JobsResponse {
-  jobs: JobInfo[]
-  total: number
+export interface HealthStatus {
+  elasticsearch: ServiceHealth
+  llm: ServiceHealth
+  redis: ServiceHealth
+}
+
+export interface QueueStats {
+  pending: number
+  running: number
+  completed: number
+  failed: number
+}
+
+export interface JobStatsResponse {
+  summarization: QueueStats
+  embedding: QueueStats
 }
 
 export interface IndexStats {
-  total_documents: number
-  index_size_bytes: number
-  shards: {
-    total: number
-    successful: number
-    failed: number
-  }
+  index_name: string
+  document_count: number
+  size_bytes: number
+  size_human: string
+  with_vectors: number
+  vector_coverage_pct: number
 }
 
 // API functions
@@ -379,11 +376,8 @@ export async function getHealth(): Promise<HealthStatus> {
   return fetchJson(`${API_BASE}/admin/health`)
 }
 
-export async function getJobs(status?: string, limit = 50): Promise<JobsResponse> {
-  const params = new URLSearchParams()
-  if (status) params.set('status', status)
-  params.set('limit', String(limit))
-  return fetchJson(`${API_BASE}/admin/jobs?${params.toString()}`)
+export async function getJobs(): Promise<JobStatsResponse> {
+  return fetchJson(`${API_BASE}/admin/jobs`)
 }
 
 export async function getIndexStats(): Promise<IndexStats> {

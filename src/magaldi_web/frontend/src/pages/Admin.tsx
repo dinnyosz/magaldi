@@ -20,7 +20,7 @@ function Admin() {
 
   const { data: jobs, isLoading: jobsLoading } = useQuery({
     queryKey: ['jobs'],
-    queryFn: () => getJobs(undefined, 20),
+    queryFn: getJobs,
     refetchInterval: 5000,
   })
 
@@ -38,17 +38,6 @@ function Admin() {
         return <Badge bg="warning">Degraded</Badge>
       case 'unhealthy':
         return <Badge bg="danger">Unhealthy</Badge>
-      case 'pending':
-        return <Badge bg="secondary">Pending</Badge>
-      case 'running':
-      case 'in_progress':
-        return <Badge bg="primary">Running</Badge>
-      case 'completed':
-      case 'success':
-        return <Badge bg="success">Completed</Badge>
-      case 'failed':
-      case 'error':
-        return <Badge bg="danger">Failed</Badge>
       default:
         return <Badge bg="secondary">{status}</Badge>
     }
@@ -62,9 +51,16 @@ function Admin() {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
   }
 
-  const formatDate = (dateStr: string | null): string => {
-    if (!dateStr) return '-'
-    return new Date(dateStr).toLocaleString()
+  const getOverallStatus = (): string => {
+    if (!health) return 'unknown'
+    const statuses = [
+      health.elasticsearch.status,
+      health.llm.status,
+      health.redis.status,
+    ]
+    if (statuses.every((s) => s === 'healthy')) return 'healthy'
+    if (statuses.some((s) => s === 'unhealthy')) return 'unhealthy'
+    return 'degraded'
   }
 
   return (
@@ -88,7 +84,7 @@ function Admin() {
                 <>
                   <div className="d-flex justify-content-between align-items-center mb-3">
                     <span className="fs-5">Overall</span>
-                    {getStatusBadge(health.status)}
+                    {getStatusBadge(getOverallStatus())}
                   </div>
                   <hr />
                   <Table borderless size="sm" className="mb-0">
@@ -99,7 +95,7 @@ function Admin() {
                           Elasticsearch
                         </td>
                         <td className="text-end">
-                          {getStatusBadge(health.services.elasticsearch.status)}
+                          {getStatusBadge(health.elasticsearch.status)}
                         </td>
                       </tr>
                       <tr>
@@ -108,7 +104,7 @@ function Admin() {
                           LLM
                         </td>
                         <td className="text-end">
-                          {getStatusBadge(health.services.llm.status)}
+                          {getStatusBadge(health.llm.status)}
                         </td>
                       </tr>
                       <tr>
@@ -117,15 +113,11 @@ function Admin() {
                           Redis
                         </td>
                         <td className="text-end">
-                          {getStatusBadge(health.services.redis.status)}
+                          {getStatusBadge(health.redis.status)}
                         </td>
                       </tr>
                     </tbody>
                   </Table>
-                  <hr />
-                  <small className="text-muted">
-                    Last check: {formatDate(health.timestamp)}
-                  </small>
                 </>
               ) : (
                 <Alert variant="warning">Unable to load health status</Alert>
@@ -148,29 +140,27 @@ function Admin() {
                 </div>
               ) : indexStats ? (
                 <Row>
-                  <Col md={4} className="text-center">
-                    <h2 className="text-primary">
-                      {indexStats.total_documents.toLocaleString()}
-                    </h2>
-                    <p className="text-muted mb-0">Total Documents</p>
+                  <Col md={3} className="text-center">
+                    <h3 className="text-primary">
+                      {indexStats.document_count.toLocaleString()}
+                    </h3>
+                    <p className="text-muted mb-0">Documents</p>
                   </Col>
-                  <Col md={4} className="text-center">
-                    <h2 className="text-info">
-                      {formatBytes(indexStats.index_size_bytes)}
-                    </h2>
+                  <Col md={3} className="text-center">
+                    <h3 className="text-info">{indexStats.size_human}</h3>
                     <p className="text-muted mb-0">Index Size</p>
                   </Col>
-                  <Col md={4} className="text-center">
-                    <h2
-                      className={
-                        indexStats.shards.failed > 0
-                          ? 'text-danger'
-                          : 'text-success'
-                      }
-                    >
-                      {indexStats.shards.successful}/{indexStats.shards.total}
-                    </h2>
-                    <p className="text-muted mb-0">Healthy Shards</p>
+                  <Col md={3} className="text-center">
+                    <h3 className="text-success">
+                      {indexStats.with_vectors.toLocaleString()}
+                    </h3>
+                    <p className="text-muted mb-0">With Vectors</p>
+                  </Col>
+                  <Col md={3} className="text-center">
+                    <h3 className="text-warning">
+                      {indexStats.vector_coverage_pct}%
+                    </h3>
+                    <p className="text-muted mb-0">Coverage</p>
                   </Col>
                 </Row>
               ) : (
@@ -181,70 +171,84 @@ function Admin() {
         </Col>
       </Row>
 
-      {/* Jobs */}
+      {/* Job Queue Stats */}
       <Card>
-        <Card.Header className="d-flex justify-content-between align-items-center">
-          <span>
-            <i className="bi bi-list-task me-2"></i>
-            Recent Jobs
-          </span>
-          {jobs && (
-            <small className="text-muted">{jobs.total} total jobs</small>
-          )}
+        <Card.Header>
+          <i className="bi bi-list-task me-2"></i>
+          Job Queues
         </Card.Header>
         <Card.Body>
           {jobsLoading ? (
             <div className="text-center py-3">
               <Spinner animation="border" size="sm" />
             </div>
-          ) : jobs && jobs.jobs.length > 0 ? (
-            <Table hover responsive>
-              <thead>
-                <tr>
-                  <th>Job ID</th>
-                  <th>Type</th>
-                  <th>Status</th>
-                  <th>Progress</th>
-                  <th>Created</th>
-                  <th>Completed</th>
-                </tr>
-              </thead>
-              <tbody>
-                {jobs.jobs.map((job) => (
-                  <tr key={job.job_id}>
-                    <td>
-                      <code className="small">{job.job_id.slice(0, 8)}...</code>
-                    </td>
-                    <td>
-                      <Badge bg="secondary">{job.job_type}</Badge>
-                    </td>
-                    <td>{getStatusBadge(job.status)}</td>
-                    <td style={{ minWidth: 100 }}>
-                      <ProgressBar
-                        now={job.progress * 100}
-                        label={`${Math.round(job.progress * 100)}%`}
-                        variant={
-                          job.status === 'failed'
-                            ? 'danger'
-                            : job.progress === 1
-                            ? 'success'
-                            : 'primary'
-                        }
-                        style={{ height: 20 }}
-                      />
-                    </td>
-                    <td>
-                      <small>{formatDate(job.created_at)}</small>
-                    </td>
-                    <td>
-                      <small>{formatDate(job.completed_at)}</small>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
+          ) : jobs ? (
+            <Row>
+              <Col md={6}>
+                <h6>Summarization</h6>
+                <Table size="sm" bordered>
+                  <tbody>
+                    <tr>
+                      <td>Pending</td>
+                      <td className="text-end">
+                        <Badge bg="secondary">{jobs.summarization.pending}</Badge>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>Running</td>
+                      <td className="text-end">
+                        <Badge bg="primary">{jobs.summarization.running}</Badge>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>Completed</td>
+                      <td className="text-end">
+                        <Badge bg="success">{jobs.summarization.completed}</Badge>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>Failed</td>
+                      <td className="text-end">
+                        <Badge bg="danger">{jobs.summarization.failed}</Badge>
+                      </td>
+                    </tr>
+                  </tbody>
+                </Table>
+              </Col>
+              <Col md={6}>
+                <h6>Embedding</h6>
+                <Table size="sm" bordered>
+                  <tbody>
+                    <tr>
+                      <td>Pending</td>
+                      <td className="text-end">
+                        <Badge bg="secondary">{jobs.embedding.pending}</Badge>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>Running</td>
+                      <td className="text-end">
+                        <Badge bg="primary">{jobs.embedding.running}</Badge>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>Completed</td>
+                      <td className="text-end">
+                        <Badge bg="success">{jobs.embedding.completed}</Badge>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>Failed</td>
+                      <td className="text-end">
+                        <Badge bg="danger">{jobs.embedding.failed}</Badge>
+                      </td>
+                    </tr>
+                  </tbody>
+                </Table>
+              </Col>
+            </Row>
           ) : (
-            <p className="text-muted text-center mb-0">No jobs found</p>
+            <p className="text-muted text-center mb-0">Unable to load job stats</p>
           )}
         </Card.Body>
       </Card>
