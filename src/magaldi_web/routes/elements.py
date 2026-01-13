@@ -129,7 +129,7 @@ async def get_element_detail(
                         ],
                     },
                 },
-                "_source": ["element_id", "name", "summary"],
+                "_source": ["element_id", "hash_id", "name", "summary"],
             },
         )
         file_hits = file_result.get("hits", {}).get("hits", [])
@@ -137,6 +137,7 @@ async def get_element_detail(
             fs = file_hits[0]["_source"]
             file_context = FileContext(
                 element_id=fs["element_id"],
+                hash_id=fs.get("hash_id"),
                 name=fs["name"],
                 summary=fs.get("summary"),
             )
@@ -150,7 +151,7 @@ async def get_element_detail(
             body={
                 "size": 1,
                 "query": {"term": {"element_id": parent_id}},
-                "_source": ["element_id", "name", "element_type", "summary"],
+                "_source": ["element_id", "hash_id", "name", "element_type", "summary"],
             },
         )
         parent_hits = parent_result.get("hits", {}).get("hits", [])
@@ -158,6 +159,7 @@ async def get_element_detail(
             ps = parent_hits[0]["_source"]
             parent_context = ParentContext(
                 element_id=ps["element_id"],
+                hash_id=ps.get("hash_id"),
                 name=ps["name"],
                 element_type=ps["element_type"],
                 summary=ps.get("summary"),

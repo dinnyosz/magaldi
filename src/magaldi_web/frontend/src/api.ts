@@ -138,6 +138,7 @@ export interface ElementDetailSibling {
 
 export interface ElementDetailParent {
   element_id: string
+  hash_id: string | null
   name: string
   element_type: string
   summary: string | null
@@ -145,6 +146,7 @@ export interface ElementDetailParent {
 
 export interface ElementDetailFile {
   element_id: string
+  hash_id: string | null
   name: string
   summary: string | null
 }

@@ -105,7 +105,7 @@ function Element() {
         {element.context.file && element.element_type !== 'file' && (
           <Breadcrumb.Item
             linkAs={Link}
-            linkProps={{ to: `/element/${element.context.file.element_id}` }}
+            linkProps={{ to: `/element/${element.context.file.hash_id || element.context.file.element_id}` }}
           >
             {element.context.file.name}
           </Breadcrumb.Item>
@@ -113,7 +113,7 @@ function Element() {
         {element.context.parent && (
           <Breadcrumb.Item
             linkAs={Link}
-            linkProps={{ to: `/element/${element.context.parent.element_id}` }}
+            linkProps={{ to: `/element/${element.context.parent.hash_id || element.context.parent.element_id}` }}
           >
             {element.context.parent.name}
           </Breadcrumb.Item>

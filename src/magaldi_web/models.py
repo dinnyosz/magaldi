@@ -265,6 +265,7 @@ class FileContext(BaseModel):
     """Context about the file containing an element."""
 
     element_id: str
+    hash_id: str | None = None
     name: str
     summary: str | None = None
 
@@ -273,6 +274,7 @@ class ParentContext(BaseModel):
     """Context about the parent of an element."""
 
     element_id: str
+    hash_id: str | None = None
     name: str
     element_type: str
     summary: str | None = None
