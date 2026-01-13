@@ -110,7 +110,7 @@ function Element() {
             {element.context.file.name}
           </Breadcrumb.Item>
         )}
-        {element.context.parent && (
+        {element.context.parent && element.context.parent.element_type !== 'file' && (
           <Breadcrumb.Item
             linkAs={Link}
             linkProps={{ to: `/element/${element.context.parent.hash_id || element.context.parent.element_id}` }}
