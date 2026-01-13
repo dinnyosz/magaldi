@@ -828,20 +828,40 @@ def run_feature_extraction(
 
             # Track which phase we're in
             in_processing_phase = False
+            labeling_elapsed = 0.0
+
+            def build_labeling_summary(state: SubfeatureLabelingState) -> RenderableType:
+                """Build a compact summary of completed labeling phase."""
+                summary = Text()
+                summary.append("  Labeling: ", style="dim")
+                summary.append(f"{state.total_features}/{state.total_features}", style="green")
+                summary.append(" features | ", style="dim")
+                summary.append(f"{state.subclusters_labeled}", style="cyan")
+                summary.append(" subclusters | ", style="dim")
+                summary.append(format_duration(labeling_elapsed), style="cyan")
+                summary.append(" elapsed", style="dim")
+                return summary
 
             class LiveSubfeatureDisplay:
                 def __rich__(self) -> RenderableType:
                     if in_processing_phase:
-                        return build_subfeature_display(current_sub_state, workers)
+                        # Show labeling summary + processing display
+                        return Group(
+                            build_labeling_summary(current_labeling_state),
+                            Text(""),  # Blank line separator
+                            build_subfeature_display(current_sub_state, workers)
+                        )
                     else:
                         return build_labeling_display(current_labeling_state)
 
             with Live(LiveSubfeatureDisplay(), console=console, refresh_per_second=10) as live:
                 combined_live = live  # Make accessible to on_labeling_progress
                 def on_sub_progress(state: SubfeatureProgressState) -> None:
-                    nonlocal current_sub_state, in_processing_phase
+                    nonlocal current_sub_state, in_processing_phase, labeling_elapsed
                     if not in_processing_phase:
                         in_processing_phase = True
+                        # Capture final labeling elapsed time
+                        labeling_elapsed = time_mod.time() - current_labeling_state.phase_start
                     current_sub_state = state
                     live.refresh()
 
