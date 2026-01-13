@@ -37,6 +37,10 @@ SUBFEATURE_QUEUE = "magaldi:subfeature:queue:{scope}:{repository}:{username}"
 SUBFEATURE_RUNNING = "magaldi:subfeature:running:{scope}:{repository}:{username}"
 SUBFEATURE_JOBS = "magaldi:subfeature:jobs:{scope}:{repository}:{username}"
 
+SUBFEATURE_LABELING_QUEUE = "magaldi:subfeature_labeling:queue:{scope}:{repository}:{username}"
+SUBFEATURE_LABELING_RUNNING = "magaldi:subfeature_labeling:running:{scope}:{repository}:{username}"
+SUBFEATURE_LABELING_JOBS = "magaldi:subfeature_labeling:jobs:{scope}:{repository}:{username}"
+
 
 def _key(template: str, scope: str, repository: str, username: str) -> str:
     """Format a key template with scope, repository, and username."""
@@ -896,4 +900,121 @@ class RedisSubfeatureJobRepository(RedisRepository):
             )
             client.srem(
                 _key(SUBFEATURE_RUNNING, scope, repository, username), subfeature_id
+            )
+
+
+class RedisSubfeatureLabelingJobRepository(RedisRepository):
+    """Redis-based subfeature labeling job queue with scope/repository/user isolation."""
+
+    def add_job(
+        self,
+        parent_label: str,
+        cluster_count: int,
+        scope: str,
+        repository: str,
+        username: str,
+    ) -> None:
+        """Add a subfeature labeling job to the queue.
+
+        Args:
+            parent_label: Parent feature label being sub-clustered.
+            cluster_count: Number of subclusters to label.
+            scope: Repository scope.
+            repository: Repository name.
+            username: User who owns this job.
+        """
+        client = self._get_client()
+
+        job_data = {
+            "parent_label": parent_label,
+            "cluster_count": cluster_count,
+            "scope": scope,
+            "repository": repository,
+            "username": username,
+            "status": "pending",
+            "created_at": datetime.now().isoformat(),
+            "completed_at": None,
+            "error_message": None,
+        }
+
+        client.hset(
+            _key(SUBFEATURE_LABELING_JOBS, scope, repository, username),
+            parent_label,
+            json.dumps(job_data),
+        )
+
+        client.zadd(
+            _key(SUBFEATURE_LABELING_QUEUE, scope, repository, username),
+            {parent_label: time.time()},
+        )
+
+    def get_job(
+        self, parent_label: str, scope: str, repository: str, username: str
+    ) -> dict[str, Any] | None:
+        """Get job data by parent label."""
+        client = self._get_client()
+        data = client.hget(
+            _key(SUBFEATURE_LABELING_JOBS, scope, repository, username), parent_label
+        )
+        if data:
+            return json.loads(data)
+        return None
+
+    def mark_running(
+        self, parent_label: str, scope: str, repository: str, username: str
+    ) -> None:
+        """Mark a job as running."""
+        client = self._get_client()
+
+        jobs_key = _key(SUBFEATURE_LABELING_JOBS, scope, repository, username)
+        running_key = _key(SUBFEATURE_LABELING_RUNNING, scope, repository, username)
+
+        job_data = self.get_job(parent_label, scope, repository, username)
+        if job_data:
+            job_data["status"] = "running"
+            client.hset(jobs_key, parent_label, json.dumps(job_data))
+            client.sadd(running_key, parent_label)
+            client.zrem(_key(SUBFEATURE_LABELING_QUEUE, scope, repository, username), parent_label)
+
+    def mark_completed(
+        self, parent_label: str, scope: str, repository: str, username: str
+    ) -> None:
+        """Mark a job as completed."""
+        client = self._get_client()
+
+        job_data = self.get_job(parent_label, scope, repository, username)
+        if job_data:
+            job_data["status"] = "completed"
+            job_data["completed_at"] = datetime.now().isoformat()
+            client.hset(
+                _key(SUBFEATURE_LABELING_JOBS, scope, repository, username),
+                parent_label,
+                json.dumps(job_data),
+            )
+            client.srem(
+                _key(SUBFEATURE_LABELING_RUNNING, scope, repository, username), parent_label
+            )
+
+    def mark_failed(
+        self,
+        parent_label: str,
+        scope: str,
+        repository: str,
+        username: str,
+        error_message: str,
+    ) -> None:
+        """Mark a job as failed."""
+        client = self._get_client()
+
+        job_data = self.get_job(parent_label, scope, repository, username)
+        if job_data:
+            job_data["status"] = "failed"
+            job_data["error_message"] = error_message
+            client.hset(
+                _key(SUBFEATURE_LABELING_JOBS, scope, repository, username),
+                parent_label,
+                json.dumps(job_data),
+            )
+            client.srem(
+                _key(SUBFEATURE_LABELING_RUNNING, scope, repository, username), parent_label
             )

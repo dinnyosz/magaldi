@@ -42,15 +42,15 @@ function ElementRow({ element, username }: { element: BrowseElement; username: s
   const [showDetails, setShowDetails] = useState(false)
 
   const { data: children, isLoading: childrenLoading } = useQuery({
-    queryKey: ['element-children', element.element_id, username],
-    queryFn: () => getElementChildren(element.element_id, username),
-    enabled: expanded && (element.element_type === 'file' || element.element_type === 'class'),
+    queryKey: ['element-children', element.hash_id, username],
+    queryFn: () => element.hash_id ? getElementChildren(element.hash_id, username) : Promise.resolve({ element_id: '', hash_id: null, children: {}, total_children: 0 }),
+    enabled: expanded && (element.element_type === 'file' || element.element_type === 'class') && !!element.hash_id,
   })
 
   const { data: details, isLoading: detailsLoading } = useQuery({
-    queryKey: ['element-details', element.element_id, username],
-    queryFn: () => getElementDetails(element.element_id, { includeCallGraph: true, username }),
-    enabled: showDetails && (element.element_type === 'function' || element.element_type === 'method'),
+    queryKey: ['element-details', element.hash_id, username],
+    queryFn: () => element.hash_id ? getElementDetails(element.hash_id, { includeCallGraph: true, username }) : Promise.resolve({ error: 'No hash_id' } as any),
+    enabled: showDetails && (element.element_type === 'function' || element.element_type === 'method') && !!element.hash_id,
   })
 
   const config = typeConfig[element.element_type] || { icon: 'bi-dot', color: 'secondary' }
@@ -92,7 +92,7 @@ function ElementRow({ element, username }: { element: BrowseElement; username: s
             </div>
           )}
           <i className={`bi ${config.icon} me-2 text-${config.color}`}></i>
-          <Link to={`/element/${encodeURIComponent(element.element_id)}`} className="text-decoration-none">
+          <Link to={`/element/${element.hash_id || element.element_id}`} className="text-decoration-none">
             <strong>{element.name}</strong>
           </Link>
           {/* Signature for functions/methods */}
@@ -126,7 +126,7 @@ function ElementRow({ element, username }: { element: BrowseElement; username: s
             <div className="small">
               <i className={`bi ${typeConfig[element.container.element_type]?.icon || 'bi-dot'} me-1 text-${typeConfig[element.container.element_type]?.color || 'secondary'}`}></i>
               <Link
-                to={`/element/${encodeURIComponent(element.container.element_id)}`}
+                to={`/element/${element.container.element_id}`}
                 className="text-decoration-none text-primary"
               >
                 {element.container.name}
@@ -182,7 +182,7 @@ function ElementRow({ element, username }: { element: BrowseElement; username: s
                               <div key={child.element_id} className="py-1 border-bottom border-light">
                                 <i className={`bi ${childConfig.icon} me-2 text-${childConfig.color}`}></i>
                                 <Link
-                                  to={`/element/${encodeURIComponent(child.element_id)}`}
+                                  to={`/element/${child.hash_id || child.element_id}`}
                                   className="text-decoration-none"
                                 >
                                   {child.name}
@@ -240,7 +240,7 @@ function ElementRow({ element, username }: { element: BrowseElement; username: s
                         {details.containers.map((c, i) => (
                           <div key={c.element_id} className="small" style={{ paddingLeft: `${i * 10}px` }}>
                             <i className={`bi ${typeConfig[c.element_type]?.icon || 'bi-dot'} me-1 text-${typeConfig[c.element_type]?.color || 'secondary'}`}></i>
-                            <Link to={`/element/${encodeURIComponent(c.element_id)}`} className="text-decoration-none">
+                            <Link to={`/element/${c.hash_id || c.element_id}`} className="text-decoration-none">
                               {c.name}
                             </Link>
                             <span className="text-muted ms-1">({c.element_type})</span>
@@ -260,7 +260,7 @@ function ElementRow({ element, username }: { element: BrowseElement; username: s
                           {details.callers.map((caller) => (
                             <div key={caller.element_id} className="py-1">
                               <Link
-                                to={`/element/${encodeURIComponent(caller.element_id)}`}
+                                to={`/element/${caller.hash_id || caller.element_id}`}
                                 className="text-decoration-none"
                               >
                                 {caller.name}
@@ -287,7 +287,7 @@ function ElementRow({ element, username }: { element: BrowseElement; username: s
                           {details.callees.map((callee) => (
                             <div key={callee.element_id} className="py-1">
                               <Link
-                                to={`/element/${encodeURIComponent(callee.element_id)}`}
+                                to={`/element/${callee.hash_id || callee.element_id}`}
                                 className="text-decoration-none"
                               >
                                 {callee.name}

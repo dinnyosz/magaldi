@@ -91,6 +91,7 @@ class QueueStatus(BaseModel):
     labeling: dict[str, QueueInfo] = Field(default_factory=dict)
     feature: dict[str, QueueInfo] = Field(default_factory=dict)
     subfeature: dict[str, QueueInfo] = Field(default_factory=dict)
+    subfeature_labeling: dict[str, QueueInfo] = Field(default_factory=dict)
     total_pending: int = 0
     total_running: int = 0
 
@@ -275,6 +276,7 @@ class ChildInfo(BaseModel):
     """Info about a child element."""
 
     element_id: str
+    hash_id: str | None = None
     name: str
     element_type: str
     line: int
@@ -286,6 +288,7 @@ class SiblingInfo(BaseModel):
     """Info about a sibling element."""
 
     element_id: str
+    hash_id: str | None = None
     name: str
     element_type: str
     line: int
@@ -312,6 +315,7 @@ class ElementDetailResponse(BaseModel):
     """Response for element detail endpoint."""
 
     element_id: str
+    hash_id: str | None = None
     name: str
     element_type: str
     file_path: str

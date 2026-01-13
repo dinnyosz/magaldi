@@ -916,13 +916,16 @@ def process_subfeatures(
 
     # Initialize Redis job tracking if config provided
     redis_repo = None
+    labeling_redis_repo = None
     if magaldi_config:
-        from shared.db.redis import RedisSubfeatureJobRepository
+        from shared.db.redis import RedisSubfeatureJobRepository, RedisSubfeatureLabelingJobRepository
         redis_repo = RedisSubfeatureJobRepository(magaldi_config)
+        labeling_redis_repo = RedisSubfeatureLabelingJobRepository(magaldi_config)
         # Clear stale subfeature queue data
         client = redis_repo._get_client()
         for key_type in ["jobs", "running", "queue"]:
             client.delete(f"magaldi:subfeature:{key_type}:{scope}:{repository}:{username}")
+            client.delete(f"magaldi:subfeature_labeling:{key_type}:{scope}:{repository}:{username}")
 
     # Initialize LLM clients
     llm_client = SummarizationLLMClient(
@@ -966,6 +969,11 @@ def process_subfeatures(
             cluster.cluster_id, (cluster.label or f"cluster_{cluster.cluster_id}", "")
         )
 
+        # Add labeling job to Redis queue
+        if labeling_redis_repo:
+            labeling_redis_repo.add_job(parent_label, 0, scope, repository, username)
+            labeling_redis_repo.mark_running(parent_label, scope, repository, username)
+
         # Update labeling progress - starting this feature
         if on_labeling_progress:
             on_labeling_progress(SubfeatureLabelingState(
@@ -993,6 +1001,8 @@ def process_subfeatures(
                 })
 
         if len(elements_with_embeddings) < subcluster_config.min_cluster_size:
+            if labeling_redis_repo:
+                labeling_redis_repo.mark_completed(parent_label, scope, repository, username)
             features_processed += 1
             continue
 
@@ -1001,12 +1011,18 @@ def process_subfeatures(
             sub_result = sub_clusterer.cluster(elements_with_embeddings)
 
             if not sub_result.clusters:
+                if labeling_redis_repo:
+                    labeling_redis_repo.mark_completed(parent_label, scope, repository, username)
                 features_processed += 1
                 continue
 
             # Label sub-clusters
             sub_result = sub_clusterer.label_clusters(sub_result)
             subclusters_labeled += len(sub_result.clusters)
+
+            # Mark labeling as completed
+            if labeling_redis_repo:
+                labeling_redis_repo.mark_completed(parent_label, scope, repository, username)
 
             # Update labeling progress - after labeling this feature's subclusters
             if on_labeling_progress:
@@ -1042,8 +1058,10 @@ def process_subfeatures(
 
             features_processed += 1
 
-        except Exception:
+        except Exception as e:
             # Skip this cluster if sub-clustering fails
+            if labeling_redis_repo:
+                labeling_redis_repo.mark_failed(parent_label, scope, repository, username, str(e))
             features_processed += 1
             continue
 

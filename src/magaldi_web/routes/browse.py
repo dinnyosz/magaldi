@@ -87,6 +87,7 @@ async def browse_elements(
             "sort": sort,
             "_source": [
                 "element_id",
+                "hash_id",
                 "name",
                 "element_type",
                 "relative_path",
@@ -147,6 +148,7 @@ async def browse_elements(
 
         elements.append({
             "element_id": source["element_id"],
+            "hash_id": source.get("hash_id"),
             "name": source["name"],
             "element_type": source["element_type"],
             "file_path": source.get("relative_path", ""),
@@ -175,24 +177,27 @@ async def browse_elements(
     }
 
 
-@router.get("/browse/element/{element_id}/children")
+@router.get("/browse/element/{hash_id}/children")
 async def get_element_children(
-    element_id: str,
+    hash_id: str,
     username: str = "main",
     es_repo: ElasticsearchRepository = Depends(get_es_repository),
 ) -> dict:
     """Get child elements of a parent element.
 
     Args:
-        element_id: Parent element ID.
+        hash_id: Parent element hash ID.
         username: User branch.
 
     Returns:
         List of child elements grouped by type.
     """
-    from urllib.parse import unquote
-    element_id = unquote(element_id)
+    # Look up element by hash_id to get the element_id
+    source = es_repo.get_document_by_hash_id(hash_id)
+    if not source:
+        return {"error": "Element not found", "children": {}, "total_children": 0}
 
+    element_id = source["element_id"]
     client = es_repo._get_client()
 
     # Build filters
@@ -219,6 +224,7 @@ async def get_element_children(
             ],
             "_source": [
                 "element_id",
+                "hash_id",
                 "name",
                 "element_type",
                 "line_start",
@@ -234,22 +240,23 @@ async def get_element_children(
     # Group children by type
     children_by_type: dict[str, list] = {}
     for hit in result.get("hits", {}).get("hits", []):
-        source = hit["_source"]
-        elem_type = source["element_type"]
+        src = hit["_source"]
+        elem_type = src["element_type"]
 
         if elem_type not in children_by_type:
             children_by_type[elem_type] = []
 
         children_by_type[elem_type].append({
-            "element_id": source["element_id"],
-            "name": source["name"],
+            "element_id": src["element_id"],
+            "hash_id": src.get("hash_id"),
+            "name": src["name"],
             "element_type": elem_type,
-            "line_start": source.get("line_start", 0),
-            "line_end": source.get("line_end"),
-            "summary": source.get("summary"),
-            "signature": source.get("signature"),
-            "visibility": source.get("visibility"),
-            "is_async": source.get("is_async", False),
+            "line_start": src.get("line_start", 0),
+            "line_end": src.get("line_end"),
+            "summary": src.get("summary"),
+            "signature": src.get("signature"),
+            "visibility": src.get("visibility"),
+            "is_async": src.get("is_async", False),
         })
 
     # Order type keys in a logical order
@@ -265,6 +272,7 @@ async def get_element_children(
 
     return {
         "element_id": element_id,
+        "hash_id": hash_id,
         "children": ordered_children,
         "total_children": sum(len(c) for c in children_by_type.values()),
     }
@@ -384,9 +392,9 @@ async def get_browse_stats(
     }
 
 
-@router.get("/browse/element/{element_id}/details")
+@router.get("/browse/element/{hash_id}/details")
 async def get_element_details(
-    element_id: str,
+    hash_id: str,
     include_call_graph: bool = False,
     username: str = "main",
     es_repo: ElasticsearchRepository = Depends(get_es_repository),
@@ -394,24 +402,20 @@ async def get_element_details(
     """Get detailed information about an element.
 
     Args:
-        element_id: Element ID to fetch.
+        hash_id: Element hash ID (64-char SHA256).
         include_call_graph: Whether to compute callers/callees (expensive).
         username: User branch.
 
     Returns:
         Detailed element info including container hierarchy and optionally call graph.
     """
-    from urllib.parse import unquote
-    element_id = unquote(element_id)
-
-    client = es_repo._get_client()
-
-    # Fetch the element
-    try:
-        doc = client.get(index=INDEX_NAME, id=element_id)
-        source = doc["_source"]
-    except Exception:
+    # Look up element by hash_id
+    source = es_repo.get_document_by_hash_id(hash_id)
+    if not source:
         return {"error": "Element not found"}
+
+    element_id = source["element_id"]
+    client = es_repo._get_client()
 
     # Build container chain (parent -> grandparent -> ...)
     containers = []
@@ -424,11 +428,12 @@ async def get_element_details(
             parent_doc = client.get(
                 index=INDEX_NAME,
                 id=current_parent,
-                _source=["element_id", "name", "element_type", "relative_path", "line_start"],
+                _source=["element_id", "hash_id", "name", "element_type", "relative_path", "line_start"],
             )
             psource = parent_doc["_source"]
             containers.append({
                 "element_id": psource.get("element_id"),
+                "hash_id": psource.get("hash_id"),
                 "name": psource.get("name"),
                 "element_type": psource.get("element_type"),
                 "file_path": psource.get("relative_path"),
@@ -447,6 +452,7 @@ async def get_element_details(
 
     result = {
         "element_id": source.get("element_id"),
+        "hash_id": source.get("hash_id"),
         "name": source.get("name"),
         "element_type": source.get("element_type"),
         "file_path": source.get("relative_path"),
@@ -492,13 +498,14 @@ async def get_element_details(
                             ],
                         },
                     },
-                    "_source": ["element_id", "name", "element_type", "relative_path", "line_start"],
+                    "_source": ["element_id", "hash_id", "name", "element_type", "relative_path", "line_start"],
                 },
             )
             for hit in caller_result.get("hits", {}).get("hits", []):
                 s = hit["_source"]
                 callers.append({
                     "element_id": s.get("element_id"),
+                    "hash_id": s.get("hash_id"),
                     "name": s.get("name"),
                     "element_type": s.get("element_type"),
                     "file_path": s.get("relative_path"),
@@ -530,13 +537,14 @@ async def get_element_details(
                                 ],
                             },
                         },
-                        "_source": ["element_id", "name", "element_type", "relative_path", "line_start"],
+                        "_source": ["element_id", "hash_id", "name", "element_type", "relative_path", "line_start"],
                     },
                 )
                 for hit in callee_result.get("hits", {}).get("hits", []):
                     s = hit["_source"]
                     callees.append({
                         "element_id": s.get("element_id"),
+                        "hash_id": s.get("hash_id"),
                         "name": s.get("name"),
                         "element_type": s.get("element_type"),
                         "file_path": s.get("relative_path"),

@@ -19,28 +19,97 @@ from shared.db.elasticsearch import ElasticsearchRepository, INDEX_NAME
 router = APIRouter()
 
 
-@router.get("/elements/{element_id:path}", response_model=ElementDetailResponse)
-async def get_element_detail(
-    element_id: str = Path(..., description="Element ID"),
+@router.get("/elements/similar/{hash_id}")
+async def get_similar_elements(
+    hash_id: str = Path(..., description="Element hash ID (64-char SHA256)"),
+    limit: int = Query(default=10, ge=1, le=50),
     es_repo: ElasticsearchRepository = Depends(get_es_repository),
-) -> ElementDetailResponse:
-    """Get detailed information about a code element."""
-    client = es_repo._get_client()
+) -> list[dict]:
+    """Find similar elements using vector similarity."""
+    # Look up element by hash_id
+    source = es_repo.get_document_by_hash_id(hash_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="Element not found")
 
-    # Get the element
-    result = client.search(
+    element_id = source["element_id"]
+    embedding = source.get("embedding")
+
+    if not embedding:
+        raise HTTPException(status_code=400, detail="Element has no embedding")
+
+    # Find similar elements
+    client = es_repo._get_client()
+    similar_result = client.search(
         index=INDEX_NAME,
         body={
-            "size": 1,
-            "query": {"term": {"element_id": element_id}},
+            "size": limit + 1,  # +1 to exclude self
+            "query": {
+                "bool": {
+                    "filter": [
+                        {"term": {"scope": source["scope"]}},
+                        {"term": {"repository": source["repository"]}},
+                        {"term": {"username": source["username"]}},
+                        {"exists": {"field": "embedding"}},
+                    ],
+                    "must": {
+                        "script_score": {
+                            "query": {"match_all": {}},
+                            "script": {
+                                "source": "cosineSimilarity(params.qv, 'embedding') + 1.0",
+                                "params": {"qv": embedding},
+                            },
+                        },
+                    },
+                },
+            },
+            "_source": [
+                "element_id",
+                "hash_id",
+                "name",
+                "element_type",
+                "relative_path",
+                "line_start",
+                "summary",
+            ],
         },
     )
 
-    hits = result.get("hits", {}).get("hits", [])
-    if not hits:
+    similar = []
+    for hit in similar_result.get("hits", {}).get("hits", []):
+        s = hit["_source"]
+        if s["element_id"] == element_id:
+            continue  # Skip self
+        similar.append(
+            {
+                "element_id": s["element_id"],
+                "hash_id": s.get("hash_id"),
+                "name": s["name"],
+                "element_type": s["element_type"],
+                "file_path": s["relative_path"],
+                "line": s["line_start"],
+                "summary": s.get("summary"),
+                "similarity": round((hit["_score"] - 1.0), 3),  # Convert back to cosine similarity
+            }
+        )
+        if len(similar) >= limit:
+            break
+
+    return similar
+
+
+@router.get("/elements/{hash_id}", response_model=ElementDetailResponse)
+async def get_element_detail(
+    hash_id: str = Path(..., description="Element hash ID (64-char SHA256)"),
+    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+) -> ElementDetailResponse:
+    """Get detailed information about a code element."""
+    # Look up element by hash_id
+    source = es_repo.get_document_by_hash_id(hash_id)
+    if not source:
         raise HTTPException(status_code=404, detail="Element not found")
 
-    source = hits[0]["_source"]
+    element_id = source["element_id"]
+    client = es_repo._get_client()
 
     # Get file context
     file_context = None
@@ -101,7 +170,7 @@ async def get_element_detail(
         body={
             "size": 100,
             "query": {"term": {"parent_id": element_id}},
-            "_source": ["element_id", "name", "element_type", "line_start", "summary", "signature"],
+            "_source": ["element_id", "hash_id", "name", "element_type", "line_start", "summary", "signature"],
             "sort": [{"line_start": "asc"}],
         },
     )
@@ -110,6 +179,7 @@ async def get_element_detail(
         children.append(
             ChildInfo(
                 element_id=cs["element_id"],
+                hash_id=cs.get("hash_id"),
                 name=cs["name"],
                 element_type=cs["element_type"],
                 line=cs["line_start"],
@@ -131,7 +201,7 @@ async def get_element_detail(
                         "must_not": [{"term": {"element_id": element_id}}],
                     },
                 },
-                "_source": ["element_id", "name", "element_type", "line_start", "summary"],
+                "_source": ["element_id", "hash_id", "name", "element_type", "line_start", "summary"],
                 "sort": [{"line_start": "asc"}],
             },
         )
@@ -140,6 +210,7 @@ async def get_element_detail(
             siblings.append(
                 SiblingInfo(
                     element_id=ss["element_id"],
+                    hash_id=ss.get("hash_id"),
                     name=ss["name"],
                     element_type=ss["element_type"],
                     line=ss["line_start"],
@@ -159,6 +230,7 @@ async def get_element_detail(
 
     return ElementDetailResponse(
         element_id=source["element_id"],
+        hash_id=source.get("hash_id"),
         name=source["name"],
         element_type=source["element_type"],
         file_path=source["relative_path"],
@@ -183,89 +255,3 @@ async def get_element_detail(
             name=source["repository"],
         ),
     )
-
-
-@router.get("/elements/{element_id:path}/similar")
-async def get_similar_elements(
-    element_id: str = Path(..., description="Element ID"),
-    limit: int = Query(default=10, ge=1, le=50),
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
-) -> list[dict]:
-    """Find similar elements using vector similarity."""
-    client = es_repo._get_client()
-
-    # Get the element's embedding
-    result = client.search(
-        index=INDEX_NAME,
-        body={
-            "size": 1,
-            "query": {"term": {"element_id": element_id}},
-            "_source": ["embedding", "scope", "repository", "username"],
-        },
-    )
-
-    hits = result.get("hits", {}).get("hits", [])
-    if not hits:
-        raise HTTPException(status_code=404, detail="Element not found")
-
-    source = hits[0]["_source"]
-    embedding = source.get("embedding")
-
-    if not embedding:
-        raise HTTPException(status_code=400, detail="Element has no embedding")
-
-    # Find similar elements
-    similar_result = client.search(
-        index=INDEX_NAME,
-        body={
-            "size": limit + 1,  # +1 to exclude self
-            "query": {
-                "bool": {
-                    "filter": [
-                        {"term": {"scope": source["scope"]}},
-                        {"term": {"repository": source["repository"]}},
-                        {"term": {"username": source["username"]}},
-                        {"exists": {"field": "embedding"}},
-                    ],
-                    "must": {
-                        "script_score": {
-                            "query": {"match_all": {}},
-                            "script": {
-                                "source": "cosineSimilarity(params.qv, 'embedding') + 1.0",
-                                "params": {"qv": embedding},
-                            },
-                        },
-                    },
-                },
-            },
-            "_source": [
-                "element_id",
-                "name",
-                "element_type",
-                "relative_path",
-                "line_start",
-                "summary",
-            ],
-        },
-    )
-
-    similar = []
-    for hit in similar_result.get("hits", {}).get("hits", []):
-        s = hit["_source"]
-        if s["element_id"] == element_id:
-            continue  # Skip self
-        similar.append(
-            {
-                "element_id": s["element_id"],
-                "name": s["name"],
-                "element_type": s["element_type"],
-                "file_path": s["relative_path"],
-                "line": s["line_start"],
-                "summary": s.get("summary"),
-                "similarity": round((hit["_score"] - 1.0), 3),  # Convert back to cosine similarity
-            }
-        )
-        if len(similar) >= limit:
-            break
-
-    return similar

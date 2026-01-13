@@ -159,7 +159,7 @@ function Element() {
                     key={child.element_id}
                     action
                     as={Link}
-                    to={`/element/${encodeURIComponent(child.element_id)}`}
+                    to={`/element/${child.hash_id || child.element_id}`}
                   >
                     <Badge
                       bg={getTypeBadgeVariant(child.element_type)}
@@ -185,7 +185,7 @@ function Element() {
                 Parent
               </Card.Header>
               <Card.Body>
-                <Link to={`/element/${encodeURIComponent(element.parent_id)}`}>
+                <Link to={`/element/${element.parent_id}`}>
                   <code>{element.parent_id.split(':').slice(-2).join(':')}</code>
                 </Link>
               </Card.Body>
@@ -205,7 +205,7 @@ function Element() {
                     key={sim.element_id}
                     action
                     as={Link}
-                    to={`/element/${encodeURIComponent(sim.element_id)}`}
+                    to={`/element/${sim.hash_id || sim.element_id}`}
                     className="d-flex justify-content-between align-items-start"
                   >
                     <div className="text-truncate me-2">

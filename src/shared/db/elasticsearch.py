@@ -5,6 +5,7 @@ Handles indexing of code elements and storage of embedding vectors.
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
 from typing import Any
 
@@ -12,6 +13,21 @@ from elasticsearch import Elasticsearch, NotFoundError
 
 from shared.config import MagaldiConfig, get_config
 from magaldi_core.code_parser import CodeElement
+
+
+def generate_hash_id(element_id: str) -> str:
+    """Generate a URL-safe hash ID from an element ID.
+
+    Uses full SHA256 hex digest (64 characters, 256 bits).
+    Guaranteed unique - no collision risk.
+
+    Args:
+        element_id: Full element ID string.
+
+    Returns:
+        64-character hex string suitable for URLs.
+    """
+    return hashlib.sha256(element_id.encode()).hexdigest()
 
 
 # Index name for code elements
@@ -22,6 +38,7 @@ INDEX_MAPPING = {
     "mappings": {
         "properties": {
             "element_id": {"type": "keyword"},
+            "hash_id": {"type": "keyword"},  # Short URL-safe ID for routing
             "scope": {"type": "keyword"},
             "repository": {"type": "keyword"},
             "username": {"type": "keyword"},
@@ -121,6 +138,7 @@ class ElasticsearchRepository:
 
         doc = {
             "element_id": element.element_id,
+            "hash_id": generate_hash_id(element.element_id),
             "scope": element.scope,
             "repository": element.repository,
             "username": element.username,
@@ -161,6 +179,52 @@ class ElasticsearchRepository:
             return result["_source"]
         except NotFoundError:
             return None
+
+    def get_document_by_hash_id(self, hash_id: str) -> dict[str, Any] | None:
+        """Get indexed document by hash_id.
+
+        Args:
+            hash_id: The 64-character SHA256 hash of the element_id.
+
+        Returns:
+            Document source or None if not found.
+        """
+        try:
+            client = self._get_client()
+            result = client.search(
+                index=INDEX_NAME,
+                body={
+                    "size": 1,
+                    "query": {"term": {"hash_id": hash_id}},
+                },
+            )
+            hits = result.get("hits", {}).get("hits", [])
+            if hits:
+                return hits[0]["_source"]
+            return None
+        except Exception:
+            return None
+
+    def get_document_by_id_or_hash(self, id_or_hash: str) -> dict[str, Any] | None:
+        """Get indexed document by either element_id or hash_id.
+
+        Automatically detects which type of ID is provided:
+        - 64-char hex string without colons = hash_id
+        - Contains colons = element_id
+
+        Args:
+            id_or_hash: Either an element_id or hash_id.
+
+        Returns:
+            Document source or None if not found.
+        """
+        # Detect if it's a hash_id (64 hex chars, no colons) or element_id
+        is_hash = len(id_or_hash) == 64 and ":" not in id_or_hash and all(c in "0123456789abcdef" for c in id_or_hash.lower())
+
+        if is_hash:
+            return self.get_document_by_hash_id(id_or_hash)
+        else:
+            return self.get_document(id_or_hash)
 
     def element_exists(self, element_id: str) -> bool:
         """Check if element exists in ES (meaning it's fully processed).
@@ -906,6 +970,7 @@ class ElasticsearchRepository:
 
         doc: dict[str, Any] = {
             "element_id": feature_id,
+            "hash_id": generate_hash_id(feature_id),
             "scope": scope,
             "repository": repository,
             "username": username,
@@ -963,6 +1028,7 @@ class ElasticsearchRepository:
 
         doc: dict[str, Any] = {
             "element_id": subfeature_id,
+            "hash_id": generate_hash_id(subfeature_id),
             "scope": scope,
             "repository": repository,
             "username": username,

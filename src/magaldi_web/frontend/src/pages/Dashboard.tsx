@@ -463,7 +463,53 @@ function Dashboard() {
                       )}
                     </Col>
                   </Row>
-                  <Row>
+                  <Row className="mb-3">
+                    <Col md={6}>
+                      <h6 className="text-muted mb-2">Subfeature Labeling</h6>
+                      {Object.keys(dashboard?.queue_status?.subfeature_labeling || {}).length > 0 ? (
+                        <Table size="sm" className="mb-0">
+                          <thead>
+                            <tr>
+                              <th>Scope</th>
+                              <th>Repository</th>
+                              <th>User</th>
+                              <th className="text-end">Pending</th>
+                              <th className="text-end">Running</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Object.entries(dashboard?.queue_status?.subfeature_labeling || {}).map(
+                              ([queueId, info]) => {
+                                const [scope, repo, user] = queueId.split('/')
+                                return (
+                                  <tr key={queueId}>
+                                    <td><code>{scope}</code></td>
+                                    <td><code>{repo}</code></td>
+                                    <td><code>{user}</code></td>
+                                    <td className="text-end">
+                                      {info.pending > 0 ? (
+                                        <Badge bg="warning">{info.pending}</Badge>
+                                      ) : (
+                                        <span className="text-muted">0</span>
+                                      )}
+                                    </td>
+                                    <td className="text-end">
+                                      {info.running > 0 ? (
+                                        <Badge bg="primary">{info.running}</Badge>
+                                      ) : (
+                                        <span className="text-muted">0</span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                )
+                              }
+                            )}
+                          </tbody>
+                        </Table>
+                      ) : (
+                        <p className="text-muted small mb-0">No pending jobs</p>
+                      )}
+                    </Col>
                     <Col md={6}>
                       <h6 className="text-muted mb-2">Subfeature Processing</h6>
                       {Object.keys(dashboard?.queue_status?.subfeature || {}).length > 0 ? (

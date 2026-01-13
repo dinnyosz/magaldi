@@ -38,6 +38,7 @@ export interface DashboardStats {
     labeling: Record<string, { pending: number; running: number }>
     feature: Record<string, { pending: number; running: number }>
     subfeature: Record<string, { pending: number; running: number }>
+    subfeature_labeling: Record<string, { pending: number; running: number }>
     total_pending: number
     total_running: number
   }
@@ -111,6 +112,7 @@ export interface FileDetailResponse {
 
 export interface ElementDetail {
   element_id: string
+  hash_id: string | null
   name: string
   element_type: string
   file_path: string
@@ -121,6 +123,7 @@ export interface ElementDetail {
   parent_id: string | null
   children: Array<{
     element_id: string
+    hash_id: string | null
     name: string
     element_type: string
   }>
@@ -128,6 +131,7 @@ export interface ElementDetail {
 
 export interface SimilarElement {
   element_id: string
+  hash_id: string | null
   name: string
   element_type: string
   file_path: string
@@ -285,14 +289,12 @@ export async function getFileDetail(scope: string, repository: string, filePath:
 }
 
 // Elements
-export async function getElement(elementId: string): Promise<ElementDetail> {
-  const encodedId = encodeURIComponent(elementId)
-  return fetchJson(`${API_BASE}/elements/${encodedId}`)
+export async function getElement(hashId: string): Promise<ElementDetail> {
+  return fetchJson(`${API_BASE}/elements/${hashId}`)
 }
 
-export async function getSimilarElements(elementId: string, limit = 10): Promise<SimilarElement[]> {
-  const encodedId = encodeURIComponent(elementId)
-  return fetchJson(`${API_BASE}/elements/${encodedId}/similar?limit=${limit}`)
+export async function getSimilarElements(hashId: string, limit = 10): Promise<SimilarElement[]> {
+  return fetchJson(`${API_BASE}/elements/similar/${hashId}?limit=${limit}`)
 }
 
 // Vector visualization
@@ -356,6 +358,7 @@ export interface ContainerInfo {
 
 export interface BrowseElement {
   element_id: string
+  hash_id: string | null
   name: string
   element_type: string
   file_path: string
@@ -391,8 +394,10 @@ export interface BrowseStats {
 
 export interface ElementChildren {
   element_id: string
+  hash_id: string | null
   children: Record<string, Array<{
     element_id: string
+    hash_id: string | null
     name: string
     element_type: string
     line_start: number
@@ -447,14 +452,14 @@ export async function getBrowseStats(params: {
   return fetchJson(`${API_BASE}/browse/stats${query}`)
 }
 
-export async function getElementChildren(elementId: string, username?: string): Promise<ElementChildren> {
-  const encodedId = encodeURIComponent(elementId)
+export async function getElementChildren(hashId: string, username?: string): Promise<ElementChildren> {
   const params = username ? `?username=${username}` : ''
-  return fetchJson(`${API_BASE}/browse/element/${encodedId}/children${params}`)
+  return fetchJson(`${API_BASE}/browse/element/${hashId}/children${params}`)
 }
 
 export interface CallGraphEntry {
   element_id: string
+  hash_id: string | null
   name: string
   element_type: string
   file_path: string
@@ -463,6 +468,7 @@ export interface CallGraphEntry {
 
 export interface ElementDetailsResponse {
   element_id: string
+  hash_id: string | null
   name: string
   element_type: string
   file_path: string
@@ -480,6 +486,7 @@ export interface ElementDetailsResponse {
   scope: string
   containers: Array<{
     element_id: string
+    hash_id: string | null
     name: string
     element_type: string
     file_path: string
@@ -492,13 +499,12 @@ export interface ElementDetailsResponse {
 }
 
 export async function getElementDetails(
-  elementId: string,
+  hashId: string,
   options?: { includeCallGraph?: boolean; username?: string }
 ): Promise<ElementDetailsResponse> {
-  const encodedId = encodeURIComponent(elementId)
   const params = new URLSearchParams()
   if (options?.includeCallGraph) params.set('include_call_graph', 'true')
   if (options?.username) params.set('username', options.username)
   const query = params.toString() ? `?${params.toString()}` : ''
-  return fetchJson(`${API_BASE}/browse/element/${encodedId}/details${query}`)
+  return fetchJson(`${API_BASE}/browse/element/${hashId}/details${query}`)
 }
