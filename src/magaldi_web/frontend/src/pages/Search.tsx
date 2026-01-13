@@ -248,7 +248,7 @@ function Search() {
                       key={result.element_id}
                       action
                       as={Link}
-                      to={`/element/${encodeURIComponent(result.element_id)}`}
+                      to={`/element/${result.hash_id || result.element_id}`}
                       className="d-flex flex-column"
                     >
                       <div className="d-flex justify-content-between align-items-start">

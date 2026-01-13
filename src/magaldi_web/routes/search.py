@@ -116,6 +116,7 @@ async def search(
             },
             "_source": [
                 "element_id",
+                "hash_id",
                 "name",
                 "element_type",
                 "relative_path",
@@ -186,6 +187,7 @@ async def search(
         results.append(
             SearchResult(
                 element_id=source["element_id"],
+                hash_id=source.get("hash_id"),
                 name=source["name"],
                 element_type=source["element_type"],
                 file_path=source.get("relative_path", ""),

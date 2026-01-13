@@ -61,6 +61,7 @@ export interface SearchRequest {
 
 export interface SearchResult {
   element_id: string
+  hash_id: string | null
   name: string
   element_type: string
   file_path: string
@@ -96,6 +97,7 @@ export interface FileTreeResponse {
 
 export interface FileElement {
   element_id: string
+  hash_id: string | null
   name: string
   element_type: string
   line_start: number

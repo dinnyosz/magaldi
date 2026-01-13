@@ -125,16 +125,16 @@ function Repository() {
         {repos?.length ? (
           <Row>
             {repos.map((repo) => (
-              <Col key={`${repo.scope}/${repo.repository}`} md={4} className="mb-4">
+              <Col key={`${repo.scope}/${repo.name}`} md={4} className="mb-4">
                 <Card
                   className="h-100"
                   style={{ cursor: 'pointer' }}
-                  onClick={() => navigate(`/repos/${repo.scope}/${repo.repository}`)}
+                  onClick={() => navigate(`/repos/${repo.scope}/${repo.name}`)}
                 >
                   <Card.Body>
                     <Card.Title>
                       <i className="bi bi-folder2-open me-2 text-primary"></i>
-                      {repo.repository}
+                      {repo.name}
                     </Card.Title>
                     <Card.Subtitle className="mb-2 text-muted">
                       {repo.scope}
@@ -227,7 +227,7 @@ function Repository() {
                               key={el.element_id}
                               action
                               as={Link}
-                              to={`/element/${encodeURIComponent(el.element_id)}`}
+                              to={`/element/${el.hash_id || el.element_id}`}
                               className="py-1 px-2"
                             >
                               <Badge

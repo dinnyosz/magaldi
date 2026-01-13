@@ -127,6 +127,7 @@ class SearchResult(BaseModel):
     """A single search result."""
 
     element_id: str
+    hash_id: str | None = None
     name: str
     element_type: str
     file_path: str
