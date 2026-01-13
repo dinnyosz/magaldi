@@ -1014,7 +1014,7 @@ def run_processing(
         # Stats line - effective wall time (elapsed/done) = actual throughput with parallelism
         effective_wall = state.timing.elapsed / state.completed if state.completed > 0 else 0.0
         total_api = state.timing.avg_summarize_time + state.timing.avg_embed_time
-        stats = f"  [dim]Throughput:[/] [green]{effective_wall:.2f}s[/]/elem [dim]|[/] [dim]API:[/] [green]{total_api:.1f}s[/]/elem [dim]([/][green]{state.timing.avg_summarize_time:.1f}s[/] summ + [green]{state.timing.avg_embed_time:.1f}s[/] embed[dim])[/]"
+        stats = f"  [dim]Throughput:[/] [green]{effective_wall:.2f}s[/]/item [dim]|[/] [dim]API:[/] [green]{total_api:.1f}s[/]/item [dim]([/][green]{state.timing.avg_summarize_time:.1f}s[/] summ + [green]{state.timing.avg_embed_time:.1f}s[/] embed[dim])[/]"
 
         parts: list[RenderableType] = [bar_text, worker_table]
         if type_line:
@@ -1177,7 +1177,7 @@ def print_processing_result(
         # Effective wall time (elapsed / processed) shows actual throughput
         if processed > 0:
             effective = elapsed / processed
-            parts.append(f"{effective:.2f}s/elem effective")
+            parts.append(f"{effective:.2f}s/item effective")
     if avg_wall > 0:
         parts.append(f"avg: {avg_wall:.1f}s total, {avg_summ:.1f}s summ, {avg_embed:.1f}s embed")
     console.print(f"  {' | '.join(parts)}")
