@@ -693,17 +693,13 @@ def run_feature_extraction(
             )
 
             def build_labeling_display(state: SubfeatureLabelingState) -> RenderableType:
-                """Build Rich display for subfeature labeling progress."""
+                """Build Rich display for subfeature labeling progress (matches Phase 5 style)."""
                 import time as time_mod
                 pct = (state.features_processed / state.total_features * 100) if state.total_features > 0 else 0
                 elapsed = time_mod.time() - state.phase_start if state.phase_start > 0 else 0
                 elapsed_str = format_duration(elapsed)
 
-                # Header
-                header_text = Text()
-                header_text.append("  Labeling subclusters for large features...", style="cyan")
-
-                # Progress bar
+                # Progress bar (no header - header is printed before Live display)
                 bar_width = 30
                 filled = int(bar_width * pct / 100)
                 bar = "━" * filled + "╺" + "─" * (bar_width - filled - 1) if filled < bar_width else "━" * bar_width
@@ -731,13 +727,13 @@ def run_feature_extraction(
                 else:
                     current_text.append("  ", style="dim")
 
-                # Stats line
+                # Stats line (matches Phase 5 format)
                 stats_text = Text()
                 if state.subclusters_labeled > 0:
                     stats_text.append("  ")
-                    stats_text.append(f"{state.subclusters_labeled} subclusters labeled", style="green")
+                    stats_text.append(f"{state.subclusters_labeled} subclusters found", style="green")
 
-                return Group(header_text, bar_text, current_text, stats_text)
+                return Group(bar_text, current_text, stats_text)
 
             # Combined live display will be set later
             combined_live = None
@@ -754,9 +750,9 @@ def run_feature_extraction(
                 eta = state.timing.eta_seconds(state.completed, state.total, state.num_workers)
                 elapsed_str = format_duration(state.timing.elapsed)
 
-                # Header
+                # Header (plain text like Phase 5)
                 header_text = Text()
-                header_text.append(f"  Processing {state.total} sub-features with {num_workers} workers...", style="cyan")
+                header_text.append(f"  Processing {state.total} sub-features with {num_workers} workers...")
 
                 # Progress bar
                 bar_width = 30
@@ -831,16 +827,21 @@ def run_feature_extraction(
             labeling_elapsed = 0.0
 
             def build_labeling_summary(state: SubfeatureLabelingState) -> RenderableType:
-                """Build a compact summary of completed labeling phase."""
-                summary = Text()
-                summary.append("  Labeling: ", style="dim")
-                summary.append(f"{state.total_features}/{state.total_features}", style="green")
-                summary.append(" features | ", style="dim")
-                summary.append(f"{state.subclusters_labeled}", style="cyan")
-                summary.append(" subclusters | ", style="dim")
-                summary.append(format_duration(labeling_elapsed), style="cyan")
-                summary.append(" elapsed", style="dim")
-                return summary
+                """Build summary of completed labeling phase (matches Phase 5 'Avg' line style)."""
+                # Calculate avg time per feature
+                avg_time = labeling_elapsed / state.total_features if state.total_features > 0 else 0
+
+                # Empty line + stats line (like Phase 5)
+                empty_line = Text("")
+                stats_line = Text()
+                stats_line.append("  ")
+                stats_line.append("Avg: ", style="dim")
+                stats_line.append(f"{avg_time:.1f}s", style="green")
+                stats_line.append("/feature | ", style="dim")
+                stats_line.append(f"{state.subclusters_labeled}", style="cyan")
+                stats_line.append(" subclusters found", style="dim")
+
+                return Group(empty_line, stats_line)
 
             class LiveSubfeatureDisplay:
                 def __rich__(self) -> RenderableType:
@@ -848,11 +849,13 @@ def run_feature_extraction(
                         # Show labeling summary + processing display
                         return Group(
                             build_labeling_summary(current_labeling_state),
-                            Text(""),  # Blank line separator
                             build_subfeature_display(current_sub_state, workers)
                         )
                     else:
                         return build_labeling_display(current_labeling_state)
+
+            # Print header before Live display (matches Phase 5 style)
+            console.print(f"  Labeling {large_cluster_count} features...")
 
             with Live(LiveSubfeatureDisplay(), console=console, refresh_per_second=10) as live:
                 combined_live = live  # Make accessible to on_labeling_progress
