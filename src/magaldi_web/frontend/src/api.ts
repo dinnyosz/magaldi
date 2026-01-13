@@ -57,6 +57,8 @@ export interface SearchRequest {
   username?: string
   limit?: number
   offset?: number
+  use_text_search?: boolean
+  use_vector_search?: boolean
 }
 
 export interface SearchResult {
@@ -79,6 +81,9 @@ export interface SearchResponse {
   total: number
   query: string
   took_ms: number
+  text_search_used: boolean
+  vector_search_used: boolean
+  embedding_error: string | null
 }
 
 export interface FileTreeNode {

@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import litellm
-from litellm import completion, embedding
+from litellm import aembedding, completion, embedding
 
 # Disable LiteLLM telemetry
 litellm.telemetry = False
@@ -359,6 +359,44 @@ class EmbeddingClient:
                 kwargs["api_key"] = self.api_key
 
             response = embedding(**kwargs)
+
+            if not response.data:
+                raise LLMError("No embedding returned")
+
+            return response.data[0]["embedding"]
+
+        except Exception as e:
+            raise LLMError(f"Embedding generation failed: {e}") from e
+
+    async def embed_async(self, text: str, timeout: int = 30) -> list[float]:
+        """Generate embedding for single text (async version).
+
+        Use this method when calling from an async context (e.g., FastAPI routes).
+
+        Args:
+            text: Text to embed.
+            timeout: Request timeout in seconds.
+
+        Returns:
+            Embedding vector as list of floats.
+
+        Raises:
+            LLMError: If embedding generation fails.
+        """
+        try:
+            kwargs: dict[str, Any] = {
+                "model": self.model,
+                "input": [text],
+                "timeout": timeout,
+            }
+
+            if self.api_base:
+                kwargs["api_base"] = self.api_base
+
+            if self.api_key:
+                kwargs["api_key"] = self.api_key
+
+            response = await aembedding(**kwargs)
 
             if not response.data:
                 raise LLMError("No embedding returned")

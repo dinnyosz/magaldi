@@ -121,6 +121,8 @@ class SearchRequest(BaseModel):
     language: str | None = None
     limit: int = Field(default=20, ge=1, le=100)
     offset: int = Field(default=0, ge=0)
+    use_text_search: bool = True
+    use_vector_search: bool = True
 
 
 class SearchResult(BaseModel):
@@ -151,6 +153,9 @@ class SearchResponse(BaseModel):
     total: int
     took_ms: int
     results: list[SearchResult] = Field(default_factory=list)
+    text_search_used: bool = True
+    vector_search_used: bool = False
+    embedding_error: str | None = None
 
 
 # =============================================================================

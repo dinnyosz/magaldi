@@ -31,6 +31,8 @@ function Search() {
   const [selectedTypes, setSelectedTypes] = useState<string[]>([])
   const [selectedUsername, setSelectedUsername] = useState<string>('')
   const [limit, setLimit] = useState(20)
+  const [useTextSearch, setUseTextSearch] = useState(true)
+  const [useVectorSearch, setUseVectorSearch] = useState(true)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const { data: repos } = useQuery({
@@ -44,7 +46,7 @@ function Search() {
   })
 
   const { data: searchResult, isLoading, error } = useQuery({
-    queryKey: ['search', debouncedQuery, selectedScope, selectedRepo, selectedTypes, selectedUsername, limit],
+    queryKey: ['search', debouncedQuery, selectedScope, selectedRepo, selectedTypes, selectedUsername, limit, useTextSearch, useVectorSearch],
     queryFn: () =>
       search({
         query: debouncedQuery,
@@ -53,8 +55,10 @@ function Search() {
         element_types: selectedTypes.length > 0 ? selectedTypes : undefined,
         username: selectedUsername || undefined,
         limit,
+        use_text_search: useTextSearch,
+        use_vector_search: useVectorSearch,
       }),
-    enabled: debouncedQuery.length > 0,
+    enabled: debouncedQuery.length > 0 && (useTextSearch || useVectorSearch),
   })
 
   // Debounce query changes
@@ -133,6 +137,33 @@ function Search() {
       <Row>
         {/* Filters Sidebar */}
         <Col md={3}>
+          <Card className="mb-4">
+            <Card.Header>Search Mode</Card.Header>
+            <Card.Body className="pb-2">
+              <Form.Check
+                type="switch"
+                id="text-search"
+                label="TextRank"
+                checked={useTextSearch}
+                onChange={(e) => {
+                  if (!e.target.checked && !useVectorSearch) return
+                  setUseTextSearch(e.target.checked)
+                }}
+                className="mb-2"
+              />
+              <Form.Check
+                type="switch"
+                id="vector-search"
+                label="Semantic"
+                checked={useVectorSearch}
+                onChange={(e) => {
+                  if (!e.target.checked && !useTextSearch) return
+                  setUseVectorSearch(e.target.checked)
+                }}
+              />
+            </Card.Body>
+          </Card>
+
           <Card className="mb-4">
             <Card.Header>Filters</Card.Header>
             <Card.Body>
@@ -235,10 +266,24 @@ function Search() {
 
           {searchResult && (
             <>
+              {useVectorSearch && !searchResult.vector_search_used && searchResult.embedding_error && (
+                <Alert variant="warning" className="mb-3">
+                  <i className="bi bi-exclamation-triangle me-2"></i>
+                  <strong>Vector search failed:</strong> {searchResult.embedding_error}
+                </Alert>
+              )}
               <div className="d-flex justify-content-between align-items-center mb-3">
                 <span className="text-muted">
                   Found {searchResult.total} results in {searchResult.took_ms}ms
                 </span>
+                <div className="d-flex gap-1">
+                  {searchResult.text_search_used && (
+                    <Badge bg="secondary">TextRank</Badge>
+                  )}
+                  {searchResult.vector_search_used && (
+                    <Badge bg="primary">Semantic</Badge>
+                  )}
+                </div>
               </div>
 
               {searchResult.results.length > 0 ? (
@@ -268,20 +313,20 @@ function Search() {
                           </small>
                         </div>
                         <div className="d-flex gap-1">
-                          {result.text_score !== null && (
+                          {useTextSearch && result.text_score !== null && (
                             <OverlayTrigger
                               placement="top"
-                              overlay={<Tooltip>Text match score</Tooltip>}
+                              overlay={<Tooltip>TextRank score (0-1)</Tooltip>}
                             >
-                              <Badge bg="info">T:{result.text_score.toFixed(0)}%</Badge>
+                              <Badge bg="secondary">TextRank:{result.text_score.toFixed(3)}</Badge>
                             </OverlayTrigger>
                           )}
-                          {result.vector_score !== null && (
+                          {useVectorSearch && result.vector_score !== null && (
                             <OverlayTrigger
                               placement="top"
-                              overlay={<Tooltip>Semantic similarity</Tooltip>}
+                              overlay={<Tooltip>Semantic similarity (0-1)</Tooltip>}
                             >
-                              <Badge bg="success">V:{result.vector_score.toFixed(0)}%</Badge>
+                              <Badge bg="primary">Semantic:{result.vector_score.toFixed(3)}</Badge>
                             </OverlayTrigger>
                           )}
                         </div>

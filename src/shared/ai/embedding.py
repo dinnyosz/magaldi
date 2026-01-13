@@ -151,6 +151,26 @@ class CodeEmbeddingClient:
         except LLMError as e:
             raise EmbeddingError(str(e)) from e
 
+    async def embed_single_async(self, text: str, timeout: int = 30) -> list[float]:
+        """Generate embedding for single text (async version).
+
+        Use this method when calling from an async context (e.g., FastAPI routes).
+
+        Args:
+            text: Text to embed.
+            timeout: Request timeout in seconds.
+
+        Returns:
+            Embedding vector as list of floats.
+
+        Raises:
+            EmbeddingError: If embedding generation fails.
+        """
+        try:
+            return await self._client.embed_async(text, timeout=timeout)
+        except LLMError as e:
+            raise EmbeddingError(str(e)) from e
+
     def embed_batch(self, texts: list[str], timeout: int = 60) -> list[list[float]]:
         """Generate embeddings for batch of texts.
 
