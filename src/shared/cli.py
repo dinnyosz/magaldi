@@ -1108,16 +1108,16 @@ def print_change_manifest(manifest: ChangeManifest) -> None:
     """Print change detection results."""
     parts = [f"scanned {manifest.total_files_scanned}"]
     if len(manifest.new_files): parts.append(f"[green]+{len(manifest.new_files)} new[/]")
-    if len(manifest.modified_files): parts.append(f"[yellow]~{len(manifest.modified_files)} mod[/]")
+    if len(manifest.modified_files): parts.append(f"[yellow]{len(manifest.modified_files)} modified[/]")
     if len(manifest.deleted_files): parts.append(f"[red]-{len(manifest.deleted_files)} del[/]")
-    if manifest.unchanged_count: parts.append(f"={manifest.unchanged_count} unchanged")
+    if manifest.unchanged_count: parts.append(f"{manifest.unchanged_count} unchanged")
     if manifest.skipped_count: parts.append(f"skipped {manifest.skipped_count}")
     console.print(f"  {' | '.join(parts)}")
 
 
 def print_parsing_result(result: ParsingResult) -> None:
     """Print parsing results."""
-    types = ", ".join(f"{t}:[green]{c}[/]" for t, c in sorted(result.elements_by_type.items()))
+    types = ", ".join(f"{t}: [green]{c}[/]" for t, c in sorted(result.elements_by_type.items()))
     failed = f" | [red]{len(result.failed_files)} failed[/]" if result.failed_files else ""
     console.print(f"  [green]{len(result.parsed_files)}[/] files → [green]{result.total_elements}[/] elements ({types}){failed}")
 
