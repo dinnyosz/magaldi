@@ -612,15 +612,16 @@ def run_feature_extraction(
             # Worker table
             worker_table = Table(show_header=False, box=None, padding=0)
             worker_table.add_column("ID", style="dim", width=4)
-            worker_table.add_column("Stage", style="cyan", width=12)
-            worker_table.add_column("Model", style="yellow")
+            worker_table.add_column("Stage", style="cyan", width=14)
+            worker_table.add_column("Model", style="yellow", width=20)
             worker_table.add_column("Feature")
 
             workers_data = state.workers.get_all()
             for wid in range(num_workers):
                 if wid in workers_data:
                     feature_name, stage, model = workers_data[wid]
-                    worker_table.add_row(f"[{wid}]", stage, model, feature_name)
+                    display_model = model[:17] + "..." if len(model) > 20 else model
+                    worker_table.add_row(f"[{wid}]", stage, display_model, feature_name)
                 else:
                     worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "")
 
@@ -779,8 +780,8 @@ def run_feature_extraction(
                 # Worker table
                 worker_table = Table(show_header=False, box=None, padding=0)
                 worker_table.add_column("ID", style="dim", width=4)
-                worker_table.add_column("Stage", style="cyan", width=12)
-                worker_table.add_column("Model", style="yellow", width=22)
+                worker_table.add_column("Stage", style="cyan", width=14)
+                worker_table.add_column("Model", style="yellow", width=20)
                 worker_table.add_column("Parent", style="magenta", width=20)
                 worker_table.add_column("Subfeature")
 
@@ -788,9 +789,9 @@ def run_feature_extraction(
                 for wid in range(num_workers):
                     if wid in workers_data:
                         parent_feature, stage, model, subfeature = workers_data[wid]
-                        display_model = model[:19] + "..." if len(model) > 22 else model
+                        display_model = model[:17] + "..." if len(model) > 20 else model
                         display_parent = parent_feature[:17] + "..." if len(parent_feature) > 20 else parent_feature
-                        display_sub = subfeature[:28] + "..." if len(subfeature) > 31 else subfeature
+                        display_sub = subfeature[:25] + "..." if len(subfeature) > 28 else subfeature
                         worker_table.add_row(f"[{wid}]", stage, display_model, display_parent, display_sub)
                     else:
                         worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "", "")
@@ -1000,6 +1001,9 @@ def run_processing(
         bar_text.append("/", style="dim")
         bar_text.append(f"{state.total}", style="cyan")
         bar_text.append(f" ({pct:.0f}%)", style="green")
+        if state.skipped > 0:
+            bar_text.append(" | ", style="dim")
+            bar_text.append(f"{state.skipped} unchanged", style="dim")
         bar_text.append(" | ", style="dim")
         bar_text.append(elapsed_str, style="cyan")
         bar_text.append(" elapsed", style="dim")
@@ -1011,15 +1015,16 @@ def run_processing(
         # Worker table
         worker_table = Table(show_header=False, box=None, padding=0)
         worker_table.add_column("ID", style="dim", width=4)
-        worker_table.add_column("Stage", style="cyan", width=12)
-        worker_table.add_column("Model", style="yellow")
+        worker_table.add_column("Stage", style="cyan", width=14)
+        worker_table.add_column("Model", style="yellow", width=20)
         worker_table.add_column("Element")
 
         workers_data = state.workers.get_all()
         for wid in range(num_workers):
             if wid in workers_data:
                 elem, stage, model = workers_data[wid]
-                worker_table.add_row(f"[{wid}]", stage, model, elem)
+                display_model = model[:17] + "..." if len(model) > 20 else model
+                worker_table.add_row(f"[{wid}]", stage, display_model, elem)
             else:
                 worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "")
 
@@ -1204,7 +1209,7 @@ def print_processing_result(
     if processed:
         parts.append(f"[green]{processed} processed[/]")
     if skipped:
-        parts.append(f"[dim]{skipped} skipped (already in ES)[/]")
+        parts.append(f"{skipped} unchanged")
     if indexed:
         parts.append(f"{indexed} indexed")
     if skip_ai:

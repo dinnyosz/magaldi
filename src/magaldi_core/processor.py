@@ -885,16 +885,20 @@ def process_elements(
     if not all_elements:
         return result
 
-    # Get all element IDs to check which already exist in ES
+    # Get all element IDs and their content hashes from ES
     all_element_ids = [e.element_id for e in all_elements]
-    existing_ids = es_repo.get_existing_element_ids(all_element_ids)
+    existing_hashes = es_repo.get_element_content_hashes(all_element_ids)
 
-    # Filter out already-existing elements and count skipped
+    # Filter out unchanged elements (same element_id AND same content_hash)
+    # Elements with changed content will be re-processed
     elements_to_process = []
     for elem in all_elements:
-        if elem.element_id in existing_ids:
+        existing_hash = existing_hashes.get(elem.element_id)
+        if existing_hash is not None and existing_hash == elem.content_hash:
+            # Element exists and content unchanged - skip
             result.elements_skipped += 1
         else:
+            # Element is new OR content changed - process it
             elements_to_process.append(elem)
 
     total = len(all_elements)

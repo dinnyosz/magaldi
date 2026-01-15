@@ -58,6 +58,7 @@ INDEX_MAPPING = {
             "visibility": {"type": "keyword"},
             "is_async": {"type": "boolean"},
             "file_hash": {"type": "keyword"},  # For change detection (stored on all elements)
+            "content_hash": {"type": "keyword"},  # SHA256 of raw_code for element-level change detection
             "element_count": {"type": "integer"},  # Total elements in file (only on file elements)
             "indexed_at": {"type": "date"},
             "cluster_id": {"type": "keyword"},  # Feature cluster ID
@@ -156,6 +157,7 @@ class ElasticsearchRepository:
             "decorators": element.decorators,
             "visibility": element.visibility,
             "is_async": element.is_async,
+            "content_hash": element.content_hash,  # For element-level change detection
             "indexed_at": indexed_at.isoformat(),
         }
 
@@ -261,6 +263,30 @@ class ElasticsearchRepository:
         return {
             doc["_id"] for doc in response["docs"] if doc.get("found", False)
         }
+
+    def get_element_content_hashes(self, element_ids: list[str]) -> dict[str, str | None]:
+        """Get content hashes for existing elements.
+
+        Args:
+            element_ids: List of element IDs to check.
+
+        Returns:
+            Dict mapping element_id to content_hash (None if element doesn't exist or has no hash).
+        """
+        if not element_ids:
+            return {}
+
+        client = self._get_client()
+
+        # Use mget for efficient batch lookup, only fetch content_hash
+        response = client.mget(index=INDEX_NAME, ids=element_ids, _source=["content_hash"])
+
+        result = {}
+        for doc in response["docs"]:
+            if doc.get("found", False):
+                result[doc["_id"]] = doc.get("_source", {}).get("content_hash")
+
+        return result
 
     def delete_by_file(
         self, scope: str, repository: str, username: str, relative_path: str

@@ -10,6 +10,7 @@ Each element includes position, content, and hierarchy information.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -79,6 +80,20 @@ class CodeElement:
 
     # Context (for variables - how they're used)
     context_usages: list[str] = field(default_factory=list)
+
+    # Content hash for change detection (computed from raw_code)
+    content_hash: str | None = None
+
+    def compute_content_hash(self) -> str:
+        """Compute SHA256 hash of the element's content for change detection.
+
+        The hash is based on raw_code which contains the actual source code.
+        This allows detecting when an element's implementation changes,
+        even if the file around it changed but this element didn't.
+        """
+        content = self.raw_code or ""
+        self.content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        return self.content_hash
 
 
 @dataclass
@@ -726,6 +741,10 @@ def parse_file(
 
         # Parse and extract elements
         result.elements = parser.parse(content, file_info, scope, repository, username)
+
+        # Compute content hash for each element (for change detection)
+        for elem in result.elements:
+            elem.compute_content_hash()
 
     except Exception as e:
         result.parse_errors.append(str(e))
