@@ -864,17 +864,6 @@ def process_elements(
 
     result = ProcessingResult(scope=scope, repository=repository, username=username)
 
-    # Handle deletions first - remove old elements for files being reprocessed
-    # This ensures modified files get their old elements removed before new ones are indexed
-    for pf in parsed_files:
-        if pf.elements:
-            es_repo.delete_by_file(
-                scope,
-                repository,
-                username,
-                pf.file_info.relative_path,
-            )
-
     # Collect all elements and compute element counts per file
     all_elements: list[CodeElement] = []
     element_counts: dict[str, int] = {}
@@ -885,26 +874,43 @@ def process_elements(
     if not all_elements:
         return result
 
-    # Get all element IDs and their content hashes from ES
-    all_element_ids = [e.element_id for e in all_elements]
+    # Smart delete: only remove stale elements (those no longer in code)
+    # For each file, compare existing ES elements with newly parsed elements
+    new_element_ids = {e.element_id for e in all_elements}
+    stale_element_ids: list[str] = []
+
+    for pf in parsed_files:
+        existing_ids = es_repo.get_element_ids_by_file(
+            scope, repository, username, pf.file_info.relative_path
+        )
+        # Stale = in ES but not in new code
+        stale_ids = existing_ids - new_element_ids
+        stale_element_ids.extend(stale_ids)
+
+    # Delete only stale elements (e.g., a variable that was removed from code)
+    if stale_element_ids:
+        es_repo.delete_elements(stale_element_ids)
+
+    # Get content hashes for change detection
+    # Unchanged elements stay in ES - no need to re-process or re-index
+    all_element_ids = list(new_element_ids)
     existing_hashes = es_repo.get_element_content_hashes(all_element_ids)
 
-    # Filter out unchanged elements (same element_id AND same content_hash)
-    # Elements with changed content will be re-processed
+    # Filter: only process elements that are new or have changed content
     elements_to_process = []
     for elem in all_elements:
         existing_hash = existing_hashes.get(elem.element_id)
         if existing_hash is not None and existing_hash == elem.content_hash:
-            # Element exists and content unchanged - skip
+            # Element exists in ES with same content - skip entirely
             result.elements_skipped += 1
         else:
-            # Element is new OR content changed - process it
+            # Element is new OR content changed - needs processing
             elements_to_process.append(elem)
 
     total = len(all_elements)
 
     if not elements_to_process:
-        # All elements already exist
+        # All elements unchanged - nothing to do
         return result
 
     # Summary cache for hierarchical context

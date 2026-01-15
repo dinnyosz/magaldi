@@ -288,6 +288,63 @@ class ElasticsearchRepository:
 
         return result
 
+    def get_element_ids_by_file(
+        self, scope: str, repository: str, username: str, relative_path: str
+    ) -> set[str]:
+        """Get all element IDs for a specific file.
+
+        Args:
+            scope: Repository scope.
+            repository: Repository name.
+            username: Username.
+            relative_path: File path relative to repo root.
+
+        Returns:
+            Set of element IDs belonging to this file.
+        """
+        client = self._get_client()
+        result = client.search(
+            index=INDEX_NAME,
+            body={
+                "query": {
+                    "bool": {
+                        "filter": [
+                            {"term": {"scope": scope}},
+                            {"term": {"repository": repository}},
+                            {"term": {"username": username}},
+                            {"term": {"relative_path": relative_path}},
+                        ]
+                    }
+                },
+                "_source": False,
+                "size": 10000,  # Should be enough for any file
+            },
+        )
+        return {hit["_id"] for hit in result.get("hits", {}).get("hits", [])}
+
+    def delete_elements(self, element_ids: list[str]) -> int:
+        """Delete specific elements by their IDs.
+
+        Args:
+            element_ids: List of element IDs to delete.
+
+        Returns:
+            Number of elements deleted.
+        """
+        if not element_ids:
+            return 0
+
+        client = self._get_client()
+        # Use bulk delete for efficiency
+        from elasticsearch.helpers import bulk
+
+        actions = [
+            {"_op_type": "delete", "_index": INDEX_NAME, "_id": eid}
+            for eid in element_ids
+        ]
+        success, _ = bulk(client, actions, raise_on_error=False, refresh=True)
+        return success
+
     def delete_by_file(
         self, scope: str, repository: str, username: str, relative_path: str
     ) -> int:
