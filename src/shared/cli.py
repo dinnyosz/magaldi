@@ -496,9 +496,9 @@ def run_feature_extraction(
                 # Current cluster line with model
                 current_text = Text()
                 if state.current_cluster:
-                    current_text.append("  [labeling] ", style="cyan")
+                    current_text.append("  labeling  ", style="cyan")
                     if state.model:
-                        current_text.append(f"[{state.model}] ", style="yellow")
+                        current_text.append(f"{state.model}  ", style="yellow")
                     current_text.append(state.current_cluster, style="white")
                 else:
                     current_text.append("  ", style="dim")
@@ -720,9 +720,9 @@ def run_feature_extraction(
                 # Current feature and model
                 current_text = Text()
                 if state.current_feature:
-                    current_text.append("  [labeling] ", style="cyan")
+                    current_text.append("  labeling  ", style="cyan")
                     if state.model:
-                        current_text.append(f"[{state.model}] ", style="yellow")
+                        current_text.append(f"{state.model}  ", style="yellow")
                     current_text.append(state.current_feature, style="white")
                 else:
                     current_text.append("  ", style="dim")
