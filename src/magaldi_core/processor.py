@@ -319,7 +319,16 @@ class DependencyTracker:
                     continue
 
                 parent_id = self._parents.get(eid)
-                if parent_id is None or parent_id in self._completed:
+                # Element is ready if:
+                # - No parent (level 0)
+                # - Parent completed
+                # - Parent not in elements_to_process (was skipped/unchanged)
+                parent_ready = (
+                    parent_id is None
+                    or parent_id in self._completed
+                    or parent_id not in self._elements
+                )
+                if parent_ready:
                     ready.append(element)
                     if len(ready) >= max_count:
                         break
