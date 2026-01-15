@@ -1096,120 +1096,160 @@ def generate_skill(
     from pathlib import Path
 
     skill_content = '''---
-name: magaldi-code-discovery
-description: Use when exploring, understanding, or searching codebases. Provides semantic search, usage tracking, and call graph analysis.
+name: magaldi
+description: >
+  ALWAYS use for: grep, find usages, search patterns, find implementations,
+  call graphs, find where X is used/called, search code by meaning.
+  These tools use the PRE-INDEXED codebase for faster, richer results than raw file search.
+  Invoke BEFORE using built-in Grep/Glob/Read tools.
 ---
 
 # Magaldi Code Discovery
 
-Use this skill when the user asks to:
-- Find code, functions, or classes
-- Understand how something works
-- Find where something is used
-- Explore a codebase structure
-- Refactor or modify existing code
+**CRITICAL: Use magaldi tools INSTEAD OF built-in Grep/Glob for code search.**
 
-## Core Principle: Semantic First, Details Later
+The codebase is pre-indexed with:
+- Semantic embeddings (search by meaning)
+- Pre-computed summaries (understand without reading)
+- Call graphs (who calls what)
+- Feature clustering (related functions grouped)
 
-**NEVER start by reading files or grepping.** Always use semantic search first.
+## When to Use Magaldi vs Built-in Tools
 
-```
-WRONG: Read the file to understand it
-RIGHT: search_code("what does this do") → then read specific parts
-```
+| User Request | USE THIS | NOT THIS |
+|--------------|----------|----------|
+| "grep for X" / "find pattern X" | `mcp__magaldi__grep_code` | Built-in Grep |
+| "find where X is used/called" | `mcp__magaldi__find_usages` | Built-in Grep |
+| "search for functions that do X" | `mcp__magaldi__search_code` | Built-in Grep |
+| "find files matching *.py" | `mcp__magaldi__find_files` | Built-in Glob |
+| "what implements Interface X" | `mcp__magaldi__find_implementations` | Built-in Grep |
+| "who calls this function" | `mcp__magaldi__get_call_graph` | Built-in Grep |
+| "find similar code to X" | `mcp__magaldi__find_similar` | N/A |
+| "what does the codebase do" | `mcp__magaldi__search_features` | N/A |
+
+## Why Magaldi Tools Are Better
+
+| Feature | Magaldi | Built-in Grep/Glob |
+|---------|---------|-------------------|
+| Pre-indexed | Yes - instant results | No - scans every file |
+| Summaries | Every function has AI summary | None |
+| Semantic search | "authentication" finds login, auth, verify | Only literal matches |
+| Call graphs | Built-in | Must grep manually |
+| Context | Parent class, siblings, children | Just file/line |
 
 ## Tool Priority (Use in This Order)
 
-### 1. DISCOVER: Semantic Search (Start Here)
+### 1. SEMANTIC SEARCH (Start Here for "what does X do")
 ```
-search_code(query="authentication logic", brief=true, limit=10)
+mcp__magaldi__search_code(query="authentication logic", brief=true)
 ```
-- Use natural language: "function that validates tokens"
-- Use `brief=true` for exploration (saves tokens)
-- Returns summaries, not code
+- Natural language: "function that validates tokens"
+- Returns summaries, not just file:line
+- Use `brief=true` for exploration
 
-### 2. NARROW: Get Specific Elements
+### 2. PATTERN SEARCH (For literal patterns, regex)
 ```
-get_element(element_id="...", include_code=true)
+mcp__magaldi__grep_code(pattern="\\\\.add_job\\\\(", context_lines=2)
 ```
-- Only after you found relevant elements via search
-- Use `include_code=true` only when you need implementation
+- Regex patterns
+- Exact string matches
+- When you need literal occurrences
 
-### 3. TRACE: Find Relationships
+### 3. USAGE TRACKING (For "where is X called")
 ```
-find_usages(element_id="...")      # Where is this called?
-find_implementations(class_name="Protocol")  # What implements this?
-get_call_graph(element_id="...")   # Callers and callees
+mcp__magaldi__find_usages(element_id="...")
 ```
-- Use for refactoring impact analysis
-- Use before modifying shared code
+- After search_code found the element
+- Shows all call sites with context
+- Filters out definitions automatically
 
-### 4. PATTERN: Literal Search (Last Resort)
+### 4. RELATIONSHIPS (For refactoring, impact analysis)
 ```
-grep_code(pattern="\\.add_job\\(", context_lines=2)
+mcp__magaldi__get_call_graph(element_id="...")
+mcp__magaldi__find_implementations(class_name="BaseClass")
 ```
-- Only for exact patterns semantic search can't find
-- Regex, specific strings, symbol occurrences
-
-## Token Efficiency Rules
-
-| DO | DON'T |
-|----|-------|
-| `search_code(brief=true)` | `search_code()` with full summaries |
-| `get_element(one_id)` | `batch_get_elements(many_ids)` |
-| `read_file(start_line=10, end_line=20)` | `read_file()` entire file |
-| Search → narrow → read | Read everything then search |
+- Before modifying shared code
+- Understanding dependencies
 
 ## Workflow Examples
 
-### "How does X work?"
+### "Grep for X" / "Find pattern X"
 ```
-1. search_code("X functionality", brief=true)
-2. get_element(best_match, include_code=true)
-3. get_context(element_id) if need surrounding code
-```
-
-### "Find all places that call X"
-```
-1. search_code("X", element_types=["function"])
-2. find_usages(element_id)
+1. mcp__magaldi__grep_code(pattern="X", context_lines=2)
+   - NOT: built-in Grep tool
 ```
 
-### "What implements interface Y?"
+### "Find where function X is called"
 ```
-1. find_implementations(class_name="Y")
-2. get_element(each implementation) for details
+1. mcp__magaldi__search_code(query="X", element_types=["function"])
+2. mcp__magaldi__find_usages(element_id=result.element_id)
+   - NOT: grep for "X("
+```
+
+### "What implements interface Y"
+```
+1. mcp__magaldi__find_implementations(class_name="Y")
+   - NOT: grep for "class.*Y"
+```
+
+### "How does X work"
+```
+1. mcp__magaldi__search_code(query="X functionality", brief=true)
+2. mcp__magaldi__get_element(element_id=best_match, include_code=true)
+   - NOT: grep then read file
+```
+
+### "Find all authentication code"
+```
+1. mcp__magaldi__search_features(query="authentication")
+2. mcp__magaldi__get_feature_members(feature_id=result.feature_id)
+   - Returns grouped, related functions
 ```
 
 ### "Refactor function Z"
 ```
-1. search_code("Z")
-2. find_usages(element_id)  # Impact analysis
-3. get_call_graph(element_id)  # Dependencies
+1. mcp__magaldi__search_code(query="Z")
+2. mcp__magaldi__find_usages(element_id)  # Impact analysis
+3. mcp__magaldi__get_call_graph(element_id)  # Dependencies
 4. THEN make changes
 ```
 
-## Anti-Patterns (Never Do These)
+## Anti-Patterns (NEVER Do These)
 
-1. **Don't grep first** - Wastes tokens, returns noise
-2. **Don't read whole files** - Use line ranges or get_element
-3. **Don't skip semantic search** - It's your best tool
-4. **Don't ignore summaries** - They're pre-computed understanding
-5. **Don't batch when you can iterate** - One element at a time
+1. **Using built-in Grep instead of magaldi__grep_code**
+   - Magaldi grep has indexed context, built-in doesn't
 
-## Available Tools Reference
+2. **Using built-in Glob instead of magaldi__find_files**
+   - Magaldi knows which files are indexed
 
-| Tool | Purpose | When to Use |
-|------|---------|-------------|
-| `search_code` | Semantic search for code | First step, always |
-| `search_features` | Find high-level capabilities | Understanding architecture |
-| `get_element` | Get one element's details | After search found it |
-| `get_context` | See element in its surroundings | Understanding hierarchy |
-| `find_usages` | Where is this used? | Before refactoring |
-| `find_implementations` | What implements this? | Finding concrete classes |
-| `get_call_graph` | Callers and callees | Dependency analysis |
-| `grep_code` | Regex pattern search | Literal matches only |
-| `read_file` | Get file contents | Last resort, use line ranges |
+3. **Grepping for function calls instead of find_usages**
+   - find_usages filters definitions, has context
+
+4. **Reading whole files to understand them**
+   - Use search_code -> get_element with summaries
+
+5. **Skipping semantic search**
+   - Summaries save tokens, embeddings find related code
+
+## Available Tools Quick Reference
+
+| Tool | Purpose |
+|------|---------|
+| `search_code` | Semantic search by meaning |
+| `search_features` | Find high-level capabilities |
+| `grep_code` | Regex pattern search (USE THIS not built-in Grep) |
+| `find_usages` | Where is this called/used |
+| `find_implementations` | What implements this interface |
+| `get_call_graph` | Callers and callees |
+| `find_similar` | Similar code patterns |
+| `get_element` | Full element details |
+| `get_context` | Parent, siblings, children |
+| `find_files` | Glob pattern search (USE THIS not built-in Glob) |
+| `read_file` | File contents with line ranges |
+| `list_features` | All features in repo |
+| `get_feature_members` | Functions in a feature |
+| `list_repos` | All indexed repos |
+| `get_repo_stats` | Repository statistics |
 
 ## Remember
 
@@ -1217,8 +1257,9 @@ The index has already done the hard work:
 - Code is parsed and structured
 - Summaries explain what code does
 - Embeddings enable semantic search
+- Call graphs are pre-computed
 
-**Use the index. Don't re-read what's already understood.**
+**Use magaldi tools. Don't re-grep what's already indexed.**
 '''
 
     result = {

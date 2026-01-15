@@ -69,7 +69,8 @@ class MagaldiMCPServer:
                 Tool(
                     name="search_code",
                     description="FIND CODE: Search for functions, classes, methods by what they do. "
-                    "Use this first to locate relevant code. Returns name, file, line, summary. "
+                    "Uses pre-indexed semantic embeddings - finds 'login' when you search 'authentication'. "
+                    "Returns AI summaries so you understand code without reading it. "
                     "Use include_code=true to see implementation. Use brief=true for exploration.",
                     inputSchema={
                         "type": "object",
@@ -107,7 +108,8 @@ class MagaldiMCPServer:
                 Tool(
                     name="search_features",
                     description="FIND CAPABILITIES: Search for high-level features (groups of related functions). "
-                    "Use when you need to understand what the codebase CAN DO, not specific implementations.",
+                    "Pre-clustered by AI - 'authentication' returns all auth-related functions grouped together. "
+                    "Use to understand what the codebase CAN DO, not just specific implementations.",
                     inputSchema={
                         "type": "object",
                         "properties": {
@@ -215,7 +217,8 @@ class MagaldiMCPServer:
                 Tool(
                     name="find_files",
                     description="FIND FILES: Search for files by glob pattern. "
-                    "Use to discover file structure (e.g., '**/*.py', 'src/**/*.ts').",
+                    "USE THIS instead of built-in Glob - searches indexed codebase. "
+                    "Discovers file structure (e.g., '**/*.py', 'src/**/*.ts').",
                     inputSchema={
                         "type": "object",
                         "properties": {
@@ -299,7 +302,8 @@ class MagaldiMCPServer:
                 Tool(
                     name="grep_code",
                     description="GREP CODE: Search with regex pattern (like ripgrep). "
-                    "Use for literal patterns, finding usages, or when semantic search isn't precise enough. "
+                    "USE THIS instead of built-in Grep - works on indexed codebase. "
+                    "For literal patterns, exact strings, symbol occurrences. "
                     "Supports context lines before/after matches.",
                     inputSchema={
                         "type": "object",
@@ -315,7 +319,8 @@ class MagaldiMCPServer:
                 Tool(
                     name="find_usages",
                     description="FIND USAGES: Find where a function/class/method is called or referenced. "
-                    "Use after search_code to see how something is used throughout the codebase.",
+                    "USE THIS instead of grepping for 'functionName(' - automatically filters definitions, "
+                    "includes context lines, and understands code structure.",
                     inputSchema={
                         "type": "object",
                         "properties": {
@@ -328,7 +333,7 @@ class MagaldiMCPServer:
                 Tool(
                     name="find_implementations",
                     description="FIND IMPLEMENTATIONS: Find classes that inherit from or implement a protocol/base class. "
-                    "Use to find concrete implementations of abstract classes or protocols.",
+                    "USE THIS instead of grepping for 'class.*BaseClass' - understands inheritance patterns.",
                     inputSchema={
                         "type": "object",
                         "properties": {
@@ -342,7 +347,7 @@ class MagaldiMCPServer:
                 Tool(
                     name="get_call_graph",
                     description="CALL GRAPH: Get callers (who calls this) and callees (what it calls) for a function. "
-                    "Use to understand dependencies and impact of changes.",
+                    "Pre-computed from indexed code - instant dependency analysis for refactoring impact.",
                     inputSchema={
                         "type": "object",
                         "properties": {
