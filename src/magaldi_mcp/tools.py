@@ -620,50 +620,6 @@ def get_feature_members(
 # =============================================================================
 
 
-def read_file(
-    repo_root: str,
-    file_path: str,
-    start_line: int | None = None,
-    end_line: int | None = None,
-) -> dict[str, Any]:
-    """Read file contents from disk.
-
-    Args:
-        repo_root: Repository root path.
-        file_path: Relative path to file.
-        start_line: Start line (1-indexed, optional).
-        end_line: End line (1-indexed, optional).
-
-    Returns:
-        File contents with metadata.
-    """
-    from pathlib import Path
-
-    full_path = Path(repo_root) / file_path
-    if not full_path.exists():
-        raise ValueError(f"File not found: {file_path}")
-    if not full_path.is_file():
-        raise ValueError(f"Not a file: {file_path}")
-
-    content = full_path.read_text()
-    lines = content.splitlines()
-    total_lines = len(lines)
-
-    # Apply line range if specified
-    if start_line is not None or end_line is not None:
-        start_idx = (start_line - 1) if start_line else 0
-        end_idx = end_line if end_line else total_lines
-        lines = lines[start_idx:end_idx]
-        content = "\n".join(lines)
-
-    return {
-        "path": file_path,
-        "content": content,
-        "total_lines": total_lines,
-        "lines_returned": len(lines),
-    }
-
-
 def find_files(
     es: ElasticsearchRepository,
     pattern: str,
@@ -1287,7 +1243,6 @@ mcp__magaldi__find_implementations(class_name="BaseClass")
 | `get_element` | Full element details |
 | `get_context` | Parent, siblings, children |
 | `find_files` | Glob pattern search (USE THIS not built-in Glob) |
-| `read_file` | File contents with line ranges |
 | `list_features` | All features in repo |
 | `get_feature_members` | Functions in a feature |
 | `list_repos` | All indexed repos |

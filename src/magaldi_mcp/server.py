@@ -26,12 +26,10 @@ class MagaldiMCPServer:
     def __init__(
         self,
         default_username: str = "main",
-        repo_root: str | None = None,
     ) -> None:
         self.server = Server("magaldi")
         self.config = get_config()
         self.default_username = default_username
-        self.repo_root = repo_root  # For read_file and find_files tools
         self.es_repo: ElasticsearchRepository | None = None
         self.embed_client: CodeEmbeddingClient | None = None
 
@@ -198,22 +196,8 @@ class MagaldiMCPServer:
                     },
                 ),
                 # =============================================================
-                # FILES - Work with actual files
+                # FILES - Work with indexed file data
                 # =============================================================
-                Tool(
-                    name="read_file",
-                    description="READ FILE: Get actual file contents from disk. "
-                    "Use when you need the full file or specific line ranges.",
-                    inputSchema={
-                        "type": "object",
-                        "properties": {
-                            "file_path": {"type": "string", "description": "Relative path (e.g., 'src/main.py')"},
-                            "start_line": {"type": "integer", "description": "Start line (1-indexed)"},
-                            "end_line": {"type": "integer", "description": "End line (1-indexed)"},
-                        },
-                        "required": ["file_path"],
-                    },
-                ),
                 Tool(
                     name="find_files",
                     description="FIND FILES: Search for files by glob pattern. "
@@ -417,7 +401,6 @@ class MagaldiMCPServer:
             grep_code,
             list_features,
             list_repos,
-            read_file,
             search_code,
             search_features,
         )
@@ -523,16 +506,6 @@ class MagaldiMCPServer:
                 es,
                 element_ids=args["element_ids"],
                 include_code=args.get("include_code", False),
-            )
-        elif name == "read_file":
-            if not self.repo_root:
-                raise ValueError("read_file requires MAGALDI_REPO_ROOT to be set")
-            return await asyncio.to_thread(
-                read_file,
-                self.repo_root,
-                file_path=args["file_path"],
-                start_line=args.get("start_line"),
-                end_line=args.get("end_line"),
             )
         elif name == "find_files":
             # Uses ES - no filesystem access needed
@@ -770,11 +743,6 @@ def run_server() -> None:
         default=os.environ.get("MAGALDI_USER", "main"),
         help="Default username for searches (default: MAGALDI_USER env or 'main')",
     )
-    parser.add_argument(
-        "--repo-root", "-r",
-        default=os.environ.get("MAGALDI_REPO_ROOT"),
-        help="Repository root for file tools (default: MAGALDI_REPO_ROOT env)",
-    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -787,6 +755,5 @@ def run_server() -> None:
 
     server = MagaldiMCPServer(
         default_username=args.user,
-        repo_root=args.repo_root,
     )
     asyncio.run(server.run())
