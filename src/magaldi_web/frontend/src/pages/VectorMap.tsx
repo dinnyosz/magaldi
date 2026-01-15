@@ -99,8 +99,8 @@ function ZoomableScatterPlot({ points, bounds, onPointClick, clusters }: Zoomabl
           name: cluster.representative.name,
           cx,
           cy,
-          radius: maxDist * 1.2, // 20% padding
-          color: `hsla(${hue}, 70%, 50%, 0.15)`,
+          radius: Math.max(maxDist * 1.3, 0.5), // 30% padding, minimum radius
+          color: `hsla(${hue}, 70%, 50%, 0.2)`,
         })
       }
     })
@@ -157,9 +157,9 @@ function ZoomableScatterPlot({ points, bounds, onPointClick, clusters }: Zoomabl
       .attr('class', 'cluster')
       .attr('cx', d => xScale(d.cx))
       .attr('cy', d => yScale(d.cy))
-      .attr('r', d => Math.abs(xScale(d.cx + d.radius) - xScale(d.cx)))
+      .attr('r', d => Math.max(Math.abs(xScale(d.cx + d.radius) - xScale(d.cx)), 20))
       .attr('fill', d => d.color)
-      .attr('stroke', d => d.color.replace('0.15', '0.4'))
+      .attr('stroke', d => d.color.replace('0.2', '0.5'))
       .attr('stroke-width', 2)
       .attr('stroke-dasharray', '5,5')
 
@@ -203,20 +203,23 @@ function ZoomableScatterPlot({ points, bounds, onPointClick, clusters }: Zoomabl
         onPointClick(d)
       })
 
-    // Create labels group (hidden initially)
-    const labelsGroup = clippedG.append('g')
+    // Create labels group (hidden initially, OUTSIDE the transformed group)
+    // Labels are rendered in screen space to avoid scaling issues
+    const labelsGroup = g.append('g')
       .attr('class', 'labels')
+      .attr('clip-path', 'url(#clip)')
       .style('opacity', 0)
 
     labelsGroup.selectAll('text.label')
       .data(points)
       .join('text')
       .attr('class', 'label')
-      .attr('x', d => xScale(d.x) + 6)
-      .attr('y', d => yScale(d.y) + 3)
-      .attr('font-size', '10px')
+      .attr('x', d => xScale(d.x) + 8)
+      .attr('y', d => yScale(d.y) - 5)
+      .attr('font-size', '9px')
       .attr('fill', '#333')
-      .text(d => d.name.length > 20 ? d.name.slice(0, 20) + '...' : d.name)
+      .attr('pointer-events', 'none')
+      .text(d => d.name.length > 25 ? d.name.slice(0, 25) + '...' : d.name)
 
     // Setup zoom behavior
     const zoom = d3.zoom<SVGSVGElement, unknown>()
@@ -226,7 +229,7 @@ function ZoomableScatterPlot({ points, bounds, onPointClick, clusters }: Zoomabl
         currentZoomRef.current = transform.k
         setZoomLevel(transform.k)
 
-        // Apply transform to clipped group
+        // Apply transform to clipped group (points and clusters)
         clippedG.attr('transform', transform.toString())
 
         // Adjust point sizes based on zoom
@@ -237,12 +240,12 @@ function ZoomableScatterPlot({ points, bounds, onPointClick, clusters }: Zoomabl
         clustersGroup.selectAll('circle.cluster')
           .attr('stroke-width', 2 / transform.k)
 
-        // Show/hide labels based on zoom level
+        // Update label positions based on transform (labels are in screen space)
         if (transform.k >= LABEL_ZOOM_THRESHOLD) {
-          labelsGroup
-            .style('opacity', Math.min(1, (transform.k - LABEL_ZOOM_THRESHOLD) / 2))
-            .selectAll('text.label')
-            .attr('font-size', `${10 / transform.k}px`)
+          labelsGroup.style('opacity', Math.min(1, (transform.k - LABEL_ZOOM_THRESHOLD) / 2))
+          labelsGroup.selectAll<SVGTextElement, VectorPoint>('text.label')
+            .attr('x', d => transform.applyX(xScale(d.x)) + 8)
+            .attr('y', d => transform.applyY(yScale(d.y)) - 5)
         } else {
           labelsGroup.style('opacity', 0)
         }
