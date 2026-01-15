@@ -665,36 +665,71 @@ def read_file(
 
 
 def find_files(
-    repo_root: str,
+    es: ElasticsearchRepository,
     pattern: str,
+    scope: str | None = None,
+    repository: str | None = None,
+    username: str = "main",
     limit: int = 50,
 ) -> list[dict[str, Any]]:
-    """Find files by glob pattern.
+    """Find indexed files by glob pattern.
+
+    Searches file elements in Elasticsearch - no filesystem access needed.
 
     Args:
-        repo_root: Repository root path.
+        es: Elasticsearch repository.
         pattern: Glob pattern (e.g., '**/*.py', 'src/**/*.ts').
+        scope: Filter by scope.
+        repository: Filter by repository.
+        username: User branch to search.
         limit: Maximum files to return.
 
     Returns:
         List of matching files with basic info.
     """
-    from pathlib import Path
+    import fnmatch
 
-    root = Path(repo_root)
+    client = es._get_client()
+
+    # Build ES query for file elements
+    filters = [
+        {"term": {"element_type": "file"}},
+        {"term": {"username": username}},
+    ]
+    if scope:
+        filters.append({"term": {"scope": scope}})
+    if repository:
+        filters.append({"term": {"repository": repository}})
+
+    # Fetch file elements
+    es_result = client.search(
+        index="magaldi-code-elements",
+        body={
+            "query": {"bool": {"filter": filters}},
+            "_source": ["element_id", "relative_path", "language", "line_end"],
+            "size": min(limit * 5, 2000),  # Get extra to filter by pattern
+            "sort": [{"relative_path": "asc"}],
+        },
+    )
+
+    hits = es_result.get("hits", {}).get("hits", [])
     matches = []
 
-    for path in root.glob(pattern):
-        if path.is_file() and not any(p.startswith('.') for p in path.parts):
-            rel_path = path.relative_to(root)
+    for hit in hits:
+        source = hit["_source"]
+        rel_path = source.get("relative_path", "")
+
+        # Apply glob pattern filter
+        if fnmatch.fnmatch(rel_path, pattern):
             matches.append({
-                "path": str(rel_path),
-                "size": path.stat().st_size,
+                "path": rel_path,
+                "language": source.get("language"),
+                "lines": source.get("line_end", 0),
             })
             if len(matches) >= limit:
                 break
 
-    return sorted(matches, key=lambda x: x["path"])
+    return matches
 
 
 def batch_get_elements(
@@ -827,17 +862,25 @@ def _find_elements_in_file(
 
 
 def grep_code(
-    repo_root: str,
+    es: ElasticsearchRepository,
     pattern: str,
+    scope: str | None = None,
+    repository: str | None = None,
+    username: str = "main",
     glob: str | None = None,
     context_lines: int = 0,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
-    """Search code with regex pattern (like grep/ripgrep).
+    """Search indexed code with regex pattern.
+
+    Searches the raw_code field in Elasticsearch - no filesystem access needed.
 
     Args:
-        repo_root: Repository root path.
+        es: Elasticsearch repository.
         pattern: Regex pattern to search.
+        scope: Filter by scope.
+        repository: Filter by repository.
+        username: User branch to search.
         glob: File glob filter (e.g., '*.py', '*.ts').
         context_lines: Lines of context before/after match.
         limit: Maximum matches to return.
@@ -845,106 +888,87 @@ def grep_code(
     Returns:
         List of matches with file, line, content, and context.
     """
+    import fnmatch
     import re
-    import subprocess
-    from pathlib import Path
 
-    root = Path(repo_root)
+    client = es._get_client()
     results: list[dict[str, Any]] = []
 
-    # Try ripgrep first (faster), fall back to manual search
-    try:
-        cmd = ["rg", "--json", "-n", "--max-count", str(limit * 2)]
-        if context_lines > 0:
-            cmd.extend(["-C", str(context_lines)])
-        if glob:
-            cmd.extend(["--glob", glob])
-        cmd.extend([pattern, str(root)])
+    # Build ES query - fetch elements with raw_code
+    filters = [
+        {"exists": {"field": "raw_code"}},
+        {"term": {"username": username}},
+    ]
+    if scope:
+        filters.append({"term": {"scope": scope}})
+    if repository:
+        filters.append({"term": {"repository": repository}})
 
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    # Fetch candidates from ES (get more than limit since we'll filter by regex)
+    es_result = client.search(
+        index="magaldi-code-elements",
+        body={
+            "query": {"bool": {"filter": filters}},
+            "_source": ["element_id", "name", "element_type", "relative_path", "line_start", "raw_code"],
+            "size": min(limit * 10, 5000),  # Fetch extra to filter
+        },
+    )
 
-        # Parse ripgrep JSON output
-        for line in proc.stdout.splitlines():
-            try:
-                import json
-                obj = json.loads(line)
-                if obj.get("type") == "match":
-                    data = obj["data"]
-                    path = data["path"]["text"]
-                    rel_path = str(Path(path).relative_to(root))
-                    line_num = data["line_number"]
-                    text = data["lines"]["text"].rstrip("\n")
-
-                    results.append({
-                        "file": rel_path,
-                        "line": line_num,
-                        "content": text,
-                        "match": data.get("submatches", [{}])[0].get("match", {}).get("text", ""),
-                    })
-
-                    if len(results) >= limit:
-                        break
-            except (json.JSONDecodeError, KeyError):
-                continue
-
-        return results
-
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        pass  # Fall back to manual search
-
-    # Manual fallback (slower but always works)
+    hits = es_result.get("hits", {}).get("hits", [])
     compiled = re.compile(pattern)
-    file_pattern = glob if glob else "**/*"
 
-    for path in root.glob(file_pattern):
-        if not path.is_file():
+    for hit in hits:
+        source = hit["_source"]
+        raw_code = source.get("raw_code", "")
+        rel_path = source.get("relative_path", "")
+
+        # Apply glob filter if specified
+        if glob and not fnmatch.fnmatch(rel_path, glob):
             continue
-        if any(p.startswith('.') for p in path.parts):
-            continue
 
-        try:
-            content = path.read_text(errors="ignore")
-            lines = content.splitlines()
+        # Search for pattern in raw_code
+        lines = raw_code.splitlines()
+        element_start_line = source.get("line_start", 1)
 
-            for i, line in enumerate(lines):
-                match = compiled.search(line)
-                if match:
-                    rel_path = str(path.relative_to(root))
-                    entry: dict[str, Any] = {
-                        "file": rel_path,
-                        "line": i + 1,
-                        "content": line,
-                        "match": match.group(0),
-                    }
+        for i, line in enumerate(lines):
+            match = compiled.search(line)
+            if match:
+                actual_line = element_start_line + i
 
-                    # Add context if requested
-                    if context_lines > 0:
-                        start = max(0, i - context_lines)
-                        end = min(len(lines), i + context_lines + 1)
-                        entry["context_before"] = lines[start:i]
-                        entry["context_after"] = lines[i + 1:end]
+                entry: dict[str, Any] = {
+                    "file": rel_path,
+                    "line": actual_line,
+                    "content": line,
+                    "match": match.group(0),
+                    "element_name": source.get("name"),
+                    "element_type": source.get("element_type"),
+                }
 
-                    results.append(entry)
+                # Add context if requested
+                if context_lines > 0:
+                    start = max(0, i - context_lines)
+                    end = min(len(lines), i + context_lines + 1)
+                    entry["context_before"] = lines[start:i]
+                    entry["context_after"] = lines[i + 1:end]
 
-                    if len(results) >= limit:
-                        return results
+                results.append(entry)
 
-        except (OSError, UnicodeDecodeError):
-            continue
+                if len(results) >= limit:
+                    return results
 
     return results
 
 
 def find_usages(
-    repo_root: str,
     es: ElasticsearchRepository,
     element_id: str,
     limit: int = 30,
 ) -> list[dict[str, Any]]:
     """Find where an element is used/called/referenced.
 
+    Searches indexed code in Elasticsearch - no filesystem access needed.
+
     Args:
-        repo_root: Repository root path.
         es: Elasticsearch repository.
         element_id: Element to find usages of.
         limit: Maximum usages to return.
@@ -963,6 +987,9 @@ def find_usages(
     element_type = doc.get("element_type")
     defining_file = doc.get("relative_path")
     defining_line = doc.get("line_start")
+    scope = doc.get("scope")
+    repository = doc.get("repository")
+    username = doc.get("username", "main")
 
     # Build search pattern based on element type
     if element_type == "function":
@@ -978,11 +1005,14 @@ def find_usages(
         # Generic: just the name as word boundary
         pattern = rf"\b{re.escape(name)}\b"
 
-    # Search with grep_code
+    # Search with grep_code (now uses ES)
     matches = grep_code(
-        repo_root=repo_root,
+        es=es,
         pattern=pattern,
-        glob="**/*.py",  # TODO: detect language from element
+        scope=scope,
+        repository=repository,
+        username=username,
+        glob="*.py",  # TODO: detect language from element
         context_lines=1,
         limit=limit + 10,  # Get extra to filter out definition
     )
@@ -1018,19 +1048,25 @@ def find_usages(
 
 
 def find_implementations(
-    repo_root: str,
     es: ElasticsearchRepository,
     element_id: str | None = None,
     class_name: str | None = None,
+    scope: str | None = None,
+    repository: str | None = None,
+    username: str = "main",
     limit: int = 20,
 ) -> list[dict[str, Any]]:
     """Find classes that implement/inherit from a protocol or base class.
 
+    Searches indexed code in Elasticsearch - no filesystem access needed.
+
     Args:
-        repo_root: Repository root path.
         es: Elasticsearch repository.
         element_id: Element ID of the protocol/base class.
         class_name: Or just the class name to search for.
+        scope: Filter by scope.
+        repository: Filter by repository.
+        username: User branch to search.
         limit: Maximum implementations to return.
 
     Returns:
@@ -1038,12 +1074,15 @@ def find_implementations(
     """
     import re
 
-    # Get the name to search for
+    # Get the name and scope/repo to search for
     if element_id:
         doc = es.get_document(element_id)
         if not doc:
             raise ValueError(f"Element not found: {element_id}")
         name = doc.get("name")
+        scope = scope or doc.get("scope")
+        repository = repository or doc.get("repository")
+        username = doc.get("username", "main")
     elif class_name:
         name = class_name
     else:
@@ -1054,9 +1093,12 @@ def find_implementations(
     pattern = rf"class\s+\w+\s*\([^)]*\b{re.escape(name)}\b"
 
     matches = grep_code(
-        repo_root=repo_root,
+        es=es,
         pattern=pattern,
-        glob="**/*.py",
+        scope=scope,
+        repository=repository,
+        username=username,
+        glob="*.py",
         context_lines=2,
         limit=limit,
     )
@@ -1308,15 +1350,15 @@ The index has already done the hard work:
 
 
 def get_call_graph(
-    repo_root: str,
     es: ElasticsearchRepository,
     element_id: str,
     direction: str = "both",
 ) -> dict[str, Any]:
     """Get callers and/or callees of a function/method.
 
+    Analyzes indexed code in Elasticsearch - no filesystem access needed.
+
     Args:
-        repo_root: Repository root path.
         es: Elasticsearch repository.
         element_id: Function/method element ID.
         direction: 'callers', 'callees', or 'both'.
@@ -1345,7 +1387,7 @@ def get_call_graph(
 
     # Find callers (who calls this function)
     if direction in ("callers", "both"):
-        usages = find_usages(repo_root, es, element_id, limit=20)
+        usages = find_usages(es, element_id, limit=20)
         for usage in usages:
             result["callers"].append({
                 "file": usage["file"],

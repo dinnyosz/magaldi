@@ -223,6 +223,8 @@ class MagaldiMCPServer:
                         "type": "object",
                         "properties": {
                             "pattern": {"type": "string", "description": "Glob pattern"},
+                            "scope": {"type": "string", "description": "Filter by scope"},
+                            "repository": {"type": "string", "description": "Filter by repo"},
                             "limit": {"type": "integer", "default": 50},
                         },
                         "required": ["pattern"],
@@ -302,13 +304,15 @@ class MagaldiMCPServer:
                 Tool(
                     name="grep_code",
                     description="GREP CODE: Search with regex pattern (like ripgrep). "
-                    "USE THIS instead of built-in Grep - works on indexed codebase. "
+                    "USE THIS instead of built-in Grep - searches indexed codebase. "
                     "For literal patterns, exact strings, symbol occurrences. "
                     "Supports context lines before/after matches.",
                     inputSchema={
                         "type": "object",
                         "properties": {
                             "pattern": {"type": "string", "description": "Regex pattern to search"},
+                            "scope": {"type": "string", "description": "Filter by scope"},
+                            "repository": {"type": "string", "description": "Filter by repo"},
                             "glob": {"type": "string", "description": "File filter (e.g., '*.py', 'src/**/*.ts')"},
                             "context_lines": {"type": "integer", "default": 0, "description": "Lines of context around match"},
                             "limit": {"type": "integer", "default": 50},
@@ -339,6 +343,8 @@ class MagaldiMCPServer:
                         "properties": {
                             "element_id": {"type": "string", "description": "Element ID of the protocol/base class"},
                             "class_name": {"type": "string", "description": "Or just the class name to search for"},
+                            "scope": {"type": "string", "description": "Filter by scope"},
+                            "repository": {"type": "string", "description": "Filter by repo"},
                             "limit": {"type": "integer", "default": 20},
                         },
                         "required": [],
@@ -529,52 +535,50 @@ class MagaldiMCPServer:
                 end_line=args.get("end_line"),
             )
         elif name == "find_files":
-            if not self.repo_root:
-                raise ValueError("find_files requires MAGALDI_REPO_ROOT to be set")
+            # Uses ES - no filesystem access needed
             return await asyncio.to_thread(
                 find_files,
-                self.repo_root,
+                es,
                 pattern=args["pattern"],
+                scope=args.get("scope"),
+                repository=args.get("repository"),
                 limit=args.get("limit", 50),
             )
         elif name == "grep_code":
-            if not self.repo_root:
-                raise ValueError("grep_code requires MAGALDI_REPO_ROOT to be set")
+            # Uses ES raw_code field - no filesystem access needed
             return await asyncio.to_thread(
                 grep_code,
-                self.repo_root,
+                es,
                 pattern=args["pattern"],
+                scope=args.get("scope"),
+                repository=args.get("repository"),
                 glob=args.get("glob"),
                 context_lines=args.get("context_lines", 0),
                 limit=args.get("limit", 50),
             )
         elif name == "find_usages":
-            if not self.repo_root:
-                raise ValueError("find_usages requires MAGALDI_REPO_ROOT to be set")
+            # Uses ES - no filesystem access needed
             return await asyncio.to_thread(
                 find_usages,
-                self.repo_root,
                 es,
                 element_id=args["element_id"],
                 limit=args.get("limit", 30),
             )
         elif name == "find_implementations":
-            if not self.repo_root:
-                raise ValueError("find_implementations requires MAGALDI_REPO_ROOT to be set")
+            # Uses ES - no filesystem access needed
             return await asyncio.to_thread(
                 find_implementations,
-                self.repo_root,
                 es,
                 element_id=args.get("element_id"),
                 class_name=args.get("class_name"),
+                scope=args.get("scope"),
+                repository=args.get("repository"),
                 limit=args.get("limit", 20),
             )
         elif name == "get_call_graph":
-            if not self.repo_root:
-                raise ValueError("get_call_graph requires MAGALDI_REPO_ROOT to be set")
+            # Uses ES - no filesystem access needed
             return await asyncio.to_thread(
                 get_call_graph,
-                self.repo_root,
                 es,
                 element_id=args["element_id"],
                 direction=args.get("direction", "both"),
