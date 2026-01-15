@@ -51,6 +51,7 @@ function ZoomableScatterPlot({ points, bounds, onPointClick, clusters }: Zoomabl
   const [hoveredPoint, setHoveredPoint] = useState<VectorPoint | null>(null)
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown>>()
   const gRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined>>()
+  const currentZoomRef = useRef(1) // Track current zoom level for event handlers
 
   // Compute cluster centroids and radii for drawing circles
   const clusterBounds = useCallback(() => {
@@ -189,12 +190,12 @@ function ZoomableScatterPlot({ points, bounds, onPointClick, clusters }: Zoomabl
       .attr('fill', d => ELEMENT_COLORS[d.element_type] || '#6c757d')
       .attr('opacity', 0.7)
       .attr('cursor', 'pointer')
-      .on('mouseenter', function(event, d) {
+      .on('mouseenter', function(_event, d) {
         d3.select(this).attr('r', 8).attr('opacity', 1)
         setHoveredPoint(d)
       })
       .on('mouseleave', function() {
-        d3.select(this).attr('r', 4 / zoomLevel).attr('opacity', 0.7)
+        d3.select(this).attr('r', 4 / currentZoomRef.current).attr('opacity', 0.7)
         setHoveredPoint(null)
       })
       .on('click', (event, d) => {
@@ -222,6 +223,7 @@ function ZoomableScatterPlot({ points, bounds, onPointClick, clusters }: Zoomabl
       .scaleExtent([0.5, 20])
       .on('zoom', (event) => {
         const transform = event.transform
+        currentZoomRef.current = transform.k
         setZoomLevel(transform.k)
 
         // Apply transform to clipped group
@@ -256,7 +258,7 @@ function ZoomableScatterPlot({ points, bounds, onPointClick, clusters }: Zoomabl
     // Store initial transform
     svg.call(zoom.transform, d3.zoomIdentity)
 
-  }, [points, bounds, onPointClick, clusterBounds, zoomLevel])
+  }, [points, bounds, onPointClick, clusterBounds])
 
   const handleZoomIn = () => {
     if (svgRef.current && zoomRef.current) {
