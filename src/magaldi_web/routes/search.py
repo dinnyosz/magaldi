@@ -128,6 +128,8 @@ async def search(
         filters.append({"terms": {"element_type": request.element_types}})
     if request.language:
         filters.append({"term": {"language": request.language}})
+    if not request.include_tests:
+        filters.append({"term": {"is_test": False}})
 
     # Validate at least one search mode is enabled
     if not request.use_text_search and not request.use_vector_search:

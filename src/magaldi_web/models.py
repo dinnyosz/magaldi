@@ -123,6 +123,7 @@ class SearchRequest(BaseModel):
     offset: int = Field(default=0, ge=0)
     use_text_search: bool = True
     use_vector_search: bool = True
+    include_tests: bool = False
 
 
 class SearchResult(BaseModel):

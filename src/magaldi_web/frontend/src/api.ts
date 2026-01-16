@@ -59,6 +59,7 @@ export interface SearchRequest {
   offset?: number
   use_text_search?: boolean
   use_vector_search?: boolean
+  include_tests?: boolean
 }
 
 export interface SearchResult {

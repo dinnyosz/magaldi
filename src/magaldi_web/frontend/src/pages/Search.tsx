@@ -34,6 +34,7 @@ function Search() {
   const [limit, setLimit] = useState(20)
   const [useTextSearch, setUseTextSearch] = useState(true)
   const [useVectorSearch, setUseVectorSearch] = useState(true)
+  const [includeTests, setIncludeTests] = useState(false)
   const [generateSummary, setGenerateSummary] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -48,7 +49,7 @@ function Search() {
   })
 
   const { data: searchResult, isLoading, error } = useQuery({
-    queryKey: ['search', debouncedQuery, selectedScope, selectedRepo, selectedTypes, selectedUsername, limit, useTextSearch, useVectorSearch],
+    queryKey: ['search', debouncedQuery, selectedScope, selectedRepo, selectedTypes, selectedUsername, limit, useTextSearch, useVectorSearch, includeTests],
     queryFn: () =>
       search({
         query: debouncedQuery,
@@ -59,6 +60,7 @@ function Search() {
         limit,
         use_text_search: useTextSearch,
         use_vector_search: useVectorSearch,
+        include_tests: includeTests,
       }),
     enabled: debouncedQuery.length > 0 && (useTextSearch || useVectorSearch),
   })
@@ -193,6 +195,14 @@ function Search() {
               <Form.Text className="text-muted small">
                 Generate overview from top results
               </Form.Text>
+              <hr className="my-2" />
+              <Form.Check
+                type="switch"
+                id="include-tests"
+                label="Include Tests"
+                checked={includeTests}
+                onChange={(e) => setIncludeTests(e.target.checked)}
+              />
             </Card.Body>
           </Card>
 
