@@ -28,6 +28,69 @@ def cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
     return dot_product / (norm1 * norm2)
 
 
+async def _generate_search_summary(
+    query: str,
+    results: list[SearchResult],
+    config,
+) -> tuple[str | None, str | None]:
+    """Generate AI summary of search results.
+
+    Args:
+        query: The user's search query.
+        results: Top search results to summarize.
+        config: Application config with LLM settings.
+
+    Returns:
+        Tuple of (summary, error). One will be None.
+    """
+    try:
+        from shared.ai.llm_client import LLMClient
+
+        # Build context from results
+        context_items = []
+        for i, r in enumerate(results[:50], 1):
+            item = f"{i}. [{r.element_type}] {r.name}"
+            if r.file_path:
+                item += f" ({r.file_path}:{r.line})"
+            if r.summary:
+                item += f"\n   Summary: {r.summary}"
+            if r.signature:
+                item += f"\n   Signature: {r.signature}"
+            context_items.append(item)
+
+        context = "\n\n".join(context_items)
+
+        prompt = f"""Based on the following code search results for the query "{query}", write a concise 2-3 paragraph summary that:
+1. Explains what code elements are relevant to the query
+2. Highlights key patterns, classes, or functions found
+3. Suggests which elements might be most useful to explore
+
+Search Results:
+{context}
+
+Write your summary in clear, technical prose. Focus on being helpful to a developer exploring this codebase."""
+
+        # Use the configured model (prefer smaller/faster model for summary)
+        llm = LLMClient(
+            model=config.llm.get_litellm_model(config.llm.summarize_model),
+            api_base=config.llm.url if config.llm.provider == "ollama" else None,
+            api_key=config.llm.api_key,
+        )
+
+        summary = llm.generate(
+            prompt=prompt,
+            temperature=0.3,
+            max_tokens=500,
+            timeout=30,
+        )
+
+        return summary.strip(), None
+
+    except Exception as e:
+        logger.warning(f"AI summary generation failed: {e}")
+        return None, str(e)
+
+
 @router.post("/search", response_model=SearchResponse)
 async def search(
     request: SearchRequest,
@@ -241,6 +304,16 @@ async def search(
     # Sort by combined score (sum of enabled search mode scores)
     results.sort(key=lambda r: r.combined_score or 0, reverse=True)
 
+    # Generate AI summary if requested
+    ai_summary = None
+    ai_summary_error = None
+    if request.generate_summary and results:
+        ai_summary, ai_summary_error = await _generate_search_summary(
+            query=request.query,
+            results=results[:50],  # Use top 50 results
+            config=config,
+        )
+
     return SearchResponse(
         query=request.query,
         total=total,
@@ -249,6 +322,8 @@ async def search(
         text_search_used=request.use_text_search,
         vector_search_used=query_embedding is not None,
         embedding_error=embedding_error,
+        ai_summary=ai_summary,
+        ai_summary_error=ai_summary_error,
     )
 
 

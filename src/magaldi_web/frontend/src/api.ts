@@ -59,6 +59,7 @@ export interface SearchRequest {
   offset?: number
   use_text_search?: boolean
   use_vector_search?: boolean
+  generate_summary?: boolean  // Generate AI summary of results
 }
 
 export interface SearchResult {
@@ -85,6 +86,8 @@ export interface SearchResponse {
   text_search_used: boolean
   vector_search_used: boolean
   embedding_error: string | null
+  ai_summary: string | null  // AI-generated summary of results
+  ai_summary_error: string | null  // Error if summary generation failed
 }
 
 export interface FileTreeNode {

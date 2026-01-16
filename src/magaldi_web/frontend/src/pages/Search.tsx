@@ -33,6 +33,7 @@ function Search() {
   const [limit, setLimit] = useState(20)
   const [useTextSearch, setUseTextSearch] = useState(true)
   const [useVectorSearch, setUseVectorSearch] = useState(true)
+  const [generateSummary, setGenerateSummary] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const { data: repos } = useQuery({
@@ -46,7 +47,7 @@ function Search() {
   })
 
   const { data: searchResult, isLoading, error } = useQuery({
-    queryKey: ['search', debouncedQuery, selectedScope, selectedRepo, selectedTypes, selectedUsername, limit, useTextSearch, useVectorSearch],
+    queryKey: ['search', debouncedQuery, selectedScope, selectedRepo, selectedTypes, selectedUsername, limit, useTextSearch, useVectorSearch, generateSummary],
     queryFn: () =>
       search({
         query: debouncedQuery,
@@ -57,6 +58,7 @@ function Search() {
         limit,
         use_text_search: useTextSearch,
         use_vector_search: useVectorSearch,
+        generate_summary: generateSummary,
       }),
     enabled: debouncedQuery.length > 0 && (useTextSearch || useVectorSearch),
   })
@@ -160,7 +162,19 @@ function Search() {
                   if (!e.target.checked && !useTextSearch) return
                   setUseVectorSearch(e.target.checked)
                 }}
+                className="mb-2"
               />
+              <hr className="my-2" />
+              <Form.Check
+                type="switch"
+                id="generate-summary"
+                label="AI Summary"
+                checked={generateSummary}
+                onChange={(e) => setGenerateSummary(e.target.checked)}
+              />
+              <Form.Text className="text-muted small">
+                Generate overview from top results
+              </Form.Text>
             </Card.Body>
           </Card>
 
@@ -285,6 +299,30 @@ function Search() {
                   )}
                 </div>
               </div>
+
+              {/* AI Summary */}
+              {generateSummary && searchResult.ai_summary && (
+                <Card className="mb-4 border-info">
+                  <Card.Header className="bg-info bg-opacity-10 d-flex align-items-center">
+                    <i className="bi bi-stars me-2"></i>
+                    <strong>AI Summary</strong>
+                  </Card.Header>
+                  <Card.Body>
+                    {searchResult.ai_summary.split('\n\n').map((paragraph, idx) => (
+                      <p key={idx} className={idx === searchResult.ai_summary!.split('\n\n').length - 1 ? 'mb-0' : ''}>
+                        {paragraph}
+                      </p>
+                    ))}
+                  </Card.Body>
+                </Card>
+              )}
+
+              {generateSummary && searchResult.ai_summary_error && (
+                <Alert variant="warning" className="mb-3">
+                  <i className="bi bi-exclamation-triangle me-2"></i>
+                  <strong>AI summary failed:</strong> {searchResult.ai_summary_error}
+                </Alert>
+              )}
 
               {searchResult.results.length > 0 ? (
                 <ListGroup>

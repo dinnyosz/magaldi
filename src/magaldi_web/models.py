@@ -123,6 +123,7 @@ class SearchRequest(BaseModel):
     offset: int = Field(default=0, ge=0)
     use_text_search: bool = True
     use_vector_search: bool = True
+    generate_summary: bool = False  # Generate AI summary of top results
 
 
 class SearchResult(BaseModel):
@@ -157,6 +158,8 @@ class SearchResponse(BaseModel):
     text_search_used: bool = True
     vector_search_used: bool = False
     embedding_error: str | None = None
+    ai_summary: str | None = None  # AI-generated summary of top results
+    ai_summary_error: str | None = None  # Error if summary generation failed
 
 
 # =============================================================================
