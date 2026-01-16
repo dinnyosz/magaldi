@@ -329,7 +329,7 @@ class TestFindSimilar:
     """Tests for find_similar function."""
 
     def test_find_similar_returns_similar_elements(self, mock_es_repo):
-        """Test find_similar returns similar elements."""
+        """Test find_similar returns similar elements grouped by is_test."""
         mock_es_repo.get_document.return_value = {
             "element_id": "id1",
             "name": "test",
@@ -344,7 +344,10 @@ class TestFindSimilar:
             element_id="id1",
         )
 
-        assert isinstance(result, list)
+        assert isinstance(result, dict)
+        assert "code_results" in result
+        assert "test_results" in result
+        assert len(result["code_results"]) == 1
 
 
 # =============================================================================
@@ -517,8 +520,8 @@ class TestFindSimilarExtended:
 
         result = find_similar(es=mock_es_repo, element_id="id1", limit=1)
 
-        assert len(result) == 1
-        assert result[0]["element_id"] == "id2"
+        assert len(result["code_results"]) == 1
+        assert result["code_results"][0]["element_id"] == "id2"
 
     def test_find_similar_same_repo_only(self, mock_es_repo):
         """Test find_similar with same_repo_only filter."""
@@ -533,7 +536,9 @@ class TestFindSimilarExtended:
 
         result = find_similar(es=mock_es_repo, element_id="id1", same_repo_only=True)
 
-        assert isinstance(result, list)
+        assert isinstance(result, dict)
+        assert "code_results" in result
+        assert "test_results" in result
         # Verify search_by_vector was called with scope/repo filters
         mock_es_repo.search_by_vector.assert_called_once()
 
@@ -1323,6 +1328,78 @@ class TestSearchCodeTestGrouping:
             embed_client=mock_embed_client,
             query="user service",
         )
+
+        assert "total_code" in result
+        assert "total_tests" in result
+        assert result["total_code"] == 1
+        assert result["total_tests"] == 1
+
+
+# =============================================================================
+# FIND SIMILAR TEST GROUPING TESTS
+# =============================================================================
+
+
+class TestFindSimilarTestGrouping:
+    """Tests for find_similar test result grouping."""
+
+    def test_groups_similar_by_is_test(self, mock_es_repo):
+        """Test that similar results are grouped by is_test."""
+        mock_es_repo.get_document.return_value = {
+            "element_id": "id1",
+            "embedding": [0.1] * 1024,
+        }
+        mock_es_repo.search_by_vector.return_value = [
+            {"element_id": "id2", "name": "similar_func", "is_test": False},
+            {"element_id": "id3", "name": "test_similar", "is_test": True},
+        ]
+
+        result = find_similar(es=mock_es_repo, element_id="id1")
+
+        assert "code_results" in result
+        assert "test_results" in result
+
+    def test_include_tests_false(self, mock_es_repo):
+        """Test include_tests parameter."""
+        mock_es_repo.get_document.return_value = {
+            "element_id": "id1",
+            "embedding": [0.1] * 1024,
+        }
+        mock_es_repo.search_by_vector.return_value = [
+            {"element_id": "id2", "name": "test_func", "is_test": True},
+        ]
+
+        result = find_similar(es=mock_es_repo, element_id="id1", include_tests=False)
+
+        assert len(result["test_results"]) == 0
+
+    def test_results_include_is_test_field(self, mock_es_repo):
+        """Test that individual results include is_test field."""
+        mock_es_repo.get_document.return_value = {
+            "element_id": "id1",
+            "embedding": [0.1] * 1024,
+        }
+        mock_es_repo.search_by_vector.return_value = [
+            {"element_id": "id2", "name": "similar_func", "is_test": False},
+        ]
+
+        result = find_similar(es=mock_es_repo, element_id="id1")
+
+        assert len(result["code_results"]) == 1
+        assert result["code_results"][0]["is_test"] is False
+
+    def test_results_include_totals(self, mock_es_repo):
+        """Test that results include total counts."""
+        mock_es_repo.get_document.return_value = {
+            "element_id": "id1",
+            "embedding": [0.1] * 1024,
+        }
+        mock_es_repo.search_by_vector.return_value = [
+            {"element_id": "id2", "name": "similar_func", "is_test": False},
+            {"element_id": "id3", "name": "test_similar", "is_test": True},
+        ]
+
+        result = find_similar(es=mock_es_repo, element_id="id1")
 
         assert "total_code" in result
         assert "total_tests" in result

@@ -215,7 +215,8 @@ def find_similar(
     element_id: str,
     limit: int = 10,
     same_repo_only: bool = False,
-) -> list[dict[str, Any]]:
+    include_tests: bool = True,
+) -> dict[str, Any]:
     """Find code elements similar to a given element.
 
     Args:
@@ -223,9 +224,10 @@ def find_similar(
         element_id: Source element ID.
         limit: Maximum results.
         same_repo_only: Only search within same repository.
+        include_tests: Include test results (default True).
 
     Returns:
-        List of similar elements with similarity scores.
+        Dict with code_results and test_results lists, grouped by is_test field.
     """
     limit = max(1, min(limit, 50))
 
@@ -251,10 +253,19 @@ def find_similar(
         size=limit + 1,  # Get one extra to filter out self
     )
 
-    formatted = []
+    # Group results by is_test
+    code_results = []
+    test_results = []
+
     for result in results:
         # Skip self
         if result.get("element_id") == element_id:
+            continue
+
+        is_test = result.get("is_test", False)
+
+        # Skip tests if not included
+        if is_test and not include_tests:
             continue
 
         entry: dict[str, Any] = {
@@ -264,13 +275,20 @@ def find_similar(
             "line": result.get("line_start"),
             "summary": result.get("summary", ""),
             "element_id": result.get("element_id"),
+            "is_test": is_test,
         }
-        formatted.append(entry)
 
-        if len(formatted) >= limit:
-            break
+        if is_test:
+            test_results.append(entry)
+        else:
+            code_results.append(entry)
 
-    return formatted
+    return {
+        "code_results": code_results[:limit],
+        "test_results": test_results[:limit] if include_tests else [],
+        "total_code": len(code_results),
+        "total_tests": len(test_results) if include_tests else 0,
+    }
 
 
 # =============================================================================
