@@ -537,6 +537,14 @@ class TestCodeElement:
         assert element.decorators == []
         assert element.parameters == []
 
+    def test_is_test_default_false(self):
+        element = CodeElement()
+        assert element.is_test is False
+
+    def test_is_test_can_be_set(self):
+        element = CodeElement(is_test=True)
+        assert element.is_test is True
+
 
 class TestParsingResult:
     """Tests for ParsingResult dataclass."""

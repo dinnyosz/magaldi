@@ -68,6 +68,7 @@ class CodeElement:
     # Metadata
     decorators: list[str] = field(default_factory=list)
     is_async: bool = False
+    is_test: bool = False  # Whether this element is test code
     visibility: str = "public"  # 'public', 'private', 'protected'
 
     # Hierarchy
