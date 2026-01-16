@@ -613,15 +613,14 @@ def run_feature_extraction(
             worker_table = Table(show_header=False, box=None, padding=0)
             worker_table.add_column("ID", style="dim", width=4)
             worker_table.add_column("Stage", style="cyan", width=14)
-            worker_table.add_column("Model", style="yellow", width=20)
+            worker_table.add_column("Model", style="yellow", width=26)
             worker_table.add_column("Feature")
 
             workers_data = state.workers.get_all()
             for wid in range(num_workers):
                 if wid in workers_data:
                     feature_name, stage, model = workers_data[wid]
-                    display_model = model[:17] + "..." if len(model) > 20 else model
-                    worker_table.add_row(f"[{wid}]", stage, display_model, feature_name)
+                    worker_table.add_row(f"[{wid}]", stage, model, feature_name)
                 else:
                     worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "")
 
@@ -781,7 +780,7 @@ def run_feature_extraction(
                 worker_table = Table(show_header=False, box=None, padding=0)
                 worker_table.add_column("ID", style="dim", width=4)
                 worker_table.add_column("Stage", style="cyan", width=14)
-                worker_table.add_column("Model", style="yellow", width=20)
+                worker_table.add_column("Model", style="yellow", width=26)
                 worker_table.add_column("Parent", style="magenta", width=20)
                 worker_table.add_column("Subfeature")
 
@@ -789,10 +788,9 @@ def run_feature_extraction(
                 for wid in range(num_workers):
                     if wid in workers_data:
                         parent_feature, stage, model, subfeature = workers_data[wid]
-                        display_model = model[:17] + "..." if len(model) > 20 else model
                         display_parent = parent_feature[:17] + "..." if len(parent_feature) > 20 else parent_feature
                         display_sub = subfeature[:25] + "..." if len(subfeature) > 28 else subfeature
-                        worker_table.add_row(f"[{wid}]", stage, display_model, display_parent, display_sub)
+                        worker_table.add_row(f"[{wid}]", stage, model, display_parent, display_sub)
                     else:
                         worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "", "")
 
@@ -1016,15 +1014,14 @@ def run_processing(
         worker_table = Table(show_header=False, box=None, padding=0)
         worker_table.add_column("ID", style="dim", width=4)
         worker_table.add_column("Stage", style="cyan", width=14)
-        worker_table.add_column("Model", style="yellow", width=20)
+        worker_table.add_column("Model", style="yellow", width=26)
         worker_table.add_column("Element")
 
         workers_data = state.workers.get_all()
         for wid in range(num_workers):
             if wid in workers_data:
                 elem, stage, model = workers_data[wid]
-                display_model = model[:17] + "..." if len(model) > 20 else model
-                worker_table.add_row(f"[{wid}]", stage, display_model, elem)
+                worker_table.add_row(f"[{wid}]", stage, model, elem)
             else:
                 worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "")
 
