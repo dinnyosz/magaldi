@@ -66,15 +66,19 @@ def _generate_search_summary_sync(
 
         context = "\n\n".join(context_items)
 
-        prompt = f"""Based on the following code search results for the query "{query}", write a concise 2-3 paragraph summary that:
-1. Describes the functionality and capabilities found related to the query
-2. Explains how these features work from a business/user perspective
-3. Identifies the main components that implement this functionality
+        prompt = f"""The user asked: "{query}"
 
-Search Results:
+Based on the code elements found below, answer the user's question directly in 2-3 paragraphs.
+
+Code Context:
 {context}
 
-Write your summary focusing on WHAT the code does and WHY it exists, not implementation details. Speak from a functionality perspective - what capabilities exist, what problems they solve, and how they relate to each other. Do not list elements directly - instead describe what they accomplish together and how they interact."""
+Instructions:
+- Answer the question directly - explain how this works in the codebase
+- Describe the overall system/feature, not individual code elements
+- Focus on the big picture: what capability exists, how it works, why it's designed this way
+- Never list or enumerate specific functions, classes, or files
+- Write as if explaining to someone who wants to understand the system, not the code"""
 
         # Use the configured model (prefer smaller/faster model for summary)
         llm = LLMClient(
