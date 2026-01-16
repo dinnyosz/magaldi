@@ -15,6 +15,7 @@ import {
   OverlayTrigger,
   Tooltip,
 } from 'react-bootstrap'
+import ReactMarkdown from 'react-markdown'
 import { search, generateSearchSummary, getRepositories, getBrowseFilters, type SearchResult } from '../api'
 
 const ELEMENT_TYPES = ['file', 'class', 'function', 'method', 'variable', 'constant', 'feature', 'subfeature']
@@ -341,13 +342,7 @@ function Search() {
                       </div>
                     )}
                     {!isSummaryLoading && summaryResult?.summary && (
-                      <>
-                        {summaryResult.summary.split('\n\n').map((paragraph, idx) => (
-                          <p key={idx} className={idx === summaryResult.summary!.split('\n\n').length - 1 ? 'mb-0' : ''}>
-                            {paragraph}
-                          </p>
-                        ))}
-                      </>
+                      <ReactMarkdown>{summaryResult.summary}</ReactMarkdown>
                     )}
                     {!isSummaryLoading && summaryResult?.error && (
                       <Alert variant="warning" className="mb-0">
