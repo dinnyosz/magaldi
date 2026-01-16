@@ -863,7 +863,8 @@ def grep_code(
     glob: str | None = None,
     context_lines: int = 0,
     limit: int = 50,
-) -> list[dict[str, Any]]:
+    include_tests: bool = True,
+) -> dict[str, Any]:
     """Search indexed code with regex pattern.
 
     Searches the raw_code field in Elasticsearch - no filesystem access needed.
@@ -877,15 +878,17 @@ def grep_code(
         glob: File glob filter (e.g., '*.py', '*.ts').
         context_lines: Lines of context before/after match.
         limit: Maximum matches to return.
+        include_tests: Whether to include test results.
 
     Returns:
-        List of matches with file, line, content, and context.
+        Dict with code_results, test_results, and totals.
     """
     import fnmatch
     import re
 
     client = es._get_client()
-    results: list[dict[str, Any]] = []
+    code_results: list[dict[str, Any]] = []
+    test_results: list[dict[str, Any]] = []
 
     # Build ES query - fetch elements with raw_code
     filters = [
@@ -902,18 +905,24 @@ def grep_code(
         index="magaldi-code-elements",
         body={
             "query": {"bool": {"filter": filters}},
-            "_source": ["element_id", "name", "element_type", "relative_path", "line_start", "raw_code"],
+            "_source": ["element_id", "name", "element_type", "relative_path", "line_start", "raw_code", "is_test"],
             "size": min(limit * 10, 5000),  # Fetch extra to filter
         },
     )
 
     hits = es_result.get("hits", {}).get("hits", [])
     compiled = re.compile(pattern)
+    total_matches = 0
 
     for hit in hits:
         source = hit["_source"]
         raw_code = source.get("raw_code", "")
         rel_path = source.get("relative_path", "")
+        is_test = source.get("is_test", False)
+
+        # Skip tests if include_tests is False
+        if not include_tests and is_test:
+            continue
 
         # Apply glob filter if specified
         if glob and not fnmatch.fnmatch(rel_path, glob):
@@ -935,6 +944,7 @@ def grep_code(
                     "match": match.group(0),
                     "element_name": source.get("name"),
                     "element_type": source.get("element_type"),
+                    "is_test": is_test,
                 }
 
                 # Add context if requested
@@ -944,12 +954,27 @@ def grep_code(
                     entry["context_before"] = lines[start:i]
                     entry["context_after"] = lines[i + 1:end]
 
-                results.append(entry)
+                # Group by is_test
+                if is_test:
+                    test_results.append(entry)
+                else:
+                    code_results.append(entry)
 
-                if len(results) >= limit:
-                    return results
+                total_matches += 1
+                if total_matches >= limit:
+                    return {
+                        "code_results": code_results,
+                        "test_results": test_results,
+                        "total_code": len(code_results),
+                        "total_tests": len(test_results),
+                    }
 
-    return results
+    return {
+        "code_results": code_results,
+        "test_results": test_results,
+        "total_code": len(code_results),
+        "total_tests": len(test_results),
+    }
 
 
 def find_usages(
@@ -999,7 +1024,7 @@ def find_usages(
         pattern = rf"\b{re.escape(name)}\b"
 
     # Search with grep_code (now uses ES)
-    matches = grep_code(
+    grep_results = grep_code(
         es=es,
         pattern=pattern,
         scope=scope,
@@ -1009,6 +1034,9 @@ def find_usages(
         context_lines=1,
         limit=limit + 10,  # Get extra to filter out definition
     )
+
+    # Combine code and test results
+    matches = grep_results["code_results"] + grep_results["test_results"]
 
     # Filter out the definition itself
     usages = []
@@ -1085,7 +1113,7 @@ def find_implementations(
     # Pattern: class SomeClass(Name) or class SomeClass(Name, Other)
     pattern = rf"class\s+\w+\s*\([^)]*\b{re.escape(name)}\b"
 
-    matches = grep_code(
+    grep_results = grep_code(
         es=es,
         pattern=pattern,
         scope=scope,
@@ -1095,6 +1123,9 @@ def find_implementations(
         context_lines=2,
         limit=limit,
     )
+
+    # Combine code and test results
+    matches = grep_results["code_results"] + grep_results["test_results"]
 
     results = []
     for match in matches:

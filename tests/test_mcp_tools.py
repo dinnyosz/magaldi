@@ -915,6 +915,7 @@ class TestGrepCodeExtended:
                             "relative_path": "test.py",
                             "line_start": 10,
                             "raw_code": "def test_func():\n    return True\n",
+                            "is_test": False,
                         }
                     }
                 ]
@@ -926,9 +927,10 @@ class TestGrepCodeExtended:
             pattern=r"def\s+test_",
         )
 
-        assert len(result) >= 1
-        assert result[0]["file"] == "test.py"
-        assert "def test_" in result[0]["content"]
+        assert "code_results" in result
+        assert len(result["code_results"]) >= 1
+        assert result["code_results"][0]["file"] == "test.py"
+        assert "def test_" in result["code_results"][0]["content"]
 
     def test_grep_code_with_context_lines(self, mock_es_repo):
         """Test grep_code includes context lines."""
@@ -945,6 +947,7 @@ class TestGrepCodeExtended:
                             "relative_path": "test.py",
                             "line_start": 1,
                             "raw_code": "line1\nline2\nmatch here\nline4\nline5\n",
+                            "is_test": False,
                         }
                     }
                 ]
@@ -957,9 +960,10 @@ class TestGrepCodeExtended:
             context_lines=2,
         )
 
-        assert len(result) >= 1
-        assert "context_before" in result[0]
-        assert "context_after" in result[0]
+        assert "code_results" in result
+        assert len(result["code_results"]) >= 1
+        assert "context_before" in result["code_results"][0]
+        assert "context_after" in result["code_results"][0]
 
 
 # =============================================================================
@@ -1400,6 +1404,151 @@ class TestFindSimilarTestGrouping:
         ]
 
         result = find_similar(es=mock_es_repo, element_id="id1")
+
+        assert "total_code" in result
+        assert "total_tests" in result
+        assert result["total_code"] == 1
+        assert result["total_tests"] == 1
+
+
+# =============================================================================
+# GREP CODE TEST GROUPING TESTS
+# =============================================================================
+
+
+class TestGrepCodeTestGrouping:
+    """Tests for grep_code test result grouping."""
+
+    def test_groups_grep_results_by_is_test(self, mock_es_repo):
+        """Test that grep results are grouped by is_test."""
+        # Mock ES search to return elements with raw_code
+        mock_es_repo._get_client().search.return_value = {
+            "hits": {
+                "hits": [
+                    {
+                        "_source": {
+                            "element_id": "id1",
+                            "name": "func",
+                            "element_type": "function",
+                            "relative_path": "src/app.py",
+                            "line_start": 1,
+                            "raw_code": "def func():\n    pattern_match\n",
+                            "is_test": False,
+                        }
+                    },
+                    {
+                        "_source": {
+                            "element_id": "id2",
+                            "name": "test_func",
+                            "element_type": "function",
+                            "relative_path": "tests/test_app.py",
+                            "line_start": 1,
+                            "raw_code": "def test_func():\n    pattern_match\n",
+                            "is_test": True,
+                        }
+                    },
+                ]
+            }
+        }
+
+        result = grep_code(es=mock_es_repo, pattern="pattern_match")
+
+        assert "code_results" in result
+        assert "test_results" in result
+
+    def test_include_tests_false_excludes_tests(self, mock_es_repo):
+        """Test that include_tests=False excludes test results."""
+        mock_es_repo._get_client().search.return_value = {
+            "hits": {
+                "hits": [
+                    {
+                        "_source": {
+                            "element_id": "id1",
+                            "name": "func",
+                            "element_type": "function",
+                            "relative_path": "src/app.py",
+                            "line_start": 1,
+                            "raw_code": "def func():\n    pattern_match\n",
+                            "is_test": False,
+                        }
+                    },
+                    {
+                        "_source": {
+                            "element_id": "id2",
+                            "name": "test_func",
+                            "element_type": "function",
+                            "relative_path": "tests/test_app.py",
+                            "line_start": 1,
+                            "raw_code": "def test_func():\n    pattern_match\n",
+                            "is_test": True,
+                        }
+                    },
+                ]
+            }
+        }
+
+        result = grep_code(es=mock_es_repo, pattern="pattern_match", include_tests=False)
+
+        assert len(result["code_results"]) == 1
+        assert len(result["test_results"]) == 0
+
+    def test_results_include_is_test_field(self, mock_es_repo):
+        """Test that individual results include is_test field."""
+        mock_es_repo._get_client().search.return_value = {
+            "hits": {
+                "hits": [
+                    {
+                        "_source": {
+                            "element_id": "id1",
+                            "name": "test_func",
+                            "element_type": "function",
+                            "relative_path": "tests/test_app.py",
+                            "line_start": 1,
+                            "raw_code": "def test_func():\n    pattern_match\n",
+                            "is_test": True,
+                        }
+                    },
+                ]
+            }
+        }
+
+        result = grep_code(es=mock_es_repo, pattern="pattern_match")
+
+        assert len(result["test_results"]) == 1
+        assert result["test_results"][0]["is_test"] is True
+
+    def test_results_include_totals(self, mock_es_repo):
+        """Test that results include total counts."""
+        mock_es_repo._get_client().search.return_value = {
+            "hits": {
+                "hits": [
+                    {
+                        "_source": {
+                            "element_id": "id1",
+                            "name": "func",
+                            "element_type": "function",
+                            "relative_path": "src/app.py",
+                            "line_start": 1,
+                            "raw_code": "def func():\n    pattern_match\n",
+                            "is_test": False,
+                        }
+                    },
+                    {
+                        "_source": {
+                            "element_id": "id2",
+                            "name": "test_func",
+                            "element_type": "function",
+                            "relative_path": "tests/test_app.py",
+                            "line_start": 1,
+                            "raw_code": "def test_func():\n    pattern_match\n",
+                            "is_test": True,
+                        }
+                    },
+                ]
+            }
+        }
+
+        result = grep_code(es=mock_es_repo, pattern="pattern_match")
 
         assert "total_code" in result
         assert "total_tests" in result
