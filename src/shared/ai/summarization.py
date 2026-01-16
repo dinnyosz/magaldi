@@ -444,12 +444,14 @@ def truncate_code(code: str, max_tokens: int = 4000) -> str:
 # =============================================================================
 
 PROMPTS = {
-    "file": """Summarize this {language} file in 2-3 sentences. Focus on:
-- The overall purpose and role of this module in the system
-- What problem domain or functionality it addresses
-- Key design decisions or architectural patterns used
+    "file": """Summarize this {language} file in 4-6 sentences for an AI agent navigating this codebase. Address:
+- The primary purpose and responsibility of this module
+- What problem domain or capability it provides to the system
+- Key patterns, abstractions, or architectural decisions used
+- When an agent should look in this file (what tasks or questions lead here)
+- Important dependencies or integrations with other parts of the system
 
-Do NOT list individual classes or functions - those are documented separately.
+Do NOT enumerate individual classes or functions - those are documented separately.
 
 File: {file_path}
 
@@ -457,12 +459,14 @@ Code:
 {code}
 
 Summary:""",
-    "class": """Summarize this {language} class in 2-3 sentences. Focus on:
-- What this class represents or models
-- Its role and responsibility in the system
-- How it fits into the broader architecture
+    "class": """Summarize this {language} class in 4-6 sentences for an AI agent navigating this codebase. Address:
+- What this class represents, models, or encapsulates
+- Its core responsibility and the problem it solves
+- How and when to instantiate or use this class
+- Key state it manages and invariants it maintains
+- How it collaborates with other classes or modules
 
-Do NOT list individual methods - those are documented separately.
+Do NOT enumerate individual methods - those are documented separately.
 
 File context: {file_summary}
 
@@ -473,9 +477,12 @@ Code:
 {code}
 
 Summary:""",
-    "function": """Describe what this function does in 1-2 sentences. Be specific about:
-- The inputs it accepts and outputs it returns
-- The exact operation, transformation, or side effect it performs
+    "function": """Describe this function in 4-6 sentences for an AI agent navigating this codebase. Address:
+- What operation, transformation, or task this function performs
+- The inputs it accepts (with their purposes) and what it returns
+- When to call this function - what scenarios or tasks require it
+- Side effects: external state changes, I/O, exceptions raised
+- Key edge cases or preconditions the caller should know
 
 File context: {file_summary}
 {class_context}
@@ -488,9 +495,12 @@ Code:
 {code}
 
 Summary:""",
-    "method": """Describe what this method does in 1-2 sentences. Be specific about:
-- The inputs it accepts and outputs it returns
-- The exact operation it performs or how it modifies the object's state
+    "method": """Describe this method in 4-6 sentences for an AI agent navigating this codebase. Address:
+- What operation this method performs on or for the object
+- The inputs it accepts (with their purposes) and what it returns
+- How it reads or modifies the object's state
+- When to call this method in the object's lifecycle
+- Side effects, exceptions, or preconditions the caller should know
 
 File context: {file_summary}
 Class context: {class_summary}
@@ -503,7 +513,10 @@ Code:
 {code}
 
 Summary:""",
-    "constant": """Describe this constant in one sentence: what value or configuration does it represent and what is it used for?
+    "constant": """Describe this constant in 2-3 sentences for an AI agent navigating this codebase. Address:
+- What configuration, value, or data this constant represents
+- Where and why this constant is used in the system
+- Any important constraints or relationships with other values
 
 File context: {file_summary}
 
@@ -513,7 +526,10 @@ Value:
 {usages_section}
 
 Description:""",
-    "variable": """Describe this variable in one sentence: what data or state does it hold and what is it used for?
+    "variable": """Describe this variable in 2-3 sentences for an AI agent navigating this codebase. Address:
+- What data, state, or configuration this variable holds
+- How it is initialized and when it changes
+- Its role in the class or module's behavior
 
 File context: {file_summary}
 Class context: {class_summary}

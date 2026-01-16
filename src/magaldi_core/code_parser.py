@@ -247,37 +247,117 @@ def generate_element_id(
 # =============================================================================
 
 
+def _get_line_indent(line: str) -> int:
+    """Get the indentation level of a line (number of leading spaces)."""
+    return len(line) - len(line.lstrip())
+
+
+def _extract_control_block(lines: list[str], start_idx: int, max_lines: int = 6) -> list[str]:
+    """Extract a control flow block starting at the given index.
+
+    Captures the control statement and its indented body up to max_lines.
+
+    Args:
+        lines: All lines in the file.
+        start_idx: Index of the control flow statement (0-indexed).
+        max_lines: Maximum lines to capture including the control statement.
+
+    Returns:
+        List of lines forming the block.
+    """
+    if start_idx >= len(lines):
+        return []
+
+    block = [lines[start_idx].rstrip()]
+    base_indent = _get_line_indent(lines[start_idx])
+
+    for i in range(start_idx + 1, min(start_idx + max_lines, len(lines))):
+        line = lines[i]
+        stripped = line.strip()
+
+        # Stop at empty lines or lines with same/less indentation (block ended)
+        if stripped and _get_line_indent(line) <= base_indent:
+            break
+
+        # Include the line (even if empty, for readability)
+        block.append(line.rstrip())
+
+    return block
+
+
+# Control flow keywords that introduce blocks we want to capture
+_CONTROL_FLOW_PATTERN = re.compile(
+    r"^\s*(if|elif|else|for|while|with|try|except|finally|match|case)\b"
+)
+
+
 def _find_variable_usages(
-    name: str, lines: list[str], declaration_line: int, max_usages: int = 5
+    name: str, lines: list[str], declaration_line: int, max_usages: int = 3
 ) -> list[str]:
-    """Find lines where a variable is used (excluding declaration).
+    """Find lines where a variable is used with contextual block information.
+
+    For control flow statements (if, for, while, etc.), captures the block
+    to show what the variable controls. For other usages, shows the line
+    with minimal context.
 
     Args:
         name: Variable name to search for.
         lines: All lines in the file.
         declaration_line: Line number of the declaration (1-indexed).
-        max_usages: Maximum number of usages to return.
+        max_usages: Maximum number of usages to return (default 3 for richer context).
 
     Returns:
-        List of "line N: <code>" strings showing usages.
+        List of usage descriptions with contextual code blocks.
     """
     usages = []
     # Pattern to match the variable name as a whole word
     pattern = re.compile(rf"\b{re.escape(name)}\b")
+    # Track which lines we've already included to avoid duplicates
+    seen_lines: set[int] = set()
 
     for i, line in enumerate(lines):
         line_num = i + 1
         if line_num == declaration_line:
             continue  # Skip the declaration itself
+        if line_num in seen_lines:
+            continue
 
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue  # Skip empty lines and comments
 
         if pattern.search(line):
-            # Truncate long lines
-            display_line = stripped[:80] + "..." if len(stripped) > 80 else stripped
-            usages.append(f"line {line_num}: {display_line}")
+            # Check if this is a control flow statement
+            if _CONTROL_FLOW_PATTERN.match(line):
+                # Extract the block this variable controls
+                block_lines = _extract_control_block(lines, i, max_lines=6)
+                # Mark all block lines as seen
+                for j in range(len(block_lines)):
+                    seen_lines.add(line_num + j)
+
+                # Format as a code block
+                block_code = "\n".join(block_lines)
+                # Truncate if too long
+                if len(block_code) > 300:
+                    block_code = block_code[:300] + "\n..."
+                usages.append(f"line {line_num} (controls block):\n{block_code}")
+            else:
+                # Regular usage - show the line with 1 line of context after if available
+                seen_lines.add(line_num)
+                context_lines = [stripped]
+
+                # Add one line of context after if it's meaningful
+                if i + 1 < len(lines):
+                    next_line = lines[i + 1].strip()
+                    if next_line and not next_line.startswith("#"):
+                        context_lines.append(next_line)
+                        seen_lines.add(line_num + 1)
+
+                display = "\n    ".join(context_lines)
+                if len(display) > 150:
+                    display = display[:150] + "..."
+                usages.append(f"line {line_num}: {display}")
+
             if len(usages) >= max_usages:
                 break
 
