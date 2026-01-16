@@ -209,6 +209,13 @@ async def search(
         # Text: divide by max text score
         text_normalized = round(text_score / max_text_score, 3) if max_text_score and text_score else None
 
+        # Compute combined score for sorting (sum of enabled scores)
+        combined_score = 0.0
+        if request.use_text_search and text_normalized is not None:
+            combined_score += text_normalized
+        if request.use_vector_search and vector_normalized is not None:
+            combined_score += vector_normalized
+
         results.append(
             SearchResult(
                 element_id=source["element_id"],
@@ -227,8 +234,12 @@ async def search(
                 text_score=text_normalized,
                 vector_score=vector_normalized,
                 highlights=hit_data["highlights"],
+                combined_score=round(combined_score, 3),
             )
         )
+
+    # Sort by combined score (sum of enabled search mode scores)
+    results.sort(key=lambda r: r.combined_score or 0, reverse=True)
 
     return SearchResponse(
         query=request.query,

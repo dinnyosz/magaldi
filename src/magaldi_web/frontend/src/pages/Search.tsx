@@ -313,12 +313,20 @@ function Search() {
                           </small>
                         </div>
                         <div className="d-flex gap-1">
+                          {result.combined_score !== null && (
+                            <OverlayTrigger
+                              placement="top"
+                              overlay={<Tooltip>Combined score (sum of enabled search modes)</Tooltip>}
+                            >
+                              <Badge bg="dark">{result.combined_score.toFixed(3)}</Badge>
+                            </OverlayTrigger>
+                          )}
                           {useTextSearch && result.text_score !== null && (
                             <OverlayTrigger
                               placement="top"
                               overlay={<Tooltip>TextRank score (0-1)</Tooltip>}
                             >
-                              <Badge bg="secondary">TextRank:{result.text_score.toFixed(3)}</Badge>
+                              <Badge bg="secondary">T:{result.text_score.toFixed(2)}</Badge>
                             </OverlayTrigger>
                           )}
                           {useVectorSearch && result.vector_score !== null && (
@@ -326,7 +334,7 @@ function Search() {
                               placement="top"
                               overlay={<Tooltip>Semantic similarity (0-1)</Tooltip>}
                             >
-                              <Badge bg="primary">Semantic:{result.vector_score.toFixed(3)}</Badge>
+                              <Badge bg="primary">S:{result.vector_score.toFixed(2)}</Badge>
                             </OverlayTrigger>
                           )}
                         </div>

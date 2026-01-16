@@ -73,6 +73,7 @@ export interface SearchResult {
   relevance_pct: number
   text_score: number | null
   vector_score: number | null
+  combined_score: number | null  // Sum of enabled scores, used for sorting
   code_snippet?: string
 }
 

@@ -143,6 +143,7 @@ class SearchResult(BaseModel):
     relevance_pct: float
     text_score: float | None = None
     vector_score: float | None = None
+    combined_score: float | None = None  # Sum of enabled scores, used for sorting
     highlights: dict[str, list[str]] = Field(default_factory=dict)
 
 
