@@ -780,7 +780,7 @@ def _process_single_element(
         summary_cache.add_summary(element.element_id, summary)
 
         # Step 2: Embed (if applicable)
-        update_status("embedding")
+        update_status("embedding", config.embed_model)
         embedding: list[float] | None = None
         if should_embed(element):
             if config.skip_ai:
