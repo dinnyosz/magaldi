@@ -361,7 +361,7 @@ class TestFindSimilarTool:
 
     @pytest.mark.asyncio
     async def test_find_similar_returns_results(self, server, mock_es_repo):
-        """Test find_similar tool returns similar elements."""
+        """Test find_similar tool returns similar elements grouped by is_test."""
         mock_es_repo.get_document.return_value = {
             "element_id": "scope:repo:user:file.py:function:test:1",
             "embedding": [0.1] * 1024,
@@ -379,7 +379,11 @@ class TestFindSimilarTool:
             {"element_id": "scope:repo:user:file.py:function:test:1"},
         )
 
-        assert isinstance(result, list)
+        # Result is a dict with code_results and test_results
+        assert isinstance(result, dict)
+        assert "code_results" in result
+        assert "test_results" in result
+        assert len(result["code_results"]) == 1
 
 
 class TestGetContextTool:

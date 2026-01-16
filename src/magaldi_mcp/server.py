@@ -99,6 +99,11 @@ class MagaldiMCPServer:
                             },
                             "repository": {"type": "string", "description": "Filter by repo"},
                             "scope": {"type": "string", "description": "Filter by scope"},
+                            "include_tests": {
+                                "type": "boolean",
+                                "description": "Include test elements in results. Default: true.",
+                                "default": True,
+                            },
                         },
                         "required": ["query"],
                     },
@@ -132,6 +137,11 @@ class MagaldiMCPServer:
                             "element_id": {"type": "string", "description": "Element ID from search results"},
                             "limit": {"type": "integer", "default": 10},
                             "same_repo_only": {"type": "boolean", "default": False},
+                            "include_tests": {
+                                "type": "boolean",
+                                "description": "Include test elements in results. Default: true.",
+                                "default": True,
+                            },
                         },
                         "required": ["element_id"],
                     },
@@ -300,6 +310,11 @@ class MagaldiMCPServer:
                             "glob": {"type": "string", "description": "File filter (e.g., '*.py', 'src/**/*.ts')"},
                             "context_lines": {"type": "integer", "default": 0, "description": "Lines of context around match"},
                             "limit": {"type": "integer", "default": 50},
+                            "include_tests": {
+                                "type": "boolean",
+                                "description": "Include test elements in results. Default: true.",
+                                "default": True,
+                            },
                         },
                         "required": ["pattern"],
                     },
@@ -422,6 +437,7 @@ class MagaldiMCPServer:
                 limit=args.get("limit", 20),
                 include_code=args.get("include_code", False),
                 brief=args.get("brief", False),
+                include_tests=args.get("include_tests", True),
             )
         elif name == "search_features":
             return await asyncio.to_thread(
@@ -441,6 +457,7 @@ class MagaldiMCPServer:
                 element_id=args["element_id"],
                 limit=args.get("limit", 10),
                 same_repo_only=args.get("same_repo_only", False),
+                include_tests=args.get("include_tests", True),
             )
         elif name == "get_element":
             return await asyncio.to_thread(
@@ -528,6 +545,7 @@ class MagaldiMCPServer:
                 glob=args.get("glob"),
                 context_lines=args.get("context_lines", 0),
                 limit=args.get("limit", 50),
+                include_tests=args.get("include_tests", True),
             )
         elif name == "find_usages":
             # Uses ES - no filesystem access needed
@@ -675,6 +693,73 @@ def _format_result(result: Any) -> str:
 
     # Single dict results (get_element, get_context, read_file, etc.)
     if isinstance(result, dict):
+        # Grouped search results (code_results and test_results)
+        if "code_results" in result and "test_results" in result:
+            code_results = result.get("code_results", [])
+            test_results = result.get("test_results", [])
+            total_code = result.get("total_code", len(code_results))
+            total_tests = result.get("total_tests", len(test_results))
+
+            lines = []
+
+            # Format code results
+            if code_results:
+                lines.append(f"Code Results ({total_code}):\n")
+                for r in code_results:
+                    loc = f"{r.get('file', '?')}:{r.get('line', '?')}" if r.get('file') else "N/A"
+                    lines.append(f"[{r.get('type', '?')}] {r.get('name', '?')} ({loc})")
+                    if r.get('signature'):
+                        lines.append(f"  {r['signature']}")
+                    if r.get('summary'):
+                        summary = r['summary']
+                        if len(summary) > 200:
+                            summary = summary[:200] + "..."
+                        lines.append(f"  {summary}")
+                    if r.get('code'):
+                        lines.append(f"  ```")
+                        lines.append(r['code'])
+                        lines.append(f"  ```")
+                    # For grep results
+                    if r.get('content') and r.get('match'):
+                        for ctx in r.get("context_before", []):
+                            lines.append(f"  | {ctx}")
+                        lines.append(f"  > {r.get('content')}")
+                        for ctx in r.get("context_after", []):
+                            lines.append(f"  | {ctx}")
+                    lines.append("")
+            else:
+                lines.append("No code results.\n")
+
+            # Format test results
+            if test_results:
+                lines.append(f"Test Results ({total_tests}):\n")
+                for r in test_results:
+                    loc = f"{r.get('file', '?')}:{r.get('line', '?')}" if r.get('file') else "N/A"
+                    lines.append(f"[{r.get('type', '?')}] {r.get('name', '?')} ({loc})")
+                    if r.get('signature'):
+                        lines.append(f"  {r['signature']}")
+                    if r.get('summary'):
+                        summary = r['summary']
+                        if len(summary) > 200:
+                            summary = summary[:200] + "..."
+                        lines.append(f"  {summary}")
+                    if r.get('code'):
+                        lines.append(f"  ```")
+                        lines.append(r['code'])
+                        lines.append(f"  ```")
+                    # For grep results
+                    if r.get('content') and r.get('match'):
+                        for ctx in r.get("context_before", []):
+                            lines.append(f"  | {ctx}")
+                        lines.append(f"  > {r.get('content')}")
+                        for ctx in r.get("context_after", []):
+                            lines.append(f"  | {ctx}")
+                    lines.append("")
+            elif result.get("total_tests", 0) > 0:
+                lines.append(f"(Tests excluded: {total_tests})")
+
+            return "\n".join(lines)
+
         # File read result
         if "content" in result and "path" in result:
             lines = [f"File: {result.get('path')} ({result.get('lines_returned')}/{result.get('total_lines')} lines)"]
