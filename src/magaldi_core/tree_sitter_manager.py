@@ -152,9 +152,13 @@ def extract_python_elements(tree: Tree, lines: list[str]) -> list[ExtractedEleme
         elif node.type == "decorated_definition":
             inner = get_child_by_field(node, "definition")
             if inner and inner.type == "class_definition":
-                elements.append(_extract_python_class(inner, lines, decorators=_get_decorators(node)))
+                elements.append(
+                    _extract_python_class(inner, lines, decorators=_get_decorators(node), decorated_node=node)
+                )
             elif inner and inner.type == "function_definition":
-                elements.append(_extract_python_function(inner, lines, decorators=_get_decorators(node)))
+                elements.append(
+                    _extract_python_function(inner, lines, decorators=_get_decorators(node), decorated_node=node)
+                )
         elif node.type == "function_definition":
             elements.append(_extract_python_function(node, lines))
         elif node.type == "expression_statement":
@@ -169,13 +173,23 @@ def extract_python_elements(tree: Tree, lines: list[str]) -> list[ExtractedEleme
 
 
 def _extract_python_class(
-    node: Node, lines: list[str], decorators: list[str] | None = None
+    node: Node, lines: list[str], decorators: list[str] | None = None, decorated_node: Node | None = None
 ) -> ExtractedElement:
-    """Extract a class definition."""
+    """Extract a class definition.
+
+    Args:
+        node: The class_definition node.
+        lines: Source code lines.
+        decorators: List of decorator names (if any).
+        decorated_node: The outer decorated_definition node (if class is decorated).
+                       Used to include decorator lines in raw_code.
+    """
     name_node = get_child_by_field(node, "name")
     name = get_node_text(name_node) if name_node else "unknown"
 
-    line_start = node.start_point[0] + 1  # 0-indexed to 1-indexed
+    # Use decorated_node's start if available (to include decorators in raw_code)
+    start_node = decorated_node if decorated_node else node
+    line_start = start_node.start_point[0] + 1  # 0-indexed to 1-indexed
     line_end = node.end_point[0] + 1
     raw_code = "\n".join(lines[line_start - 1 : line_end])
 
@@ -193,9 +207,22 @@ def _extract_python_class(
 
 
 def _extract_python_function(
-    node: Node, lines: list[str], decorators: list[str] | None = None, is_method: bool = False
+    node: Node,
+    lines: list[str],
+    decorators: list[str] | None = None,
+    is_method: bool = False,
+    decorated_node: Node | None = None,
 ) -> ExtractedElement:
-    """Extract a function/method definition."""
+    """Extract a function/method definition.
+
+    Args:
+        node: The function_definition node.
+        lines: Source code lines.
+        decorators: List of decorator names (if any).
+        is_method: Whether this is a method (vs standalone function).
+        decorated_node: The outer decorated_definition node (if function is decorated).
+                       Used to include decorator lines in raw_code.
+    """
     name_node = get_child_by_field(node, "name")
     name = get_node_text(name_node) if name_node else "unknown"
 
@@ -208,7 +235,9 @@ def _extract_python_function(
     # Check for async
     is_async = any(child.type == "async" for child in node.children)
 
-    line_start = node.start_point[0] + 1
+    # Use decorated_node's start if available (to include decorators in raw_code)
+    start_node = decorated_node if decorated_node else node
+    line_start = start_node.start_point[0] + 1
     line_end = node.end_point[0] + 1
     raw_code = "\n".join(lines[line_start - 1 : line_end])
 
@@ -309,7 +338,9 @@ def extract_python_class_members(
             inner = get_child_by_field(child, "definition")
             if inner and inner.type == "function_definition":
                 methods.append(
-                    _extract_python_function(inner, lines, decorators=_get_decorators(child), is_method=True)
+                    _extract_python_function(
+                        inner, lines, decorators=_get_decorators(child), is_method=True, decorated_node=child
+                    )
                 )
         elif child.type == "expression_statement":
             assign = get_children_by_type(child, "assignment")
