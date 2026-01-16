@@ -74,7 +74,7 @@ def _generate_search_summary_sync(
 Search Results:
 {context}
 
-Write your summary focusing on WHAT the code does and WHY it exists, not implementation details. Speak from a functionality perspective - what capabilities exist, what problems they solve, and how they relate to each other."""
+Write your summary focusing on WHAT the code does and WHY it exists, not implementation details. Speak from a functionality perspective - what capabilities exist, what problems they solve, and how they relate to each other. Do not list elements directly - instead describe what they accomplish together and how they interact."""
 
         # Use the configured model (prefer smaller/faster model for summary)
         llm = LLMClient(
