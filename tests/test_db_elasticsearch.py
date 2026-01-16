@@ -688,6 +688,40 @@ class TestInterruptedRunDetection:
         es_repo.close()
         file_state_repo.close()
 
+# =============================================================================
+# IS_TEST FIELD INDEXING TESTS
+# =============================================================================
+
+
+class TestIsTestIndexing:
+    """Tests for is_test field indexing."""
+
+    def test_indexes_is_test_field(self, es_repo, sample_element):
+        """Test that is_test field is indexed."""
+        sample_element.is_test = True
+        es_repo.index_element(sample_element)
+
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+
+        doc = es_repo.get_document(sample_element.element_id)
+        assert doc is not None
+        assert doc.get("is_test") is True
+
+    def test_is_test_defaults_to_false(self, es_repo, sample_element):
+        """Test that is_test defaults to False."""
+        sample_element.is_test = False
+        es_repo.index_element(sample_element)
+
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+
+        doc = es_repo.get_document(sample_element.element_id)
+        assert doc is not None
+        assert doc.get("is_test") is False
+
+
+class TestOldDataHandling:
+    """Tests for handling old data without element_count."""
+
     def test_old_data_without_element_count_treated_as_incomplete(self, config):
         """Test that files without element_count (old data) are treated as incomplete."""
         from shared.db.elasticsearch import (

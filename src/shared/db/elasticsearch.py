@@ -57,6 +57,7 @@ INDEX_MAPPING = {
             "decorators": {"type": "keyword"},
             "visibility": {"type": "keyword"},
             "is_async": {"type": "boolean"},
+            "is_test": {"type": "boolean"},  # Whether element is test code
             "file_hash": {"type": "keyword"},  # For change detection (stored on all elements)
             "content_hash": {"type": "keyword"},  # SHA256 of raw_code for element-level change detection
             "element_count": {"type": "integer"},  # Total elements in file (only on file elements)
@@ -157,6 +158,7 @@ class ElasticsearchRepository:
             "decorators": element.decorators,
             "visibility": element.visibility,
             "is_async": element.is_async,
+            "is_test": element.is_test,
             "content_hash": element.content_hash,  # For element-level change detection
             "indexed_at": indexed_at.isoformat(),
         }
@@ -1578,6 +1580,7 @@ class ElasticsearchEmbeddingStore(ElasticsearchRepository):
             decorators=doc.get("decorators"),
             visibility=doc.get("visibility"),
             is_async=doc.get("is_async", False),
+            is_test=doc.get("is_test", False),
         )
 
     def get_summary(self, element_id: str) -> str | None:
