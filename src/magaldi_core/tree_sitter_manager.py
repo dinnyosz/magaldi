@@ -297,17 +297,28 @@ def _extract_python_assignment(
 
 
 def _get_decorators(decorated_node: Node) -> list[str]:
-    """Extract decorator names from a decorated_definition node."""
+    """Extract decorator names from a decorated_definition node.
+
+    Handles both simple decorators (@foo) and call decorators (@foo.bar(...)).
+    """
     decorators = []
     for child in decorated_node.children:
         if child.type == "decorator":
             # Get the name part (after @, before ())
             for deco_child in child.children:
                 if deco_child.type == "identifier":
+                    # Simple decorator: @foo
                     decorators.append(get_node_text(deco_child))
                     break
                 elif deco_child.type == "attribute":
+                    # Attribute decorator: @foo.bar
                     decorators.append(get_node_text(deco_child))
+                    break
+                elif deco_child.type == "call":
+                    # Call decorator: @foo(...) or @foo.bar(...)
+                    func_node = get_child_by_field(deco_child, "function")
+                    if func_node:
+                        decorators.append(get_node_text(func_node))
                     break
     return decorators
 
