@@ -52,16 +52,18 @@ def _generate_search_summary_sync(
     try:
         from shared.ai.llm_client import LLMClient
 
-        # Build context from results
+        # Build context from results (truncate summaries to avoid token limits)
         context_items = []
         for i, r in enumerate(results[:50], 1):
             item = f"{i}. [{r.element_type}] {r.name}"
             if r.file_path:
                 item += f" ({r.file_path}:{r.line})"
             if r.summary:
-                item += f"\n   Summary: {r.summary}"
+                summary = r.summary[:250] + "..." if len(r.summary) > 250 else r.summary
+                item += f"\n   Summary: {summary}"
             if r.signature:
-                item += f"\n   Signature: {r.signature}"
+                sig = r.signature[:150] + "..." if len(r.signature) > 150 else r.signature
+                item += f"\n   Signature: {sig}"
             context_items.append(item)
 
         context = "\n\n".join(context_items)
