@@ -523,6 +523,79 @@ class TestParseFiles:
 # =============================================================================
 
 
+class TestParseFileTestDetection:
+    """Tests for is_test detection during parsing."""
+
+    def test_marks_test_file_elements(self, tmp_path: Path):
+        """Test that elements in test files are marked is_test=True."""
+        test_file = tmp_path / "test_example.py"
+        test_file.write_text('''
+def test_something():
+    pass
+
+def helper():
+    pass
+''')
+        file_info = FileInfo(
+            relative_path="test_example.py",
+            absolute_path=test_file,
+            language="python",
+        )
+
+        result = parse_file(file_info, "scope", "repo", "main")
+
+        # All elements should be marked as test (file-level detection)
+        for elem in result.elements:
+            assert elem.is_test is True, f"{elem.name} should be is_test=True"
+
+    def test_marks_test_functions_by_name(self, tmp_path: Path):
+        """Test that test_ functions in non-test files are marked."""
+        src_file = tmp_path / "example.py"
+        src_file.write_text('''
+def test_inline():
+    """An inline test."""
+    pass
+
+def regular_function():
+    pass
+''')
+        file_info = FileInfo(
+            relative_path="src/example.py",
+            absolute_path=src_file,
+            language="python",
+        )
+
+        result = parse_file(file_info, "scope", "repo", "main")
+
+        # Find elements by name
+        elements = {e.name: e for e in result.elements}
+
+        # File element should not be test
+        assert elements["example.py"].is_test is False
+        # test_ function should be test
+        assert elements["test_inline"].is_test is True
+        # regular function should not be test
+        assert elements["regular_function"].is_test is False
+
+    def test_non_test_file_not_marked(self, tmp_path: Path):
+        """Test that regular files are not marked as test."""
+        src_file = tmp_path / "app.py"
+        src_file.write_text('''
+def main():
+    pass
+''')
+        file_info = FileInfo(
+            relative_path="src/app.py",
+            absolute_path=src_file,
+            language="python",
+        )
+
+        result = parse_file(file_info, "scope", "repo", "main")
+
+        for elem in result.elements:
+            assert elem.is_test is False, f"{elem.name} should be is_test=False"
+
+
 class TestIsTestElement:
     """Tests for is_test_element utility function."""
 

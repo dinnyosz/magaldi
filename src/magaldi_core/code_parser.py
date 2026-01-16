@@ -825,6 +825,18 @@ def parse_file(
         # Parse and extract elements
         result.elements = parser.parse(content, file_info, scope, repository, username)
 
+        # Detect if this is a test file
+        file_is_test = is_test_path(file_info.relative_path, file_info.language)
+
+        # Apply is_test to all elements
+        for elem in result.elements:
+            if file_is_test:
+                # All elements in test files are test code
+                elem.is_test = True
+            else:
+                # Check individual elements for test markers
+                elem.is_test = is_test_element(elem.name, elem.decorators, file_info.language)
+
         # Compute content hash for each element (for change detection)
         for elem in result.elements:
             elem.compute_content_hash()
