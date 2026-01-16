@@ -15,7 +15,7 @@ import {
   OverlayTrigger,
   Tooltip,
 } from 'react-bootstrap'
-import { search, getRepositories, getBrowseFilters, type SearchResult } from '../api'
+import { search, generateSearchSummary, getRepositories, getBrowseFilters, type SearchResult } from '../api'
 
 const ELEMENT_TYPES = ['file', 'class', 'function', 'method', 'variable', 'constant', 'feature', 'subfeature']
 const DEBOUNCE_MS = 300
@@ -47,7 +47,7 @@ function Search() {
   })
 
   const { data: searchResult, isLoading, error } = useQuery({
-    queryKey: ['search', debouncedQuery, selectedScope, selectedRepo, selectedTypes, selectedUsername, limit, useTextSearch, useVectorSearch, generateSummary],
+    queryKey: ['search', debouncedQuery, selectedScope, selectedRepo, selectedTypes, selectedUsername, limit, useTextSearch, useVectorSearch],
     queryFn: () =>
       search({
         query: debouncedQuery,
@@ -58,9 +58,26 @@ function Search() {
         limit,
         use_text_search: useTextSearch,
         use_vector_search: useVectorSearch,
-        generate_summary: generateSummary,
       }),
     enabled: debouncedQuery.length > 0 && (useTextSearch || useVectorSearch),
+  })
+
+  // Separate query for AI summary - only runs after search results are available
+  const { data: summaryResult, isLoading: isSummaryLoading } = useQuery({
+    queryKey: ['search-summary', debouncedQuery, searchResult?.results?.slice(0, 50).map(r => r.element_id).join(',')],
+    queryFn: () =>
+      generateSearchSummary({
+        query: debouncedQuery,
+        results: (searchResult?.results || []).slice(0, 50).map(r => ({
+          name: r.name,
+          element_type: r.element_type,
+          file_path: r.file_path,
+          line: r.line,
+          summary: r.summary,
+          signature: null,
+        })),
+      }),
+    enabled: generateSummary && !!searchResult?.results?.length,
   })
 
   // Debounce query changes
@@ -301,27 +318,45 @@ function Search() {
               </div>
 
               {/* AI Summary */}
-              {generateSummary && searchResult.ai_summary && (
+              {generateSummary && (
                 <Card className="mb-4 border-info">
                   <Card.Header className="bg-info bg-opacity-10 d-flex align-items-center">
                     <i className="bi bi-stars me-2"></i>
                     <strong>AI Summary</strong>
+                    {isSummaryLoading && (
+                      <Spinner animation="border" size="sm" className="ms-2" />
+                    )}
                   </Card.Header>
                   <Card.Body>
-                    {searchResult.ai_summary.split('\n\n').map((paragraph, idx) => (
-                      <p key={idx} className={idx === searchResult.ai_summary!.split('\n\n').length - 1 ? 'mb-0' : ''}>
-                        {paragraph}
-                      </p>
-                    ))}
+                    {isSummaryLoading && (
+                      <div className="text-muted">
+                        <div className="placeholder-glow">
+                          <span className="placeholder col-12 mb-2"></span>
+                          <span className="placeholder col-11 mb-2"></span>
+                          <span className="placeholder col-10 mb-2"></span>
+                          <span className="placeholder col-12 mb-3"></span>
+                          <span className="placeholder col-11 mb-2"></span>
+                          <span className="placeholder col-9"></span>
+                        </div>
+                      </div>
+                    )}
+                    {!isSummaryLoading && summaryResult?.summary && (
+                      <>
+                        {summaryResult.summary.split('\n\n').map((paragraph, idx) => (
+                          <p key={idx} className={idx === summaryResult.summary!.split('\n\n').length - 1 ? 'mb-0' : ''}>
+                            {paragraph}
+                          </p>
+                        ))}
+                      </>
+                    )}
+                    {!isSummaryLoading && summaryResult?.error && (
+                      <Alert variant="warning" className="mb-0">
+                        <i className="bi bi-exclamation-triangle me-2"></i>
+                        <strong>Failed:</strong> {summaryResult.error}
+                      </Alert>
+                    )}
                   </Card.Body>
                 </Card>
-              )}
-
-              {generateSummary && searchResult.ai_summary_error && (
-                <Alert variant="warning" className="mb-3">
-                  <i className="bi bi-exclamation-triangle me-2"></i>
-                  <strong>AI summary failed:</strong> {searchResult.ai_summary_error}
-                </Alert>
               )}
 
               {searchResult.results.length > 0 ? (

@@ -10,7 +10,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from magaldi_web.dependencies import get_cached_config, get_es_repository
 
 logger = logging.getLogger(__name__)
-from magaldi_web.models import SearchRequest, SearchResponse, SearchResult
+from magaldi_web.models import (
+    SearchRequest,
+    SearchResponse,
+    SearchResult,
+    SearchSummaryRequest,
+    SearchSummaryResponse,
+)
 from shared.db.elasticsearch import ElasticsearchRepository, INDEX_NAME
 
 router = APIRouter()
@@ -28,16 +34,16 @@ def cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
     return dot_product / (norm1 * norm2)
 
 
-async def _generate_search_summary(
+def _generate_search_summary_sync(
     query: str,
-    results: list[SearchResult],
+    results: list,
     config,
 ) -> tuple[str | None, str | None]:
-    """Generate AI summary of search results.
+    """Generate AI summary of search results (synchronous).
 
     Args:
         query: The user's search query.
-        results: Top search results to summarize.
+        results: Top search results to summarize (SummaryResultItem objects).
         config: Application config with LLM settings.
 
     Returns:
@@ -304,16 +310,6 @@ async def search(
     # Sort by combined score (sum of enabled search mode scores)
     results.sort(key=lambda r: r.combined_score or 0, reverse=True)
 
-    # Generate AI summary if requested
-    ai_summary = None
-    ai_summary_error = None
-    if request.generate_summary and results:
-        ai_summary, ai_summary_error = await _generate_search_summary(
-            query=request.query,
-            results=results[:50],  # Use top 50 results
-            config=config,
-        )
-
     return SearchResponse(
         query=request.query,
         total=total,
@@ -322,8 +318,6 @@ async def search(
         text_search_used=request.use_text_search,
         vector_search_used=query_embedding is not None,
         embedding_error=embedding_error,
-        ai_summary=ai_summary,
-        ai_summary_error=ai_summary_error,
     )
 
 
@@ -356,3 +350,25 @@ async def get_search_filters(
         "element_types": [b["key"] for b in aggs.get("element_types", {}).get("buckets", [])],
         "languages": [b["key"] for b in aggs.get("languages", {}).get("buckets", [])],
     }
+
+
+@router.post("/search/summary", response_model=SearchSummaryResponse)
+async def generate_search_summary(
+    request: SearchSummaryRequest,
+) -> SearchSummaryResponse:
+    """Generate AI summary of search results.
+
+    This endpoint is called separately after search results are displayed,
+    allowing results to appear immediately while summary generates.
+    """
+    if not request.results:
+        return SearchSummaryResponse(error="No results provided")
+
+    config = get_cached_config()
+    summary, error = _generate_search_summary_sync(
+        query=request.query,
+        results=request.results,
+        config=config,
+    )
+
+    return SearchSummaryResponse(summary=summary, error=error)

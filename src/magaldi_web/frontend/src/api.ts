@@ -59,7 +59,6 @@ export interface SearchRequest {
   offset?: number
   use_text_search?: boolean
   use_vector_search?: boolean
-  generate_summary?: boolean  // Generate AI summary of results
 }
 
 export interface SearchResult {
@@ -86,8 +85,25 @@ export interface SearchResponse {
   text_search_used: boolean
   vector_search_used: boolean
   embedding_error: string | null
-  ai_summary: string | null  // AI-generated summary of results
-  ai_summary_error: string | null  // Error if summary generation failed
+}
+
+export interface SummaryResultItem {
+  name: string
+  element_type: string
+  file_path: string
+  line: number
+  summary: string | null
+  signature: string | null
+}
+
+export interface SearchSummaryRequest {
+  query: string
+  results: SummaryResultItem[]
+}
+
+export interface SearchSummaryResponse {
+  summary: string | null
+  error: string | null
 }
 
 export interface FileTreeNode {
@@ -306,6 +322,13 @@ export async function getDashboard(): Promise<DashboardStats> {
 // Search
 export async function search(params: SearchRequest): Promise<SearchResponse> {
   return fetchJson<SearchResponse>(`${API_BASE}/search`, {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
+}
+
+export async function generateSearchSummary(params: SearchSummaryRequest): Promise<SearchSummaryResponse> {
+  return fetchJson<SearchSummaryResponse>(`${API_BASE}/search/summary`, {
     method: 'POST',
     body: JSON.stringify(params),
   })

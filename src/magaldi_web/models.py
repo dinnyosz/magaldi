@@ -123,7 +123,6 @@ class SearchRequest(BaseModel):
     offset: int = Field(default=0, ge=0)
     use_text_search: bool = True
     use_vector_search: bool = True
-    generate_summary: bool = False  # Generate AI summary of top results
 
 
 class SearchResult(BaseModel):
@@ -158,8 +157,31 @@ class SearchResponse(BaseModel):
     text_search_used: bool = True
     vector_search_used: bool = False
     embedding_error: str | None = None
-    ai_summary: str | None = None  # AI-generated summary of top results
-    ai_summary_error: str | None = None  # Error if summary generation failed
+
+
+class SummaryResultItem(BaseModel):
+    """A simplified result item for summary generation."""
+
+    name: str
+    element_type: str
+    file_path: str
+    line: int
+    summary: str | None = None
+    signature: str | None = None
+
+
+class SearchSummaryRequest(BaseModel):
+    """Request for AI summary of search results."""
+
+    query: str
+    results: list[SummaryResultItem] = Field(default_factory=list, max_length=50)
+
+
+class SearchSummaryResponse(BaseModel):
+    """Response for AI summary endpoint."""
+
+    summary: str | None = None
+    error: str | None = None
 
 
 # =============================================================================
