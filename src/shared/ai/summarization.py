@@ -741,7 +741,7 @@ def process_summarization_job(
             return False
 
         # Generate summary
-        summary = generate_summary(element, summary_store, ollama, config)
+        summary = generate_summary(element, summary_store, llm_client, config)
 
         # Store summary
         summary_store.store_summary(element_id, summary)

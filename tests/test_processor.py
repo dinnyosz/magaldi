@@ -1,0 +1,644 @@
+"""Tests for processor module."""
+
+import pytest
+from unittest.mock import MagicMock
+
+from magaldi_core.processor import (
+    DependencyTracker,
+    ProcessingConfig,
+    ProcessingResult,
+    TimingStats,
+    WorkerStatus,
+    ProgressState,
+    ProcessedElement,
+)
+from magaldi_core.code_parser import CodeElement
+
+
+def make_element(
+    element_id: str,
+    element_type: str = "function",
+    parent_id: str | None = None,
+    level: int = 2,
+) -> CodeElement:
+    """Create a mock CodeElement for testing."""
+    return CodeElement(
+        element_id=element_id,
+        element_type=element_type,
+        name=element_id.split(":")[-1],
+        relative_path="file.py",
+        line_start=1,
+        line_end=10,
+        level=level,
+        parent_id=parent_id,
+        raw_code="def test(): pass",
+    )
+
+
+class TestDependencyTracker:
+    """Tests for DependencyTracker class."""
+
+    def test_level_0_elements_always_ready(self):
+        """Level 0 elements (files) should always be ready."""
+        file_elem = make_element("scope:repo:user:file.py:file:file.py:1", "file", None, 0)
+        tracker = DependencyTracker([file_elem])
+
+        ready = tracker.get_ready_elements()
+        assert len(ready) == 1
+        assert ready[0].element_id == file_elem.element_id
+
+    def test_child_ready_when_parent_completed(self):
+        """Child should be ready after parent is marked complete."""
+        parent = make_element("scope:repo:user:file.py:class:MyClass:1", "class", None, 1)
+        child = make_element(
+            "scope:repo:user:file.py:method:my_method:5",
+            "method",
+            parent.element_id,
+            2,
+        )
+        tracker = DependencyTracker([parent, child])
+
+        # Initially only parent should be ready
+        ready = tracker.get_ready_elements()
+        assert len(ready) == 1
+        assert ready[0].element_id == parent.element_id
+
+        # Mark parent complete
+        tracker.mark_complete(parent.element_id)
+
+        # Now child should be ready
+        ready = tracker.get_ready_elements()
+        assert len(ready) == 1
+        assert ready[0].element_id == child.element_id
+
+    def test_child_ready_when_parent_not_in_tracker(self):
+        """Child should be ready if parent was skipped (not in elements_to_process).
+
+        This tests the fix for content_hash optimization where unchanged parents
+        are not included in the processing list.
+        """
+        # Parent exists but is NOT in the tracker (was skipped due to unchanged content)
+        parent_id = "scope:repo:user:file.py:class:UnchangedClass:1"
+
+        # Child references the parent but parent is not in elements_to_process
+        child = make_element(
+            "scope:repo:user:file.py:method:changed_method:5",
+            "method",
+            parent_id,  # References parent that's not in tracker
+            2,
+        )
+
+        # Only child is in the tracker (parent was unchanged/skipped)
+        tracker = DependencyTracker([child])
+
+        # Child should be ready immediately since parent is not in tracker
+        ready = tracker.get_ready_elements()
+        assert len(ready) == 1
+        assert ready[0].element_id == child.element_id
+
+    def test_multiple_children_of_skipped_parent(self):
+        """Multiple children should all be ready when parent was skipped."""
+        parent_id = "scope:repo:user:file.py:class:SkippedClass:1"
+
+        child1 = make_element(
+            "scope:repo:user:file.py:method:method1:5",
+            "method",
+            parent_id,
+            2,
+        )
+        child2 = make_element(
+            "scope:repo:user:file.py:method:method2:15",
+            "method",
+            parent_id,
+            2,
+        )
+
+        tracker = DependencyTracker([child1, child2])
+
+        ready = tracker.get_ready_elements(max_count=10)
+        assert len(ready) == 2
+
+    def test_mixed_ready_and_waiting(self):
+        """Mix of elements with present and absent parents."""
+        # Parent in tracker
+        present_parent = make_element(
+            "scope:repo:user:file.py:class:PresentClass:1",
+            "class",
+            None,
+            1,
+        )
+        child_of_present = make_element(
+            "scope:repo:user:file.py:method:child1:5",
+            "method",
+            present_parent.element_id,
+            2,
+        )
+
+        # Parent NOT in tracker (skipped)
+        absent_parent_id = "scope:repo:user:file.py:class:AbsentClass:20"
+        child_of_absent = make_element(
+            "scope:repo:user:file.py:method:child2:25",
+            "method",
+            absent_parent_id,
+            2,
+        )
+
+        tracker = DependencyTracker([present_parent, child_of_present, child_of_absent])
+
+        # Initially: present_parent ready, child_of_absent ready (parent skipped)
+        ready = tracker.get_ready_elements(max_count=10)
+        ready_ids = {e.element_id for e in ready}
+
+        assert present_parent.element_id in ready_ids
+        assert child_of_absent.element_id in ready_ids
+        assert child_of_present.element_id not in ready_ids  # Must wait for parent
+
+    def test_is_complete(self):
+        """is_complete should return True when all elements processed."""
+        elem1 = make_element("scope:repo:user:file.py:function:func1:1", "function", None, 2)
+        elem2 = make_element("scope:repo:user:file.py:function:func2:10", "function", None, 2)
+
+        tracker = DependencyTracker([elem1, elem2])
+
+        assert not tracker.is_complete()
+
+        tracker.get_ready_elements()
+        tracker.mark_complete(elem1.element_id)
+        assert not tracker.is_complete()
+
+        tracker.mark_complete(elem2.element_id)
+        assert tracker.is_complete()
+
+    def test_mark_failed_unblocks_children(self):
+        """Failed parent should still unblock children."""
+        parent = make_element("scope:repo:user:file.py:class:MyClass:1", "class", None, 1)
+        child = make_element(
+            "scope:repo:user:file.py:method:my_method:5",
+            "method",
+            parent.element_id,
+            2,
+        )
+        tracker = DependencyTracker([parent, child])
+
+        # Get parent
+        ready = tracker.get_ready_elements()
+        assert len(ready) == 1
+
+        # Mark parent as failed
+        tracker.mark_failed(parent.element_id)
+
+        # Child should now be ready
+        ready = tracker.get_ready_elements()
+        assert len(ready) == 1
+        assert ready[0].element_id == child.element_id
+
+    def test_pending_count(self):
+        """pending_count should track remaining elements."""
+        elements = [
+            make_element(f"scope:repo:user:file.py:function:func{i}:1", "function", None, 2)
+            for i in range(5)
+        ]
+        tracker = DependencyTracker(elements)
+
+        assert tracker.pending_count() == 5
+
+        tracker.get_ready_elements()
+        tracker.mark_complete(elements[0].element_id)
+        assert tracker.pending_count() == 4
+
+        tracker.mark_complete(elements[1].element_id)
+        assert tracker.pending_count() == 3
+
+
+# =============================================================================
+# PROCESSING CONFIG TESTS
+# =============================================================================
+
+
+class TestProcessingConfig:
+    """Tests for ProcessingConfig class."""
+
+    def test_default_values(self):
+        """Test default configuration values."""
+        config = ProcessingConfig()
+
+        assert config.summarize_model == "qwen2.5-coder:3b"
+        assert config.summarize_model_small == "qwen2.5-coder:1.5b"
+        assert config.embed_model == "snowflake-arctic-embed2"
+        assert config.api_base == "http://localhost:11434"
+        assert config.provider == "ollama"
+        assert config.api_key is None
+        assert config.skip_ai is False
+        assert config.num_workers == 4
+
+    def test_custom_values(self):
+        """Test custom configuration values."""
+        config = ProcessingConfig(
+            summarize_model="gpt-4",
+            provider="openai",
+            api_key="test-key",
+            num_workers=8,
+        )
+
+        assert config.summarize_model == "gpt-4"
+        assert config.provider == "openai"
+        assert config.api_key == "test-key"
+        assert config.num_workers == 8
+
+    def test_get_model_for_function(self):
+        """Test model selection for function elements."""
+        config = ProcessingConfig()
+
+        model = config.get_model_for_element_type("function")
+        assert model == config.summarize_model_small
+
+    def test_get_model_for_method(self):
+        """Test model selection for method elements."""
+        config = ProcessingConfig()
+
+        model = config.get_model_for_element_type("method")
+        assert model == config.summarize_model_small
+
+    def test_get_model_for_variable(self):
+        """Test model selection for variable elements."""
+        config = ProcessingConfig()
+
+        model = config.get_model_for_element_type("variable")
+        assert model == config.summarize_model_small
+
+    def test_get_model_for_class(self):
+        """Test model selection for class elements."""
+        config = ProcessingConfig()
+
+        model = config.get_model_for_element_type("class")
+        assert model == config.summarize_model
+
+    def test_get_model_for_file(self):
+        """Test model selection for file elements."""
+        config = ProcessingConfig()
+
+        model = config.get_model_for_element_type("file")
+        assert model == config.summarize_model
+
+
+# =============================================================================
+# PROCESSING RESULT TESTS
+# =============================================================================
+
+
+class TestProcessingResult:
+    """Tests for ProcessingResult class."""
+
+    def test_default_values(self):
+        """Test default result values."""
+        result = ProcessingResult(
+            scope="test-scope",
+            repository="test-repo",
+            username="testuser",
+        )
+
+        assert result.scope == "test-scope"
+        assert result.repository == "test-repo"
+        assert result.username == "testuser"
+        assert result.elements_processed == 0
+        assert result.elements_skipped == 0
+        assert result.elements_failed == 0
+        assert result.summarized == 0
+        assert result.embedded == 0
+        assert result.indexed == 0
+        assert result.errors == []
+        assert result.failed_elements == []
+
+    def test_with_counts(self):
+        """Test result with custom counts."""
+        result = ProcessingResult(
+            scope="test-scope",
+            repository="test-repo",
+            username="testuser",
+            elements_processed=10,
+            elements_skipped=5,
+            elements_failed=1,
+            summarized=9,
+            embedded=9,
+            indexed=9,
+            errors=["Test error"],
+            failed_elements=[("elem1", "Error msg")],
+        )
+
+        assert result.elements_processed == 10
+        assert result.elements_skipped == 5
+        assert result.elements_failed == 1
+        assert result.summarized == 9
+        assert result.indexed == 9
+        assert len(result.errors) == 1
+        assert len(result.failed_elements) == 1
+
+
+# =============================================================================
+# TIMING STATS TESTS
+# =============================================================================
+
+
+class TestTimingStats:
+    """Tests for TimingStats class."""
+
+    def test_default_values(self):
+        """Test default timing stats values."""
+        stats = TimingStats()
+
+        assert stats.phase_start == 0.0
+        assert stats.total_summarize_by_type == {}
+        assert stats.total_embed_by_type == {}
+
+    def test_set_totals_by_type(self):
+        """Test setting totals by type."""
+        stats = TimingStats()
+        stats.set_totals_by_type({"function": 10, "class": 5})
+
+        assert stats.totals_by_type == {"function": 10, "class": 5}
+        assert stats.summarize_counts_by_type["function"] == 0
+        assert stats.summarize_counts_by_type["class"] == 0
+
+    def test_record_timing(self):
+        """Test recording timing for elements."""
+        stats = TimingStats()
+        stats.set_totals_by_type({"function": 2})
+
+        stats.record(
+            wall_time=1.0,
+            summarize_time=0.5,
+            embed_time=0.3,
+            element_type="function",
+            was_embedded=True,
+        )
+
+        assert stats.total_summarize_by_type["function"] == 0.5
+        assert stats.total_embed_by_type["function"] == 0.3
+        assert stats.summarize_counts_by_type["function"] == 1
+        assert stats.embed_counts_by_type["function"] == 1
+
+    def test_record_without_embedding(self):
+        """Test recording timing when element not embedded."""
+        stats = TimingStats()
+        stats.set_totals_by_type({"function": 2})
+
+        stats.record(
+            wall_time=1.0,
+            summarize_time=0.5,
+            embed_time=0.0,
+            element_type="function",
+            was_embedded=False,
+        )
+
+        assert stats.total_summarize_by_type["function"] == 0.5
+        assert stats.total_embed_by_type["function"] == 0.0
+        assert stats.embed_counts_by_type["function"] == 0
+
+    def test_total_summarize_count(self):
+        """Test total summarize count property."""
+        stats = TimingStats()
+        stats.set_totals_by_type({"function": 3, "class": 2})
+
+        stats.record(1.0, 0.5, 0.3, "function", True)
+        stats.record(1.0, 0.5, 0.3, "function", True)
+        stats.record(1.0, 0.5, 0.3, "class", True)
+
+        assert stats.total_summarize_count == 3
+
+    def test_total_embed_count(self):
+        """Test total embed count property."""
+        stats = TimingStats()
+        stats.set_totals_by_type({"function": 3})
+
+        stats.record(1.0, 0.5, 0.3, "function", True)
+        stats.record(1.0, 0.5, 0.0, "function", False)
+        stats.record(1.0, 0.5, 0.3, "function", True)
+
+        assert stats.total_embed_count == 2
+
+    def test_avg_summarize_time(self):
+        """Test average summarize time calculation."""
+        stats = TimingStats()
+        stats.set_totals_by_type({"function": 2})
+
+        stats.record(1.0, 0.4, 0.2, "function", True)
+        stats.record(1.0, 0.6, 0.2, "function", True)
+
+        # Average of 0.4 and 0.6 = 0.5
+        assert abs(stats.avg_summarize_time - 0.5) < 0.001
+
+    def test_avg_summarize_time_empty(self):
+        """Test average summarize time when no data."""
+        stats = TimingStats()
+
+        assert stats.avg_summarize_time == 0.0
+
+    def test_avg_embed_time(self):
+        """Test average embed time calculation."""
+        stats = TimingStats()
+        stats.set_totals_by_type({"function": 2})
+
+        stats.record(1.0, 0.5, 0.3, "function", True)
+        stats.record(1.0, 0.5, 0.5, "function", True)
+
+        # Average of 0.3 and 0.5 = 0.4
+        assert abs(stats.avg_embed_time - 0.4) < 0.001
+
+    def test_get_type_stats(self):
+        """Test getting per-type statistics."""
+        stats = TimingStats()
+        stats.set_totals_by_type({"function": 3, "class": 2})
+
+        stats.record(1.0, 0.5, 0.3, "function", True)
+        stats.record(1.0, 0.5, 0.3, "function", True)
+
+        type_stats = stats.get_type_stats()
+
+        # function: completed=2, total=3
+        assert "function" in type_stats
+        completed, total, avg_api, avg_summ, avg_embed = type_stats["function"]
+        assert completed == 2
+        assert total == 3
+        assert avg_summ == 0.5
+
+    def test_eta_seconds_no_data(self):
+        """Test ETA calculation with no data."""
+        stats = TimingStats()
+
+        assert stats.eta_seconds(0, 10) is None
+
+    def test_eta_seconds_with_data(self):
+        """Test ETA calculation with data."""
+        stats = TimingStats()
+        stats.set_totals_by_type({"function": 10})
+
+        # Process 2 elements, 8 remaining
+        stats.record(1.0, 0.5, 0.5, "function", True)
+        stats.record(1.0, 0.5, 0.5, "function", True)
+
+        eta = stats.eta_seconds(2, 10, num_workers=1)
+        # Remaining: 8 elements * 1.0s avg = 8s
+        assert eta is not None
+        assert abs(eta - 8.0) < 0.1
+
+    def test_eta_seconds_with_multiple_workers(self):
+        """Test ETA calculation with multiple workers."""
+        stats = TimingStats()
+        stats.set_totals_by_type({"function": 10})
+
+        stats.record(1.0, 0.5, 0.5, "function", True)
+        stats.record(1.0, 0.5, 0.5, "function", True)
+
+        eta = stats.eta_seconds(2, 10, num_workers=2)
+        # Remaining: 8 elements * 1.0s avg / 2 workers = 4s
+        assert eta is not None
+        assert abs(eta - 4.0) < 0.1
+
+
+# =============================================================================
+# WORKER STATUS TESTS
+# =============================================================================
+
+
+class TestWorkerStatus:
+    """Tests for WorkerStatus class."""
+
+    def test_default_empty(self):
+        """Test default worker status is empty."""
+        status = WorkerStatus()
+        assert status.get_all() == {}
+
+    def test_set_and_get(self):
+        """Test setting and getting worker status."""
+        status = WorkerStatus()
+
+        status.set(0, "element1", "summarizing", "gpt-4")
+
+        all_status = status.get_all()
+        assert 0 in all_status
+        assert all_status[0] == ("element1", "summarizing", "gpt-4")
+
+    def test_set_multiple_workers(self):
+        """Test setting multiple worker statuses."""
+        status = WorkerStatus()
+
+        status.set(0, "elem1", "summarizing", "model1")
+        status.set(1, "elem2", "embedding", "model2")
+        status.set(2, "elem3", "indexing", "")
+
+        all_status = status.get_all()
+        assert len(all_status) == 3
+
+    def test_clear(self):
+        """Test clearing worker status."""
+        status = WorkerStatus()
+
+        status.set(0, "element1", "summarizing", "model")
+        status.clear(0)
+
+        assert 0 not in status.get_all()
+
+    def test_clear_nonexistent(self):
+        """Test clearing nonexistent worker doesn't fail."""
+        status = WorkerStatus()
+
+        # Should not raise
+        status.clear(999)
+
+    def test_update_existing(self):
+        """Test updating existing worker status."""
+        status = WorkerStatus()
+
+        status.set(0, "elem1", "summarizing", "model")
+        status.set(0, "elem1", "embedding", "model")
+
+        all_status = status.get_all()
+        assert all_status[0] == ("elem1", "embedding", "model")
+
+
+# =============================================================================
+# PROGRESS STATE TESTS
+# =============================================================================
+
+
+class TestProgressState:
+    """Tests for ProgressState class."""
+
+    def test_creation(self):
+        """Test creating progress state."""
+        timing = TimingStats()
+        workers = WorkerStatus()
+
+        state = ProgressState(
+            total=100,
+            completed=50,
+            skipped=10,
+            failed=2,
+            timing=timing,
+            workers=workers,
+            num_workers=4,
+        )
+
+        assert state.total == 100
+        assert state.completed == 50
+        assert state.skipped == 10
+        assert state.failed == 2
+        assert state.num_workers == 4
+        assert state.recent_errors == []
+
+    def test_with_errors(self):
+        """Test progress state with errors."""
+        timing = TimingStats()
+        workers = WorkerStatus()
+
+        state = ProgressState(
+            total=100,
+            completed=50,
+            skipped=0,
+            failed=1,
+            timing=timing,
+            workers=workers,
+            recent_errors=[("elem1", "Error message")],
+        )
+
+        assert len(state.recent_errors) == 1
+        assert state.recent_errors[0][0] == "elem1"
+
+
+# =============================================================================
+# PROCESSED ELEMENT TESTS
+# =============================================================================
+
+
+class TestProcessedElement:
+    """Tests for ProcessedElement class."""
+
+    def test_successful_element(self):
+        """Test creating successful processed element."""
+        elem = ProcessedElement(
+            element_id="scope:repo:user:file.py:function:test:1",
+            success=True,
+            wall_time=1.5,
+            summarize_time=0.8,
+            embed_time=0.5,
+        )
+
+        assert elem.success is True
+        assert elem.wall_time == 1.5
+        assert elem.summarize_time == 0.8
+        assert elem.embed_time == 0.5
+        assert elem.error is None
+
+    def test_failed_element(self):
+        """Test creating failed processed element."""
+        elem = ProcessedElement(
+            element_id="scope:repo:user:file.py:function:test:1",
+            success=False,
+            wall_time=0.5,
+            summarize_time=0.5,
+            embed_time=0.0,
+            error="API timeout",
+        )
+
+        assert elem.success is False
+        assert elem.error == "API timeout"

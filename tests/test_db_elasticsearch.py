@@ -391,7 +391,8 @@ class TestElasticsearchTextSearch:
             es_repo.index_element(elem)
         es_repo._get_client().indices.refresh(index=INDEX_NAME)
 
-        results = es_repo.search_by_text("authentication")
+        # Search for "User model" which appears in the User class docstring
+        results = es_repo.search_by_text("User model")
 
         assert len(results) >= 1
         assert any(r["name"] == "User" for r in results)

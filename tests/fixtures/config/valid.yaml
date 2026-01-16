@@ -9,7 +9,8 @@ elasticsearch:
   retry_on_timeout: false
   max_retries: 2
 
-ollama:
+llm:
+  provider: ollama
   url: http://testhost:11434
   summarize_model: test-model
   summarize_temperature: 0.5

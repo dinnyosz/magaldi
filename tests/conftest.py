@@ -11,10 +11,10 @@ import pytest
 from shared import config as config_module
 from shared.config import (
     ElasticsearchConfig,
+    LLMConfig,
     LoggingConfig,
     MagaldiConfig,
     MCPConfig,
-    OllamaConfig,
     ParserConfig,
     SearchConfig,
     UserDataConfig,
@@ -64,9 +64,10 @@ def test_elasticsearch_config() -> ElasticsearchConfig:
 
 
 @pytest.fixture
-def test_ollama_config() -> OllamaConfig:
-    """Provide a test Ollama configuration."""
-    return OllamaConfig(
+def test_llm_config() -> LLMConfig:
+    """Provide a test LLM configuration."""
+    return LLMConfig(
+        provider="ollama",
         url="http://localhost:11434",
         summarize_model="test-model",
         summarize_temperature=0.3,
@@ -102,13 +103,13 @@ def test_workers_config() -> WorkersConfig:
 @pytest.fixture
 def test_config(
     test_elasticsearch_config: ElasticsearchConfig,
-    test_ollama_config: OllamaConfig,
+    test_llm_config: LLMConfig,
     test_workers_config: WorkersConfig,
 ) -> MagaldiConfig:
     """Provide a complete test configuration."""
     return MagaldiConfig(
         elasticsearch=test_elasticsearch_config,
-        ollama=test_ollama_config,
+        llm=test_llm_config,
         workers=test_workers_config,
         parser=ParserConfig(
             parallel_workers=2,

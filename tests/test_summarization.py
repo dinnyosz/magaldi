@@ -112,48 +112,37 @@ def summary_store() -> InMemorySummaryStore:
 
 
 class TestSummarizationLLMClient:
-    """Tests for Ollama client."""
+    """Tests for LLM summarization client."""
 
     def test_generate_returns_response(self):
-        with patch("requests.Session") as mock_session_class:
-            mock_session = MagicMock()
-            mock_session_class.return_value = mock_session
+        """Test text generation returns LLM response."""
+        client = SummarizationLLMClient("http://localhost:11434", "qwen2.5-coder:7b")
+        # Mock the internal client
+        client._client = MagicMock()
+        client._client.generate.return_value = "This is a summary."
 
-            mock_response = MagicMock()
-            mock_response.json.return_value = {"response": "This is a summary."}
-            mock_response.raise_for_status = MagicMock()
-            mock_session.post.return_value = mock_response
+        result = client.generate("Summarize this code")
 
-            client = SummarizationLLMClient("http://localhost:11434", "qwen2.5-coder:7b")
-            result = client.generate("Summarize this code")
-
-            assert result == "This is a summary."
+        assert result == "This is a summary."
+        client._client.generate.assert_called_once()
 
     def test_verify_model_returns_true_when_available(self):
-        with patch("requests.Session") as mock_session_class:
-            mock_session = MagicMock()
-            mock_session_class.return_value = mock_session
+        """Test model verification returns True when model is available."""
+        client = SummarizationLLMClient("http://localhost:11434", "qwen2.5-coder:7b")
+        # Mock the internal client
+        client._client = MagicMock()
+        client._client.verify_model.return_value = True
 
-            mock_response = MagicMock()
-            mock_response.json.return_value = {
-                "models": [{"name": "qwen2.5-coder:7b"}, {"name": "other:model"}]
-            }
-            mock_session.get.return_value = mock_response
-
-            client = SummarizationLLMClient("http://localhost:11434", "qwen2.5-coder:7b")
-            assert client.verify_model() is True
+        assert client.verify_model() is True
 
     def test_verify_model_returns_false_when_unavailable(self):
-        with patch("requests.Session") as mock_session_class:
-            mock_session = MagicMock()
-            mock_session_class.return_value = mock_session
+        """Test model verification returns False when model is unavailable."""
+        client = SummarizationLLMClient("http://localhost:11434", "qwen2.5-coder:7b")
+        # Mock the internal client
+        client._client = MagicMock()
+        client._client.verify_model.return_value = False
 
-            mock_response = MagicMock()
-            mock_response.json.return_value = {"models": [{"name": "other:model"}]}
-            mock_session.get.return_value = mock_response
-
-            client = SummarizationLLMClient("http://localhost:11434", "qwen2.5-coder:7b")
-            assert client.verify_model() is False
+        assert client.verify_model() is False
 
 
 # =============================================================================
@@ -395,7 +384,7 @@ class TestProcessSummarizationJob:
             username="main",
             job_repo=job_repo,
             summary_store=summary_store,
-            ollama=mock_ollama,
+            llm_client=mock_ollama,
             config=config,
         )
 
@@ -428,7 +417,7 @@ class TestProcessSummarizationJob:
             username="main",
             job_repo=job_repo,
             summary_store=summary_store,
-            ollama=mock_ollama,
+            llm_client=mock_ollama,
             config=config,
         )
 
@@ -463,7 +452,7 @@ class TestGenerateSummary:
         summary = generate_summary(
             element=class_element,
             summary_store=summary_store,
-            ollama=mock_ollama,
+            llm_client=mock_ollama,
             config=config,
         )
 

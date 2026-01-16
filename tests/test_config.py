@@ -8,10 +8,10 @@ import pytest
 from shared.config import (
     ConfigurationError,
     ElasticsearchConfig,
+    LLMConfig,
     LoggingConfig,
     MagaldiConfig,
     MCPConfig,
-    OllamaConfig,
     ParserConfig,
     SearchConfig,
     UserDataConfig,
@@ -86,27 +86,27 @@ class TestElasticsearchConfigDefaults:
         assert config.max_retries == 3
 
 
-class TestOllamaConfigDefaults:
-    """Test OllamaConfig dataclass defaults."""
+class TestLLMConfigDefaults:
+    """Test LLMConfig dataclass defaults."""
 
     def test_default_url(self):
-        config = OllamaConfig()
+        config = LLMConfig()
         assert config.url == "http://localhost:11434"
 
     def test_default_summarize_model(self):
-        config = OllamaConfig()
+        config = LLMConfig()
         assert config.summarize_model == "qwen2.5-coder:3b"
 
     def test_default_summarize_temperature(self):
-        config = OllamaConfig()
+        config = LLMConfig()
         assert config.summarize_temperature == 0.3
 
     def test_default_embed_model(self):
-        config = OllamaConfig()
+        config = LLMConfig()
         assert config.embed_model == "snowflake-arctic-embed2"
 
     def test_default_embed_dimensions(self):
-        config = OllamaConfig()
+        config = LLMConfig()
         assert config.embed_dimensions == 1024
 
 
@@ -149,7 +149,7 @@ class TestLoadFromFile:
         assert config.elasticsearch.host == "testhost"
         assert config.elasticsearch.port == 9200
         assert config.elasticsearch.url == "http://testhost:9200"
-        assert config.ollama.summarize_model == "test-model"
+        assert config.llm.summarize_model == "test-model"
         assert config.workers.summarization.count == 2
         assert config.logging.level == "DEBUG"
 
@@ -197,10 +197,10 @@ class TestEnvOverrides:
         assert config.elasticsearch.scheme == "https"
         assert config.elasticsearch.url == "https://eshost:9201"
 
-    def test_env_overrides_ollama_url(self, clean_env):
-        os.environ["MAGALDI_OLLAMA_URL"] = "http://ollama:11435"
+    def test_env_overrides_llm_url(self, clean_env):
+        os.environ["MAGALDI_LLM_URL"] = "http://ollama:11435"
         config = load_config(FIXTURES_DIR / "minimal.yaml")
-        assert config.ollama.url == "http://ollama:11435"
+        assert config.llm.url == "http://ollama:11435"
 
     def test_env_overrides_log_level(self, clean_env):
         os.environ["MAGALDI_LOG_LEVEL"] = "WARNING"
@@ -256,8 +256,8 @@ class TestValidation:
         """Invalid embed dimensions for snowflake model should raise ConfigurationError."""
         # Load config and manually set invalid dimensions
         config = load_config(FIXTURES_DIR / "valid.yaml", skip_validation=True)
-        config.ollama.embed_model = "snowflake-arctic-embed2"
-        config.ollama.embed_dimensions = 512  # Wrong for snowflake-arctic-embed2
+        config.llm.embed_model = "snowflake-arctic-embed2"
+        config.llm.embed_dimensions = 512  # Wrong for snowflake-arctic-embed2
 
         from shared.config import _validate_config
         with pytest.raises(ConfigurationError) as exc_info:
@@ -342,7 +342,8 @@ class TestMagaldiConfigRoot:
         config = load_config(FIXTURES_DIR / "valid.yaml")
 
         assert hasattr(config, "elasticsearch")
-        assert hasattr(config, "ollama")
+        assert hasattr(config, "redis")
+        assert hasattr(config, "llm")
         assert hasattr(config, "workers")
         assert hasattr(config, "parser")
         assert hasattr(config, "search")
@@ -356,7 +357,7 @@ class TestMagaldiConfigRoot:
         config = load_config(FIXTURES_DIR / "valid.yaml")
 
         assert isinstance(config.elasticsearch, ElasticsearchConfig)
-        assert isinstance(config.ollama, OllamaConfig)
+        assert isinstance(config.llm, LLMConfig)
         assert isinstance(config.workers, WorkersConfig)
         assert isinstance(config.parser, ParserConfig)
         assert isinstance(config.search, SearchConfig)

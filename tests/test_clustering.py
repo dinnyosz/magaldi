@@ -110,7 +110,7 @@ class TestClusterConfig:
         assert config.min_cluster_size == 5
         assert config.min_samples == 3
         assert config.element_types == ["function", "method"]
-        assert config.ollama_url == "http://localhost:11434"
+        assert config.api_base == "http://localhost:11434"
 
     def test_custom_values(self):
         """Test custom configuration values."""

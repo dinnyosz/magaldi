@@ -105,12 +105,12 @@ class TestDashboardEndpoint:
         ]
 
         with patch("magaldi_web.routes.dashboard.check_elasticsearch_health") as mock_es_health, \
-             patch("magaldi_web.routes.dashboard.check_ollama_health") as mock_ollama_health, \
+             patch("magaldi_web.routes.dashboard.check_llm_health") as mock_llm_health, \
              patch("magaldi_web.routes.dashboard.check_redis_health") as mock_redis_health, \
              patch("magaldi_web.routes.dashboard.get_redis_queue_stats") as mock_queue_stats:
 
             mock_es_health.return_value = {"status": "healthy"}
-            mock_ollama_health.return_value = {"status": "healthy"}
+            mock_llm_health.return_value = {"status": "healthy"}
             mock_redis_health.return_value = {"status": "healthy"}
             mock_queue_stats.return_value = {
                 "summarization": {},
@@ -156,12 +156,12 @@ class TestDashboardEndpoint:
         ]
 
         with patch("magaldi_web.routes.dashboard.check_elasticsearch_health") as mock_es_health, \
-             patch("magaldi_web.routes.dashboard.check_ollama_health") as mock_ollama_health, \
+             patch("magaldi_web.routes.dashboard.check_llm_health") as mock_llm_health, \
              patch("magaldi_web.routes.dashboard.check_redis_health") as mock_redis_health, \
              patch("magaldi_web.routes.dashboard.get_redis_queue_stats") as mock_queue_stats:
 
             mock_es_health.return_value = {"status": "healthy"}
-            mock_ollama_health.return_value = {"status": "healthy"}
+            mock_llm_health.return_value = {"status": "healthy"}
             mock_redis_health.return_value = {"status": "healthy"}
             mock_queue_stats.return_value = {
                 "summarization": {},
@@ -458,3 +458,168 @@ class TestCORS:
 
         # CORS preflight should succeed
         assert response.status_code in [200, 204, 405]
+
+
+# =============================================================================
+# BROWSE ENDPOINT TESTS
+# =============================================================================
+
+
+class TestBrowseEndpoints:
+    """Tests for /api/v1/browse/* endpoints."""
+
+    def test_browse_elements(
+        self, client: TestClient, mock_es_repo: MagicMock, mock_es_client: MagicMock
+    ):
+        """Test browsing code elements."""
+        mock_es_client.search.return_value = {
+            "hits": {
+                "total": {"value": 2},
+                "hits": [
+                    {
+                        "_source": {
+                            "element_id": "scope:repo:main:file.py:function:test:1",
+                            "name": "test",
+                            "element_type": "function",
+                            "relative_path": "file.py",
+                            "line_start": 1,
+                            "line_end": 10,
+                            "language": "python",
+                            "summary": "A test function.",
+                            "repository": "repo",
+                            "scope": "scope",
+                        }
+                    },
+                    {
+                        "_source": {
+                            "element_id": "scope:repo:main:file.py:function:other:20",
+                            "name": "other",
+                            "element_type": "function",
+                            "relative_path": "file.py",
+                            "line_start": 20,
+                            "line_end": 30,
+                            "repository": "repo",
+                            "scope": "scope",
+                        }
+                    },
+                ],
+            }
+        }
+
+        response = client.get("/api/v1/browse/elements?scope=scope&repository=repo")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "elements" in data
+        assert "total" in data
+        assert data["total"] == 2
+
+    def test_browse_elements_with_filters(
+        self, client: TestClient, mock_es_repo: MagicMock, mock_es_client: MagicMock
+    ):
+        """Test browsing elements with type filter."""
+        mock_es_client.search.return_value = {
+            "hits": {"total": {"value": 0}, "hits": []}
+        }
+
+        response = client.get(
+            "/api/v1/browse/elements",
+            params={
+                "element_type": "class",
+                "language": "python",
+                "page": 1,
+                "limit": 10,
+            },
+        )
+
+        assert response.status_code == 200
+
+
+# =============================================================================
+# REPOS ENDPOINT TESTS
+# =============================================================================
+
+
+class TestReposEndpoints:
+    """Tests for /api/v1/repos/* endpoints."""
+
+    def test_list_repositories(
+        self, client: TestClient, mock_es_repo: MagicMock, mock_es_client: MagicMock
+    ):
+        """Test listing all repositories."""
+        mock_es_client.search.return_value = {
+            "aggregations": {
+                "repos": {
+                    "buckets": [
+                        {
+                            "key": {"scope": "magaldi", "repository": "magaldi"},
+                            "doc_count": 100,
+                            "languages": {"buckets": [{"key": "python"}]},
+                        }
+                    ]
+                }
+            }
+        }
+
+        response = client.get("/api/v1/repos")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "repos" in data
+
+    def test_get_repository(
+        self, client: TestClient, mock_es_repo: MagicMock, mock_es_client: MagicMock
+    ):
+        """Test getting a specific repository."""
+        mock_es_client.search.return_value = {
+            "aggregations": {
+                "by_type": {
+                    "buckets": [
+                        {"key": "file", "doc_count": 10},
+                        {"key": "class", "doc_count": 5},
+                        {"key": "function", "doc_count": 20},
+                    ]
+                },
+                "by_language": {
+                    "buckets": [{"key": "python", "doc_count": 35}]
+                },
+            },
+            "hits": {"total": {"value": 35}},
+        }
+
+        response = client.get("/api/v1/repos/magaldi/magaldi")
+
+        assert response.status_code == 200
+        data = response.json()
+        # Response includes scope, name, element_count, etc.
+        assert "scope" in data
+        assert "name" in data
+
+
+# =============================================================================
+# ADMIN ENDPOINT TESTS
+# =============================================================================
+
+
+class TestAdminEndpoints:
+    """Tests for /api/v1/admin/* endpoints."""
+
+    def test_health_check(
+        self, client: TestClient, mock_es_repo: MagicMock
+    ):
+        """Test health check endpoint."""
+        with patch("magaldi_web.routes.admin.check_elasticsearch_health") as mock_es_health, \
+             patch("magaldi_web.routes.admin.check_llm_health") as mock_llm_health, \
+             patch("magaldi_web.routes.admin.check_redis_health") as mock_redis_health:
+
+            mock_es_health.return_value = {"status": "healthy", "cluster": "test"}
+            mock_llm_health.return_value = {"status": "healthy", "model": "test"}
+            mock_redis_health.return_value = {"status": "healthy"}
+
+            response = client.get("/api/v1/admin/health")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "elasticsearch" in data
+        assert "llm" in data
+        assert "redis" in data

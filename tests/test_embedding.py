@@ -109,54 +109,40 @@ def embedding_store() -> InMemoryEmbeddingStore:
 
 
 class TestCodeEmbeddingClient:
-    """Tests for Ollama embedding client."""
+    """Tests for LLM embedding client."""
 
     def test_embed_single_returns_vector(self):
-        with patch("requests.Session") as mock_session_class:
-            mock_session = MagicMock()
-            mock_session_class.return_value = mock_session
+        """Test single text embedding generation."""
+        client = CodeEmbeddingClient("http://localhost:11434", "test-model")
+        # Mock the internal client
+        client._client = MagicMock()
+        client._client.embed.return_value = [0.1, 0.2, 0.3]
 
-            mock_response = MagicMock()
-            mock_response.json.return_value = {"embeddings": [[0.1, 0.2, 0.3]]}
-            mock_response.raise_for_status = MagicMock()
-            mock_session.post.return_value = mock_response
+        result = client.embed_single("test text")
 
-            client = CodeEmbeddingClient("http://localhost:11434", "test-model")
-            result = client.embed_single("test text")
-
-            assert result == [0.1, 0.2, 0.3]
+        assert result == [0.1, 0.2, 0.3]
+        client._client.embed.assert_called_once_with("test text", timeout=30)
 
     def test_embed_batch_returns_vectors(self):
-        with patch("requests.Session") as mock_session_class:
-            mock_session = MagicMock()
-            mock_session_class.return_value = mock_session
+        """Test batch embedding generation."""
+        client = CodeEmbeddingClient("http://localhost:11434", "test-model")
+        # Mock the internal client
+        client._client = MagicMock()
+        client._client.embed_batch.return_value = [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]
 
-            mock_response = MagicMock()
-            mock_response.json.return_value = {
-                "embeddings": [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]
-            }
-            mock_response.raise_for_status = MagicMock()
-            mock_session.post.return_value = mock_response
+        result = client.embed_batch(["text1", "text2", "text3"])
 
-            client = CodeEmbeddingClient("http://localhost:11434", "test-model")
-            result = client.embed_batch(["text1", "text2", "text3"])
-
-            assert len(result) == 3
-            assert result[0] == [0.1, 0.2]
+        assert len(result) == 3
+        assert result[0] == [0.1, 0.2]
 
     def test_verify_model_returns_true_when_available(self):
-        with patch("requests.Session") as mock_session_class:
-            mock_session = MagicMock()
-            mock_session_class.return_value = mock_session
+        """Test model verification returns True when model is available."""
+        client = CodeEmbeddingClient("http://localhost:11434", "snowflake-arctic-embed2")
+        # Mock the internal client
+        client._client = MagicMock()
+        client._client.verify_model.return_value = True
 
-            mock_response = MagicMock()
-            mock_response.json.return_value = {
-                "models": [{"name": "snowflake-arctic-embed2"}]
-            }
-            mock_session.get.return_value = mock_response
-
-            client = CodeEmbeddingClient("http://localhost:11434", "snowflake-arctic-embed2")
-            assert client.verify_model() is True
+        assert client.verify_model() is True
 
 
 # =============================================================================
@@ -465,7 +451,7 @@ class TestProcessEmbeddingJob:
             username="main",
             job_repo=job_repo,
             embedding_store=embedding_store,
-            ollama=mock_ollama,
+            embed_client=mock_ollama,
             config=config,
         )
 
@@ -496,7 +482,7 @@ class TestProcessEmbeddingJob:
             username="main",
             job_repo=job_repo,
             embedding_store=embedding_store,
-            ollama=mock_ollama,
+            embed_client=mock_ollama,
             config=config,
         )
 
@@ -528,7 +514,7 @@ class TestProcessEmbeddingJob:
             username="main",
             job_repo=job_repo,
             embedding_store=embedding_store,
-            ollama=mock_ollama,
+            embed_client=mock_ollama,
             config=config,
         )
 
