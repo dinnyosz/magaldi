@@ -523,6 +523,46 @@ class TestParseFiles:
 # =============================================================================
 
 
+class TestIsTestPath:
+    """Tests for is_test_path utility function."""
+
+    @pytest.mark.parametrize("path,language,expected", [
+        # Python test paths
+        ("test_foo.py", "python", True),
+        ("foo_test.py", "python", True),
+        ("tests/test_module.py", "python", True),
+        ("tests/unit/test_foo.py", "python", True),
+        ("conftest.py", "python", True),
+        ("src/conftest.py", "python", True),
+        # Python non-test paths
+        ("foo.py", "python", False),
+        ("testing.py", "python", False),
+        ("src/app.py", "python", False),
+        # JavaScript/TypeScript test paths
+        ("foo.test.js", "javascript", True),
+        ("foo.spec.js", "javascript", True),
+        ("foo.test.ts", "typescript", True),
+        ("foo.spec.tsx", "typescript", True),
+        ("__tests__/foo.js", "javascript", True),
+        ("test/foo.js", "javascript", True),
+        # JavaScript non-test paths
+        ("foo.js", "javascript", False),
+        ("testing.js", "javascript", False),
+        # PHP test paths
+        ("FooTest.php", "php", True),
+        ("tests/FooTest.php", "php", True),
+        # PHP non-test paths
+        ("Foo.php", "php", False),
+        # Rust test paths
+        ("tests/integration.rs", "rust", True),
+        # Rust non-test paths (unit tests are in-file)
+        ("src/lib.rs", "rust", False),
+    ])
+    def test_is_test_path(self, path: str, language: str, expected: bool):
+        from magaldi_core.code_parser import is_test_path
+        assert is_test_path(path, language) == expected
+
+
 class TestCodeElement:
     """Tests for CodeElement dataclass."""
 

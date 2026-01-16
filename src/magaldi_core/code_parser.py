@@ -34,6 +34,55 @@ class ParsingError(Exception):
 
 
 # =============================================================================
+# TEST PATH DETECTION
+# =============================================================================
+
+# Test path patterns by language
+TEST_PATH_PATTERNS: dict[str, list[str]] = {
+    "python": [
+        r"(^|/)test_[^/]+\.py$",      # test_*.py
+        r"(^|/)[^/]+_test\.py$",       # *_test.py
+        r"(^|/)tests/",                # tests/ directory
+        r"(^|/)conftest\.py$",         # conftest.py
+    ],
+    "javascript": [
+        r"\.(test|spec)\.[jt]sx?$",    # *.test.js, *.spec.ts, etc.
+        r"(^|/)__tests__/",            # __tests__/ directory
+        r"(^|/)test/",                 # test/ directory
+    ],
+    "typescript": [
+        r"\.(test|spec)\.[jt]sx?$",    # *.test.ts, *.spec.tsx, etc.
+        r"(^|/)__tests__/",            # __tests__/ directory
+        r"(^|/)test/",                 # test/ directory
+    ],
+    "php": [
+        r"Test\.php$",                 # *Test.php
+        r"(^|/)tests/",                # tests/ directory
+    ],
+    "rust": [
+        r"(^|/)tests/",                # tests/ directory (integration tests)
+    ],
+}
+
+
+def is_test_path(relative_path: str, language: str) -> bool:
+    """Check if a file path indicates test code.
+
+    Args:
+        relative_path: File path relative to repository root.
+        language: Programming language of the file.
+
+    Returns:
+        True if the path matches test file patterns.
+    """
+    patterns = TEST_PATH_PATTERNS.get(language, [])
+    for pattern in patterns:
+        if re.search(pattern, relative_path):
+            return True
+    return False
+
+
+# =============================================================================
 # DATA CLASSES
 # =============================================================================
 
