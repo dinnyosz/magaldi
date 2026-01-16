@@ -116,9 +116,11 @@ class TestSearchCodeTool:
 
         result = await server._handle_tool("search_code", {"query": "test function"})
 
-        # Result is a list of matching elements
-        assert isinstance(result, list)
-        assert len(result) >= 1
+        # Result is a dict with code_results and test_results
+        assert isinstance(result, dict)
+        assert "code_results" in result
+        assert "test_results" in result
+        assert len(result["code_results"]) >= 1
 
     @pytest.mark.asyncio
     async def test_search_code_with_filters(self, server, mock_es_repo):
@@ -130,8 +132,10 @@ class TestSearchCodeTool:
             {"query": "test", "element_types": ["function"], "limit": 5},
         )
 
-        # Empty result is a list
-        assert isinstance(result, list)
+        # Empty result is a dict with code_results and test_results
+        assert isinstance(result, dict)
+        assert "code_results" in result
+        assert "test_results" in result
 
 
 class TestGetElementTool:

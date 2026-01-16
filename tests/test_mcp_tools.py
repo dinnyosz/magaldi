@@ -79,9 +79,11 @@ class TestSearchCode:
             query="test function",
         )
 
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert result[0]["name"] == "test"
+        assert isinstance(result, dict)
+        assert "code_results" in result
+        assert "test_results" in result
+        assert len(result["code_results"]) == 1
+        assert result["code_results"][0]["name"] == "test"
 
     def test_search_code_with_filters(self, mock_es_repo, mock_embed_client):
         """Test search_code with element type filter."""
@@ -95,7 +97,9 @@ class TestSearchCode:
             limit=5,
         )
 
-        assert isinstance(result, list)
+        assert isinstance(result, dict)
+        assert "code_results" in result
+        assert "test_results" in result
 
     def test_search_code_with_repository_filter(self, mock_es_repo, mock_embed_client):
         """Test search_code with repository filter."""
@@ -109,7 +113,9 @@ class TestSearchCode:
             scope="test-scope",
         )
 
-        assert isinstance(result, list)
+        assert isinstance(result, dict)
+        assert "code_results" in result
+        assert "test_results" in result
 
 
 # =============================================================================
@@ -1150,7 +1156,7 @@ class TestSearchCodeFallback:
             query="test",
         )
 
-        assert len(result) == 1
+        assert len(result["code_results"]) == 1
         mock_es_repo.search_by_keyword.assert_called_once()
 
     def test_search_code_filters_by_language(self, mock_es_repo, mock_embed_client):
@@ -1167,8 +1173,8 @@ class TestSearchCodeFallback:
             language="python",
         )
 
-        assert len(result) == 1
-        assert result[0]["element_id"] == "id1"
+        assert len(result["code_results"]) == 1
+        assert result["code_results"][0]["element_id"] == "id1"
 
     def test_search_code_brief_mode(self, mock_es_repo, mock_embed_client):
         """Test search_code brief mode excludes summary."""
@@ -1191,9 +1197,9 @@ class TestSearchCodeFallback:
             brief=True,
         )
 
-        assert len(result) == 1
-        assert "summary" not in result[0]
-        assert "signature" not in result[0]
+        assert len(result["code_results"]) == 1
+        assert "summary" not in result["code_results"][0]
+        assert "signature" not in result["code_results"][0]
 
     def test_search_code_includes_code_when_requested(self, mock_es_repo, mock_embed_client):
         """Test search_code includes code when include_code=True."""
@@ -1215,8 +1221,8 @@ class TestSearchCodeFallback:
             include_code=True,
         )
 
-        assert len(result) == 1
-        assert result[0]["code"] == "def test(): pass"
+        assert len(result["code_results"]) == 1
+        assert result["code_results"][0]["code"] == "def test(): pass"
 
     def test_search_code_method_qualified_name(self, mock_es_repo, mock_embed_client):
         """Test search_code builds qualified name for methods."""
@@ -1242,5 +1248,83 @@ class TestSearchCodeFallback:
             query="method",
         )
 
-        assert len(result) == 1
-        assert result[0]["name"] == "MyClass.my_method"
+        assert len(result["code_results"]) == 1
+        assert result["code_results"][0]["name"] == "MyClass.my_method"
+
+
+# =============================================================================
+# SEARCH CODE TEST GROUPING TESTS
+# =============================================================================
+
+
+class TestSearchCodeTestGrouping:
+    """Tests for search_code test result grouping."""
+
+    def test_groups_test_and_code_results(self, mock_es_repo, mock_embed_client):
+        """Test that results are grouped by is_test."""
+        mock_es_repo.search_by_vector.return_value = [
+            {"element_id": "id1", "name": "UserService", "element_type": "class", "is_test": False, "relative_path": "service.py", "line_start": 1},
+            {"element_id": "id2", "name": "test_user_service", "element_type": "function", "is_test": True, "relative_path": "test_service.py", "line_start": 1},
+        ]
+
+        result = search_code(
+            es=mock_es_repo,
+            embed_client=mock_embed_client,
+            query="user service",
+        )
+
+        assert "code_results" in result
+        assert "test_results" in result
+        assert len(result["code_results"]) == 1
+        assert len(result["test_results"]) == 1
+        assert result["code_results"][0]["name"] == "UserService"
+        assert result["test_results"][0]["name"] == "test_user_service"
+
+    def test_include_tests_false_excludes_tests(self, mock_es_repo, mock_embed_client):
+        """Test that include_tests=False excludes test results."""
+        mock_es_repo.search_by_vector.return_value = [
+            {"element_id": "id1", "name": "UserService", "element_type": "class", "is_test": False, "relative_path": "service.py", "line_start": 1},
+            {"element_id": "id2", "name": "test_user_service", "element_type": "function", "is_test": True, "relative_path": "test_service.py", "line_start": 1},
+        ]
+
+        result = search_code(
+            es=mock_es_repo,
+            embed_client=mock_embed_client,
+            query="user service",
+            include_tests=False,
+        )
+
+        assert len(result["code_results"]) == 1
+        assert len(result["test_results"]) == 0
+
+    def test_results_include_is_test_field(self, mock_es_repo, mock_embed_client):
+        """Test that individual results include is_test field."""
+        mock_es_repo.search_by_vector.return_value = [
+            {"element_id": "id1", "name": "foo", "element_type": "function", "is_test": True, "relative_path": "test_foo.py", "line_start": 1},
+        ]
+
+        result = search_code(
+            es=mock_es_repo,
+            embed_client=mock_embed_client,
+            query="foo",
+        )
+
+        assert result["test_results"][0]["is_test"] is True
+
+    def test_results_include_totals(self, mock_es_repo, mock_embed_client):
+        """Test that results include total counts."""
+        mock_es_repo.search_by_vector.return_value = [
+            {"element_id": "id1", "name": "UserService", "element_type": "class", "is_test": False, "relative_path": "service.py", "line_start": 1},
+            {"element_id": "id2", "name": "test_user_service", "element_type": "function", "is_test": True, "relative_path": "test_service.py", "line_start": 1},
+        ]
+
+        result = search_code(
+            es=mock_es_repo,
+            embed_client=mock_embed_client,
+            query="user service",
+        )
+
+        assert "total_code" in result
+        assert "total_tests" in result
+        assert result["total_code"] == 1
+        assert result["total_tests"] == 1

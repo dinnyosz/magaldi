@@ -29,7 +29,8 @@ def search_code(
     limit: int = 20,
     include_code: bool = False,
     brief: bool = False,
-) -> list[dict[str, Any]]:
+    include_tests: bool = True,
+) -> dict[str, Any]:
     """Semantic search for code elements.
 
     Tries vector search first, falls back to keyword search if Ollama unavailable.
@@ -46,9 +47,10 @@ def search_code(
         limit: Maximum results.
         include_code: Include source code in results (for detailed inspection).
         brief: Minimal output - just name, type, file, line (for exploration).
+        include_tests: Include test results (default True).
 
     Returns:
-        List of matching code elements.
+        Dict with code_results and test_results lists, grouped by is_test field.
     """
     # Validate limit
     limit = max(1, min(limit, 50))
@@ -80,11 +82,19 @@ def search_code(
             size=limit,
         )
 
-    # Format results - keep only essential fields
-    formatted = []
+    # Group results by is_test
+    code_results = []
+    test_results = []
+
     for result in results:
         # Filter by language if specified
         if language and result.get("language") != language:
+            continue
+
+        is_test = result.get("is_test", False)
+
+        # Skip tests if not included
+        if is_test and not include_tests:
             continue
 
         # Build qualified name: ClassName.method_name for methods
@@ -101,6 +111,7 @@ def search_code(
             "file": result.get("relative_path"),
             "line": result.get("line_start"),
             "element_id": result.get("element_id"),
+            "is_test": is_test,
         }
 
         # Brief mode: just the basics for exploration
@@ -114,9 +125,17 @@ def search_code(
             if include_code and result.get("raw_code"):
                 entry["code"] = result["raw_code"]
 
-        formatted.append(entry)
+        if is_test:
+            test_results.append(entry)
+        else:
+            code_results.append(entry)
 
-    return formatted[:limit]
+    return {
+        "code_results": code_results[:limit],
+        "test_results": test_results[:limit] if include_tests else [],
+        "total_code": len(code_results),
+        "total_tests": len(test_results) if include_tests else 0,
+    }
 
 
 def search_features(
