@@ -523,6 +523,32 @@ class TestParseFiles:
 # =============================================================================
 
 
+class TestIsTestElement:
+    """Tests for is_test_element utility function."""
+
+    @pytest.mark.parametrize("name,decorators,language,expected", [
+        # Python test elements
+        ("test_foo", [], "python", True),
+        ("test_something_complex", [], "python", True),
+        ("foo", ["pytest.mark.parametrize"], "python", True),
+        ("foo", ["pytest.fixture"], "python", True),
+        ("foo", ["unittest.skip"], "python", True),
+        # Python non-test elements
+        ("foo", [], "python", False),
+        ("testing_helper", [], "python", False),
+        ("my_test", [], "python", False),  # doesn't start with test_
+        # Rust test elements
+        ("test_foo", ["test"], "rust", True),
+        ("foo", ["test"], "rust", True),
+        ("foo", ["cfg(test)"], "rust", True),
+        # Rust non-test elements
+        ("foo", [], "rust", False),
+    ])
+    def test_is_test_element(self, name: str, decorators: list[str], language: str, expected: bool):
+        from magaldi_core.code_parser import is_test_element
+        assert is_test_element(name, decorators, language) == expected
+
+
 class TestIsTestPath:
     """Tests for is_test_path utility function."""
 

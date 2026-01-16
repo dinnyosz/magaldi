@@ -82,6 +82,39 @@ def is_test_path(relative_path: str, language: str) -> bool:
     return False
 
 
+def is_test_element(name: str, decorators: list[str], language: str) -> bool:
+    """Check if an element is test code based on name/decorators.
+
+    Args:
+        name: Element name (function/method/class name).
+        decorators: List of decorator/attribute names.
+        language: Programming language.
+
+    Returns:
+        True if the element appears to be test code.
+    """
+    # Python: test_ prefix or pytest/unittest decorators
+    if language == "python":
+        if name.startswith("test_"):
+            return True
+        test_decorators = {"pytest", "unittest", "pytest.mark", "pytest.fixture"}
+        for dec in decorators:
+            for test_dec in test_decorators:
+                if dec.startswith(test_dec):
+                    return True
+        return False
+
+    # Rust: #[test] or #[cfg(test)] attributes
+    if language == "rust":
+        test_attrs = {"test", "cfg(test)"}
+        return any(dec in test_attrs for dec in decorators)
+
+    # JavaScript/TypeScript: detected via call patterns (describe/it/test)
+    # These are handled separately during parsing
+    # PHP: @test annotation or Test suffix handled via path/class name
+    return False
+
+
 # =============================================================================
 # DATA CLASSES
 # =============================================================================
