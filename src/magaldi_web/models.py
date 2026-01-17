@@ -513,3 +513,44 @@ class ClustersResponse(BaseModel):
 
     clusters: list[Cluster] = Field(default_factory=list)
     total_elements: int = 0
+
+
+# =============================================================================
+# GLOSSARY MODELS
+# =============================================================================
+
+
+class GlossaryTermSummary(BaseModel):
+    """Summary of a glossary term."""
+
+    term: str
+    total_count: int
+    file_count: int
+    feature_count: int
+
+
+class FeatureAssociationSummary(BaseModel):
+    """Summary of a feature association."""
+
+    feature_id: str
+    feature_label: str
+    frequency: int
+    total_members: int
+    percentage: float
+
+
+class GlossaryTermResponse(BaseModel):
+    """Detailed glossary term response."""
+
+    term: str
+    total_count: int
+    element_ids: list[str]
+    file_paths: list[str]
+    feature_associations: list[FeatureAssociationSummary]
+
+
+class GlossaryListResponse(BaseModel):
+    """List of glossary terms response."""
+
+    terms: list[GlossaryTermSummary]
+    total: int
