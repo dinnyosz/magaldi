@@ -385,6 +385,52 @@ class MagaldiMCPServer:
                         "required": [],
                     },
                 ),
+                # =============================================================
+                # GLOSSARY - Domain terminology discovery
+                # =============================================================
+                Tool(
+                    name="list_glossary",
+                    description="LIST GLOSSARY: List all glossary terms for a repository. "
+                    "Shows domain concepts extracted from code element names. "
+                    "Use to discover what terminology exists in the codebase.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "scope": {"type": "string", "description": "Filter by scope"},
+                            "repository": {"type": "string", "description": "Filter by repo"},
+                            "min_count": {"type": "integer", "default": 1, "description": "Minimum occurrence count"},
+                        },
+                        "required": ["scope", "repository"],
+                    },
+                ),
+                Tool(
+                    name="get_glossary_term",
+                    description="GET GLOSSARY TERM: Get full details for a specific glossary term. "
+                    "Shows element IDs, file paths, and feature associations for the term.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "scope": {"type": "string"},
+                            "repository": {"type": "string"},
+                            "term": {"type": "string", "description": "The glossary term to look up"},
+                        },
+                        "required": ["scope", "repository", "term"],
+                    },
+                ),
+                Tool(
+                    name="search_glossary",
+                    description="SEARCH GLOSSARY: Search glossary terms by partial match. "
+                    "Use to find all terms related to a concept (e.g., 'user' matches 'user', 'username').",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "scope": {"type": "string"},
+                            "repository": {"type": "string"},
+                            "query": {"type": "string", "description": "Partial term to search for"},
+                        },
+                        "required": ["scope", "repository", "query"],
+                    },
+                ),
             ]
 
         @self.server.call_tool()
@@ -412,12 +458,15 @@ class MagaldiMCPServer:
             get_element,
             get_feature_members,
             get_file_structure,
+            get_glossary_term,
             get_repo_stats,
             grep_code,
             list_features,
+            list_glossary,
             list_repos,
             search_code,
             search_features,
+            search_glossary,
         )
 
         es = self._get_es()
@@ -581,6 +630,33 @@ class MagaldiMCPServer:
                 skill_name=args.get("skill_name", "magaldi"),
                 scope=args.get("scope", "project"),
             )
+        elif name == "list_glossary":
+            return await asyncio.to_thread(
+                list_glossary,
+                es,
+                scope=args["scope"],
+                repository=args["repository"],
+                username=args.get("username", self.default_username),
+                min_count=args.get("min_count", 1),
+            )
+        elif name == "get_glossary_term":
+            return await asyncio.to_thread(
+                get_glossary_term,
+                es,
+                scope=args["scope"],
+                repository=args["repository"],
+                term=args["term"],
+                username=args.get("username", self.default_username),
+            )
+        elif name == "search_glossary":
+            return await asyncio.to_thread(
+                search_glossary,
+                es,
+                scope=args["scope"],
+                repository=args["repository"],
+                query=args["query"],
+                username=args.get("username", self.default_username),
+            )
         else:
             raise ValueError(f"Unknown tool: {name}")
 
@@ -689,6 +765,17 @@ def _format_result(result: Any) -> str:
                 lines.append(f"[class] {r.get('class_name')} ({r.get('file')}:{r.get('line')})")
                 lines.append(f"  {r.get('definition')}")
                 lines.append("")
+            return "\n".join(lines)
+
+        # Glossary list results
+        if "term" in first and "total_count" in first:
+            lines = [f"Found {len(result)} glossary terms:\n"]
+            for r in result:
+                lines.append(f"  {r.get('term')}: {r.get('total_count')} occurrences")
+                if r.get('feature_associations'):
+                    assocs = r['feature_associations'][:3]  # Show top 3
+                    for a in assocs:
+                        lines.append(f"    -> {a.get('feature_label')} ({a.get('percentage'):.0f}%)")
             return "\n".join(lines)
 
     # Single dict results (get_element, get_context, read_file, etc.)
