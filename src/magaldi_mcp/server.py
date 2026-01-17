@@ -123,6 +123,15 @@ class MagaldiMCPServer:
                             "limit": {"type": "integer", "default": 20},
                             "repository": {"type": "string"},
                             "scope": {"type": "string"},
+                            "glossary_term": {
+                                "type": "string",
+                                "description": "Filter to features where this glossary term appears in members",
+                            },
+                            "min_percentage": {
+                                "type": "number",
+                                "description": "Minimum percentage of members containing the term (0-100)",
+                                "default": 0,
+                            },
                         },
                         "required": ["query"],
                     },
@@ -498,6 +507,8 @@ class MagaldiMCPServer:
                 repository=args.get("repository"),
                 username=args.get("username", self.default_username),
                 limit=args.get("limit", 10),
+                glossary_term=args.get("glossary_term"),
+                min_percentage=args.get("min_percentage", 0.0),
             )
         elif name == "find_similar":
             return await asyncio.to_thread(

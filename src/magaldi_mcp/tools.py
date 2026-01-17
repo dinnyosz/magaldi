@@ -146,6 +146,8 @@ def search_features(
     repository: str | None = None,
     username: str = "main",
     limit: int = 20,
+    glossary_term: str | None = None,
+    min_percentage: float = 0.0,
 ) -> list[dict[str, Any]]:
     """Search for features/capabilities.
 
@@ -159,6 +161,10 @@ def search_features(
         repository: Filter by repository.
         username: User branch.
         limit: Maximum results.
+        glossary_term: Optional term to filter by. Only returns features where this
+            term appears in the feature's members.
+        min_percentage: Minimum percentage of feature members that must contain the
+            glossary_term (0-100). Default 0 means any occurrence.
 
     Returns:
         List of matching features.
@@ -191,6 +197,24 @@ def search_features(
             element_types=["feature", "subfeature"],
             size=limit,
         )
+
+    # Apply glossary term filter if provided
+    if glossary_term is not None:
+        glossary_entry = es.get_glossary_term(scope, repository, glossary_term, username)
+        if glossary_entry is None:
+            # Term not found, return empty results
+            return []
+
+        # Build set of feature_ids that meet the min_percentage threshold
+        feature_associations = glossary_entry.get("feature_associations", [])
+        valid_feature_ids = {
+            assoc["feature_id"]
+            for assoc in feature_associations
+            if assoc.get("percentage", 0) >= min_percentage
+        }
+
+        # Filter results to only include features in the valid set
+        results = [r for r in results if r.get("element_id") in valid_feature_ids]
 
     formatted = []
     for result in results:

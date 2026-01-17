@@ -1554,3 +1554,107 @@ class TestGrepCodeTestGrouping:
         assert "total_tests" in result
         assert result["total_code"] == 1
         assert result["total_tests"] == 1
+
+
+# =============================================================================
+# SEARCH FEATURES GLOSSARY FILTER TESTS
+# =============================================================================
+
+
+class TestSearchFeaturesGlossaryFilter:
+    """Tests for search_features glossary filtering."""
+
+    @pytest.fixture
+    def mock_es(self):
+        return MagicMock()
+
+    @pytest.fixture
+    def mock_embed(self):
+        embed = MagicMock()
+        embed.embed_single.return_value = [0.1] * 768
+        return embed
+
+    def test_filters_by_glossary_term(self, mock_es, mock_embed):
+        """Features are filtered to those associated with glossary term."""
+        # Setup: glossary term has feature associations
+        mock_es.get_glossary_term.return_value = {
+            "term": "user",
+            "feature_associations": [
+                {"feature_id": "f1", "percentage": 50.0},
+                {"feature_id": "f2", "percentage": 20.0},
+            ],
+        }
+        # Setup: search returns 3 features
+        mock_es.search_by_vector.return_value = [
+            {"element_id": "f1", "cluster_label": "Auth", "member_count": 10},
+            {"element_id": "f2", "cluster_label": "Users", "member_count": 5},
+            {"element_id": "f3", "cluster_label": "Email", "member_count": 8},
+        ]
+
+        result = search_features(
+            mock_es, mock_embed, query="test",
+            scope="s", repository="r",
+            glossary_term="user",
+        )
+
+        # Only f1 and f2 should be returned (they're in glossary associations)
+        assert len(result) == 2
+        labels = [r["label"] for r in result]
+        assert "Auth" in labels
+        assert "Users" in labels
+        assert "Email" not in labels
+
+    def test_filters_by_min_percentage(self, mock_es, mock_embed):
+        """Features below min_percentage are filtered out."""
+        mock_es.get_glossary_term.return_value = {
+            "term": "user",
+            "feature_associations": [
+                {"feature_id": "f1", "percentage": 50.0},
+                {"feature_id": "f2", "percentage": 20.0},
+            ],
+        }
+        mock_es.search_by_vector.return_value = [
+            {"element_id": "f1", "cluster_label": "Auth", "member_count": 10},
+            {"element_id": "f2", "cluster_label": "Users", "member_count": 5},
+        ]
+
+        result = search_features(
+            mock_es, mock_embed, query="test",
+            scope="s", repository="r",
+            glossary_term="user",
+            min_percentage=30.0,
+        )
+
+        # Only f1 (50%) should pass the 30% threshold
+        assert len(result) == 1
+        assert result[0]["label"] == "Auth"
+
+    def test_no_filter_when_glossary_term_not_provided(self, mock_es, mock_embed):
+        """Without glossary_term, all results are returned."""
+        mock_es.search_by_vector.return_value = [
+            {"element_id": "f1", "cluster_label": "Auth", "member_count": 10},
+            {"element_id": "f2", "cluster_label": "Users", "member_count": 5},
+        ]
+
+        result = search_features(
+            mock_es, mock_embed, query="test",
+            scope="s", repository="r",
+        )
+
+        assert len(result) == 2
+        mock_es.get_glossary_term.assert_not_called()
+
+    def test_returns_empty_when_glossary_term_not_found(self, mock_es, mock_embed):
+        """When glossary term doesn't exist, return empty results."""
+        mock_es.get_glossary_term.return_value = None
+        mock_es.search_by_vector.return_value = [
+            {"element_id": "f1", "cluster_label": "Auth", "member_count": 10},
+        ]
+
+        result = search_features(
+            mock_es, mock_embed, query="test",
+            scope="s", repository="r",
+            glossary_term="nonexistent",
+        )
+
+        assert len(result) == 0
