@@ -70,10 +70,10 @@ class TestListGlossaryTerms:
         assert data["terms"][0]["term"] == "user"  # Sorted by count desc
 
     def test_filters_by_min_count(self, client, mock_es_repo):
-        """Filters terms below min_count threshold."""
+        """Passes min_count to repository for filtering."""
+        # ES filters by min_count, so mock returns only matching terms
         mock_es_repo.get_glossary_terms.return_value = [
             {"term": "user", "total_count": 5, "file_paths": [], "feature_associations": []},
-            {"term": "rare", "total_count": 1, "file_paths": [], "feature_associations": []},
         ]
 
         response = client.get("/repos/scope/repo/glossary?min_count=3")
@@ -82,6 +82,8 @@ class TestListGlossaryTerms:
         data = response.json()
         assert data["total"] == 1
         assert data["terms"][0]["term"] == "user"
+        # Verify min_count was passed to the repository
+        mock_es_repo.get_glossary_terms.assert_called_once_with("scope", "repo", "main", 3)
 
     def test_passes_username_to_repository(self, client, mock_es_repo):
         """Passes username parameter to repository."""
@@ -90,7 +92,7 @@ class TestListGlossaryTerms:
         response = client.get("/repos/scope/repo/glossary?username=developer")
 
         assert response.status_code == 200
-        mock_es_repo.get_glossary_terms.assert_called_once_with("scope", "repo", "developer")
+        mock_es_repo.get_glossary_terms.assert_called_once_with("scope", "repo", "developer", 1)
 
     def test_uses_default_username_main(self, client, mock_es_repo):
         """Uses 'main' as default username."""
@@ -99,7 +101,7 @@ class TestListGlossaryTerms:
         response = client.get("/repos/scope/repo/glossary")
 
         assert response.status_code == 200
-        mock_es_repo.get_glossary_terms.assert_called_once_with("scope", "repo", "main")
+        mock_es_repo.get_glossary_terms.assert_called_once_with("scope", "repo", "main", 1)
 
     def test_returns_empty_list_when_no_terms(self, client, mock_es_repo):
         """Returns empty list when no terms exist."""
@@ -113,11 +115,12 @@ class TestListGlossaryTerms:
         assert data["terms"] == []
 
     def test_sorts_terms_by_count_descending(self, client, mock_es_repo):
-        """Sorts terms by total_count in descending order."""
+        """Returns terms sorted by total_count in descending order (sorted by ES)."""
+        # ES already returns sorted results, mock reflects this
         mock_es_repo.get_glossary_terms.return_value = [
-            {"term": "small", "total_count": 2, "file_paths": [], "feature_associations": []},
             {"term": "large", "total_count": 10, "file_paths": [], "feature_associations": []},
             {"term": "medium", "total_count": 5, "file_paths": [], "feature_associations": []},
+            {"term": "small", "total_count": 2, "file_paths": [], "feature_associations": []},
         ]
 
         response = client.get("/repos/scope/repo/glossary")

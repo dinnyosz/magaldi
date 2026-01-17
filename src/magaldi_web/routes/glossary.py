@@ -25,13 +25,8 @@ async def list_glossary_terms(
     es_repo: ElasticsearchRepository = Depends(get_es_repository),
 ) -> GlossaryListResponse:
     """List all glossary terms for a repository."""
-    terms = es_repo.get_glossary_terms(scope, repository, username)
-
-    # Filter by min_count
-    filtered_terms = [t for t in terms if t.get("total_count", 0) >= min_count]
-
-    # Sort by count descending
-    filtered_terms.sort(key=lambda t: t.get("total_count", 0), reverse=True)
+    # get_glossary_terms already filters by min_count and sorts by count descending
+    terms = es_repo.get_glossary_terms(scope, repository, username, min_count)
 
     return GlossaryListResponse(
         terms=[
@@ -41,9 +36,9 @@ async def list_glossary_terms(
                 file_count=len(t.get("file_paths", [])),
                 feature_count=len(t.get("feature_associations", [])),
             )
-            for t in filtered_terms
+            for t in terms
         ],
-        total=len(filtered_terms),
+        total=len(terms),
     )
 
 
