@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from shared.ai.glossary.extractor import extract_terms, split_name, COMMON_TERMS
+from shared.ai.glossary.extractor import (
+    extract_terms,
+    split_name,
+    COMMON_TERMS,
+    aggregate_glossary_terms,
+    GlossaryEntry,
+)
 
 
 class TestSplitName:
@@ -89,3 +95,57 @@ class TestCommonTerms:
         suffixes = ["service", "controller", "handler", "manager", "factory"]
         for suffix in suffixes:
             assert suffix in COMMON_TERMS
+
+
+class TestAggregateGlossaryTerms:
+    """Tests for glossary term aggregation."""
+
+    def test_aggregates_from_multiple_elements(self):
+        """Test aggregation across multiple elements."""
+        elements = [
+            {"element_id": "id1", "name": "UserService", "relative_path": "user.py"},
+            {"element_id": "id2", "name": "UserController", "relative_path": "user.py"},
+            {"element_id": "id3", "name": "EmailSender", "relative_path": "email.py"},
+        ]
+
+        result = aggregate_glossary_terms(elements)
+
+        assert "user" in result
+        assert result["user"].total_count == 2
+        assert set(result["user"].element_ids) == {"id1", "id2"}
+        assert result["user"].file_paths == ["user.py"]
+
+    def test_tracks_file_paths(self):
+        """Test that file paths are tracked correctly."""
+        elements = [
+            {"element_id": "id1", "name": "UserService", "relative_path": "services/user.py"},
+            {"element_id": "id2", "name": "UserModel", "relative_path": "models/user.py"},
+        ]
+
+        result = aggregate_glossary_terms(elements)
+
+        assert "user" in result
+        assert set(result["user"].file_paths) == {"services/user.py", "models/user.py"}
+
+    def test_returns_empty_for_no_domain_terms(self):
+        """Test that elements with only common terms return empty."""
+        elements = [
+            {"element_id": "id1", "name": "GetService", "relative_path": "a.py"},
+        ]
+
+        result = aggregate_glossary_terms(elements)
+
+        assert len(result) == 0
+
+    def test_glossary_entry_dataclass(self):
+        """Test GlossaryEntry dataclass structure."""
+        entry = GlossaryEntry(
+            term="user",
+            total_count=5,
+            element_ids=["id1", "id2"],
+            file_paths=["a.py", "b.py"],
+        )
+
+        assert entry.term == "user"
+        assert entry.total_count == 5
+        assert len(entry.element_ids) == 2

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
+from typing import Any
 
 
 COMMON_TERMS: set[str] = {
@@ -102,3 +104,47 @@ def extract_terms(name: str, min_length: int = 2) -> list[str]:
         result.append(term)
 
     return result
+
+
+@dataclass
+class GlossaryEntry:
+    """A glossary term with its occurrences."""
+
+    term: str
+    total_count: int = 0
+    element_ids: list[str] = field(default_factory=list)
+    file_paths: list[str] = field(default_factory=list)
+
+
+def aggregate_glossary_terms(
+    elements: list[dict[str, Any]],
+) -> dict[str, GlossaryEntry]:
+    """Aggregate glossary terms from a list of elements.
+
+    Args:
+        elements: List of element dicts with 'element_id', 'name', 'relative_path'.
+
+    Returns:
+        Dict mapping term to GlossaryEntry with aggregated data.
+    """
+    entries: dict[str, GlossaryEntry] = {}
+
+    for element in elements:
+        element_id = element.get("element_id", "")
+        name = element.get("name", "")
+        file_path = element.get("relative_path", "")
+
+        terms = extract_terms(name)
+
+        for term in terms:
+            if term not in entries:
+                entries[term] = GlossaryEntry(term=term)
+
+            entry = entries[term]
+            entry.total_count += 1
+            entry.element_ids.append(element_id)
+
+            if file_path and file_path not in entry.file_paths:
+                entry.file_paths.append(file_path)
+
+    return entries
