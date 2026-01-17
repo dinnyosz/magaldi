@@ -639,7 +639,7 @@ def get_children(
 def get_feature_members(
     es: ElasticsearchRepository,
     feature_id: str,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     """Get all members of a feature or subfeature cluster.
 
     Args:
@@ -647,7 +647,7 @@ def get_feature_members(
         feature_id: Feature or subfeature ID.
 
     Returns:
-        List of member elements.
+        Dict with 'members' list and 'glossary_terms' list.
     """
     # Get feature/subfeature document
     feature = es.get_document(feature_id)
@@ -656,7 +656,7 @@ def get_feature_members(
 
     member_ids = feature.get("member_ids", [])
     if not member_ids:
-        return []
+        return {"members": [], "glossary_terms": []}
 
     # Fetch member documents
     members = []
@@ -673,7 +673,37 @@ def get_feature_members(
                 "signature": doc.get("signature", ""),
             })
 
-    return members
+    # Parse feature_id to get scope, repository, username
+    # Format: scope:repo:username:feature:N or scope:repo:username:subfeature:N
+    parts = feature_id.split(":")
+    glossary_terms = []
+    if len(parts) >= 3:
+        scope = parts[0]
+        repository = parts[1]
+        username = parts[2]
+
+        # Get all glossary terms for this repo
+        all_terms = es.get_glossary_terms(scope, repository, username)
+
+        # Filter to terms that have associations with this feature
+        for term_entry in all_terms:
+            for assoc in term_entry.get("feature_associations", []):
+                if assoc.get("feature_id") == feature_id:
+                    glossary_terms.append({
+                        "term": term_entry.get("term"),
+                        "frequency": assoc.get("frequency"),
+                        "percentage": assoc.get("percentage"),
+                    })
+                    break  # Found association for this feature
+
+    return {
+        "members": members,
+        "glossary_terms": sorted(
+            glossary_terms,
+            key=lambda x: x.get("percentage", 0),
+            reverse=True,
+        ),
+    }
 
 
 # =============================================================================

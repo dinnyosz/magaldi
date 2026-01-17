@@ -858,6 +858,39 @@ def _format_result(result: Any) -> str:
 
             return "\n".join(lines)
 
+        # Feature members result (get_feature_members)
+        if "members" in result and "glossary_terms" in result:
+            members = result.get("members", [])
+            glossary_terms = result.get("glossary_terms", [])
+
+            lines = []
+
+            # Format members
+            if members:
+                lines.append(f"Feature Members ({len(members)}):\n")
+                for m in members:
+                    loc = f"{m.get('file', '?')}:{m.get('line', '?')}" if m.get('file') else "N/A"
+                    lines.append(f"[{m.get('type', '?')}] {m.get('name', '?')} ({loc})")
+                    if m.get('signature'):
+                        lines.append(f"  {m['signature']}")
+                    if m.get('summary'):
+                        summary = m['summary']
+                        if len(summary) > 200:
+                            summary = summary[:200] + "..."
+                        lines.append(f"  {summary}")
+                    lines.append("")
+            else:
+                lines.append("No members.\n")
+
+            # Format glossary terms
+            if glossary_terms:
+                lines.append(f"Glossary Terms ({len(glossary_terms)}):\n")
+                for t in glossary_terms:
+                    lines.append(f"  {t.get('term')}: {t.get('frequency')} occurrences ({t.get('percentage', 0):.1f}%)")
+                lines.append("")
+
+            return "\n".join(lines)
+
         # File read result
         if "content" in result and "path" in result:
             lines = [f"File: {result.get('path')} ({result.get('lines_returned')}/{result.get('total_lines')} lines)"]

@@ -834,12 +834,15 @@ class TestGetFeatureMembers:
                 "line_start": 20,
             },
         ]
+        mock_es_repo.get_glossary_terms.return_value = []
 
         result = get_feature_members(es=mock_es_repo, feature_id="feature1")
 
-        assert len(result) == 2
-        assert result[0]["name"] == "login"
-        assert result[1]["name"] == "logout"
+        assert "members" in result
+        assert "glossary_terms" in result
+        assert len(result["members"]) == 2
+        assert result["members"][0]["name"] == "login"
+        assert result["members"][1]["name"] == "logout"
 
     def test_get_feature_members_not_found(self, mock_es_repo):
         """Test get_feature_members raises when feature not found."""
@@ -858,7 +861,7 @@ class TestGetFeatureMembers:
 
         result = get_feature_members(es=mock_es_repo, feature_id="feature1")
 
-        assert result == []
+        assert result == {"members": [], "glossary_terms": []}
 
 
 # =============================================================================
@@ -1658,3 +1661,130 @@ class TestSearchFeaturesGlossaryFilter:
         )
 
         assert len(result) == 0
+
+
+# =============================================================================
+# GET FEATURE MEMBERS GLOSSARY TESTS
+# =============================================================================
+
+
+class TestGetFeatureMembersGlossary:
+    """Tests for get_feature_members glossary_terms field."""
+
+    @pytest.fixture
+    def mock_es(self):
+        return MagicMock()
+
+    def test_returns_glossary_terms_for_feature(self, mock_es):
+        """Feature members response includes associated glossary terms."""
+        # Setup feature
+        mock_es.get_document.side_effect = [
+            # Feature document
+            {"member_ids": ["elem1", "elem2"]},
+            # Member 1
+            {"element_id": "elem1", "name": "UserService", "element_type": "class"},
+            # Member 2
+            {"element_id": "elem2", "name": "createUser", "element_type": "function"},
+        ]
+        # Setup glossary terms
+        mock_es.get_glossary_terms.return_value = [
+            {
+                "term": "user",
+                "feature_associations": [
+                    {"feature_id": "scope:repo:main:feature:1", "frequency": 2, "percentage": 100.0},
+                ],
+            },
+            {
+                "term": "email",
+                "feature_associations": [
+                    {"feature_id": "scope:repo:main:feature:2", "frequency": 1, "percentage": 50.0},
+                ],
+            },
+        ]
+
+        result = get_feature_members(mock_es, "scope:repo:main:feature:1")
+
+        assert "members" in result
+        assert "glossary_terms" in result
+        assert len(result["glossary_terms"]) == 1
+        assert result["glossary_terms"][0]["term"] == "user"
+        assert result["glossary_terms"][0]["percentage"] == 100.0
+
+    def test_glossary_terms_sorted_by_percentage(self, mock_es):
+        """Glossary terms are sorted by percentage descending."""
+        mock_es.get_document.side_effect = [
+            {"member_ids": ["elem1"]},
+            {"element_id": "elem1", "name": "Test", "element_type": "class"},
+        ]
+        mock_es.get_glossary_terms.return_value = [
+            {
+                "term": "low",
+                "feature_associations": [
+                    {"feature_id": "s:r:main:feature:1", "frequency": 1, "percentage": 20.0},
+                ],
+            },
+            {
+                "term": "high",
+                "feature_associations": [
+                    {"feature_id": "s:r:main:feature:1", "frequency": 5, "percentage": 80.0},
+                ],
+            },
+        ]
+
+        result = get_feature_members(mock_es, "s:r:main:feature:1")
+
+        assert result["glossary_terms"][0]["term"] == "high"
+        assert result["glossary_terms"][1]["term"] == "low"
+
+    def test_empty_glossary_terms_when_no_associations(self, mock_es):
+        """Returns empty glossary_terms when feature has no associations."""
+        mock_es.get_document.side_effect = [
+            {"member_ids": ["elem1"]},
+            {"element_id": "elem1", "name": "Test", "element_type": "class"},
+        ]
+        mock_es.get_glossary_terms.return_value = []
+
+        result = get_feature_members(mock_es, "s:r:main:feature:1")
+
+        assert result["glossary_terms"] == []
+
+    def test_members_still_returned(self, mock_es):
+        """Members are still returned in the new format."""
+        mock_es.get_document.side_effect = [
+            {"member_ids": ["elem1"]},
+            {"element_id": "elem1", "name": "MyClass", "element_type": "class",
+             "relative_path": "src/file.py", "line_start": 10},
+        ]
+        mock_es.get_glossary_terms.return_value = []
+
+        result = get_feature_members(mock_es, "s:r:main:feature:1")
+
+        assert len(result["members"]) == 1
+        assert result["members"][0]["name"] == "MyClass"
+
+    def test_empty_members_returns_empty_dict(self, mock_es):
+        """Empty feature returns proper structure with empty lists."""
+        mock_es.get_document.return_value = {
+            "element_id": "s:r:main:feature:1",
+            "member_ids": [],
+        }
+        mock_es.get_glossary_terms.return_value = []
+
+        result = get_feature_members(mock_es, "s:r:main:feature:1")
+
+        assert result == {"members": [], "glossary_terms": []}
+
+    def test_handles_malformed_feature_id(self, mock_es):
+        """Handles feature_id with fewer than 3 parts gracefully."""
+        mock_es.get_document.side_effect = [
+            {"member_ids": ["elem1"]},
+            {"element_id": "elem1", "name": "Test", "element_type": "class"},
+        ]
+        # get_glossary_terms should not be called with invalid parts
+
+        result = get_feature_members(mock_es, "invalid")
+
+        # Should still return members but with empty glossary terms
+        assert "members" in result
+        assert "glossary_terms" in result
+        assert result["glossary_terms"] == []
