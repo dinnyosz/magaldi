@@ -17,13 +17,17 @@ Usage:
 
 from __future__ import annotations
 
-import os
+import asyncio
+import random
+import time
 import warnings
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 import litellm
 from litellm import aembedding, completion, embedding
+
+T = TypeVar("T")
 
 # Disable LiteLLM telemetry
 litellm.telemetry = False
@@ -39,6 +43,115 @@ class LLMError(Exception):
     """Raised when LLM operations fail."""
 
     pass
+
+
+# =============================================================================
+# RETRY HELPERS
+# =============================================================================
+
+
+def _is_retryable_error(e: Exception) -> bool:
+    """Check if an error is retryable (connection/timeout issues)."""
+    error_str = str(e).lower()
+    retryable_patterns = [
+        "connection",
+        "timeout",
+        "temporarily unavailable",
+        "service unavailable",
+        "rate limit",
+        "too many requests",
+        "503",
+        "502",
+        "504",
+        "429",
+    ]
+    return any(pattern in error_str for pattern in retryable_patterns)
+
+
+def _retry_with_backoff(
+    fn: Callable[[], T],
+    max_retries: int = 3,
+    base_delay: float = 1.0,
+    max_delay: float = 30.0,
+    operation: str = "LLM request",
+) -> T:
+    """Execute function with exponential backoff retry.
+
+    Args:
+        fn: Function to execute.
+        max_retries: Maximum number of retry attempts.
+        base_delay: Initial delay between retries in seconds.
+        max_delay: Maximum delay between retries.
+        operation: Description for error messages.
+
+    Returns:
+        Result from successful function call.
+
+    Raises:
+        LLMError: If all retries are exhausted.
+    """
+    last_error: Exception | None = None
+
+    for attempt in range(max_retries + 1):
+        try:
+            return fn()
+        except Exception as e:
+            last_error = e
+
+            # Don't retry on non-retryable errors
+            if not _is_retryable_error(e):
+                raise LLMError(f"{operation} failed: {e}") from e
+
+            # Don't sleep after last attempt
+            if attempt < max_retries:
+                # Exponential backoff with jitter
+                delay = min(base_delay * (2**attempt) + random.uniform(0, 1), max_delay)
+                time.sleep(delay)
+
+    raise LLMError(f"{operation} failed after {max_retries + 1} attempts: {last_error}") from last_error
+
+
+async def _retry_with_backoff_async(
+    fn: Callable[[], T],
+    max_retries: int = 3,
+    base_delay: float = 1.0,
+    max_delay: float = 30.0,
+    operation: str = "LLM request",
+) -> T:
+    """Execute async function with exponential backoff retry.
+
+    Args:
+        fn: Async function to execute.
+        max_retries: Maximum number of retry attempts.
+        base_delay: Initial delay between retries in seconds.
+        max_delay: Maximum delay between retries.
+        operation: Description for error messages.
+
+    Returns:
+        Result from successful function call.
+
+    Raises:
+        LLMError: If all retries are exhausted.
+    """
+    last_error: Exception | None = None
+
+    for attempt in range(max_retries + 1):
+        try:
+            return await fn()
+        except Exception as e:
+            last_error = e
+
+            # Don't retry on non-retryable errors
+            if not _is_retryable_error(e):
+                raise LLMError(f"{operation} failed: {e}") from e
+
+            # Don't sleep after last attempt
+            if attempt < max_retries:
+                # Exponential backoff with jitter
+                delay = min(base_delay * (2**attempt) + random.uniform(0, 1), max_delay)
+                await asyncio.sleep(delay)
+
+    raise LLMError(f"{operation} failed after {max_retries + 1} attempts: {last_error}") from last_error
 
 
 # =============================================================================
@@ -146,6 +259,7 @@ class LLMClient:
         model: str,
         api_base: str | None = None,
         api_key: str | None = None,
+        max_retries: int = 3,
     ):
         """Initialize LLM client.
 
@@ -153,10 +267,12 @@ class LLMClient:
             model: Model identifier (e.g., "ollama/qwen2.5-coder:3b", "gpt-4o-mini")
             api_base: API base URL (required for Ollama, optional for cloud)
             api_key: API key (required for cloud providers)
+            max_retries: Maximum retry attempts for transient failures.
         """
         self.model = model
         self.api_base = api_base
         self.api_key = api_key
+        self.max_retries = max_retries
 
         # Extract provider from model string
         self.provider = model.split("/")[0] if "/" in model else "openai"
@@ -168,15 +284,17 @@ class LLMClient:
             model=config.model,
             api_base=config.api_base,
             api_key=config.api_key,
+            max_retries=config.max_retries,
         )
 
     @classmethod
-    def from_ollama(cls, url: str, model: str) -> LLMClient:
+    def from_ollama(cls, url: str, model: str, max_retries: int = 3) -> LLMClient:
         """Create client for Ollama provider.
 
         Args:
             url: Ollama server URL
             model: Model name without provider prefix
+            max_retries: Maximum retry attempts for transient failures.
 
         Returns:
             LLMClient configured for Ollama.
@@ -184,6 +302,7 @@ class LLMClient:
         return cls(
             model=f"ollama/{model}",
             api_base=url,
+            max_retries=max_retries,
         )
 
     def verify_model(self) -> bool:
@@ -220,11 +339,11 @@ class LLMClient:
             Generated text.
 
         Raises:
-            LLMError: If generation fails.
+            LLMError: If generation fails after retries.
         """
         use_model = model or self.model
 
-        try:
+        def _do_generate() -> str:
             # Build kwargs for litellm
             kwargs: dict[str, Any] = {
                 "model": use_model,
@@ -251,8 +370,11 @@ class LLMClient:
 
             return content.strip()
 
-        except Exception as e:
-            raise LLMError(f"LLM generation failed for model '{use_model}': {e}") from e
+        return _retry_with_backoff(
+            _do_generate,
+            max_retries=self.max_retries,
+            operation=f"LLM generation ({use_model})",
+        )
 
 
 # =============================================================================
@@ -275,6 +397,7 @@ class EmbeddingClient:
         api_base: str | None = None,
         api_key: str | None = None,
         dimensions: int = 1024,
+        max_retries: int = 3,
     ):
         """Initialize embedding client.
 
@@ -283,11 +406,13 @@ class EmbeddingClient:
             api_base: API base URL (required for Ollama)
             api_key: API key (required for cloud providers)
             dimensions: Expected embedding dimensions
+            max_retries: Maximum retry attempts for transient failures.
         """
         self.model = model
         self.api_base = api_base
         self.api_key = api_key
         self.dimensions = dimensions
+        self.max_retries = max_retries
 
         # Extract provider from model string
         self.provider = model.split("/")[0] if "/" in model else "openai"
@@ -300,16 +425,18 @@ class EmbeddingClient:
             api_base=config.api_base,
             api_key=config.api_key,
             dimensions=config.dimensions,
+            max_retries=config.max_retries,
         )
 
     @classmethod
-    def from_ollama(cls, url: str, model: str, dimensions: int = 1024) -> EmbeddingClient:
+    def from_ollama(cls, url: str, model: str, dimensions: int = 1024, max_retries: int = 3) -> EmbeddingClient:
         """Create client for Ollama provider.
 
         Args:
             url: Ollama server URL
             model: Model name without provider prefix
             dimensions: Expected embedding dimensions
+            max_retries: Maximum retry attempts for transient failures.
 
         Returns:
             EmbeddingClient configured for Ollama.
@@ -318,6 +445,7 @@ class EmbeddingClient:
             model=f"ollama/{model}",
             api_base=url,
             dimensions=dimensions,
+            max_retries=max_retries,
         )
 
     def verify_model(self) -> bool:
@@ -343,9 +471,9 @@ class EmbeddingClient:
             Embedding vector as list of floats.
 
         Raises:
-            LLMError: If embedding generation fails.
+            LLMError: If embedding generation fails after retries.
         """
-        try:
+        def _do_embed() -> list[float]:
             kwargs: dict[str, Any] = {
                 "model": self.model,
                 "input": [text],
@@ -365,8 +493,11 @@ class EmbeddingClient:
 
             return response.data[0]["embedding"]
 
-        except Exception as e:
-            raise LLMError(f"Embedding generation failed: {e}") from e
+        return _retry_with_backoff(
+            _do_embed,
+            max_retries=self.max_retries,
+            operation=f"Embedding generation ({self.model})",
+        )
 
     async def embed_async(self, text: str, timeout: int = 30) -> list[float]:
         """Generate embedding for single text (async version).
@@ -381,9 +512,9 @@ class EmbeddingClient:
             Embedding vector as list of floats.
 
         Raises:
-            LLMError: If embedding generation fails.
+            LLMError: If embedding generation fails after retries.
         """
-        try:
+        async def _do_embed() -> list[float]:
             kwargs: dict[str, Any] = {
                 "model": self.model,
                 "input": [text],
@@ -403,8 +534,11 @@ class EmbeddingClient:
 
             return response.data[0]["embedding"]
 
-        except Exception as e:
-            raise LLMError(f"Embedding generation failed: {e}") from e
+        return await _retry_with_backoff_async(
+            _do_embed,
+            max_retries=self.max_retries,
+            operation=f"Embedding generation ({self.model})",
+        )
 
     def embed_batch(self, texts: list[str], timeout: int = 60) -> list[list[float]]:
         """Generate embeddings for batch of texts.
@@ -417,12 +551,12 @@ class EmbeddingClient:
             List of embedding vectors.
 
         Raises:
-            LLMError: If embedding generation fails.
+            LLMError: If embedding generation fails after retries.
         """
         if not texts:
             return []
 
-        try:
+        def _do_embed_batch() -> list[list[float]]:
             kwargs: dict[str, Any] = {
                 "model": self.model,
                 "input": texts,
@@ -439,8 +573,11 @@ class EmbeddingClient:
 
             return [item["embedding"] for item in response.data]
 
-        except Exception as e:
-            raise LLMError(f"Batch embedding generation failed: {e}") from e
+        return _retry_with_backoff(
+            _do_embed_batch,
+            max_retries=self.max_retries,
+            operation=f"Batch embedding generation ({self.model})",
+        )
 
 
 # =============================================================================

@@ -297,10 +297,10 @@ class TestLLMClient:
 
     def test_generate_raises_on_exception(self):
         """Test that LLMError is raised on exception."""
-        client = LLMClient(model="test-model")
+        client = LLMClient(model="test-model", max_retries=0)
 
         with patch("shared.ai.llm_client.completion", side_effect=Exception("Connection error")):
-            with pytest.raises(LLMError, match="LLM generation failed"):
+            with pytest.raises(LLMError, match="LLM generation"):
                 client.generate("Test")
 
     def test_verify_model_returns_true_on_success(self):
@@ -434,10 +434,10 @@ class TestEmbeddingClient:
 
     def test_embed_raises_on_exception(self):
         """Test that LLMError is raised on exception."""
-        client = EmbeddingClient(model="test-model")
+        client = EmbeddingClient(model="test-model", max_retries=0)
 
         with patch("shared.ai.llm_client.embedding", side_effect=Exception("Connection error")):
-            with pytest.raises(LLMError, match="Embedding generation failed"):
+            with pytest.raises(LLMError, match="Embedding generation"):
                 client.embed("Test")
 
     @pytest.mark.asyncio
@@ -488,11 +488,11 @@ class TestEmbeddingClient:
     @pytest.mark.asyncio
     async def test_embed_async_raises_on_exception(self):
         """Test that LLMError is raised on async exception."""
-        client = EmbeddingClient(model="test-model")
+        client = EmbeddingClient(model="test-model", max_retries=0)
 
         with patch("shared.ai.llm_client.aembedding", new_callable=AsyncMock) as mock_aembed:
             mock_aembed.side_effect = Exception("Connection error")
-            with pytest.raises(LLMError, match="Embedding generation failed"):
+            with pytest.raises(LLMError, match="Embedding generation"):
                 await client.embed_async("Test")
 
     def test_embed_batch_success(self):
@@ -536,10 +536,10 @@ class TestEmbeddingClient:
 
     def test_embed_batch_raises_on_exception(self):
         """Test that LLMError is raised on batch exception."""
-        client = EmbeddingClient(model="test-model")
+        client = EmbeddingClient(model="test-model", max_retries=0)
 
         with patch("shared.ai.llm_client.embedding", side_effect=Exception("Connection error")):
-            with pytest.raises(LLMError, match="Batch embedding generation failed"):
+            with pytest.raises(LLMError, match="Batch embedding generation"):
                 client.embed_batch(["Test"])
 
     def test_verify_model_returns_true_on_success(self):
