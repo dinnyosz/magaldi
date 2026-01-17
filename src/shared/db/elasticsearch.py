@@ -1388,6 +1388,7 @@ class ElasticsearchRepository:
                     ]
                 }
             },
+            refresh=True,
         )
 
         return response.get("deleted", 0)
@@ -1533,6 +1534,81 @@ class ElasticsearchRepository:
             })
 
         return repos
+
+    def get_all_elements(
+        self,
+        scope: str,
+        repository: str,
+        username: str = "main",
+        element_types: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get all elements for a repository (excluding features, subfeatures, glossary).
+
+        Args:
+            scope: Scope to filter by.
+            repository: Repository to filter by.
+            username: Username/branch (default: main).
+            element_types: Optional filter by element types.
+
+        Returns:
+            List of element dicts.
+        """
+        client = self._get_client()
+
+        must_clauses: list[dict[str, Any]] = [
+            {"term": {"scope": scope}},
+            {"term": {"repository": repository}},
+            {"term": {"username": username}},
+        ]
+
+        # Exclude non-element types
+        must_not_clauses: list[dict[str, Any]] = [
+            {"term": {"element_type": "feature"}},
+            {"term": {"element_type": "subfeature"}},
+            {"term": {"element_type": "glossary"}},
+        ]
+
+        if element_types:
+            must_clauses.append({"terms": {"element_type": element_types}})
+
+        query: dict[str, Any] = {
+            "bool": {
+                "must": must_clauses,
+                "must_not": must_not_clauses,
+            }
+        }
+
+        # Use scroll for large result sets
+        results: list[dict[str, Any]] = []
+
+        response = client.search(
+            index=INDEX_NAME,
+            query=query,
+            size=1000,
+            scroll="2m",
+        )
+
+        scroll_id = response.get("_scroll_id")
+        hits = response.get("hits", {}).get("hits", [])
+
+        while hits:
+            for hit in hits:
+                source = hit.get("_source", {})
+                source["element_id"] = hit.get("_id")
+                results.append(source)
+
+            response = client.scroll(scroll_id=scroll_id, scroll="2m")
+            scroll_id = response.get("_scroll_id")
+            hits = response.get("hits", {}).get("hits", [])
+
+        # Clear scroll
+        if scroll_id:
+            try:
+                client.clear_scroll(scroll_id=scroll_id)
+            except Exception:
+                pass
+
+        return results
 
     def get_features(
         self,

@@ -361,6 +361,56 @@ class TestExtractFeaturesCommand:
         assert "magaldi.yaml" in result.output
 
 
+class TestExtractGlossaryCommand:
+    """Tests for extract-glossary CLI command."""
+
+    def test_extract_glossary_command_exists(self, cli_runner):
+        """Test that extract-glossary command is registered."""
+        result = cli_runner.invoke(main, ["extract-glossary", "--help"])
+
+        assert result.exit_code == 0
+        assert "Extract glossary" in result.output
+        assert "--link-features" in result.output
+
+    def test_extract_glossary_missing_user(self, cli_runner, tmp_path):
+        """Test extract-glossary fails without --user."""
+        repo_path = tmp_path / "test-repo"
+        repo_path.mkdir()
+
+        result = cli_runner.invoke(main, [
+            "extract-glossary",
+            str(repo_path),
+        ])
+
+        assert result.exit_code != 0
+
+    @patch("shared.cli.load_config")
+    @patch("shared.cli.run_glossary_extraction")
+    def test_extract_glossary_no_config(
+        self,
+        mock_run_glossary_extraction,
+        mock_load_config,
+        cli_runner,
+        mock_config,
+        tmp_path,
+    ):
+        """Test extract-glossary without magaldi.yaml."""
+        repo_path = tmp_path / "test-repo"
+        repo_path.mkdir()
+        # Don't create magaldi.yaml
+
+        mock_load_config.return_value = mock_config
+
+        result = cli_runner.invoke(main, [
+            "extract-glossary",
+            str(repo_path),
+            "--user", "testuser",
+        ])
+
+        assert result.exit_code != 0
+        assert "magaldi.yaml" in result.output
+
+
 class TestWebCommands:
     """Tests for web subcommands."""
 

@@ -239,6 +239,24 @@ def parse(
             if feature_result:
                 print_feature_result(feature_result)
 
+        # Phase 6: Glossary Extraction (after features so we can link)
+        if not skip_ai and not dry_run and processed > 0:
+            console.print("\n[bold blue]Phase 6:[/] Glossary Extraction")
+            glossary_result = run_glossary_extraction(
+                scope=discovery_result.scope,
+                repository=discovery_result.repository,
+                username=user,
+                config=config,
+                link_features=not skip_features,  # Link if features were extracted
+            )
+            if glossary_result:
+                terms = glossary_result.get("terms_count", 0)
+                linked = glossary_result.get("linked_count", 0)
+                if linked > 0:
+                    console.print(f"  [green]{terms} terms[/] extracted, [green]{linked}[/] linked to features")
+                else:
+                    console.print(f"  [green]{terms} terms[/] extracted")
+
         print_summary(discovery_result, manifest, processed, indexed, skip_ai)
 
     except KeyboardInterrupt:
@@ -322,6 +340,65 @@ def extract_features(
             console.print("\n[green]Feature extraction complete.[/]")
         else:
             console.print("[yellow]No elements to extract features from.[/]")
+
+    except Exception as e:
+        console.print(f"\n[red]Error:[/] {e}")
+        sys.exit(1)
+
+
+# =============================================================================
+# EXTRACT-GLOSSARY COMMAND
+# =============================================================================
+
+
+@main.command("extract-glossary")
+@click.argument("repo_path", type=click.Path(exists=True, file_okay=False, dir_okay=True))
+@click.option("--user", "-u", required=True, help="Username/branch to extract glossary from")
+@click.option("--link-features", is_flag=True, help="Also link glossary to existing features")
+def extract_glossary(
+    repo_path: str,
+    user: str,
+    link_features: bool,
+) -> None:
+    """Extract glossary terms from indexed code elements.
+
+    Scans element names to identify domain-specific terminology
+    and stores them for enhanced code discovery.
+
+    REPO_PATH is the path to the repository (used to load magaldi.yaml).
+    """
+    from pathlib import Path
+    from magaldi_core.discovery import load_repo_config
+
+    config = load_config(skip_validation=False)
+
+    # Load repo config to get scope/repository
+    repo_config_path = Path(repo_path) / "magaldi.yaml"
+    if not repo_config_path.exists():
+        console.print(f"[red]Error:[/] magaldi.yaml not found in {repo_path}")
+        sys.exit(1)
+
+    repo_config = load_repo_config(repo_config_path)
+    scope = repo_config["scope"]
+    repository = Path(repo_path).name
+
+    console.print("[bold blue]Glossary Extraction[/]")
+    console.print(f"  Repository: {scope}/{repository} @{user}")
+    console.print()
+
+    try:
+        result = run_glossary_extraction(
+            scope=scope,
+            repository=repository,
+            username=user,
+            config=config,
+            link_features=link_features,
+        )
+
+        if result:
+            console.print(f"\n[green]Glossary extraction complete.[/]")
+        else:
+            console.print("[yellow]No elements to extract glossary from.[/]")
 
     except Exception as e:
         console.print(f"\n[red]Error:[/] {e}")
@@ -909,6 +986,144 @@ def run_feature_extraction(
                 }
                 for c in clustering_result.clusters
             ],
+        }
+
+    finally:
+        es_repo.close()
+
+
+def run_glossary_extraction(
+    scope: str,
+    repository: str,
+    username: str,
+    config: MagaldiConfig,
+    link_features: bool = False,
+) -> dict | None:
+    """Run Glossary Extraction phase.
+
+    Args:
+        scope: Repository scope.
+        repository: Repository name.
+        username: Username/branch.
+        config: Magaldi configuration.
+        link_features: Whether to link glossary terms to existing features.
+
+    Returns:
+        Dict with glossary extraction results or None if no elements.
+    """
+    from shared.ai.glossary.extractor import aggregate_glossary_terms
+    from shared.ai.glossary.linker import link_glossary_to_features
+    from shared.db.elasticsearch import ElasticsearchRepository
+
+    es_repo = ElasticsearchRepository(config)
+
+    try:
+        # Fetch all elements (excluding features, subfeatures, glossary)
+        with console.status("[bold blue]Fetching elements...[/]"):
+            elements = es_repo.get_all_elements(
+                scope=scope,
+                repository=repository,
+                username=username,
+            )
+
+        if not elements:
+            console.print("  [dim]No elements found[/]")
+            return None
+
+        console.print(f"  Found {len(elements)} elements")
+
+        # Extract and aggregate glossary terms
+        with console.status("[bold blue]Extracting glossary terms...[/]"):
+            glossary_entries = aggregate_glossary_terms(elements)
+
+        if not glossary_entries:
+            console.print("  [dim]No domain terms extracted[/]")
+            return {"terms_count": 0}
+
+        console.print(f"  Extracted [green]{len(glossary_entries)}[/] unique terms")
+
+        # Delete existing glossary entries
+        with console.status("[bold blue]Clearing existing glossary...[/]"):
+            deleted = es_repo.delete_glossary(scope, repository, username)
+            if deleted > 0:
+                console.print(f"  Deleted {deleted} existing entries")
+
+        # Index new glossary entries
+        with console.status("[bold blue]Indexing glossary entries...[/]"):
+            for term, entry in glossary_entries.items():
+                glossary_id = f"{scope}:{repository}:{username}:glossary:{term}"
+                es_repo.index_glossary(
+                    glossary_id=glossary_id,
+                    scope=scope,
+                    repository=repository,
+                    username=username,
+                    term=term,
+                    total_count=entry.total_count,
+                    element_ids=entry.element_ids,
+                    file_paths=entry.file_paths,
+                )
+
+        console.print(f"  Indexed [green]{len(glossary_entries)}[/] glossary entries")
+
+        # Link to features if requested
+        linked_count = 0
+        if link_features:
+            console.print()
+            console.print("[bold blue]Linking to features...[/]")
+
+            with console.status("[bold blue]Fetching features...[/]"):
+                features = es_repo.get_features(scope, repository, username)
+
+            console.print(f"  Found {len(features)} features")
+
+            if features:
+                # Build element name lookup
+                element_names = {e["element_id"]: e.get("name", "") for e in elements}
+                glossary_terms = set(glossary_entries.keys())
+
+                with console.status("[bold blue]Computing associations...[/]"):
+                    term_to_features = link_glossary_to_features(
+                        glossary_terms, features, element_names
+                    )
+
+                # Update glossary entries with associations
+                with console.status("[bold blue]Updating glossary entries...[/]"):
+                    for term, associations in term_to_features.items():
+                        if associations:
+                            glossary_id = f"{scope}:{repository}:{username}:glossary:{term}"
+                            es_repo.update_glossary_feature_associations(
+                                glossary_id=glossary_id,
+                                feature_associations=[
+                                    {
+                                        "feature_id": a.feature_id,
+                                        "feature_label": a.feature_label,
+                                        "frequency": a.frequency,
+                                        "total_members": a.total_members,
+                                        "percentage": a.percentage,
+                                    }
+                                    for a in associations
+                                ],
+                            )
+                            linked_count += 1
+
+                console.print(f"  Updated [green]{linked_count}[/] terms with feature links")
+
+        # Print top terms
+        top_terms = sorted(
+            glossary_entries.values(),
+            key=lambda e: e.total_count,
+            reverse=True,
+        )[:10]
+
+        if top_terms:
+            console.print()
+            console.print("[bold]Top terms:[/]")
+            for entry in top_terms:
+                console.print(f"  [cyan]{entry.term}[/]: {entry.total_count} occurrences")
+
+        return {
+            "terms_count": len(glossary_entries),
+            "linked_count": linked_count,
         }
 
     finally:
