@@ -459,7 +459,11 @@ Code:
 {code}
 
 Summary:""",
-    "class": """Summarize this {language} class in 4-6 sentences for an AI agent navigating this codebase. Address:
+    "class": """Summarize this {language} class in 4-6 sentences for an AI agent navigating this codebase.
+
+FOCUS on the class itself. Use the file context only to understand how this class fits in - do not repeat or summarize the file context.
+
+Address:
 - What this class represents, models, or encapsulates
 - Its core responsibility and the problem it solves
 - How and when to instantiate or use this class
@@ -468,7 +472,7 @@ Summary:""",
 
 Do NOT enumerate individual methods - those are documented separately.
 
-File context: {file_summary}
+File context (for understanding only): {file_summary}
 
 Class: {class_name}
 {decorators}
@@ -477,14 +481,18 @@ Code:
 {code}
 
 Summary:""",
-    "function": """Describe this function in 4-6 sentences for an AI agent navigating this codebase. Address:
+    "function": """Describe this function in 4-6 sentences for an AI agent navigating this codebase.
+
+FOCUS on the function itself. Use file/class context only to understand the function's role - do not repeat or summarize the context.
+
+Address:
 - What operation, transformation, or task this function performs
 - The inputs it accepts (with their purposes) and what it returns
 - When to call this function - what scenarios or tasks require it
 - Side effects: external state changes, I/O, exceptions raised
 - Key edge cases or preconditions the caller should know
 
-File context: {file_summary}
+File context (for understanding only): {file_summary}
 {class_context}
 
 Function: {function_name}
@@ -495,15 +503,19 @@ Code:
 {code}
 
 Summary:""",
-    "method": """Describe this method in 4-6 sentences for an AI agent navigating this codebase. Address:
+    "method": """Describe this method in 4-6 sentences for an AI agent navigating this codebase.
+
+FOCUS on the method itself. Use file/class context only to understand the method's role - do not repeat or summarize the context.
+
+Address:
 - What operation this method performs on or for the object
 - The inputs it accepts (with their purposes) and what it returns
 - How it reads or modifies the object's state
 - When to call this method in the object's lifecycle
 - Side effects, exceptions, or preconditions the caller should know
 
-File context: {file_summary}
-Class context: {class_summary}
+File context (for understanding only): {file_summary}
+Class context (for understanding only): {class_summary}
 
 Method: {method_name}
 Signature: {signature}
@@ -513,12 +525,16 @@ Code:
 {code}
 
 Summary:""",
-    "constant": """Describe this constant in 2-3 sentences for an AI agent navigating this codebase. Address:
+    "constant": """Describe this constant in 2-3 sentences for an AI agent navigating this codebase.
+
+FOCUS on the constant itself. Use file context only to understand its purpose - do not repeat or summarize the context.
+
+Address:
 - What configuration, value, or data this constant represents
 - Where and why this constant is used in the system
 - Any important constraints or relationships with other values
 
-File context: {file_summary}
+File context (for understanding only): {file_summary}
 
 Name: {name}
 Value:
@@ -526,13 +542,17 @@ Value:
 {usages_section}
 
 Description:""",
-    "variable": """Describe this variable in 2-3 sentences for an AI agent navigating this codebase. Address:
+    "variable": """Describe this variable in 2-3 sentences for an AI agent navigating this codebase.
+
+FOCUS on the variable itself. Use file/class context only to understand its purpose - do not repeat or summarize the context.
+
+Address:
 - What data, state, or configuration this variable holds
 - How it is initialized and when it changes
 - Its role in the class or module's behavior
 
-File context: {file_summary}
-Class context: {class_summary}
+File context (for understanding only): {file_summary}
+Class context (for understanding only): {class_summary}
 
 Name: {name}
 Value:
