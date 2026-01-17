@@ -9,8 +9,11 @@ from magaldi_web.models import (
     ChildInfo,
     ElementContext,
     ElementDetailResponse,
+    FeatureInfo,
+    FeatureMember,
     FileContext,
     ParentContext,
+    ParentFeatureInfo,
     RepoRef,
     SiblingInfo,
 )
@@ -230,6 +233,51 @@ async def get_element_detail(
         except (json.JSONDecodeError, TypeError):
             decorators = []
 
+    # Get feature info for features/subfeatures
+    feature_info = None
+    if source["element_type"] in ("feature", "subfeature"):
+        member_ids = source.get("member_ids", [])
+        members = []
+
+        # Fetch member element details (limit to first 50 for performance)
+        if member_ids:
+            members_result = client.mget(
+                index=INDEX_NAME,
+                ids=member_ids[:50],
+                _source=["element_id", "hash_id", "name", "element_type", "relative_path", "line_start", "summary", "signature"],
+            )
+            for doc in members_result.get("docs", []):
+                if doc.get("found") and doc.get("_source"):
+                    ms = doc["_source"]
+                    members.append(
+                        FeatureMember(
+                            element_id=ms["element_id"],
+                            hash_id=ms.get("hash_id"),
+                            name=ms["name"],
+                            element_type=ms["element_type"],
+                            file_path=ms.get("relative_path", ""),
+                            line=ms.get("line_start", 0),
+                            summary=ms.get("summary"),
+                            signature=ms.get("signature"),
+                        )
+                    )
+
+        # Get parent feature info for subfeatures
+        parent_feature = None
+        if source["element_type"] == "subfeature":
+            parent_label = source.get("parent_feature_label")
+            if parent_label:
+                parent_feature = ParentFeatureInfo(
+                    label=parent_label,
+                    summary=source.get("parent_feature_summary"),
+                )
+
+        feature_info = FeatureInfo(
+            member_count=source.get("member_count", len(member_ids)),
+            members=members,
+            parent_feature=parent_feature,
+        )
+
     return ElementDetailResponse(
         element_id=source["element_id"],
         hash_id=source.get("hash_id"),
@@ -256,4 +304,5 @@ async def get_element_detail(
             scope=source["scope"],
             name=source["repository"],
         ),
+        feature_info=feature_info,
     )

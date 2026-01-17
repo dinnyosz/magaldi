@@ -22,6 +22,8 @@ const typeConfig: Record<string, { icon: string; color: string; label: string }>
   method: { icon: 'bi-gear', color: 'success', label: 'Method' },
   variable: { icon: 'bi-x-diamond', color: 'secondary', label: 'Variable' },
   constant: { icon: 'bi-hash', color: 'warning', label: 'Constant' },
+  feature: { icon: 'bi-collection', color: 'info', label: 'Feature' },
+  subfeature: { icon: 'bi-collection-fill', color: 'info', label: 'Subfeature' },
 }
 
 function getTypeConfig(type: string) {
@@ -88,6 +90,7 @@ function Element() {
   const langIcon = languageIcons[element.language] || 'bi-file-code'
   const isCallable = ['function', 'method'].includes(element.element_type)
   const isContainer = ['file', 'class'].includes(element.element_type)
+  const isFeature = ['feature', 'subfeature'].includes(element.element_type)
 
   return (
     <div>
@@ -162,24 +165,35 @@ function Element() {
                 </div>
 
                 <div className="text-end">
-                  <Badge bg="light" text="dark" className="me-2">
-                    <i className={`bi ${langIcon} me-1`}></i>
-                    {element.language}
-                  </Badge>
-                  <small className="text-muted">
-                    L{element.line_start}
-                    {element.line_end && element.line_end !== element.line_start && `-${element.line_end}`}
-                  </small>
+                  {element.language && (
+                    <Badge bg="light" text="dark" className="me-2">
+                      <i className={`bi ${langIcon} me-1`}></i>
+                      {element.language}
+                    </Badge>
+                  )}
+                  {element.line_start > 0 && (
+                    <small className="text-muted">
+                      L{element.line_start}
+                      {element.line_end && element.line_end !== element.line_start && `-${element.line_end}`}
+                    </small>
+                  )}
+                  {isFeature && element.feature_info && (
+                    <Badge bg="secondary" className="ms-2">
+                      {element.feature_info.member_count} members
+                    </Badge>
+                  )}
                 </div>
               </div>
 
-              {/* File path */}
-              <div className="mt-2">
-                <small className="text-muted">
-                  <i className="bi bi-folder me-1"></i>
-                  {element.file_path}
-                </small>
-              </div>
+              {/* File path - only shown for code elements */}
+              {element.file_path && (
+                <div className="mt-2">
+                  <small className="text-muted">
+                    <i className="bi bi-folder me-1"></i>
+                    {element.file_path}
+                  </small>
+                </div>
+              )}
             </Card.Header>
 
             <Card.Body>
@@ -300,6 +314,117 @@ function Element() {
                     )
                   })}
                 </Tabs>
+              </Card.Body>
+            </Card>
+          )}
+
+          {/* Members - shown for features and subfeatures */}
+          {isFeature && element.feature_info && (
+            <Card className="mb-4">
+              <Card.Header>
+                <i className="bi bi-people me-2"></i>
+                Members ({element.feature_info.member_count})
+                {element.feature_info.member_count > element.feature_info.members.length && (
+                  <small className="text-muted ms-2">
+                    showing first {element.feature_info.members.length}
+                  </small>
+                )}
+              </Card.Header>
+              {element.feature_info.parent_feature && (
+                <Card.Body className="bg-light border-bottom py-2">
+                  <small className="text-uppercase text-muted fw-bold d-block mb-1">Parent Feature</small>
+                  <div>
+                    <i className="bi bi-collection me-2 text-info"></i>
+                    <strong>{element.feature_info.parent_feature.label}</strong>
+                    {element.feature_info.parent_feature.summary && (
+                      <small className="d-block text-muted ms-4">{element.feature_info.parent_feature.summary}</small>
+                    )}
+                  </div>
+                </Card.Body>
+              )}
+              <Card.Body className="p-0">
+                {element.feature_info.members.length > 0 ? (
+                  <Tabs defaultActiveKey="all" className="px-3 pt-2">
+                    <Tab eventKey="all" title="All">
+                      <ListGroup variant="flush">
+                        {element.feature_info.members.map((member) => {
+                          const memberConfig = getTypeConfig(member.element_type)
+                          return (
+                            <ListGroup.Item
+                              key={member.element_id}
+                              action
+                              as={Link}
+                              to={`/element/${member.hash_id || member.element_id}`}
+                              className="d-flex justify-content-between align-items-start"
+                            >
+                              <div>
+                                <Badge
+                                  bg={memberConfig.color}
+                                  style={getTypeBadgeStyle(member.element_type)}
+                                  className="me-2"
+                                >
+                                  <i className={`bi ${memberConfig.icon}`}></i>
+                                </Badge>
+                                <span className="fw-medium">{member.name}</span>
+                                {member.signature && (
+                                  <code className="ms-2 small text-muted">
+                                    {member.signature.length > 40 ? member.signature.substring(0, 40) + '...' : member.signature}
+                                  </code>
+                                )}
+                                {member.summary && (
+                                  <small className="d-block text-muted ms-4 mt-1">{member.summary}</small>
+                                )}
+                              </div>
+                              <div className="text-end">
+                                <small className="text-muted d-block">{member.file_path.split('/').pop()}</small>
+                                <small className="text-muted">L{member.line}</small>
+                              </div>
+                            </ListGroup.Item>
+                          )
+                        })}
+                      </ListGroup>
+                    </Tab>
+                    {['function', 'method', 'class'].map((type) => {
+                      const items = element.feature_info!.members.filter(m => m.element_type === type)
+                      if (items.length === 0) return null
+                      const tc = getTypeConfig(type)
+                      return (
+                        <Tab key={type} eventKey={type} title={`${tc.label}s (${items.length})`}>
+                          <ListGroup variant="flush">
+                            {items.map((member) => (
+                              <ListGroup.Item
+                                key={member.element_id}
+                                action
+                                as={Link}
+                                to={`/element/${member.hash_id || member.element_id}`}
+                                className="d-flex justify-content-between align-items-start"
+                              >
+                                <div>
+                                  <span className="fw-medium">{member.name}</span>
+                                  {member.signature && (
+                                    <code className="ms-2 small text-muted">{member.signature}</code>
+                                  )}
+                                  {member.summary && (
+                                    <small className="d-block text-muted mt-1">{member.summary}</small>
+                                  )}
+                                </div>
+                                <div className="text-end">
+                                  <small className="text-muted d-block">{member.file_path.split('/').pop()}</small>
+                                  <small className="text-muted">L{member.line}</small>
+                                </div>
+                              </ListGroup.Item>
+                            ))}
+                          </ListGroup>
+                        </Tab>
+                      )
+                    })}
+                  </Tabs>
+                ) : (
+                  <div className="text-center py-4 text-muted">
+                    <i className="bi bi-inbox fs-3 d-block mb-2"></i>
+                    No members found
+                  </div>
+                )}
               </Card.Body>
             </Card>
           )}
@@ -452,25 +577,35 @@ function Element() {
                   {config.label}
                 </Badge>
               </ListGroup.Item>
-              <ListGroup.Item className="d-flex justify-content-between">
-                <span className="text-muted">Language</span>
-                <span>
-                  <i className={`bi ${langIcon} me-1`}></i>
-                  {element.language}
-                </span>
-              </ListGroup.Item>
-              <ListGroup.Item className="d-flex justify-content-between">
-                <span className="text-muted">Lines</span>
-                <span>
-                  {element.line_start}
-                  {element.line_end && element.line_end !== element.line_start && `-${element.line_end}`}
-                  {element.line_end && (
-                    <small className="text-muted ms-1">
-                      ({element.line_end - element.line_start + 1} lines)
-                    </small>
-                  )}
-                </span>
-              </ListGroup.Item>
+              {element.language && (
+                <ListGroup.Item className="d-flex justify-content-between">
+                  <span className="text-muted">Language</span>
+                  <span>
+                    <i className={`bi ${langIcon} me-1`}></i>
+                    {element.language}
+                  </span>
+                </ListGroup.Item>
+              )}
+              {element.line_start > 0 && (
+                <ListGroup.Item className="d-flex justify-content-between">
+                  <span className="text-muted">Lines</span>
+                  <span>
+                    {element.line_start}
+                    {element.line_end && element.line_end !== element.line_start && `-${element.line_end}`}
+                    {element.line_end && (
+                      <small className="text-muted ms-1">
+                        ({element.line_end - element.line_start + 1} lines)
+                      </small>
+                    )}
+                  </span>
+                </ListGroup.Item>
+              )}
+              {isFeature && element.feature_info && (
+                <ListGroup.Item className="d-flex justify-content-between">
+                  <span className="text-muted">Members</span>
+                  <span>{element.feature_info.member_count}</span>
+                </ListGroup.Item>
+              )}
               {element.visibility && (
                 <ListGroup.Item className="d-flex justify-content-between">
                   <span className="text-muted">Visibility</span>

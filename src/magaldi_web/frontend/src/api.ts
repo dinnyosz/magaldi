@@ -172,6 +172,28 @@ export interface ElementDetailFile {
   summary: string | null
 }
 
+export interface FeatureMember {
+  element_id: string
+  hash_id: string | null
+  name: string
+  element_type: string
+  file_path: string
+  line: number
+  summary: string | null
+  signature: string | null
+}
+
+export interface ParentFeatureInfo {
+  label: string
+  summary: string | null
+}
+
+export interface FeatureInfo {
+  member_count: number
+  members: FeatureMember[]
+  parent_feature: ParentFeatureInfo | null
+}
+
 export interface ElementDetail {
   element_id: string
   hash_id: string | null
@@ -198,6 +220,7 @@ export interface ElementDetail {
     scope: string
     name: string
   }
+  feature_info: FeatureInfo | null
 }
 
 export interface SimilarElement {

@@ -346,6 +346,34 @@ class RepoRef(BaseModel):
     name: str
 
 
+class FeatureMember(BaseModel):
+    """A member element of a feature or subfeature."""
+
+    element_id: str
+    hash_id: str | None = None
+    name: str
+    element_type: str
+    file_path: str
+    line: int
+    summary: str | None = None
+    signature: str | None = None
+
+
+class ParentFeatureInfo(BaseModel):
+    """Info about the parent feature of a subfeature."""
+
+    label: str
+    summary: str | None = None
+
+
+class FeatureInfo(BaseModel):
+    """Feature-specific information for feature/subfeature elements."""
+
+    member_count: int = 0
+    members: list[FeatureMember] = Field(default_factory=list)
+    parent_feature: ParentFeatureInfo | None = None
+
+
 class ElementDetailResponse(BaseModel):
     """Response for element detail endpoint."""
 
@@ -366,6 +394,7 @@ class ElementDetailResponse(BaseModel):
     is_async: bool = False
     context: ElementContext
     repository: RepoRef
+    feature_info: FeatureInfo | None = None
 
 
 # =============================================================================
