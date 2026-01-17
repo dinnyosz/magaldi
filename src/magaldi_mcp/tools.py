@@ -1444,3 +1444,105 @@ def get_call_graph(
             })
 
     return result
+
+
+# =============================================================================
+# GLOSSARY TOOLS
+# =============================================================================
+
+
+def list_glossary(
+    es: ElasticsearchRepository,
+    scope: str,
+    repository: str,
+    username: str = "main",
+    min_count: int = 1,
+) -> list[dict[str, Any]]:
+    """List all glossary terms for a repository.
+
+    Glossary terms are domain concepts extracted from element names
+    (e.g., 'user', 'email', 'order') that appear across the codebase.
+
+    Args:
+        es: Elasticsearch repository.
+        scope: Repository scope.
+        repository: Repository name.
+        username: User branch (default: main).
+        min_count: Minimum occurrence count to include (default: 1).
+
+    Returns:
+        List of glossary terms sorted by count, each with:
+        - term: The domain term
+        - total_count: Number of elements containing this term
+        - file_paths: Files where term appears
+        - feature_associations: Linked features (if glossary was linked)
+    """
+    return es.get_glossary_terms(
+        scope=scope,
+        repository=repository,
+        username=username,
+        min_count=min_count,
+    )
+
+
+def get_glossary_term(
+    es: ElasticsearchRepository,
+    scope: str,
+    repository: str,
+    term: str,
+    username: str = "main",
+) -> dict[str, Any] | None:
+    """Get full details for a specific glossary term.
+
+    Args:
+        es: Elasticsearch repository.
+        scope: Repository scope.
+        repository: Repository name.
+        term: The glossary term to retrieve.
+        username: User branch (default: main).
+
+    Returns:
+        Glossary entry with:
+        - term: The domain term
+        - total_count: Number of elements containing this term
+        - element_ids: List of element IDs containing this term
+        - file_paths: Files where term appears
+        - feature_associations: Linked features with frequency/percentage
+        Or None if term not found.
+    """
+    return es.get_glossary_term(
+        scope=scope,
+        repository=repository,
+        term=term,
+        username=username,
+    )
+
+
+def search_glossary(
+    es: ElasticsearchRepository,
+    scope: str,
+    repository: str,
+    query: str,
+    username: str = "main",
+) -> list[dict[str, Any]]:
+    """Search glossary terms by partial match.
+
+    Finds terms that contain the query string. For example,
+    searching 'user' might return 'user', 'username', 'userid'.
+
+    Args:
+        es: Elasticsearch repository.
+        scope: Repository scope.
+        repository: Repository name.
+        query: Partial term to search for.
+        username: User branch (default: main).
+
+    Returns:
+        List of matching glossary terms with term and total_count.
+    """
+    return es.search_glossary(
+        scope=scope,
+        repository=repository,
+        query=query,
+        username=username,
+    )
