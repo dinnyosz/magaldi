@@ -111,9 +111,9 @@ async def get_element_detail(
     element_id = source["element_id"]
     client = es_repo._get_client()
 
-    # Get file context
+    # Get file context (only for code elements that have a relative_path)
     file_context = None
-    if source["element_type"] != "file":
+    if source["element_type"] not in ("file", "feature", "subfeature") and source.get("relative_path"):
         file_result = client.search(
             index=INDEX_NAME,
             body={
@@ -235,10 +235,10 @@ async def get_element_detail(
         hash_id=source.get("hash_id"),
         name=source["name"],
         element_type=source["element_type"],
-        file_path=source["relative_path"],
-        line_start=source["line_start"],
+        file_path=source.get("relative_path", ""),
+        line_start=source.get("line_start", 0),
         line_end=source.get("line_end"),
-        language=source.get("language", "unknown"),
+        language=source.get("language", ""),
         summary=source.get("summary"),
         signature=source.get("signature"),
         docstring=source.get("docstring"),

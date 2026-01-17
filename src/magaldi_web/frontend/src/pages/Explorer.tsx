@@ -25,16 +25,31 @@ import {
   BrowseElement,
 } from '../api'
 
-// Element type icons and colors
-const typeConfig: Record<string, { icon: string; color: string }> = {
-  file: { icon: 'bi-file-code', color: 'info' },
-  class: { icon: 'bi-box', color: 'primary' },
-  function: { icon: 'bi-braces', color: 'success' },
-  method: { icon: 'bi-gear', color: 'warning' },
+// Element type icons, colors, and behavior flags
+type TypeConfig = {
+  icon: string
+  color: string
+  canHaveChildren?: boolean
+  canHaveCallGraph?: boolean
+}
+
+const typeConfig: Record<string, TypeConfig> = {
+  file: { icon: 'bi-file-code', color: 'info', canHaveChildren: true },
+  class: { icon: 'bi-box', color: 'primary', canHaveChildren: true },
+  function: { icon: 'bi-braces', color: 'success', canHaveCallGraph: true },
+  method: { icon: 'bi-gear', color: 'warning', canHaveCallGraph: true },
   variable: { icon: 'bi-x-diamond', color: 'secondary' },
   constant: { icon: 'bi-hash', color: 'danger' },
   feature: { icon: 'bi-collection', color: 'info' },
   subfeature: { icon: 'bi-collection-fill', color: 'info' },
+}
+
+const defaultTypeConfig: TypeConfig = { icon: 'bi-dot', color: 'secondary' }
+
+// Simple pluralization for element types
+function pluralize(type: string): string {
+  if (type === 'class') return 'Classes'
+  return `${type}s`
 }
 
 function ElementRow({ element, username }: { element: BrowseElement; username: string }) {
@@ -44,18 +59,19 @@ function ElementRow({ element, username }: { element: BrowseElement; username: s
   const { data: children, isLoading: childrenLoading } = useQuery({
     queryKey: ['element-children', element.hash_id, username],
     queryFn: () => element.hash_id ? getElementChildren(element.hash_id, username) : Promise.resolve({ element_id: '', hash_id: null, children: {}, total_children: 0 }),
-    enabled: expanded && (element.element_type === 'file' || element.element_type === 'class') && !!element.hash_id,
+    enabled: expanded && !!element.hash_id,
   })
 
   const { data: details, isLoading: detailsLoading } = useQuery({
     queryKey: ['element-details', element.hash_id, username],
     queryFn: () => element.hash_id ? getElementDetails(element.hash_id, { includeCallGraph: true, username }) : Promise.resolve({ error: 'No hash_id' } as any),
-    enabled: showDetails && (element.element_type === 'function' || element.element_type === 'method') && !!element.hash_id,
+    enabled: showDetails && !!element.hash_id,
   })
 
-  const config = typeConfig[element.element_type] || { icon: 'bi-dot', color: 'secondary' }
-  const hasChildren = element.element_type === 'file' || element.element_type === 'class'
-  const canShowDetails = element.element_type === 'function' || element.element_type === 'method'
+  const config = typeConfig[element.element_type] || defaultTypeConfig
+  // Use type config flags to determine expand behavior
+  const hasChildren = !!config.canHaveChildren && !!element.hash_id
+  const canShowDetails = !!config.canHaveCallGraph && !!element.hash_id
 
   return (
     <>
@@ -402,7 +418,7 @@ function Explorer() {
     <div>
       <h1 className="mb-4">
         <i className="bi bi-folder2-open me-2"></i>
-        Code Explorer
+        Explorer
       </h1>
 
       {/* Filters */}
@@ -468,9 +484,7 @@ function Explorer() {
                   onChange={(e) => updateFilter('type', e.target.value)}
                 >
                   <option value="">All Types</option>
-                  {filters?.element_types
-                    .filter((t) => !['feature', 'subfeature'].includes(t))
-                    .map((t) => (
+                  {filters?.element_types.map((t) => (
                       <option key={t} value={t}>
                         {t} {stats?.type_counts[t] ? `(${stats.type_counts[t].toLocaleString()})` : ''}
                       </option>
@@ -512,9 +526,7 @@ function Explorer() {
       {/* Stats Summary */}
       {stats && (
         <Row className="mb-3 g-2">
-          {Object.entries(stats.type_counts)
-            .filter(([type]) => !['feature', 'subfeature'].includes(type))
-            .map(([type, count]) => {
+          {Object.entries(stats.type_counts).map(([type, count]) => {
               const config = typeConfig[type] || { icon: 'bi-dot', color: 'secondary' }
               const isActive = elementType === type
               return (
@@ -527,7 +539,7 @@ function Explorer() {
                     <Card.Body className="py-2">
                       <i className={`bi ${config.icon} text-${config.color}`}></i>
                       <h5 className="mb-0">{count.toLocaleString()}</h5>
-                      <small className="text-muted text-capitalize">{type}s</small>
+                      <small className="text-muted text-capitalize">{pluralize(type)}</small>
                     </Card.Body>
                   </Card>
                 </Col>
