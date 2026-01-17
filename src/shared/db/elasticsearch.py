@@ -68,6 +68,11 @@ INDEX_MAPPING = {
             "member_ids": {"type": "keyword"},  # Element IDs of members (for feature docs)
             "parent_feature_label": {"type": "keyword"},  # Parent feature label (for subfeatures)
             "parent_feature_summary": {"type": "text"},  # Parent feature summary (for subfeatures)
+            "term": {"type": "keyword"},  # Glossary term
+            "total_count": {"type": "integer"},  # Glossary term occurrence count
+            "file_paths": {"type": "keyword"},  # Array of file paths
+            "feature_associations": {"type": "object"},  # Feature linking data
+            "updated_at": {"type": "date"},  # Update timestamp
             "embedding": {
                 "type": "dense_vector",
                 "dims": 1024,
@@ -1136,6 +1141,256 @@ class ElasticsearchRepository:
         client = self._get_client()
         client.index(index=INDEX_NAME, id=subfeature_id, document=doc)
         return True
+
+    def index_glossary(
+        self,
+        glossary_id: str,
+        scope: str,
+        repository: str,
+        username: str,
+        term: str,
+        total_count: int,
+        element_ids: list[str],
+        file_paths: list[str],
+    ) -> bool:
+        """Index a glossary entry document.
+
+        Args:
+            glossary_id: Unique glossary ID (format: scope:repo:username:glossary:term).
+            scope: Repository scope.
+            repository: Repository name.
+            username: Username/branch.
+            term: The glossary term (e.g., "user", "email").
+            total_count: Total occurrences of this term.
+            element_ids: List of element IDs containing this term.
+            file_paths: List of file paths containing this term.
+
+        Returns:
+            True on success.
+        """
+        doc: dict[str, Any] = {
+            "element_id": glossary_id,
+            "hash_id": generate_hash_id(glossary_id),
+            "scope": scope,
+            "repository": repository,
+            "username": username,
+            "element_type": "glossary",
+            "name": term,
+            "term": term,
+            "total_count": total_count,
+            "element_ids": element_ids,
+            "file_paths": file_paths,
+            "feature_associations": [],
+            "indexed_at": datetime.now().isoformat(),
+            "level": -3,  # Glossary terms are at the highest conceptual level
+        }
+
+        client = self._get_client()
+        client.index(index=INDEX_NAME, id=glossary_id, document=doc)
+        return True
+
+    def get_glossary_terms(
+        self,
+        scope: str,
+        repository: str,
+        username: str = "main",
+        min_count: int = 1,
+    ) -> list[dict[str, Any]]:
+        """Get all glossary terms for a repository.
+
+        Args:
+            scope: Repository scope.
+            repository: Repository name.
+            username: User branch.
+            min_count: Minimum occurrence count to filter by.
+
+        Returns:
+            List of glossary terms with their counts and associations.
+        """
+        client = self._get_client()
+
+        query: dict[str, Any] = {
+            "bool": {
+                "must": [
+                    {"term": {"scope": scope}},
+                    {"term": {"repository": repository}},
+                    {"term": {"username": username}},
+                    {"term": {"element_type": "glossary"}},
+                    {"range": {"total_count": {"gte": min_count}}},
+                ]
+            }
+        }
+
+        response = client.search(
+            index=INDEX_NAME,
+            query=query,
+            size=1000,
+            sort=[{"total_count": "desc"}],
+        )
+
+        results: list[dict[str, Any]] = []
+        for hit in response.get("hits", {}).get("hits", []):
+            source = hit.get("_source", {})
+            results.append({
+                "glossary_id": hit.get("_id"),
+                "term": source.get("term"),
+                "total_count": source.get("total_count"),
+                "element_ids": source.get("element_ids", []),
+                "file_paths": source.get("file_paths", []),
+                "feature_associations": source.get("feature_associations", []),
+            })
+
+        return results
+
+    def get_glossary_term(
+        self,
+        scope: str,
+        repository: str,
+        term: str,
+        username: str = "main",
+    ) -> dict[str, Any] | None:
+        """Get a specific glossary term.
+
+        Args:
+            scope: Repository scope.
+            repository: Repository name.
+            term: The glossary term to retrieve.
+            username: User branch.
+
+        Returns:
+            Glossary term data or None if not found.
+        """
+        glossary_id = f"{scope}:{repository}:{username}:glossary:{term}"
+        client = self._get_client()
+
+        try:
+            response = client.get(index=INDEX_NAME, id=glossary_id)
+            if response.get("found"):
+                source = response.get("_source", {})
+                return {
+                    "glossary_id": glossary_id,
+                    "term": source.get("term"),
+                    "total_count": source.get("total_count"),
+                    "element_ids": source.get("element_ids", []),
+                    "file_paths": source.get("file_paths", []),
+                    "feature_associations": source.get("feature_associations", []),
+                }
+        except Exception:
+            pass
+
+        return None
+
+    def search_glossary(
+        self,
+        scope: str,
+        repository: str,
+        query: str,
+        username: str = "main",
+    ) -> list[dict[str, Any]]:
+        """Search glossary terms by partial match.
+
+        Args:
+            scope: Repository scope.
+            repository: Repository name.
+            query: Search query (partial match).
+            username: User branch.
+
+        Returns:
+            List of matching glossary terms.
+        """
+        client = self._get_client()
+
+        es_query: dict[str, Any] = {
+            "bool": {
+                "must": [
+                    {"term": {"scope": scope}},
+                    {"term": {"repository": repository}},
+                    {"term": {"username": username}},
+                    {"term": {"element_type": "glossary"}},
+                    {"wildcard": {"term": f"*{query.lower()}*"}},
+                ]
+            }
+        }
+
+        response = client.search(
+            index=INDEX_NAME,
+            query=es_query,
+            size=100,
+            sort=[{"total_count": "desc"}],
+        )
+
+        results: list[dict[str, Any]] = []
+        for hit in response.get("hits", {}).get("hits", []):
+            source = hit.get("_source", {})
+            results.append({
+                "glossary_id": hit.get("_id"),
+                "term": source.get("term"),
+                "total_count": source.get("total_count"),
+            })
+
+        return results
+
+    def update_glossary_feature_associations(
+        self,
+        glossary_id: str,
+        feature_associations: list[dict[str, Any]],
+    ) -> bool:
+        """Update feature associations for a glossary entry.
+
+        Args:
+            glossary_id: Glossary entry ID.
+            feature_associations: List of feature association dicts with
+                feature_id, feature_label, frequency, total_members, percentage.
+
+        Returns:
+            True on success.
+        """
+        client = self._get_client()
+
+        client.update(
+            index=INDEX_NAME,
+            id=glossary_id,
+            doc={
+                "feature_associations": feature_associations,
+                "updated_at": datetime.now().isoformat(),
+            },
+        )
+
+        return True
+
+    def delete_glossary(
+        self,
+        scope: str,
+        repository: str,
+        username: str,
+    ) -> int:
+        """Delete all glossary entries for a repository.
+
+        Args:
+            scope: Repository scope.
+            repository: Repository name.
+            username: User branch.
+
+        Returns:
+            Number of glossary entries deleted.
+        """
+        client = self._get_client()
+
+        response = client.delete_by_query(
+            index=INDEX_NAME,
+            query={
+                "bool": {
+                    "must": [
+                        {"term": {"scope": scope}},
+                        {"term": {"repository": repository}},
+                        {"term": {"username": username}},
+                        {"term": {"element_type": "glossary"}},
+                    ]
+                }
+            },
+        )
+
+        return response.get("deleted", 0)
 
     def delete_features(
         self,
