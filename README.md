@@ -334,6 +334,53 @@ ollama pull qwen2.5-coder:7b
 ollama pull snowflake-arctic-embed2
 ```
 
+### Ollama Performance Tuning
+
+For parallel parsing with multiple workers, tune Ollama with these environment variables. Set them **before** starting Ollama - add to your shell profile (`~/.zshrc`, `~/.bashrc`) to persist:
+
+```bash
+# Add to ~/.zshrc or ~/.bashrc, then restart Ollama
+
+# Keep all 3 models loaded (summarization + embedding + features) to avoid swapping
+export OLLAMA_MAX_LOADED_MODELS=3
+
+# Handle concurrent workers (adjust based on VRAM)
+export OLLAMA_NUM_PARALLEL=4
+
+# Keep models loaded indefinitely during long parsing runs
+export OLLAMA_KEEP_ALIVE=-1
+
+# Enable flash attention (faster, less memory)
+export OLLAMA_FLASH_ATTENTION=1
+
+# Handle request bursts
+export OLLAMA_MAX_QUEUE=1024
+```
+
+If running Ollama as a **systemd service**, add to `/etc/systemd/system/ollama.service`:
+```ini
+[Service]
+Environment="OLLAMA_MAX_LOADED_MODELS=3"
+Environment="OLLAMA_NUM_PARALLEL=4"
+Environment="OLLAMA_KEEP_ALIVE=-1"
+Environment="OLLAMA_FLASH_ATTENTION=1"
+```
+Then reload: `sudo systemctl daemon-reload && sudo systemctl restart ollama`
+
+**Other useful variables:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OLLAMA_NUM_PARALLEL` | 1 | Concurrent requests per model |
+| `OLLAMA_KEEP_ALIVE` | 5m | How long to keep model loaded (`-1` = forever) |
+| `OLLAMA_FLASH_ATTENTION` | 0 | Enable flash attention (`1` = on) |
+| `OLLAMA_MAX_QUEUE` | 512 | Max queued requests |
+| `OLLAMA_NUM_GPU` | all | GPU layers to offload (reduce if OOM) |
+| `OLLAMA_MAX_LOADED_MODELS` | 1 | Models in memory (**set to 3** for Magaldi) |
+| `OLLAMA_NUM_THREADS` | auto | CPU threads for computation |
+
+**Note:** Each parallel slot requires memory for the context window. Start with `OLLAMA_NUM_PARALLEL=2` and increase if you have sufficient VRAM.
+
 ## Contributing
 
 1. Fork the repository
