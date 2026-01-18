@@ -13,30 +13,150 @@ Usage:
     # Embeddings
     embed = EmbeddingClient(model="ollama/snowflake-arctic-embed2")
     vector = embed.embed("Some text to embed")
+
+    # Cleanup on shutdown (optional but recommended)
+    import atexit
+    atexit.register(cleanup_llm_sessions)
 """
 
 from __future__ import annotations
 
 import asyncio
+import atexit
 import random
 import time
 import warnings
 from dataclasses import dataclass
 from typing import Any, Callable, TypeVar
 
+import aiohttp
 import litellm
 from litellm import aembedding, completion, embedding
+from litellm.llms.custom_httpx.aiohttp_handler import BaseLLMAIOHTTPHandler
 
 T = TypeVar("T")
 
 # Disable LiteLLM telemetry
 litellm.telemetry = False
 
-# Suppress LiteLLM internal warnings:
-# - Pydantic 2.12+ serialization warnings (https://github.com/BerriAI/litellm/issues/11759)
-# - Unclosed aiohttp sessions from Ollama provider
+# Suppress Pydantic 2.12+ serialization warnings from LiteLLM
+# See: https://github.com/BerriAI/litellm/issues/11759
 warnings.filterwarnings("ignore", message="Pydantic serializer warnings")
-warnings.filterwarnings("ignore", category=ResourceWarning, message=".*[Uu]nclosed.*")
+
+
+# =============================================================================
+# CONNECTION POOL MANAGEMENT
+# =============================================================================
+
+# Global aiohttp session for connection pooling
+_aiohttp_session: aiohttp.ClientSession | None = None
+_session_lock = asyncio.Lock()
+
+
+def _get_or_create_session() -> aiohttp.ClientSession:
+    """Get or create the global aiohttp session with connection pooling.
+
+    This session is reused across all LiteLLM requests for better performance.
+    The session uses keep-alive connections and a connection pool.
+
+    Returns:
+        Configured aiohttp.ClientSession instance.
+    """
+    global _aiohttp_session
+
+    if _aiohttp_session is None or _aiohttp_session.closed:
+        connector = aiohttp.TCPConnector(
+            limit=100,  # Total connection pool size
+            limit_per_host=20,  # Per-host connection limit
+            ttl_dns_cache=300,  # DNS cache TTL in seconds
+            keepalive_timeout=60,  # Keep connections alive for 60s
+            enable_cleanup_closed=True,  # Clean up closed connections
+        )
+        timeout = aiohttp.ClientTimeout(
+            total=300,  # Total request timeout
+            connect=30,  # Connection timeout
+        )
+        _aiohttp_session = aiohttp.ClientSession(
+            connector=connector,
+            timeout=timeout,
+        )
+        # Configure LiteLLM to use our managed session
+        litellm.base_llm_aiohttp_handler = BaseLLMAIOHTTPHandler(
+            client_session=_aiohttp_session
+        )
+
+    return _aiohttp_session
+
+
+async def _get_or_create_session_async() -> aiohttp.ClientSession:
+    """Async version of session creation with proper locking."""
+    global _aiohttp_session
+
+    async with _session_lock:
+        if _aiohttp_session is None or _aiohttp_session.closed:
+            connector = aiohttp.TCPConnector(
+                limit=100,
+                limit_per_host=20,
+                ttl_dns_cache=300,
+                keepalive_timeout=60,
+                enable_cleanup_closed=True,
+            )
+            timeout = aiohttp.ClientTimeout(
+                total=300,
+                connect=30,
+            )
+            _aiohttp_session = aiohttp.ClientSession(
+                connector=connector,
+                timeout=timeout,
+            )
+            litellm.base_llm_aiohttp_handler = BaseLLMAIOHTTPHandler(
+                client_session=_aiohttp_session
+            )
+
+    return _aiohttp_session
+
+
+def cleanup_llm_sessions() -> None:
+    """Close the global aiohttp session.
+
+    Call this function during application shutdown to cleanly close
+    all HTTP connections. Can be registered with atexit:
+
+        import atexit
+        atexit.register(cleanup_llm_sessions)
+    """
+    global _aiohttp_session
+
+    if _aiohttp_session is not None and not _aiohttp_session.closed:
+        # For sync cleanup, we need to run in event loop
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(_aiohttp_session.close())
+        except RuntimeError:
+            # No running loop, create one for cleanup
+            try:
+                asyncio.run(_aiohttp_session.close())
+            except Exception:
+                pass  # Best effort cleanup
+        _aiohttp_session = None
+
+
+async def cleanup_llm_sessions_async() -> None:
+    """Async version of session cleanup.
+
+    Use this in async applications for proper cleanup:
+
+        await cleanup_llm_sessions_async()
+    """
+    global _aiohttp_session
+
+    if _aiohttp_session is not None and not _aiohttp_session.closed:
+        await _aiohttp_session.close()
+        _aiohttp_session = None
+
+
+# Register cleanup on interpreter exit
+atexit.register(cleanup_llm_sessions)
 
 
 class LLMError(Exception):
@@ -341,6 +461,9 @@ class LLMClient:
         Raises:
             LLMError: If generation fails after retries.
         """
+        # Ensure connection pool is initialized
+        _get_or_create_session()
+
         use_model = model or self.model
 
         def _do_generate() -> str:
@@ -473,6 +596,9 @@ class EmbeddingClient:
         Raises:
             LLMError: If embedding generation fails after retries.
         """
+        # Ensure connection pool is initialized
+        _get_or_create_session()
+
         def _do_embed() -> list[float]:
             kwargs: dict[str, Any] = {
                 "model": self.model,
@@ -514,6 +640,9 @@ class EmbeddingClient:
         Raises:
             LLMError: If embedding generation fails after retries.
         """
+        # Ensure connection pool is initialized (async-safe)
+        await _get_or_create_session_async()
+
         async def _do_embed() -> list[float]:
             kwargs: dict[str, Any] = {
                 "model": self.model,
@@ -555,6 +684,9 @@ class EmbeddingClient:
         """
         if not texts:
             return []
+
+        # Ensure connection pool is initialized
+        _get_or_create_session()
 
         def _do_embed_batch() -> list[list[float]]:
             kwargs: dict[str, Any] = {

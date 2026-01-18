@@ -62,4 +62,4 @@ Repository config file: `magaldi.yaml` in repo root with required `scope` field.
 
 ## TODOs
 
-- [ ] **LiteLLM warnings**: Check if [issue #11759](https://github.com/BerriAI/litellm/issues/11759) (Pydantic serialization) and unclosed aiohttp session issues are resolved, then remove warning suppression from `src/shared/ai/llm_client.py`
+- [ ] **LiteLLM Pydantic warning**: Check if [issue #11759](https://github.com/BerriAI/litellm/issues/11759) (Pydantic serialization) is resolved, then remove warning suppression from `src/shared/ai/llm_client.py`

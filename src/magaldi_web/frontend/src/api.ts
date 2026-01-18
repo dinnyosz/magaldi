@@ -603,3 +603,57 @@ export async function getElementDetails(
   const query = params.toString() ? `?${params.toString()}` : ''
   return fetchJson(`${API_BASE}/browse/element/${hashId}/details${query}`)
 }
+
+// Glossary Types
+export interface GlossaryTermSummary {
+  term: string
+  total_count: number
+  file_count: number
+  feature_count: number
+}
+
+export interface FeatureAssociationSummary {
+  feature_id: string
+  feature_label: string
+  frequency: number
+  total_members: number
+  percentage: number
+}
+
+export interface GlossaryTermDetail {
+  term: string
+  total_count: number
+  element_ids: string[]
+  file_paths: string[]
+  feature_associations: FeatureAssociationSummary[]
+}
+
+export interface GlossaryListResponse {
+  terms: GlossaryTermSummary[]
+  total: number
+}
+
+// Glossary API Functions
+export async function getGlossaryTerms(
+  scope: string,
+  repository: string,
+  minCount: number = 1
+): Promise<GlossaryListResponse> {
+  return fetchJson(`${API_BASE}/repos/${scope}/${repository}/glossary?min_count=${minCount}`)
+}
+
+export async function getGlossaryTerm(
+  scope: string,
+  repository: string,
+  term: string
+): Promise<GlossaryTermDetail> {
+  return fetchJson(`${API_BASE}/repos/${scope}/${repository}/glossary/${encodeURIComponent(term)}`)
+}
+
+export async function searchGlossaryTerms(
+  scope: string,
+  repository: string,
+  query: string
+): Promise<GlossaryListResponse> {
+  return fetchJson(`${API_BASE}/repos/${scope}/${repository}/glossary/search/${encodeURIComponent(query)}`)
+}

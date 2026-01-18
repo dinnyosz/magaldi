@@ -12,7 +12,7 @@ import {
   Tab,
   Tabs,
 } from 'react-bootstrap'
-import { getElement, getSimilarElements, ElementDetail } from '../api'
+import { getElement, getSimilarElements, type ElementDetail as _ElementDetail } from '../api'
 
 // Type configuration
 const typeConfig: Record<string, { icon: string; color: string; label: string }> = {

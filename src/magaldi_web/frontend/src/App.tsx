@@ -6,6 +6,7 @@ import Repository from './pages/Repository'
 import Element from './pages/Element'
 import Explorer from './pages/Explorer'
 import VectorMap from './pages/VectorMap'
+import Glossary from './pages/Glossary'
 import Admin from './pages/Admin'
 
 function App() {
@@ -59,6 +60,13 @@ function App() {
               </Nav.Link>
               <Nav.Link
                 as={Link}
+                to="/glossary"
+                active={location.pathname.startsWith('/glossary')}
+              >
+                Glossary
+              </Nav.Link>
+              <Nav.Link
+                as={Link}
                 to="/admin"
                 active={location.pathname.startsWith('/admin')}
               >
@@ -79,6 +87,8 @@ function App() {
           <Route path="/element/:elementId" element={<Element />} />
           <Route path="/vector-map" element={<VectorMap />} />
           <Route path="/vector-map/:scope/:repository" element={<VectorMap />} />
+          <Route path="/glossary" element={<Glossary />} />
+          <Route path="/glossary/:scope/:repository" element={<Glossary />} />
           <Route path="/admin" element={<Admin />} />
         </Routes>
       </Container>

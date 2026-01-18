@@ -22,7 +22,8 @@ import {
   getBrowseStats,
   getElementChildren,
   getElementDetails,
-  BrowseElement,
+  type BrowseElement,
+  type CallGraphEntry,
 } from '../api'
 
 // Element type icons, colors, and behavior flags
@@ -253,7 +254,7 @@ function ElementRow({ element, username }: { element: BrowseElement; username: s
                     {details.containers && details.containers.length > 0 && (
                       <div className="col-md-3 mb-2">
                         <small className="text-uppercase text-muted fw-bold d-block mb-1">Container Hierarchy</small>
-                        {details.containers.map((c, i) => (
+                        {details.containers.map((c: CallGraphEntry, i: number) => (
                           <div key={c.element_id} className="small" style={{ paddingLeft: `${i * 10}px` }}>
                             <i className={`bi ${typeConfig[c.element_type]?.icon || 'bi-dot'} me-1 text-${typeConfig[c.element_type]?.color || 'secondary'}`}></i>
                             <Link to={`/element/${c.hash_id || c.element_id}`} className="text-decoration-none">
@@ -273,7 +274,7 @@ function ElementRow({ element, username }: { element: BrowseElement; username: s
                       </small>
                       {details.callers && details.callers.length > 0 ? (
                         <div className="small" style={{ maxHeight: '150px', overflowY: 'auto' }}>
-                          {details.callers.map((caller) => (
+                          {details.callers.map((caller: CallGraphEntry) => (
                             <div key={caller.element_id} className="py-1">
                               <Link
                                 to={`/element/${caller.hash_id || caller.element_id}`}
@@ -300,7 +301,7 @@ function ElementRow({ element, username }: { element: BrowseElement; username: s
                       </small>
                       {details.callees && details.callees.length > 0 ? (
                         <div className="small" style={{ maxHeight: '150px', overflowY: 'auto' }}>
-                          {details.callees.map((callee) => (
+                          {details.callees.map((callee: CallGraphEntry) => (
                             <div key={callee.element_id} className="py-1">
                               <Link
                                 to={`/element/${callee.hash_id || callee.element_id}`}
