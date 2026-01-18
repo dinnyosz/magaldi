@@ -1265,8 +1265,10 @@ def run_processing(
                     type_parts.append(f"[{color}]{t}[/]: [yellow]{done}/{tot}[/] [dim]({api_time:.1f}s)[/]")
         type_line = f"  [dim]Progress:[/] {' [dim]|[/] '.join(type_parts)}" if type_parts else ""
 
-        # Stats line - effective wall time (elapsed/done) = actual throughput with parallelism
-        effective_wall = state.timing.elapsed / state.completed if state.completed > 0 else 0.0
+        # Stats line - effective wall time = elapsed / items that actually made API calls
+        # Don't include skipped (unchanged) items in throughput calculation
+        api_processed = state.completed - state.skipped
+        effective_wall = state.timing.elapsed / api_processed if api_processed > 0 else 0.0
         total_api = state.timing.avg_summarize_time + state.timing.avg_embed_time
         stats = f"  [dim]Throughput:[/] [green]{effective_wall:.2f}s[/]/item [dim]|[/] [dim]API:[/] [green]{total_api:.1f}s[/]/item [dim]([/][green]{state.timing.avg_summarize_time:.1f}s[/] summ + [green]{state.timing.avg_embed_time:.1f}s[/] embed[dim])[/]"
 
@@ -1341,8 +1343,9 @@ def run_processing(
     avg_summ = current_state.timing.avg_summarize_time
     avg_embed = current_state.timing.avg_embed_time
     elapsed = current_state.timing.elapsed
-    # Effective wall time = elapsed / processed (shows throughput with parallelism)
-    avg_wall = elapsed / result.elements_processed if result.elements_processed > 0 else 0.0
+    # Effective wall time = elapsed / items that made API calls (not counting skipped/unchanged)
+    api_processed = result.elements_processed - result.elements_skipped
+    avg_wall = elapsed / api_processed if api_processed > 0 else 0.0
 
     return (result.elements_processed, result.elements_skipped, result.indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, result.failed_elements)
 
@@ -1428,9 +1431,10 @@ def print_processing_result(
         parts.append("[yellow]AI skipped[/]")
     if elapsed > 0:
         parts.append(f"{format_duration(elapsed)} elapsed")
-        # Effective wall time (elapsed / processed) shows actual throughput
-        if processed > 0:
-            effective = elapsed / processed
+        # Effective wall time = elapsed / items that made API calls (not counting skipped)
+        api_processed = processed - skipped
+        if api_processed > 0:
+            effective = elapsed / api_processed
             parts.append(f"{effective:.2f}s/item effective")
     if avg_wall > 0:
         parts.append(f"avg: {avg_wall:.1f}s total, {avg_summ:.1f}s summ, {avg_embed:.1f}s embed")
