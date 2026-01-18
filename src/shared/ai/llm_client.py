@@ -48,24 +48,30 @@ warnings.filterwarnings("ignore", message="Pydantic serializer warnings")
 # CONNECTION POOL MANAGEMENT
 # =============================================================================
 
-# Global aiohttp session for connection pooling
+# Global aiohttp session for async connection pooling
+# Note: Only used for async calls. Sync calls use LiteLLM's internal httpx client.
 _aiohttp_session: aiohttp.ClientSession | None = None
 _session_lock: asyncio.Lock | None = None  # Created lazily to avoid event loop issues
-_sync_lock = __import__("threading").Lock()  # For sync session creation
 
 
-def _get_or_create_session() -> aiohttp.ClientSession:
+async def _get_or_create_session_async() -> aiohttp.ClientSession:
     """Get or create the global aiohttp session with connection pooling.
 
-    This session is reused across all LiteLLM requests for better performance.
+    This session is reused across all async LiteLLM requests for better performance.
     The session uses keep-alive connections and a connection pool.
+
+    Note: Only call this from async context. Sync LiteLLM calls use httpx internally.
 
     Returns:
         Configured aiohttp.ClientSession instance.
     """
-    global _aiohttp_session
+    global _aiohttp_session, _session_lock
 
-    with _sync_lock:
+    # Create lock lazily to avoid "no running event loop" error at import time
+    if _session_lock is None:
+        _session_lock = asyncio.Lock()
+
+    async with _session_lock:
         if _aiohttp_session is None or _aiohttp_session.closed:
             connector = aiohttp.TCPConnector(
                 limit=100,  # Total connection pool size
@@ -82,39 +88,7 @@ def _get_or_create_session() -> aiohttp.ClientSession:
                 connector=connector,
                 timeout=timeout,
             )
-            # Configure LiteLLM to use our managed session
-            litellm.base_llm_aiohttp_handler = BaseLLMAIOHTTPHandler(
-                client_session=_aiohttp_session
-            )
-
-    return _aiohttp_session
-
-
-async def _get_or_create_session_async() -> aiohttp.ClientSession:
-    """Async version of session creation with proper locking."""
-    global _aiohttp_session, _session_lock
-
-    # Create lock lazily to avoid "no running event loop" error at import time
-    if _session_lock is None:
-        _session_lock = asyncio.Lock()
-
-    async with _session_lock:
-        if _aiohttp_session is None or _aiohttp_session.closed:
-            connector = aiohttp.TCPConnector(
-                limit=100,
-                limit_per_host=20,
-                ttl_dns_cache=300,
-                keepalive_timeout=60,
-                enable_cleanup_closed=True,
-            )
-            timeout = aiohttp.ClientTimeout(
-                total=300,
-                connect=30,
-            )
-            _aiohttp_session = aiohttp.ClientSession(
-                connector=connector,
-                timeout=timeout,
-            )
+            # Configure LiteLLM to use our managed session for async calls
             litellm.base_llm_aiohttp_handler = BaseLLMAIOHTTPHandler(
                 client_session=_aiohttp_session
             )
@@ -467,9 +441,6 @@ class LLMClient:
         Raises:
             LLMError: If generation fails after retries.
         """
-        # Ensure connection pool is initialized
-        _get_or_create_session()
-
         use_model = model or self.model
 
         def _do_generate() -> str:
@@ -602,9 +573,6 @@ class EmbeddingClient:
         Raises:
             LLMError: If embedding generation fails after retries.
         """
-        # Ensure connection pool is initialized
-        _get_or_create_session()
-
         def _do_embed() -> list[float]:
             kwargs: dict[str, Any] = {
                 "model": self.model,
@@ -690,9 +658,6 @@ class EmbeddingClient:
         """
         if not texts:
             return []
-
-        # Ensure connection pool is initialized
-        _get_or_create_session()
 
         def _do_embed_batch() -> list[list[float]]:
             kwargs: dict[str, Any] = {
