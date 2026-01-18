@@ -50,7 +50,8 @@ warnings.filterwarnings("ignore", message="Pydantic serializer warnings")
 
 # Global aiohttp session for connection pooling
 _aiohttp_session: aiohttp.ClientSession | None = None
-_session_lock = asyncio.Lock()
+_session_lock: asyncio.Lock | None = None  # Created lazily to avoid event loop issues
+_sync_lock = __import__("threading").Lock()  # For sync session creation
 
 
 def _get_or_create_session() -> aiohttp.ClientSession:
@@ -64,33 +65,38 @@ def _get_or_create_session() -> aiohttp.ClientSession:
     """
     global _aiohttp_session
 
-    if _aiohttp_session is None or _aiohttp_session.closed:
-        connector = aiohttp.TCPConnector(
-            limit=100,  # Total connection pool size
-            limit_per_host=20,  # Per-host connection limit
-            ttl_dns_cache=300,  # DNS cache TTL in seconds
-            keepalive_timeout=60,  # Keep connections alive for 60s
-            enable_cleanup_closed=True,  # Clean up closed connections
-        )
-        timeout = aiohttp.ClientTimeout(
-            total=300,  # Total request timeout
-            connect=30,  # Connection timeout
-        )
-        _aiohttp_session = aiohttp.ClientSession(
-            connector=connector,
-            timeout=timeout,
-        )
-        # Configure LiteLLM to use our managed session
-        litellm.base_llm_aiohttp_handler = BaseLLMAIOHTTPHandler(
-            client_session=_aiohttp_session
-        )
+    with _sync_lock:
+        if _aiohttp_session is None or _aiohttp_session.closed:
+            connector = aiohttp.TCPConnector(
+                limit=100,  # Total connection pool size
+                limit_per_host=20,  # Per-host connection limit
+                ttl_dns_cache=300,  # DNS cache TTL in seconds
+                keepalive_timeout=60,  # Keep connections alive for 60s
+                enable_cleanup_closed=True,  # Clean up closed connections
+            )
+            timeout = aiohttp.ClientTimeout(
+                total=300,  # Total request timeout
+                connect=30,  # Connection timeout
+            )
+            _aiohttp_session = aiohttp.ClientSession(
+                connector=connector,
+                timeout=timeout,
+            )
+            # Configure LiteLLM to use our managed session
+            litellm.base_llm_aiohttp_handler = BaseLLMAIOHTTPHandler(
+                client_session=_aiohttp_session
+            )
 
     return _aiohttp_session
 
 
 async def _get_or_create_session_async() -> aiohttp.ClientSession:
     """Async version of session creation with proper locking."""
-    global _aiohttp_session
+    global _aiohttp_session, _session_lock
+
+    # Create lock lazily to avoid "no running event loop" error at import time
+    if _session_lock is None:
+        _session_lock = asyncio.Lock()
 
     async with _session_lock:
         if _aiohttp_session is None or _aiohttp_session.closed:
