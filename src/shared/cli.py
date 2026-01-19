@@ -1686,24 +1686,42 @@ def benchmark_models(
             # Build evaluation prompt with source code and all summaries
             eval_prompt = _build_evaluation_prompt(elem, models_to_test, results, i)
 
-            with console.status(f"  Evaluating {elem_name}..."):
-                eval_result = client.generate(
-                    model=eval_model,
-                    prompt=eval_prompt,
-                    temperature=0.1,  # Low temp for consistent ratings
-                    max_tokens=512,
-                    timeout=benchmark_config.timeout,
-                )
+            # Retry up to 3 times if some ratings are missing
+            max_retries = 3
+            parsed_ratings = {}
+            for attempt in range(max_retries):
+                with console.status(f"  Evaluating {elem_name}..." + (f" (retry {attempt})" if attempt > 0 else "")):
+                    eval_result = client.generate(
+                        model=eval_model,
+                        prompt=eval_prompt,
+                        temperature=0.1 + (attempt * 0.1),  # Slightly increase temp on retry
+                        max_tokens=512,
+                        timeout=benchmark_config.timeout,
+                    )
 
-            if eval_result.success:
-                # Parse ratings from response
-                parsed_ratings = _parse_evaluation_ratings(eval_result.response, models_to_test)
+                if eval_result.success:
+                    parsed_ratings = _parse_evaluation_ratings(eval_result.response, models_to_test)
+                    # Check if all models got a rating
+                    missing = [m for m in models_to_test if parsed_ratings[m]["rating"] is None]
+                    if not missing:
+                        break  # All ratings present, we're done
+                    elif attempt < max_retries - 1:
+                        continue  # Retry
+                else:
+                    if attempt < max_retries - 1:
+                        continue  # Retry on failure
+
+            if parsed_ratings:
                 ratings[i] = parsed_ratings
                 rating_str = " | ".join(
                     f"{m}: {parsed_ratings[m]['rating'] or '?'}"
                     for m in models_to_test
                 )
-                console.print(f"  [green]✓[/] {elem_name[:40]:<40} | {rating_str}")
+                missing_count = sum(1 for m in models_to_test if parsed_ratings[m]["rating"] is None)
+                if missing_count > 0:
+                    console.print(f"  [yellow]~[/] {elem_name[:40]:<40} | {rating_str} [dim]({missing_count} missing)[/]")
+                else:
+                    console.print(f"  [green]✓[/] {elem_name[:40]:<40} | {rating_str}")
             else:
                 console.print(f"  [red]✗[/] {elem_name[:40]:<40} | Evaluation failed: {eval_result.error}")
 
@@ -2088,11 +2106,16 @@ def _build_evaluation_prompt(
         "A score of 10 means an AI agent can fully understand when and how to use this code from the summary alone.",
         "A score of 1 means the summary is unhelpful for code navigation.",
         "",
-        "Respond with ratings AND a one-sentence justification in this exact format (one per line):",
+        "IMPORTANT: You MUST rate ALL models listed below. Do not skip any.",
+        "",
+        "Respond with ratings AND a one-sentence justification in this EXACT format (one per line):",
     ])
 
     for model in models:
         prompt_parts.append(f"{model}: <rating>/10 - <one sentence justification>")
+
+    prompt_parts.append("")
+    prompt_parts.append("Rate ALL models above. Do not skip any model.")
 
     return "\n".join(prompt_parts)
 
