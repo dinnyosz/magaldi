@@ -50,7 +50,7 @@ class SummarizationConfig:
     # Generation settings (based on arxiv.org/html/2507.03160v2)
     temperature: float = 0.2
     top_p: float = 0.95
-    max_tokens: int = 256
+    max_tokens: int = 512
     timeout: int = 60
 
     # Retry settings
@@ -145,7 +145,7 @@ class SummarizationLLMClient:
         prompt: str,
         temperature: float = 0.2,
         top_p: float = 0.95,
-        max_tokens: int = 256,
+        max_tokens: int = 512,
         timeout: int = 60,
         model: str | None = None,
     ) -> str:

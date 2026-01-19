@@ -130,7 +130,7 @@ class OllamaBenchmarkClient:
         prompt: str,
         temperature: float = 0.2,
         top_p: float = 0.95,
-        max_tokens: int = 256,
+        max_tokens: int = 512,
         timeout: int = 120,
     ) -> BenchmarkResult:
         """Generate completion and return detailed timing.

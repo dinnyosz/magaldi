@@ -97,7 +97,8 @@ class LLMConfig:
     # Generation settings (based on arxiv.org/html/2507.03160v2)
     summarize_temperature: float = 0.2
     summarize_top_p: float = 0.95
-    summarize_max_tokens: int = 256
+    # TODO: Add per-element-type max_tokens configuration (e.g., files need more than functions)
+    summarize_max_tokens: int = 512
     summarize_context_window: int = 8192
 
     # Embedding model
@@ -278,7 +279,7 @@ class BenchmarkConfig:
 
     # Generation settings (based on paper's methodology)
     temperature: float = 0.2      # Paper used 0.2, top_p=0.95
-    max_tokens: int = 256
+    max_tokens: int = 512
     timeout: int = 120
 
 
