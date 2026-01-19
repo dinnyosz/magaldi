@@ -128,7 +128,8 @@ class OllamaBenchmarkClient:
         self,
         model: str,
         prompt: str,
-        temperature: float = 0.3,
+        temperature: float = 0.2,
+        top_p: float = 0.95,
         max_tokens: int = 256,
         timeout: int = 120,
     ) -> BenchmarkResult:
@@ -138,6 +139,7 @@ class OllamaBenchmarkClient:
             model: Model name.
             prompt: The prompt to send.
             temperature: Sampling temperature.
+            top_p: Nucleus sampling parameter.
             max_tokens: Maximum tokens to generate.
             timeout: Request timeout in seconds.
 
@@ -155,6 +157,7 @@ class OllamaBenchmarkClient:
                     "stream": False,
                     "options": {
                         "temperature": temperature,
+                        "top_p": top_p,
                         "num_predict": max_tokens,
                     },
                 },

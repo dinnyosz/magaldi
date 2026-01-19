@@ -421,7 +421,8 @@ class LLMClient:
     def generate(
         self,
         prompt: str,
-        temperature: float = 0.3,
+        temperature: float = 0.2,
+        top_p: float = 0.95,
         max_tokens: int = 256,
         timeout: int = 60,
         model: str | None = None,
@@ -431,6 +432,7 @@ class LLMClient:
         Args:
             prompt: The prompt to send to the model.
             temperature: Sampling temperature (0.0 to 1.0).
+            top_p: Nucleus sampling parameter (0.0 to 1.0).
             max_tokens: Maximum tokens to generate.
             timeout: Request timeout in seconds.
             model: Optional model override.
@@ -449,6 +451,7 @@ class LLMClient:
                 "model": use_model,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": temperature,
+                "top_p": top_p,
                 "max_tokens": max_tokens,
                 "timeout": timeout,
             }

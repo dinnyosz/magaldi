@@ -42,10 +42,11 @@ class ClusterConfig:
     # Element types to cluster
     element_types: list[str] = field(default_factory=lambda: ["function", "method"])
 
-    # LLM settings for labeling
+    # LLM settings for labeling (based on arxiv.org/html/2507.03160v2)
     api_base: str = "http://localhost:11434"
     labeling_model: str = "qwen2.5-coder:3b"
-    label_temperature: float = 0.3
+    label_temperature: float = 0.2
+    label_top_p: float = 0.95
     label_max_tokens: int = 32
     label_timeout: int = 30
 
@@ -357,6 +358,7 @@ class FeatureClusterer:
                 raw_label = llm_client.generate(
                     prompt=prompt,
                     temperature=self.config.label_temperature,
+                    top_p=self.config.label_top_p,
                     max_tokens=self.config.label_max_tokens,
                     timeout=self.config.label_timeout,
                 )

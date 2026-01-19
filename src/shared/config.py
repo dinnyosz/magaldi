@@ -94,7 +94,9 @@ class LLMConfig:
     summarize_model: str = "qwen2.5-coder:3b"
     # Smaller model for functions, methods, variables, constants
     summarize_model_small: str = "qwen2.5-coder:1.5b"
-    summarize_temperature: float = 0.3
+    # Generation settings (based on arxiv.org/html/2507.03160v2)
+    summarize_temperature: float = 0.2
+    summarize_top_p: float = 0.95
     summarize_max_tokens: int = 256
     summarize_context_window: int = 8192
 

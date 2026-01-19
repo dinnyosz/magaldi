@@ -43,8 +43,9 @@ class FeatureProcessingConfig:
     provider: str = "ollama"  # LLM provider: ollama, openai, anthropic, etc.
     api_key: str | None = None  # API key for cloud providers
 
-    # Summarization settings
-    summarize_temperature: float = 0.3
+    # Summarization settings (based on arxiv.org/html/2507.03160v2)
+    summarize_temperature: float = 0.2
+    summarize_top_p: float = 0.95
     summarize_max_tokens: int = 512  # Longer for feature summaries
     summarize_timeout: int = 90
 
@@ -347,6 +348,7 @@ def _generate_feature_summary(
     raw_summary = llm_client.generate(
         prompt=prompt,
         temperature=config.summarize_temperature,
+        top_p=config.summarize_top_p,
         max_tokens=config.summarize_max_tokens,
         timeout=config.summarize_timeout,
     )
@@ -747,6 +749,7 @@ def _generate_subfeature_summary(
     raw_summary = llm_client.generate(
         prompt=prompt,
         temperature=config.summarize_temperature,
+        top_p=config.summarize_top_p,
         max_tokens=config.summarize_max_tokens,
         timeout=config.summarize_timeout,
     )
