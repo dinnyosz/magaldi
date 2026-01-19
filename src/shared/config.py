@@ -254,7 +254,7 @@ class BenchmarkConfig:
         # Tier 3: Medium (3-4B) - ~10-12GB VRAM, best efficiency/performance
         "qwen2.5-coder:3b",        # 59% pass@1, sweet spot
         "llama3.2:3b",
-        "smollm3",                 # 3B, claims to outperform Qwen2.5-3B, 64K context
+        "alibayram/smollm3",       # 3B, claims to outperform Qwen2.5-3B, 64K context
         "phi4-mini",               # 3.8B, MIT, 128K context, strong reasoning
         # Tier 4: Large (6B-9B) - ~14-17GB VRAM
         "qwen2.5-coder:7b",        # 65% pass@1, most stable (1.00)
