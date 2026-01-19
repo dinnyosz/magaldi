@@ -228,35 +228,43 @@ class UserDataConfig:
 
 @dataclass
 class BenchmarkConfig:
-    """Benchmark configuration for model comparison."""
+    """Benchmark configuration for model comparison.
 
-    # Models to benchmark (mix of dense and MoE architectures)
+    Model selection based on arxiv.org/html/2507.03160v2:
+    - Qwen2.5-Coder family: best stability and performance/efficiency ratio
+    - 3B models offer sweet spot (59% pass@1, ~11GB VRAM)
+    - 10% performance gain typically requires 4x VRAM increase
+    """
+
+    # Models to benchmark - ordered by size within each category
+    # Reference: "Assessing Small Language Models for Code Generation" (2025)
     models: list[str] = field(default_factory=lambda: [
-        # Dense models - Qwen coder series
+        # Tier 1: Ultra-light (<1.5B) - ~6-8GB VRAM
         "qwen2.5-coder:0.5b",
-        "qwen2.5-coder:1.5b",
-        "qwen2.5-coder:3b",
-        "qwen2.5-coder:7b",
-        # Dense models - Llama edge/mobile
+        "qwen2.5-coder:1.5b",      # 54% pass@1, best efficiency
+        "opencoder:1.5b",          # Full transparency model
         "llama3.2:1b",
+        # Tier 2: Light (1.5B-3B) - ~10-12GB VRAM, best efficiency/performance
+        "qwen2.5-coder:3b",        # 59% pass@1, sweet spot
         "llama3.2:3b",
-        # MoE models - small
+        # Tier 3: Medium (6B-9B) - ~14-17GB VRAM
+        "qwen2.5-coder:7b",        # 65% pass@1, most stable (1.00)
+        "opencoder:8b",            # Comparable to top performers
+        # MoE models - active params listed
         "granite3.1-moe:1b",       # ~1B active (IBM, 128K context)
         "granite3.1-moe:3b",       # ~3B active (IBM, 128K context)
         "deepseek-coder-v2:lite",  # 2.4B active from 16B total
-        "qwen3:30b-a3b",           # 3.3B active from 30B total
-        # MoE models - large
-        "nemotron-3-nano",         # 3-4B active from 30B (Mamba+MoE hybrid)
     ])
 
     # Model used for evaluating/rating summaries (LLM-as-judge)
+    # Qwen2.5-Coder 7B chosen for highest stability score (1.00)
     eval_model: str = "qwen2.5-coder:7b"
 
     # Ollama API URL (defaults to same as llm.url)
     ollama_url: str | None = None
 
-    # Generation settings
-    temperature: float = 0.3
+    # Generation settings (based on paper's methodology)
+    temperature: float = 0.2      # Paper used 0.2, top_p=0.95
     max_tokens: int = 256
     timeout: int = 120
 
