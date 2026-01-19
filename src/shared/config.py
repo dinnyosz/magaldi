@@ -232,24 +232,31 @@ class UserDataConfig:
 class BenchmarkConfig:
     """Benchmark configuration for model comparison.
 
-    Model selection based on arxiv.org/html/2507.03160v2:
+    Model selection based on:
+    - arxiv.org/html/2507.03160v2 (SLM code generation study)
+    - bentoml.com/blog/the-best-open-source-small-language-models
+
+    Key findings:
     - Qwen2.5-Coder family: best stability and performance/efficiency ratio
     - 3B models offer sweet spot (59% pass@1, ~11GB VRAM)
     - 10% performance gain typically requires 4x VRAM increase
     """
 
     # Models to benchmark - ordered by size within each category
-    # Reference: "Assessing Small Language Models for Code Generation" (2025)
     models: list[str] = field(default_factory=lambda: [
-        # Tier 1: Ultra-light (<1.5B) - ~6-8GB VRAM
+        # Tier 1: Ultra-light (<1B) - ~4-6GB VRAM
+        "qwen3:0.6b",              # Smallest Qwen3, Apache 2.0, 32K context
         "qwen2.5-coder:0.5b",
+        # Tier 2: Light (1-1.5B) - ~6-8GB VRAM
         "qwen2.5-coder:1.5b",      # 54% pass@1, best efficiency
         "opencoder:1.5b",          # Full transparency model
         "llama3.2:1b",
-        # Tier 2: Light (1.5B-3B) - ~10-12GB VRAM, best efficiency/performance
+        # Tier 3: Medium (3-4B) - ~10-12GB VRAM, best efficiency/performance
         "qwen2.5-coder:3b",        # 59% pass@1, sweet spot
         "llama3.2:3b",
-        # Tier 3: Medium (6B-9B) - ~14-17GB VRAM
+        "smollm3:3b",              # Claims to outperform Qwen2.5-3B, 64K context
+        "phi4-mini",               # 3.8B, MIT, 128K context, strong reasoning
+        # Tier 4: Large (6B-9B) - ~14-17GB VRAM
         "qwen2.5-coder:7b",        # 65% pass@1, most stable (1.00)
         "opencoder:8b",            # Comparable to top performers
         # MoE models - active params listed
