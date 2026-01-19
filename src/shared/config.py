@@ -263,6 +263,7 @@ class BenchmarkConfig:
         "granite3.1-moe:1b",       # ~1B active (IBM, 128K context)
         "granite3.1-moe:3b",       # ~3B active (IBM, 128K context)
         "deepseek-coder-v2:lite",  # 2.4B active from 16B total
+        "nemotron-3-nano",         # 3-4B active from 30B (NVIDIA, Mamba+MoE hybrid)
     ])
 
     # Model used for evaluating/rating summaries (LLM-as-judge)
