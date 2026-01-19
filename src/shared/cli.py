@@ -1471,6 +1471,680 @@ def print_summary(
 
 
 # =============================================================================
+# BENCHMARK-MODELS COMMAND
+# =============================================================================
+
+
+@main.command("benchmark-models")
+@click.argument("repo_path", type=click.Path(exists=True, file_okay=False, dir_okay=True))
+@click.option("--file", "-f", "file_path", default=None, help="Specific file to benchmark (relative path)")
+@click.option("--num-files", "-n", default=5, help="Number of random files to select (default: 5)")
+@click.option("--max-per-type", default=10, help="Max elements per type per file (default: 10)")
+@click.option("--models", "-m", default=None, help="Comma-separated list of Ollama models (default: from config)")
+@click.option("--ollama-url", default=None, help="Ollama API URL (default: from config or http://localhost:11434)")
+@click.option("--user", "-u", default="benchmark", help="Username for parsing (default: benchmark)")
+def benchmark_models(
+    repo_path: str,
+    file_path: str | None,
+    num_files: int,
+    max_per_type: int,
+    models: str | None,
+    ollama_url: str | None,
+    user: str,
+) -> None:
+    """Benchmark Ollama models on code summarization.
+
+    Parses a repository, selects random files (or a specific one), and runs
+    summarization benchmarks with detailed timing and LLM-as-judge evaluation.
+
+    By default, selects 5 random files with max 10 elements per type per file.
+
+    REPO_PATH is the path to the repository to benchmark.
+    """
+    import random
+    from datetime import datetime as dt
+    from pathlib import Path
+
+    from shared.ai.ollama_benchmark import OllamaBenchmarkClient, BenchmarkResult
+    from magaldi_core.change_detection import ChangeManifest, FileInfo
+
+    # Load config for defaults
+    config = load_config(skip_validation=True)
+    benchmark_config = config.benchmark
+
+    # Parse models list (CLI overrides config)
+    if models:
+        model_list = [m.strip() for m in models.split(",")]
+    else:
+        model_list = benchmark_config.models
+
+    # Ollama URL (CLI overrides config, config overrides default)
+    if ollama_url is None:
+        ollama_url = benchmark_config.ollama_url or config.llm.url
+
+    console.print("[bold blue]Magaldi Model Benchmark[/]")
+    console.print(f"  Repository: {repo_path}")
+    console.print(f"  Models: {', '.join(model_list)}")
+    console.print()
+
+    try:
+        # Phase 1: Discovery
+        console.print("[bold blue]Phase 1:[/] Discovery")
+        discovery_result = run_discovery(repo_path, user)
+        print_discovery_result(discovery_result)
+
+        # Create manifest with ALL files (skip change detection)
+        console.print("\n[bold blue]Phase 2:[/] Creating file manifest (all files)")
+        manifest = _create_full_manifest(discovery_result)
+        console.print(f"  {manifest.files_to_parse} files to parse")
+
+        if manifest.files_to_parse == 0:
+            console.print("\n[red]No supported files found in repository.[/]")
+            sys.exit(1)
+
+        # Phase 3: Parsing
+        console.print("\n[bold blue]Phase 3:[/] Parsing")
+        parsing_result = run_parsing(manifest)
+        print_parsing_result(parsing_result)
+
+        # Select files to benchmark
+        console.print("\n[bold blue]Phase 4:[/] File Selection")
+        selected_files = _select_benchmark_files(parsing_result, file_path, num_files=num_files, max_per_type=max_per_type)
+        if not selected_files:
+            console.print("\n[red]No valid files found for benchmarking.[/]")
+            sys.exit(1)
+
+        # Combine all elements from selected files
+        elements = []
+        for sf in selected_files:
+            elements.extend(sf["elements"])
+
+        console.print(f"  Selected {len(selected_files)} files:")
+        from collections import Counter
+        for sf in selected_files:
+            file_types = Counter(e.element_type for e in sf["elements"])
+            type_str = ", ".join(f"{t}: {c}" for t, c in sorted(file_types.items()))
+            console.print(f"    [cyan]{sf['path']}[/] ({len(sf['elements'])} elements: {type_str})")
+
+        # Show total element type breakdown
+        total_type_counts = Counter(e.element_type for e in elements)
+        total_type_summary = ", ".join(f"{t}: {c}" for t, c in sorted(total_type_counts.items()))
+        console.print(f"  Total: {len(elements)} elements ({total_type_summary})")
+
+        # Check Ollama connection
+        console.print("\n[bold blue]Phase 5:[/] Ollama Connection")
+        client = OllamaBenchmarkClient(base_url=ollama_url)
+        if not client.check_connection():
+            console.print(f"[red]Cannot connect to Ollama at {ollama_url}[/]")
+            sys.exit(1)
+
+        available_models = client.list_models()
+        console.print(f"  Connected to Ollama | {len(available_models)} models available")
+
+        # Check which models are available
+        missing_models = []
+        models_to_test = []
+        for model in model_list:
+            # Check if model is available (handles :latest suffix)
+            if model in available_models or f"{model}:latest" in available_models:
+                models_to_test.append(model)
+            else:
+                # Try without tag
+                base = model.rsplit(":", 1)[0] if ":" in model else model
+                if base in available_models or f"{base}:latest" in available_models:
+                    models_to_test.append(model)
+                else:
+                    missing_models.append(model)
+
+        if missing_models:
+            console.print(f"  [yellow]Missing models (skipped):[/]")
+            for m in missing_models:
+                console.print(f"    [dim]✗ {m}[/]")
+
+        if not models_to_test:
+            console.print("\n[red]No models available to test.[/]")
+            console.print("[yellow]Pull models with:[/]")
+            for m in missing_models:
+                console.print(f"  ollama pull {m}")
+            sys.exit(1)
+
+        console.print(f"  Testing models: {', '.join(models_to_test)}")
+
+        # Warmup models
+        console.print("\n[bold blue]Phase 6:[/] Model Warmup")
+        for model in models_to_test:
+            with console.status(f"[bold blue]Warming up {model}...[/]"):
+                success, warmup_time, error = client.warmup(model, timeout=120)
+            if success:
+                console.print(f"  [green]✓[/] {model} ({warmup_time:.1f}s)")
+            else:
+                console.print(f"  [red]✗[/] {model}: {error}")
+                models_to_test.remove(model)
+
+        if not models_to_test:
+            console.print("[red]No models available after warmup.[/]")
+            sys.exit(1)
+
+        # Run benchmarks
+        console.print("\n[bold blue]Phase 7:[/] Benchmarking")
+        results: dict[str, list[BenchmarkResult]] = {m: [] for m in models_to_test}
+
+        # Build prompt for each element
+        prompts = []
+        for elem in elements:
+            prompt = _build_summarization_prompt(elem)
+            prompts.append((elem, prompt))
+
+        # Test each model on each element
+        for model in models_to_test:
+            console.print(f"\n  [cyan]{model}[/]")
+
+            for i, (elem, prompt) in enumerate(prompts):
+                elem_name = f"{elem.element_type}:{elem.name}"
+                with console.status(f"    [{i+1}/{len(prompts)}] {elem_name}..."):
+                    result = client.generate(
+                        model=model,
+                        prompt=prompt,
+                        temperature=benchmark_config.temperature,
+                        max_tokens=benchmark_config.max_tokens,
+                        timeout=benchmark_config.timeout,
+                    )
+                    results[model].append(result)
+
+                if result.success:
+                    # Calculate sum of Ollama-reported times
+                    # Note: Ollama has a known bug where total_duration > sum of components
+                    # due to untracked context processing overhead (GitHub issue #10860)
+                    ollama_sum = result.load_time + result.prefill_time + result.generate_time
+                    overhead = result.ollama_total_time - ollama_sum
+                    overhead_str = f"+{overhead:.2f}s overhead" if overhead > 0.01 else ""
+                    console.print(
+                        f"    [green]✓[/] {elem_name[:40]:<40} | "
+                        f"[bold]{result.ollama_total_time:.2f}s[/] "
+                        f"(load:{result.load_time:.2f} pre:{result.prefill_time:.2f} gen:{result.generate_time:.2f} {overhead_str}) | "
+                        f"{result.prompt_tokens}→{result.output_tokens} tok @ {result.tokens_per_second:.1f} t/s"
+                    )
+                else:
+                    console.print(f"    [red]✗[/] {elem_name[:40]:<40} | {result.error}")
+
+        # Phase 8: LLM Evaluation of summaries
+        console.print("\n[bold blue]Phase 8:[/] LLM Evaluation")
+
+        # Use configured eval model, with fallback to largest available
+        eval_model = benchmark_config.eval_model
+        if eval_model not in available_models:
+            console.print(f"  [yellow]Eval model {eval_model} not available, using {models_to_test[-1]}[/]")
+            eval_model = models_to_test[-1]
+        console.print(f"  Using [cyan]{eval_model}[/] to rate summaries (1-10)")
+
+        # ratings[element_index][model] = rating (1-10) or None if failed
+        ratings: dict[int, dict[str, int | None]] = {i: {} for i in range(len(prompts))}
+
+        for i, (elem, _) in enumerate(prompts):
+            elem_name = f"{elem.element_type}:{elem.name}"
+
+            # Build evaluation prompt with source code and all summaries
+            eval_prompt = _build_evaluation_prompt(elem, models_to_test, results, i)
+
+            with console.status(f"  Evaluating {elem_name}..."):
+                eval_result = client.generate(
+                    model=eval_model,
+                    prompt=eval_prompt,
+                    temperature=0.1,  # Low temp for consistent ratings
+                    max_tokens=512,
+                    timeout=benchmark_config.timeout,
+                )
+
+            if eval_result.success:
+                # Parse ratings from response
+                parsed_ratings = _parse_evaluation_ratings(eval_result.response, models_to_test)
+                ratings[i] = parsed_ratings
+                rating_str = " | ".join(
+                    f"{m}: {parsed_ratings[m]['rating'] or '?'}"
+                    for m in models_to_test
+                )
+                console.print(f"  [green]✓[/] {elem_name[:40]:<40} | {rating_str}")
+            else:
+                console.print(f"  [red]✗[/] {elem_name[:40]:<40} | Evaluation failed: {eval_result.error}")
+
+        # Summary comparison (show all summaries with ratings)
+        console.print("\n" + "=" * 70)
+        console.print("[bold]Summary Comparison[/]")
+        console.print("=" * 70)
+
+        for i, (elem, _) in enumerate(prompts):
+            elem_name = f"{elem.element_type}:{elem.name}"
+            console.print(f"\n[bold cyan]{elem_name}[/]")
+
+            # Show source code snippet (first 10 lines)
+            if elem.raw_code:
+                console.print("  [dim]Source:[/]")
+                code_lines = elem.raw_code.strip().split('\n')[:10]
+                for line in code_lines:
+                    console.print(f"    [dim]{line[:70]}[/]")
+                if len(elem.raw_code.strip().split('\n')) > 10:
+                    console.print(f"    [dim]... ({len(elem.raw_code.strip().split(chr(10)))} lines total)[/]")
+
+            for model in models_to_test:
+                model_result = results[model][i]
+                rating_data = ratings[i].get(model, {})
+                rating = rating_data.get("rating")
+                reason = rating_data.get("reason")
+                rating_display = f"[bold green]{rating}/10[/]" if rating else "[dim]?/10[/]"
+
+                if model_result.success and model_result.response.strip():
+                    console.print(f"  [yellow]{model}[/] {rating_display}:")
+                    if reason:
+                        console.print(f"    [dim italic]→ {reason}[/]")
+                    # Show full summary for comparison (wrapped)
+                    summary = model_result.response.strip()
+                    for line in summary.split('\n'):
+                        # Wrap long lines
+                        while len(line) > 70:
+                            console.print(f"    {line[:70]}")
+                            line = line[70:]
+                        if line:
+                            console.print(f"    {line}")
+                else:
+                    console.print(f"  [yellow]{model}[/] {rating_display}: [red](failed)[/]")
+
+        # Benchmark summary table
+        console.print("\n" + "=" * 70)
+        console.print("[bold]Benchmark Summary[/]")
+        console.print("=" * 70)
+
+        summary_table = Table(show_header=True, header_style="bold cyan")
+        summary_table.add_column("Model", style="cyan")
+        summary_table.add_column("Avg Rating", justify="center")
+        summary_table.add_column("Success", justify="center")
+        summary_table.add_column("Avg Time", justify="right")
+        summary_table.add_column("Gen t/s", justify="right")
+
+        for model in models_to_test:
+            model_results = results[model]
+            success_count = sum(1 for r in model_results if r.success)
+            successful = [r for r in model_results if r.success]
+
+            # Calculate average rating for this model
+            model_ratings = [
+                ratings[i].get(model, {}).get("rating")
+                for i in range(len(prompts))
+                if ratings[i].get(model, {}).get("rating") is not None
+            ]
+            avg_rating = sum(model_ratings) / len(model_ratings) if model_ratings else 0
+
+            if successful:
+                avg_wall = sum(r.ollama_total_time for r in successful) / len(successful)
+                avg_tps = sum(r.tokens_per_second for r in successful) / len(successful)
+
+                # Color-code rating (1-10 scale)
+                if avg_rating >= 8:
+                    rating_style = "bold green"
+                elif avg_rating >= 6:
+                    rating_style = "yellow"
+                else:
+                    rating_style = "red"
+
+                summary_table.add_row(
+                    model,
+                    f"[{rating_style}]{avg_rating:.1f}/10[/]" if model_ratings else "-",
+                    f"{success_count}/{len(model_results)}",
+                    f"{avg_wall:.2f}s",
+                    f"{avg_tps:.1f}",
+                )
+            else:
+                summary_table.add_row(
+                    model,
+                    "-",
+                    f"0/{len(model_results)}",
+                    "-",
+                    "-",
+                )
+
+        console.print(summary_table)
+
+        # Ratings by element type
+        console.print("\n[bold]Ratings by Element Type[/]")
+
+        # Group elements by type
+        from collections import defaultdict
+        elements_by_type: dict[str, list[int]] = defaultdict(list)  # type -> list of element indices
+        for i, (elem, _) in enumerate(prompts):
+            elements_by_type[elem.element_type].append(i)
+
+        # Create table with element types as rows
+        type_table = Table(show_header=True, header_style="bold cyan")
+        type_table.add_column("Element Type", style="cyan")
+        for model in models_to_test:
+            type_table.add_column(model, justify="center")
+
+        for elem_type, indices in sorted(elements_by_type.items()):
+            row = [elem_type]
+            for model in models_to_test:
+                type_ratings = [
+                    ratings[i].get(model, {}).get("rating")
+                    for i in indices
+                    if ratings[i].get(model, {}).get("rating") is not None
+                ]
+                if type_ratings:
+                    avg = sum(type_ratings) / len(type_ratings)
+                    if avg >= 8:
+                        row.append(f"[bold green]{avg:.1f}[/]")
+                    elif avg >= 6:
+                        row.append(f"[yellow]{avg:.1f}[/]")
+                    else:
+                        row.append(f"[red]{avg:.1f}[/]")
+                else:
+                    row.append("-")
+            type_table.add_row(*row)
+
+        console.print(type_table)
+
+        # Token stats
+        console.print("\n[bold]Token Statistics[/]")
+        for model in models_to_test:
+            successful = [r for r in results[model] if r.success]
+            if successful:
+                total_prompt = sum(r.prompt_tokens for r in successful)
+                total_output = sum(r.output_tokens for r in successful)
+                console.print(f"  {model}: {total_prompt:,} prompt tokens, {total_output:,} output tokens")
+
+        client.close()
+        console.print("\n[green]Benchmark complete.[/]")
+
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Interrupted[/]")
+        sys.exit(130)
+    except Exception as e:
+        console.print(f"\n[red]Error:[/] {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+
+def _create_full_manifest(discovery_result: DiscoveryResult) -> ChangeManifest:
+    """Create a ChangeManifest with all discovered files as 'new'.
+
+    This skips change detection and treats all files as new.
+    """
+    import hashlib
+    import os
+    from datetime import datetime as dt
+    from pathlib import Path
+
+    from magaldi_core.change_detection import ChangeManifest, FileInfo
+    from magaldi_core.discovery import SUPPORTED_EXTENSIONS, _is_excluded_dir, _is_excluded_file
+
+    new_files = []
+    repo_path = discovery_result.repo_path
+
+    for root, dirs, files in os.walk(repo_path):
+        # Filter directories
+        dirs[:] = [
+            d for d in dirs
+            if not _is_excluded_dir(
+                d,
+                discovery_result.exclude_directories + ["node_modules", ".git", "__pycache__", ".venv", "venv"]
+            )
+        ]
+
+        for file_name in files:
+            abs_path = Path(root) / file_name
+            rel_path = str(abs_path.relative_to(repo_path))
+
+            # Check extension
+            ext = abs_path.suffix.lower()
+            if ext not in SUPPORTED_EXTENSIONS:
+                continue
+
+            # Check exclusions
+            if _is_excluded_file(file_name, discovery_result.exclude_files):
+                continue
+
+            # Compute hash
+            try:
+                with open(abs_path, "rb") as f:
+                    file_hash = hashlib.sha256(f.read()).hexdigest()
+            except Exception:
+                continue
+
+            new_files.append(FileInfo(
+                relative_path=rel_path,
+                absolute_path=abs_path,
+                language=SUPPORTED_EXTENSIONS[ext],
+                hash=file_hash,
+            ))
+
+    return ChangeManifest(
+        scope=discovery_result.scope,
+        repository=discovery_result.repository,
+        username=discovery_result.username,
+        timestamp=dt.now(),
+        total_files_scanned=len(new_files),
+        new_files=new_files,
+        modified_files=[],
+        deleted_files=[],
+        unchanged_count=0,
+        skipped_count=0,
+    )
+
+
+def _select_benchmark_files(
+    parsing_result: ParsingResult,
+    forced_path: str | None,
+    num_files: int = 5,
+    max_per_type: int = 10,
+) -> list[dict] | None:
+    """Select files for benchmarking.
+
+    Args:
+        parsing_result: Result from parsing phase.
+        forced_path: Specific file path to use, or None for random selection.
+        num_files: Number of files to select (default 5).
+        max_per_type: Maximum elements per type per file (default 10).
+
+    Returns:
+        List of dicts with 'path' and 'elements' keys, or None if no valid files found.
+    """
+    import random
+    from collections import defaultdict
+
+    def cap_elements_by_type(elements: list, max_per_type: int) -> list:
+        """Cap elements to max_per_type per element_type per file."""
+        by_type: dict[str, list] = defaultdict(list)
+        for elem in elements:
+            by_type[elem.element_type].append(elem)
+
+        result = []
+        for elem_type, type_elements in by_type.items():
+            if len(type_elements) > max_per_type:
+                # Randomly sample to get variety
+                result.extend(random.sample(type_elements, max_per_type))
+            else:
+                result.extend(type_elements)
+
+        # Sort by line number to maintain order
+        result.sort(key=lambda e: e.line_start)
+        return result
+
+    parsed_files = parsing_result.parsed_files
+
+    if forced_path:
+        # Find the specific file (single file mode)
+        for pf in parsed_files:
+            path = pf.file_info.relative_path
+            if path == forced_path or path.endswith(forced_path):
+                elements = cap_elements_by_type(list(pf.elements), max_per_type)
+                return [{
+                    "path": path,
+                    "elements": elements,
+                }]
+        return None
+
+    # Random selection: prefer files with 3+ elements
+    candidates = [
+        pf for pf in parsed_files
+        if len(pf.elements) >= 3
+    ]
+
+    if not candidates:
+        # Fall back to any file with elements
+        candidates = [pf for pf in parsed_files if len(pf.elements) > 0]
+
+    if not candidates:
+        return None
+
+    # Select up to num_files randomly
+    selected_files = random.sample(candidates, min(num_files, len(candidates)))
+
+    result = []
+    for pf in selected_files:
+        elements = cap_elements_by_type(list(pf.elements), max_per_type)
+        result.append({
+            "path": pf.file_info.relative_path,
+            "elements": elements,
+        })
+
+    return result
+
+
+def _build_summarization_prompt(element: "CodeElement") -> str:
+    """Build a summarization prompt for an element using the same prompts as parse CLI.
+
+    Args:
+        element: CodeElement from parsing.
+
+    Returns:
+        Prompt string for summarization.
+    """
+    from shared.ai.summarization import build_prompt
+
+    # For benchmarking, we don't have parent summaries (no hierarchical context)
+    # Use placeholder text to indicate this
+    parent_summaries: dict[str, str] = {}
+    if element.element_type != "file":
+        parent_summaries["file"] = "(file context not available in benchmark mode)"
+    if element.element_type in ("method", "variable"):
+        parent_summaries["class"] = "(class context not available in benchmark mode)"
+
+    return build_prompt(element, parent_summaries, max_code_tokens=4000)
+
+
+def _build_evaluation_prompt(
+    element: "CodeElement",
+    models: list[str],
+    results: dict[str, list],
+    element_index: int,
+) -> str:
+    """Build a prompt to evaluate and rate summaries.
+
+    Args:
+        element: The code element being summarized.
+        models: List of model names.
+        results: Dict mapping model name to list of BenchmarkResult.
+        element_index: Index of the element in the results lists.
+
+    Returns:
+        Prompt string for evaluation.
+    """
+    # Get source code (truncated if too long)
+    source_code = element.raw_code or "(no source code available)"
+    if len(source_code) > 2000:
+        source_code = source_code[:2000] + "\n... (truncated)"
+
+    # Build the prompt
+    prompt_parts = [
+        "You are evaluating code summaries for accuracy and usefulness.",
+        "",
+        f"## Source Code ({element.element_type}: {element.name})",
+        "```",
+        source_code,
+        "```",
+        "",
+        "## Summaries to Evaluate",
+    ]
+
+    for model in models:
+        result = results[model][element_index]
+        if result.success and result.response.strip():
+            summary = result.response.strip()
+        else:
+            summary = "(generation failed)"
+        prompt_parts.append(f"\n### {model}")
+        prompt_parts.append(summary)
+
+    prompt_parts.extend([
+        "",
+        "## Task",
+        "These summaries are for Magaldi, a code discovery engine that helps AI agents navigate codebases.",
+        "Rate each summary from 1-10 based on how well it serves an AI agent trying to understand and use this code:",
+        "",
+        "- **Purpose & Responsibility**: Does it clearly explain what this code does and what problem it solves?",
+        "- **When to Use**: Does it help an agent know when to look here? What tasks or scenarios lead to this code?",
+        "- **Inputs/Outputs**: Are parameters, return values, and data flow clearly described?",
+        "- **Side Effects & Preconditions**: Does it mention state changes, I/O, exceptions, or important edge cases?",
+        "- **Actionability**: Can an AI agent confidently decide whether to use this code based on the summary?",
+        "",
+        "A score of 10 means an AI agent can fully understand when and how to use this code from the summary alone.",
+        "A score of 1 means the summary is unhelpful for code navigation.",
+        "",
+        "Respond with ratings AND a one-sentence justification in this exact format (one per line):",
+    ])
+
+    for model in models:
+        prompt_parts.append(f"{model}: <rating>/10 - <one sentence justification>")
+
+    return "\n".join(prompt_parts)
+
+
+def _parse_evaluation_ratings(response: str, models: list[str]) -> dict[str, dict]:
+    """Parse ratings and justifications from the LLM evaluation response.
+
+    Args:
+        response: The LLM response text.
+        models: List of model names to look for.
+
+    Returns:
+        Dict mapping model name to {"rating": int|None, "reason": str|None}.
+    """
+    import re
+
+    ratings: dict[str, dict] = {}
+
+    for model in models:
+        # Look for patterns like "model_name: 8/10 - reason" or "model_name: 8 - reason"
+        # Escape special regex characters in model name
+        escaped_model = re.escape(model)
+        patterns = [
+            rf"{escaped_model}:\s*(\d+)/10\s*[-–—]\s*(.+?)(?:\n|$)",  # model: 8/10 - reason
+            rf"{escaped_model}:\s*(\d+)\s*[-–—]\s*(.+?)(?:\n|$)",     # model: 8 - reason
+            rf"{escaped_model}\s*[:\-]\s*(\d+)/10\s*[-–—]\s*(.+?)(?:\n|$)",  # model - 8/10 - reason
+            rf"{escaped_model}:\s*(\d+)/10",  # model: 8/10 (no reason)
+            rf"{escaped_model}:\s*(\d+)",     # model: 8 (no reason)
+        ]
+
+        rating = None
+        reason = None
+        for pattern in patterns:
+            match = re.search(pattern, response, re.IGNORECASE)
+            if match:
+                try:
+                    r = int(match.group(1))
+                    if 1 <= r <= 10:
+                        rating = r
+                        # Check if there's a reason captured
+                        if len(match.groups()) > 1:
+                            reason = match.group(2).strip()
+                        break
+                except ValueError:
+                    pass
+
+        ratings[model] = {"rating": rating, "reason": reason}
+
+    return ratings
+
+
+# =============================================================================
 # WEB COMMANDS
 # =============================================================================
 

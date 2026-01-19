@@ -227,6 +227,41 @@ class UserDataConfig:
 
 
 @dataclass
+class BenchmarkConfig:
+    """Benchmark configuration for model comparison."""
+
+    # Models to benchmark (mix of dense and MoE architectures)
+    models: list[str] = field(default_factory=lambda: [
+        # Dense models - Qwen coder series
+        "qwen2.5-coder:0.5b",
+        "qwen2.5-coder:1.5b",
+        "qwen2.5-coder:3b",
+        "qwen2.5-coder:7b",
+        # Dense models - Llama edge/mobile
+        "llama3.2:1b",
+        "llama3.2:3b",
+        # MoE models - small
+        "granite3.1-moe:1b",       # ~1B active (IBM, 128K context)
+        "granite3.1-moe:3b",       # ~3B active (IBM, 128K context)
+        "deepseek-coder-v2:lite",  # 2.4B active from 16B total
+        "qwen3:30b-a3b",           # 3.3B active from 30B total
+        # MoE models - large
+        "nemotron-3-nano",         # 3-4B active from 30B (Mamba+MoE hybrid)
+    ])
+
+    # Model used for evaluating/rating summaries (LLM-as-judge)
+    eval_model: str = "qwen2.5-coder:7b"
+
+    # Ollama API URL (defaults to same as llm.url)
+    ollama_url: str | None = None
+
+    # Generation settings
+    temperature: float = 0.3
+    max_tokens: int = 256
+    timeout: int = 120
+
+
+@dataclass
 class MagaldiConfig:
     """Root configuration object containing all sections."""
 
@@ -240,6 +275,7 @@ class MagaldiConfig:
     mcp: MCPConfig = field(default_factory=MCPConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     user_data: UserDataConfig = field(default_factory=UserDataConfig)
+    benchmark: BenchmarkConfig = field(default_factory=BenchmarkConfig)
 
 
 # =============================================================================
