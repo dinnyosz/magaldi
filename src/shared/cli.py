@@ -1799,16 +1799,22 @@ def benchmark_models(
                 rating_data = ratings[i].get(model, {})
                 rating = rating_data.get("rating")
                 reason = rating_data.get("reason")
-                rating_display = f"[bold green]{rating}/10[/]" if rating else "[dim]?/10[/]"
 
+                # Check if generation actually succeeded (response not empty after cleaning)
+                from shared.ai.summarization import clean_summary
+                summary = ""
+                generation_ok = False
                 if model_result.success and model_result.response.strip():
+                    summary = clean_summary(model_result.response)
+                    generation_ok = bool(summary.strip())
+
+                # Only show rating if generation succeeded
+                if generation_ok:
+                    rating_display = f"[bold green]{rating}/10[/]" if rating else "[dim]?/10[/]"
                     console.print(f"  [yellow]{model}[/] {rating_display}:")
                     if reason:
                         console.print(f"    [dim italic]→ {reason}[/]")
                     # Show full summary for comparison (wrapped)
-                    # Apply same clean_summary as actual parsing
-                    from shared.ai.summarization import clean_summary
-                    summary = clean_summary(model_result.response)
                     for line in summary.split('\n'):
                         # Wrap long lines
                         while len(line) > 70:
@@ -1817,7 +1823,8 @@ def benchmark_models(
                         if line:
                             console.print(f"    {line}")
                 else:
-                    console.print(f"  [yellow]{model}[/] {rating_display}: [red](failed)[/]")
+                    error_msg = model_result.error if model_result.error else "empty response after cleaning"
+                    console.print(f"  [yellow]{model}[/] [dim]N/A[/]: [red](failed: {error_msg[:50]})[/]")
 
         # Benchmark summary table
         console.print("\n" + "=" * 70)
@@ -1833,20 +1840,29 @@ def benchmark_models(
 
         for model in models_to_test:
             model_results = results[model]
-            success_count = sum(1 for r in model_results if r.success)
-            successful = [r for r in model_results if r.success]
 
-            # Calculate average rating for this model
+            # Count real successes (response not empty after cleaning)
+            from shared.ai.summarization import clean_summary
+            real_successes = []
+            real_success_indices = []
+            for i, r in enumerate(model_results):
+                if r.success and r.response.strip():
+                    cleaned = clean_summary(r.response)
+                    if cleaned.strip():
+                        real_successes.append(r)
+                        real_success_indices.append(i)
+
+            # Calculate average rating only for real successes
             model_ratings = [
                 ratings[i].get(model, {}).get("rating")
-                for i in range(len(prompts))
+                for i in real_success_indices
                 if ratings[i].get(model, {}).get("rating") is not None
             ]
             avg_rating = sum(model_ratings) / len(model_ratings) if model_ratings else 0
 
-            if successful:
-                avg_wall = sum(r.ollama_total_time for r in successful) / len(successful)
-                avg_tps = sum(r.tokens_per_second for r in successful) / len(successful)
+            if real_successes:
+                avg_wall = sum(r.ollama_total_time for r in real_successes) / len(real_successes)
+                avg_tps = sum(r.tokens_per_second for r in real_successes) / len(real_successes)
 
                 # Color-code rating (1-10 scale)
                 if avg_rating >= 8:
@@ -1859,7 +1875,7 @@ def benchmark_models(
                 summary_table.add_row(
                     model,
                     f"[{rating_style}]{avg_rating:.1f}/10[/]" if model_ratings else "-",
-                    f"{success_count}/{len(model_results)}",
+                    f"{len(real_successes)}/{len(model_results)}",
                     f"{avg_wall:.2f}s",
                     f"{avg_tps:.1f}",
                 )
@@ -1892,11 +1908,16 @@ def benchmark_models(
         for elem_type, indices in sorted(elements_by_type.items()):
             row = [elem_type]
             for model in models_to_test:
-                type_ratings = [
-                    ratings[i].get(model, {}).get("rating")
-                    for i in indices
-                    if ratings[i].get(model, {}).get("rating") is not None
-                ]
+                # Only include ratings for real successes
+                type_ratings = []
+                for i in indices:
+                    r = results[model][i]
+                    if r.success and r.response.strip():
+                        cleaned = clean_summary(r.response)
+                        if cleaned.strip():
+                            rating = ratings[i].get(model, {}).get("rating")
+                            if rating is not None:
+                                type_ratings.append(rating)
                 if type_ratings:
                     avg = sum(type_ratings) / len(type_ratings)
                     if avg >= 8:
@@ -2146,21 +2167,30 @@ def _save_benchmark_markdown(
 
     for model in models_tested:
         model_results = results[model]
-        success_count = sum(1 for r in model_results if r.success)
-        successful = [r for r in model_results if r.success]
 
+        # Count real successes (response not empty after cleaning)
+        real_successes = []
+        real_success_indices = []
+        for i, r in enumerate(model_results):
+            if r.success and r.response.strip():
+                cleaned = clean_summary(r.response)
+                if cleaned.strip():
+                    real_successes.append(r)
+                    real_success_indices.append(i)
+
+        # Calculate average rating only for real successes
         model_ratings = [
             ratings[i].get(model, {}).get("rating")
-            for i in range(len(elements))
+            for i in real_success_indices
             if ratings[i].get(model, {}).get("rating") is not None
         ]
         avg_rating = sum(model_ratings) / len(model_ratings) if model_ratings else 0
 
-        if successful:
-            avg_wall = sum(r.ollama_total_time for r in successful) / len(successful)
-            avg_tps = sum(r.tokens_per_second for r in successful) / len(successful)
+        if real_successes:
+            avg_wall = sum(r.ollama_total_time for r in real_successes) / len(real_successes)
+            avg_tps = sum(r.tokens_per_second for r in real_successes) / len(real_successes)
             lines.append(
-                f"| {model} | {avg_rating:.1f}/10 | {success_count}/{len(model_results)} | {avg_wall:.2f}s | {avg_tps:.1f} |"
+                f"| {model} | {avg_rating:.1f}/10 | {len(real_successes)}/{len(model_results)} | {avg_wall:.2f}s | {avg_tps:.1f} |"
             )
         else:
             lines.append(f"| {model} | - | 0/{len(model_results)} | - | - |")
@@ -2188,11 +2218,16 @@ def _save_benchmark_markdown(
     for elem_type, indices in sorted(elements_by_type.items()):
         row = f"| {elem_type} |"
         for model in models_tested:
-            type_ratings = [
-                ratings[i].get(model, {}).get("rating")
-                for i in indices
-                if ratings[i].get(model, {}).get("rating") is not None
-            ]
+            # Only include ratings for real successes
+            type_ratings = []
+            for i in indices:
+                r = results[model][i]
+                if r.success and r.response.strip():
+                    cleaned = clean_summary(r.response)
+                    if cleaned.strip():
+                        rating = ratings[i].get(model, {}).get("rating")
+                        if rating is not None:
+                            type_ratings.append(rating)
             if type_ratings:
                 avg = sum(type_ratings) / len(type_ratings)
                 row += f" {avg:.1f} |"
@@ -2238,17 +2273,24 @@ def _save_benchmark_markdown(
             rating_data = ratings[i].get(model, {})
             rating = rating_data.get("rating")
             reason = rating_data.get("reason", "")
-            rating_display = f"{rating}/10" if rating else "?/10"
 
+            # Check for real success
+            summary = ""
+            generation_ok = False
             if model_result.success and model_result.response.strip():
                 summary = clean_summary(model_result.response)
+                generation_ok = bool(summary.strip())
+
+            if generation_ok:
+                rating_display = f"{rating}/10" if rating else "?/10"
                 # Escape pipes and truncate for table
                 summary_escaped = summary.replace("|", "\\|").replace("\n", " ")
                 if len(summary_escaped) > 200:
                     summary_escaped = summary_escaped[:200] + "..."
                 lines.append(f"| {model} | {rating_display} | {summary_escaped} |")
             else:
-                lines.append(f"| {model} | {rating_display} | *(failed)* |")
+                error_msg = model_result.error if model_result.error else "empty after cleaning"
+                lines.append(f"| {model} | N/A | *(failed: {error_msg[:30]})* |")
 
         lines.append("")
 
@@ -2263,13 +2305,22 @@ def _save_benchmark_markdown(
             rating = rating_data.get("rating")
             reason = rating_data.get("reason", "")
 
-            lines.append(f"**{model}** ({rating}/10 - {reason})" if rating else f"**{model}** (?/10)")
-            lines.append("")
+            # Check for real success
+            summary = ""
+            generation_ok = False
             if model_result.success and model_result.response.strip():
                 summary = clean_summary(model_result.response)
+                generation_ok = bool(summary.strip())
+
+            if generation_ok:
+                lines.append(f"**{model}** ({rating}/10 - {reason})" if rating else f"**{model}** (?/10)")
+                lines.append("")
                 lines.append(f"> {summary}")
             else:
-                lines.append("> *(failed)*")
+                error_msg = model_result.error if model_result.error else "empty after cleaning"
+                lines.append(f"**{model}** (N/A - failed: {error_msg[:40]})")
+                lines.append("")
+                lines.append("> *(no valid output)*")
             lines.append("")
 
         lines.append("</details>")
