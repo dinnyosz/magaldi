@@ -124,6 +124,9 @@ class OllamaBenchmarkClient:
             elapsed = time.perf_counter() - start
             return False, elapsed, str(e)
 
+    # Models that use thinking/reasoning tags by default
+    THINKING_MODELS = ("qwen3", "deepseek-r1", "deepseek-coder-v2", "nemotron")
+
     def generate(
         self,
         model: str,
@@ -148,12 +151,18 @@ class OllamaBenchmarkClient:
         """
         start = time.perf_counter()
 
+        # Disable thinking mode for models that support it
+        # by appending /no_think instruction
+        actual_prompt = prompt
+        if any(model.startswith(tm) for tm in self.THINKING_MODELS):
+            actual_prompt = f"/no_think\n\n{prompt}"
+
         try:
             resp = self._session.post(
                 f"{self.base_url}/api/generate",
                 json={
                     "model": model,
-                    "prompt": prompt,
+                    "prompt": actual_prompt,
                     "stream": False,
                     "options": {
                         "temperature": temperature,

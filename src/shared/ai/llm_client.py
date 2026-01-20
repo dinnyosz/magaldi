@@ -418,6 +418,9 @@ class LLMClient:
         except Exception:
             return False
 
+    # Models that use thinking/reasoning tags by default
+    THINKING_MODELS = ("qwen3", "deepseek-r1", "deepseek-coder-v2", "nemotron")
+
     def generate(
         self,
         prompt: str,
@@ -445,11 +448,18 @@ class LLMClient:
         """
         use_model = model or self.model
 
+        # Disable thinking mode for models that support it
+        # by prepending /no_think instruction (e.g., qwen3, deepseek-r1)
+        actual_prompt = prompt
+        model_name = use_model.split("/")[-1] if "/" in use_model else use_model
+        if any(model_name.startswith(tm) for tm in self.THINKING_MODELS):
+            actual_prompt = f"/no_think\n\n{prompt}"
+
         def _do_generate() -> str:
             # Build kwargs for litellm
             kwargs: dict[str, Any] = {
                 "model": use_model,
-                "messages": [{"role": "user", "content": prompt}],
+                "messages": [{"role": "user", "content": actual_prompt}],
                 "temperature": temperature,
                 "top_p": top_p,
                 "max_tokens": max_tokens,
