@@ -1631,7 +1631,7 @@ def benchmark_models(
 
         # Sort elements by hierarchy level: file (0) → class (1) → function/method (2) → variable (3)
         level_order = {"file": 0, "class": 1, "function": 2, "method": 2, "variable": 3, "constant": 3}
-        sorted_elements = sorted(elements, key=lambda e: (e.file_path, level_order.get(e.element_type, 99), e.line_start))
+        sorted_elements = sorted(elements, key=lambda e: (e.relative_path, level_order.get(e.element_type, 99), e.line_start))
 
         # Build list of (element, index) to track original order for results
         element_indices = {id(elem): i for i, elem in enumerate(elements)}
@@ -1658,14 +1658,14 @@ def benchmark_models(
                 parent_summaries: dict[str, str] = {}
                 if elem.element_type != "file":
                     # Add file summary if available
-                    if elem.file_path in file_summaries:
-                        parent_summaries["file"] = file_summaries[elem.file_path]
+                    if elem.relative_path in file_summaries:
+                        parent_summaries["file"] = file_summaries[elem.relative_path]
                 if elem.element_type in ("method", "variable", "constant"):
                     # Add class summary if available (find parent class)
                     if elem.parent_id:
                         # Try to find class summary by parent
                         for (fp, cn), summ in class_summaries.items():
-                            if fp == elem.file_path:
+                            if fp == elem.relative_path:
                                 parent_summaries["class"] = summ
                                 break
 
@@ -1687,9 +1687,9 @@ def benchmark_models(
                     from shared.ai.summarization import clean_summary
                     cleaned = clean_summary(result.response)
                     if elem.element_type == "file":
-                        file_summaries[elem.file_path] = cleaned
+                        file_summaries[elem.relative_path] = cleaned
                     elif elem.element_type == "class":
-                        class_summaries[(elem.file_path, elem.name)] = cleaned
+                        class_summaries[(elem.relative_path, elem.name)] = cleaned
 
                 if result.success:
                     ollama_sum = result.load_time + result.prefill_time + result.generate_time
