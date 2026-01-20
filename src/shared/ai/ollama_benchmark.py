@@ -151,25 +151,27 @@ class OllamaBenchmarkClient:
         """
         start = time.perf_counter()
 
+        # Build request payload
+        payload: dict = {
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": temperature,
+                "top_p": top_p,
+                "num_predict": max_tokens,
+            },
+        }
+
         # Disable thinking mode for models that support it
-        # by appending /no_think instruction
-        actual_prompt = prompt
+        # via the "think" API parameter (Ollama 0.9+)
         if any(model.startswith(tm) for tm in self.THINKING_MODELS):
-            actual_prompt = f"/no_think\n\n{prompt}"
+            payload["think"] = False
 
         try:
             resp = self._session.post(
                 f"{self.base_url}/api/generate",
-                json={
-                    "model": model,
-                    "prompt": actual_prompt,
-                    "stream": False,
-                    "options": {
-                        "temperature": temperature,
-                        "top_p": top_p,
-                        "num_predict": max_tokens,
-                    },
-                },
+                json=payload,
                 timeout=timeout,
             )
             total_time = time.perf_counter() - start

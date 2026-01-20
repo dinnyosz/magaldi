@@ -448,18 +448,15 @@ class LLMClient:
         """
         use_model = model or self.model
 
-        # Disable thinking mode for models that support it
-        # by prepending /no_think instruction (e.g., qwen3, deepseek-r1)
-        actual_prompt = prompt
+        # Check if this is a thinking model that needs think=false
         model_name = use_model.split("/")[-1] if "/" in use_model else use_model
-        if any(model_name.startswith(tm) for tm in self.THINKING_MODELS):
-            actual_prompt = f"/no_think\n\n{prompt}"
+        is_thinking_model = any(model_name.startswith(tm) for tm in self.THINKING_MODELS)
 
         def _do_generate() -> str:
             # Build kwargs for litellm
             kwargs: dict[str, Any] = {
                 "model": use_model,
-                "messages": [{"role": "user", "content": actual_prompt}],
+                "messages": [{"role": "user", "content": prompt}],
                 "temperature": temperature,
                 "top_p": top_p,
                 "max_tokens": max_tokens,
@@ -473,6 +470,11 @@ class LLMClient:
             # Add api_key if provided
             if self.api_key:
                 kwargs["api_key"] = self.api_key
+
+            # Disable thinking mode for models that support it
+            # LiteLLM added think parameter support in PR #15465 (Sept 2025)
+            if is_thinking_model and use_model.startswith("ollama/"):
+                kwargs["think"] = False
 
             response = completion(**kwargs)
 
