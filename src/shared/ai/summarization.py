@@ -457,12 +457,12 @@ PROMPTS = {
 
 Do NOT enumerate individual classes or functions - those are documented separately.
 
-OUTPUT ONLY THE SUMMARY. No reasoning, no steps, no preamble - just the summary sentences directly.
-
 File: {file_path}
 
 Code:
 {code}
+
+IMPORTANT: Write ONLY the 4-6 sentence summary below. Do NOT include any reasoning, analysis, bullet points, or explanations. Start directly with the first sentence of the summary.
 
 Summary:""",
     "class": """Summarize this {language} class in 4-6 sentences for an AI agent navigating this codebase.
@@ -478,8 +478,6 @@ Address:
 
 Do NOT enumerate individual methods - those are documented separately.
 
-OUTPUT ONLY THE SUMMARY. No reasoning, no steps, no preamble - just the summary sentences directly.
-
 File context (for understanding only): {file_summary}
 
 Class: {class_name}
@@ -487,6 +485,8 @@ Class: {class_name}
 
 Code:
 {code}
+
+IMPORTANT: Write ONLY the 4-6 sentence summary below. Do NOT include any reasoning, analysis, bullet points, or explanations. Start directly with the first sentence of the summary.
 
 Summary:""",
     "function": """Describe this function in 4-6 sentences for an AI agent navigating this codebase.
@@ -500,8 +500,6 @@ Address:
 - Side effects: external state changes, I/O, exceptions raised
 - Key edge cases or preconditions the caller should know
 
-OUTPUT ONLY THE SUMMARY. No reasoning, no steps, no preamble - just the summary sentences directly.
-
 File context (for understanding only): {file_summary}
 {class_context}
 
@@ -511,6 +509,8 @@ Signature: {signature}
 
 Code:
 {code}
+
+IMPORTANT: Write ONLY the 4-6 sentence summary below. Do NOT include any reasoning, analysis, bullet points, or explanations. Start directly with the first sentence of the summary.
 
 Summary:""",
     "method": """Describe this method in 4-6 sentences for an AI agent navigating this codebase.
@@ -524,8 +524,6 @@ Address:
 - When to call this method in the object's lifecycle
 - Side effects, exceptions, or preconditions the caller should know
 
-OUTPUT ONLY THE SUMMARY. No reasoning, no steps, no preamble - just the summary sentences directly.
-
 File context (for understanding only): {file_summary}
 Class context (for understanding only): {class_summary}
 
@@ -535,6 +533,8 @@ Signature: {signature}
 
 Code:
 {code}
+
+IMPORTANT: Write ONLY the 4-6 sentence summary below. Do NOT include any reasoning, analysis, bullet points, or explanations. Start directly with the first sentence of the summary.
 
 Summary:""",
     "constant": """Describe this constant in 2-3 sentences for an AI agent navigating this codebase.
@@ -546,8 +546,6 @@ Address:
 - Where and why this constant is used in the system
 - Any important constraints or relationships with other values
 
-OUTPUT ONLY THE DESCRIPTION. No reasoning, no steps, no preamble - just the description sentences directly.
-
 File context (for understanding only): {file_summary}
 {function_context}
 
@@ -555,6 +553,8 @@ Name: {name}
 Value:
 {code}
 {usages_section}
+
+IMPORTANT: Write ONLY the 2-3 sentence description below. Do NOT include any reasoning, analysis, bullet points, or explanations. Start directly with the first sentence.
 
 Description:""",
     "variable": """Describe this variable in 2-3 sentences for an AI agent navigating this codebase.
@@ -566,8 +566,6 @@ Address:
 - How it is initialized and when it changes
 - Its role in the containing scope's behavior
 
-OUTPUT ONLY THE DESCRIPTION. No reasoning, no steps, no preamble - just the description sentences directly.
-
 File context (for understanding only): {file_summary}
 {class_context}
 {function_context}
@@ -576,6 +574,8 @@ Name: {name}
 Value:
 {code}
 {usages_section}
+
+IMPORTANT: Write ONLY the 2-3 sentence description below. Do NOT include any reasoning, analysis, bullet points, or explanations. Start directly with the first sentence.
 
 Description:""",
 }
