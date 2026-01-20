@@ -1625,23 +1625,54 @@ def benchmark_models(
             console.print("[red]No models available after warmup.[/]")
             sys.exit(1)
 
-        # Run benchmarks
-        console.print("\n[bold blue]Phase 7:[/] Benchmarking")
+        # Run benchmarks with hierarchical context (file → class → method)
+        console.print("\n[bold blue]Phase 7:[/] Benchmarking (with hierarchical context)")
         results: dict[str, list[BenchmarkResult]] = {m: [] for m in models_to_test}
 
-        # Build prompt for each element
-        prompts = []
-        for elem in elements:
-            prompt = _build_summarization_prompt(elem)
-            prompts.append((elem, prompt))
+        # Sort elements by hierarchy level: file (0) → class (1) → function/method (2) → variable (3)
+        level_order = {"file": 0, "class": 1, "function": 2, "method": 2, "variable": 3, "constant": 3}
+        sorted_elements = sorted(elements, key=lambda e: (e.file_path, level_order.get(e.element_type, 99), e.line_start))
 
-        # Test each model on each element
+        # Build list of (element, index) to track original order for results
+        element_indices = {id(elem): i for i, elem in enumerate(elements)}
+        prompts = [(elem, None) for elem in elements]  # Placeholder, prompts built per-model
+
+        # Test each model with hierarchical summarization
         for model in models_to_test:
             console.print(f"\n  [cyan]{model}[/]")
 
-            for i, (elem, prompt) in enumerate(prompts):
+            # Track summaries for hierarchical context (per model)
+            # file_summaries[file_path] = summary
+            # class_summaries[(file_path, class_name)] = summary
+            file_summaries: dict[str, str] = {}
+            class_summaries: dict[tuple[str, str], str] = {}
+
+            # Process elements in hierarchical order
+            model_results: dict[int, BenchmarkResult] = {}  # index -> result
+
+            for elem in sorted_elements:
                 elem_name = f"{elem.element_type}:{elem.name}"
-                with console.status(f"    [{i+1}/{len(prompts)}] {elem_name}..."):
+                elem_idx = element_indices[id(elem)]
+
+                # Build parent summaries based on element type
+                parent_summaries: dict[str, str] = {}
+                if elem.element_type != "file":
+                    # Add file summary if available
+                    if elem.file_path in file_summaries:
+                        parent_summaries["file"] = file_summaries[elem.file_path]
+                if elem.element_type in ("method", "variable", "constant"):
+                    # Add class summary if available (find parent class)
+                    if elem.parent_id:
+                        # Try to find class summary by parent
+                        for (fp, cn), summ in class_summaries.items():
+                            if fp == elem.file_path:
+                                parent_summaries["class"] = summ
+                                break
+
+                # Build prompt with parent context
+                prompt = _build_summarization_prompt(elem, parent_summaries)
+
+                with console.status(f"    [{len(model_results)+1}/{len(elements)}] {elem_name}..."):
                     result = client.generate(
                         model=model,
                         prompt=prompt,
@@ -1649,23 +1680,35 @@ def benchmark_models(
                         max_tokens=benchmark_config.max_tokens,
                         timeout=benchmark_config.timeout,
                     )
-                    results[model].append(result)
+                    model_results[elem_idx] = result
+
+                # Store summary for child elements
+                if result.success and result.response.strip():
+                    from shared.ai.summarization import clean_summary
+                    cleaned = clean_summary(result.response)
+                    if elem.element_type == "file":
+                        file_summaries[elem.file_path] = cleaned
+                    elif elem.element_type == "class":
+                        class_summaries[(elem.file_path, elem.name)] = cleaned
 
                 if result.success:
-                    # Calculate sum of Ollama-reported times
-                    # Note: Ollama has a known bug where total_duration > sum of components
-                    # due to untracked context processing overhead (GitHub issue #10860)
                     ollama_sum = result.load_time + result.prefill_time + result.generate_time
                     overhead = result.ollama_total_time - ollama_sum
                     overhead_str = f"+{overhead:.2f}s overhead" if overhead > 0.01 else ""
+                    context_str = ""
+                    if parent_summaries:
+                        context_str = f" [dim](+{'+'.join(parent_summaries.keys())} context)[/]"
                     console.print(
                         f"    [green]✓[/] {elem_name[:40]:<40} | "
                         f"[bold]{result.ollama_total_time:.2f}s[/] "
                         f"(load:{result.load_time:.2f} pre:{result.prefill_time:.2f} gen:{result.generate_time:.2f} {overhead_str}) | "
-                        f"{result.prompt_tokens}→{result.output_tokens} tok @ {result.tokens_per_second:.1f} t/s"
+                        f"{result.prompt_tokens}→{result.output_tokens} tok @ {result.tokens_per_second:.1f} t/s{context_str}"
                     )
                 else:
                     console.print(f"    [red]✗[/] {elem_name[:40]:<40} | {result.error}")
+
+            # Store results in original element order
+            results[model] = [model_results[i] for i in range(len(elements))]
 
         # Phase 8: LLM Evaluation of summaries
         console.print("\n[bold blue]Phase 8:[/] LLM Evaluation")
@@ -2028,24 +2071,23 @@ def _select_benchmark_files(
     return result
 
 
-def _build_summarization_prompt(element: "CodeElement") -> str:
+def _build_summarization_prompt(
+    element: "CodeElement",
+    parent_summaries: dict[str, str] | None = None,
+) -> str:
     """Build a summarization prompt for an element using the same prompts as parse CLI.
 
     Args:
         element: CodeElement from parsing.
+        parent_summaries: Dict with 'file' and/or 'class' summaries for context.
 
     Returns:
         Prompt string for summarization.
     """
-    from shared.ai.summarization import build_prompt, clean_summary
+    from shared.ai.summarization import build_prompt
 
-    # For benchmarking, we don't have parent summaries (no hierarchical context)
-    # Use placeholder text to indicate this
-    parent_summaries: dict[str, str] = {}
-    if element.element_type != "file":
-        parent_summaries["file"] = "(file context not available in benchmark mode)"
-    if element.element_type in ("method", "variable"):
-        parent_summaries["class"] = "(class context not available in benchmark mode)"
+    if parent_summaries is None:
+        parent_summaries = {}
 
     return build_prompt(element, parent_summaries, max_code_tokens=4000)
 
@@ -2098,28 +2140,27 @@ def _build_evaluation_prompt(
     prompt_parts.extend([
         "",
         "## Task",
-        "These summaries are for Magaldi, a code discovery engine that helps AI agents navigate codebases.",
-        "Rate each summary from 1-10 based on how well it serves an AI agent trying to understand and use this code:",
+        "Rate each summary 1-10 for how well it helps an AI agent understand and use this code.",
         "",
-        "- **Purpose & Responsibility**: Does it clearly explain what this code does and what problem it solves?",
-        "- **When to Use**: Does it help an agent know when to look here? What tasks or scenarios lead to this code?",
-        "- **Inputs/Outputs**: Are parameters, return values, and data flow clearly described?",
-        "- **Side Effects & Preconditions**: Does it mention state changes, I/O, exceptions, or important edge cases?",
-        "- **Actionability**: Can an AI agent confidently decide whether to use this code based on the summary?",
+        "Criteria: Purpose clarity, when-to-use guidance, inputs/outputs, side effects, actionability.",
+        "10 = agent fully understands when/how to use this code. 1 = unhelpful.",
         "",
-        "A score of 10 means an AI agent can fully understand when and how to use this code from the summary alone.",
-        "A score of 1 means the summary is unhelpful for code navigation.",
+        "## Required Output Format",
+        "Output EXACTLY one line per model in this format:",
+        "MODEL_NAME: SCORE/10 - REASON",
         "",
-        "IMPORTANT: You MUST rate ALL models listed below. Do not skip any.",
+        "Example:",
+        "some-model:3b: 7/10 - Clear purpose but missing edge cases",
+        "other/model: 8/10 - Comprehensive and actionable",
         "",
-        "Respond with ratings AND a one-sentence justification in this EXACT format (one per line):",
+        f"You MUST output exactly {len(models)} ratings, one for each model below:",
     ])
 
     for model in models:
-        prompt_parts.append(f"{model}: <rating>/10 - <one sentence justification>")
+        prompt_parts.append(f"- {model}")
 
     prompt_parts.append("")
-    prompt_parts.append("Rate ALL models above. Do not skip any model.")
+    prompt_parts.append("Output your ratings now (no other text, just the ratings):")
 
     return "\n".join(prompt_parts)
 
@@ -2136,24 +2177,59 @@ def _parse_evaluation_ratings(response: str, models: list[str]) -> dict[str, dic
     """
     import re
 
+    # First, clean the response of thinking tags (same patterns as clean_summary)
+    cleaned = response
+    thinking_patterns = [
+        r"<think>.*?</think>\s*",
+        r"<thinking>.*?</thinking>\s*",
+        r"<reasoning>.*?</reasoning>\s*",
+        r"<reflection>.*?</reflection>\s*",
+    ]
+    for pattern in thinking_patterns:
+        cleaned = re.sub(pattern, "", cleaned, flags=re.DOTALL | re.IGNORECASE)
+
+    # Handle unclosed tags
+    unclosed_patterns = [
+        r"<think>.*$",
+        r"<thinking>.*$",
+        r"<reasoning>.*$",
+        r"<reflection>.*$",
+    ]
+    for pattern in unclosed_patterns:
+        cleaned = re.sub(pattern, "", cleaned, flags=re.DOTALL | re.IGNORECASE)
+
     ratings: dict[str, dict] = {}
 
     for model in models:
         # Look for patterns like "model_name: 8/10 - reason" or "model_name: 8 - reason"
         # Escape special regex characters in model name
         escaped_model = re.escape(model)
+
+        # Build patterns that handle various LLM formatting quirks:
+        # - Optional markdown (**, `)
+        # - Optional list prefixes (-, *, 1.)
+        # - Various separators (:, -, –, —)
+        # - Rating as X/10 or just X
+        prefix = r"(?:[-*]\s*|\d+\.\s*)?(?:\*\*|`)??"  # optional list prefix and markdown
+        suffix = r"(?:\*\*|`)??"  # closing markdown
+
         patterns = [
-            rf"{escaped_model}:\s*(\d+)/10\s*[-–—]\s*(.+?)(?:\n|$)",  # model: 8/10 - reason
-            rf"{escaped_model}:\s*(\d+)\s*[-–—]\s*(.+?)(?:\n|$)",     # model: 8 - reason
-            rf"{escaped_model}\s*[:\-]\s*(\d+)/10\s*[-–—]\s*(.+?)(?:\n|$)",  # model - 8/10 - reason
-            rf"{escaped_model}:\s*(\d+)/10",  # model: 8/10 (no reason)
-            rf"{escaped_model}:\s*(\d+)",     # model: 8 (no reason)
+            # model: 8/10 - reason (with optional markdown/list prefix)
+            rf"{prefix}{escaped_model}{suffix}\s*[:\-–—]\s*(\d+)\s*/\s*10\s*[-–—:]\s*(.+?)(?:\n|$)",
+            # model: 8 - reason
+            rf"{prefix}{escaped_model}{suffix}\s*[:\-–—]\s*(\d+)\s*[-–—:]\s*(.+?)(?:\n|$)",
+            # model: 8/10 (no reason)
+            rf"{prefix}{escaped_model}{suffix}\s*[:\-–—]\s*(\d+)\s*/\s*10",
+            # model: 8 (no reason)
+            rf"{prefix}{escaped_model}{suffix}\s*[:\-–—]\s*(\d+)(?:\s|$|/)",
+            # Fallback: just find model name followed somewhere by a number/10
+            rf"{escaped_model}[^0-9]*?(\d+)\s*/\s*10",
         ]
 
         rating = None
         reason = None
         for pattern in patterns:
-            match = re.search(pattern, response, re.IGNORECASE)
+            match = re.search(pattern, cleaned, re.IGNORECASE)
             if match:
                 try:
                     r = int(match.group(1))
@@ -2161,7 +2237,9 @@ def _parse_evaluation_ratings(response: str, models: list[str]) -> dict[str, dic
                         rating = r
                         # Check if there's a reason captured
                         if len(match.groups()) > 1:
-                            reason = match.group(2).strip()
+                            captured_reason = match.group(2)
+                            if captured_reason:
+                                reason = captured_reason.strip()
                         break
                 except ValueError:
                     pass

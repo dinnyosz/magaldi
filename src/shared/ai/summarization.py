@@ -653,6 +653,33 @@ def clean_summary(summary: str) -> str:
     if not summary:
         return summary
 
+    # Remove reasoning/thinking tags from models like nemotron-3-nano, DeepSeek, etc.
+    # These models output chain-of-thought in <think>...</think> or similar tags
+    thinking_patterns = [
+        r"<think>.*?</think>\s*",      # <think>...</think>
+        r"<thinking>.*?</thinking>\s*", # <thinking>...</thinking>
+        r"<reasoning>.*?</reasoning>\s*", # <reasoning>...</reasoning>
+        r"<reflection>.*?</reflection>\s*", # <reflection>...</reflection>
+    ]
+    for pattern in thinking_patterns:
+        summary = re.sub(pattern, "", summary, flags=re.DOTALL | re.IGNORECASE)
+
+    # Handle unclosed thinking tags (content got cut off)
+    # Remove everything from opening tag to end if no closing tag
+    unclosed_patterns = [
+        r"<think>.*$",
+        r"<thinking>.*$",
+        r"<reasoning>.*$",
+        r"<reflection>.*$",
+    ]
+    for pattern in unclosed_patterns:
+        summary = re.sub(pattern, "", summary, flags=re.DOTALL | re.IGNORECASE)
+
+    summary = summary.strip()
+
+    if not summary:
+        return summary
+
     # Remove common prefixes
     prefixes_to_remove = [
         "Summary:",

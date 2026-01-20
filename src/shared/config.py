@@ -250,7 +250,6 @@ class BenchmarkConfig:
         "qwen2.5-coder:0.5b",
         # Tier 2: Light (1-2B) - ~6-8GB VRAM
         "qwen2.5-coder:1.5b",      # 54% pass@1, best efficiency
-        "opencoder:1.5b",          # Full transparency model
         "llama3.2:1b",
         "qwen3:1.7b",              # Qwen3 dense, Apache 2.0
         # Tier 3: Medium (3-4B) - ~10-12GB VRAM, best efficiency/performance
@@ -261,7 +260,6 @@ class BenchmarkConfig:
         "qwen3:4b",                # Qwen3 dense, Apache 2.0
         # Tier 4: Large (6B-9B) - ~14-17GB VRAM
         "qwen2.5-coder:7b",        # 65% pass@1, most stable (1.00)
-        "opencoder:8b",            # Comparable to top performers
         "qwen3:8b",                # Qwen3 dense, Apache 2.0
         # MoE models - active params listed
         "granite3.1-moe:1b",       # ~1B active (IBM, 128K context)
