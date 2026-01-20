@@ -245,12 +245,15 @@ class BenchmarkConfig:
 
     # Models to benchmark - ordered by size within each category
     # NOTE: Temporarily testing only thinking models (qwen3, deepseek, nemotron)
+    # UPDATE: qwen3 models after July 2025 split into "thinking" and "instruct" variants
+    #         The default qwen3:Xb has thinking baked in, use instruct variants instead
     models: list[str] = field(default_factory=lambda: [
-        # === THINKING MODELS (testing think=false) ===
-        "qwen3:0.6b",              # Smallest Qwen3, Apache 2.0, 32K context
-        "qwen3:1.7b",              # Qwen3 dense, Apache 2.0
-        "qwen3:4b",                # Qwen3 dense, Apache 2.0
-        "qwen3:8b",                # Qwen3 dense, Apache 2.0
+        # === QWEN3 INSTRUCT VARIANTS (no thinking) ===
+        "qwen3:0.6b",                    # 0.6B doesn't have instruct variant yet
+        "qwen3:1.7b",                    # 1.7B doesn't have instruct variant yet
+        "qwen3:4b-instruct",             # Instruct variant - no thinking
+        "qwen3:8b",                      # Qwen3 dense, Apache 2.0
+        # === OTHER THINKING MODELS ===
         "deepseek-coder-v2:lite",  # 2.4B active from 16B total
         "nemotron-3-nano",         # 3-4B active from 30B (NVIDIA, Mamba+MoE hybrid)
         # === COMMENTED OUT FOR NOW ===
