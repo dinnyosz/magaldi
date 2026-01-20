@@ -1755,7 +1755,9 @@ def benchmark_models(
                     if reason:
                         console.print(f"    [dim italic]→ {reason}[/]")
                     # Show full summary for comparison (wrapped)
-                    summary = model_result.response.strip()
+                    # Apply same clean_summary as actual parsing
+                    from shared.ai.summarization import clean_summary
+                    summary = clean_summary(model_result.response)
                     for line in summary.split('\n'):
                         # Wrap long lines
                         while len(line) > 70:
@@ -2035,7 +2037,7 @@ def _build_summarization_prompt(element: "CodeElement") -> str:
     Returns:
         Prompt string for summarization.
     """
-    from shared.ai.summarization import build_prompt
+    from shared.ai.summarization import build_prompt, clean_summary
 
     # For benchmarking, we don't have parent summaries (no hierarchical context)
     # Use placeholder text to indicate this
@@ -2085,7 +2087,9 @@ def _build_evaluation_prompt(
     for model in models:
         result = results[model][element_index]
         if result.success and result.response.strip():
-            summary = result.response.strip()
+            # Apply same clean_summary as actual parsing
+            from shared.ai.summarization import clean_summary
+            summary = clean_summary(result.response)
         else:
             summary = "(generation failed)"
         prompt_parts.append(f"\n### {model}")
