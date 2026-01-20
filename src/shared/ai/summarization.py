@@ -531,7 +531,7 @@ Code:
 Summary:""",
     "constant": """Describe this constant in 2-3 sentences for an AI agent navigating this codebase.
 
-FOCUS on the constant itself. Use file context only to understand its purpose - do not repeat or summarize the context.
+FOCUS on the constant itself. Use context only to understand its purpose - do not repeat or summarize the context.
 
 Address:
 - What configuration, value, or data this constant represents
@@ -539,6 +539,7 @@ Address:
 - Any important constraints or relationships with other values
 
 File context (for understanding only): {file_summary}
+{function_context}
 
 Name: {name}
 Value:
@@ -548,15 +549,16 @@ Value:
 Description:""",
     "variable": """Describe this variable in 2-3 sentences for an AI agent navigating this codebase.
 
-FOCUS on the variable itself. Use file/class context only to understand its purpose - do not repeat or summarize the context.
+FOCUS on the variable itself. Use context only to understand its purpose - do not repeat or summarize the context.
 
 Address:
 - What data, state, or configuration this variable holds
 - How it is initialized and when it changes
-- Its role in the class or module's behavior
+- Its role in the containing scope's behavior
 
 File context (for understanding only): {file_summary}
-Class context (for understanding only): {class_summary}
+{class_context}
+{function_context}
 
 Name: {name}
 Value:
@@ -595,10 +597,15 @@ def build_prompt(
     # Build context sections
     file_summary = parent_summaries.get("file", "No file context available.")
     class_summary = parent_summaries.get("class", "")
+    function_summary = parent_summaries.get("function", "")
 
     class_context = ""
-    if class_summary and element_type in ("method", "function"):
-        class_context = f"Class context: {class_summary}"
+    if class_summary and element_type in ("method", "function", "variable", "constant"):
+        class_context = f"Class context (for understanding only): {class_summary}"
+
+    function_context = ""
+    if function_summary and element_type in ("variable", "constant"):
+        function_context = f"Function/method context (for understanding only): {function_summary}"
 
     docstring_section = ""
     if element.docstring:
@@ -622,6 +629,7 @@ def build_prompt(
         file_summary=file_summary,
         class_summary=class_summary,
         class_context=class_context,
+        function_context=function_context,
         class_name=element.name if element_type == "class" else "",
         function_name=element.name,
         method_name=element.name,

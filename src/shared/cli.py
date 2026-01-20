@@ -1642,10 +1642,12 @@ def benchmark_models(
             console.print(f"\n  [cyan]{model}[/]")
 
             # Track summaries for hierarchical context (per model)
-            # file_summaries[file_path] = summary
-            # class_summaries[(file_path, class_name)] = summary
+            # file_summaries[relative_path] = summary
+            # class_summaries[(relative_path, class_name)] = summary
+            # function_summaries[element_id] = summary
             file_summaries: dict[str, str] = {}
             class_summaries: dict[tuple[str, str], str] = {}
+            function_summaries: dict[str, str] = {}  # element_id -> summary
 
             # Process elements in hierarchical order
             model_results: dict[int, BenchmarkResult] = {}  # index -> result
@@ -1668,6 +1670,10 @@ def benchmark_models(
                             if fp == elem.relative_path:
                                 parent_summaries["class"] = summ
                                 break
+                if elem.element_type in ("variable", "constant"):
+                    # Add function/method summary if parent is a function/method
+                    if elem.parent_id and elem.parent_id in function_summaries:
+                        parent_summaries["function"] = function_summaries[elem.parent_id]
 
                 # Build prompt with parent context
                 prompt = _build_summarization_prompt(elem, parent_summaries)
@@ -1690,6 +1696,8 @@ def benchmark_models(
                         file_summaries[elem.relative_path] = cleaned
                     elif elem.element_type == "class":
                         class_summaries[(elem.relative_path, elem.name)] = cleaned
+                    elif elem.element_type in ("function", "method"):
+                        function_summaries[elem.element_id] = cleaned
 
                 if result.success:
                     ollama_sum = result.load_time + result.prefill_time + result.generate_time
