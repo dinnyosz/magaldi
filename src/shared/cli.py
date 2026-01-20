@@ -1920,6 +1920,17 @@ def benchmark_models(
                 total_output = sum(r.output_tokens for r in successful)
                 console.print(f"  {model}: {total_prompt:,} prompt tokens, {total_output:,} output tokens")
 
+        # Save results to markdown
+        markdown_path = _save_benchmark_markdown(
+            repo_path=repo_path,
+            models_tested=models_to_test,
+            eval_model=eval_model,
+            elements=elements,
+            results=results,
+            ratings=ratings,
+        )
+        console.print(f"\n[bold green]Results saved to:[/] {markdown_path}")
+
         client.close()
         console.print("\n[green]Benchmark complete.[/]")
 
@@ -2077,6 +2088,200 @@ def _select_benchmark_files(
         })
 
     return result
+
+
+def _save_benchmark_markdown(
+    repo_path: str,
+    models_tested: list[str],
+    eval_model: str,
+    elements: list,
+    results: dict,
+    ratings: dict,
+    output_dir: str = "plans/benchmarks/data",
+) -> str:
+    """Save benchmark results to markdown file.
+
+    Args:
+        repo_path: Repository path.
+        models_tested: List of models tested.
+        eval_model: Model used for evaluation.
+        elements: List of CodeElements.
+        results: Dict mapping model -> list of BenchmarkResult.
+        ratings: Dict mapping element_index -> {model -> {"rating": int, "reason": str}}.
+        output_dir: Directory to save markdown file.
+
+    Returns:
+        Path to saved markdown file.
+    """
+    from collections import defaultdict
+    from datetime import datetime as dt
+    from pathlib import Path
+
+    from shared.ai.summarization import clean_summary
+
+    # Create output directory
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    # Generate filename with timestamp
+    timestamp = dt.now().strftime("%Y-%m-%d_%H-%M-%S")
+    filename = f"{timestamp}_benchmark.md"
+    filepath = Path(output_dir) / filename
+
+    lines = []
+
+    # Header
+    lines.append(f"# Benchmark Results - {dt.now().strftime('%Y-%m-%d %H:%M')}")
+    lines.append("")
+    lines.append(f"**Repository:** `{repo_path}`")
+    lines.append(f"**Evaluation Model:** `{eval_model}`")
+    lines.append(f"**Models Tested:** {len(models_tested)}")
+    lines.append(f"**Elements Evaluated:** {len(elements)}")
+    lines.append("")
+
+    # Summary table
+    lines.append("## Summary")
+    lines.append("")
+    lines.append("| Model | Avg Rating | Success | Avg Time | Gen t/s |")
+    lines.append("|-------|-----------|---------|----------|---------|")
+
+    for model in models_tested:
+        model_results = results[model]
+        success_count = sum(1 for r in model_results if r.success)
+        successful = [r for r in model_results if r.success]
+
+        model_ratings = [
+            ratings[i].get(model, {}).get("rating")
+            for i in range(len(elements))
+            if ratings[i].get(model, {}).get("rating") is not None
+        ]
+        avg_rating = sum(model_ratings) / len(model_ratings) if model_ratings else 0
+
+        if successful:
+            avg_wall = sum(r.ollama_total_time for r in successful) / len(successful)
+            avg_tps = sum(r.tokens_per_second for r in successful) / len(successful)
+            lines.append(
+                f"| {model} | {avg_rating:.1f}/10 | {success_count}/{len(model_results)} | {avg_wall:.2f}s | {avg_tps:.1f} |"
+            )
+        else:
+            lines.append(f"| {model} | - | 0/{len(model_results)} | - | - |")
+
+    lines.append("")
+
+    # Ratings by element type
+    lines.append("## Ratings by Element Type")
+    lines.append("")
+
+    elements_by_type: dict[str, list[int]] = defaultdict(list)
+    for i, elem in enumerate(elements):
+        elements_by_type[elem.element_type].append(i)
+
+    # Header row
+    header = "| Element Type |"
+    separator = "|--------------|"
+    for model in models_tested:
+        short_name = model.split("/")[-1][:15]
+        header += f" {short_name} |"
+        separator += "--------|"
+    lines.append(header)
+    lines.append(separator)
+
+    for elem_type, indices in sorted(elements_by_type.items()):
+        row = f"| {elem_type} |"
+        for model in models_tested:
+            type_ratings = [
+                ratings[i].get(model, {}).get("rating")
+                for i in indices
+                if ratings[i].get(model, {}).get("rating") is not None
+            ]
+            if type_ratings:
+                avg = sum(type_ratings) / len(type_ratings)
+                row += f" {avg:.1f} |"
+            else:
+                row += " - |"
+        lines.append(row)
+
+    lines.append("")
+
+    # Detailed results per element
+    lines.append("## Detailed Results")
+    lines.append("")
+
+    for i, elem in enumerate(elements):
+        elem_name = f"{elem.element_type}:{elem.name}"
+        lines.append(f"### {elem_name}")
+        lines.append("")
+        lines.append(f"**File:** `{elem.relative_path}`")
+        lines.append(f"**Lines:** {elem.line_start}-{elem.line_end}")
+        lines.append("")
+
+        # Source code snippet
+        if elem.raw_code:
+            lines.append("<details>")
+            lines.append("<summary>Source Code</summary>")
+            lines.append("")
+            lines.append("```python")
+            code_lines = elem.raw_code.strip().split('\n')[:30]
+            for line in code_lines:
+                lines.append(line)
+            if len(elem.raw_code.strip().split('\n')) > 30:
+                lines.append(f"# ... ({len(elem.raw_code.strip().split(chr(10)))} lines total)")
+            lines.append("```")
+            lines.append("</details>")
+            lines.append("")
+
+        # Summaries by model
+        lines.append("| Model | Rating | Summary |")
+        lines.append("|-------|--------|---------|")
+
+        for model in models_tested:
+            model_result = results[model][i]
+            rating_data = ratings[i].get(model, {})
+            rating = rating_data.get("rating")
+            reason = rating_data.get("reason", "")
+            rating_display = f"{rating}/10" if rating else "?/10"
+
+            if model_result.success and model_result.response.strip():
+                summary = clean_summary(model_result.response)
+                # Escape pipes and truncate for table
+                summary_escaped = summary.replace("|", "\\|").replace("\n", " ")
+                if len(summary_escaped) > 200:
+                    summary_escaped = summary_escaped[:200] + "..."
+                lines.append(f"| {model} | {rating_display} | {summary_escaped} |")
+            else:
+                lines.append(f"| {model} | {rating_display} | *(failed)* |")
+
+        lines.append("")
+
+        # Full summaries (expandable)
+        lines.append("<details>")
+        lines.append("<summary>Full Summaries</summary>")
+        lines.append("")
+
+        for model in models_tested:
+            model_result = results[model][i]
+            rating_data = ratings[i].get(model, {})
+            rating = rating_data.get("rating")
+            reason = rating_data.get("reason", "")
+
+            lines.append(f"**{model}** ({rating}/10 - {reason})" if rating else f"**{model}** (?/10)")
+            lines.append("")
+            if model_result.success and model_result.response.strip():
+                summary = clean_summary(model_result.response)
+                lines.append(f"> {summary}")
+            else:
+                lines.append("> *(failed)*")
+            lines.append("")
+
+        lines.append("</details>")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+    # Write file
+    with open(filepath, "w") as f:
+        f.write("\n".join(lines))
+
+    return str(filepath)
 
 
 def _build_summarization_prompt(
