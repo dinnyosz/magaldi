@@ -457,6 +457,8 @@ PROMPTS = {
 
 Do NOT enumerate individual classes or functions - those are documented separately.
 
+OUTPUT ONLY THE SUMMARY. No reasoning, no steps, no preamble - just the summary sentences directly.
+
 File: {file_path}
 
 Code:
@@ -475,6 +477,8 @@ Address:
 - How it collaborates with other classes or modules
 
 Do NOT enumerate individual methods - those are documented separately.
+
+OUTPUT ONLY THE SUMMARY. No reasoning, no steps, no preamble - just the summary sentences directly.
 
 File context (for understanding only): {file_summary}
 
@@ -495,6 +499,8 @@ Address:
 - When to call this function - what scenarios or tasks require it
 - Side effects: external state changes, I/O, exceptions raised
 - Key edge cases or preconditions the caller should know
+
+OUTPUT ONLY THE SUMMARY. No reasoning, no steps, no preamble - just the summary sentences directly.
 
 File context (for understanding only): {file_summary}
 {class_context}
@@ -518,6 +524,8 @@ Address:
 - When to call this method in the object's lifecycle
 - Side effects, exceptions, or preconditions the caller should know
 
+OUTPUT ONLY THE SUMMARY. No reasoning, no steps, no preamble - just the summary sentences directly.
+
 File context (for understanding only): {file_summary}
 Class context (for understanding only): {class_summary}
 
@@ -538,6 +546,8 @@ Address:
 - Where and why this constant is used in the system
 - Any important constraints or relationships with other values
 
+OUTPUT ONLY THE DESCRIPTION. No reasoning, no steps, no preamble - just the description sentences directly.
+
 File context (for understanding only): {file_summary}
 {function_context}
 
@@ -555,6 +565,8 @@ Address:
 - What data, state, or configuration this variable holds
 - How it is initialized and when it changes
 - Its role in the containing scope's behavior
+
+OUTPUT ONLY THE DESCRIPTION. No reasoning, no steps, no preamble - just the description sentences directly.
 
 File context (for understanding only): {file_summary}
 {class_context}

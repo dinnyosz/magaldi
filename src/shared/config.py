@@ -244,28 +244,31 @@ class BenchmarkConfig:
     """
 
     # Models to benchmark - ordered by size within each category
+    # NOTE: Temporarily testing only thinking models (qwen3, deepseek, nemotron)
     models: list[str] = field(default_factory=lambda: [
-        # Tier 1: Ultra-light (<1B) - ~4-6GB VRAM
+        # === THINKING MODELS (testing think=false) ===
         "qwen3:0.6b",              # Smallest Qwen3, Apache 2.0, 32K context
-        "qwen2.5-coder:0.5b",
-        # Tier 2: Light (1-2B) - ~6-8GB VRAM
-        "qwen2.5-coder:1.5b",      # 54% pass@1, best efficiency
-        "llama3.2:1b",
         "qwen3:1.7b",              # Qwen3 dense, Apache 2.0
-        # Tier 3: Medium (3-4B) - ~10-12GB VRAM, best efficiency/performance
-        "qwen2.5-coder:3b",        # 59% pass@1, sweet spot
-        "llama3.2:3b",
-        "alibayram/smollm3",       # 3B, claims to outperform Qwen2.5-3B, 64K context
-        "phi4-mini",               # 3.8B, MIT, 128K context, strong reasoning
         "qwen3:4b",                # Qwen3 dense, Apache 2.0
-        # Tier 4: Large (6B-9B) - ~14-17GB VRAM
-        "qwen2.5-coder:7b",        # 65% pass@1, most stable (1.00)
         "qwen3:8b",                # Qwen3 dense, Apache 2.0
-        # MoE models - active params listed
-        "granite3.1-moe:1b",       # ~1B active (IBM, 128K context)
-        "granite3.1-moe:3b",       # ~3B active (IBM, 128K context)
         "deepseek-coder-v2:lite",  # 2.4B active from 16B total
         "nemotron-3-nano",         # 3-4B active from 30B (NVIDIA, Mamba+MoE hybrid)
+        # === COMMENTED OUT FOR NOW ===
+        # # Tier 1: Ultra-light (<1B) - ~4-6GB VRAM
+        # "qwen2.5-coder:0.5b",
+        # # Tier 2: Light (1-2B) - ~6-8GB VRAM
+        # "qwen2.5-coder:1.5b",      # 54% pass@1, best efficiency
+        # "llama3.2:1b",
+        # # Tier 3: Medium (3-4B) - ~10-12GB VRAM, best efficiency/performance
+        # "qwen2.5-coder:3b",        # 59% pass@1, sweet spot
+        # "llama3.2:3b",
+        # "alibayram/smollm3",       # 3B, claims to outperform Qwen2.5-3B, 64K context
+        # "phi4-mini",               # 3.8B, MIT, 128K context, strong reasoning
+        # # Tier 4: Large (6B-9B) - ~14-17GB VRAM
+        # "qwen2.5-coder:7b",        # 65% pass@1, most stable (1.00)
+        # # MoE models - active params listed
+        # "granite3.1-moe:1b",       # ~1B active (IBM, 128K context)
+        # "granite3.1-moe:3b",       # ~3B active (IBM, 128K context)
     ])
 
     # Model used for evaluating/rating summaries (LLM-as-judge)
