@@ -32,6 +32,7 @@ class BenchmarkResult:
     prompt_tokens: int = 0  # Input tokens
     output_tokens: int = 0  # Generated tokens
     prompt_chars: int = 0  # Input character count (for length-based analysis)
+    output_chars: int = 0  # Output character count
 
     @property
     def tokens_per_second(self) -> float:
@@ -193,10 +194,11 @@ class OllamaBenchmarkClient:
             eval_ns = data.get("eval_duration", 0)
             ollama_total_ns = data.get("total_duration", 0)
 
+            response_text = data.get("response", "").strip()
             return BenchmarkResult(
                 model=model,
                 success=True,
-                response=data.get("response", "").strip(),
+                response=response_text,
                 load_time=load_ns / 1e9,
                 prefill_time=prompt_eval_ns / 1e9,
                 generate_time=eval_ns / 1e9,
@@ -205,6 +207,7 @@ class OllamaBenchmarkClient:
                 prompt_tokens=data.get("prompt_eval_count", 0),
                 output_tokens=data.get("eval_count", 0),
                 prompt_chars=len(prompt),
+                output_chars=len(response_text),
             )
 
         except requests.Timeout:

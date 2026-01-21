@@ -1710,6 +1710,7 @@ def benchmark_models(
                         f"    [green]✓[/] {elem_name[:40]:<40} | "
                         f"[bold]{result.ollama_total_time:.2f}s[/] "
                         f"(load:{result.load_time:.2f} pre:{result.prefill_time:.2f} gen:{result.generate_time:.2f} {overhead_str}) | "
+                        f"{result.prompt_chars}→{result.output_chars} chr | "
                         f"{result.prompt_tokens}→{result.output_tokens} tok | "
                         f"pre:{result.prefill_tokens_per_second:.0f} t/s gen:{result.tokens_per_second:.0f} t/s{context_str}"
                     )
