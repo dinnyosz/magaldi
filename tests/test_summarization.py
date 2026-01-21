@@ -31,8 +31,8 @@ def config() -> SummarizationConfig:
     return SummarizationConfig(
         ollama_url="http://localhost:11434",
         model="qwen2.5-coder:7b",
-        temperature=0.3,
-        max_tokens=256,
+        temperature=0.2,
+        max_tokens=512,
     )
 
 
@@ -474,8 +474,8 @@ class TestSummarizationConfig:
         config = SummarizationConfig()
 
         assert config.model == "qwen2.5-coder:3b"
-        assert config.temperature == 0.3
-        assert config.max_tokens == 256
+        assert config.temperature == 0.2
+        assert config.max_tokens == 512
         assert config.max_retries == 3
 
     def test_custom_values(self):

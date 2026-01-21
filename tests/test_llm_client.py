@@ -55,8 +55,8 @@ class TestLLMConfig:
         assert config.model == "ollama/qwen2.5-coder:3b"
         assert config.api_base is None
         assert config.api_key is None
-        assert config.temperature == 0.3
-        assert config.max_tokens == 256
+        assert config.temperature == 0.2
+        assert config.max_tokens == 512
         assert config.timeout == 60
         assert config.max_retries == 3
 

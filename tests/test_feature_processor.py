@@ -117,7 +117,7 @@ class TestFeatureProcessingConfig:
         assert config.api_base == "http://localhost:11434"
         assert config.provider == "ollama"
         assert config.num_workers == 4
-        assert config.summarize_temperature == 0.3
+        assert config.summarize_temperature == 0.2
         assert config.embed_dimensions == 1024
 
     def test_custom_values(self):

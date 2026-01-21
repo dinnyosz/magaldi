@@ -56,9 +56,9 @@ class ProcessingConfig:
     api_key: str | None = None  # API key for cloud providers
     skip_ai: bool = False
 
-    # Summarization settings
-    summarize_temperature: float = 0.3
-    summarize_max_tokens: int = 256
+    # Summarization settings (based on arxiv.org/html/2507.03160v2)
+    summarize_temperature: float = 0.2
+    summarize_max_tokens: int = 512
     summarize_timeout: int = 60
     max_code_tokens: int = 4000
 

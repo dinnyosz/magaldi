@@ -274,9 +274,9 @@ class LLMConfig:
     api_base: str | None = None  # For Ollama: "http://localhost:11434"
     api_key: str | None = None  # For cloud providers
 
-    # Generation settings
-    temperature: float = 0.3
-    max_tokens: int = 256
+    # Generation settings (based on arxiv.org/html/2507.03160v2)
+    temperature: float = 0.2
+    max_tokens: int = 512
     timeout: int = 60
 
     # Retry settings

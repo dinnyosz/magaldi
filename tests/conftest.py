@@ -70,7 +70,7 @@ def test_llm_config() -> LLMConfig:
         provider="ollama",
         url="http://localhost:11434",
         summarize_model="test-model",
-        summarize_temperature=0.3,
+        summarize_temperature=0.2,
         summarize_max_tokens=128,
         summarize_context_window=4096,
         embed_model="test-embed",

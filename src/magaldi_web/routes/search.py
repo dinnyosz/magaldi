@@ -89,8 +89,8 @@ Instructions:
 
         summary = llm.generate(
             prompt=prompt,
-            temperature=0.3,
-            max_tokens=500,
+            temperature=0.2,
+            max_tokens=512,
             timeout=30,
         )
 

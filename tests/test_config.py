@@ -99,7 +99,7 @@ class TestLLMConfigDefaults:
 
     def test_default_summarize_temperature(self):
         config = LLMConfig()
-        assert config.summarize_temperature == 0.3
+        assert config.summarize_temperature == 0.2
 
     def test_default_embed_model(self):
         config = LLMConfig()

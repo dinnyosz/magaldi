@@ -1722,15 +1722,22 @@ def benchmark_models(
         # Phase 8: LLM Evaluation of summaries
         console.print("\n[bold blue]Phase 8:[/] LLM Evaluation")
 
-        # Use configured eval model, with fallback to largest available
-        eval_model = benchmark_config.eval_model
-        if eval_model not in available_models:
-            console.print(f"  [yellow]Eval model {eval_model} not available, using {models_to_test[-1]}[/]")
-            eval_model = models_to_test[-1]
-        console.print(f"  Using [cyan]{eval_model}[/] to rate summaries (1-10)")
+        # Validate configured eval models, filter to available ones
+        eval_models = []
+        for em in benchmark_config.eval_models:
+            if em in available_models:
+                eval_models.append(em)
+            else:
+                console.print(f"  [yellow]Eval model {em} not available, skipping[/]")
+        if not eval_models:
+            console.print(f"  [yellow]No eval models available, using {models_to_test[-1]}[/]")
+            eval_models = [models_to_test[-1]]
+        console.print(f"  Using {len(eval_models)} evaluator(s): [cyan]{', '.join(eval_models)}[/]")
 
-        # ratings[element_index][model] = rating (1-10) or None if failed
-        ratings: dict[int, dict[str, int | None]] = {i: {} for i in range(len(prompts))}
+        # ratings[element_index][model][eval_model] = {"rating": int, "reason": str}
+        ratings: dict[int, dict[str, dict[str, dict]]] = {
+            i: {m: {} for m in models_to_test} for i in range(len(prompts))
+        }
         total_elements = len(prompts)
 
         for i, (elem, _) in enumerate(prompts):
@@ -1740,63 +1747,82 @@ def benchmark_models(
             # Build evaluation prompt with source code and all summaries
             eval_prompt = _build_evaluation_prompt(elem, models_to_test, results, i)
 
-            # Retry up to 3 times if some ratings are missing
-            max_retries = 3
-            parsed_ratings = {}
-            for attempt in range(max_retries):
-                with console.status(f"  {progress} Evaluating {elem_name}..." + (f" (retry {attempt})" if attempt > 0 else "")):
-                    eval_result = client.generate(
-                        model=eval_model,
-                        prompt=eval_prompt,
-                        temperature=0.1 + (attempt * 0.1),  # Slightly increase temp on retry
-                        max_tokens=512,
-                        timeout=benchmark_config.timeout,
-                    )
+            # Evaluate with each eval model
+            elem_ratings_by_evaluator: dict[str, dict] = {}
+            for eval_model in eval_models:
+                # Retry up to 3 times if some ratings are missing
+                max_retries = 3
+                parsed_ratings = {}
+                for attempt in range(max_retries):
+                    with console.status(f"  {progress} [{eval_model}] Evaluating {elem_name}..." + (f" (retry {attempt})" if attempt > 0 else "")):
+                        eval_result = client.generate(
+                            model=eval_model,
+                            prompt=eval_prompt,
+                            temperature=0.1 + (attempt * 0.1),  # Slightly increase temp on retry
+                            max_tokens=512,
+                            timeout=benchmark_config.timeout,
+                        )
 
-                if eval_result.success:
-                    parsed_ratings = _parse_evaluation_ratings(eval_result.response, models_to_test)
-                    # Check if all models got a rating
-                    missing = [m for m in models_to_test if parsed_ratings[m]["rating"] is None]
-                    if not missing:
-                        break  # All ratings present, we're done
-                    elif attempt < max_retries - 1:
-                        continue  # Retry
-                else:
-                    if attempt < max_retries - 1:
-                        continue  # Retry on failure
+                    if eval_result.success:
+                        parsed_ratings = _parse_evaluation_ratings(eval_result.response, models_to_test)
+                        # Check if all models got a rating
+                        missing = [m for m in models_to_test if parsed_ratings[m]["rating"] is None]
+                        if not missing:
+                            break  # All ratings present, we're done
+                        elif attempt < max_retries - 1:
+                            continue  # Retry
+                    else:
+                        if attempt < max_retries - 1:
+                            continue  # Retry on failure
 
-            if parsed_ratings:
-                ratings[i] = parsed_ratings
-                rating_str = " | ".join(
-                    f"{m}: {parsed_ratings[m]['rating'] or '?'}"
-                    for m in models_to_test
-                )
-                missing_count = sum(1 for m in models_to_test if parsed_ratings[m]["rating"] is None)
-                if missing_count > 0:
-                    console.print(f"  {progress} [yellow]~[/] {elem_name[:40]:<40} | {rating_str} [dim]({missing_count} missing)[/]")
+                elem_ratings_by_evaluator[eval_model] = parsed_ratings
+
+            # Store ratings per eval model
+            for model in models_to_test:
+                for eval_model in eval_models:
+                    if elem_ratings_by_evaluator.get(eval_model, {}).get(model):
+                        ratings[i][model][eval_model] = elem_ratings_by_evaluator[eval_model][model]
+
+            # Display ratings (show average across evaluators for each model)
+            rating_parts = []
+            for m in models_to_test:
+                model_evals = [
+                    elem_ratings_by_evaluator.get(em, {}).get(m, {}).get("rating")
+                    for em in eval_models
+                ]
+                valid_ratings = [r for r in model_evals if r is not None]
+                if valid_ratings:
+                    avg = sum(valid_ratings) / len(valid_ratings)
+                    rating_parts.append(f"{m}: {avg:.1f}")
                 else:
-                    console.print(f"  {progress} [green]✓[/] {elem_name[:40]:<40} | {rating_str}")
+                    rating_parts.append(f"{m}: ?")
+            rating_str = " | ".join(rating_parts)
+
+            # Count total missing ratings across all evaluators
+            total_expected = len(models_to_test) * len(eval_models)
+            total_present = sum(
+                1 for m in models_to_test for em in eval_models
+                if elem_ratings_by_evaluator.get(em, {}).get(m, {}).get("rating") is not None
+            )
+            missing_count = total_expected - total_present
+
+            if missing_count > 0:
+                console.print(f"  {progress} [yellow]~[/] {elem_name[:40]:<40} | {rating_str} [dim]({missing_count} missing)[/]")
             else:
-                console.print(f"  {progress} [red]✗[/] {elem_name[:40]:<40} | Evaluation failed: {eval_result.error}")
+                console.print(f"  {progress} [green]✓[/] {elem_name[:40]:<40} | {rating_str}")
 
         # Benchmark summary table (detailed summaries are saved to markdown file only)
         console.print("\n" + "=" * 70)
         console.print("[bold]Benchmark Summary[/]")
         console.print("=" * 70)
 
-        summary_table = Table(show_header=True, header_style="bold cyan")
-        summary_table.add_column("Model", style="cyan")
-        summary_table.add_column("Avg Rating", justify="center")
-        summary_table.add_column("Success", justify="center")
-        summary_table.add_column("Avg Time", justify="right")
-        summary_table.add_column("Pre t/s", justify="right")
-        summary_table.add_column("Gen t/s", justify="right")
+        from shared.ai.summarization import clean_summary
 
+        # Build real_success_indices once
+        real_success_indices_by_model: dict[str, list[int]] = {}
+        real_successes_by_model: dict[str, list] = {}
         for model in models_to_test:
             model_results = results[model]
-
-            # Count real successes (response not empty after cleaning)
-            from shared.ai.summarization import clean_summary
             real_successes = []
             real_success_indices = []
             for i, r in enumerate(model_results):
@@ -1805,49 +1831,67 @@ def benchmark_models(
                     if cleaned.strip():
                         real_successes.append(r)
                         real_success_indices.append(i)
+            real_success_indices_by_model[model] = real_success_indices
+            real_successes_by_model[model] = real_successes
 
-            # Calculate average rating only for real successes
-            model_ratings = [
-                ratings[i].get(model, {}).get("rating")
-                for i in real_success_indices
-                if ratings[i].get(model, {}).get("rating") is not None
-            ]
-            avg_rating = sum(model_ratings) / len(model_ratings) if model_ratings else 0
+        # Show summary table per evaluator
+        for eval_model in eval_models:
+            console.print(f"\n[bold]Evaluator: {eval_model}[/]")
 
-            if real_successes:
-                avg_wall = sum(r.ollama_total_time for r in real_successes) / len(real_successes)
-                avg_pre_tps = sum(r.prefill_tokens_per_second for r in real_successes) / len(real_successes)
-                avg_gen_tps = sum(r.tokens_per_second for r in real_successes) / len(real_successes)
+            summary_table = Table(show_header=True, header_style="bold cyan")
+            summary_table.add_column("Model", style="cyan")
+            summary_table.add_column("Avg Rating", justify="center")
+            summary_table.add_column("Success", justify="center")
+            summary_table.add_column("Avg Time", justify="right")
+            summary_table.add_column("Pre t/s", justify="right")
+            summary_table.add_column("Gen t/s", justify="right")
 
-                # Color-code rating (1-10 scale)
-                if avg_rating >= 8:
-                    rating_style = "bold green"
-                elif avg_rating >= 6:
-                    rating_style = "yellow"
+            for model in models_to_test:
+                real_successes = real_successes_by_model[model]
+                real_success_indices = real_success_indices_by_model[model]
+
+                # Calculate average rating only for real successes (from this evaluator)
+                model_ratings = [
+                    ratings[i].get(model, {}).get(eval_model, {}).get("rating")
+                    for i in real_success_indices
+                    if ratings[i].get(model, {}).get(eval_model, {}).get("rating") is not None
+                ]
+                avg_rating = sum(model_ratings) / len(model_ratings) if model_ratings else 0
+
+                if real_successes:
+                    avg_wall = sum(r.ollama_total_time for r in real_successes) / len(real_successes)
+                    avg_pre_tps = sum(r.prefill_tokens_per_second for r in real_successes) / len(real_successes)
+                    avg_gen_tps = sum(r.tokens_per_second for r in real_successes) / len(real_successes)
+
+                    # Color-code rating (1-10 scale)
+                    if avg_rating >= 8:
+                        rating_style = "bold green"
+                    elif avg_rating >= 6:
+                        rating_style = "yellow"
+                    else:
+                        rating_style = "red"
+
+                    summary_table.add_row(
+                        model,
+                        f"[{rating_style}]{avg_rating:.1f}/10[/]" if model_ratings else "-",
+                        f"{len(real_successes)}/{len(results[model])}",
+                        f"{avg_wall:.2f}s",
+                        f"{avg_pre_tps:.0f}",
+                        f"{avg_gen_tps:.0f}",
+                    )
                 else:
-                    rating_style = "red"
+                    summary_table.add_row(
+                        model,
+                        "-",
+                        f"0/{len(results[model])}",
+                        "-",
+                        "-",
+                        "-",
+                    )
 
-                summary_table.add_row(
-                    model,
-                    f"[{rating_style}]{avg_rating:.1f}/10[/]" if model_ratings else "-",
-                    f"{len(real_successes)}/{len(model_results)}",
-                    f"{avg_wall:.2f}s",
-                    f"{avg_pre_tps:.0f}",
-                    f"{avg_gen_tps:.0f}",
-                )
-            else:
-                summary_table.add_row(
-                    model,
-                    "-",
-                    f"0/{len(model_results)}",
-                    "-",
-                    "-",
-                    "-",
-                )
+            console.print(summary_table)
 
-        console.print(summary_table)
-
-        # Ratings by element type
+        # Ratings by element type (per evaluator)
         console.print("\n[bold]Ratings by Element Type[/]")
 
         # Group elements by type
@@ -1856,27 +1900,188 @@ def benchmark_models(
         for i, (elem, _) in enumerate(prompts):
             elements_by_type[elem.element_type].append(i)
 
-        # Create table with element types as rows
-        type_table = Table(show_header=True, header_style="bold cyan")
-        type_table.add_column("Element Type", style="cyan")
-        for model in models_to_test:
-            type_table.add_column(model, justify="center")
+        # Show type table per evaluator
+        for eval_model in eval_models:
+            console.print(f"\n[dim]Evaluator: {eval_model}[/]")
 
-        for elem_type, indices in sorted(elements_by_type.items()):
-            row = [elem_type]
+            type_table = Table(show_header=True, header_style="bold cyan")
+            type_table.add_column("Element Type", style="cyan")
             for model in models_to_test:
-                # Only include ratings for real successes
-                type_ratings = []
+                type_table.add_column(model, justify="center")
+
+            for elem_type, indices in sorted(elements_by_type.items()):
+                row = [elem_type]
+                for model in models_to_test:
+                    # Only include ratings for real successes (from this evaluator)
+                    type_ratings = []
+                    for i in indices:
+                        r = results[model][i]
+                        if r.success and r.response.strip():
+                            cleaned = clean_summary(r.response)
+                            if cleaned.strip():
+                                rating = ratings[i].get(model, {}).get(eval_model, {}).get("rating")
+                                if rating is not None:
+                                    type_ratings.append(rating)
+                    if type_ratings:
+                        avg = sum(type_ratings) / len(type_ratings)
+                        if avg >= 8:
+                            row.append(f"[bold green]{avg:.1f}[/]")
+                        elif avg >= 6:
+                            row.append(f"[yellow]{avg:.1f}[/]")
+                        else:
+                            row.append(f"[red]{avg:.1f}[/]")
+                    else:
+                        row.append("-")
+                type_table.add_row(*row)
+
+            console.print(type_table)
+
+        # Averaged ratings across all evaluators
+        if len(eval_models) > 1:
+            console.print(f"\n[bold]Averaged Across Evaluators[/]")
+
+            # Averaged summary table
+            avg_summary_table = Table(show_header=True, header_style="bold cyan")
+            avg_summary_table.add_column("Model", style="cyan")
+            avg_summary_table.add_column("Avg Rating", justify="center")
+            avg_summary_table.add_column("Success", justify="center")
+            avg_summary_table.add_column("Avg Time", justify="right")
+            avg_summary_table.add_column("Pre t/s", justify="right")
+            avg_summary_table.add_column("Gen t/s", justify="right")
+
+            for model in models_to_test:
+                real_successes = real_successes_by_model[model]
+                real_success_indices = real_success_indices_by_model[model]
+
+                # Average rating across all evaluators for real successes
+                all_ratings = []
+                for i in real_success_indices:
+                    for em in eval_models:
+                        rating = ratings[i].get(model, {}).get(em, {}).get("rating")
+                        if rating is not None:
+                            all_ratings.append(rating)
+                avg_rating = sum(all_ratings) / len(all_ratings) if all_ratings else 0
+
+                if real_successes:
+                    avg_wall = sum(r.ollama_total_time for r in real_successes) / len(real_successes)
+                    avg_pre_tps = sum(r.prefill_tokens_per_second for r in real_successes) / len(real_successes)
+                    avg_gen_tps = sum(r.tokens_per_second for r in real_successes) / len(real_successes)
+
+                    if avg_rating >= 8:
+                        rating_style = "bold green"
+                    elif avg_rating >= 6:
+                        rating_style = "yellow"
+                    else:
+                        rating_style = "red"
+
+                    avg_summary_table.add_row(
+                        model,
+                        f"[{rating_style}]{avg_rating:.1f}/10[/]" if all_ratings else "-",
+                        f"{len(real_successes)}/{len(results[model])}",
+                        f"{avg_wall:.2f}s",
+                        f"{avg_pre_tps:.0f}",
+                        f"{avg_gen_tps:.0f}",
+                    )
+                else:
+                    avg_summary_table.add_row(model, "-", f"0/{len(results[model])}", "-", "-", "-")
+
+            console.print(avg_summary_table)
+
+            # Averaged element type table
+            console.print(f"\n[dim]Ratings by Element Type (averaged)[/]")
+            avg_type_table = Table(show_header=True, header_style="bold cyan")
+            avg_type_table.add_column("Element Type", style="cyan")
+            for model in models_to_test:
+                avg_type_table.add_column(model, justify="center")
+
+            for elem_type, indices in sorted(elements_by_type.items()):
+                row = [elem_type]
+                for model in models_to_test:
+                    # Average ratings across all evaluators for this element type
+                    type_ratings = []
+                    for i in indices:
+                        r = results[model][i]
+                        if r.success and r.response.strip():
+                            cleaned = clean_summary(r.response)
+                            if cleaned.strip():
+                                for em in eval_models:
+                                    rating = ratings[i].get(model, {}).get(em, {}).get("rating")
+                                    if rating is not None:
+                                        type_ratings.append(rating)
+                    if type_ratings:
+                        avg = sum(type_ratings) / len(type_ratings)
+                        if avg >= 8:
+                            row.append(f"[bold green]{avg:.1f}[/]")
+                        elif avg >= 6:
+                            row.append(f"[yellow]{avg:.1f}[/]")
+                        else:
+                            row.append(f"[red]{avg:.1f}[/]")
+                    else:
+                        row.append("-")
+                avg_type_table.add_row(*row)
+
+            console.print(avg_type_table)
+
+        # Ratings by Character Length
+        console.print("\n[bold]Ratings by Input Character Length[/]")
+
+        # Define character length ranges
+        char_ranges = [
+            (0, 500, "0-500"),
+            (500, 1000, "500-1K"),
+            (1000, 2000, "1K-2K"),
+            (2000, 4000, "2K-4K"),
+            (4000, 8000, "4K-8K"),
+            (8000, float("inf"), "8K+"),
+        ]
+
+        def get_char_range_label(chars: int) -> str:
+            for min_c, max_c, label in char_ranges:
+                if min_c <= chars < max_c:
+                    return label
+            return "8K+"
+
+        # Group elements by character length range
+        elements_by_char_range: dict[str, list[int]] = defaultdict(list)
+        for i, (elem, _) in enumerate(prompts):
+            # Get prompt char count from any successful result
+            prompt_chars = 0
+            for model in models_to_test:
+                if results[model][i].success and results[model][i].prompt_chars > 0:
+                    prompt_chars = results[model][i].prompt_chars
+                    break
+            if prompt_chars == 0:
+                # Fallback: estimate from raw_code length
+                prompt_chars = len(elem.raw_code or "") + 200  # ~200 chars for prompt template
+            range_label = get_char_range_label(prompt_chars)
+            elements_by_char_range[range_label].append(i)
+
+        # Show averaged char range table
+        console.print(f"\n[dim]Ratings by Character Length (averaged across evaluators)[/]")
+        char_table = Table(show_header=True, header_style="bold cyan")
+        char_table.add_column("Char Range", style="cyan")
+        char_table.add_column("Count", justify="right")
+        for model in models_to_test:
+            char_table.add_column(model, justify="center")
+
+        # Sort by range order
+        range_order = {label: i for i, (_, _, label) in enumerate(char_ranges)}
+        for range_label in sorted(elements_by_char_range.keys(), key=lambda x: range_order.get(x, 99)):
+            indices = elements_by_char_range[range_label]
+            row = [range_label, str(len(indices))]
+            for model in models_to_test:
+                range_ratings = []
                 for i in indices:
                     r = results[model][i]
                     if r.success and r.response.strip():
                         cleaned = clean_summary(r.response)
                         if cleaned.strip():
-                            rating = ratings[i].get(model, {}).get("rating")
-                            if rating is not None:
-                                type_ratings.append(rating)
-                if type_ratings:
-                    avg = sum(type_ratings) / len(type_ratings)
+                            for em in eval_models:
+                                rating = ratings[i].get(model, {}).get(em, {}).get("rating")
+                                if rating is not None:
+                                    range_ratings.append(rating)
+                if range_ratings:
+                    avg = sum(range_ratings) / len(range_ratings)
                     if avg >= 8:
                         row.append(f"[bold green]{avg:.1f}[/]")
                     elif avg >= 6:
@@ -1885,9 +2090,9 @@ def benchmark_models(
                         row.append(f"[red]{avg:.1f}[/]")
                 else:
                     row.append("-")
-            type_table.add_row(*row)
+            char_table.add_row(*row)
 
-        console.print(type_table)
+        console.print(char_table)
 
         # Token stats
         console.print("\n[bold]Token Statistics[/]")
@@ -1902,7 +2107,7 @@ def benchmark_models(
         markdown_path = _save_benchmark_markdown(
             repo_path=repo_path,
             models_tested=models_to_test,
-            eval_model=eval_model,
+            eval_models=eval_models,
             elements=elements,
             results=results,
             ratings=ratings,
@@ -2071,7 +2276,7 @@ def _select_benchmark_files(
 def _save_benchmark_markdown(
     repo_path: str,
     models_tested: list[str],
-    eval_model: str,
+    eval_models: list[str],
     elements: list,
     results: dict,
     ratings: dict,
@@ -2082,10 +2287,10 @@ def _save_benchmark_markdown(
     Args:
         repo_path: Repository path.
         models_tested: List of models tested.
-        eval_model: Model used for evaluation.
+        eval_models: List of models used for evaluation (LLM-as-judge).
         elements: List of CodeElements.
         results: Dict mapping model -> list of BenchmarkResult.
-        ratings: Dict mapping element_index -> {model -> {"rating": int, "reason": str}}.
+        ratings: Dict mapping element_index -> {model -> {eval_model -> {"rating": int, "reason": str}}}.
         output_dir: Directory to save markdown file.
 
     Returns:
@@ -2111,21 +2316,16 @@ def _save_benchmark_markdown(
     lines.append(f"# Benchmark Results - {dt.now().strftime('%Y-%m-%d %H:%M')}")
     lines.append("")
     lines.append(f"**Repository:** `{repo_path}`")
-    lines.append(f"**Evaluation Model:** `{eval_model}`")
+    lines.append(f"**Evaluation Models:** `{', '.join(eval_models)}`")
     lines.append(f"**Models Tested:** {len(models_tested)}")
     lines.append(f"**Elements Evaluated:** {len(elements)}")
     lines.append("")
 
-    # Summary table
-    lines.append("## Summary")
-    lines.append("")
-    lines.append("| Model | Avg Rating | Success | Avg Time | Pre t/s | Gen t/s |")
-    lines.append("|-------|-----------|---------|----------|---------|---------|")
-
+    # Pre-compute real successes for each model
+    real_success_indices_by_model: dict[str, list[int]] = {}
+    real_successes_by_model: dict[str, list] = {}
     for model in models_tested:
         model_results = results[model]
-
-        # Count real successes (response not empty after cleaning)
         real_successes = []
         real_success_indices = []
         for i, r in enumerate(model_results):
@@ -2134,65 +2334,211 @@ def _save_benchmark_markdown(
                 if cleaned.strip():
                     real_successes.append(r)
                     real_success_indices.append(i)
+        real_success_indices_by_model[model] = real_success_indices
+        real_successes_by_model[model] = real_successes
 
-        # Calculate average rating only for real successes
-        model_ratings = [
-            ratings[i].get(model, {}).get("rating")
-            for i in real_success_indices
-            if ratings[i].get(model, {}).get("rating") is not None
-        ]
-        avg_rating = sum(model_ratings) / len(model_ratings) if model_ratings else 0
+    # Summary table per evaluator
+    for eval_model in eval_models:
+        lines.append(f"## Summary (Evaluator: {eval_model})")
+        lines.append("")
+        lines.append("| Model | Avg Rating | Success | Avg Time | Pre t/s | Gen t/s |")
+        lines.append("|-------|-----------|---------|----------|---------|---------|")
 
-        if real_successes:
-            avg_wall = sum(r.ollama_total_time for r in real_successes) / len(real_successes)
-            avg_pre_tps = sum(r.prefill_tokens_per_second for r in real_successes) / len(real_successes)
-            avg_gen_tps = sum(r.tokens_per_second for r in real_successes) / len(real_successes)
-            lines.append(
-                f"| {model} | {avg_rating:.1f}/10 | {len(real_successes)}/{len(model_results)} | {avg_wall:.2f}s | {avg_pre_tps:.0f} | {avg_gen_tps:.0f} |"
-            )
-        else:
-            lines.append(f"| {model} | - | 0/{len(model_results)} | - | - | - |")
+        for model in models_tested:
+            real_successes = real_successes_by_model[model]
+            real_success_indices = real_success_indices_by_model[model]
 
-    lines.append("")
+            # Calculate average rating only for real successes (from this evaluator)
+            model_ratings = [
+                ratings[i].get(model, {}).get(eval_model, {}).get("rating")
+                for i in real_success_indices
+                if ratings[i].get(model, {}).get(eval_model, {}).get("rating") is not None
+            ]
+            avg_rating = sum(model_ratings) / len(model_ratings) if model_ratings else 0
 
-    # Ratings by element type
-    lines.append("## Ratings by Element Type")
-    lines.append("")
+            if real_successes:
+                avg_wall = sum(r.ollama_total_time for r in real_successes) / len(real_successes)
+                avg_pre_tps = sum(r.prefill_tokens_per_second for r in real_successes) / len(real_successes)
+                avg_gen_tps = sum(r.tokens_per_second for r in real_successes) / len(real_successes)
+                lines.append(
+                    f"| {model} | {avg_rating:.1f}/10 | {len(real_successes)}/{len(results[model])} | {avg_wall:.2f}s | {avg_pre_tps:.0f} | {avg_gen_tps:.0f} |"
+                )
+            else:
+                lines.append(f"| {model} | - | 0/{len(results[model])} | - | - | - |")
 
+        lines.append("")
+
+    # Ratings by element type per evaluator
     elements_by_type: dict[str, list[int]] = defaultdict(list)
     for i, elem in enumerate(elements):
         elements_by_type[elem.element_type].append(i)
 
-    # Header row
-    header = "| Element Type |"
-    separator = "|--------------|"
-    for model in models_tested:
-        header += f" {model} |"
-        separator += "-" * (len(model) + 2) + "|"
-    lines.append(header)
-    lines.append(separator)
+    for eval_model in eval_models:
+        lines.append(f"## Ratings by Element Type (Evaluator: {eval_model})")
+        lines.append("")
 
-    for elem_type, indices in sorted(elements_by_type.items()):
-        row = f"| {elem_type} |"
+        # Header row
+        header = "| Element Type |"
+        separator = "|--------------|"
         for model in models_tested:
-            # Only include ratings for real successes
-            type_ratings = []
-            for i in indices:
-                r = results[model][i]
-                if r.success and r.response.strip():
-                    cleaned = clean_summary(r.response)
-                    if cleaned.strip():
-                        rating = ratings[i].get(model, {}).get("rating")
-                        if rating is not None:
-                            type_ratings.append(rating)
-            if type_ratings:
-                avg = sum(type_ratings) / len(type_ratings)
-                row += f" {avg:.1f} |"
-            else:
-                row += " - |"
-        lines.append(row)
+            header += f" {model} |"
+            separator += "-" * (len(model) + 2) + "|"
+        lines.append(header)
+        lines.append(separator)
 
-    lines.append("")
+        for elem_type, indices in sorted(elements_by_type.items()):
+            row = f"| {elem_type} |"
+            for model in models_tested:
+                # Only include ratings for real successes (from this evaluator)
+                type_ratings = []
+                for i in indices:
+                    r = results[model][i]
+                    if r.success and r.response.strip():
+                        cleaned = clean_summary(r.response)
+                        if cleaned.strip():
+                            rating = ratings[i].get(model, {}).get(eval_model, {}).get("rating")
+                            if rating is not None:
+                                type_ratings.append(rating)
+                if type_ratings:
+                    avg = sum(type_ratings) / len(type_ratings)
+                    row += f" {avg:.1f} |"
+                else:
+                    row += " - |"
+            lines.append(row)
+
+        lines.append("")
+
+    # Averaged ratings across all evaluators (if multiple)
+    if len(eval_models) > 1:
+        lines.append("## Summary (Averaged Across Evaluators)")
+        lines.append("")
+        lines.append("| Model | Avg Rating | Success | Avg Time | Pre t/s | Gen t/s |")
+        lines.append("|-------|-----------|---------|----------|---------|---------|")
+
+        for model in models_tested:
+            real_successes = real_successes_by_model[model]
+            real_success_indices = real_success_indices_by_model[model]
+
+            # Average rating across all evaluators
+            all_ratings = []
+            for i in real_success_indices:
+                for em in eval_models:
+                    rating = ratings[i].get(model, {}).get(em, {}).get("rating")
+                    if rating is not None:
+                        all_ratings.append(rating)
+            avg_rating = sum(all_ratings) / len(all_ratings) if all_ratings else 0
+
+            if real_successes:
+                avg_wall = sum(r.ollama_total_time for r in real_successes) / len(real_successes)
+                avg_pre_tps = sum(r.prefill_tokens_per_second for r in real_successes) / len(real_successes)
+                avg_gen_tps = sum(r.tokens_per_second for r in real_successes) / len(real_successes)
+                lines.append(
+                    f"| {model} | {avg_rating:.1f}/10 | {len(real_successes)}/{len(results[model])} | {avg_wall:.2f}s | {avg_pre_tps:.0f} | {avg_gen_tps:.0f} |"
+                )
+            else:
+                lines.append(f"| {model} | - | 0/{len(results[model])} | - | - | - |")
+
+        lines.append("")
+
+        # Averaged element type table
+        lines.append("## Ratings by Element Type (Averaged Across Evaluators)")
+        lines.append("")
+
+        header = "| Element Type |"
+        separator = "|--------------|"
+        for model in models_tested:
+            header += f" {model} |"
+            separator += "-" * (len(model) + 2) + "|"
+        lines.append(header)
+        lines.append(separator)
+
+        for elem_type, indices in sorted(elements_by_type.items()):
+            row = f"| {elem_type} |"
+            for model in models_tested:
+                # Average ratings across all evaluators
+                type_ratings = []
+                for i in indices:
+                    r = results[model][i]
+                    if r.success and r.response.strip():
+                        cleaned = clean_summary(r.response)
+                        if cleaned.strip():
+                            for em in eval_models:
+                                rating = ratings[i].get(model, {}).get(em, {}).get("rating")
+                                if rating is not None:
+                                    type_ratings.append(rating)
+                if type_ratings:
+                    avg = sum(type_ratings) / len(type_ratings)
+                    row += f" {avg:.1f} |"
+                else:
+                    row += " - |"
+            lines.append(row)
+
+        lines.append("")
+
+        # Character length analysis
+        lines.append("## Ratings by Input Character Length (Averaged)")
+        lines.append("")
+
+        # Define character length ranges
+        char_ranges = [
+            (0, 500, "0-500"),
+            (500, 1000, "500-1K"),
+            (1000, 2000, "1K-2K"),
+            (2000, 4000, "2K-4K"),
+            (4000, 8000, "4K-8K"),
+            (8000, float("inf"), "8K+"),
+        ]
+
+        def get_char_range_label(chars: int) -> str:
+            for min_c, max_c, label in char_ranges:
+                if min_c <= chars < max_c:
+                    return label
+            return "8K+"
+
+        # Group elements by character length range
+        elements_by_char_range: dict[str, list[int]] = defaultdict(list)
+        for i, elem in enumerate(elements):
+            prompt_chars = 0
+            for model in models_tested:
+                if results[model][i].success and results[model][i].prompt_chars > 0:
+                    prompt_chars = results[model][i].prompt_chars
+                    break
+            if prompt_chars == 0:
+                prompt_chars = len(elem.raw_code or "") + 200
+            range_label = get_char_range_label(prompt_chars)
+            elements_by_char_range[range_label].append(i)
+
+        header = "| Char Range | Count |"
+        separator = "|------------|-------|"
+        for model in models_tested:
+            header += f" {model} |"
+            separator += "-" * (len(model) + 2) + "|"
+        lines.append(header)
+        lines.append(separator)
+
+        range_order = {label: i for i, (_, _, label) in enumerate(char_ranges)}
+        for range_label in sorted(elements_by_char_range.keys(), key=lambda x: range_order.get(x, 99)):
+            indices = elements_by_char_range[range_label]
+            row = f"| {range_label} | {len(indices)} |"
+            for model in models_tested:
+                range_ratings = []
+                for i in indices:
+                    r = results[model][i]
+                    if r.success and r.response.strip():
+                        cleaned = clean_summary(r.response)
+                        if cleaned.strip():
+                            for em in eval_models:
+                                rating = ratings[i].get(model, {}).get(em, {}).get("rating")
+                                if rating is not None:
+                                    range_ratings.append(rating)
+                if range_ratings:
+                    avg = sum(range_ratings) / len(range_ratings)
+                    row += f" {avg:.1f} |"
+                else:
+                    row += " - |"
+            lines.append(row)
+
+        lines.append("")
 
     # Detailed results per element
     lines.append("## Detailed Results")
@@ -2221,15 +2567,15 @@ def _save_benchmark_markdown(
             lines.append("</details>")
             lines.append("")
 
-        # Summaries by model
-        lines.append("| Model | Rating | Summary |")
-        lines.append("|-------|--------|---------|")
+        # Summaries by model (show ratings from each evaluator)
+        # Build header with rating columns for each evaluator
+        rating_cols = " | ".join([f"Rating ({em.split(':')[0]})" for em in eval_models])
+        lines.append(f"| Model | {rating_cols} | Summary |")
+        separator = "|-------|" + "|".join(["--------|"] * len(eval_models)) + "---------|"
+        lines.append(separator)
 
         for model in models_tested:
             model_result = results[model][i]
-            rating_data = ratings[i].get(model, {})
-            rating = rating_data.get("rating")
-            reason = rating_data.get("reason", "")
 
             # Check for real success
             summary = ""
@@ -2239,15 +2585,22 @@ def _save_benchmark_markdown(
                 generation_ok = bool(summary.strip())
 
             if generation_ok:
-                rating_display = f"{rating}/10" if rating else "?/10"
+                # Collect ratings from all evaluators
+                rating_cells = []
+                for em in eval_models:
+                    rating = ratings[i].get(model, {}).get(em, {}).get("rating")
+                    rating_cells.append(f"{rating}/10" if rating else "?")
+                rating_str = " | ".join(rating_cells)
+
                 # Escape pipes and truncate for table
                 summary_escaped = summary.replace("|", "\\|").replace("\n", " ")
                 if len(summary_escaped) > 200:
                     summary_escaped = summary_escaped[:200] + "..."
-                lines.append(f"| {model} | {rating_display} | {summary_escaped} |")
+                lines.append(f"| {model} | {rating_str} | {summary_escaped} |")
             else:
                 error_msg = model_result.error if model_result.error else "empty after cleaning"
-                lines.append(f"| {model} | N/A | *(failed: {error_msg[:30]})* |")
+                na_cells = " | ".join(["N/A"] * len(eval_models))
+                lines.append(f"| {model} | {na_cells} | *(failed: {error_msg[:30]})* |")
 
         lines.append("")
 
@@ -2258,9 +2611,6 @@ def _save_benchmark_markdown(
 
         for model in models_tested:
             model_result = results[model][i]
-            rating_data = ratings[i].get(model, {})
-            rating = rating_data.get("rating")
-            reason = rating_data.get("reason", "")
 
             # Check for real success
             summary = ""
@@ -2270,7 +2620,19 @@ def _save_benchmark_markdown(
                 generation_ok = bool(summary.strip())
 
             if generation_ok:
-                lines.append(f"**{model}** ({rating}/10 - {reason})" if rating else f"**{model}** (?/10)")
+                # Show ratings from all evaluators
+                rating_parts = []
+                for em in eval_models:
+                    em_short = em.split(':')[0]
+                    rating_data = ratings[i].get(model, {}).get(em, {})
+                    rating = rating_data.get("rating")
+                    reason = rating_data.get("reason", "")
+                    if rating:
+                        rating_parts.append(f"{em_short}: {rating}/10 - {reason}" if reason else f"{em_short}: {rating}/10")
+                    else:
+                        rating_parts.append(f"{em_short}: ?")
+                rating_str = " | ".join(rating_parts)
+                lines.append(f"**{model}** ({rating_str})")
                 lines.append("")
                 lines.append(f"> {summary}")
             else:

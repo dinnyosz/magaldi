@@ -243,30 +243,22 @@ class BenchmarkConfig:
     - 10% performance gain typically requires 4x VRAM increase
     """
 
-    # Models to benchmark - ordered by size within each category
+    # Models to benchmark - final selection based on benchmarking
     # NOTE: qwen3 models after July 2025 split into "thinking" and "instruct" variants
     #       The default qwen3:Xb has thinking baked in, use instruct variants instead
     models: list[str] = field(default_factory=lambda: [
-        # === QWEN3 FAMILY ===
-        "qwen3:0.6b",                    # 0.6B doesn't have instruct variant yet
-        "qwen3:1.7b",                    # 1.7B doesn't have instruct variant yet
-        "qwen3:4b-instruct",             # Instruct variant - no thinking
-        # === QWEN 2.5 CODER FAMILY ===
-        "qwen2.5-coder:1.5b",      # 54% pass@1, best efficiency
-        "qwen2.5-coder:3b",        # 59% pass@1, sweet spot
-        "qwen2.5-coder:7b",        # 65% pass@1, most stable (1.00)
-        # === OTHER MODELS ===
-        "llama3.2:3b",
-        "alibayram/smollm3",       # 3B, claims to outperform Qwen2.5-3B, 64K context
-        # === MoE models (instruct variants) ===
-        "granite3.1-moe:1b-instruct-q4_0",  # ~1B active (IBM, 128K context)
-        "granite3.1-moe:3b-instruct-q4_0",  # ~3B active (IBM, 128K context)
+        "qwen3:1.7b",                           # Best balance (8.2 rating, 114 t/s)
+        "qwen3:4b-instruct",                    # Best quality (8.7 rating, 65 t/s)
+        "granite3.1-moe:3b-instruct-q4_0",      # Fastest (7.9 rating, 148 t/s)
+        "starcoder2:3b",                        # Code-focused
+        "codegemma:2b",                         # Google code model
     ])
 
-    # Model used for evaluating/rating summaries (LLM-as-judge)
-    # Qwen2.5-Coder 7B chosen for highest stability score (1.00)
-    eval_model: str = "qwen2.5-coder:7b"
-
+    # Models used for evaluating/rating summaries (LLM-as-judge)
+    eval_models: list[str] = field(default_factory=lambda: [
+        "granite3.1-moe:3b-instruct-q4_0",  # Fast evaluator
+        "qwen3:4b-instruct",                # Quality evaluator
+    ])
     # Ollama API URL (defaults to same as llm.url)
     ollama_url: str | None = None
 
