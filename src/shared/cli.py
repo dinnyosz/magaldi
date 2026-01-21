@@ -1710,7 +1710,8 @@ def benchmark_models(
                         f"    [green]✓[/] {elem_name[:40]:<40} | "
                         f"[bold]{result.ollama_total_time:.2f}s[/] "
                         f"(load:{result.load_time:.2f} pre:{result.prefill_time:.2f} gen:{result.generate_time:.2f} {overhead_str}) | "
-                        f"{result.prompt_tokens}→{result.output_tokens} tok @ {result.tokens_per_second:.1f} t/s{context_str}"
+                        f"{result.prompt_tokens}→{result.output_tokens} tok | "
+                        f"pre:{result.prefill_tokens_per_second:.0f} t/s gen:{result.tokens_per_second:.0f} t/s{context_str}"
                     )
                 else:
                     console.print(f"    [red]✗[/] {elem_name[:40]:<40} | {result.error}")
@@ -1730,9 +1731,11 @@ def benchmark_models(
 
         # ratings[element_index][model] = rating (1-10) or None if failed
         ratings: dict[int, dict[str, int | None]] = {i: {} for i in range(len(prompts))}
+        total_elements = len(prompts)
 
         for i, (elem, _) in enumerate(prompts):
             elem_name = f"{elem.element_type}:{elem.name}"
+            progress = f"[{i+1}/{total_elements}]"
 
             # Build evaluation prompt with source code and all summaries
             eval_prompt = _build_evaluation_prompt(elem, models_to_test, results, i)
@@ -1741,7 +1744,7 @@ def benchmark_models(
             max_retries = 3
             parsed_ratings = {}
             for attempt in range(max_retries):
-                with console.status(f"  Evaluating {elem_name}..." + (f" (retry {attempt})" if attempt > 0 else "")):
+                with console.status(f"  {progress} Evaluating {elem_name}..." + (f" (retry {attempt})" if attempt > 0 else "")):
                     eval_result = client.generate(
                         model=eval_model,
                         prompt=eval_prompt,
@@ -1770,63 +1773,13 @@ def benchmark_models(
                 )
                 missing_count = sum(1 for m in models_to_test if parsed_ratings[m]["rating"] is None)
                 if missing_count > 0:
-                    console.print(f"  [yellow]~[/] {elem_name[:40]:<40} | {rating_str} [dim]({missing_count} missing)[/]")
+                    console.print(f"  {progress} [yellow]~[/] {elem_name[:40]:<40} | {rating_str} [dim]({missing_count} missing)[/]")
                 else:
-                    console.print(f"  [green]✓[/] {elem_name[:40]:<40} | {rating_str}")
+                    console.print(f"  {progress} [green]✓[/] {elem_name[:40]:<40} | {rating_str}")
             else:
-                console.print(f"  [red]✗[/] {elem_name[:40]:<40} | Evaluation failed: {eval_result.error}")
+                console.print(f"  {progress} [red]✗[/] {elem_name[:40]:<40} | Evaluation failed: {eval_result.error}")
 
-        # Summary comparison (show all summaries with ratings)
-        console.print("\n" + "=" * 70)
-        console.print("[bold]Summary Comparison[/]")
-        console.print("=" * 70)
-
-        for i, (elem, _) in enumerate(prompts):
-            elem_name = f"{elem.element_type}:{elem.name}"
-            console.print(f"\n[bold cyan]{elem_name}[/]")
-
-            # Show source code snippet (first 10 lines)
-            if elem.raw_code:
-                console.print("  [dim]Source:[/]")
-                code_lines = elem.raw_code.strip().split('\n')[:10]
-                for line in code_lines:
-                    console.print(f"    [dim]{line[:70]}[/]")
-                if len(elem.raw_code.strip().split('\n')) > 10:
-                    console.print(f"    [dim]... ({len(elem.raw_code.strip().split(chr(10)))} lines total)[/]")
-
-            for model in models_to_test:
-                model_result = results[model][i]
-                rating_data = ratings[i].get(model, {})
-                rating = rating_data.get("rating")
-                reason = rating_data.get("reason")
-
-                # Check if generation actually succeeded (response not empty after cleaning)
-                from shared.ai.summarization import clean_summary
-                summary = ""
-                generation_ok = False
-                if model_result.success and model_result.response.strip():
-                    summary = clean_summary(model_result.response)
-                    generation_ok = bool(summary.strip())
-
-                # Only show rating if generation succeeded
-                if generation_ok:
-                    rating_display = f"[bold green]{rating}/10[/]" if rating else "[dim]?/10[/]"
-                    console.print(f"  [yellow]{model}[/] {rating_display}:")
-                    if reason:
-                        console.print(f"    [dim italic]→ {reason}[/]")
-                    # Show full summary for comparison (wrapped)
-                    for line in summary.split('\n'):
-                        # Wrap long lines
-                        while len(line) > 70:
-                            console.print(f"    {line[:70]}")
-                            line = line[70:]
-                        if line:
-                            console.print(f"    {line}")
-                else:
-                    error_msg = model_result.error if model_result.error else "empty response after cleaning"
-                    console.print(f"  [yellow]{model}[/] [dim]N/A[/]: [red](failed: {error_msg[:50]})[/]")
-
-        # Benchmark summary table
+        # Benchmark summary table (detailed summaries are saved to markdown file only)
         console.print("\n" + "=" * 70)
         console.print("[bold]Benchmark Summary[/]")
         console.print("=" * 70)
@@ -1836,6 +1789,7 @@ def benchmark_models(
         summary_table.add_column("Avg Rating", justify="center")
         summary_table.add_column("Success", justify="center")
         summary_table.add_column("Avg Time", justify="right")
+        summary_table.add_column("Pre t/s", justify="right")
         summary_table.add_column("Gen t/s", justify="right")
 
         for model in models_to_test:
@@ -1862,7 +1816,8 @@ def benchmark_models(
 
             if real_successes:
                 avg_wall = sum(r.ollama_total_time for r in real_successes) / len(real_successes)
-                avg_tps = sum(r.tokens_per_second for r in real_successes) / len(real_successes)
+                avg_pre_tps = sum(r.prefill_tokens_per_second for r in real_successes) / len(real_successes)
+                avg_gen_tps = sum(r.tokens_per_second for r in real_successes) / len(real_successes)
 
                 # Color-code rating (1-10 scale)
                 if avg_rating >= 8:
@@ -1877,13 +1832,15 @@ def benchmark_models(
                     f"[{rating_style}]{avg_rating:.1f}/10[/]" if model_ratings else "-",
                     f"{len(real_successes)}/{len(model_results)}",
                     f"{avg_wall:.2f}s",
-                    f"{avg_tps:.1f}",
+                    f"{avg_pre_tps:.0f}",
+                    f"{avg_gen_tps:.0f}",
                 )
             else:
                 summary_table.add_row(
                     model,
                     "-",
                     f"0/{len(model_results)}",
+                    "-",
                     "-",
                     "-",
                 )
@@ -2162,8 +2119,8 @@ def _save_benchmark_markdown(
     # Summary table
     lines.append("## Summary")
     lines.append("")
-    lines.append("| Model | Avg Rating | Success | Avg Time | Gen t/s |")
-    lines.append("|-------|-----------|---------|----------|---------|")
+    lines.append("| Model | Avg Rating | Success | Avg Time | Pre t/s | Gen t/s |")
+    lines.append("|-------|-----------|---------|----------|---------|---------|")
 
     for model in models_tested:
         model_results = results[model]
@@ -2188,12 +2145,13 @@ def _save_benchmark_markdown(
 
         if real_successes:
             avg_wall = sum(r.ollama_total_time for r in real_successes) / len(real_successes)
-            avg_tps = sum(r.tokens_per_second for r in real_successes) / len(real_successes)
+            avg_pre_tps = sum(r.prefill_tokens_per_second for r in real_successes) / len(real_successes)
+            avg_gen_tps = sum(r.tokens_per_second for r in real_successes) / len(real_successes)
             lines.append(
-                f"| {model} | {avg_rating:.1f}/10 | {len(real_successes)}/{len(model_results)} | {avg_wall:.2f}s | {avg_tps:.1f} |"
+                f"| {model} | {avg_rating:.1f}/10 | {len(real_successes)}/{len(model_results)} | {avg_wall:.2f}s | {avg_pre_tps:.0f} | {avg_gen_tps:.0f} |"
             )
         else:
-            lines.append(f"| {model} | - | 0/{len(model_results)} | - | - |")
+            lines.append(f"| {model} | - | 0/{len(model_results)} | - | - | - |")
 
     lines.append("")
 
@@ -2209,9 +2167,8 @@ def _save_benchmark_markdown(
     header = "| Element Type |"
     separator = "|--------------|"
     for model in models_tested:
-        short_name = model.split("/")[-1][:15]
-        header += f" {short_name} |"
-        separator += "--------|"
+        header += f" {model} |"
+        separator += "-" * (len(model) + 2) + "|"
     lines.append(header)
     lines.append(separator)
 

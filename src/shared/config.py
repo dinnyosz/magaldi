@@ -244,34 +244,23 @@ class BenchmarkConfig:
     """
 
     # Models to benchmark - ordered by size within each category
-    # NOTE: Temporarily testing only thinking models (qwen3, deepseek, nemotron)
-    # UPDATE: qwen3 models after July 2025 split into "thinking" and "instruct" variants
-    #         The default qwen3:Xb has thinking baked in, use instruct variants instead
+    # NOTE: qwen3 models after July 2025 split into "thinking" and "instruct" variants
+    #       The default qwen3:Xb has thinking baked in, use instruct variants instead
     models: list[str] = field(default_factory=lambda: [
-        # === QWEN3 INSTRUCT VARIANTS (no thinking) ===
+        # === QWEN3 FAMILY ===
         "qwen3:0.6b",                    # 0.6B doesn't have instruct variant yet
         "qwen3:1.7b",                    # 1.7B doesn't have instruct variant yet
         "qwen3:4b-instruct",             # Instruct variant - no thinking
-        "qwen3:8b",                      # Qwen3 dense, Apache 2.0
-        # === OTHER THINKING MODELS ===
-        "deepseek-coder-v2:lite",  # 2.4B active from 16B total
-        "nemotron-3-nano",         # 3-4B active from 30B (NVIDIA, Mamba+MoE hybrid)
-        # === COMMENTED OUT FOR NOW ===
-        # # Tier 1: Ultra-light (<1B) - ~4-6GB VRAM
-        # "qwen2.5-coder:0.5b",
-        # # Tier 2: Light (1-2B) - ~6-8GB VRAM
-        # "qwen2.5-coder:1.5b",      # 54% pass@1, best efficiency
-        # "llama3.2:1b",
-        # # Tier 3: Medium (3-4B) - ~10-12GB VRAM, best efficiency/performance
-        # "qwen2.5-coder:3b",        # 59% pass@1, sweet spot
-        # "llama3.2:3b",
-        # "alibayram/smollm3",       # 3B, claims to outperform Qwen2.5-3B, 64K context
-        # "phi4-mini",               # 3.8B, MIT, 128K context, strong reasoning
-        # # Tier 4: Large (6B-9B) - ~14-17GB VRAM
-        # "qwen2.5-coder:7b",        # 65% pass@1, most stable (1.00)
-        # # MoE models - active params listed
-        # "granite3.1-moe:1b",       # ~1B active (IBM, 128K context)
-        # "granite3.1-moe:3b",       # ~3B active (IBM, 128K context)
+        # === QWEN 2.5 CODER FAMILY ===
+        "qwen2.5-coder:1.5b",      # 54% pass@1, best efficiency
+        "qwen2.5-coder:3b",        # 59% pass@1, sweet spot
+        "qwen2.5-coder:7b",        # 65% pass@1, most stable (1.00)
+        # === OTHER MODELS ===
+        "llama3.2:3b",
+        "alibayram/smollm3",       # 3B, claims to outperform Qwen2.5-3B, 64K context
+        # === MoE models (instruct variants) ===
+        "granite3.1-moe:1b-instruct-q4_0",  # ~1B active (IBM, 128K context)
+        "granite3.1-moe:3b-instruct-q4_0",  # ~3B active (IBM, 128K context)
     ])
 
     # Model used for evaluating/rating summaries (LLM-as-judge)
