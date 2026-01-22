@@ -250,8 +250,6 @@ class BenchmarkConfig:
         "qwen3:1.7b",                           # Best balance (8.2 rating, 114 t/s)
         "qwen3:4b-instruct",                    # Best quality (8.7 rating, 65 t/s)
         "granite3.1-moe:3b-instruct-q4_0",      # Fastest (7.9 rating, 148 t/s)
-        "starcoder2:3b",                        # Code-focused
-        "codegemma:2b",                         # Google code model
     ])
 
     # Models used for evaluating/rating summaries (LLM-as-judge)

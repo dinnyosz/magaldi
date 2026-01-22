@@ -2095,6 +2095,74 @@ def benchmark_models(
 
         console.print(char_table)
 
+        # Per-file breakdown by character range
+        console.print("\n[bold]Per-File Scores by Character Range[/]")
+
+        # Build file info with char range
+        file_char_data: dict[str, list[tuple[int, str, int, dict[str, float]]]] = defaultdict(list)
+        # file_path -> [(elem_index, elem_name, prompt_chars, {model: avg_rating})]
+
+        for i, (elem, _) in enumerate(prompts):
+            prompt_chars = 0
+            for model in models_to_test:
+                if results[model][i].success and results[model][i].prompt_chars > 0:
+                    prompt_chars = results[model][i].prompt_chars
+                    break
+            if prompt_chars == 0:
+                prompt_chars = len(elem.raw_code or "") + 200
+
+            # Get ratings for this element across all models
+            model_ratings: dict[str, float] = {}
+            for model in models_to_test:
+                r = results[model][i]
+                if r.success and r.response.strip():
+                    cleaned = clean_summary(r.response)
+                    if cleaned.strip():
+                        elem_ratings = []
+                        for em in eval_models:
+                            rating = ratings[i].get(model, {}).get(em, {}).get("rating")
+                            if rating is not None:
+                                elem_ratings.append(rating)
+                        if elem_ratings:
+                            model_ratings[model] = sum(elem_ratings) / len(elem_ratings)
+
+            elem_name = f"{elem.element_type}:{elem.name}"
+            file_char_data[elem.relative_path].append((i, elem_name, prompt_chars, model_ratings))
+
+        # Show per-file table grouped by character range
+        for range_label in sorted(elements_by_char_range.keys(), key=lambda x: range_order.get(x, 99)):
+            indices_in_range = set(elements_by_char_range[range_label])
+            if not indices_in_range:
+                continue
+
+            console.print(f"\n[dim]Character Range: {range_label}[/]")
+            file_table = Table(show_header=True, header_style="bold cyan", show_lines=False)
+            file_table.add_column("File", style="cyan", max_width=40)
+            file_table.add_column("Element", max_width=30)
+            file_table.add_column("Chars", justify="right")
+            for model in models_to_test:
+                file_table.add_column(model.split(":")[0][:12], justify="center")
+
+            for file_path in sorted(file_char_data.keys()):
+                for elem_idx, elem_name, prompt_chars, model_ratings in file_char_data[file_path]:
+                    if elem_idx not in indices_in_range:
+                        continue
+                    row = [file_path.split("/")[-1][:40], elem_name[:30], str(prompt_chars)]
+                    for model in models_to_test:
+                        if model in model_ratings:
+                            rating = model_ratings[model]
+                            if rating >= 8:
+                                row.append(f"[bold green]{rating:.1f}[/]")
+                            elif rating >= 6:
+                                row.append(f"[yellow]{rating:.1f}[/]")
+                            else:
+                                row.append(f"[red]{rating:.1f}[/]")
+                        else:
+                            row.append("-")
+                    file_table.add_row(*row)
+
+            console.print(file_table)
+
         # Token stats
         console.print("\n[bold]Token Statistics[/]")
         for model in models_to_test:
@@ -2540,6 +2608,71 @@ def _save_benchmark_markdown(
             lines.append(row)
 
         lines.append("")
+
+        # Per-file breakdown by character range
+        lines.append("## Per-File Scores by Character Range")
+        lines.append("")
+
+        # Build file info with char range
+        file_char_data: dict[str, list[tuple[int, str, int, dict[str, float]]]] = defaultdict(list)
+
+        for i, elem in enumerate(elements):
+            prompt_chars = 0
+            for model in models_tested:
+                if results[model][i].success and results[model][i].prompt_chars > 0:
+                    prompt_chars = results[model][i].prompt_chars
+                    break
+            if prompt_chars == 0:
+                prompt_chars = len(elem.raw_code or "") + 200
+
+            model_ratings_elem: dict[str, float] = {}
+            for model in models_tested:
+                r = results[model][i]
+                if r.success and r.response.strip():
+                    cleaned = clean_summary(r.response)
+                    if cleaned.strip():
+                        elem_ratings = []
+                        for em in eval_models:
+                            rating = ratings[i].get(model, {}).get(em, {}).get("rating")
+                            if rating is not None:
+                                elem_ratings.append(rating)
+                        if elem_ratings:
+                            model_ratings_elem[model] = sum(elem_ratings) / len(elem_ratings)
+
+            elem_name = f"{elem.element_type}:{elem.name}"
+            file_char_data[elem.relative_path].append((i, elem_name, prompt_chars, model_ratings_elem))
+
+        # Output per character range
+        for range_label in sorted(elements_by_char_range.keys(), key=lambda x: range_order.get(x, 99)):
+            indices_in_range = set(elements_by_char_range[range_label])
+            if not indices_in_range:
+                continue
+
+            lines.append(f"### {range_label} characters")
+            lines.append("")
+
+            header = "| File | Element | Chars |"
+            separator = "|------|---------|-------|"
+            for model in models_tested:
+                short_name = model.split(":")[0][:15]
+                header += f" {short_name} |"
+                separator += "-" * (len(short_name) + 2) + "|"
+            lines.append(header)
+            lines.append(separator)
+
+            for file_path in sorted(file_char_data.keys()):
+                for elem_idx, elem_name, prompt_chars, model_ratings_elem in file_char_data[file_path]:
+                    if elem_idx not in indices_in_range:
+                        continue
+                    row = f"| {file_path.split('/')[-1][:30]} | {elem_name[:25]} | {prompt_chars} |"
+                    for model in models_tested:
+                        if model in model_ratings_elem:
+                            row += f" {model_ratings_elem[model]:.1f} |"
+                        else:
+                            row += " - |"
+                    lines.append(row)
+
+            lines.append("")
 
     # Detailed results per element
     lines.append("## Detailed Results")
