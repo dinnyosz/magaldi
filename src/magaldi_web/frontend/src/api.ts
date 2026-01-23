@@ -388,11 +388,11 @@ export async function getFileDetail(scope: string, repository: string, filePath:
 
 // Elements
 export async function getElement(hashId: string): Promise<ElementDetail> {
-  return fetchJson(`${API_BASE}/elements/${hashId}`)
+  return fetchJson(`${API_BASE}/elements/${encodeURIComponent(hashId)}`)
 }
 
 export async function getSimilarElements(hashId: string, limit = 10): Promise<SimilarElement[]> {
-  return fetchJson(`${API_BASE}/elements/similar/${hashId}?limit=${limit}`)
+  return fetchJson(`${API_BASE}/elements/similar/${encodeURIComponent(hashId)}?limit=${limit}`)
 }
 
 // Vector visualization
@@ -549,7 +549,7 @@ export async function getBrowseStats(params: {
 
 export async function getElementChildren(hashId: string, username?: string): Promise<ElementChildren> {
   const params = username ? `?username=${username}` : ''
-  return fetchJson(`${API_BASE}/browse/element/${hashId}/children${params}`)
+  return fetchJson(`${API_BASE}/browse/element/${encodeURIComponent(hashId)}/children${params}`)
 }
 
 export interface CallGraphEntry {
@@ -601,7 +601,7 @@ export async function getElementDetails(
   if (options?.includeCallGraph) params.set('include_call_graph', 'true')
   if (options?.username) params.set('username', options.username)
   const query = params.toString() ? `?${params.toString()}` : ''
-  return fetchJson(`${API_BASE}/browse/element/${hashId}/details${query}`)
+  return fetchJson(`${API_BASE}/browse/element/${encodeURIComponent(hashId)}/details${query}`)
 }
 
 // Glossary Types
@@ -876,7 +876,7 @@ export async function getElementCallers(
   if (options?.limit) params.set('limit', String(options.limit))
   if (options?.include_tests !== undefined) params.set('include_tests', String(options.include_tests))
   const query = params.toString() ? `?${params.toString()}` : ''
-  return fetchJson(`${API_BASE}/analysis/callers/${hashId}${query}`)
+  return fetchJson(`${API_BASE}/analysis/callers/${encodeURIComponent(hashId)}${query}`)
 }
 
 export async function getCallChain(
@@ -887,7 +887,7 @@ export async function getCallChain(
   if (options?.direction) params.set('direction', options.direction)
   if (options?.max_depth) params.set('max_depth', String(options.max_depth))
   const query = params.toString() ? `?${params.toString()}` : ''
-  return fetchJson(`${API_BASE}/analysis/call-chain/${hashId}${query}`)
+  return fetchJson(`${API_BASE}/analysis/call-chain/${encodeURIComponent(hashId)}${query}`)
 }
 
 export async function getDeadCode(
@@ -916,7 +916,7 @@ export async function getEntryPoints(
 }
 
 export async function getFileDependencies(hashId: string): Promise<DependenciesResponse> {
-  return fetchJson(`${API_BASE}/analysis/dependencies/${hashId}`)
+  return fetchJson(`${API_BASE}/analysis/dependencies/${encodeURIComponent(hashId)}`)
 }
 
 export async function getModuleDependents(
@@ -948,5 +948,5 @@ export async function getDependencyGraph(
 }
 
 export async function explainElement(hashId: string): Promise<ExplainElementResponse> {
-  return fetchJson(`${API_BASE}/analysis/explain/${hashId}`)
+  return fetchJson(`${API_BASE}/analysis/explain/${encodeURIComponent(hashId)}`)
 }
