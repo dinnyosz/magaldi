@@ -6,6 +6,7 @@ plus tool-specific parameters, and returns a dict or list result.
 
 from __future__ import annotations
 
+import warnings
 from typing import Any
 
 from shared.db.elasticsearch import ElasticsearchRepository
@@ -921,6 +922,11 @@ def grep_code(
 ) -> dict[str, Any]:
     """Search indexed code with regex pattern.
 
+    .. deprecated::
+        Use `pattern_search` with mode='regexp' instead for better performance.
+        pattern_search runs queries server-side. grep_code will be removed in a
+        future release.
+
     Searches the raw_code field in Elasticsearch - no filesystem access needed.
 
     Args:
@@ -937,6 +943,13 @@ def grep_code(
     Returns:
         Dict with code_results, test_results, and totals.
     """
+    warnings.warn(
+        "grep_code is deprecated. Use pattern_search with mode='regexp' instead. "
+        "pattern_search runs queries server-side for better performance.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
     import fnmatch
     import re
 

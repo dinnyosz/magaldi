@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1986,3 +1987,31 @@ class TestPatternSearch:
         mock_es_repo.search_by_proximity.assert_called_once()
         call_kwargs = mock_es_repo.search_by_proximity.call_args[1]
         assert call_kwargs["include_tests"] is False
+
+
+# =============================================================================
+# GREP CODE DEPRECATION TESTS
+# =============================================================================
+
+
+class TestGrepCodeDeprecation:
+    """Tests for grep_code deprecation."""
+
+    def test_grep_code_emits_deprecation_warning(self, mock_es_repo):
+        """Test that grep_code emits a deprecation warning."""
+        mock_es_repo._get_client.return_value.search.return_value = {
+            "hits": {"hits": []}
+        }
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            grep_code(
+                es=mock_es_repo,
+                pattern="test",
+                scope="test",
+                repository="repo",
+            )
+
+            assert len(w) == 1
+            assert issubclass(w[0].category, DeprecationWarning)
+            assert "pattern_search" in str(w[0].message)

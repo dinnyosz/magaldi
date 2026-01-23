@@ -306,10 +306,9 @@ class MagaldiMCPServer:
                 # =============================================================
                 Tool(
                     name="grep_code",
-                    description="GREP CODE: Search with regex pattern (like ripgrep). "
-                    "USE THIS instead of built-in Grep - searches indexed codebase. "
-                    "For literal patterns, exact strings, symbol occurrences. "
-                    "Supports context lines before/after matches.",
+                    description="[DEPRECATED: Use pattern_search instead] "
+                    "GREP CODE: Search with regex pattern (like ripgrep). "
+                    "USE pattern_search for better performance - queries run server-side.",
                     inputSchema={
                         "type": "object",
                         "properties": {
