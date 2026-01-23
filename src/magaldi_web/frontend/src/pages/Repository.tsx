@@ -168,6 +168,58 @@ function Repository() {
         </Breadcrumb.Item>
       </Breadcrumb>
 
+      {/* Quick Analysis Links */}
+      <Row className="mb-4">
+        <Col xs={6} md={3}>
+          <Card
+            as={Link}
+            to={`/repos/${scope}/${repository}/entry-points`}
+            className="text-decoration-none h-100"
+          >
+            <Card.Body className="text-center py-3">
+              <i className="bi bi-door-open text-primary fs-4 d-block mb-2"></i>
+              <small className="text-muted">Entry Points</small>
+            </Card.Body>
+          </Card>
+        </Col>
+        <Col xs={6} md={3}>
+          <Card
+            as={Link}
+            to={`/repos/${scope}/${repository}/dead-code`}
+            className="text-decoration-none h-100"
+          >
+            <Card.Body className="text-center py-3">
+              <i className="bi bi-trash text-warning fs-4 d-block mb-2"></i>
+              <small className="text-muted">Dead Code</small>
+            </Card.Body>
+          </Card>
+        </Col>
+        <Col xs={6} md={3}>
+          <Card
+            as={Link}
+            to={`/repos/${scope}/${repository}/dependency-graph`}
+            className="text-decoration-none h-100"
+          >
+            <Card.Body className="text-center py-3">
+              <i className="bi bi-share text-success fs-4 d-block mb-2"></i>
+              <small className="text-muted">Dependencies</small>
+            </Card.Body>
+          </Card>
+        </Col>
+        <Col xs={6} md={3}>
+          <Card
+            as={Link}
+            to={`/glossary/${scope}/${repository}`}
+            className="text-decoration-none h-100"
+          >
+            <Card.Body className="text-center py-3">
+              <i className="bi bi-book text-info fs-4 d-block mb-2"></i>
+              <small className="text-muted">Glossary</small>
+            </Card.Body>
+          </Card>
+        </Col>
+      </Row>
+
       <Row>
         {/* File Tree */}
         <Col md={4} lg={3}>

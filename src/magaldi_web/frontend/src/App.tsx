@@ -8,6 +8,10 @@ import Explorer from './pages/Explorer'
 import VectorMap from './pages/VectorMap'
 import Glossary from './pages/Glossary'
 import Admin from './pages/Admin'
+import DeadCode from './pages/DeadCode'
+import EntryPoints from './pages/EntryPoints'
+import CallExplorer from './pages/CallExplorer'
+import DependencyGraph from './pages/DependencyGraph'
 
 function App() {
   const location = useLocation()
@@ -84,6 +88,10 @@ function App() {
           <Route path="/explorer" element={<Explorer />} />
           <Route path="/repos" element={<Repository />} />
           <Route path="/repos/:scope/:repository/*" element={<Repository />} />
+          <Route path="/repos/:scope/:repo/dead-code" element={<DeadCode />} />
+          <Route path="/repos/:scope/:repo/entry-points" element={<EntryPoints />} />
+          <Route path="/repos/:scope/:repo/call-explorer" element={<CallExplorer />} />
+          <Route path="/repos/:scope/:repo/dependency-graph" element={<DependencyGraph />} />
           <Route path="/element/:elementId" element={<Element />} />
           <Route path="/vector-map" element={<VectorMap />} />
           <Route path="/vector-map/:scope/:repository" element={<VectorMap />} />
