@@ -55,7 +55,7 @@ function EntryPointList({ items, category }: { items: EntryPointItem[]; category
             key={item.element_id}
             action
             as={Link}
-            to={`/element/${item.hash_id || item.element_id}`}
+            to={`/element/${encodeURIComponent(item.hash_id || item.element_id)}`}
           >
             <div className="d-flex justify-content-between align-items-start">
               <div className="me-2">

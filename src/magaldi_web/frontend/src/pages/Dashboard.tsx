@@ -203,15 +203,15 @@ function Dashboard() {
         </Col>
         <Col>
           <Card
-            className="text-center h-100 bg-light"
+            className="text-center h-100 bg-body-secondary"
             style={{ cursor: 'pointer' }}
             onClick={() => navigate('/explorer')}
           >
             <Card.Body className="py-3">
-              <h3 className="mb-0 text-secondary">
+              <h3 className="mb-0 text-body-secondary">
                 {dashboard?.stats?.element_count?.toLocaleString() ?? 0}
               </h3>
-              <small className="text-muted">Total</small>
+              <small className="text-body-tertiary">Total</small>
             </Card.Body>
           </Card>
         </Col>

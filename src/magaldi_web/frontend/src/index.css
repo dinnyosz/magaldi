@@ -1,5 +1,22 @@
 :root {
   --bs-body-bg: #f8f9fa;
+  --scrollbar-track: #f1f1f1;
+  --scrollbar-thumb: #c1c1c1;
+  --scrollbar-thumb-hover: #a8a8a8;
+  --code-bg: #f8f9fa;
+  --code-border: #dee2e6;
+  --file-tree-hover: #e9ecef;
+  --vector-map-bg: #ffffff;
+}
+
+[data-bs-theme="dark"] {
+  --scrollbar-track: #2b2b2b;
+  --scrollbar-thumb: #555555;
+  --scrollbar-thumb-hover: #666666;
+  --code-bg: #1e1e1e;
+  --code-border: #3d3d3d;
+  --file-tree-hover: #3d3d3d;
+  --vector-map-bg: #212529;
 }
 
 body {
@@ -13,16 +30,16 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1f1f1;
+  background: var(--scrollbar-track);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #c1c1c1;
+  background: var(--scrollbar-thumb);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #a8a8a8;
+  background: var(--scrollbar-thumb-hover);
 }
 
 /* Code styling */
@@ -32,8 +49,8 @@ code {
 }
 
 pre {
-  background-color: #f8f9fa;
-  border: 1px solid #dee2e6;
+  background-color: var(--code-bg);
+  border: 1px solid var(--code-border);
   border-radius: 0.375rem;
   padding: 1rem;
   overflow-x: auto;
@@ -60,7 +77,7 @@ mark {
 }
 
 .file-tree-item:hover {
-  background-color: #e9ecef;
+  background-color: var(--file-tree-hover);
 }
 
 .file-tree-item.active {
@@ -83,10 +100,25 @@ mark {
 
 /* Vector map container */
 .vector-map-container {
-  border: 1px solid #dee2e6;
+  border: 1px solid var(--code-border);
   border-radius: 0.5rem;
-  background-color: #ffffff;
+  background-color: var(--vector-map-bg);
   overflow: hidden;
+}
+
+/* Dark mode table fixes */
+[data-bs-theme="dark"] .table {
+  --bs-table-color: var(--bs-body-color);
+  --bs-table-bg: transparent;
+}
+
+[data-bs-theme="dark"] .table th,
+[data-bs-theme="dark"] .table td {
+  color: var(--bs-body-color);
+}
+
+[data-bs-theme="dark"] .card-header {
+  color: var(--bs-body-color);
 }
 
 /* Responsive adjustments */

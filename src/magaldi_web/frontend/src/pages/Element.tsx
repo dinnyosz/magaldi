@@ -115,7 +115,7 @@ function Element() {
         {element.context.file && element.element_type !== 'file' && (
           <Breadcrumb.Item
             linkAs={Link}
-            linkProps={{ to: `/element/${element.context.file.hash_id || element.context.file.element_id}` }}
+            linkProps={{ to: `/element/${encodeURIComponent(element.context.file.hash_id || element.context.file.element_id)}` }}
           >
             {element.context.file.name}
           </Breadcrumb.Item>
@@ -123,7 +123,7 @@ function Element() {
         {element.context.parent && element.context.parent.element_type !== 'file' && (
           <Breadcrumb.Item
             linkAs={Link}
-            linkProps={{ to: `/element/${element.context.parent.hash_id || element.context.parent.element_id}` }}
+            linkProps={{ to: `/element/${encodeURIComponent(element.context.parent.hash_id || element.context.parent.element_id)}` }}
           >
             {element.context.parent.name}
           </Breadcrumb.Item>
@@ -262,7 +262,7 @@ function Element() {
                             key={child.element_id}
                             action
                             as={Link}
-                            to={`/element/${child.hash_id || child.element_id}`}
+                            to={`/element/${encodeURIComponent(child.hash_id || child.element_id)}`}
                             className="d-flex justify-content-between align-items-start"
                           >
                             <div>
@@ -301,7 +301,7 @@ function Element() {
                               key={child.element_id}
                               action
                               as={Link}
-                              to={`/element/${child.hash_id || child.element_id}`}
+                              to={`/element/${encodeURIComponent(child.hash_id || child.element_id)}`}
                               className="d-flex justify-content-between align-items-start"
                             >
                               <div>
@@ -361,7 +361,7 @@ function Element() {
                               key={member.element_id}
                               action
                               as={Link}
-                              to={`/element/${member.hash_id || member.element_id}`}
+                              to={`/element/${encodeURIComponent(member.hash_id || member.element_id)}`}
                               className="d-flex justify-content-between align-items-start"
                             >
                               <div>
@@ -403,7 +403,7 @@ function Element() {
                                 key={member.element_id}
                                 action
                                 as={Link}
-                                to={`/element/${member.hash_id || member.element_id}`}
+                                to={`/element/${encodeURIComponent(member.hash_id || member.element_id)}`}
                                 className="d-flex justify-content-between align-items-start"
                               >
                                 <div>
@@ -451,7 +451,7 @@ function Element() {
                       key={sibling.element_id}
                       action
                       as={Link}
-                      to={`/element/${sibling.hash_id || sibling.element_id}`}
+                      to={`/element/${encodeURIComponent(sibling.hash_id || sibling.element_id)}`}
                       className="d-flex justify-content-between align-items-start"
                     >
                       <div>
@@ -551,7 +551,7 @@ function Element() {
                       key={caller.element_id}
                       action
                       as={Link}
-                      to={`/element/${caller.hash_id || caller.element_id}`}
+                      to={`/element/${encodeURIComponent(caller.hash_id || caller.element_id)}`}
                     >
                       <div className="d-flex justify-content-between align-items-start">
                         <div className="text-truncate me-2">
@@ -627,7 +627,7 @@ function Element() {
                       key={`${callee.name}-${idx}`}
                       action
                       as={Link}
-                      to={`/element/${callee.hash_id || callee.element_id}`}
+                      to={`/element/${encodeURIComponent(callee.hash_id || callee.element_id || '')}`}
                     >
                       {calleeContent}
                     </ListGroup.Item>
@@ -678,7 +678,7 @@ function Element() {
                       key={sim.element_id}
                       action
                       as={Link}
-                      to={`/element/${sim.hash_id || sim.element_id}`}
+                      to={`/element/${encodeURIComponent(sim.hash_id || sim.element_id)}`}
                       className="d-flex justify-content-between align-items-start"
                     >
                       <div className="text-truncate me-2">

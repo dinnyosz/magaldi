@@ -1,5 +1,6 @@
 import { Routes, Route, Link, useLocation } from 'react-router-dom'
-import { Container, Nav, Navbar } from 'react-bootstrap'
+import { Container, Nav, Navbar, Button } from 'react-bootstrap'
+import { useDarkMode } from './hooks/useDarkMode'
 import Dashboard from './pages/Dashboard'
 import Search from './pages/Search'
 import Repository from './pages/Repository'
@@ -15,6 +16,7 @@ import DependencyGraph from './pages/DependencyGraph'
 
 function App() {
   const location = useLocation()
+  const [theme, toggleTheme] = useDarkMode()
 
   return (
     <div className="d-flex flex-column min-vh-100">
@@ -77,6 +79,15 @@ function App() {
                 Admin
               </Nav.Link>
             </Nav>
+            <Button
+              variant="outline-light"
+              size="sm"
+              onClick={toggleTheme}
+              className="ms-2"
+              aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
+            >
+              <i className={`bi ${theme === 'light' ? 'bi-moon-fill' : 'bi-sun-fill'}`}></i>
+            </Button>
           </Navbar.Collapse>
         </Container>
       </Navbar>
@@ -101,9 +112,9 @@ function App() {
         </Routes>
       </Container>
 
-      <footer className="bg-light py-3 mt-auto border-top">
+      <footer className="bg-body-tertiary py-3 mt-auto border-top">
         <Container fluid>
-          <small className="text-muted">
+          <small className="text-body-secondary">
             Magaldi - Code Discovery Engine
           </small>
         </Container>

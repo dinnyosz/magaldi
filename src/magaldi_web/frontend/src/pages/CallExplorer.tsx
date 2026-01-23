@@ -63,7 +63,7 @@ function CallChainTree({
                 {/* Name with link if resolved */}
                 {node.element_id && !node.unresolved && !node.missing ? (
                   <Link
-                    to={`/element/${node.hash_id || node.element_id}`}
+                    to={`/element/${encodeURIComponent(node.hash_id || node.element_id)}`}
                     className="fw-medium"
                   >
                     {node.name}

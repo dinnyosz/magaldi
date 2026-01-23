@@ -150,7 +150,7 @@ function DeadCode() {
                         </Badge>
                       </td>
                       <td>
-                        <Link to={`/element/${item.hash_id || item.element_id}`}>
+                        <Link to={`/element/${encodeURIComponent(item.hash_id || item.element_id)}`}>
                           {item.name}
                         </Link>
                         {item.is_test && (

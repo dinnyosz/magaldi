@@ -279,7 +279,7 @@ function Repository() {
                               key={el.element_id}
                               action
                               as={Link}
-                              to={`/element/${el.hash_id || el.element_id}`}
+                              to={`/element/${encodeURIComponent(el.hash_id || el.element_id)}`}
                               className="py-1 px-2"
                             >
                               <Badge
