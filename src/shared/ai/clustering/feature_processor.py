@@ -996,12 +996,14 @@ def process_subfeatures(
 
         for element_id in cluster.element_ids:
             doc = member_docs.get(element_id)
-            if doc and doc.get("embedding"):
+            # Use summary_embedding (the primary embedding field)
+            emb = doc.get("summary_embedding") if doc else None
+            if emb:
                 idx = cluster.element_ids.index(element_id)
                 name = cluster.element_names[idx] if idx < len(cluster.element_names) else ""
                 elements_with_embeddings.append({
                     "element_id": element_id,
-                    "embedding": doc["embedding"],
+                    "embedding": emb,
                     "name": name,
                     "element_type": doc.get("element_type", "function"),
                 })

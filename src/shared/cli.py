@@ -512,6 +512,11 @@ def run_feature_extraction(
 
         clusterer = FeatureClusterer(cluster_config)
 
+        # Rename summary_embedding to embedding for clusterer compatibility
+        for elem in elements:
+            if "summary_embedding" in elem:
+                elem["embedding"] = elem.pop("summary_embedding")
+
         with console.status("[bold blue]Clustering...[/]"):
             clustering_result = clusterer.cluster(elements)
 
