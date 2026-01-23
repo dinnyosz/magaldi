@@ -22,15 +22,21 @@ from shared.db.elasticsearch import ElasticsearchRepository, INDEX_NAME
 router = APIRouter()
 
 
-@router.get("/elements/similar/{hash_id}")
+@router.get("/elements/similar/{identifier}")
 async def get_similar_elements(
-    hash_id: str = Path(..., description="Element hash ID (64-char SHA256)"),
+    identifier: str = Path(..., description="Element hash_id (64-char SHA256) or element_id"),
     limit: int = Query(default=10, ge=1, le=50),
     es_repo: ElasticsearchRepository = Depends(get_es_repository),
 ) -> list[dict]:
     """Find similar elements using vector similarity."""
-    # Look up element by hash_id
-    source = es_repo.get_document_by_hash_id(hash_id)
+    # Try hash_id first (64 hex characters), then fall back to element_id
+    source = None
+    if len(identifier) == 64 and all(c in "0123456789abcdef" for c in identifier.lower()):
+        source = es_repo.get_document_by_hash_id(identifier)
+
+    if not source:
+        source = es_repo.get_document(identifier)
+
     if not source:
         raise HTTPException(status_code=404, detail="Element not found")
 
@@ -100,14 +106,21 @@ async def get_similar_elements(
     return similar
 
 
-@router.get("/elements/{hash_id}", response_model=ElementDetailResponse)
+@router.get("/elements/{identifier}", response_model=ElementDetailResponse)
 async def get_element_detail(
-    hash_id: str = Path(..., description="Element hash ID (64-char SHA256)"),
+    identifier: str = Path(..., description="Element hash_id (64-char SHA256) or element_id"),
     es_repo: ElasticsearchRepository = Depends(get_es_repository),
 ) -> ElementDetailResponse:
     """Get detailed information about a code element."""
-    # Look up element by hash_id
-    source = es_repo.get_document_by_hash_id(hash_id)
+    # Try hash_id first (64 hex characters), then fall back to element_id
+    source = None
+    if len(identifier) == 64 and all(c in "0123456789abcdef" for c in identifier.lower()):
+        source = es_repo.get_document_by_hash_id(identifier)
+
+    if not source:
+        # Try as element_id
+        source = es_repo.get_document(identifier)
+
     if not source:
         raise HTTPException(status_code=404, detail="Element not found")
 
