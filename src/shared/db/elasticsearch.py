@@ -828,6 +828,63 @@ class ElasticsearchRepository:
 
         return [hit["_source"] for hit in result["hits"]["hits"]]
 
+    def search_by_wildcard(
+        self,
+        pattern: str,
+        scope: str | None = None,
+        repository: str | None = None,
+        username: str | None = None,
+        glob: str | None = None,
+        size: int = 50,
+        include_tests: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Search raw_code field using Elasticsearch wildcard query.
+
+        Wildcard syntax:
+        - * matches zero or more characters
+        - ? matches exactly one character
+
+        Args:
+            pattern: Wildcard pattern.
+            scope: Filter by scope.
+            repository: Filter by repository.
+            username: Filter by username (optional).
+            glob: File path glob filter.
+            size: Maximum results.
+            include_tests: Include test elements.
+
+        Returns:
+            List of matching documents.
+        """
+        must_clauses: list[dict[str, Any]] = [
+            {"wildcard": {"raw_code.keyword": {"value": pattern, "case_insensitive": True}}},
+        ]
+
+        filter_clauses: list[dict[str, Any]] = []
+
+        if username:
+            filter_clauses.append({"term": {"username": username}})
+        if scope:
+            filter_clauses.append({"term": {"scope": scope}})
+        if repository:
+            filter_clauses.append({"term": {"repository": repository}})
+        if glob:
+            filter_clauses.append({"wildcard": {"relative_path": glob}})
+        if not include_tests:
+            filter_clauses.append({"term": {"is_test": False}})
+
+        query: dict[str, Any] = {"bool": {"must": must_clauses}}
+        if filter_clauses:
+            query["bool"]["filter"] = filter_clauses
+
+        client = self._get_client()
+        result = client.search(
+            index=INDEX_NAME,
+            body={"query": query, "size": size},
+        )
+
+        return [hit["_source"] for hit in result["hits"]["hits"]]
+
     def get_all_embeddings(
         self,
         scope: str,

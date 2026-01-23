@@ -801,6 +801,25 @@ class TestPatternSearch:
         )
         assert len(results) == 0
 
+    def test_search_by_wildcard(self, es_repo, sample_elements):
+        """Test wildcard pattern search."""
+        results = es_repo.search_by_wildcard(
+            pattern="*column*Model*",
+            scope="test-pattern",
+            repository="repo",
+        )
+        assert len(results) >= 1
+        assert any("add_column" in r.get("name", "") for r in results)
+
+    def test_search_by_wildcard_question_mark(self, es_repo, sample_elements):
+        """Test wildcard with ? for single character."""
+        results = es_repo.search_by_wildcard(
+            pattern="*proce??*",
+            scope="test-pattern",
+            repository="repo",
+        )
+        assert len(results) >= 1
+
 
 class TestOldDataHandling:
     """Tests for handling old data without element_count."""
