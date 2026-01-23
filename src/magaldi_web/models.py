@@ -553,3 +553,215 @@ class GlossaryListResponse(BaseModel):
 
     terms: list[GlossaryTermSummary]
     total: int
+
+
+# =============================================================================
+# CALL ANALYSIS MODELS
+# =============================================================================
+
+
+class CallerInfo(BaseModel):
+    """Information about a caller."""
+
+    element_id: str
+    hash_id: str | None = None
+    name: str
+    element_type: str
+    file_path: str
+    line: int
+    summary: str | None = None
+
+
+class CalleeInfo(BaseModel):
+    """Information about a callee."""
+
+    name: str
+    receiver: str | None = None
+    line: int
+    element_id: str | None = None  # None if unresolved
+    hash_id: str | None = None
+    element_type: str | None = None
+    file_path: str | None = None
+    target_line: int | None = None
+    summary: str | None = None
+
+
+class CallGraphResponse(BaseModel):
+    """Response for call graph endpoint."""
+
+    element: dict
+    callers: list[CallerInfo]
+    callees: list[CalleeInfo]
+
+
+class CallChainNode(BaseModel):
+    """Node in a call chain tree."""
+
+    element_id: str | None = None
+    hash_id: str | None = None
+    name: str
+    element_type: str | None = None
+    file_path: str | None = None
+    line: int | None = None
+    summary: str | None = None
+    callers: list["CallChainNode"] = Field(default_factory=list)
+    callees: list["CallChainNode"] = Field(default_factory=list)
+    cycle: bool = False
+    unresolved: bool = False
+    missing: bool = False
+
+
+class CallChainResponse(BaseModel):
+    """Response for call chain endpoint."""
+
+    root: dict
+    direction: str
+    max_depth: int
+    callers: list[CallChainNode] = Field(default_factory=list)
+    callees: list[CallChainNode] = Field(default_factory=list)
+
+
+class DeadCodeItem(BaseModel):
+    """A potentially dead code item."""
+
+    element_id: str
+    hash_id: str | None = None
+    name: str
+    element_type: str
+    file_path: str
+    line: int
+    summary: str | None = None
+    is_test: bool = False
+
+
+class DeadCodeResponse(BaseModel):
+    """Response for dead code analysis."""
+
+    potentially_dead: list[DeadCodeItem]
+    stats: dict
+
+
+class EntryPointItem(BaseModel):
+    """An entry point item."""
+
+    element_id: str
+    hash_id: str | None = None
+    name: str
+    element_type: str
+    file_path: str
+    line: int
+    summary: str | None = None
+    decorators: list[str] = Field(default_factory=list)
+
+
+class EntryPointsResponse(BaseModel):
+    """Response for entry points analysis."""
+
+    http: list[EntryPointItem]
+    cli: list[EntryPointItem]
+    test: list[EntryPointItem]
+    main: list[EntryPointItem]
+    async_tasks: list[EntryPointItem]
+    stats: dict
+
+
+# =============================================================================
+# DEPENDENCY ANALYSIS MODELS
+# =============================================================================
+
+
+class ImportInfo(BaseModel):
+    """Information about an import."""
+
+    name: str
+    module: str
+    alias: str | None = None
+    line: int
+    is_internal: bool = False
+
+
+class DependenciesResponse(BaseModel):
+    """Response for file dependencies."""
+
+    file_info: dict
+    internal_imports: list[ImportInfo]
+    external_imports: list[ImportInfo]
+    stats: dict
+
+
+class DependentInfo(BaseModel):
+    """Information about a dependent file."""
+
+    element_id: str
+    hash_id: str | None = None
+    file_path: str
+    name: str
+
+
+class DependentsResponse(BaseModel):
+    """Response for module dependents."""
+
+    module: str
+    dependents: list[DependentInfo]
+    total: int
+
+
+class DependencyGraphEdge(BaseModel):
+    """An edge in the dependency graph."""
+
+    from_path: str = Field(alias="from")
+    to_path: str = Field(alias="to")
+
+    model_config = {"populate_by_name": True}
+
+
+class DependencyGraphResponse(BaseModel):
+    """Response for dependency graph."""
+
+    nodes: list[str]
+    edges: list[dict]  # {from, to}
+    cycles: list[list[str]]
+    stats: dict
+
+
+# =============================================================================
+# SIMILARITY MODELS
+# =============================================================================
+
+
+class SimilarCodeItem(BaseModel):
+    """A similar code item."""
+
+    element_id: str
+    hash_id: str | None = None
+    name: str
+    element_type: str
+    file_path: str
+    line: int
+    summary: str | None = None
+    similarity: float
+
+
+class SimilarCodeResponse(BaseModel):
+    """Response for similar code search."""
+
+    element: dict
+    similar_structure: list[SimilarCodeItem]
+    similar_intent: list[SimilarCodeItem]
+
+
+# =============================================================================
+# EXPLAIN ELEMENT MODELS
+# =============================================================================
+
+
+class ExplainElementResponse(BaseModel):
+    """Comprehensive element explanation response."""
+
+    element: dict
+    callers: list[CallerInfo]
+    callees: list[CalleeInfo]
+    imports: list[ImportInfo]
+    similar_code: list[SimilarCodeItem]
+    parent: dict | None = None
+    embedding_status: dict
