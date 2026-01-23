@@ -482,12 +482,15 @@ def validate_vector(vector: list[float], expected_dims: int) -> bool:
 # =============================================================================
 
 
-def build_embedding_text(
+def build_summary_embedding_text(
     element: CodeElement,
     embedding_store: EmbeddingStore,
     max_tokens: int = 8000,
 ) -> str:
-    """Build enriched text for embedding with hierarchical context.
+    """Build text for summary embedding (metadata + summary + context).
+
+    This builds enriched text with hierarchical context from parent summaries,
+    optimized for semantic search based on what the code does.
 
     Args:
         element: Code element to embed.
@@ -568,6 +571,44 @@ def build_embedding_text(
         summary = embedding_store.get_summary(element.element_id)
         if summary:
             parts.append(f"Summary: {summary}")
+
+    text = "\n".join(parts)
+    return validate_context_length(text, max_tokens)
+
+
+# Backwards compatibility alias
+build_embedding_text = build_summary_embedding_text
+
+
+def build_code_embedding_text(
+    element: CodeElement,
+    max_tokens: int = 8000,
+) -> str:
+    """Build text for code embedding (raw code with minimal context).
+
+    This builds text focused on the actual code implementation,
+    optimized for finding similar code patterns and implementations.
+
+    Args:
+        element: Code element to embed.
+        max_tokens: Maximum context tokens.
+
+    Returns:
+        Formatted text for code embedding.
+    """
+    parts: list[str] = []
+
+    # Add minimal context (file path, element type)
+    parts.append(f"# {element.element_type}: {element.name}")
+    parts.append(f"# File: {element.relative_path}")
+
+    # Add signature if available
+    if element.signature:
+        parts.append(f"# Signature: {element.signature}")
+
+    # Add the raw code
+    if element.raw_code:
+        parts.append(element.raw_code)
 
     text = "\n".join(parts)
     return validate_context_length(text, max_tokens)

@@ -14,6 +14,8 @@ from shared.ai.embedding import (
     InMemoryEmbeddingStore,
     CodeEmbeddingClient,
     build_embedding_text,
+    build_summary_embedding_text,
+    build_code_embedding_text,
     estimate_tokens,
     normalize_vector,
     process_embedding_job,
@@ -236,8 +238,8 @@ class TestValidateContextLength:
 # =============================================================================
 
 
-class TestBuildEmbeddingText:
-    """Tests for embedding text construction."""
+class TestBuildSummaryEmbeddingText:
+    """Tests for summary embedding text construction."""
 
     def test_file_embedding_text(
         self, file_element: CodeElement, embedding_store: InMemoryEmbeddingStore
@@ -246,11 +248,23 @@ class TestBuildEmbeddingText:
         embedding_store.store_element(file_element)
         embedding_store.store_summary(file_element.element_id, "Main application module.")
 
-        text = build_embedding_text(file_element, embedding_store)
+        text = build_summary_embedding_text(file_element, embedding_store)
 
         assert "src/app.py" in text
         assert "python" in text.lower()
         assert "Main application module" in text
+
+    def test_backwards_compat_alias(
+        self, file_element: CodeElement, embedding_store: InMemoryEmbeddingStore
+    ):
+        """Test that build_embedding_text is an alias for build_summary_embedding_text."""
+        embedding_store.store_element(file_element)
+        embedding_store.store_summary(file_element.element_id, "Main application module.")
+
+        text1 = build_embedding_text(file_element, embedding_store)
+        text2 = build_summary_embedding_text(file_element, embedding_store)
+
+        assert text1 == text2
 
     def test_class_embedding_text_includes_file_context(
         self,
@@ -266,7 +280,7 @@ class TestBuildEmbeddingText:
         embedding_store.store_element(class_element)
         embedding_store.store_summary(class_element.element_id, "User service class.")
 
-        text = build_embedding_text(class_element, embedding_store)
+        text = build_summary_embedding_text(class_element, embedding_store)
 
         assert "Flask application" in text  # File context
         assert "UserService" in text
@@ -291,7 +305,7 @@ class TestBuildEmbeddingText:
         embedding_store.store_element(method_element)
         embedding_store.store_summary(method_element.element_id, "Retrieves user by ID.")
 
-        text = build_embedding_text(method_element, embedding_store)
+        text = build_summary_embedding_text(method_element, embedding_store)
 
         assert "Main module" in text  # File context
         assert "User management service" in text  # Class context
@@ -303,7 +317,7 @@ class TestBuildEmbeddingText:
     ):
         embedding_store.store_element(method_element)
 
-        text = build_embedding_text(method_element, embedding_store)
+        text = build_summary_embedding_text(method_element, embedding_store)
 
         assert "def get_user" in text
         assert "user_id: int" in text
@@ -313,9 +327,76 @@ class TestBuildEmbeddingText:
     ):
         embedding_store.store_element(method_element)
 
-        text = build_embedding_text(method_element, embedding_store)
+        text = build_summary_embedding_text(method_element, embedding_store)
 
         assert "Get user by ID" in text
+
+
+class TestBuildCodeEmbeddingText:
+    """Tests for code embedding text construction."""
+
+    def test_includes_element_type_and_name(self, method_element: CodeElement):
+        text = build_code_embedding_text(method_element)
+
+        assert "# method: get_user" in text
+
+    def test_includes_file_path(self, method_element: CodeElement):
+        text = build_code_embedding_text(method_element)
+
+        assert "# File: src/app.py" in text
+
+    def test_includes_signature(self, method_element: CodeElement):
+        text = build_code_embedding_text(method_element)
+
+        assert "# Signature: def get_user(self, user_id: int) -> User" in text
+
+    def test_includes_raw_code(self):
+        element = CodeElement(
+            element_id="scope:repo:main:src/app.py:function:process:10",
+            scope="scope",
+            repository="repo",
+            username="main",
+            relative_path="src/app.py",
+            element_type="function",
+            name="process",
+            language="python",
+            line_start=10,
+            line_end=15,
+            raw_code="def process(data):\n    return data.strip()",
+        )
+
+        text = build_code_embedding_text(element)
+
+        assert "def process(data):" in text
+        assert "return data.strip()" in text
+
+    def test_no_store_required(self, method_element: CodeElement):
+        """Code embedding doesn't need embedding store (unlike summary embedding)."""
+        # This should work without any store
+        text = build_code_embedding_text(method_element)
+        assert text  # Just verify it produces output
+
+    def test_respects_max_tokens(self):
+        # Create element with very long code
+        long_code = "x = 1\n" * 10000
+        element = CodeElement(
+            element_id="scope:repo:main:src/long.py:function:long_fn:1",
+            scope="scope",
+            repository="repo",
+            username="main",
+            relative_path="src/long.py",
+            element_type="function",
+            name="long_fn",
+            language="python",
+            line_start=1,
+            line_end=10000,
+            raw_code=long_code,
+        )
+
+        text = build_code_embedding_text(element, max_tokens=100)
+
+        assert len(text) < len(long_code)
+        assert "truncated" in text
 
 
 # =============================================================================

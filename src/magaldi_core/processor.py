@@ -26,7 +26,8 @@ from shared.db.redis import RedisSummarizationJobRepository, RedisEmbeddingJobRe
 from shared.ai.embedding import (
     EmbeddingConfig,
     CodeEmbeddingClient,
-    build_embedding_text,
+    build_summary_embedding_text,
+    build_code_embedding_text,
     normalize_vector,
     validate_vector,
 )
@@ -115,9 +116,13 @@ class TimingStats:
 
     # Per-type tracking
     total_summarize_by_type: dict[str, float] = field(default_factory=dict)
-    total_embed_by_type: dict[str, float] = field(default_factory=dict)
+    total_embed_by_type: dict[str, float] = field(default_factory=dict)  # Legacy: total embed time (summary + code)
+    total_summary_embed_by_type: dict[str, float] = field(default_factory=dict)  # Summary embedding time
+    total_code_embed_by_type: dict[str, float] = field(default_factory=dict)  # Code embedding time
     summarize_counts_by_type: dict[str, int] = field(default_factory=dict)  # count of summarized
-    embed_counts_by_type: dict[str, int] = field(default_factory=dict)  # count of embedded
+    embed_counts_by_type: dict[str, int] = field(default_factory=dict)  # count of embedded (legacy)
+    summary_embed_counts_by_type: dict[str, int] = field(default_factory=dict)  # count of summary embeds
+    code_embed_counts_by_type: dict[str, int] = field(default_factory=dict)  # count of code embeds
     totals_by_type: dict[str, int] = field(default_factory=dict)  # total element counts
 
     def set_totals_by_type(self, totals: dict[str, int]) -> None:
@@ -130,19 +135,50 @@ class TimingStats:
                     self.summarize_counts_by_type[t] = 0
                 if t not in self.embed_counts_by_type:
                     self.embed_counts_by_type[t] = 0
+                if t not in self.summary_embed_counts_by_type:
+                    self.summary_embed_counts_by_type[t] = 0
+                if t not in self.code_embed_counts_by_type:
+                    self.code_embed_counts_by_type[t] = 0
                 if t not in self.total_summarize_by_type:
                     self.total_summarize_by_type[t] = 0.0
                 if t not in self.total_embed_by_type:
                     self.total_embed_by_type[t] = 0.0
+                if t not in self.total_summary_embed_by_type:
+                    self.total_summary_embed_by_type[t] = 0.0
+                if t not in self.total_code_embed_by_type:
+                    self.total_code_embed_by_type[t] = 0.0
 
-    def record(self, wall_time: float, summarize_time: float, embed_time: float, element_type: str = "", was_embedded: bool = True) -> None:
-        """Record timing for a completed element."""
+    def record(
+        self,
+        wall_time: float,
+        summarize_time: float,
+        embed_time: float,
+        element_type: str = "",
+        was_embedded: bool = True,
+        summary_embed_time: float = 0.0,
+        code_embed_time: float = 0.0,
+    ) -> None:
+        """Record timing for a completed element.
+
+        Args:
+            wall_time: Total wall clock time.
+            summarize_time: Time spent on LLM summarization.
+            embed_time: Total embedding time (legacy, for backwards compat).
+            element_type: Type of element (file, class, function, etc).
+            was_embedded: Whether the element was embedded.
+            summary_embed_time: Time spent on summary embedding.
+            code_embed_time: Time spent on code embedding.
+        """
         with self._lock:
             if element_type:
                 if element_type not in self.total_summarize_by_type:
                     self.total_summarize_by_type[element_type] = 0.0
                 if element_type not in self.total_embed_by_type:
                     self.total_embed_by_type[element_type] = 0.0
+                if element_type not in self.total_summary_embed_by_type:
+                    self.total_summary_embed_by_type[element_type] = 0.0
+                if element_type not in self.total_code_embed_by_type:
+                    self.total_code_embed_by_type[element_type] = 0.0
                 # Always record summarize time (every element is summarized)
                 self.total_summarize_by_type[element_type] += summarize_time
                 self.summarize_counts_by_type[element_type] = self.summarize_counts_by_type.get(element_type, 0) + 1
@@ -150,6 +186,13 @@ class TimingStats:
                 if was_embedded and embed_time > 0:
                     self.total_embed_by_type[element_type] += embed_time
                     self.embed_counts_by_type[element_type] = self.embed_counts_by_type.get(element_type, 0) + 1
+                    # Track dual embedding times separately
+                    if summary_embed_time > 0:
+                        self.total_summary_embed_by_type[element_type] += summary_embed_time
+                        self.summary_embed_counts_by_type[element_type] = self.summary_embed_counts_by_type.get(element_type, 0) + 1
+                    if code_embed_time > 0:
+                        self.total_code_embed_by_type[element_type] += code_embed_time
+                        self.code_embed_counts_by_type[element_type] = self.code_embed_counts_by_type.get(element_type, 0) + 1
 
     @property
     def total_summarize_count(self) -> int:
@@ -285,7 +328,9 @@ class ProcessedElement:
     success: bool
     wall_time: float
     summarize_time: float
-    embed_time: float
+    embed_time: float  # Total embed time (summary + code)
+    summary_embed_time: float = 0.0  # Time for summary embedding
+    code_embed_time: float = 0.0  # Time for code embedding
     error: str | None = None
 
 
@@ -637,8 +682,8 @@ def _embed_element(
     summary_cache: _SummaryCache,
     embed_client: CodeEmbeddingClient,
     config: ProcessingConfig,
-) -> list[float]:
-    """Generate embedding for an element.
+) -> tuple[list[float], list[float], float, float]:
+    """Generate both embeddings for an element.
 
     Args:
         element: Element to embed.
@@ -647,42 +692,60 @@ def _embed_element(
         config: Processing configuration.
 
     Returns:
-        Embedding vector.
+        Tuple of (summary_embedding, code_embedding, summary_embed_time, code_embed_time).
 
     Raises:
         ValueError: If embedding validation fails.
     """
-    # Build enriched text for embedding
-    text = build_embedding_text(element, summary_cache, config.embed_max_context)
+    import time as _time
 
-    # Generate embedding
-    embedding = embed_client.embed_single(text, timeout=config.embed_timeout)
+    # Summary embedding (existing logic)
+    summary_text = build_summary_embedding_text(element, summary_cache, config.embed_max_context)
+    summary_start = _time.time()
+    summary_embedding = embed_client.embed_single(summary_text, timeout=config.embed_timeout)
+    summary_embed_time = _time.time() - summary_start
 
     # Validate dimensions
-    if not validate_vector(embedding, config.embed_dimensions):
+    if not validate_vector(summary_embedding, config.embed_dimensions):
         raise ValueError(
-            f"Invalid embedding: expected {config.embed_dimensions} dims, "
-            f"got {len(embedding)}"
+            f"Invalid summary embedding: expected {config.embed_dimensions} dims, "
+            f"got {len(summary_embedding)}"
         )
+    summary_embedding = normalize_vector(summary_embedding)
 
-    # Normalize for cosine similarity
-    return normalize_vector(embedding)
+    # Code embedding (new)
+    code_text = build_code_embedding_text(element, config.embed_max_context)
+    code_start = _time.time()
+    code_embedding = embed_client.embed_single(code_text, timeout=config.embed_timeout)
+    code_embed_time = _time.time() - code_start
+
+    # Validate dimensions
+    if not validate_vector(code_embedding, config.embed_dimensions):
+        raise ValueError(
+            f"Invalid code embedding: expected {config.embed_dimensions} dims, "
+            f"got {len(code_embedding)}"
+        )
+    code_embedding = normalize_vector(code_embedding)
+
+    return summary_embedding, code_embedding, summary_embed_time, code_embed_time
 
 
 def _index_element(
     element: CodeElement,
     summary: str,
-    embedding: list[float] | None,
+    summary_embedding: list[float] | None,
+    code_embedding: list[float] | None,
     es_repo: ElasticsearchRepository,
     file_hash: str | None = None,
     element_count: int | None = None,
 ) -> bool:
-    """Index element to Elasticsearch with summary and embedding.
+    """Index element to Elasticsearch with summary and both embeddings.
 
     Args:
         element: Element to index.
         summary: Generated summary.
-        embedding: Embedding vector (or None if not embedded).
+        summary_embedding: Summary embedding vector (or None if not embedded).
+        code_embedding: Code embedding vector (or None if not embedded).
         es_repo: Elasticsearch repository.
         file_hash: File hash for all elements.
         element_count: Total element count in file (only for file-level elements).
@@ -696,9 +759,11 @@ def _index_element(
     # Store summary
     es_repo.store_summary(element.element_id, summary)
 
-    # Store embedding if present
-    if embedding is not None:
-        es_repo.store_embedding(element.element_id, embedding)
+    # Store embeddings if present (using type-specific methods)
+    if summary_embedding is not None:
+        es_repo.store_summary_embedding(element.element_id, summary_embedding)
+    if code_embedding is not None:
+        es_repo.store_code_embedding(element.element_id, code_embedding)
 
     return True
 
@@ -737,6 +802,8 @@ def _process_single_element(
     start_wall = time.time()
     summarize_time = 0.0
     embed_time = 0.0
+    summary_embed_time = 0.0
+    code_embed_time = 0.0
 
     # Build hierarchical display name: [type] .../path/file.py → Class → method
     def build_display_name(max_path_len: int = 40) -> str:
@@ -779,17 +846,21 @@ def _process_single_element(
         # Cache summary for children
         summary_cache.add_summary(element.element_id, summary)
 
-        # Step 2: Embed (if applicable)
+        # Step 2: Embed (if applicable) - generate both summary and code embeddings
         update_status("embedding", config.embed_model)
-        embedding: list[float] | None = None
+        summary_embedding: list[float] | None = None
+        code_embedding: list[float] | None = None
         if should_embed(element):
             if config.skip_ai:
-                # Generate dummy embedding for testing
-                embedding = [0.0] * config.embed_dimensions
+                # Generate dummy embeddings for testing
+                summary_embedding = [0.0] * config.embed_dimensions
+                code_embedding = [0.0] * config.embed_dimensions
             else:
-                api_start = time.time()
-                embedding = _embed_element(element, summary_cache, embed_client, config)
-                embed_time = time.time() - api_start
+                # Generate both embeddings (returns tuple with timing)
+                summary_embedding, code_embedding, summary_embed_time, code_embed_time = _embed_element(
+                    element, summary_cache, embed_client, config
+                )
+                embed_time = summary_embed_time + code_embed_time
 
         # Step 3: Index to ES (only after summarize+embed complete)
         update_status("indexing")
@@ -801,7 +872,7 @@ def _process_single_element(
         if element.element_type == "file" and element_counts:
             element_count = element_counts.get(element.relative_path)
 
-        _index_element(element, summary, embedding, es_repo, file_hash, element_count)
+        _index_element(element, summary, summary_embedding, code_embedding, es_repo, file_hash, element_count)
 
         worker_status.clear(worker_id)
         wall_time = time.time() - start_wall
@@ -812,6 +883,8 @@ def _process_single_element(
             wall_time=wall_time,
             summarize_time=summarize_time,
             embed_time=embed_time,
+            summary_embed_time=summary_embed_time,
+            code_embed_time=code_embed_time,
         )
 
     except Exception as e:
@@ -823,6 +896,8 @@ def _process_single_element(
             wall_time=wall_time,
             summarize_time=summarize_time,
             embed_time=embed_time,
+            summary_embed_time=summary_embed_time,
+            code_embed_time=code_embed_time,
             error=str(e),
         )
 
@@ -1048,8 +1123,16 @@ def process_elements(
                 element = future_to_element.pop(future)
                 processed = future.result()
 
-                # Record timing with element type
-                timing_stats.record(processed.wall_time, processed.summarize_time, processed.embed_time, element.element_type, was_embedded=should_embed(element))
+                # Record timing with element type (including dual embedding times)
+                timing_stats.record(
+                    processed.wall_time,
+                    processed.summarize_time,
+                    processed.embed_time,
+                    element.element_type,
+                    was_embedded=should_embed(element),
+                    summary_embed_time=processed.summary_embed_time,
+                    code_embed_time=processed.code_embed_time,
+                )
 
                 was_embedded = should_embed(element)
                 if processed.success:

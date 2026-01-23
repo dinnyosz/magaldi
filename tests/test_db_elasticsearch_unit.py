@@ -484,16 +484,39 @@ class TestGetElementContentHashes:
 class TestGetEmbedding:
     """Tests for get_embedding method."""
 
-    def test_get_embedding_found(self, mock_repo, mock_es_client):
-        """Test getting embedding for existing element."""
+    def test_get_summary_embedding_found(self, mock_repo, mock_es_client):
+        """Test getting summary embedding for existing element."""
         mock_es_client.get.return_value = {
-            "_source": {"embedding": [0.1] * 1024}
+            "_source": {"summary_embedding": [0.1] * 1024}
+        }
+
+        result = mock_repo.get_embedding("test_id", embedding_type="summary")
+
+        assert result is not None
+        assert len(result) == 1024
+
+    def test_get_code_embedding_found(self, mock_repo, mock_es_client):
+        """Test getting code embedding for existing element."""
+        mock_es_client.get.return_value = {
+            "_source": {"code_embedding": [0.2] * 1024}
+        }
+
+        result = mock_repo.get_embedding("test_id", embedding_type="code")
+
+        assert result is not None
+        assert len(result) == 1024
+        assert result[0] == 0.2
+
+    def test_get_embedding_default_is_summary(self, mock_repo, mock_es_client):
+        """Test that default embedding_type is 'summary'."""
+        mock_es_client.get.return_value = {
+            "_source": {"summary_embedding": [0.3] * 1024}
         }
 
         result = mock_repo.get_embedding("test_id")
 
         assert result is not None
-        assert len(result) == 1024
+        assert result[0] == 0.3
 
     def test_get_embedding_not_found(self, mock_repo, mock_es_client):
         """Test getting embedding for non-existent element."""

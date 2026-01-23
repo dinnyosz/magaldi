@@ -364,7 +364,7 @@ class TestFindSimilarTool:
         """Test find_similar tool returns similar elements grouped by is_test."""
         mock_es_repo.get_document.return_value = {
             "element_id": "scope:repo:user:file.py:function:test:1",
-            "embedding": [0.1] * 1024,
+            "summary_embedding": [0.1] * 1024,
         }
         mock_es_repo.search_by_vector.return_value = [
             {
