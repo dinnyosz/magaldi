@@ -365,6 +365,119 @@ class TestElasticsearchSummaryAndEmbedding:
         result = es_repo.store_embedding("nonexistent-id", embedding)
         assert result is False
 
+    # =========================================================================
+    # DUAL EMBEDDING TESTS (summary_embedding + code_embedding)
+    # =========================================================================
+
+    def test_store_summary_embedding(self, es_repo, sample_element):
+        """Test storing summary embedding with explicit embedding_type."""
+        es_repo.index_element(sample_element)
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+
+        embedding = [0.2] * 1024
+        result = es_repo.store_embedding(
+            sample_element.element_id, embedding, embedding_type="summary"
+        )
+        assert result is True
+
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+
+        retrieved = es_repo.get_embedding(sample_element.element_id, embedding_type="summary")
+        assert retrieved is not None
+        assert len(retrieved) == 1024
+        assert retrieved[0] == pytest.approx(0.2, rel=1e-5)
+
+    def test_store_code_embedding(self, es_repo, sample_element):
+        """Test storing code embedding with embedding_type='code'."""
+        es_repo.index_element(sample_element)
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+
+        embedding = [0.3] * 1024
+        result = es_repo.store_embedding(
+            sample_element.element_id, embedding, embedding_type="code"
+        )
+        assert result is True
+
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+
+        retrieved = es_repo.get_embedding(sample_element.element_id, embedding_type="code")
+        assert retrieved is not None
+        assert len(retrieved) == 1024
+        assert retrieved[0] == pytest.approx(0.3, rel=1e-5)
+
+    def test_store_both_embeddings_independently(self, es_repo, sample_element):
+        """Test storing both summary and code embeddings independently."""
+        es_repo.index_element(sample_element)
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+
+        summary_embedding = [0.4] * 1024
+        code_embedding = [0.5] * 1024
+
+        # Store both embeddings
+        es_repo.store_embedding(sample_element.element_id, summary_embedding, embedding_type="summary")
+        es_repo.store_embedding(sample_element.element_id, code_embedding, embedding_type="code")
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+
+        # Retrieve and verify both
+        retrieved_summary = es_repo.get_embedding(sample_element.element_id, embedding_type="summary")
+        retrieved_code = es_repo.get_embedding(sample_element.element_id, embedding_type="code")
+
+        assert retrieved_summary is not None
+        assert retrieved_code is not None
+        assert retrieved_summary[0] == pytest.approx(0.4, rel=1e-5)
+        assert retrieved_code[0] == pytest.approx(0.5, rel=1e-5)
+
+    def test_store_summary_embedding_convenience_wrapper(self, es_repo, sample_element):
+        """Test store_summary_embedding convenience method."""
+        es_repo.index_element(sample_element)
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+
+        embedding = [0.6] * 1024
+        result = es_repo.store_summary_embedding(sample_element.element_id, embedding)
+        assert result is True
+
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+
+        retrieved = es_repo.get_embedding(sample_element.element_id, embedding_type="summary")
+        assert retrieved is not None
+        assert retrieved[0] == pytest.approx(0.6, rel=1e-5)
+
+    def test_store_code_embedding_convenience_wrapper(self, es_repo, sample_element):
+        """Test store_code_embedding convenience method."""
+        es_repo.index_element(sample_element)
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+
+        embedding = [0.7] * 1024
+        result = es_repo.store_code_embedding(sample_element.element_id, embedding)
+        assert result is True
+
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+
+        retrieved = es_repo.get_embedding(sample_element.element_id, embedding_type="code")
+        assert retrieved is not None
+        assert retrieved[0] == pytest.approx(0.7, rel=1e-5)
+
+    def test_default_embedding_type_is_summary(self, es_repo, sample_element):
+        """Test that default embedding_type is 'summary' for backwards compatibility."""
+        es_repo.index_element(sample_element)
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+
+        embedding = [0.8] * 1024
+
+        # Store without specifying type (should default to summary)
+        es_repo.store_embedding(sample_element.element_id, embedding)
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+
+        # Should be retrievable as summary embedding
+        retrieved = es_repo.get_embedding(sample_element.element_id, embedding_type="summary")
+        assert retrieved is not None
+        assert retrieved[0] == pytest.approx(0.8, rel=1e-5)
+
+        # Should also work with default get_embedding (no type specified)
+        retrieved_default = es_repo.get_embedding(sample_element.element_id)
+        assert retrieved_default is not None
+        assert retrieved_default[0] == pytest.approx(0.8, rel=1e-5)
+
 
 # =============================================================================
 # TEXT SEARCH TESTS
@@ -478,6 +591,96 @@ class TestElasticsearchVectorSearch:
 
         assert len(results) >= 1
         assert all(r["element_type"] == "function" for r in results)
+
+    def test_vector_search_by_summary_embedding(self, es_repo, multiple_elements):
+        """Test vector search using summary embeddings."""
+        for i, elem in enumerate(multiple_elements):
+            es_repo.index_element(elem)
+            # Store only summary embeddings
+            summary_embedding = [0.1 + (i * 0.1)] * 1024
+            es_repo.store_embedding(elem.element_id, summary_embedding, embedding_type="summary")
+
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+
+        query_vector = [0.1] * 1024
+        results = es_repo.search_by_vector(query_vector, min_score=0.5, embedding_type="summary")
+
+        assert len(results) >= 1
+        assert "_score" in results[0]
+
+    def test_vector_search_by_code_embedding(self, es_repo, multiple_elements):
+        """Test vector search using code embeddings."""
+        for i, elem in enumerate(multiple_elements):
+            es_repo.index_element(elem)
+            # Store only code embeddings
+            code_embedding = [0.2 + (i * 0.1)] * 1024
+            es_repo.store_embedding(elem.element_id, code_embedding, embedding_type="code")
+
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+
+        query_vector = [0.2] * 1024
+        results = es_repo.search_by_vector(query_vector, min_score=0.5, embedding_type="code")
+
+        assert len(results) >= 1
+        assert "_score" in results[0]
+
+    def test_vector_search_default_uses_summary_embedding(self, es_repo, multiple_elements):
+        """Test that default vector search uses summary embeddings for backwards compatibility."""
+        for i, elem in enumerate(multiple_elements):
+            es_repo.index_element(elem)
+            # Store both types of embeddings with different values
+            summary_embedding = [0.3] * 1024
+            code_embedding = [0.9] * 1024
+            es_repo.store_embedding(elem.element_id, summary_embedding, embedding_type="summary")
+            es_repo.store_embedding(elem.element_id, code_embedding, embedding_type="code")
+
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+
+        # Search without specifying embedding_type - should use summary
+        query_vector = [0.3] * 1024
+        results = es_repo.search_by_vector(query_vector, min_score=0.5)
+
+        assert len(results) >= 1
+        # Results should come from summary_embedding since query is closer to [0.3]
+
+    def test_get_all_embeddings_summary_type(self, es_repo, multiple_elements):
+        """Test get_all_embeddings returns summary embeddings by default."""
+        for i, elem in enumerate(multiple_elements):
+            es_repo.index_element(elem)
+            summary_embedding = [0.1 + (i * 0.1)] * 1024
+            es_repo.store_embedding(elem.element_id, summary_embedding, embedding_type="summary")
+
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+
+        results = es_repo.get_all_embeddings(
+            scope="test-es",
+            repository="test-repo",
+            username="main",
+        )
+
+        assert len(results) >= 1
+        # Results should have summary_embedding field
+        assert any("summary_embedding" in r for r in results)
+
+    def test_get_all_embeddings_code_type(self, es_repo, multiple_elements):
+        """Test get_all_embeddings returns code embeddings when specified."""
+        for i, elem in enumerate(multiple_elements):
+            es_repo.index_element(elem)
+            code_embedding = [0.2 + (i * 0.1)] * 1024
+            es_repo.store_embedding(elem.element_id, code_embedding, embedding_type="code")
+
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+
+        results = es_repo.get_all_embeddings(
+            scope="test-es",
+            repository="test-repo",
+            username="main",
+            embedding_type="code",
+        )
+
+        assert len(results) >= 1
+        # Results should have code_embedding field
+        assert any("code_embedding" in r for r in results)
 
 
 # =============================================================================

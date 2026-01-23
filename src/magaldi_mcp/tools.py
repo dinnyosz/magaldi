@@ -261,7 +261,8 @@ def find_similar(
     if not doc:
         raise ValueError(f"Element not found: {element_id}")
 
-    embedding = doc.get("embedding")
+    # Try summary_embedding first, fall back to code_embedding
+    embedding = doc.get("summary_embedding") or doc.get("code_embedding")
     if not embedding:
         raise ValueError(f"Element has no embedding: {element_id}")
 

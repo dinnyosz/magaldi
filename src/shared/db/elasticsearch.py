@@ -81,7 +81,15 @@ INDEX_MAPPING = {
             "file_paths": {"type": "keyword"},  # Array of file paths
             "feature_associations": {"type": "object"},  # Feature linking data
             "updated_at": {"type": "date"},  # Update timestamp
-            "embedding": {
+            # Renamed: was "embedding", now explicit for summary-based embedding
+            "summary_embedding": {
+                "type": "dense_vector",
+                "dims": 1024,
+                "index": True,
+                "similarity": "cosine",
+            },
+            # NEW: embedding of raw_code for structural similarity
+            "code_embedding": {
                 "type": "dense_vector",
                 "dims": 1024,
                 "index": True,
@@ -458,8 +466,36 @@ class ElasticsearchRepository:
         )
         return response.get("deleted", 0)
 
-    def store_embedding(self, element_id: str, embedding: list[float]) -> bool:
+    def store_embedding(
+        self,
+        element_id: str,
+        embedding: list[float],
+        embedding_type: str = "summary",
+    ) -> bool:
         """Store embedding vector for an element.
+
+        Args:
+            element_id: Element ID to update.
+            embedding: Vector embedding (1024 dimensions).
+            embedding_type: Type of embedding - "summary" or "code".
+
+        Returns:
+            True on success.
+        """
+        field_name = f"{embedding_type}_embedding"
+        try:
+            client = self._get_client()
+            client.update(
+                index=INDEX_NAME,
+                id=element_id,
+                body={"doc": {field_name: embedding}},
+            )
+            return True
+        except NotFoundError:
+            return False
+
+    def store_summary_embedding(self, element_id: str, embedding: list[float]) -> bool:
+        """Store summary embedding (convenience wrapper).
 
         Args:
             element_id: Element ID to update.
@@ -468,22 +504,36 @@ class ElasticsearchRepository:
         Returns:
             True on success.
         """
-        try:
-            client = self._get_client()
-            client.update(
-                index=INDEX_NAME,
-                id=element_id,
-                body={"doc": {"embedding": embedding}},
-            )
-            return True
-        except NotFoundError:
-            return False
+        return self.store_embedding(element_id, embedding, embedding_type="summary")
 
-    def get_embedding(self, element_id: str) -> list[float] | None:
-        """Get embedding vector for an element."""
+    def store_code_embedding(self, element_id: str, embedding: list[float]) -> bool:
+        """Store code embedding (convenience wrapper).
+
+        Args:
+            element_id: Element ID to update.
+            embedding: Vector embedding (1024 dimensions).
+
+        Returns:
+            True on success.
+        """
+        return self.store_embedding(element_id, embedding, embedding_type="code")
+
+    def get_embedding(
+        self, element_id: str, embedding_type: str = "summary"
+    ) -> list[float] | None:
+        """Get embedding vector for an element.
+
+        Args:
+            element_id: Element ID to retrieve.
+            embedding_type: Type of embedding - "summary" or "code".
+
+        Returns:
+            Embedding vector or None if not found.
+        """
+        field_name = f"{embedding_type}_embedding"
         doc = self.get_document(element_id)
         if doc:
-            return doc.get("embedding")
+            return doc.get(field_name)
         return None
 
     def store_summary(self, element_id: str, summary: str) -> bool:
@@ -640,6 +690,7 @@ class ElasticsearchRepository:
         element_types: list[str] | None = None,
         size: int = 10,
         min_score: float = 0.3,
+        embedding_type: str = "summary",
     ) -> list[dict[str, Any]]:
         """Search elements by vector similarity.
 
@@ -651,13 +702,15 @@ class ElasticsearchRepository:
             element_types: Filter by element types.
             size: Maximum results to return.
             min_score: Minimum similarity score.
+            embedding_type: Type of embedding to search - "summary" or "code".
 
         Returns:
             List of matching documents with scores.
         """
+        field_name = f"{embedding_type}_embedding"
         filter_clauses: list[dict[str, Any]] = [
-            # Only search documents that have embeddings
-            {"exists": {"field": "embedding"}}
+            # Only search documents that have embeddings of the specified type
+            {"exists": {"field": field_name}}
         ]
 
         if scope:
@@ -673,7 +726,7 @@ class ElasticsearchRepository:
             "script_score": {
                 "query": {"bool": {"filter": filter_clauses}},
                 "script": {
-                    "source": "cosineSimilarity(params.query_vector, 'embedding') + 1.0",
+                    "source": f"cosineSimilarity(params.query_vector, '{field_name}') + 1.0",
                     "params": {"query_vector": embedding},
                 },
             }
@@ -948,6 +1001,7 @@ class ElasticsearchRepository:
         repository: str,
         username: str,
         element_types: list[str] | None = None,
+        embedding_type: str = "summary",
     ) -> list[dict[str, Any]]:
         """Fetch all elements with embeddings for clustering.
 
@@ -956,15 +1010,17 @@ class ElasticsearchRepository:
             repository: Repository to filter by.
             username: Username to filter by.
             element_types: Filter by element types (e.g., ["function", "method"]).
+            embedding_type: Type of embedding to fetch - "summary" or "code".
 
         Returns:
-            List of dicts with element_id, embedding, element_type, name, relative_path.
+            List of dicts with element_id, {embedding_type}_embedding, element_type, name, relative_path.
         """
+        field_name = f"{embedding_type}_embedding"
         must_clauses: list[dict[str, Any]] = [
             {"term": {"scope": scope}},
             {"term": {"repository": repository}},
             {"term": {"username": username}},
-            {"exists": {"field": "embedding"}},
+            {"exists": {"field": field_name}},
         ]
 
         if element_types:
@@ -979,7 +1035,7 @@ class ElasticsearchRepository:
             body={
                 "query": {"bool": {"must": must_clauses}},
                 "size": 1000,
-                "_source": ["element_id", "embedding", "element_type", "name", "relative_path"],
+                "_source": ["element_id", field_name, "element_type", "name", "relative_path"],
             },
             scroll="2m",
         )
@@ -1271,7 +1327,7 @@ class ElasticsearchRepository:
         }
 
         if embedding is not None:
-            doc["embedding"] = embedding
+            doc["summary_embedding"] = embedding
 
         client = self._get_client()
         client.index(index=INDEX_NAME, id=feature_id, document=doc)
@@ -1331,7 +1387,7 @@ class ElasticsearchRepository:
         }
 
         if embedding is not None:
-            doc["embedding"] = embedding
+            doc["summary_embedding"] = embedding
 
         client = self._get_client()
         client.index(index=INDEX_NAME, id=subfeature_id, document=doc)

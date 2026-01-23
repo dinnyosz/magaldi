@@ -335,7 +335,7 @@ class TestFindSimilar:
         mock_es_repo.get_document.return_value = {
             "element_id": "id1",
             "name": "test",
-            "embedding": [0.1] * 1024,
+            "summary_embedding": [0.1] * 1024,
         }
         mock_es_repo.search_by_vector.return_value = [
             {"element_id": "id2", "name": "similar", "_score": 0.9}
@@ -513,7 +513,7 @@ class TestFindSimilarExtended:
         mock_es_repo.get_document.return_value = {
             "element_id": "id1",
             "name": "test",
-            "embedding": [0.1] * 1024,
+            "summary_embedding": [0.1] * 1024,
         }
         mock_es_repo.search_by_vector.return_value = [
             {"element_id": "id1", "name": "test", "_score": 1.0},  # Self
@@ -530,7 +530,7 @@ class TestFindSimilarExtended:
         mock_es_repo.get_document.return_value = {
             "element_id": "id1",
             "name": "test",
-            "embedding": [0.1] * 1024,
+            "summary_embedding": [0.1] * 1024,
             "scope": "github",
             "repository": "myrepo",
         }
@@ -1356,7 +1356,7 @@ class TestFindSimilarTestGrouping:
         """Test that similar results are grouped by is_test."""
         mock_es_repo.get_document.return_value = {
             "element_id": "id1",
-            "embedding": [0.1] * 1024,
+            "summary_embedding": [0.1] * 1024,
         }
         mock_es_repo.search_by_vector.return_value = [
             {"element_id": "id2", "name": "similar_func", "is_test": False},
@@ -1372,7 +1372,7 @@ class TestFindSimilarTestGrouping:
         """Test include_tests parameter."""
         mock_es_repo.get_document.return_value = {
             "element_id": "id1",
-            "embedding": [0.1] * 1024,
+            "summary_embedding": [0.1] * 1024,
         }
         mock_es_repo.search_by_vector.return_value = [
             {"element_id": "id2", "name": "test_func", "is_test": True},
@@ -1386,7 +1386,7 @@ class TestFindSimilarTestGrouping:
         """Test that individual results include is_test field."""
         mock_es_repo.get_document.return_value = {
             "element_id": "id1",
-            "embedding": [0.1] * 1024,
+            "summary_embedding": [0.1] * 1024,
         }
         mock_es_repo.search_by_vector.return_value = [
             {"element_id": "id2", "name": "similar_func", "is_test": False},
@@ -1401,7 +1401,7 @@ class TestFindSimilarTestGrouping:
         """Test that results include total counts."""
         mock_es_repo.get_document.return_value = {
             "element_id": "id1",
-            "embedding": [0.1] * 1024,
+            "summary_embedding": [0.1] * 1024,
         }
         mock_es_repo.search_by_vector.return_value = [
             {"element_id": "id2", "name": "similar_func", "is_test": False},
