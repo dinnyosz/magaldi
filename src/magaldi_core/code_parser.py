@@ -20,12 +20,15 @@ from typing import Any
 from magaldi_core.change_detection import ChangeManifest, FileInfo
 from magaldi_core.tree_sitter_manager import (
     ExtractedElement,
+    ExtractedImport,
     ExtractedReference,
     extract_javascript_class_members,
     extract_javascript_elements,
+    extract_javascript_imports,
     extract_javascript_references,
     extract_python_class_members,
     extract_python_elements,
+    extract_python_imports,
     extract_python_references,
     get_manager,
 )
@@ -125,6 +128,16 @@ def is_test_element(name: str, decorators: list[str], language: str) -> bool:
 
 
 @dataclass
+class Import:
+    """Represents an import statement."""
+
+    name: str  # Imported name (e.g., "os", "process")
+    module: str  # Source module (e.g., "os", "utils", "./utils")
+    alias: str | None  # Alias if any (e.g., "pd" for "import pandas as pd")
+    line: int  # Line number
+
+
+@dataclass
 class CodeElement:
     """A parsed code element (class, function, method, variable)."""
 
@@ -167,6 +180,9 @@ class CodeElement:
 
     # Context (for variables - how they're used)
     context_usages: list[str] = field(default_factory=list)
+
+    # Imports (only populated on file elements)
+    imports: list[Import] = field(default_factory=list)
 
     # Content hash for change detection (computed from raw_code)
     content_hash: str | None = None
@@ -470,6 +486,18 @@ class PythonParser(TreeSitterParser):
         tree = self.manager.parse(content.encode("utf-8"), "python")
         extracted = extract_python_elements(tree, lines)
 
+        # Extract imports and populate on file element
+        extracted_imports = extract_python_imports(tree, lines)
+        file_element.imports = [
+            Import(
+                name=imp.name,
+                module=imp.module,
+                alias=imp.alias,
+                line=imp.line,
+            )
+            for imp in extracted_imports
+        ]
+
         # Convert ExtractedElements to CodeElements
         for ext in extracted:
             if ext.element_type == "class":
@@ -694,6 +722,18 @@ class JavaScriptParser(TreeSitterParser):
         # Parse with tree-sitter
         tree = self.manager.parse(content.encode("utf-8"), self.language)
         extracted = extract_javascript_elements(tree, lines)
+
+        # Extract imports and populate on file element
+        extracted_imports = extract_javascript_imports(tree, lines)
+        file_element.imports = [
+            Import(
+                name=imp.name,
+                module=imp.module,
+                alias=imp.alias,
+                line=imp.line,
+            )
+            for imp in extracted_imports
+        ]
 
         # Convert ExtractedElements to CodeElements
         for ext in extracted:

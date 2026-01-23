@@ -27,6 +27,16 @@ class TreeSitterError(Exception):
 
 
 @dataclass
+class ExtractedImport:
+    """An import statement extracted from the AST."""
+
+    name: str  # Imported name (e.g., "os", "process")
+    module: str  # Source module (e.g., "os", "utils", "./utils")
+    alias: str | None  # Alias if any (e.g., "pd" for "import pandas as pd")
+    line: int  # Line number (1-indexed)
+
+
+@dataclass
 class ExtractedElement:
     """A code element extracted from the AST."""
 
@@ -380,6 +390,135 @@ def extract_python_class_members(
 
 
 # =============================================================================
+# PYTHON IMPORT EXTRACTION
+# =============================================================================
+
+
+def extract_python_imports(tree: Tree, lines: list[str]) -> list[ExtractedImport]:
+    """Extract import statements from a Python AST.
+
+    Handles:
+    - import os -> Import(name="os", module="os", alias=None)
+    - import pandas as pd -> Import(name="pandas", module="pandas", alias="pd")
+    - from utils import process -> Import(name="process", module="utils", alias=None)
+    - from utils import process as p -> Import(name="process", module="utils", alias="p")
+
+    Args:
+        tree: Parsed tree-sitter Tree.
+        lines: Source code lines.
+
+    Returns:
+        List of extracted imports.
+    """
+    imports: list[ExtractedImport] = []
+    root = tree.root_node
+
+    for node in root.children:
+        if node.type == "import_statement":
+            # Handle: import os, import pandas as pd
+            imports.extend(_extract_python_import_statement(node))
+        elif node.type == "import_from_statement":
+            # Handle: from utils import process, from utils import process as p
+            imports.extend(_extract_python_import_from_statement(node))
+
+    return imports
+
+
+def _extract_python_import_statement(node: Node) -> list[ExtractedImport]:
+    """Extract imports from 'import x' or 'import x as y' statements."""
+    imports: list[ExtractedImport] = []
+    line = node.start_point[0] + 1
+
+    for child in node.children:
+        if child.type == "dotted_name":
+            # Simple import: import os
+            name = get_node_text(child)
+            imports.append(ExtractedImport(
+                name=name,
+                module=name,
+                alias=None,
+                line=line,
+            ))
+        elif child.type == "aliased_import":
+            # Import with alias: import pandas as pd
+            name_node = get_child_by_field(child, "name")
+            alias_node = get_child_by_field(child, "alias")
+            if name_node:
+                name = get_node_text(name_node)
+                alias = get_node_text(alias_node) if alias_node else None
+                imports.append(ExtractedImport(
+                    name=name,
+                    module=name,
+                    alias=alias,
+                    line=line,
+                ))
+
+    return imports
+
+
+def _extract_python_import_from_statement(node: Node) -> list[ExtractedImport]:
+    """Extract imports from 'from x import y' or 'from x import y as z' statements."""
+    imports: list[ExtractedImport] = []
+    line = node.start_point[0] + 1
+
+    # Get the module name
+    module_node = get_child_by_field(node, "module_name")
+    module = get_node_text(module_node) if module_node else ""
+
+    # Handle relative imports (dots before module name)
+    # e.g., 'from . import foo' or 'from ..utils import bar'
+    relative_prefix = ""
+    for child in node.children:
+        if child.type == "relative_import":
+            # Get all dots and the module name from relative import
+            for rel_child in child.children:
+                if rel_child.type == "import_prefix":
+                    relative_prefix = get_node_text(rel_child)
+                elif rel_child.type == "dotted_name":
+                    module = relative_prefix + get_node_text(rel_child)
+            break
+
+    # If we only have dots (from . import foo), module is empty
+    if not module and relative_prefix:
+        module = relative_prefix
+
+    # Get imported names
+    for child in node.children:
+        if child.type == "dotted_name" and child != module_node:
+            # Simple import: from utils import process
+            name = get_node_text(child)
+            imports.append(ExtractedImport(
+                name=name,
+                module=module,
+                alias=None,
+                line=line,
+            ))
+        elif child.type == "aliased_import":
+            # Import with alias: from utils import process as p
+            name_node = get_child_by_field(child, "name")
+            alias_node = get_child_by_field(child, "alias")
+            if name_node:
+                name = get_node_text(name_node)
+                alias = get_node_text(alias_node) if alias_node else None
+                imports.append(ExtractedImport(
+                    name=name,
+                    module=module,
+                    alias=alias,
+                    line=line,
+                ))
+        elif child.type == "wildcard_import":
+            # from utils import *
+            imports.append(ExtractedImport(
+                name="*",
+                module=module,
+                alias=None,
+                line=line,
+            ))
+
+    return imports
+
+
+# =============================================================================
 # PYTHON REFERENCE EXTRACTION
 # =============================================================================
 
@@ -667,6 +806,143 @@ def extract_javascript_class_members(
             )
 
     return methods, fields
+
+
+# =============================================================================
+# JAVASCRIPT IMPORT EXTRACTION
+# =============================================================================
+
+
+def extract_javascript_imports(tree: Tree, lines: list[str]) -> list[ExtractedImport]:
+    """Extract import statements from a JavaScript/TypeScript AST.
+
+    Handles:
+    - import { foo } from './utils' -> Import(name="foo", module="./utils", alias=None)
+    - import { foo as bar } from './utils' -> Import(name="foo", module="./utils", alias="bar")
+    - import utils from './utils' -> Import(name="utils", module="./utils", alias=None)
+    - import * as utils from './utils' -> Import(name="*", module="./utils", alias="utils")
+    - const bar = require('lib') -> Import(name="bar", module="lib", alias=None)
+
+    Args:
+        tree: Parsed tree-sitter Tree.
+        lines: Source code lines.
+
+    Returns:
+        List of extracted imports.
+    """
+    imports: list[ExtractedImport] = []
+    root = tree.root_node
+
+    for node in walk_tree(root):
+        if node.type == "import_statement":
+            imports.extend(_extract_js_import_statement(node))
+        elif node.type == "lexical_declaration" or node.type == "variable_declaration":
+            # Check for require() calls: const foo = require('bar')
+            imports.extend(_extract_js_require_statement(node))
+
+    return imports
+
+
+def _extract_js_import_statement(node: Node) -> list[ExtractedImport]:
+    """Extract imports from ES6 import statements."""
+    imports: list[ExtractedImport] = []
+    line = node.start_point[0] + 1
+
+    # Get the module source (the string after 'from')
+    source_node = get_child_by_field(node, "source")
+    if not source_node:
+        return imports
+
+    # Remove quotes from module path
+    module = get_node_text(source_node).strip("'\"")
+
+    # Find import clause (the part before 'from')
+    for child in node.children:
+        if child.type == "import_clause":
+            imports.extend(_extract_js_import_clause(child, module, line))
+
+    return imports
+
+
+def _extract_js_import_clause(node: Node, module: str, line: int) -> list[ExtractedImport]:
+    """Extract imports from an import clause."""
+    imports: list[ExtractedImport] = []
+
+    for child in node.children:
+        if child.type == "identifier":
+            # Default import: import utils from './utils'
+            name = get_node_text(child)
+            imports.append(ExtractedImport(
+                name=name,
+                module=module,
+                alias=None,
+                line=line,
+            ))
+        elif child.type == "named_imports":
+            # Named imports: import { foo, bar as baz } from './utils'
+            for spec in child.children:
+                if spec.type == "import_specifier":
+                    name_node = get_child_by_field(spec, "name")
+                    alias_node = get_child_by_field(spec, "alias")
+                    if name_node:
+                        name = get_node_text(name_node)
+                        alias = get_node_text(alias_node) if alias_node else None
+                        imports.append(ExtractedImport(
+                            name=name,
+                            module=module,
+                            alias=alias,
+                            line=line,
+                        ))
+        elif child.type == "namespace_import":
+            # Namespace import: import * as utils from './utils'
+            # Find the identifier after 'as'
+            for ns_child in child.children:
+                if ns_child.type == "identifier":
+                    alias = get_node_text(ns_child)
+                    imports.append(ExtractedImport(
+                        name="*",
+                        module=module,
+                        alias=alias,
+                        line=line,
+                    ))
+                    break
+
+    return imports
+
+
+def _extract_js_require_statement(node: Node) -> list[ExtractedImport]:
+    """Extract imports from CommonJS require() calls."""
+    imports: list[ExtractedImport] = []
+    line = node.start_point[0] + 1
+
+    for child in node.children:
+        if child.type == "variable_declarator":
+            name_node = get_child_by_field(child, "name")
+            value_node = get_child_by_field(child, "value")
+
+            if not name_node or not value_node:
+                continue
+
+            # Check if value is a require() call
+            if value_node.type == "call_expression":
+                func_node = get_child_by_field(value_node, "function")
+                if func_node and get_node_text(func_node) == "require":
+                    # Get the module argument
+                    args_node = get_child_by_field(value_node, "arguments")
+                    if args_node and len(args_node.children) > 0:
+                        for arg in args_node.children:
+                            if arg.type == "string":
+                                module = get_node_text(arg).strip("'\"")
+                                name = get_node_text(name_node)
+                                imports.append(ExtractedImport(
+                                    name=name,
+                                    module=module,
+                                    alias=None,
+                                    line=line,
+                                ))
+                                break
+
+    return imports
 
 
 # =============================================================================

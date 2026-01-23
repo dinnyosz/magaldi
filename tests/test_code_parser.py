@@ -7,6 +7,7 @@ import pytest
 from magaldi_core.change_detection import ChangeManifest, FileInfo
 from magaldi_core.code_parser import (
     CodeElement,
+    Import,
     JavaScriptParser,
     ParsedFile,
     ParsingResult,
@@ -719,3 +720,383 @@ class TestParsingResult:
         by_type = result.elements_by_type
         assert by_type["class"] == 1
         assert by_type["function"] == 2
+
+
+# =============================================================================
+# IMPORT EXTRACTION TESTS
+# =============================================================================
+
+
+class TestPythonImportExtraction:
+    """Tests for Python import extraction."""
+
+    def test_simple_import(self):
+        """Test extracting simple import statements."""
+        code = """import os
+import sys
+"""
+        parser = PythonParser()
+        file_info = FileInfo(
+            relative_path="module.py",
+            absolute_path=Path("/fake/module.py"),
+            language="python",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        file_elem = next(e for e in elements if e.element_type == "file")
+
+        assert len(file_elem.imports) == 2
+
+        os_import = next(i for i in file_elem.imports if i.name == "os")
+        assert os_import.module == "os"
+        assert os_import.alias is None
+        assert os_import.line == 1
+
+        sys_import = next(i for i in file_elem.imports if i.name == "sys")
+        assert sys_import.module == "sys"
+        assert sys_import.alias is None
+        assert sys_import.line == 2
+
+    def test_import_with_alias(self):
+        """Test extracting import with alias."""
+        code = """import pandas as pd
+import numpy as np
+"""
+        parser = PythonParser()
+        file_info = FileInfo(
+            relative_path="module.py",
+            absolute_path=Path("/fake/module.py"),
+            language="python",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        file_elem = next(e for e in elements if e.element_type == "file")
+
+        assert len(file_elem.imports) == 2
+
+        pd_import = next(i for i in file_elem.imports if i.name == "pandas")
+        assert pd_import.module == "pandas"
+        assert pd_import.alias == "pd"
+        assert pd_import.line == 1
+
+        np_import = next(i for i in file_elem.imports if i.name == "numpy")
+        assert np_import.module == "numpy"
+        assert np_import.alias == "np"
+        assert np_import.line == 2
+
+    def test_from_import(self):
+        """Test extracting from import statements."""
+        code = """from pathlib import Path
+from utils import process
+"""
+        parser = PythonParser()
+        file_info = FileInfo(
+            relative_path="module.py",
+            absolute_path=Path("/fake/module.py"),
+            language="python",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        file_elem = next(e for e in elements if e.element_type == "file")
+
+        assert len(file_elem.imports) == 2
+
+        path_import = next(i for i in file_elem.imports if i.name == "Path")
+        assert path_import.module == "pathlib"
+        assert path_import.alias is None
+        assert path_import.line == 1
+
+        process_import = next(i for i in file_elem.imports if i.name == "process")
+        assert process_import.module == "utils"
+        assert process_import.alias is None
+        assert process_import.line == 2
+
+    def test_from_import_with_alias(self):
+        """Test extracting from import with alias."""
+        code = """from utils import process as p
+from collections import OrderedDict as OD
+"""
+        parser = PythonParser()
+        file_info = FileInfo(
+            relative_path="module.py",
+            absolute_path=Path("/fake/module.py"),
+            language="python",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        file_elem = next(e for e in elements if e.element_type == "file")
+
+        assert len(file_elem.imports) == 2
+
+        p_import = next(i for i in file_elem.imports if i.name == "process")
+        assert p_import.module == "utils"
+        assert p_import.alias == "p"
+        assert p_import.line == 1
+
+        od_import = next(i for i in file_elem.imports if i.name == "OrderedDict")
+        assert od_import.module == "collections"
+        assert od_import.alias == "OD"
+        assert od_import.line == 2
+
+    def test_dotted_module_import(self):
+        """Test extracting import of dotted module names."""
+        code = """import os.path
+from collections.abc import Callable
+"""
+        parser = PythonParser()
+        file_info = FileInfo(
+            relative_path="module.py",
+            absolute_path=Path("/fake/module.py"),
+            language="python",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        file_elem = next(e for e in elements if e.element_type == "file")
+
+        assert len(file_elem.imports) == 2
+
+        ospath_import = next(i for i in file_elem.imports if i.name == "os.path")
+        assert ospath_import.module == "os.path"
+        assert ospath_import.alias is None
+
+        callable_import = next(i for i in file_elem.imports if i.name == "Callable")
+        assert callable_import.module == "collections.abc"
+        assert callable_import.alias is None
+
+    def test_mixed_imports(self):
+        """Test extracting various import patterns together."""
+        code = """import os
+import pandas as pd
+from pathlib import Path
+from utils import process as p
+"""
+        parser = PythonParser()
+        file_info = FileInfo(
+            relative_path="module.py",
+            absolute_path=Path("/fake/module.py"),
+            language="python",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        file_elem = next(e for e in elements if e.element_type == "file")
+
+        assert len(file_elem.imports) == 4
+
+        imports_by_name = {i.name: i for i in file_elem.imports}
+
+        assert imports_by_name["os"].alias is None
+        assert imports_by_name["pandas"].alias == "pd"
+        assert imports_by_name["Path"].module == "pathlib"
+        assert imports_by_name["process"].alias == "p"
+
+
+class TestJavaScriptImportExtraction:
+    """Tests for JavaScript/TypeScript import extraction."""
+
+    def test_named_imports(self):
+        """Test extracting named imports."""
+        code = """import { foo, bar } from './utils';
+"""
+        parser = JavaScriptParser()
+        file_info = FileInfo(
+            relative_path="module.js",
+            absolute_path=Path("/fake/module.js"),
+            language="javascript",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        file_elem = next(e for e in elements if e.element_type == "file")
+
+        assert len(file_elem.imports) == 2
+
+        foo_import = next(i for i in file_elem.imports if i.name == "foo")
+        assert foo_import.module == "./utils"
+        assert foo_import.alias is None
+        assert foo_import.line == 1
+
+        bar_import = next(i for i in file_elem.imports if i.name == "bar")
+        assert bar_import.module == "./utils"
+        assert bar_import.alias is None
+
+    def test_named_imports_with_alias(self):
+        """Test extracting named imports with alias."""
+        code = """import { foo as bar } from './utils';
+"""
+        parser = JavaScriptParser()
+        file_info = FileInfo(
+            relative_path="module.js",
+            absolute_path=Path("/fake/module.js"),
+            language="javascript",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        file_elem = next(e for e in elements if e.element_type == "file")
+
+        assert len(file_elem.imports) == 1
+
+        import_elem = file_elem.imports[0]
+        assert import_elem.name == "foo"
+        assert import_elem.module == "./utils"
+        assert import_elem.alias == "bar"
+        assert import_elem.line == 1
+
+    def test_default_import(self):
+        """Test extracting default imports."""
+        code = """import utils from './utils';
+import React from 'react';
+"""
+        parser = JavaScriptParser()
+        file_info = FileInfo(
+            relative_path="module.js",
+            absolute_path=Path("/fake/module.js"),
+            language="javascript",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        file_elem = next(e for e in elements if e.element_type == "file")
+
+        assert len(file_elem.imports) == 2
+
+        utils_import = next(i for i in file_elem.imports if i.name == "utils")
+        assert utils_import.module == "./utils"
+        assert utils_import.alias is None
+        assert utils_import.line == 1
+
+        react_import = next(i for i in file_elem.imports if i.name == "React")
+        assert react_import.module == "react"
+        assert react_import.alias is None
+        assert react_import.line == 2
+
+    def test_namespace_import(self):
+        """Test extracting namespace imports."""
+        code = """import * as utils from './utils';
+"""
+        parser = JavaScriptParser()
+        file_info = FileInfo(
+            relative_path="module.js",
+            absolute_path=Path("/fake/module.js"),
+            language="javascript",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        file_elem = next(e for e in elements if e.element_type == "file")
+
+        assert len(file_elem.imports) == 1
+
+        import_elem = file_elem.imports[0]
+        assert import_elem.name == "*"
+        assert import_elem.module == "./utils"
+        assert import_elem.alias == "utils"
+        assert import_elem.line == 1
+
+    def test_require_import(self):
+        """Test extracting CommonJS require imports."""
+        code = """const bar = require('lib');
+const utils = require('./utils');
+"""
+        parser = JavaScriptParser()
+        file_info = FileInfo(
+            relative_path="module.js",
+            absolute_path=Path("/fake/module.js"),
+            language="javascript",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        file_elem = next(e for e in elements if e.element_type == "file")
+
+        assert len(file_elem.imports) == 2
+
+        bar_import = next(i for i in file_elem.imports if i.name == "bar")
+        assert bar_import.module == "lib"
+        assert bar_import.alias is None
+        assert bar_import.line == 1
+
+        utils_import = next(i for i in file_elem.imports if i.name == "utils")
+        assert utils_import.module == "./utils"
+        assert utils_import.alias is None
+        assert utils_import.line == 2
+
+    def test_mixed_imports(self):
+        """Test extracting various import patterns together."""
+        code = """import React from 'react';
+import { useState, useEffect } from 'react';
+import * as utils from './utils';
+const path = require('path');
+"""
+        parser = JavaScriptParser()
+        file_info = FileInfo(
+            relative_path="module.js",
+            absolute_path=Path("/fake/module.js"),
+            language="javascript",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        file_elem = next(e for e in elements if e.element_type == "file")
+
+        assert len(file_elem.imports) == 5
+
+        imports_by_name = {i.name: i for i in file_elem.imports}
+
+        assert imports_by_name["React"].module == "react"
+        assert imports_by_name["useState"].module == "react"
+        assert imports_by_name["useEffect"].module == "react"
+        assert imports_by_name["*"].alias == "utils"
+        assert imports_by_name["path"].module == "path"
+
+
+class TestTypeScriptImportExtraction:
+    """Tests for TypeScript import extraction."""
+
+    def test_typescript_imports(self):
+        """Test extracting TypeScript imports (same syntax as JS)."""
+        code = """import { Component } from '@angular/core';
+import type { User } from './types';
+"""
+        parser = JavaScriptParser(language="typescript")
+        file_info = FileInfo(
+            relative_path="module.ts",
+            absolute_path=Path("/fake/module.ts"),
+            language="typescript",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        file_elem = next(e for e in elements if e.element_type == "file")
+
+        # Should extract both regular and type imports
+        assert len(file_elem.imports) >= 1
+
+        component_import = next(i for i in file_elem.imports if i.name == "Component")
+        assert component_import.module == "@angular/core"
+        assert component_import.alias is None
+
+
+class TestImportDataclass:
+    """Tests for the Import dataclass."""
+
+    def test_import_fields(self):
+        """Test Import dataclass fields."""
+        imp = Import(
+            name="process",
+            module="utils",
+            alias="p",
+            line=5,
+        )
+
+        assert imp.name == "process"
+        assert imp.module == "utils"
+        assert imp.alias == "p"
+        assert imp.line == 5
+
+    def test_import_no_alias(self):
+        """Test Import with no alias."""
+        imp = Import(
+            name="os",
+            module="os",
+            alias=None,
+            line=1,
+        )
+
+        assert imp.name == "os"
+        assert imp.module == "os"
+        assert imp.alias is None
+        assert imp.line == 1
