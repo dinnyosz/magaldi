@@ -657,3 +657,286 @@ export async function searchGlossaryTerms(
 ): Promise<GlossaryListResponse> {
   return fetchJson(`${API_BASE}/repos/${scope}/${repository}/glossary/search/${encodeURIComponent(query)}`)
 }
+
+// =============================================================================
+// Analysis API Types
+// =============================================================================
+
+export interface CallerInfo {
+  element_id: string
+  hash_id: string | null
+  name: string
+  element_type: string
+  file_path: string
+  line: number
+  summary: string | null
+}
+
+export interface CalleeInfo {
+  name: string
+  receiver: string | null
+  line: number
+  element_id: string | null
+  hash_id: string | null
+  element_type: string | null
+  file_path: string | null
+  target_line: number | null
+  summary: string | null
+}
+
+export interface CallGraphResponse {
+  element: {
+    element_id: string
+    hash_id: string | null
+    name: string
+    element_type: string
+    file_path: string | null
+    line: number | null
+  }
+  callers: CallerInfo[]
+  callees: CalleeInfo[]
+}
+
+export interface CallChainNode {
+  element_id: string | null
+  hash_id: string | null
+  name: string
+  element_type: string | null
+  file_path: string | null
+  line: number | null
+  summary: string | null
+  callers: CallChainNode[]
+  callees: CallChainNode[]
+  cycle: boolean
+  unresolved: boolean
+  missing: boolean
+}
+
+export interface CallChainResponse {
+  root: Record<string, unknown>
+  direction: string
+  max_depth: number
+  callers: CallChainNode[]
+  callees: CallChainNode[]
+}
+
+export interface DeadCodeItem {
+  element_id: string
+  hash_id: string | null
+  name: string
+  element_type: string
+  file_path: string
+  line: number
+  summary: string | null
+  is_test: boolean
+}
+
+export interface DeadCodeResponse {
+  potentially_dead: DeadCodeItem[]
+  stats: {
+    total_functions: number
+    excluded_entry_points: number
+    called: number
+    potentially_dead: number
+  }
+}
+
+export interface EntryPointItem {
+  element_id: string
+  hash_id: string | null
+  name: string
+  element_type: string
+  file_path: string
+  line: number
+  summary: string | null
+  decorators: string[]
+}
+
+export interface EntryPointsResponse {
+  http: EntryPointItem[]
+  cli: EntryPointItem[]
+  test: EntryPointItem[]
+  main: EntryPointItem[]
+  async_tasks: EntryPointItem[]
+  stats: {
+    total_http: number
+    total_cli: number
+    total_test: number
+    total_main: number
+    total_async: number
+    total: number
+  }
+}
+
+export interface ImportInfo {
+  name: string
+  module: string
+  alias: string | null
+  line: number
+  is_internal: boolean
+}
+
+export interface DependenciesResponse {
+  file_info: Record<string, unknown>
+  internal_imports: ImportInfo[]
+  external_imports: ImportInfo[]
+  stats: {
+    total: number
+    internal: number
+    external: number
+  }
+}
+
+export interface DependentInfo {
+  element_id: string
+  hash_id: string | null
+  file_path: string
+  name: string
+}
+
+export interface DependentsResponse {
+  module: string
+  dependents: DependentInfo[]
+  total: number
+}
+
+export interface DependencyGraphResponse {
+  nodes: string[]
+  edges: Array<{ from: string; to: string }>
+  cycles: string[][]
+  stats: {
+    node_count: number
+    edge_count: number
+    cycle_count: number
+    has_cycles: boolean
+  }
+}
+
+export interface SimilarCodeItem {
+  element_id: string
+  hash_id: string | null
+  name: string
+  element_type: string
+  file_path: string
+  line: number
+  summary: string | null
+  similarity: number
+}
+
+export interface ExplainElementResponse {
+  element: {
+    element_id: string
+    name: string
+    type: string
+    file: string
+    line: number
+    signature: string | null
+    summary: string | null
+    docstring: string | null
+    decorators: string[]
+    is_test: boolean
+  }
+  callers: CallerInfo[]
+  callees: CalleeInfo[]
+  imports: ImportInfo[]
+  similar_code: SimilarCodeItem[]
+  parent: {
+    element_id: string
+    name: string
+    type: string
+    file: string
+    line: number
+    summary: string | null
+  } | null
+  embedding_status: {
+    has_summary: boolean
+    has_code: boolean
+  }
+}
+
+// =============================================================================
+// Analysis API Functions
+// =============================================================================
+
+export async function getElementCallers(
+  hashId: string,
+  options?: { limit?: number; include_tests?: boolean }
+): Promise<CallGraphResponse> {
+  const params = new URLSearchParams()
+  if (options?.limit) params.set('limit', String(options.limit))
+  if (options?.include_tests !== undefined) params.set('include_tests', String(options.include_tests))
+  const query = params.toString() ? `?${params.toString()}` : ''
+  return fetchJson(`${API_BASE}/analysis/callers/${hashId}${query}`)
+}
+
+export async function getCallChain(
+  hashId: string,
+  options?: { direction?: 'callers' | 'callees' | 'both'; max_depth?: number }
+): Promise<CallChainResponse> {
+  const params = new URLSearchParams()
+  if (options?.direction) params.set('direction', options.direction)
+  if (options?.max_depth) params.set('max_depth', String(options.max_depth))
+  const query = params.toString() ? `?${params.toString()}` : ''
+  return fetchJson(`${API_BASE}/analysis/call-chain/${hashId}${query}`)
+}
+
+export async function getDeadCode(
+  scope: string,
+  repository: string,
+  options?: { username?: string; include_tests?: boolean }
+): Promise<DeadCodeResponse> {
+  const params = new URLSearchParams()
+  params.set('scope', scope)
+  params.set('repository', repository)
+  if (options?.username) params.set('username', options.username)
+  if (options?.include_tests !== undefined) params.set('include_tests', String(options.include_tests))
+  return fetchJson(`${API_BASE}/analysis/dead-code?${params.toString()}`)
+}
+
+export async function getEntryPoints(
+  scope: string,
+  repository: string,
+  username?: string
+): Promise<EntryPointsResponse> {
+  const params = new URLSearchParams()
+  params.set('scope', scope)
+  params.set('repository', repository)
+  if (username) params.set('username', username)
+  return fetchJson(`${API_BASE}/analysis/entry-points?${params.toString()}`)
+}
+
+export async function getFileDependencies(hashId: string): Promise<DependenciesResponse> {
+  return fetchJson(`${API_BASE}/analysis/dependencies/${hashId}`)
+}
+
+export async function getModuleDependents(
+  module: string,
+  scope: string,
+  repository: string,
+  options?: { username?: string; limit?: number }
+): Promise<DependentsResponse> {
+  const params = new URLSearchParams()
+  params.set('module', module)
+  params.set('scope', scope)
+  params.set('repository', repository)
+  if (options?.username) params.set('username', options.username)
+  if (options?.limit) params.set('limit', String(options.limit))
+  return fetchJson(`${API_BASE}/analysis/dependents?${params.toString()}`)
+}
+
+export async function getDependencyGraph(
+  scope: string,
+  repository: string,
+  options?: { username?: string; internal_only?: boolean }
+): Promise<DependencyGraphResponse> {
+  const params = new URLSearchParams()
+  params.set('scope', scope)
+  params.set('repository', repository)
+  if (options?.username) params.set('username', options.username)
+  if (options?.internal_only !== undefined) params.set('internal_only', String(options.internal_only))
+  return fetchJson(`${API_BASE}/analysis/dependency-graph?${params.toString()}`)
+}
+
+export async function explainElement(hashId: string): Promise<ExplainElementResponse> {
+  return fetchJson(`${API_BASE}/analysis/explain/${hashId}`)
+}
