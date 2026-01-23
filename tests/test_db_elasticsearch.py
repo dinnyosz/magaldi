@@ -719,6 +719,89 @@ class TestIsTestIndexing:
         assert doc.get("is_test") is False
 
 
+# =============================================================================
+# PATTERN SEARCH TESTS
+# =============================================================================
+
+
+class TestPatternSearch:
+    """Tests for pattern search methods."""
+
+    @pytest.fixture
+    def sample_elements(self, es_repo):
+        """Create sample elements with raw_code for pattern testing."""
+        elements = [
+            CodeElement(
+                element_id="test-pattern:repo:main:file.py:function:add_column:10",
+                scope="test-pattern",
+                repository="repo",
+                username="main",
+                relative_path="file.py",
+                element_type="function",
+                name="add_column",
+                language="python",
+                line_start=10,
+                line_end=12,
+                raw_code="def add_column(table, Model):\n    table.add_column('name', String)",
+                is_test=False,
+                level=2,
+            ),
+            CodeElement(
+                element_id="test-pattern:repo:main:utils.py:function:process:20",
+                scope="test-pattern",
+                repository="repo",
+                username="main",
+                relative_path="utils.py",
+                element_type="function",
+                name="process",
+                language="python",
+                line_start=20,
+                line_end=22,
+                raw_code="def process(data):\n    return data.strip()",
+                is_test=False,
+                level=2,
+            ),
+            CodeElement(
+                element_id="test-pattern:repo:main:test_file.py:function:test_add:30",
+                scope="test-pattern",
+                repository="repo",
+                username="main",
+                relative_path="test_file.py",
+                element_type="function",
+                name="test_add",
+                language="python",
+                line_start=30,
+                line_end=32,
+                raw_code="def test_add():\n    add_column(t, Model)",
+                is_test=True,
+                level=2,
+            ),
+        ]
+        for elem in elements:
+            es_repo.index_element(elem)
+        es_repo._get_client().indices.refresh(index="magaldi-code-elements")
+        return elements
+
+    def test_search_by_regexp(self, es_repo, sample_elements):
+        """Test regexp pattern search."""
+        results = es_repo.search_by_regexp(
+            pattern="add_column.*Model",
+            scope="test-pattern",
+            repository="repo",
+        )
+        assert len(results) >= 1
+        assert any("add_column" in r.get("raw_code", "") for r in results)
+
+    def test_search_by_regexp_no_match(self, es_repo, sample_elements):
+        """Test regexp with no matches."""
+        results = es_repo.search_by_regexp(
+            pattern="nonexistent_function",
+            scope="test-pattern",
+            repository="repo",
+        )
+        assert len(results) == 0
+
+
 class TestOldDataHandling:
     """Tests for handling old data without element_count."""
 

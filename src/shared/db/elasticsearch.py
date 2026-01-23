@@ -48,7 +48,15 @@ INDEX_MAPPING = {
             "language": {"type": "keyword"},
             "line_start": {"type": "integer"},
             "line_end": {"type": "integer"},
-            "raw_code": {"type": "text"},
+            "raw_code": {
+                "type": "text",
+                "fields": {
+                    "keyword": {
+                        "type": "keyword",
+                        "ignore_above": 32766,  # Max for keyword, allows regexp on full code
+                    }
+                }
+            },
             "signature": {"type": "text"},
             "docstring": {"type": "text"},
             "summary": {"type": "text"},
@@ -746,6 +754,79 @@ class ElasticsearchRepository:
             {**hit["_source"], "_score": hit["_score"]}
             for hit in result["hits"]["hits"]
         ]
+
+    def search_by_regexp(
+        self,
+        pattern: str,
+        scope: str | None = None,
+        repository: str | None = None,
+        username: str | None = None,
+        glob: str | None = None,
+        size: int = 50,
+        include_tests: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Search raw_code field using Elasticsearch regexp query.
+
+        Uses Lucene regexp syntax (not Python re). Key differences:
+        - . matches any character (no need to escape)
+        - * is zero or more of previous
+        - .* matches any string
+        - No lookahead/lookbehind support
+
+        Note: Patterns are automatically wrapped with .* for substring matching
+        (Lucene regexp requires matching the entire field by default).
+
+        Args:
+            pattern: Lucene regexp pattern (e.g., 'add_column.*Model').
+            scope: Filter by scope.
+            repository: Filter by repository.
+            username: Filter by username.
+            glob: File path glob filter (e.g., '*.py').
+            size: Maximum results.
+            include_tests: Include test elements.
+
+        Returns:
+            List of matching documents.
+        """
+        # Wrap pattern with .* for substring matching if not already wrapped
+        # Lucene regexp matches the ENTIRE field, so we need anchors for substring search
+        search_pattern = pattern
+        if not pattern.startswith(".*"):
+            search_pattern = ".*" + search_pattern
+        if not pattern.endswith(".*"):
+            search_pattern = search_pattern + ".*"
+
+        must_clauses: list[dict[str, Any]] = [
+            {"regexp": {"raw_code.keyword": {"value": search_pattern, "flags": "ALL"}}},
+        ]
+
+        filter_clauses: list[dict[str, Any]] = []
+
+        if username:
+            filter_clauses.append({"term": {"username": username}})
+        if scope:
+            filter_clauses.append({"term": {"scope": scope}})
+        if repository:
+            filter_clauses.append({"term": {"repository": repository}})
+        if glob:
+            filter_clauses.append({"wildcard": {"relative_path": glob}})
+        if not include_tests:
+            filter_clauses.append({"term": {"is_test": False}})
+
+        query = {
+            "bool": {
+                "must": must_clauses,
+                "filter": filter_clauses,
+            }
+        }
+
+        client = self._get_client()
+        result = client.search(
+            index=INDEX_NAME,
+            body={"query": query, "size": size},
+        )
+
+        return [hit["_source"] for hit in result["hits"]["hits"]]
 
     def get_all_embeddings(
         self,
