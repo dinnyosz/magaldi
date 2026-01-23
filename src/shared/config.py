@@ -230,6 +230,25 @@ class UserDataConfig:
 
 
 @dataclass
+class ModelParams:
+    """Per-model generation parameters.
+
+    Sources for recommended values:
+    - Qwen3: huggingface.co/Qwen/Qwen3-4B (instruct: temp=0.7, top_p=0.8)
+    - Granite: huggingface.co/ibm-granite/granite-3.1-3b-a800m-instruct (temp=0.6)
+    - LFM2.5: huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct (temp=0.1, top_p=0.1)
+    """
+
+    temperature: float = 0.2
+    top_p: float | None = None
+    top_k: int | None = None
+    min_p: float | None = None
+    repetition_penalty: float | None = None
+    presence_penalty: float | None = None
+    max_tokens: int | None = None  # Override default max_tokens (useful for thinking models)
+
+
+@dataclass
 class BenchmarkConfig:
     """Benchmark configuration for model comparison.
 
@@ -247,23 +266,127 @@ class BenchmarkConfig:
     # NOTE: qwen3 models after July 2025 split into "thinking" and "instruct" variants
     #       The default qwen3:Xb has thinking baked in, use instruct variants instead
     models: list[str] = field(default_factory=lambda: [
+        # Qwen2.5-Coder - code-specific models (tested: 1.5b=8.1/10, 3b=7.8/10)
+        "qwen2.5-coder:1.5b",                   # Fast code model (8.1 rating, 147 t/s)
+        "qwen2.5-coder:3b",                     # Quality code model (7.8 rating, 91 t/s)
+        # Qwen3 - general models with good code performance
         "qwen3:1.7b",                           # Best balance (8.2 rating, 114 t/s)
         "qwen3:4b-instruct",                    # Best quality (8.7 rating, 65 t/s)
-        "granite3.1-moe:3b-instruct-q4_0",      # Fastest (7.9 rating, 148 t/s)
+        # LM Studio models (OpenAI-compatible API)
+        "lmstudio:qwen/qwen3-4b-2507",          # Qwen3-4B via LM Studio
+        "lmstudio:ibm/granite-4-h-tiny",        # IBM Granite 4 Hybrid Tiny via LM Studio
+        "lmstudio:granite-4.0-h-tiny-mlx",      # IBM Granite 4 Hybrid Tiny MLX via LM Studio
     ])
 
     # Models used for evaluating/rating summaries (LLM-as-judge)
     eval_models: list[str] = field(default_factory=lambda: [
-        "granite3.1-moe:3b-instruct-q4_0",  # Fast evaluator
         "qwen3:4b-instruct",                # Quality evaluator
     ])
     # Ollama API URL (defaults to same as llm.url)
     ollama_url: str | None = None
+    # LM Studio API URL (OpenAI-compatible)
+    lmstudio_url: str = "http://localhost:1234/v1"
 
     # Generation settings (based on paper's methodology)
+    # These are defaults; per-model params override when specified
     temperature: float = 0.2      # Paper used 0.2, top_p=0.95
     max_tokens: int = 512
     timeout: int = 120
+
+    # Per-model parameters from HuggingFace model cards
+    # Model name patterns are matched with startswith() for flexibility
+    model_params: dict[str, ModelParams] = field(default_factory=lambda: {
+        # Qwen2.5-Coder: huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct
+        # temperature=0.7, top_p=0.8, top_k=20, repetition_penalty=1.05
+        "qwen2.5-coder": ModelParams(
+            temperature=0.7,
+            top_p=0.8,
+            top_k=20,
+            repetition_penalty=1.05,
+        ),
+        # Qwen3-Coder: huggingface.co/Qwen/Qwen3-Coder-30B-A3B-Instruct
+        # temperature=0.7, top_p=0.8, top_k=20, repetition_penalty=1.05
+        "qwen3-coder": ModelParams(
+            temperature=0.7,
+            top_p=0.8,
+            top_k=20,
+            repetition_penalty=1.05,
+        ),
+        # Qwen3 (non-thinking mode, we set think=False in benchmark)
+        # huggingface.co/Qwen/Qwen3-4B#best-practices
+        # huggingface.co/Qwen/Qwen3-1.7B#best-practices
+        # temperature=0.7, top_p=0.8, top_k=20, min_p=0, presence_penalty=1.5
+        "qwen3": ModelParams(
+            temperature=0.7,
+            top_p=0.8,
+            top_k=20,
+            min_p=0.0,
+            presence_penalty=1.5,
+        ),
+        # IBM Granite Code: Similar to Granite 3.x params
+        # github.com/ibm-granite/granite-code-models
+        # temperature=0.6, top_k=50, top_p=0.9, min_p=0.01, repetition_penalty=1.0
+        "granite-code": ModelParams(
+            temperature=0.6,
+            top_p=0.9,
+            top_k=50,
+            min_p=0.01,
+            repetition_penalty=1.0,
+        ),
+        # IBM Granite 3.1 MoE: Based on Granite 3.3 official Replicate params
+        # huggingface.co/ibm-granite/granite-3.3-8b-instruct-GGUF/discussions/2
+        # temperature=0.6, top_k=50, top_p=0.9, min_p=0.01, repetition_penalty=1.0
+        "granite3.1-moe": ModelParams(
+            temperature=0.6,
+            top_p=0.9,
+            top_k=50,
+            min_p=0.01,
+            repetition_penalty=1.0,
+        ),
+        # LFM2.5 Instruct: huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct
+        # temperature=0.1, top_k=50, top_p=0.1, repetition_penalty=1.05
+        "sam860/lfm2.5": ModelParams(
+            temperature=0.1,
+            top_p=0.1,
+            top_k=50,
+            repetition_penalty=1.05,
+        ),
+        # Official LFM2.5 Instruct from HuggingFace (same params)
+        "hf.co/LiquidAI/LFM2.5": ModelParams(
+            temperature=0.1,
+            top_p=0.1,
+            top_k=50,
+            repetition_penalty=1.05,
+        ),
+        # LFM2 (all sizes): huggingface.co/LiquidAI/LFM2-8B-A1B
+        # temperature=0.3, min_p=0.15, repetition_penalty=1.05
+        "sam860/lfm2": ModelParams(
+            temperature=0.3,
+            min_p=0.15,
+            repetition_penalty=1.05,
+        ),
+        # LFM2.5 Thinking: huggingface.co/LiquidAI/LFM2.5-1.2B-Thinking
+        # Default temp=0.05, inference example uses 0.1
+        # Higher max_tokens needed: model outputs <think>...</think> before summary
+        "lfm2.5-thinking": ModelParams(
+            temperature=0.1,
+            top_p=0.1,
+            top_k=50,
+            repetition_penalty=1.05,
+            max_tokens=1024,  # Thinking models need more tokens
+        ),
+    })
+
+    def get_model_params(self, model_name: str) -> ModelParams:
+        """Get parameters for a specific model.
+
+        Matches model_name against keys using startswith() for flexibility.
+        Falls back to default ModelParams if no match.
+        """
+        for pattern, params in self.model_params.items():
+            if model_name.startswith(pattern):
+                return params
+        return ModelParams(temperature=self.temperature)
 
 
 @dataclass

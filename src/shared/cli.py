@@ -1505,7 +1505,7 @@ def benchmark_models(
     from datetime import datetime as dt
     from pathlib import Path
 
-    from shared.ai.ollama_benchmark import OllamaBenchmarkClient, BenchmarkResult
+    from shared.ai.ollama_benchmark import BenchmarkClient, BenchmarkResult
     from magaldi_core.change_detection import ChangeManifest, FileInfo
 
     # Load config for defaults
@@ -1521,6 +1521,55 @@ def benchmark_models(
     # Ollama URL (CLI overrides config, config overrides default)
     if ollama_url is None:
         ollama_url = benchmark_config.ollama_url or config.llm.url
+
+    # LM Studio URL
+    lmstudio_url = benchmark_config.lmstudio_url
+
+    def is_lmstudio_model(model_spec: str) -> bool:
+        """Check if the model is an LM Studio model."""
+        return model_spec.startswith("lmstudio:")
+
+    def get_model_api_config(model_spec: str) -> dict:
+        """Get api_base and api_key for a model spec.
+
+        Returns dict with 'api_base' and 'api_key' keys.
+        """
+        if is_lmstudio_model(model_spec):
+            return {"api_base": lmstudio_url, "api_key": "lm-studio"}
+        # For Ollama and others, use defaults (handled by client)
+        return {}
+
+    def to_litellm_model(model_spec: str) -> str:
+        """Convert model specification to LiteLLM format for display/tracking.
+
+        Examples:
+            "qwen3:4b" -> "ollama/qwen3:4b"
+            "openai:gpt-4" -> "openai/gpt-4"
+            "lmstudio:ibm/granite" -> "lmstudio/ibm/granite" (keeps lmstudio prefix)
+            "ollama/qwen3:4b" -> "ollama/qwen3:4b" (already in format)
+        """
+        # Check for explicit prefixes FIRST (before checking for /)
+        # This handles cases like "lmstudio:ibm/granite-4-h-tiny"
+        for prefix in ["openai:", "anthropic:", "vllm:", "lmstudio:"]:
+            if model_spec.startswith(prefix):
+                provider = prefix[:-1]
+                model_name = model_spec[len(prefix):]
+                return f"{provider}/{model_name}"
+        # Already in LiteLLM format (provider/model)
+        if "/" in model_spec and not model_spec.startswith("hf.co/"):
+            return model_spec
+        # Default to Ollama
+        return f"ollama/{model_spec}"
+
+    def to_litellm_api_model(model_spec: str) -> str:
+        """Convert model specification to the actual LiteLLM API format.
+
+        LM Studio uses OpenAI-compatible API, so lmstudio/ becomes openai/.
+        """
+        litellm_model = to_litellm_model(model_spec)
+        if litellm_model.startswith("lmstudio/"):
+            return "openai/" + litellm_model[9:]
+        return litellm_model
 
     console.print("[bold blue]Magaldi Model Benchmark[/]")
     console.print(f"  Repository: {repo_path}")
@@ -1571,30 +1620,72 @@ def benchmark_models(
         total_type_summary = ", ".join(f"{t}: {c}" for t, c in sorted(total_type_counts.items()))
         console.print(f"  Total: {len(elements)} elements ({total_type_summary})")
 
-        # Check Ollama connection
-        console.print("\n[bold blue]Phase 5:[/] Ollama Connection")
-        client = OllamaBenchmarkClient(base_url=ollama_url)
+        # Check backend connections
+        console.print("\n[bold blue]Phase 5:[/] Backend Connection")
+
+        # Create unified client (uses LiteLLM)
+        client = BenchmarkClient(api_base=ollama_url)
         if not client.check_connection():
             console.print(f"[red]Cannot connect to Ollama at {ollama_url}[/]")
             sys.exit(1)
 
         available_models = client.list_models()
-        console.print(f"  Connected to Ollama | {len(available_models)} models available")
+        console.print(f"  [green]✓[/] Ollama ({ollama_url}) | {len(available_models)} models")
 
-        # Check which models are available
+        # Check LM Studio connection if any lmstudio models are configured
+        lmstudio_models_configured = any(m.startswith("lmstudio:") for m in model_list)
+        available_lmstudio_models: list[str] = []
+        if lmstudio_models_configured:
+            try:
+                import requests
+                resp = requests.get(f"{lmstudio_url}/models", timeout=5)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    available_lmstudio_models = [m["id"] for m in data.get("data", [])]
+                    console.print(f"  [green]✓[/] LM Studio ({lmstudio_url}) | {len(available_lmstudio_models)} models")
+                else:
+                    console.print(f"  [yellow]![/] LM Studio ({lmstudio_url}) | Cannot list models (status {resp.status_code})")
+            except Exception as e:
+                console.print(f"  [yellow]![/] LM Studio ({lmstudio_url}) | Connection failed: {e}")
+
+        # Convert model specs to LiteLLM format and check availability
+        # Store mapping from litellm format to original spec for api_config lookup
         missing_models = []
         models_to_test = []
-        for model in model_list:
-            # Check if model is available (handles :latest suffix)
-            if model in available_models or f"{model}:latest" in available_models:
-                models_to_test.append(model)
-            else:
-                # Try without tag
-                base = model.rsplit(":", 1)[0] if ":" in model else model
-                if base in available_models or f"{base}:latest" in available_models:
-                    models_to_test.append(model)
+        model_specs: dict[str, str] = {}  # litellm_model -> original_spec
+        for model_spec in model_list:
+            litellm_model = to_litellm_model(model_spec)
+
+            # For Ollama models, check availability
+            if litellm_model.startswith("ollama/"):
+                model_name = litellm_model[7:]  # Remove "ollama/" prefix
+                if model_name in available_models or f"{model_name}:latest" in available_models:
+                    models_to_test.append(litellm_model)
+                    model_specs[litellm_model] = model_spec
                 else:
-                    missing_models.append(model)
+                    # Try without tag
+                    base = model_name.rsplit(":", 1)[0] if ":" in model_name else model_name
+                    if base in available_models or f"{base}:latest" in available_models:
+                        models_to_test.append(litellm_model)
+                        model_specs[litellm_model] = model_spec
+                    else:
+                        missing_models.append(model_spec)
+            # For LM Studio models, check availability
+            elif litellm_model.startswith("lmstudio/"):
+                model_name = litellm_model[9:]  # Remove "lmstudio/" prefix
+                if available_lmstudio_models:
+                    if model_name in available_lmstudio_models:
+                        models_to_test.append(litellm_model)
+                        model_specs[litellm_model] = model_spec
+                    else:
+                        missing_models.append(model_spec)
+                else:
+                    # LM Studio not reachable, skip these models
+                    missing_models.append(model_spec)
+            else:
+                # Other models - trust they're available
+                models_to_test.append(litellm_model)
+                model_specs[litellm_model] = model_spec
 
         if missing_models:
             console.print(f"  [yellow]Missing models (skipped):[/]")
@@ -1612,14 +1703,28 @@ def benchmark_models(
 
         # Warmup models
         console.print("\n[bold blue]Phase 6:[/] Model Warmup")
-        for model in models_to_test:
-            with console.status(f"[bold blue]Warming up {model}...[/]"):
-                success, warmup_time, error = client.warmup(model, timeout=120)
+        models_failed_warmup = []
+        for litellm_model in models_to_test:
+            # Get api config for this model (LM Studio needs different api_base)
+            original_spec = model_specs.get(litellm_model, litellm_model)
+            api_config = get_model_api_config(original_spec)
+            # Use API model format (lmstudio/ -> openai/ for LiteLLM)
+            api_model = to_litellm_api_model(original_spec)
+            with console.status(f"[bold blue]Warming up {litellm_model}...[/]"):
+                success, warmup_time, error = client.warmup(
+                    api_model,
+                    timeout=120,
+                    **api_config,
+                )
             if success:
-                console.print(f"  [green]✓[/] {model} ({warmup_time:.1f}s)")
+                console.print(f"  [green]✓[/] {litellm_model} ({warmup_time:.1f}s)")
             else:
-                console.print(f"  [red]✗[/] {model}: {error}")
-                models_to_test.remove(model)
+                console.print(f"  [red]✗[/] {litellm_model}: {error}")
+                models_failed_warmup.append(litellm_model)
+
+        # Remove failed models
+        for m in models_failed_warmup:
+            models_to_test.remove(m)
 
         if not models_to_test:
             console.print("[red]No models available after warmup.[/]")
@@ -1638,8 +1743,9 @@ def benchmark_models(
         prompts = [(elem, None) for elem in elements]  # Placeholder, prompts built per-model
 
         # Test each model with hierarchical summarization
-        for model in models_to_test:
-            console.print(f"\n  [cyan]{model}[/]")
+        for litellm_model in models_to_test:
+            original_spec = model_specs.get(litellm_model, litellm_model)
+            console.print(f"\n  [cyan]{litellm_model}[/]")
 
             # Track summaries for hierarchical context (per model)
             # file_summaries[relative_path] = summary
@@ -1655,6 +1761,15 @@ def benchmark_models(
             for elem in sorted_elements:
                 elem_name = f"{elem.element_type}:{elem.name}"
                 elem_idx = element_indices[id(elem)]
+
+                # For file elements, load raw_code from disk (not stored in parsed elements)
+                if elem.element_type == "file" and not elem.raw_code:
+                    file_full_path = Path(repo_path) / elem.relative_path
+                    if file_full_path.exists():
+                        try:
+                            elem.raw_code = file_full_path.read_text(encoding="utf-8")
+                        except Exception:
+                            elem.raw_code = ""
 
                 # Build parent summaries based on element type
                 parent_summaries: dict[str, str] = {}
@@ -1678,13 +1793,33 @@ def benchmark_models(
                 # Build prompt with parent context
                 prompt = _build_summarization_prompt(elem, parent_summaries)
 
+                # For thinking models, add directive to skip thinking
+                from shared.ai.ollama_benchmark import BenchmarkClient
+                model_name = litellm_model.split("/")[-1] if "/" in litellm_model else litellm_model
+                if any(model_name.startswith(tm) for tm in BenchmarkClient.THINKING_MODELS):
+                    prompt = prompt + "\n\n/no_think"
+
                 with console.status(f"    [{len(model_results)+1}/{len(elements)}] {elem_name}..."):
+                    # Get per-model parameters from config (use original spec for pattern matching)
+                    model_params = benchmark_config.get_model_params(original_spec)
+                    # Use per-model max_tokens if set, otherwise default
+                    max_tokens = model_params.max_tokens or benchmark_config.max_tokens
+                    # Get api config for this model (LM Studio needs different api_base)
+                    api_config = get_model_api_config(original_spec)
+                    # Use API model format (lmstudio/ -> openai/ for LiteLLM)
+                    api_model = to_litellm_api_model(original_spec)
                     result = client.generate(
-                        model=model,
+                        model=api_model,
                         prompt=prompt,
-                        temperature=benchmark_config.temperature,
-                        max_tokens=benchmark_config.max_tokens,
+                        temperature=model_params.temperature,
+                        top_p=model_params.top_p,
+                        top_k=model_params.top_k,
+                        min_p=model_params.min_p,
+                        repetition_penalty=model_params.repetition_penalty,
+                        presence_penalty=model_params.presence_penalty,
+                        max_tokens=max_tokens,
                         timeout=benchmark_config.timeout,
+                        **api_config,
                     )
                     model_results[elem_idx] = result
 
@@ -1700,44 +1835,72 @@ def benchmark_models(
                         function_summaries[elem.element_id] = cleaned
 
                 if result.success:
-                    ollama_sum = result.load_time + result.prefill_time + result.generate_time
-                    overhead = result.ollama_total_time - ollama_sum
-                    overhead_str = f"+{overhead:.2f}s overhead" if overhead > 0.01 else ""
                     context_str = ""
                     if parent_summaries:
                         context_str = f" [dim](+{'+'.join(parent_summaries.keys())} context)[/]"
                     console.print(
-                        f"    [green]✓[/] {elem_name[:40]:<40} | "
-                        f"[bold]{result.ollama_total_time:.2f}s[/] "
-                        f"(load:{result.load_time:.2f} pre:{result.prefill_time:.2f} gen:{result.generate_time:.2f} {overhead_str}) | "
+                        f"    [green]✓[/] {elem_name:<40} | "
+                        f"[bold]{result.total_time:.2f}s[/] | "
                         f"{result.prompt_chars}→{result.output_chars} chr | "
                         f"{result.prompt_tokens}→{result.output_tokens} tok | "
-                        f"pre:{result.prefill_tokens_per_second:.0f} t/s gen:{result.tokens_per_second:.0f} t/s{context_str}"
+                        f"{result.tokens_per_second:.0f} t/s{context_str}"
                     )
                 else:
-                    console.print(f"    [red]✗[/] {elem_name[:40]:<40} | {result.error}")
+                    console.print(f"    [red]✗[/] {elem_name:<40} | {result.error}")
 
             # Store results in original element order
-            results[model] = [model_results[i] for i in range(len(elements))]
+            results[litellm_model] = [model_results[i] for i in range(len(elements))]
 
-        # Phase 8: LLM Evaluation of summaries
-        console.print("\n[bold blue]Phase 8:[/] LLM Evaluation")
+        # Phase 8: LLM Evaluation of summaries (multi-criteria JSON-based)
+        console.print("\n[bold blue]Phase 8:[/] LLM Evaluation (multi-criteria)")
+
+        from shared.ai.ollama_benchmark import (
+            EVALUATION_CRITERIA,
+            CriteriaScores,
+            EvaluationResult,
+            build_evaluation_prompt,
+            parse_evaluation_response,
+        )
 
         # Validate configured eval models, filter to available ones
-        eval_models = []
+        # Store as (original_spec, litellm_model) tuples for api_config lookup
+        eval_model_pairs: list[tuple[str, str]] = []
         for em in benchmark_config.eval_models:
-            if em in available_models:
-                eval_models.append(em)
+            litellm_model = to_litellm_model(em)
+            # For Ollama models, check availability
+            if litellm_model.startswith("ollama/"):
+                model_name = litellm_model[7:]  # Remove "ollama/" prefix
+                if model_name in available_models or f"{model_name}:latest" in available_models:
+                    eval_model_pairs.append((em, litellm_model))
+                else:
+                    base = model_name.rsplit(":", 1)[0] if ":" in model_name else model_name
+                    if base in available_models or f"{base}:latest" in available_models:
+                        eval_model_pairs.append((em, litellm_model))
+                    else:
+                        console.print(f"  [yellow]Eval model {em} not available, skipping[/]")
             else:
-                console.print(f"  [yellow]Eval model {em} not available, skipping[/]")
-        if not eval_models:
+                # Non-Ollama models - trust they're available
+                eval_model_pairs.append((em, litellm_model))
+
+        if not eval_model_pairs:
             console.print(f"  [yellow]No eval models available, using {models_to_test[-1]}[/]")
-            eval_models = [models_to_test[-1]]
+            # Use last tested model as fallback
+            last_model = model_list[-1]
+            eval_model_pairs = [(last_model, to_litellm_model(last_model))]
+
+        eval_models = [litellm for _, litellm in eval_model_pairs]
+        eval_model_specs = {litellm: orig for orig, litellm in eval_model_pairs}
         console.print(f"  Using {len(eval_models)} evaluator(s): [cyan]{', '.join(eval_models)}[/]")
 
-        # ratings[element_index][model][eval_model] = {"rating": int, "reason": str}
-        ratings: dict[int, dict[str, dict[str, dict]]] = {
-            i: {m: {} for m in models_to_test} for i in range(len(prompts))
+        # Show criteria for each element type
+        element_types_in_test = set(elem.element_type for elem, _ in prompts)
+        for elem_type in sorted(element_types_in_test):
+            criteria = EVALUATION_CRITERIA.get(elem_type, {})
+            console.print(f"  [dim]{elem_type} criteria: {', '.join(criteria.keys())}[/]")
+
+        # evaluation_results[element_index][eval_model] = EvaluationResult
+        evaluation_results: dict[int, dict[str, EvaluationResult]] = {
+            i: {} for i in range(len(prompts))
         }
         total_elements = len(prompts)
 
@@ -1745,76 +1908,102 @@ def benchmark_models(
             elem_name = f"{elem.element_type}:{elem.name}"
             progress = f"[{i+1}/{total_elements}]"
 
-            # Build evaluation prompt with source code and all summaries
-            eval_prompt = _build_evaluation_prompt(elem, models_to_test, results, i)
+            # Build summaries dict for evaluation
+            summaries: dict[str, str] = {}
+            for model in models_to_test:
+                result = results[model][i]
+                if result.success and result.response.strip():
+                    from shared.ai.summarization import clean_summary
+                    summaries[model] = clean_summary(result.response)
+                else:
+                    summaries[model] = ""
+
+            # Build evaluation prompt with element-specific criteria
+            eval_prompt = build_evaluation_prompt(
+                element_type=elem.element_type,
+                element_name=elem.name,
+                source_code=elem.raw_code or "",
+                summaries=summaries,
+            )
 
             # Evaluate with each eval model
-            elem_ratings_by_evaluator: dict[str, dict] = {}
             for eval_model in eval_models:
-                # Retry up to 3 times if some ratings are missing
+                # Get api config for this eval model (LM Studio needs different api_base)
+                eval_original_spec = eval_model_specs.get(eval_model, eval_model)
+                eval_api_config = get_model_api_config(eval_original_spec)
+                # Use API model format (lmstudio/ -> openai/ for LiteLLM)
+                eval_api_model = to_litellm_api_model(eval_original_spec)
+
+                # Retry up to 3 times if parsing fails
                 max_retries = 3
-                parsed_ratings = {}
+                eval_result_obj = EvaluationResult(
+                    element_type=elem.element_type,
+                    element_name=elem.name,
+                )
+
                 for attempt in range(max_retries):
                     with console.status(f"  {progress} [{eval_model}] Evaluating {elem_name}..." + (f" (retry {attempt})" if attempt > 0 else "")):
                         eval_result = client.generate(
-                            model=eval_model,
+                            model=eval_api_model,
                             prompt=eval_prompt,
                             temperature=0.1 + (attempt * 0.1),  # Slightly increase temp on retry
-                            max_tokens=512,
+                            max_tokens=1024,  # More tokens for JSON output
                             timeout=benchmark_config.timeout,
+                            **eval_api_config,
                         )
 
                     if eval_result.success:
-                        parsed_ratings = _parse_evaluation_ratings(eval_result.response, models_to_test)
-                        # Check if all models got a rating
-                        missing = [m for m in models_to_test if parsed_ratings[m]["rating"] is None]
-                        if not missing:
+                        eval_result_obj.raw_response = eval_result.response
+                        evaluations, error = parse_evaluation_response(
+                            eval_result.response,
+                            elem.element_type,
+                            models_to_test,
+                        )
+                        eval_result_obj.evaluations = evaluations
+                        eval_result_obj.parse_error = error
+
+                        # Check if all models got evaluated
+                        if not error:
                             break  # All ratings present, we're done
                         elif attempt < max_retries - 1:
                             continue  # Retry
                     else:
+                        eval_result_obj.parse_error = eval_result.error
                         if attempt < max_retries - 1:
                             continue  # Retry on failure
 
-                elem_ratings_by_evaluator[eval_model] = parsed_ratings
+                evaluation_results[i][eval_model] = eval_result_obj
 
-            # Store ratings per eval model
-            for model in models_to_test:
-                for eval_model in eval_models:
-                    if elem_ratings_by_evaluator.get(eval_model, {}).get(model):
-                        ratings[i][model][eval_model] = elem_ratings_by_evaluator[eval_model][model]
-
-            # Display ratings (show average across evaluators for each model)
+            # Display scores (show average scaled score for each model)
             rating_parts = []
             for m in models_to_test:
-                model_evals = [
-                    elem_ratings_by_evaluator.get(em, {}).get(m, {}).get("rating")
-                    for em in eval_models
-                ]
-                valid_ratings = [r for r in model_evals if r is not None]
-                if valid_ratings:
-                    avg = sum(valid_ratings) / len(valid_ratings)
+                model_scores = []
+                for em in eval_models:
+                    eval_res = evaluation_results[i].get(em)
+                    if eval_res and m in eval_res.evaluations:
+                        model_scores.append(eval_res.evaluations[m].average)
+                if model_scores:
+                    avg = sum(model_scores) / len(model_scores)
                     rating_parts.append(f"{m}: {avg:.1f}")
                 else:
                     rating_parts.append(f"{m}: ?")
             rating_str = " | ".join(rating_parts)
 
-            # Count total missing ratings across all evaluators
-            total_expected = len(models_to_test) * len(eval_models)
-            total_present = sum(
-                1 for m in models_to_test for em in eval_models
-                if elem_ratings_by_evaluator.get(em, {}).get(m, {}).get("rating") is not None
-            )
-            missing_count = total_expected - total_present
+            # Check for errors
+            errors = [
+                evaluation_results[i].get(em, EvaluationResult("", "")).parse_error
+                for em in eval_models
+            ]
+            has_errors = any(e for e in errors)
 
-            if missing_count > 0:
-                console.print(f"  {progress} [yellow]~[/] {elem_name[:40]:<40} | {rating_str} [dim]({missing_count} missing)[/]")
+            if has_errors:
+                console.print(f"  {progress} [yellow]~[/] {elem_name} | {rating_str} [dim](parse issues)[/]")
             else:
-                console.print(f"  {progress} [green]✓[/] {elem_name[:40]:<40} | {rating_str}")
+                console.print(f"  {progress} [green]✓[/] {elem_name} | {rating_str}")
 
         # Benchmark summary table (detailed summaries are saved to markdown file only)
         console.print("\n" + "=" * 70)
-        console.print("[bold]Benchmark Summary[/]")
+        console.print("[bold]Benchmark Summary (Multi-Criteria Evaluation)[/]")
         console.print("=" * 70)
 
         from shared.ai.summarization import clean_summary
@@ -1835,50 +2024,61 @@ def benchmark_models(
             real_success_indices_by_model[model] = real_success_indices
             real_successes_by_model[model] = real_successes
 
+        # Helper to get scaled score (1-10) from evaluation results
+        def get_average(elem_idx: int, model: str, eval_model: str) -> float | None:
+            eval_res = evaluation_results[elem_idx].get(eval_model)
+            if eval_res and model in eval_res.evaluations:
+                return eval_res.evaluations[model].average
+            return None
+
+        # Helper to get criteria scores
+        def get_criteria_scores(elem_idx: int, model: str, eval_model: str) -> dict[str, int]:
+            eval_res = evaluation_results[elem_idx].get(eval_model)
+            if eval_res and model in eval_res.evaluations:
+                return eval_res.evaluations[model].scores
+            return {}
+
         # Show summary table per evaluator
         for eval_model in eval_models:
             console.print(f"\n[bold]Evaluator: {eval_model}[/]")
 
             summary_table = Table(show_header=True, header_style="bold cyan")
-            summary_table.add_column("Model", style="cyan")
-            summary_table.add_column("Avg Rating", justify="center")
+            summary_table.add_column("Model", style="cyan", no_wrap=True)
+            summary_table.add_column("Score", justify="center")
             summary_table.add_column("Success", justify="center")
             summary_table.add_column("Avg Time", justify="right")
-            summary_table.add_column("Pre t/s", justify="right")
-            summary_table.add_column("Gen t/s", justify="right")
+            summary_table.add_column("tok/s", justify="right")
 
             for model in models_to_test:
                 real_successes = real_successes_by_model[model]
                 real_success_indices = real_success_indices_by_model[model]
 
-                # Calculate average rating only for real successes (from this evaluator)
-                model_ratings = [
-                    ratings[i].get(model, {}).get(eval_model, {}).get("rating")
+                # Calculate average scaled score for real successes
+                model_scores = [
+                    get_average(i, model, eval_model)
                     for i in real_success_indices
-                    if ratings[i].get(model, {}).get(eval_model, {}).get("rating") is not None
                 ]
-                avg_rating = sum(model_ratings) / len(model_ratings) if model_ratings else 0
+                valid_scores = [s for s in model_scores if s is not None]
+                avg_score = sum(valid_scores) / len(valid_scores) if valid_scores else 0
 
                 if real_successes:
-                    avg_wall = sum(r.ollama_total_time for r in real_successes) / len(real_successes)
-                    avg_pre_tps = sum(r.prefill_tokens_per_second for r in real_successes) / len(real_successes)
-                    avg_gen_tps = sum(r.tokens_per_second for r in real_successes) / len(real_successes)
+                    avg_wall = sum(r.total_time for r in real_successes) / len(real_successes)
+                    avg_tps = sum(r.tokens_per_second for r in real_successes) / len(real_successes)
 
-                    # Color-code rating (1-10 scale)
-                    if avg_rating >= 8:
-                        rating_style = "bold green"
-                    elif avg_rating >= 6:
-                        rating_style = "yellow"
+                    # Color-code score (1-10 scale)
+                    if avg_score >= 8:
+                        score_style = "bold green"
+                    elif avg_score >= 6:
+                        score_style = "yellow"
                     else:
-                        rating_style = "red"
+                        score_style = "red"
 
                     summary_table.add_row(
                         model,
-                        f"[{rating_style}]{avg_rating:.1f}/10[/]" if model_ratings else "-",
+                        f"[{score_style}]{avg_score:.1f}/10[/]" if valid_scores else "-",
                         f"{len(real_successes)}/{len(results[model])}",
                         f"{avg_wall:.2f}s",
-                        f"{avg_pre_tps:.0f}",
-                        f"{avg_gen_tps:.0f}",
+                        f"{avg_tps:.0f}",
                     )
                 else:
                     summary_table.add_row(
@@ -1887,130 +2087,49 @@ def benchmark_models(
                         f"0/{len(results[model])}",
                         "-",
                         "-",
-                        "-",
                     )
 
             console.print(summary_table)
 
-        # Ratings by element type (per evaluator)
-        console.print("\n[bold]Ratings by Element Type[/]")
+        # Criteria breakdown by element type
+        console.print("\n[bold]Criteria Scores by Element Type[/]")
 
         # Group elements by type
         from collections import defaultdict
-        elements_by_type: dict[str, list[int]] = defaultdict(list)  # type -> list of element indices
+        elements_by_type: dict[str, list[int]] = defaultdict(list)
         for i, (elem, _) in enumerate(prompts):
             elements_by_type[elem.element_type].append(i)
 
-        # Show type table per evaluator
-        for eval_model in eval_models:
-            console.print(f"\n[dim]Evaluator: {eval_model}[/]")
+        # Show criteria breakdown for each element type
+        for elem_type in sorted(elements_by_type.keys()):
+            indices = elements_by_type[elem_type]
+            criteria = EVALUATION_CRITERIA.get(elem_type, {})
 
-            type_table = Table(show_header=True, header_style="bold cyan")
-            type_table.add_column("Element Type", style="cyan")
+            console.print(f"\n[cyan]{elem_type}[/] ({len(indices)} elements)")
+
+            # Build table with criteria as rows, models as columns
+            criteria_table = Table(show_header=True, header_style="bold", expand=False)
+            criteria_table.add_column("Criterion", style="dim", no_wrap=True, min_width=20)
             for model in models_to_test:
-                type_table.add_column(model, justify="center")
+                criteria_table.add_column(model.replace("/", "\n"), justify="center")
 
-            for elem_type, indices in sorted(elements_by_type.items()):
-                row = [elem_type]
+            for criterion in criteria.keys():
+                row = [criterion]
                 for model in models_to_test:
-                    # Only include ratings for real successes (from this evaluator)
-                    type_ratings = []
-                    for i in indices:
-                        r = results[model][i]
-                        if r.success and r.response.strip():
-                            cleaned = clean_summary(r.response)
-                            if cleaned.strip():
-                                rating = ratings[i].get(model, {}).get(eval_model, {}).get("rating")
-                                if rating is not None:
-                                    type_ratings.append(rating)
-                    if type_ratings:
-                        avg = sum(type_ratings) / len(type_ratings)
-                        if avg >= 8:
-                            row.append(f"[bold green]{avg:.1f}[/]")
-                        elif avg >= 6:
-                            row.append(f"[yellow]{avg:.1f}[/]")
-                        else:
-                            row.append(f"[red]{avg:.1f}[/]")
-                    else:
-                        row.append("-")
-                type_table.add_row(*row)
-
-            console.print(type_table)
-
-        # Averaged ratings across all evaluators
-        if len(eval_models) > 1:
-            console.print(f"\n[bold]Averaged Across Evaluators[/]")
-
-            # Averaged summary table
-            avg_summary_table = Table(show_header=True, header_style="bold cyan")
-            avg_summary_table.add_column("Model", style="cyan")
-            avg_summary_table.add_column("Avg Rating", justify="center")
-            avg_summary_table.add_column("Success", justify="center")
-            avg_summary_table.add_column("Avg Time", justify="right")
-            avg_summary_table.add_column("Pre t/s", justify="right")
-            avg_summary_table.add_column("Gen t/s", justify="right")
-
-            for model in models_to_test:
-                real_successes = real_successes_by_model[model]
-                real_success_indices = real_success_indices_by_model[model]
-
-                # Average rating across all evaluators for real successes
-                all_ratings = []
-                for i in real_success_indices:
-                    for em in eval_models:
-                        rating = ratings[i].get(model, {}).get(em, {}).get("rating")
-                        if rating is not None:
-                            all_ratings.append(rating)
-                avg_rating = sum(all_ratings) / len(all_ratings) if all_ratings else 0
-
-                if real_successes:
-                    avg_wall = sum(r.ollama_total_time for r in real_successes) / len(real_successes)
-                    avg_pre_tps = sum(r.prefill_tokens_per_second for r in real_successes) / len(real_successes)
-                    avg_gen_tps = sum(r.tokens_per_second for r in real_successes) / len(real_successes)
-
-                    if avg_rating >= 8:
-                        rating_style = "bold green"
-                    elif avg_rating >= 6:
-                        rating_style = "yellow"
-                    else:
-                        rating_style = "red"
-
-                    avg_summary_table.add_row(
-                        model,
-                        f"[{rating_style}]{avg_rating:.1f}/10[/]" if all_ratings else "-",
-                        f"{len(real_successes)}/{len(results[model])}",
-                        f"{avg_wall:.2f}s",
-                        f"{avg_pre_tps:.0f}",
-                        f"{avg_gen_tps:.0f}",
-                    )
-                else:
-                    avg_summary_table.add_row(model, "-", f"0/{len(results[model])}", "-", "-", "-")
-
-            console.print(avg_summary_table)
-
-            # Averaged element type table
-            console.print(f"\n[dim]Ratings by Element Type (averaged)[/]")
-            avg_type_table = Table(show_header=True, header_style="bold cyan")
-            avg_type_table.add_column("Element Type", style="cyan")
-            for model in models_to_test:
-                avg_type_table.add_column(model, justify="center")
-
-            for elem_type, indices in sorted(elements_by_type.items()):
-                row = [elem_type]
-                for model in models_to_test:
-                    # Average ratings across all evaluators for this element type
-                    type_ratings = []
+                    # Average this criterion across all elements of this type and all evaluators
+                    criterion_scores = []
                     for i in indices:
                         r = results[model][i]
                         if r.success and r.response.strip():
                             cleaned = clean_summary(r.response)
                             if cleaned.strip():
                                 for em in eval_models:
-                                    rating = ratings[i].get(model, {}).get(em, {}).get("rating")
-                                    if rating is not None:
-                                        type_ratings.append(rating)
-                    if type_ratings:
-                        avg = sum(type_ratings) / len(type_ratings)
+                                    scores = get_criteria_scores(i, model, em)
+                                    if criterion in scores:
+                                        criterion_scores.append(scores[criterion])
+                    if criterion_scores:
+                        avg = sum(criterion_scores) / len(criterion_scores)
+                        # Color based on 1-10 scale
                         if avg >= 8:
                             row.append(f"[bold green]{avg:.1f}[/]")
                         elif avg >= 6:
@@ -2019,12 +2138,84 @@ def benchmark_models(
                             row.append(f"[red]{avg:.1f}[/]")
                     else:
                         row.append("-")
-                avg_type_table.add_row(*row)
+                criteria_table.add_row(*row)
 
-            console.print(avg_type_table)
+            # Add overall row
+            overall_row = ["[bold]Overall[/]"]
+            for model in models_to_test:
+                model_scores = []
+                for i in indices:
+                    r = results[model][i]
+                    if r.success and r.response.strip():
+                        cleaned = clean_summary(r.response)
+                        if cleaned.strip():
+                            for em in eval_models:
+                                score = get_average(i, model, em)
+                                if score is not None:
+                                    model_scores.append(score)
+                if model_scores:
+                    avg = sum(model_scores) / len(model_scores)
+                    if avg >= 8:
+                        overall_row.append(f"[bold green]{avg:.1f}/10[/]")
+                    elif avg >= 6:
+                        overall_row.append(f"[yellow]{avg:.1f}/10[/]")
+                    else:
+                        overall_row.append(f"[red]{avg:.1f}/10[/]")
+                else:
+                    overall_row.append("-")
+            criteria_table.add_row(*overall_row)
 
-        # Ratings by Character Length
-        console.print("\n[bold]Ratings by Input Character Length[/]")
+            console.print(criteria_table)
+
+        # Averaged summary across all evaluators
+        if len(eval_models) > 1:
+            console.print(f"\n[bold]Averaged Across {len(eval_models)} Evaluators[/]")
+
+            avg_summary_table = Table(show_header=True, header_style="bold cyan")
+            avg_summary_table.add_column("Model", style="cyan", no_wrap=True)
+            avg_summary_table.add_column("Avg Score", justify="center")
+            avg_summary_table.add_column("Success", justify="center")
+            avg_summary_table.add_column("Avg Time", justify="right")
+            avg_summary_table.add_column("tok/s", justify="right")
+
+            for model in models_to_test:
+                real_successes = real_successes_by_model[model]
+                real_success_indices = real_success_indices_by_model[model]
+
+                # Average across all evaluators
+                all_scores = []
+                for i in real_success_indices:
+                    for em in eval_models:
+                        score = get_average(i, model, em)
+                        if score is not None:
+                            all_scores.append(score)
+                avg_score = sum(all_scores) / len(all_scores) if all_scores else 0
+
+                if real_successes:
+                    avg_wall = sum(r.total_time for r in real_successes) / len(real_successes)
+                    avg_tps = sum(r.tokens_per_second for r in real_successes) / len(real_successes)
+
+                    if avg_score >= 8:
+                        score_style = "bold green"
+                    elif avg_score >= 6:
+                        score_style = "yellow"
+                    else:
+                        score_style = "red"
+
+                    avg_summary_table.add_row(
+                        model,
+                        f"[{score_style}]{avg_score:.1f}/10[/]" if all_scores else "-",
+                        f"{len(real_successes)}/{len(results[model])}",
+                        f"{avg_wall:.2f}s",
+                        f"{avg_tps:.0f}",
+                    )
+                else:
+                    avg_summary_table.add_row(model, "-", f"0/{len(results[model])}", "-", "-")
+
+            console.print(avg_summary_table)
+
+        # Scores by Character Length
+        console.print("\n[bold]Scores by Input Character Length[/]")
 
         # Define character length ranges
         char_ranges = [
@@ -2058,12 +2249,12 @@ def benchmark_models(
             elements_by_char_range[range_label].append(i)
 
         # Show averaged char range table
-        console.print(f"\n[dim]Ratings by Character Length (averaged across evaluators)[/]")
-        char_table = Table(show_header=True, header_style="bold cyan")
-        char_table.add_column("Char Range", style="cyan")
-        char_table.add_column("Count", justify="right")
+        console.print(f"\n[dim]Scores by Character Length (averaged across evaluators)[/]")
+        char_table = Table(show_header=True, header_style="bold cyan", expand=False)
+        char_table.add_column("Char Range", style="cyan", no_wrap=True, min_width=10)
+        char_table.add_column("Count", justify="right", no_wrap=True, min_width=5)
         for model in models_to_test:
-            char_table.add_column(model, justify="center")
+            char_table.add_column(model.replace("/", "\n"), justify="center")
 
         # Sort by range order
         range_order = {label: i for i, (_, _, label) in enumerate(char_ranges)}
@@ -2071,18 +2262,18 @@ def benchmark_models(
             indices = elements_by_char_range[range_label]
             row = [range_label, str(len(indices))]
             for model in models_to_test:
-                range_ratings = []
+                range_scores = []
                 for i in indices:
                     r = results[model][i]
                     if r.success and r.response.strip():
                         cleaned = clean_summary(r.response)
                         if cleaned.strip():
                             for em in eval_models:
-                                rating = ratings[i].get(model, {}).get(em, {}).get("rating")
-                                if rating is not None:
-                                    range_ratings.append(rating)
-                if range_ratings:
-                    avg = sum(range_ratings) / len(range_ratings)
+                                score = get_average(i, model, em)
+                                if score is not None:
+                                    range_scores.append(score)
+                if range_scores:
+                    avg = sum(range_scores) / len(range_scores)
                     if avg >= 8:
                         row.append(f"[bold green]{avg:.1f}[/]")
                     elif avg >= 6:
@@ -2095,12 +2286,13 @@ def benchmark_models(
 
         console.print(char_table)
 
-        # Per-file breakdown by character range
-        console.print("\n[bold]Per-File Scores by Character Range[/]")
+        # Average scores by element type AND character range (single table)
+        console.print("\n[bold]Average Scores by Element Type & Character Range[/]")
 
-        # Build file info with char range
-        file_char_data: dict[str, list[tuple[int, str, int, dict[str, float]]]] = defaultdict(list)
-        # file_path -> [(elem_index, elem_name, prompt_chars, {model: avg_rating})]
+        # Build: element_type -> char_range -> model -> list of scores
+        type_range_scores: dict[str, dict[str, dict[str, list[float]]]] = defaultdict(
+            lambda: defaultdict(lambda: defaultdict(list))
+        )
 
         for i, (elem, _) in enumerate(prompts):
             prompt_chars = 0
@@ -2111,57 +2303,184 @@ def benchmark_models(
             if prompt_chars == 0:
                 prompt_chars = len(elem.raw_code or "") + 200
 
-            # Get ratings for this element across all models
-            model_ratings: dict[str, float] = {}
+            range_label = get_char_range_label(prompt_chars)
+            elem_type = elem.element_type
+
             for model in models_to_test:
                 r = results[model][i]
                 if r.success and r.response.strip():
                     cleaned = clean_summary(r.response)
                     if cleaned.strip():
-                        elem_ratings = []
                         for em in eval_models:
-                            rating = ratings[i].get(model, {}).get(em, {}).get("rating")
-                            if rating is not None:
-                                elem_ratings.append(rating)
-                        if elem_ratings:
-                            model_ratings[model] = sum(elem_ratings) / len(elem_ratings)
+                            score = get_average(i, model, em)
+                            if score is not None:
+                                type_range_scores[elem_type][range_label][model].append(score)
 
-            elem_name = f"{elem.element_type}:{elem.name}"
-            file_char_data[elem.relative_path].append((i, elem_name, prompt_chars, model_ratings))
+        # Single combined table (element type first, then char range)
+        combined_table = Table(show_header=True, header_style="bold cyan", show_lines=False, expand=False)
+        combined_table.add_column("Element Type", style="cyan", no_wrap=True, min_width=12)
+        combined_table.add_column("Char Range", style="dim", no_wrap=True, min_width=10)
+        combined_table.add_column("Count", justify="right", no_wrap=True, min_width=5)
+        for model in models_to_test:
+            combined_table.add_column(model.replace("/", "\n"), justify="center")
 
-        # Show per-file table grouped by character range
-        for range_label in sorted(elements_by_char_range.keys(), key=lambda x: range_order.get(x, 99)):
-            indices_in_range = set(elements_by_char_range[range_label])
-            if not indices_in_range:
-                continue
-
-            console.print(f"\n[dim]Character Range: {range_label}[/]")
-            file_table = Table(show_header=True, header_style="bold cyan", show_lines=False)
-            file_table.add_column("File", style="cyan", max_width=40)
-            file_table.add_column("Element", max_width=30)
-            file_table.add_column("Chars", justify="right")
-            for model in models_to_test:
-                file_table.add_column(model.split(":")[0][:12], justify="center")
-
-            for file_path in sorted(file_char_data.keys()):
-                for elem_idx, elem_name, prompt_chars, model_ratings in file_char_data[file_path]:
-                    if elem_idx not in indices_in_range:
-                        continue
-                    row = [file_path.split("/")[-1][:40], elem_name[:30], str(prompt_chars)]
-                    for model in models_to_test:
-                        if model in model_ratings:
-                            rating = model_ratings[model]
-                            if rating >= 8:
-                                row.append(f"[bold green]{rating:.1f}[/]")
-                            elif rating >= 6:
-                                row.append(f"[yellow]{rating:.1f}[/]")
-                            else:
-                                row.append(f"[red]{rating:.1f}[/]")
+        for elem_type in sorted(type_range_scores.keys()):
+            range_data = type_range_scores[elem_type]
+            for range_label in sorted(range_data.keys(), key=lambda x: range_order.get(x, 99)):
+                model_scores_data = range_data[range_label]
+                count = max(len(s) for s in model_scores_data.values()) if model_scores_data else 0
+                count = count // len(eval_models) if eval_models else count
+                row = [elem_type, range_label, str(count)]
+                for model in models_to_test:
+                    if model in model_scores_data and model_scores_data[model]:
+                        avg = sum(model_scores_data[model]) / len(model_scores_data[model])
+                        if avg >= 8:
+                            row.append(f"[bold green]{avg:.1f}[/]")
+                        elif avg >= 6:
+                            row.append(f"[yellow]{avg:.1f}[/]")
                         else:
-                            row.append("-")
-                    file_table.add_row(*row)
+                            row.append(f"[red]{avg:.1f}[/]")
+                    else:
+                        row.append("-")
+                combined_table.add_row(*row)
 
-            console.print(file_table)
+        console.print(combined_table)
+
+        # =================================================================
+        # FULL METRICS TABLE with hierarchical totals
+        # =================================================================
+        console.print("\n[bold]Full Metrics Breakdown[/]")
+
+        # Build: element_type -> char_range -> criterion -> model -> list of scores
+        full_metrics: dict[str, dict[str, dict[str, dict[str, list[int]]]]] = defaultdict(
+            lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+        )
+        # Also track counts: element_type -> char_range -> count
+        element_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+
+        for i, (elem, _) in enumerate(prompts):
+            # Get prompt chars
+            prompt_chars = 0
+            for model in models_to_test:
+                if results[model][i].success and results[model][i].prompt_chars > 0:
+                    prompt_chars = results[model][i].prompt_chars
+                    break
+            if prompt_chars == 0:
+                prompt_chars = len(elem.raw_code or "") + 200
+
+            range_label = get_char_range_label(prompt_chars)
+            elem_type = elem.element_type
+            criteria = EVALUATION_CRITERIA.get(elem_type, {})
+
+            # Check if any model has a valid response for this element
+            has_valid_response = False
+            for model in models_to_test:
+                r = results[model][i]
+                if r.success and r.response.strip():
+                    cleaned = clean_summary(r.response)
+                    if cleaned.strip():
+                        has_valid_response = True
+                        break
+
+            if has_valid_response:
+                element_counts[elem_type][range_label] += 1
+
+            # Collect per-criterion scores
+            for model in models_to_test:
+                r = results[model][i]
+                if r.success and r.response.strip():
+                    cleaned = clean_summary(r.response)
+                    if cleaned.strip():
+                        for em in eval_models:
+                            scores = get_criteria_scores(i, model, em)
+                            for criterion in criteria.keys():
+                                if criterion in scores:
+                                    full_metrics[elem_type][range_label][criterion][model].append(scores[criterion])
+
+        # Create full metrics table
+        metrics_table = Table(show_header=True, header_style="bold magenta", show_lines=True, expand=False)
+        metrics_table.add_column("Element Type", style="cyan", no_wrap=True, min_width=12)
+        metrics_table.add_column("Char Range", style="dim", no_wrap=True, min_width=10)
+        metrics_table.add_column("Criterion", style="dim", no_wrap=True, min_width=18)
+        metrics_table.add_column("Count", justify="right", no_wrap=True, min_width=5)
+        for model in models_to_test:
+            metrics_table.add_column(model.replace("/", "\n"), justify="center")
+
+        def format_score(avg: float) -> str:
+            if avg >= 8:
+                return f"[bold green]{avg:.1f}[/]"
+            elif avg >= 6:
+                return f"[yellow]{avg:.1f}[/]"
+            else:
+                return f"[red]{avg:.1f}[/]"
+
+        def calc_avg(scores: list) -> float | None:
+            return sum(scores) / len(scores) if scores else None
+
+        grand_totals: dict[str, list[float]] = defaultdict(list)
+
+        for elem_type in sorted(full_metrics.keys()):
+            type_totals: dict[str, list[float]] = defaultdict(list)
+            range_data = full_metrics[elem_type]
+
+            for range_label in sorted(range_data.keys(), key=lambda x: range_order.get(x, 99)):
+                criterion_data = range_data[range_label]
+                range_totals: dict[str, list[float]] = defaultdict(list)
+                count = element_counts[elem_type][range_label]
+                criteria = EVALUATION_CRITERIA.get(elem_type, {})
+
+                # Add row for each criterion
+                for criterion in criteria.keys():
+                    if criterion in criterion_data:
+                        row = [elem_type, range_label, criterion, str(count)]
+                        for model in models_to_test:
+                            if model in criterion_data[criterion] and criterion_data[criterion][model]:
+                                scores = criterion_data[criterion][model]
+                                avg = calc_avg(scores)
+                                if avg is not None:
+                                    row.append(format_score(avg))
+                                    range_totals[model].append(avg)
+                                    type_totals[model].append(avg)
+                                    grand_totals[model].append(avg)
+                                else:
+                                    row.append("-")
+                            else:
+                                row.append("-")
+                        metrics_table.add_row(*row)
+
+                # Subtotal for element_type + char_range
+                subtotal_row = ["", "", "[bold]Subtotal[/]", f"[bold]{count}[/]"]
+                for model in models_to_test:
+                    if range_totals[model]:
+                        avg = calc_avg(range_totals[model])
+                        subtotal_row.append(f"[bold]{format_score(avg)}[/]" if avg else "-")
+                    else:
+                        subtotal_row.append("-")
+                metrics_table.add_row(*subtotal_row)
+
+            # Total for element_type (across all char ranges)
+            type_count = sum(element_counts[elem_type].values())
+            type_total_row = [f"[bold cyan]{elem_type}[/]", "[bold]TOTAL[/]", "", f"[bold]{type_count}[/]"]
+            for model in models_to_test:
+                if type_totals[model]:
+                    avg = calc_avg(type_totals[model])
+                    type_total_row.append(f"[bold]{format_score(avg)}[/]" if avg else "-")
+                else:
+                    type_total_row.append("-")
+            metrics_table.add_row(*type_total_row)
+
+        # Grand total
+        total_count = sum(sum(rc.values()) for rc in element_counts.values())
+        grand_total_row = ["[bold magenta]GRAND TOTAL[/]", "", "", f"[bold]{total_count}[/]"]
+        for model in models_to_test:
+            if grand_totals[model]:
+                avg = calc_avg(grand_totals[model])
+                grand_total_row.append(f"[bold]{format_score(avg)}[/]" if avg else "-")
+            else:
+                grand_total_row.append("-")
+        metrics_table.add_row(*grand_total_row)
+
+        console.print(metrics_table)
 
         # Token stats
         console.print("\n[bold]Token Statistics[/]")
@@ -2179,10 +2498,11 @@ def benchmark_models(
             eval_models=eval_models,
             elements=elements,
             results=results,
-            ratings=ratings,
+            evaluation_results=evaluation_results,
         )
         console.print(f"\n[bold green]Results saved to:[/] {markdown_path}")
 
+        # Close client
         client.close()
         console.print("\n[green]Benchmark complete.[/]")
 
@@ -2348,7 +2668,7 @@ def _save_benchmark_markdown(
     eval_models: list[str],
     elements: list,
     results: dict,
-    ratings: dict,
+    evaluation_results: dict,
     output_dir: str = "plans/benchmarks/data",
 ) -> str:
     """Save benchmark results to markdown file.
@@ -2359,7 +2679,7 @@ def _save_benchmark_markdown(
         eval_models: List of models used for evaluation (LLM-as-judge).
         elements: List of CodeElements.
         results: Dict mapping model -> list of BenchmarkResult.
-        ratings: Dict mapping element_index -> {model -> {eval_model -> {"rating": int, "reason": str}}}.
+        evaluation_results: Dict mapping element_index -> {eval_model -> EvaluationResult}.
         output_dir: Directory to save markdown file.
 
     Returns:
@@ -2370,6 +2690,7 @@ def _save_benchmark_markdown(
     from pathlib import Path
 
     from shared.ai.summarization import clean_summary
+    from shared.ai.ollama_benchmark import EVALUATION_CRITERIA
 
     # Create output directory
     Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -2381,6 +2702,27 @@ def _save_benchmark_markdown(
 
     lines = []
 
+    # Helper to get scaled score
+    def get_average(elem_idx: int, model: str, eval_model: str) -> float | None:
+        eval_res = evaluation_results[elem_idx].get(eval_model)
+        if eval_res and model in eval_res.evaluations:
+            return eval_res.evaluations[model].average
+        return None
+
+    # Helper to get criteria scores
+    def get_criteria_scores(elem_idx: int, model: str, eval_model: str) -> dict[str, int]:
+        eval_res = evaluation_results[elem_idx].get(eval_model)
+        if eval_res and model in eval_res.evaluations:
+            return eval_res.evaluations[model].scores
+        return {}
+
+    # Helper to get notes
+    def get_notes(elem_idx: int, model: str, eval_model: str) -> str:
+        eval_res = evaluation_results[elem_idx].get(eval_model)
+        if eval_res and model in eval_res.evaluations:
+            return eval_res.evaluations[model].notes
+        return ""
+
     # Header
     lines.append(f"# Benchmark Results - {dt.now().strftime('%Y-%m-%d %H:%M')}")
     lines.append("")
@@ -2388,6 +2730,7 @@ def _save_benchmark_markdown(
     lines.append(f"**Evaluation Models:** `{', '.join(eval_models)}`")
     lines.append(f"**Models Tested:** {len(models_tested)}")
     lines.append(f"**Elements Evaluated:** {len(elements)}")
+    lines.append(f"**Evaluation:** Multi-criteria JSON-based (element-type-specific)")
     lines.append("")
 
     # Pre-compute real successes for each model
@@ -2410,269 +2753,127 @@ def _save_benchmark_markdown(
     for eval_model in eval_models:
         lines.append(f"## Summary (Evaluator: {eval_model})")
         lines.append("")
-        lines.append("| Model | Avg Rating | Success | Avg Time | Pre t/s | Gen t/s |")
-        lines.append("|-------|-----------|---------|----------|---------|---------|")
+        lines.append("| Model | Avg Score | Success | Avg Time | tok/s |")
+        lines.append("|-------|-----------|---------|----------|-------|")
 
         for model in models_tested:
             real_successes = real_successes_by_model[model]
             real_success_indices = real_success_indices_by_model[model]
 
-            # Calculate average rating only for real successes (from this evaluator)
-            model_ratings = [
-                ratings[i].get(model, {}).get(eval_model, {}).get("rating")
+            # Calculate average scaled score for real successes
+            model_scores = [
+                get_average(i, model, eval_model)
                 for i in real_success_indices
-                if ratings[i].get(model, {}).get(eval_model, {}).get("rating") is not None
             ]
-            avg_rating = sum(model_ratings) / len(model_ratings) if model_ratings else 0
+            valid_scores = [s for s in model_scores if s is not None]
+            avg_score = sum(valid_scores) / len(valid_scores) if valid_scores else 0
 
             if real_successes:
-                avg_wall = sum(r.ollama_total_time for r in real_successes) / len(real_successes)
-                avg_pre_tps = sum(r.prefill_tokens_per_second for r in real_successes) / len(real_successes)
-                avg_gen_tps = sum(r.tokens_per_second for r in real_successes) / len(real_successes)
+                avg_wall = sum(r.total_time for r in real_successes) / len(real_successes)
+                avg_tps = sum(r.tokens_per_second for r in real_successes) / len(real_successes)
                 lines.append(
-                    f"| {model} | {avg_rating:.1f}/10 | {len(real_successes)}/{len(results[model])} | {avg_wall:.2f}s | {avg_pre_tps:.0f} | {avg_gen_tps:.0f} |"
+                    f"| {model} | {avg_score:.1f}/10 | {len(real_successes)}/{len(results[model])} | {avg_wall:.2f}s | {avg_tps:.0f} |"
                 )
             else:
-                lines.append(f"| {model} | - | 0/{len(results[model])} | - | - | - |")
+                lines.append(f"| {model} | - | 0/{len(results[model])} | - | - |")
 
         lines.append("")
 
-    # Ratings by element type per evaluator
+    # Criteria breakdown by element type
     elements_by_type: dict[str, list[int]] = defaultdict(list)
     for i, elem in enumerate(elements):
         elements_by_type[elem.element_type].append(i)
 
-    for eval_model in eval_models:
-        lines.append(f"## Ratings by Element Type (Evaluator: {eval_model})")
+    lines.append("## Criteria Scores by Element Type")
+    lines.append("")
+
+    for elem_type in sorted(elements_by_type.keys()):
+        indices = elements_by_type[elem_type]
+        criteria = EVALUATION_CRITERIA.get(elem_type, {})
+
+        lines.append(f"### {elem_type} ({len(indices)} elements)")
         lines.append("")
 
-        # Header row
-        header = "| Element Type |"
-        separator = "|--------------|"
+        # Header
+        header = "| Criterion |"
+        separator = "|-----------|"
         for model in models_tested:
             header += f" {model} |"
             separator += "-" * (len(model) + 2) + "|"
         lines.append(header)
         lines.append(separator)
 
-        for elem_type, indices in sorted(elements_by_type.items()):
-            row = f"| {elem_type} |"
+        for criterion in criteria.keys():
+            row = f"| {criterion} |"
             for model in models_tested:
-                # Only include ratings for real successes (from this evaluator)
-                type_ratings = []
+                criterion_scores = []
                 for i in indices:
                     r = results[model][i]
                     if r.success and r.response.strip():
                         cleaned = clean_summary(r.response)
                         if cleaned.strip():
-                            rating = ratings[i].get(model, {}).get(eval_model, {}).get("rating")
-                            if rating is not None:
-                                type_ratings.append(rating)
-                if type_ratings:
-                    avg = sum(type_ratings) / len(type_ratings)
+                            for em in eval_models:
+                                scores = get_criteria_scores(i, model, em)
+                                if criterion in scores:
+                                    criterion_scores.append(scores[criterion])
+                if criterion_scores:
+                    avg = sum(criterion_scores) / len(criterion_scores)
                     row += f" {avg:.1f} |"
                 else:
                     row += " - |"
             lines.append(row)
 
+        # Overall row
+        row = "| **Overall** |"
+        for model in models_tested:
+            model_scores = []
+            for i in indices:
+                r = results[model][i]
+                if r.success and r.response.strip():
+                    cleaned = clean_summary(r.response)
+                    if cleaned.strip():
+                        for em in eval_models:
+                            score = get_average(i, model, em)
+                            if score is not None:
+                                model_scores.append(score)
+            if model_scores:
+                avg = sum(model_scores) / len(model_scores)
+                row += f" **{avg:.1f}/10** |"
+            else:
+                row += " - |"
+        lines.append(row)
+
         lines.append("")
 
-    # Averaged ratings across all evaluators (if multiple)
+    # Averaged summary across all evaluators (if multiple)
     if len(eval_models) > 1:
         lines.append("## Summary (Averaged Across Evaluators)")
         lines.append("")
-        lines.append("| Model | Avg Rating | Success | Avg Time | Pre t/s | Gen t/s |")
-        lines.append("|-------|-----------|---------|----------|---------|---------|")
+        lines.append("| Model | Avg Score | Success | Avg Time | tok/s |")
+        lines.append("|-------|-----------|---------|----------|-------|")
 
         for model in models_tested:
             real_successes = real_successes_by_model[model]
             real_success_indices = real_success_indices_by_model[model]
 
-            # Average rating across all evaluators
-            all_ratings = []
+            all_scores = []
             for i in real_success_indices:
                 for em in eval_models:
-                    rating = ratings[i].get(model, {}).get(em, {}).get("rating")
-                    if rating is not None:
-                        all_ratings.append(rating)
-            avg_rating = sum(all_ratings) / len(all_ratings) if all_ratings else 0
+                    score = get_average(i, model, em)
+                    if score is not None:
+                        all_scores.append(score)
+            avg_score = sum(all_scores) / len(all_scores) if all_scores else 0
 
             if real_successes:
-                avg_wall = sum(r.ollama_total_time for r in real_successes) / len(real_successes)
-                avg_pre_tps = sum(r.prefill_tokens_per_second for r in real_successes) / len(real_successes)
-                avg_gen_tps = sum(r.tokens_per_second for r in real_successes) / len(real_successes)
+                avg_wall = sum(r.total_time for r in real_successes) / len(real_successes)
+                avg_tps = sum(r.tokens_per_second for r in real_successes) / len(real_successes)
                 lines.append(
-                    f"| {model} | {avg_rating:.1f}/10 | {len(real_successes)}/{len(results[model])} | {avg_wall:.2f}s | {avg_pre_tps:.0f} | {avg_gen_tps:.0f} |"
+                    f"| {model} | {avg_score:.1f}/10 | {len(real_successes)}/{len(results[model])} | {avg_wall:.2f}s | {avg_tps:.0f} |"
                 )
             else:
-                lines.append(f"| {model} | - | 0/{len(results[model])} | - | - | - |")
+                lines.append(f"| {model} | - | 0/{len(results[model])} | - | - |")
 
         lines.append("")
-
-        # Averaged element type table
-        lines.append("## Ratings by Element Type (Averaged Across Evaluators)")
-        lines.append("")
-
-        header = "| Element Type |"
-        separator = "|--------------|"
-        for model in models_tested:
-            header += f" {model} |"
-            separator += "-" * (len(model) + 2) + "|"
-        lines.append(header)
-        lines.append(separator)
-
-        for elem_type, indices in sorted(elements_by_type.items()):
-            row = f"| {elem_type} |"
-            for model in models_tested:
-                # Average ratings across all evaluators
-                type_ratings = []
-                for i in indices:
-                    r = results[model][i]
-                    if r.success and r.response.strip():
-                        cleaned = clean_summary(r.response)
-                        if cleaned.strip():
-                            for em in eval_models:
-                                rating = ratings[i].get(model, {}).get(em, {}).get("rating")
-                                if rating is not None:
-                                    type_ratings.append(rating)
-                if type_ratings:
-                    avg = sum(type_ratings) / len(type_ratings)
-                    row += f" {avg:.1f} |"
-                else:
-                    row += " - |"
-            lines.append(row)
-
-        lines.append("")
-
-        # Character length analysis
-        lines.append("## Ratings by Input Character Length (Averaged)")
-        lines.append("")
-
-        # Define character length ranges
-        char_ranges = [
-            (0, 500, "0-500"),
-            (500, 1000, "500-1K"),
-            (1000, 2000, "1K-2K"),
-            (2000, 4000, "2K-4K"),
-            (4000, 8000, "4K-8K"),
-            (8000, float("inf"), "8K+"),
-        ]
-
-        def get_char_range_label(chars: int) -> str:
-            for min_c, max_c, label in char_ranges:
-                if min_c <= chars < max_c:
-                    return label
-            return "8K+"
-
-        # Group elements by character length range
-        elements_by_char_range: dict[str, list[int]] = defaultdict(list)
-        for i, elem in enumerate(elements):
-            prompt_chars = 0
-            for model in models_tested:
-                if results[model][i].success and results[model][i].prompt_chars > 0:
-                    prompt_chars = results[model][i].prompt_chars
-                    break
-            if prompt_chars == 0:
-                prompt_chars = len(elem.raw_code or "") + 200
-            range_label = get_char_range_label(prompt_chars)
-            elements_by_char_range[range_label].append(i)
-
-        header = "| Char Range | Count |"
-        separator = "|------------|-------|"
-        for model in models_tested:
-            header += f" {model} |"
-            separator += "-" * (len(model) + 2) + "|"
-        lines.append(header)
-        lines.append(separator)
-
-        range_order = {label: i for i, (_, _, label) in enumerate(char_ranges)}
-        for range_label in sorted(elements_by_char_range.keys(), key=lambda x: range_order.get(x, 99)):
-            indices = elements_by_char_range[range_label]
-            row = f"| {range_label} | {len(indices)} |"
-            for model in models_tested:
-                range_ratings = []
-                for i in indices:
-                    r = results[model][i]
-                    if r.success and r.response.strip():
-                        cleaned = clean_summary(r.response)
-                        if cleaned.strip():
-                            for em in eval_models:
-                                rating = ratings[i].get(model, {}).get(em, {}).get("rating")
-                                if rating is not None:
-                                    range_ratings.append(rating)
-                if range_ratings:
-                    avg = sum(range_ratings) / len(range_ratings)
-                    row += f" {avg:.1f} |"
-                else:
-                    row += " - |"
-            lines.append(row)
-
-        lines.append("")
-
-        # Per-file breakdown by character range
-        lines.append("## Per-File Scores by Character Range")
-        lines.append("")
-
-        # Build file info with char range
-        file_char_data: dict[str, list[tuple[int, str, int, dict[str, float]]]] = defaultdict(list)
-
-        for i, elem in enumerate(elements):
-            prompt_chars = 0
-            for model in models_tested:
-                if results[model][i].success and results[model][i].prompt_chars > 0:
-                    prompt_chars = results[model][i].prompt_chars
-                    break
-            if prompt_chars == 0:
-                prompt_chars = len(elem.raw_code or "") + 200
-
-            model_ratings_elem: dict[str, float] = {}
-            for model in models_tested:
-                r = results[model][i]
-                if r.success and r.response.strip():
-                    cleaned = clean_summary(r.response)
-                    if cleaned.strip():
-                        elem_ratings = []
-                        for em in eval_models:
-                            rating = ratings[i].get(model, {}).get(em, {}).get("rating")
-                            if rating is not None:
-                                elem_ratings.append(rating)
-                        if elem_ratings:
-                            model_ratings_elem[model] = sum(elem_ratings) / len(elem_ratings)
-
-            elem_name = f"{elem.element_type}:{elem.name}"
-            file_char_data[elem.relative_path].append((i, elem_name, prompt_chars, model_ratings_elem))
-
-        # Output per character range
-        for range_label in sorted(elements_by_char_range.keys(), key=lambda x: range_order.get(x, 99)):
-            indices_in_range = set(elements_by_char_range[range_label])
-            if not indices_in_range:
-                continue
-
-            lines.append(f"### {range_label} characters")
-            lines.append("")
-
-            header = "| File | Element | Chars |"
-            separator = "|------|---------|-------|"
-            for model in models_tested:
-                short_name = model.split(":")[0][:15]
-                header += f" {short_name} |"
-                separator += "-" * (len(short_name) + 2) + "|"
-            lines.append(header)
-            lines.append(separator)
-
-            for file_path in sorted(file_char_data.keys()):
-                for elem_idx, elem_name, prompt_chars, model_ratings_elem in file_char_data[file_path]:
-                    if elem_idx not in indices_in_range:
-                        continue
-                    row = f"| {file_path.split('/')[-1][:30]} | {elem_name[:25]} | {prompt_chars} |"
-                    for model in models_tested:
-                        if model in model_ratings_elem:
-                            row += f" {model_ratings_elem[model]:.1f} |"
-                        else:
-                            row += " - |"
-                    lines.append(row)
-
-            lines.append("")
 
     # Detailed results per element
     lines.append("## Detailed Results")
@@ -2701,17 +2902,13 @@ def _save_benchmark_markdown(
             lines.append("</details>")
             lines.append("")
 
-        # Summaries by model (show ratings from each evaluator)
-        # Build header with rating columns for each evaluator
-        rating_cols = " | ".join([f"Rating ({em.split(':')[0]})" for em in eval_models])
-        lines.append(f"| Model | {rating_cols} | Summary |")
-        separator = "|-------|" + "|".join(["--------|"] * len(eval_models)) + "---------|"
-        lines.append(separator)
+        # Summaries by model with criteria scores
+        lines.append("| Model | Score | Summary |")
+        lines.append("|-------|-------|---------|")
 
         for model in models_tested:
             model_result = results[model][i]
 
-            # Check for real success
             summary = ""
             generation_ok = False
             if model_result.success and model_result.response.strip():
@@ -2719,34 +2916,30 @@ def _save_benchmark_markdown(
                 generation_ok = bool(summary.strip())
 
             if generation_ok:
-                # Collect ratings from all evaluators
-                rating_cells = []
-                for em in eval_models:
-                    rating = ratings[i].get(model, {}).get(em, {}).get("rating")
-                    rating_cells.append(f"{rating}/10" if rating else "?")
-                rating_str = " | ".join(rating_cells)
+                # Get averaged score across evaluators
+                scores = [get_average(i, model, em) for em in eval_models]
+                valid_scores = [s for s in scores if s is not None]
+                avg_score = sum(valid_scores) / len(valid_scores) if valid_scores else 0
 
                 # Escape pipes and truncate for table
                 summary_escaped = summary.replace("|", "\\|").replace("\n", " ")
                 if len(summary_escaped) > 200:
                     summary_escaped = summary_escaped[:200] + "..."
-                lines.append(f"| {model} | {rating_str} | {summary_escaped} |")
+                lines.append(f"| {model} | {avg_score:.1f}/10 | {summary_escaped} |")
             else:
                 error_msg = model_result.error if model_result.error else "empty after cleaning"
-                na_cells = " | ".join(["N/A"] * len(eval_models))
-                lines.append(f"| {model} | {na_cells} | *(failed: {error_msg[:30]})* |")
+                lines.append(f"| {model} | N/A | *(failed: {error_msg[:30]})* |")
 
         lines.append("")
 
-        # Full summaries (expandable)
+        # Full summaries with criteria breakdown (expandable)
         lines.append("<details>")
-        lines.append("<summary>Full Summaries</summary>")
+        lines.append("<summary>Full Summaries & Criteria</summary>")
         lines.append("")
 
         for model in models_tested:
             model_result = results[model][i]
 
-            # Check for real success
             summary = ""
             generation_ok = False
             if model_result.success and model_result.response.strip():
@@ -2754,20 +2947,37 @@ def _save_benchmark_markdown(
                 generation_ok = bool(summary.strip())
 
             if generation_ok:
-                # Show ratings from all evaluators
-                rating_parts = []
+                # Get scores and notes from evaluators
+                score_parts = []
                 for em in eval_models:
-                    em_short = em.split(':')[0]
-                    rating_data = ratings[i].get(model, {}).get(em, {})
-                    rating = rating_data.get("rating")
-                    reason = rating_data.get("reason", "")
-                    if rating:
-                        rating_parts.append(f"{em_short}: {rating}/10 - {reason}" if reason else f"{em_short}: {rating}/10")
+                    score = get_average(i, model, em)
+                    notes = get_notes(i, model, em)
+                    em_short = em.split('/')[0] if '/' in em else em
+                    if score is not None:
+                        if notes:
+                            score_parts.append(f"{em_short}: {score:.1f}/10 - {notes}")
+                        else:
+                            score_parts.append(f"{em_short}: {score:.1f}/10")
                     else:
-                        rating_parts.append(f"{em_short}: ?")
-                rating_str = " | ".join(rating_parts)
-                lines.append(f"**{model}** ({rating_str})")
+                        score_parts.append(f"{em_short}: ?")
+
+                lines.append(f"**{model}**")
                 lines.append("")
+                lines.append(f"Scores: {' | '.join(score_parts)}")
+                lines.append("")
+
+                # Show criteria breakdown
+                criteria = EVALUATION_CRITERIA.get(elem.element_type, {})
+                if criteria:
+                    lines.append("Criteria:")
+                    for em in eval_models:
+                        scores = get_criteria_scores(i, model, em)
+                        if scores:
+                            em_short = em.split('/')[0] if '/' in em else em
+                            criteria_str = ", ".join(f"{k}={v}" for k, v in scores.items())
+                            lines.append(f"- {em_short}: {criteria_str}")
+                    lines.append("")
+
                 lines.append(f"> {summary}")
             else:
                 error_msg = model_result.error if model_result.error else "empty after cleaning"
@@ -2807,163 +3017,6 @@ def _build_summarization_prompt(
         parent_summaries = {}
 
     return build_prompt(element, parent_summaries, max_code_tokens=4000)
-
-
-def _build_evaluation_prompt(
-    element: "CodeElement",
-    models: list[str],
-    results: dict[str, list],
-    element_index: int,
-) -> str:
-    """Build a prompt to evaluate and rate summaries.
-
-    Args:
-        element: The code element being summarized.
-        models: List of model names.
-        results: Dict mapping model name to list of BenchmarkResult.
-        element_index: Index of the element in the results lists.
-
-    Returns:
-        Prompt string for evaluation.
-    """
-    # Get source code (truncated if too long)
-    source_code = element.raw_code or "(no source code available)"
-    if len(source_code) > 2000:
-        source_code = source_code[:2000] + "\n... (truncated)"
-
-    # Build the prompt
-    prompt_parts = [
-        "You are evaluating code summaries for accuracy and usefulness.",
-        "",
-        f"## Source Code ({element.element_type}: {element.name})",
-        "```",
-        source_code,
-        "```",
-        "",
-        "## Summaries to Evaluate",
-    ]
-
-    for model in models:
-        result = results[model][element_index]
-        if result.success and result.response.strip():
-            # Apply same clean_summary as actual parsing
-            from shared.ai.summarization import clean_summary
-            summary = clean_summary(result.response)
-        else:
-            summary = "(generation failed)"
-        prompt_parts.append(f"\n### {model}")
-        prompt_parts.append(summary)
-
-    prompt_parts.extend([
-        "",
-        "## Task",
-        "Rate each summary 1-10 for how well it helps an AI agent understand and use this code.",
-        "",
-        "Criteria: Purpose clarity, when-to-use guidance, inputs/outputs, side effects, actionability.",
-        "10 = agent fully understands when/how to use this code. 1 = unhelpful.",
-        "",
-        "## Required Output Format",
-        "Output EXACTLY one line per model in this format:",
-        "MODEL_NAME: SCORE/10 - REASON",
-        "",
-        "Example:",
-        "some-model:3b: 7/10 - Clear purpose but missing edge cases",
-        "other/model: 8/10 - Comprehensive and actionable",
-        "",
-        f"You MUST output exactly {len(models)} ratings, one for each model below:",
-    ])
-
-    for model in models:
-        prompt_parts.append(f"- {model}")
-
-    prompt_parts.append("")
-    prompt_parts.append("Output your ratings now (no other text, just the ratings):")
-
-    return "\n".join(prompt_parts)
-
-
-def _parse_evaluation_ratings(response: str, models: list[str]) -> dict[str, dict]:
-    """Parse ratings and justifications from the LLM evaluation response.
-
-    Args:
-        response: The LLM response text.
-        models: List of model names to look for.
-
-    Returns:
-        Dict mapping model name to {"rating": int|None, "reason": str|None}.
-    """
-    import re
-
-    # First, clean the response of thinking tags (same patterns as clean_summary)
-    cleaned = response
-    thinking_patterns = [
-        r"<think>.*?</think>\s*",
-        r"<thinking>.*?</thinking>\s*",
-        r"<reasoning>.*?</reasoning>\s*",
-        r"<reflection>.*?</reflection>\s*",
-    ]
-    for pattern in thinking_patterns:
-        cleaned = re.sub(pattern, "", cleaned, flags=re.DOTALL | re.IGNORECASE)
-
-    # Handle unclosed tags
-    unclosed_patterns = [
-        r"<think>.*$",
-        r"<thinking>.*$",
-        r"<reasoning>.*$",
-        r"<reflection>.*$",
-    ]
-    for pattern in unclosed_patterns:
-        cleaned = re.sub(pattern, "", cleaned, flags=re.DOTALL | re.IGNORECASE)
-
-    ratings: dict[str, dict] = {}
-
-    for model in models:
-        # Look for patterns like "model_name: 8/10 - reason" or "model_name: 8 - reason"
-        # Escape special regex characters in model name
-        escaped_model = re.escape(model)
-
-        # Build patterns that handle various LLM formatting quirks:
-        # - Optional markdown (**, `)
-        # - Optional list prefixes (-, *, 1.)
-        # - Various separators (:, -, –, —)
-        # - Rating as X/10 or just X
-        prefix = r"(?:[-*]\s*|\d+\.\s*)?(?:\*\*|`)??"  # optional list prefix and markdown
-        suffix = r"(?:\*\*|`)??"  # closing markdown
-
-        patterns = [
-            # model: 8/10 - reason (with optional markdown/list prefix)
-            rf"{prefix}{escaped_model}{suffix}\s*[:\-–—]\s*(\d+)\s*/\s*10\s*[-–—:]\s*(.+?)(?:\n|$)",
-            # model: 8 - reason
-            rf"{prefix}{escaped_model}{suffix}\s*[:\-–—]\s*(\d+)\s*[-–—:]\s*(.+?)(?:\n|$)",
-            # model: 8/10 (no reason)
-            rf"{prefix}{escaped_model}{suffix}\s*[:\-–—]\s*(\d+)\s*/\s*10",
-            # model: 8 (no reason)
-            rf"{prefix}{escaped_model}{suffix}\s*[:\-–—]\s*(\d+)(?:\s|$|/)",
-            # Fallback: just find model name followed somewhere by a number/10
-            rf"{escaped_model}[^0-9]*?(\d+)\s*/\s*10",
-        ]
-
-        rating = None
-        reason = None
-        for pattern in patterns:
-            match = re.search(pattern, cleaned, re.IGNORECASE)
-            if match:
-                try:
-                    r = int(match.group(1))
-                    if 1 <= r <= 10:
-                        rating = r
-                        # Check if there's a reason captured
-                        if len(match.groups()) > 1:
-                            captured_reason = match.group(2)
-                            if captured_reason:
-                                reason = captured_reason.strip()
-                        break
-                except ValueError:
-                    pass
-
-        ratings[model] = {"rating": rating, "reason": reason}
-
-    return ratings
 
 
 # =============================================================================

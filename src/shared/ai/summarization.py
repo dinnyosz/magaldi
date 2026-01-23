@@ -673,6 +673,25 @@ def clean_summary(summary: str) -> str:
     if not summary:
         return summary
 
+    # Truncate at chat template markers (model starting a new turn)
+    # These indicate the model went past the intended response
+    chat_markers = [
+        "<|im_start|>",      # ChatML format (Qwen, etc.)
+        "<|im_end|>",        # ChatML end
+        "<|im_sep|>",        # ChatML separator
+        "<|assistant|>",     # Phi format
+        "<|user|>",          # Phi format
+        "<|end|>",           # Generic end
+        "<|eot_id|>",        # Llama 3 format
+        "<|start_header_id|>",  # Llama 3 format
+        "[INST]",            # Mistral/Llama 2 format
+        "[/INST]",           # Mistral/Llama 2 format
+        "### ",              # Alpaca format (### Response:, ### Human:, etc.)
+    ]
+    for marker in chat_markers:
+        if marker in summary:
+            summary = summary.split(marker)[0]
+
     # Remove reasoning/thinking tags from models like nemotron-3-nano, DeepSeek, etc.
     # These models output chain-of-thought in <think>...</think> or similar tags
     thinking_patterns = [
