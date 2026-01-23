@@ -26,6 +26,10 @@ from magaldi_mcp.tools import (
     find_implementations,
     get_call_graph,
     pattern_search,
+    find_callers,
+    find_call_chain,
+    find_dead_code,
+    find_entry_points,
 )
 
 
@@ -2328,3 +2332,626 @@ class TestFindImplementationsWithPatternSearch:
         pattern = call_args[1]["pattern"]
         # Dot should be escaped
         assert "\\." in pattern
+
+
+# =============================================================================
+# FIND CALLERS TESTS
+# =============================================================================
+
+
+class TestFindCallers:
+    """Tests for find_callers function."""
+
+    def test_find_callers_returns_grouped_results(self, mock_es_repo):
+        """Test find_callers returns callers grouped by code/tests."""
+        mock_es_repo.get_document.return_value = {
+            "element_id": "scope:repo:main:utils.py:function:helper:10",
+            "name": "helper",
+            "element_type": "function",
+            "relative_path": "utils.py",
+            "line_start": 10,
+            "scope": "scope",
+            "repository": "repo",
+            "username": "main",
+        }
+        mock_es_repo.find_elements_calling.return_value = [
+            {
+                "element_id": "scope:repo:main:app.py:function:main:1",
+                "name": "main",
+                "element_type": "function",
+                "relative_path": "app.py",
+                "line_start": 1,
+                "is_test": False,
+                "summary": "Main function",
+            },
+            {
+                "element_id": "scope:repo:main:test_app.py:function:test_helper:5",
+                "name": "test_helper",
+                "element_type": "function",
+                "relative_path": "test_app.py",
+                "line_start": 5,
+                "is_test": True,
+                "summary": "Test for helper",
+            },
+        ]
+
+        result = find_callers(
+            es=mock_es_repo,
+            element_id="scope:repo:main:utils.py:function:helper:10",
+        )
+
+        assert "target" in result
+        assert "code_results" in result
+        assert "test_results" in result
+        assert result["target"]["name"] == "helper"
+        assert len(result["code_results"]) == 1
+        assert len(result["test_results"]) == 1
+        assert result["code_results"][0]["name"] == "main"
+        assert result["test_results"][0]["name"] == "test_helper"
+
+    def test_find_callers_not_found_raises(self, mock_es_repo):
+        """Test find_callers raises when element not found."""
+        mock_es_repo.get_document.return_value = None
+
+        with pytest.raises(ValueError, match="Element not found"):
+            find_callers(es=mock_es_repo, element_id="nonexistent")
+
+    def test_find_callers_excludes_tests_when_disabled(self, mock_es_repo):
+        """Test find_callers excludes test results when include_tests=False."""
+        mock_es_repo.get_document.return_value = {
+            "element_id": "scope:repo:main:utils.py:function:helper:10",
+            "name": "helper",
+            "element_type": "function",
+            "relative_path": "utils.py",
+            "line_start": 10,
+            "scope": "scope",
+            "repository": "repo",
+            "username": "main",
+        }
+        mock_es_repo.find_elements_calling.return_value = [
+            {
+                "element_id": "scope:repo:main:test_app.py:function:test_helper:5",
+                "name": "test_helper",
+                "element_type": "function",
+                "relative_path": "test_app.py",
+                "line_start": 5,
+                "is_test": True,
+            },
+        ]
+
+        result = find_callers(
+            es=mock_es_repo,
+            element_id="scope:repo:main:utils.py:function:helper:10",
+            include_tests=False,
+        )
+
+        assert len(result["code_results"]) == 0
+        assert len(result["test_results"]) == 0
+
+    def test_find_callers_uses_target_scope_repo(self, mock_es_repo):
+        """Test find_callers uses target's scope/repo if not specified."""
+        mock_es_repo.get_document.return_value = {
+            "element_id": "myscope:myrepo:main:utils.py:function:helper:10",
+            "name": "helper",
+            "element_type": "function",
+            "relative_path": "utils.py",
+            "line_start": 10,
+            "scope": "myscope",
+            "repository": "myrepo",
+            "username": "main",
+        }
+        mock_es_repo.find_elements_calling.return_value = []
+
+        find_callers(
+            es=mock_es_repo,
+            element_id="myscope:myrepo:main:utils.py:function:helper:10",
+        )
+
+        call_args = mock_es_repo.find_elements_calling.call_args
+        assert call_args[1]["scope"] == "myscope"
+        assert call_args[1]["repository"] == "myrepo"
+
+
+# =============================================================================
+# FIND CALL CHAIN TESTS
+# =============================================================================
+
+
+class TestFindCallChain:
+    """Tests for find_call_chain function."""
+
+    def test_find_call_chain_callees(self, mock_es_repo):
+        """Test find_call_chain traces callees."""
+        mock_es_repo.get_document.side_effect = [
+            # Root element
+            {
+                "element_id": "scope:repo:main:app.py:function:main:1",
+                "name": "main",
+                "element_type": "function",
+                "relative_path": "app.py",
+                "line_start": 1,
+                "scope": "scope",
+                "repository": "repo",
+                "username": "main",
+            },
+            # First callee
+            {
+                "element_id": "scope:repo:main:utils.py:function:helper:10",
+                "name": "helper",
+                "element_type": "function",
+                "relative_path": "utils.py",
+                "line_start": 10,
+            },
+        ]
+        mock_es_repo.get_calls.side_effect = [
+            # Calls from main
+            [
+                {
+                    "name": "helper",
+                    "receiver": None,
+                    "line": 5,
+                    "resolved_id": "scope:repo:main:utils.py:function:helper:10",
+                }
+            ],
+            # Calls from helper (none)
+            [],
+        ]
+
+        result = find_call_chain(
+            es=mock_es_repo,
+            element_id="scope:repo:main:app.py:function:main:1",
+            direction="callees",
+            max_depth=3,
+        )
+
+        assert "root" in result
+        assert result["root"]["name"] == "main"
+        assert result["direction"] == "callees"
+        assert "callees" in result
+        assert len(result["callees"]) == 1
+        assert result["callees"][0]["name"] == "helper"
+
+    def test_find_call_chain_callers(self, mock_es_repo):
+        """Test find_call_chain traces callers."""
+        mock_es_repo.get_document.return_value = {
+            "element_id": "scope:repo:main:utils.py:function:helper:10",
+            "name": "helper",
+            "element_type": "function",
+            "relative_path": "utils.py",
+            "line_start": 10,
+            "scope": "scope",
+            "repository": "repo",
+            "username": "main",
+        }
+        mock_es_repo.find_elements_calling.side_effect = [
+            # Callers of helper
+            [
+                {
+                    "element_id": "scope:repo:main:app.py:function:main:1",
+                    "name": "main",
+                    "element_type": "function",
+                    "relative_path": "app.py",
+                    "line_start": 1,
+                }
+            ],
+            # Callers of main (none)
+            [],
+        ]
+
+        result = find_call_chain(
+            es=mock_es_repo,
+            element_id="scope:repo:main:utils.py:function:helper:10",
+            direction="callers",
+            max_depth=3,
+        )
+
+        assert "callers" in result
+        assert len(result["callers"]) == 1
+        assert result["callers"][0]["name"] == "main"
+
+    def test_find_call_chain_not_found_raises(self, mock_es_repo):
+        """Test find_call_chain raises when element not found."""
+        mock_es_repo.get_document.return_value = None
+
+        with pytest.raises(ValueError, match="Element not found"):
+            find_call_chain(es=mock_es_repo, element_id="nonexistent")
+
+    def test_find_call_chain_detects_cycles(self, mock_es_repo):
+        """Test find_call_chain marks cycles instead of infinite recursion."""
+        mock_es_repo.get_document.side_effect = [
+            # Root element (func_a)
+            {
+                "element_id": "scope:repo:main:app.py:function:func_a:1",
+                "name": "func_a",
+                "element_type": "function",
+                "relative_path": "app.py",
+                "line_start": 1,
+                "scope": "scope",
+                "repository": "repo",
+                "username": "main",
+            },
+            # func_b
+            {
+                "element_id": "scope:repo:main:app.py:function:func_b:10",
+                "name": "func_b",
+                "element_type": "function",
+                "relative_path": "app.py",
+                "line_start": 10,
+            },
+        ]
+        mock_es_repo.get_calls.side_effect = [
+            # func_a calls func_b
+            [
+                {
+                    "name": "func_b",
+                    "receiver": None,
+                    "line": 5,
+                    "resolved_id": "scope:repo:main:app.py:function:func_b:10",
+                }
+            ],
+            # func_b calls func_a (creates cycle)
+            [
+                {
+                    "name": "func_a",
+                    "receiver": None,
+                    "line": 15,
+                    "resolved_id": "scope:repo:main:app.py:function:func_a:1",
+                }
+            ],
+        ]
+
+        result = find_call_chain(
+            es=mock_es_repo,
+            element_id="scope:repo:main:app.py:function:func_a:1",
+            direction="callees",
+            max_depth=5,
+        )
+
+        # Should have callees
+        assert "callees" in result
+        assert len(result["callees"]) == 1
+        # func_b should have a cycle marked
+        func_b = result["callees"][0]
+        assert func_b["name"] == "func_b"
+        # func_b's callees should contain func_a marked as cycle
+        assert len(func_b.get("callees", [])) == 1
+        assert func_b["callees"][0].get("cycle") is True
+
+    def test_find_call_chain_max_depth_clamped(self, mock_es_repo):
+        """Test find_call_chain clamps max_depth to valid range."""
+        mock_es_repo.get_document.return_value = {
+            "element_id": "scope:repo:main:app.py:function:main:1",
+            "name": "main",
+            "element_type": "function",
+            "relative_path": "app.py",
+            "line_start": 1,
+            "scope": "scope",
+            "repository": "repo",
+            "username": "main",
+        }
+        mock_es_repo.get_calls.return_value = []
+
+        # Test max_depth > 10 is clamped to 10
+        result = find_call_chain(
+            es=mock_es_repo,
+            element_id="scope:repo:main:app.py:function:main:1",
+            max_depth=20,
+        )
+        assert result["max_depth"] == 10
+
+        # Test max_depth < 1 is clamped to 1
+        result = find_call_chain(
+            es=mock_es_repo,
+            element_id="scope:repo:main:app.py:function:main:1",
+            max_depth=0,
+        )
+        assert result["max_depth"] == 1
+
+
+# =============================================================================
+# FIND DEAD CODE TESTS
+# =============================================================================
+
+
+class TestFindDeadCode:
+    """Tests for find_dead_code function."""
+
+    def test_find_dead_code_returns_uncalled_functions(self, mock_es_repo):
+        """Test find_dead_code returns functions with no callers."""
+        mock_client = MagicMock()
+        mock_es_repo._get_client.return_value = mock_client
+        mock_client.search.return_value = {
+            "hits": {
+                "hits": [
+                    {
+                        "_source": {
+                            "element_id": "scope:repo:main:utils.py:function:unused:10",
+                            "name": "unused",
+                            "element_type": "function",
+                            "relative_path": "utils.py",
+                            "line_start": 10,
+                            "decorators": [],
+                            "is_test": False,
+                            "summary": "Unused function",
+                        }
+                    },
+                    {
+                        "_source": {
+                            "element_id": "scope:repo:main:utils.py:function:used:20",
+                            "name": "used",
+                            "element_type": "function",
+                            "relative_path": "utils.py",
+                            "line_start": 20,
+                            "decorators": [],
+                            "is_test": False,
+                            "summary": "Used function",
+                        }
+                    },
+                ]
+            }
+        }
+        # First function has no callers, second has callers
+        mock_es_repo.find_elements_calling.side_effect = [[], [{"name": "caller"}]]
+
+        result = find_dead_code(
+            es=mock_es_repo,
+            scope="scope",
+            repository="repo",
+        )
+
+        assert "potentially_dead" in result
+        assert "stats" in result
+        assert len(result["potentially_dead"]) == 1
+        assert result["potentially_dead"][0]["name"] == "unused"
+        assert result["stats"]["total_functions"] == 2
+        assert result["stats"]["potentially_dead"] == 1
+
+    def test_find_dead_code_excludes_entry_points(self, mock_es_repo):
+        """Test find_dead_code excludes decorated entry points."""
+        mock_client = MagicMock()
+        mock_es_repo._get_client.return_value = mock_client
+        mock_client.search.return_value = {
+            "hits": {
+                "hits": [
+                    {
+                        "_source": {
+                            "element_id": "scope:repo:main:app.py:function:index:10",
+                            "name": "index",
+                            "element_type": "function",
+                            "relative_path": "app.py",
+                            "line_start": 10,
+                            "decorators": ["@app.route('/')"],
+                            "is_test": False,
+                        }
+                    },
+                ]
+            }
+        }
+
+        result = find_dead_code(
+            es=mock_es_repo,
+            scope="scope",
+            repository="repo",
+        )
+
+        # Entry point should be excluded, not in dead code
+        assert len(result["potentially_dead"]) == 0
+        assert result["stats"]["excluded_entry_points"] == 1
+
+    def test_find_dead_code_excludes_magic_methods(self, mock_es_repo):
+        """Test find_dead_code excludes __init__ and other magic methods."""
+        mock_client = MagicMock()
+        mock_es_repo._get_client.return_value = mock_client
+        mock_client.search.return_value = {
+            "hits": {
+                "hits": [
+                    {
+                        "_source": {
+                            "element_id": "scope:repo:main:cls.py:method:__init__:10",
+                            "name": "__init__",
+                            "element_type": "method",
+                            "relative_path": "cls.py",
+                            "line_start": 10,
+                            "decorators": [],
+                            "is_test": False,
+                        }
+                    },
+                ]
+            }
+        }
+
+        result = find_dead_code(
+            es=mock_es_repo,
+            scope="scope",
+            repository="repo",
+        )
+
+        # __init__ should be excluded
+        assert len(result["potentially_dead"]) == 0
+        assert result["stats"]["excluded_entry_points"] == 1
+
+    def test_find_dead_code_excludes_main(self, mock_es_repo):
+        """Test find_dead_code excludes main functions."""
+        mock_client = MagicMock()
+        mock_es_repo._get_client.return_value = mock_client
+        mock_client.search.return_value = {
+            "hits": {
+                "hits": [
+                    {
+                        "_source": {
+                            "element_id": "scope:repo:main:app.py:function:main:1",
+                            "name": "main",
+                            "element_type": "function",
+                            "relative_path": "app.py",
+                            "line_start": 1,
+                            "decorators": [],
+                            "is_test": False,
+                        }
+                    },
+                ]
+            }
+        }
+
+        result = find_dead_code(
+            es=mock_es_repo,
+            scope="scope",
+            repository="repo",
+        )
+
+        assert len(result["potentially_dead"]) == 0
+        assert result["stats"]["excluded_entry_points"] == 1
+
+
+# =============================================================================
+# FIND ENTRY POINTS TESTS
+# =============================================================================
+
+
+class TestFindEntryPoints:
+    """Tests for find_entry_points function."""
+
+    def test_find_entry_points_groups_by_type(self, mock_es_repo):
+        """Test find_entry_points groups results by type."""
+        mock_client = MagicMock()
+        mock_es_repo._get_client.return_value = mock_client
+        mock_client.search.return_value = {
+            "hits": {
+                "hits": [
+                    {
+                        "_source": {
+                            "element_id": "scope:repo:main:app.py:function:index:10",
+                            "name": "index",
+                            "element_type": "function",
+                            "relative_path": "app.py",
+                            "line_start": 10,
+                            "decorators": ["@app.route('/')"],
+                            "is_test": False,
+                        }
+                    },
+                    {
+                        "_source": {
+                            "element_id": "scope:repo:main:cli.py:function:run:20",
+                            "name": "run",
+                            "element_type": "function",
+                            "relative_path": "cli.py",
+                            "line_start": 20,
+                            "decorators": ["@click.command()"],
+                            "is_test": False,
+                        }
+                    },
+                    {
+                        "_source": {
+                            "element_id": "scope:repo:main:conftest.py:function:client:5",
+                            "name": "client",
+                            "element_type": "function",
+                            "relative_path": "conftest.py",
+                            "line_start": 5,
+                            "decorators": ["@pytest.fixture"],
+                            "is_test": False,
+                        }
+                    },
+                    {
+                        "_source": {
+                            "element_id": "scope:repo:main:app.py:function:main:1",
+                            "name": "main",
+                            "element_type": "function",
+                            "relative_path": "app.py",
+                            "line_start": 1,
+                            "decorators": [],
+                            "is_test": False,
+                        }
+                    },
+                ]
+            }
+        }
+
+        result = find_entry_points(
+            es=mock_es_repo,
+            scope="scope",
+            repository="repo",
+        )
+
+        assert "http" in result
+        assert "cli" in result
+        assert "test" in result
+        assert "main" in result
+        assert "stats" in result
+
+        assert len(result["http"]) == 1
+        assert result["http"][0]["name"] == "index"
+
+        assert len(result["cli"]) == 1
+        assert result["cli"][0]["name"] == "run"
+
+        assert len(result["test"]) == 1
+        assert result["test"][0]["name"] == "client"
+
+        assert len(result["main"]) == 1
+        assert result["main"][0]["name"] == "main"
+
+        assert result["stats"]["total"] == 4
+
+    def test_find_entry_points_with_no_matches(self, mock_es_repo):
+        """Test find_entry_points with no entry points."""
+        mock_client = MagicMock()
+        mock_es_repo._get_client.return_value = mock_client
+        mock_client.search.return_value = {
+            "hits": {
+                "hits": [
+                    {
+                        "_source": {
+                            "element_id": "scope:repo:main:utils.py:function:helper:10",
+                            "name": "helper",
+                            "element_type": "function",
+                            "relative_path": "utils.py",
+                            "line_start": 10,
+                            "decorators": [],
+                            "is_test": False,
+                        }
+                    },
+                ]
+            }
+        }
+
+        result = find_entry_points(
+            es=mock_es_repo,
+            scope="scope",
+            repository="repo",
+        )
+
+        assert len(result["http"]) == 0
+        assert len(result["cli"]) == 0
+        assert len(result["test"]) == 0
+        assert len(result["main"]) == 0
+        assert result["stats"]["total"] == 0
+
+    def test_find_entry_points_async_tasks(self, mock_es_repo):
+        """Test find_entry_points detects async task decorators."""
+        mock_client = MagicMock()
+        mock_es_repo._get_client.return_value = mock_client
+        mock_client.search.return_value = {
+            "hits": {
+                "hits": [
+                    {
+                        "_source": {
+                            "element_id": "scope:repo:main:tasks.py:function:process:10",
+                            "name": "process",
+                            "element_type": "function",
+                            "relative_path": "tasks.py",
+                            "line_start": 10,
+                            "decorators": ["@celery.task"],
+                            "is_test": False,
+                        }
+                    },
+                ]
+            }
+        }
+
+        result = find_entry_points(
+            es=mock_es_repo,
+            scope="scope",
+            repository="repo",
+        )
+
+        assert len(result["async_tasks"]) == 1
+        assert result["async_tasks"][0]["name"] == "process"

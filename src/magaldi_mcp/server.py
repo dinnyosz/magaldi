@@ -404,6 +404,77 @@ class MagaldiMCPServer:
                         "required": ["element_id"],
                     },
                 ),
+                Tool(
+                    name="find_callers",
+                    description="FIND CALLERS: Find all functions that call a given function/method. "
+                    "Uses indexed call data for instant results. Returns callers grouped by code/tests.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "element_id": {"type": "string", "description": "Target element ID to find callers of"},
+                            "scope": {"type": "string", "description": "Filter by scope"},
+                            "repository": {"type": "string", "description": "Filter by repository"},
+                            "username": {"type": "string", "description": "Filter by username branch"},
+                            "limit": {"type": "integer", "default": 30, "description": "Max results"},
+                            "include_tests": {"type": "boolean", "default": True, "description": "Include test functions"},
+                        },
+                        "required": ["element_id"],
+                    },
+                ),
+                Tool(
+                    name="find_call_chain",
+                    description="CALL CHAIN: Trace call chains from an element. "
+                    "Shows what a function calls (callees) or what calls it (callers) recursively. "
+                    "Use for impact analysis before refactoring.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "element_id": {"type": "string", "description": "Starting element ID"},
+                            "direction": {
+                                "type": "string",
+                                "enum": ["callers", "callees", "both"],
+                                "default": "callees",
+                                "description": "callers: what calls this, callees: what this calls, both: both directions",
+                            },
+                            "max_depth": {"type": "integer", "default": 5, "description": "Max depth to traverse (1-10)"},
+                            "scope": {"type": "string", "description": "Filter by scope"},
+                            "repository": {"type": "string", "description": "Filter by repository"},
+                            "username": {"type": "string", "description": "Filter by username branch"},
+                        },
+                        "required": ["element_id"],
+                    },
+                ),
+                Tool(
+                    name="find_dead_code",
+                    description="DEAD CODE: Find functions/methods that are never called. "
+                    "Excludes entry points (routes, CLI commands), magic methods, and main functions. "
+                    "Use for codebase cleanup.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "scope": {"type": "string", "description": "Repository scope (required)"},
+                            "repository": {"type": "string", "description": "Repository name (required)"},
+                            "username": {"type": "string", "description": "Username branch"},
+                            "include_tests": {"type": "boolean", "default": False, "description": "Include test functions in check"},
+                        },
+                        "required": ["scope", "repository"],
+                    },
+                ),
+                Tool(
+                    name="find_entry_points",
+                    description="ENTRY POINTS: Find HTTP handlers, CLI commands, test fixtures, main functions. "
+                    "Detects entry points by decorator patterns (@route, @command, @fixture) and naming. "
+                    "Returns grouped by type.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "scope": {"type": "string", "description": "Repository scope (required)"},
+                            "repository": {"type": "string", "description": "Repository name (required)"},
+                            "username": {"type": "string", "description": "Username branch"},
+                        },
+                        "required": ["scope", "repository"],
+                    },
+                ),
                 # =============================================================
                 # META - Self-documentation
                 # =============================================================
@@ -489,6 +560,10 @@ class MagaldiMCPServer:
         """Dispatch tool call to implementation."""
         from magaldi_mcp.tools import (
             batch_get_elements,
+            find_call_chain,
+            find_callers,
+            find_dead_code,
+            find_entry_points,
             find_files,
             find_implementations,
             find_similar,
@@ -682,6 +757,45 @@ class MagaldiMCPServer:
                 es,
                 element_id=args["element_id"],
                 direction=args.get("direction", "both"),
+            )
+        elif name == "find_callers":
+            return await asyncio.to_thread(
+                find_callers,
+                es,
+                element_id=args["element_id"],
+                scope=args.get("scope"),
+                repository=args.get("repository"),
+                username=args.get("username"),
+                limit=args.get("limit", 30),
+                include_tests=args.get("include_tests", True),
+            )
+        elif name == "find_call_chain":
+            return await asyncio.to_thread(
+                find_call_chain,
+                es,
+                element_id=args["element_id"],
+                direction=args.get("direction", "callees"),
+                max_depth=args.get("max_depth", 5),
+                scope=args.get("scope"),
+                repository=args.get("repository"),
+                username=args.get("username"),
+            )
+        elif name == "find_dead_code":
+            return await asyncio.to_thread(
+                find_dead_code,
+                es,
+                scope=args["scope"],
+                repository=args["repository"],
+                username=args.get("username"),
+                include_tests=args.get("include_tests", False),
+            )
+        elif name == "find_entry_points":
+            return await asyncio.to_thread(
+                find_entry_points,
+                es,
+                scope=args["scope"],
+                repository=args["repository"],
+                username=args.get("username"),
             )
         elif name == "generate_skill":
             return await asyncio.to_thread(
@@ -969,22 +1083,149 @@ def _format_result(result: Any) -> str:
             lines.append(f"  By type: {result.get('elements_by_type')}")
             return "\n".join(lines)
 
-        # Call graph
-        if "callers" in result and "callees" in result:
+        # Call graph (get_call_graph result)
+        if "callers" in result and "callees" in result and "element" in result:
             elem = result.get("element", {})
-            lines = [f"Call graph for [{elem.get('type')}] {elem.get('name')} ({elem.get('file')})\n"]
+            lines = [f"Call graph for [{elem.get('type')}] {elem.get('name')} ({elem.get('file')}:{elem.get('line')})\n"]
 
             if result.get("callers"):
                 lines.append(f"Callers ({len(result['callers'])}):")
                 for c in result["callers"]:
-                    lines.append(f"  {c.get('file')}:{c.get('line')}")
-                    lines.append(f"    > {c.get('content', '').strip()}")
+                    loc = f"{c.get('file')}:{c.get('line')}" if c.get('file') else "?"
+                    lines.append(f"  [{c.get('type', '?')}] {c.get('name')} ({loc})")
+                    if c.get('summary'):
+                        summary = c['summary'][:100] + "..." if len(c.get('summary', '')) > 100 else c.get('summary', '')
+                        lines.append(f"    {summary}")
                 lines.append("")
 
             if result.get("callees"):
                 lines.append(f"Callees ({len(result['callees'])}):")
                 for c in result["callees"]:
-                    lines.append(f"  {c.get('name')}")
+                    if c.get("element_id"):
+                        loc = f"{c.get('file')}:{c.get('target_line')}" if c.get('file') else "?"
+                        lines.append(f"  [{c.get('type', '?')}] {c.get('name')} ({loc})")
+                        if c.get('summary'):
+                            summary = c['summary'][:100] + "..." if len(c.get('summary', '')) > 100 else c.get('summary', '')
+                            lines.append(f"    {summary}")
+                    else:
+                        receiver = f"{c.get('receiver')}." if c.get('receiver') else ""
+                        lines.append(f"  {receiver}{c.get('name')}() @ line {c.get('line')} (unresolved)")
+                lines.append("")
+
+            return "\n".join(lines)
+
+        # find_callers result (has "target" key)
+        if "target" in result and "code_results" in result and "test_results" in result:
+            target = result.get("target", {})
+            lines = [f"Callers of [{target.get('type')}] {target.get('name')} ({target.get('file')}:{target.get('line')})\n"]
+
+            code_results = result.get("code_results", [])
+            test_results = result.get("test_results", [])
+
+            if code_results:
+                lines.append(f"Code Callers ({len(code_results)}):")
+                for c in code_results:
+                    loc = f"{c.get('file')}:{c.get('line')}" if c.get('file') else "?"
+                    lines.append(f"  [{c.get('type', '?')}] {c.get('name')} ({loc})")
+                    if c.get('summary'):
+                        summary = c['summary'][:100] + "..." if len(c.get('summary', '')) > 100 else c.get('summary', '')
+                        lines.append(f"    {summary}")
+                lines.append("")
+
+            if test_results:
+                lines.append(f"Test Callers ({len(test_results)}):")
+                for c in test_results:
+                    loc = f"{c.get('file')}:{c.get('line')}" if c.get('file') else "?"
+                    lines.append(f"  [{c.get('type', '?')}] {c.get('name')} ({loc})")
+
+            return "\n".join(lines)
+
+        # find_call_chain result (has "root" and "direction" keys)
+        if "root" in result and "direction" in result:
+            root = result.get("root", {})
+            direction = result.get("direction")
+            max_depth = result.get("max_depth", 5)
+            lines = [f"Call chain for [{root.get('type')}] {root.get('name')} ({root.get('file')}:{root.get('line')})"]
+            lines.append(f"Direction: {direction}, Max depth: {max_depth}\n")
+
+            def format_tree(nodes: list, indent: int = 0) -> None:
+                for node in nodes:
+                    prefix = "  " * indent
+                    if node.get("cycle"):
+                        lines.append(f"{prefix}[CYCLE] {node.get('name')}")
+                    elif node.get("unresolved"):
+                        receiver = f"{node.get('receiver')}." if node.get('receiver') else ""
+                        lines.append(f"{prefix}[unresolved] {receiver}{node.get('name')}()")
+                    elif node.get("missing"):
+                        lines.append(f"{prefix}[missing] {node.get('name')}")
+                    else:
+                        loc = f"{node.get('file')}:{node.get('line')}" if node.get('file') else "?"
+                        lines.append(f"{prefix}[{node.get('type', '?')}] {node.get('name')} ({loc})")
+                        # Recurse into children
+                        if node.get("callers"):
+                            format_tree(node["callers"], indent + 1)
+                        if node.get("callees"):
+                            format_tree(node["callees"], indent + 1)
+
+            if result.get("callers"):
+                lines.append("Callers:")
+                format_tree(result["callers"], 1)
+                lines.append("")
+
+            if result.get("callees"):
+                lines.append("Callees:")
+                format_tree(result["callees"], 1)
+
+            return "\n".join(lines)
+
+        # find_dead_code result (has "potentially_dead" key)
+        if "potentially_dead" in result and "stats" in result:
+            dead = result.get("potentially_dead", [])
+            stats = result.get("stats", {})
+            lines = [f"Dead Code Analysis\n"]
+            lines.append(f"Stats:")
+            lines.append(f"  Total functions: {stats.get('total_functions', 0)}")
+            lines.append(f"  Excluded (entry points): {stats.get('excluded_entry_points', 0)}")
+            lines.append(f"  Called: {stats.get('called', 0)}")
+            lines.append(f"  Potentially dead: {stats.get('potentially_dead', 0)}")
+            lines.append("")
+
+            if dead:
+                lines.append(f"Potentially Dead Code ({len(dead)}):")
+                for d in dead:
+                    loc = f"{d.get('file')}:{d.get('line')}" if d.get('file') else "?"
+                    lines.append(f"  [{d.get('type', '?')}] {d.get('name')} ({loc})")
+                    if d.get('summary'):
+                        summary = d['summary'][:100] + "..." if len(d.get('summary', '')) > 100 else d.get('summary', '')
+                        lines.append(f"    {summary}")
+            else:
+                lines.append("No potentially dead code found!")
+
+            return "\n".join(lines)
+
+        # find_entry_points result (has "http", "cli", "test", "main" keys)
+        if "http" in result and "cli" in result and "test" in result and "main" in result:
+            stats = result.get("stats", {})
+            lines = [f"Entry Points (Total: {stats.get('total', 0)})\n"]
+
+            def format_entries(title: str, entries: list) -> None:
+                if entries:
+                    lines.append(f"{title} ({len(entries)}):")
+                    for e in entries:
+                        loc = f"{e.get('file')}:{e.get('line')}" if e.get('file') else "?"
+                        lines.append(f"  [{e.get('type', '?')}] {e.get('name')} ({loc})")
+                        if e.get('decorators'):
+                            decs = ", ".join(e['decorators'][:3])
+                            if len(e['decorators']) > 3:
+                                decs += "..."
+                            lines.append(f"    decorators: {decs}")
+                    lines.append("")
+
+            format_entries("HTTP Handlers", result.get("http", []))
+            format_entries("CLI Commands", result.get("cli", []))
+            format_entries("Test Fixtures", result.get("test", []))
+            format_entries("Main Functions", result.get("main", []))
+            format_entries("Async Tasks", result.get("async_tasks", []))
 
             return "\n".join(lines)
 

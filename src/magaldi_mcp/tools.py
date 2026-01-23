@@ -1528,55 +1528,608 @@ def get_call_graph(
 
     name = doc.get("name")
     element_type = doc.get("element_type")
-    raw_code = doc.get("raw_code", "")
     defining_file = doc.get("relative_path")
+    line_start = doc.get("line_start")
+    scope = doc.get("scope")
+    repository = doc.get("repository")
+    username = doc.get("username", "main")
 
     result: dict[str, Any] = {
         "element": {
             "name": name,
             "type": element_type,
             "file": defining_file,
+            "line": line_start,
+            "element_id": element_id,
         },
         "callers": [],
         "callees": [],
     }
 
-    # Find callers (who calls this function)
+    # Find callers (who calls this function) using indexed call data
     if direction in ("callers", "both"):
-        usages = find_usages(es, element_id, limit=20)
-        for usage in usages:
+        callers = es.find_elements_calling(
+            target_id=element_id,
+            scope=scope,
+            repository=repository,
+            username=username,
+            limit=30,
+        )
+        for caller in callers:
             result["callers"].append({
-                "file": usage["file"],
-                "line": usage["line"],
-                "content": usage["content"],
+                "element_id": caller.get("element_id"),
+                "name": caller.get("name"),
+                "type": caller.get("element_type"),
+                "file": caller.get("relative_path"),
+                "line": caller.get("line_start"),
+                "summary": caller.get("summary", ""),
             })
 
-    # Find callees (what this function calls)
-    if direction in ("callees", "both") and raw_code:
-        # Extract function/method calls from the code
-        import re
-
-        # Match function calls: name( but not def name(
-        call_pattern = r"(?<!def\s)(?<!class\s)\b(\w+)\s*\("
-        calls = re.findall(call_pattern, raw_code)
-
-        # Deduplicate and filter builtins
-        builtins = {"print", "len", "str", "int", "float", "list", "dict", "set",
-                    "range", "enumerate", "zip", "map", "filter", "sorted", "type",
-                    "isinstance", "hasattr", "getattr", "setattr", "super", "open"}
-
-        seen = set()
-        for call_name in calls:
-            if call_name in seen or call_name in builtins:
-                continue
-            seen.add(call_name)
-
-            result["callees"].append({
-                "name": call_name,
-                "type": "call",
-            })
+    # Find callees (what this function calls) using indexed call data
+    if direction in ("callees", "both"):
+        calls = es.get_calls(element_id)
+        for call in calls:
+            callee_entry: dict[str, Any] = {
+                "name": call.get("name"),
+                "receiver": call.get("receiver"),
+                "line": call.get("line"),
+            }
+            # Include resolved target info if available
+            resolved_id = call.get("resolved_id")
+            if resolved_id:
+                callee_entry["element_id"] = resolved_id
+                # Get resolved element details
+                resolved_doc = es.get_document(resolved_id)
+                if resolved_doc:
+                    callee_entry["type"] = resolved_doc.get("element_type")
+                    callee_entry["file"] = resolved_doc.get("relative_path")
+                    callee_entry["target_line"] = resolved_doc.get("line_start")
+                    callee_entry["summary"] = resolved_doc.get("summary", "")
+            result["callees"].append(callee_entry)
 
     return result
+
+
+def find_callers(
+    es: ElasticsearchRepository,
+    element_id: str,
+    scope: str | None = None,
+    repository: str | None = None,
+    username: str | None = None,
+    limit: int = 30,
+    include_tests: bool = True,
+) -> dict[str, Any]:
+    """Find all functions that call the specified element.
+
+    Uses indexed call data to find callers via calls.resolved_id.
+
+    Args:
+        es: Elasticsearch repository.
+        element_id: Target element ID to find callers of.
+        scope: Filter by scope.
+        repository: Filter by repository.
+        username: Filter by username branch.
+        limit: Maximum results to return.
+        include_tests: Whether to include test functions as callers.
+
+    Returns:
+        Dict with target info and lists of callers grouped by code/tests.
+    """
+    # Get target element info
+    doc = es.get_document(element_id)
+    if not doc:
+        raise ValueError(f"Element not found: {element_id}")
+
+    # Use target's scope/repo if not specified
+    scope = scope or doc.get("scope")
+    repository = repository or doc.get("repository")
+    username = username or doc.get("username", "main")
+
+    # Find elements calling the target
+    callers = es.find_elements_calling(
+        target_id=element_id,
+        scope=scope,
+        repository=repository,
+        username=username,
+        limit=limit * 2 if include_tests else limit,  # Get extra to filter
+    )
+
+    # Group by is_test
+    code_results: list[dict[str, Any]] = []
+    test_results: list[dict[str, Any]] = []
+
+    for caller in callers:
+        is_test = caller.get("is_test", False)
+
+        # Skip tests if not included
+        if is_test and not include_tests:
+            continue
+
+        entry = {
+            "element_id": caller.get("element_id"),
+            "name": caller.get("name"),
+            "type": caller.get("element_type"),
+            "file": caller.get("relative_path"),
+            "line": caller.get("line_start"),
+            "summary": caller.get("summary", ""),
+            "is_test": is_test,
+        }
+
+        if is_test:
+            test_results.append(entry)
+        else:
+            code_results.append(entry)
+
+        # Respect limit
+        if len(code_results) + len(test_results) >= limit:
+            break
+
+    return {
+        "target": {
+            "element_id": element_id,
+            "name": doc.get("name"),
+            "type": doc.get("element_type"),
+            "file": doc.get("relative_path"),
+            "line": doc.get("line_start"),
+        },
+        "code_results": code_results[:limit],
+        "test_results": test_results[:limit] if include_tests else [],
+        "total_code": len(code_results),
+        "total_tests": len(test_results) if include_tests else 0,
+    }
+
+
+def find_call_chain(
+    es: ElasticsearchRepository,
+    element_id: str,
+    direction: str = "callees",
+    max_depth: int = 5,
+    scope: str | None = None,
+    repository: str | None = None,
+    username: str | None = None,
+) -> dict[str, Any]:
+    """Trace call chains from an element.
+
+    Args:
+        es: Elasticsearch repository.
+        element_id: Starting element ID.
+        direction: "callees" (what does it call), "callers" (what calls it),
+                   or "both".
+        max_depth: Maximum depth to traverse (default 5).
+        scope: Filter by scope.
+        repository: Filter by repository.
+        username: Filter by username branch.
+
+    Returns:
+        Tree structure with depth levels showing call relationships.
+    """
+    # Validate max_depth
+    max_depth = max(1, min(max_depth, 10))
+
+    # Get root element info
+    doc = es.get_document(element_id)
+    if not doc:
+        raise ValueError(f"Element not found: {element_id}")
+
+    # Use element's scope/repo if not specified
+    scope = scope or doc.get("scope")
+    repository = repository or doc.get("repository")
+    username = username or doc.get("username", "main")
+
+    root_node = {
+        "element_id": element_id,
+        "name": doc.get("name"),
+        "type": doc.get("element_type"),
+        "file": doc.get("relative_path"),
+        "line": doc.get("line_start"),
+        "depth": 0,
+    }
+
+    result: dict[str, Any] = {
+        "root": root_node,
+        "direction": direction,
+        "max_depth": max_depth,
+    }
+
+    visited: set[str] = {element_id}
+
+    def build_callers_tree(node_id: str, depth: int) -> list[dict[str, Any]]:
+        """Recursively build tree of callers."""
+        if depth >= max_depth:
+            return []
+
+        callers = es.find_elements_calling(
+            target_id=node_id,
+            scope=scope,
+            repository=repository,
+            username=username,
+            limit=10,  # Limit branching
+        )
+
+        children = []
+        for caller in callers:
+            caller_id = caller.get("element_id")
+            if caller_id in visited:
+                # Cycle detected, mark but don't recurse
+                children.append({
+                    "element_id": caller_id,
+                    "name": caller.get("name"),
+                    "type": caller.get("element_type"),
+                    "file": caller.get("relative_path"),
+                    "line": caller.get("line_start"),
+                    "depth": depth + 1,
+                    "cycle": True,
+                })
+                continue
+
+            visited.add(caller_id)
+            node = {
+                "element_id": caller_id,
+                "name": caller.get("name"),
+                "type": caller.get("element_type"),
+                "file": caller.get("relative_path"),
+                "line": caller.get("line_start"),
+                "depth": depth + 1,
+                "callers": build_callers_tree(caller_id, depth + 1),
+            }
+            children.append(node)
+
+        return children
+
+    def build_callees_tree(node_id: str, depth: int) -> list[dict[str, Any]]:
+        """Recursively build tree of callees."""
+        if depth >= max_depth:
+            return []
+
+        calls = es.get_calls(node_id)
+        children = []
+
+        for call in calls:
+            resolved_id = call.get("resolved_id")
+            if not resolved_id:
+                # Unresolved call - just record the name
+                children.append({
+                    "name": call.get("name"),
+                    "receiver": call.get("receiver"),
+                    "line": call.get("line"),
+                    "depth": depth + 1,
+                    "unresolved": True,
+                })
+                continue
+
+            if resolved_id in visited:
+                # Cycle detected
+                children.append({
+                    "element_id": resolved_id,
+                    "name": call.get("name"),
+                    "line": call.get("line"),
+                    "depth": depth + 1,
+                    "cycle": True,
+                })
+                continue
+
+            visited.add(resolved_id)
+
+            # Get resolved element info
+            resolved_doc = es.get_document(resolved_id)
+            if resolved_doc:
+                node = {
+                    "element_id": resolved_id,
+                    "name": resolved_doc.get("name"),
+                    "type": resolved_doc.get("element_type"),
+                    "file": resolved_doc.get("relative_path"),
+                    "line": resolved_doc.get("line_start"),
+                    "depth": depth + 1,
+                    "callees": build_callees_tree(resolved_id, depth + 1),
+                }
+                children.append(node)
+            else:
+                # Resolved ID but no document found
+                children.append({
+                    "element_id": resolved_id,
+                    "name": call.get("name"),
+                    "line": call.get("line"),
+                    "depth": depth + 1,
+                    "missing": True,
+                })
+
+        return children
+
+    if direction in ("callers", "both"):
+        result["callers"] = build_callers_tree(element_id, 0)
+    if direction in ("callees", "both"):
+        # Reset visited for callees direction if doing both
+        if direction == "both":
+            visited = {element_id}
+        result["callees"] = build_callees_tree(element_id, 0)
+
+    return result
+
+
+def find_dead_code(
+    es: ElasticsearchRepository,
+    scope: str,
+    repository: str,
+    username: str | None = None,
+    include_tests: bool = False,
+) -> dict[str, Any]:
+    """Find functions/methods that are never called.
+
+    Excludes:
+    - Entry points (decorated with @app.route, @click.command, etc.)
+    - Functions named 'main', '__main__'
+    - Test functions (if include_tests=False)
+    - Magic methods (__init__, __str__, etc.)
+
+    Args:
+        es: Elasticsearch repository.
+        scope: Repository scope (required).
+        repository: Repository name (required).
+        username: User branch (defaults to "main").
+        include_tests: Whether to include test functions in dead code check.
+
+    Returns:
+        Dict with potentially_dead list and statistics.
+    """
+    username = username or "main"
+
+    # Entry point decorators to exclude
+    entry_point_decorators = {
+        "app.route", "route", "get", "post", "put", "delete", "patch",
+        "click.command", "command", "click.group", "group",
+        "pytest.fixture", "fixture",
+        "property", "staticmethod", "classmethod",
+        "abstractmethod", "abstractproperty",
+        "celery.task", "task",
+        "api_view", "action",
+    }
+
+    # Names to exclude (entry points, magic methods)
+    excluded_names = {
+        "main", "__main__", "__init__", "__new__", "__del__",
+        "__str__", "__repr__", "__hash__", "__eq__", "__ne__",
+        "__lt__", "__le__", "__gt__", "__ge__",
+        "__add__", "__sub__", "__mul__", "__truediv__",
+        "__iter__", "__next__", "__getitem__", "__setitem__",
+        "__len__", "__call__", "__enter__", "__exit__",
+        "__contains__", "__bool__", "__getattr__", "__setattr__",
+        "setUp", "tearDown", "setUpClass", "tearDownClass",
+    }
+
+    client = es._get_client()
+
+    # Get all functions and methods in the repository
+    filters = [
+        {"term": {"scope": scope}},
+        {"term": {"repository": repository}},
+        {"term": {"username": username}},
+        {"terms": {"element_type": ["function", "method"]}},
+    ]
+
+    if not include_tests:
+        filters.append({"term": {"is_test": False}})
+
+    es_result = client.search(
+        index="magaldi-code-elements",
+        body={
+            "query": {"bool": {"filter": filters}},
+            "_source": ["element_id", "name", "element_type", "relative_path",
+                        "line_start", "decorators", "is_test", "summary"],
+            "size": 2000,
+        },
+    )
+
+    hits = es_result.get("hits", {}).get("hits", [])
+
+    # Filter out entry points and find uncalled functions
+    potentially_dead: list[dict[str, Any]] = []
+    excluded_count = 0
+    called_count = 0
+
+    for hit in hits:
+        source = hit["_source"]
+        element_id = source.get("element_id")
+        name = source.get("name")
+        decorators = source.get("decorators", []) or []
+
+        # Skip excluded names
+        if name in excluded_names:
+            excluded_count += 1
+            continue
+
+        # Skip if has entry point decorator
+        is_entry_point = False
+        for dec in decorators:
+            # Decorator might be "app.route" or just the decorator name in the list
+            dec_lower = dec.lower() if isinstance(dec, str) else ""
+            for ep in entry_point_decorators:
+                if ep in dec_lower or dec_lower.endswith(ep):
+                    is_entry_point = True
+                    break
+            if is_entry_point:
+                break
+
+        if is_entry_point:
+            excluded_count += 1
+            continue
+
+        # Check if anything calls this element
+        callers = es.find_elements_calling(
+            target_id=element_id,
+            scope=scope,
+            repository=repository,
+            username=username,
+            limit=1,  # Just need to know if there's at least one
+        )
+
+        if not callers:
+            potentially_dead.append({
+                "element_id": element_id,
+                "name": name,
+                "type": source.get("element_type"),
+                "file": source.get("relative_path"),
+                "line": source.get("line_start"),
+                "summary": source.get("summary", ""),
+                "is_test": source.get("is_test", False),
+            })
+        else:
+            called_count += 1
+
+    return {
+        "potentially_dead": potentially_dead,
+        "stats": {
+            "total_functions": len(hits),
+            "excluded_entry_points": excluded_count,
+            "called": called_count,
+            "potentially_dead": len(potentially_dead),
+        },
+    }
+
+
+def find_entry_points(
+    es: ElasticsearchRepository,
+    scope: str,
+    repository: str,
+    username: str | None = None,
+) -> dict[str, Any]:
+    """Find entry points: HTTP handlers, CLI commands, test fixtures, main functions.
+
+    Detection patterns:
+    - Decorator patterns: @app.route, @click.command, @pytest.fixture, etc.
+    - Named: main, __main__
+    - Called externally with no internal callers
+
+    Args:
+        es: Elasticsearch repository.
+        scope: Repository scope (required).
+        repository: Repository name (required).
+        username: User branch (defaults to "main").
+
+    Returns:
+        Entry points grouped by type (http, cli, test, main, other).
+    """
+    username = username or "main"
+
+    # Decorator categories
+    http_decorators = {"route", "app.route", "get", "post", "put", "delete", "patch",
+                       "api_view", "action", "api.route", "blueprint.route"}
+    cli_decorators = {"click.command", "command", "click.group", "group",
+                      "click.option", "argument"}
+    test_decorators = {"pytest.fixture", "fixture", "pytest.mark"}
+    async_decorators = {"celery.task", "task", "dramatiq.actor", "actor"}
+
+    client = es._get_client()
+
+    # Get all functions and methods
+    filters = [
+        {"term": {"scope": scope}},
+        {"term": {"repository": repository}},
+        {"term": {"username": username}},
+        {"terms": {"element_type": ["function", "method"]}},
+    ]
+
+    es_result = client.search(
+        index="magaldi-code-elements",
+        body={
+            "query": {"bool": {"filter": filters}},
+            "_source": ["element_id", "name", "element_type", "relative_path",
+                        "line_start", "decorators", "is_test", "summary"],
+            "size": 2000,
+        },
+    )
+
+    hits = es_result.get("hits", {}).get("hits", [])
+
+    # Categorize entry points
+    http_handlers: list[dict[str, Any]] = []
+    cli_commands: list[dict[str, Any]] = []
+    test_fixtures: list[dict[str, Any]] = []
+    main_functions: list[dict[str, Any]] = []
+    async_tasks: list[dict[str, Any]] = []
+    other_entry_points: list[dict[str, Any]] = []
+
+    for hit in hits:
+        source = hit["_source"]
+        name = source.get("name")
+        decorators = source.get("decorators", []) or []
+
+        entry = {
+            "element_id": source.get("element_id"),
+            "name": name,
+            "type": source.get("element_type"),
+            "file": source.get("relative_path"),
+            "line": source.get("line_start"),
+            "summary": source.get("summary", ""),
+            "decorators": decorators,
+        }
+
+        # Check for main function
+        if name in ("main", "__main__"):
+            main_functions.append(entry)
+            continue
+
+        # Check decorators
+        decorator_matched = False
+        for dec in decorators:
+            dec_lower = dec.lower() if isinstance(dec, str) else ""
+
+            # HTTP handlers
+            for pattern in http_decorators:
+                if pattern in dec_lower:
+                    http_handlers.append(entry)
+                    decorator_matched = True
+                    break
+
+            if decorator_matched:
+                break
+
+            # CLI commands
+            for pattern in cli_decorators:
+                if pattern in dec_lower:
+                    cli_commands.append(entry)
+                    decorator_matched = True
+                    break
+
+            if decorator_matched:
+                break
+
+            # Test fixtures
+            for pattern in test_decorators:
+                if pattern in dec_lower:
+                    test_fixtures.append(entry)
+                    decorator_matched = True
+                    break
+
+            if decorator_matched:
+                break
+
+            # Async tasks
+            for pattern in async_decorators:
+                if pattern in dec_lower:
+                    async_tasks.append(entry)
+                    decorator_matched = True
+                    break
+
+            if decorator_matched:
+                break
+
+    return {
+        "http": http_handlers,
+        "cli": cli_commands,
+        "test": test_fixtures,
+        "main": main_functions,
+        "async_tasks": async_tasks,
+        "other": other_entry_points,
+        "stats": {
+            "total_http": len(http_handlers),
+            "total_cli": len(cli_commands),
+            "total_test": len(test_fixtures),
+            "total_main": len(main_functions),
+            "total_async": len(async_tasks),
+            "total": len(http_handlers) + len(cli_commands) + len(test_fixtures) +
+                    len(main_functions) + len(async_tasks),
+        },
+    }
 
 
 # =============================================================================
