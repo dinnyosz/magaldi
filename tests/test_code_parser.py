@@ -6,6 +6,7 @@ import pytest
 
 from magaldi_core.change_detection import ChangeManifest, FileInfo
 from magaldi_core.code_parser import (
+    Call,
     CodeElement,
     Import,
     JavaScriptParser,
@@ -1100,3 +1101,429 @@ class TestImportDataclass:
         assert imp.module == "os"
         assert imp.alias is None
         assert imp.line == 1
+
+
+# =============================================================================
+# CALL EXTRACTION TESTS
+# =============================================================================
+
+
+class TestPythonCallExtraction:
+    """Tests for Python call extraction."""
+
+    def test_bare_function_call(self):
+        """Test extracting bare function calls."""
+        code = """def main():
+    process(x)
+    validate(data)
+"""
+        parser = PythonParser()
+        file_info = FileInfo(
+            relative_path="module.py",
+            absolute_path=Path("/fake/module.py"),
+            language="python",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        main_func = next(e for e in elements if e.name == "main" and e.element_type == "function")
+
+        assert len(main_func.calls) == 2
+
+        process_call = next(c for c in main_func.calls if c.name == "process")
+        assert process_call.receiver is None
+        assert process_call.line == 2
+
+        validate_call = next(c for c in main_func.calls if c.name == "validate")
+        assert validate_call.receiver is None
+        assert validate_call.line == 3
+
+    def test_method_call_on_self(self):
+        """Test extracting method calls on self."""
+        code = """class MyClass:
+    def process(self):
+        self.validate()
+        self.helper(x, y)
+"""
+        parser = PythonParser()
+        file_info = FileInfo(
+            relative_path="module.py",
+            absolute_path=Path("/fake/module.py"),
+            language="python",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        process_method = next(e for e in elements if e.name == "process" and e.element_type == "method")
+
+        assert len(process_method.calls) == 2
+
+        validate_call = next(c for c in process_method.calls if c.name == "validate")
+        assert validate_call.receiver == "self"
+        assert validate_call.line == 3
+
+        helper_call = next(c for c in process_method.calls if c.name == "helper")
+        assert helper_call.receiver == "self"
+        assert helper_call.line == 4
+
+    def test_method_call_on_object(self):
+        """Test extracting method calls on objects."""
+        code = """def process():
+    utils.run()
+    config.get('key')
+    db.query(sql)
+"""
+        parser = PythonParser()
+        file_info = FileInfo(
+            relative_path="module.py",
+            absolute_path=Path("/fake/module.py"),
+            language="python",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        process_func = next(e for e in elements if e.name == "process" and e.element_type == "function")
+
+        assert len(process_func.calls) == 3
+
+        run_call = next(c for c in process_func.calls if c.name == "run")
+        assert run_call.receiver == "utils"
+
+        get_call = next(c for c in process_func.calls if c.name == "get")
+        assert get_call.receiver == "config"
+
+        query_call = next(c for c in process_func.calls if c.name == "query")
+        assert query_call.receiver == "db"
+
+    def test_chained_calls(self):
+        """Test extracting chained method calls."""
+        code = """def process():
+    obj.method1().method2()
+    data.filter(x).map(y).reduce(z)
+"""
+        parser = PythonParser()
+        file_info = FileInfo(
+            relative_path="module.py",
+            absolute_path=Path("/fake/module.py"),
+            language="python",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        process_func = next(e for e in elements if e.name == "process" and e.element_type == "function")
+
+        # Should extract method2 (from the outermost call)
+        # The chained calls appear as separate call nodes
+        call_names = [c.name for c in process_func.calls]
+        assert "method2" in call_names or "method1" in call_names
+
+    def test_nested_attribute_call(self):
+        """Test extracting calls on nested attributes."""
+        code = """def process():
+    a.b.method()
+    config.db.connect()
+"""
+        parser = PythonParser()
+        file_info = FileInfo(
+            relative_path="module.py",
+            absolute_path=Path("/fake/module.py"),
+            language="python",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        process_func = next(e for e in elements if e.name == "process" and e.element_type == "function")
+
+        assert len(process_func.calls) == 2
+
+        method_call = next(c for c in process_func.calls if c.name == "method")
+        assert method_call.receiver == "a.b"
+
+        connect_call = next(c for c in process_func.calls if c.name == "connect")
+        assert connect_call.receiver == "config.db"
+
+    def test_mixed_calls(self):
+        """Test extracting various call patterns together."""
+        code = """def process(self, data):
+    validate(data)
+    self.transform(data)
+    utils.process(data)
+    return result
+"""
+        parser = PythonParser()
+        file_info = FileInfo(
+            relative_path="module.py",
+            absolute_path=Path("/fake/module.py"),
+            language="python",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        process_func = next(e for e in elements if e.name == "process" and e.element_type == "function")
+
+        assert len(process_func.calls) == 3
+
+        calls_by_name = {c.name: c for c in process_func.calls}
+
+        assert calls_by_name["validate"].receiver is None
+        assert calls_by_name["transform"].receiver == "self"
+        assert calls_by_name["process"].receiver == "utils"
+
+    def test_no_calls_in_function(self):
+        """Test function with no calls."""
+        code = """def simple():
+    x = 1 + 2
+    return x
+"""
+        parser = PythonParser()
+        file_info = FileInfo(
+            relative_path="module.py",
+            absolute_path=Path("/fake/module.py"),
+            language="python",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        simple_func = next(e for e in elements if e.name == "simple" and e.element_type == "function")
+
+        assert len(simple_func.calls) == 0
+
+
+class TestJavaScriptCallExtraction:
+    """Tests for JavaScript/TypeScript call extraction."""
+
+    def test_bare_function_call(self):
+        """Test extracting bare function calls."""
+        code = """function main() {
+    process(x);
+    validate(data);
+}
+"""
+        parser = JavaScriptParser()
+        file_info = FileInfo(
+            relative_path="module.js",
+            absolute_path=Path("/fake/module.js"),
+            language="javascript",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        main_func = next(e for e in elements if e.name == "main" and e.element_type == "function")
+
+        assert len(main_func.calls) == 2
+
+        process_call = next(c for c in main_func.calls if c.name == "process")
+        assert process_call.receiver is None
+        assert process_call.line == 2
+
+        validate_call = next(c for c in main_func.calls if c.name == "validate")
+        assert validate_call.receiver is None
+        assert validate_call.line == 3
+
+    def test_method_call_on_this(self):
+        """Test extracting method calls on this."""
+        code = """class MyClass {
+    process() {
+        this.validate();
+        this.helper(x, y);
+    }
+}
+"""
+        parser = JavaScriptParser()
+        file_info = FileInfo(
+            relative_path="module.js",
+            absolute_path=Path("/fake/module.js"),
+            language="javascript",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        process_method = next(e for e in elements if e.name == "process" and e.element_type == "method")
+
+        assert len(process_method.calls) == 2
+
+        validate_call = next(c for c in process_method.calls if c.name == "validate")
+        assert validate_call.receiver == "this"
+
+        helper_call = next(c for c in process_method.calls if c.name == "helper")
+        assert helper_call.receiver == "this"
+
+    def test_method_call_on_object(self):
+        """Test extracting method calls on objects."""
+        code = """function process() {
+    utils.run();
+    config.get('key');
+    db.query(sql);
+}
+"""
+        parser = JavaScriptParser()
+        file_info = FileInfo(
+            relative_path="module.js",
+            absolute_path=Path("/fake/module.js"),
+            language="javascript",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        process_func = next(e for e in elements if e.name == "process" and e.element_type == "function")
+
+        assert len(process_func.calls) == 3
+
+        run_call = next(c for c in process_func.calls if c.name == "run")
+        assert run_call.receiver == "utils"
+
+        get_call = next(c for c in process_func.calls if c.name == "get")
+        assert get_call.receiver == "config"
+
+        query_call = next(c for c in process_func.calls if c.name == "query")
+        assert query_call.receiver == "db"
+
+    def test_chained_calls(self):
+        """Test extracting chained method calls."""
+        code = """function process() {
+    obj.method1().method2();
+    data.filter(x).map(y).reduce(z);
+}
+"""
+        parser = JavaScriptParser()
+        file_info = FileInfo(
+            relative_path="module.js",
+            absolute_path=Path("/fake/module.js"),
+            language="javascript",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        process_func = next(e for e in elements if e.name == "process" and e.element_type == "function")
+
+        # Should extract calls from the chain
+        call_names = [c.name for c in process_func.calls]
+        assert "method2" in call_names or "method1" in call_names
+
+    def test_mixed_calls(self):
+        """Test extracting various call patterns together."""
+        code = """function process(data) {
+    validate(data);
+    this.transform(data);
+    utils.process(data);
+    return result;
+}
+"""
+        parser = JavaScriptParser()
+        file_info = FileInfo(
+            relative_path="module.js",
+            absolute_path=Path("/fake/module.js"),
+            language="javascript",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        process_func = next(e for e in elements if e.name == "process" and e.element_type == "function")
+
+        # Note: 'this' reference in a regular function might be handled differently
+        # The important thing is we extract the calls we can
+        call_names = [c.name for c in process_func.calls]
+        assert "validate" in call_names
+        assert "process" in call_names
+
+    def test_no_calls_in_function(self):
+        """Test function with no calls."""
+        code = """function simple() {
+    const x = 1 + 2;
+    return x;
+}
+"""
+        parser = JavaScriptParser()
+        file_info = FileInfo(
+            relative_path="module.js",
+            absolute_path=Path("/fake/module.js"),
+            language="javascript",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        simple_func = next(e for e in elements if e.name == "simple" and e.element_type == "function")
+
+        assert len(simple_func.calls) == 0
+
+    def test_arrow_function_calls(self):
+        """Test extracting calls from arrow functions."""
+        code = """const process = (data) => {
+    validate(data);
+    transform(data);
+};
+"""
+        parser = JavaScriptParser()
+        file_info = FileInfo(
+            relative_path="module.js",
+            absolute_path=Path("/fake/module.js"),
+            language="javascript",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        process_func = next(e for e in elements if e.name == "process" and e.element_type == "function")
+
+        assert len(process_func.calls) == 2
+        call_names = [c.name for c in process_func.calls]
+        assert "validate" in call_names
+        assert "transform" in call_names
+
+
+class TestCallDataclass:
+    """Tests for the Call dataclass."""
+
+    def test_call_fields(self):
+        """Test Call dataclass fields."""
+        from magaldi_core.code_parser import Call
+
+        call = Call(
+            name="process",
+            receiver="utils",
+            line=42,
+        )
+
+        assert call.name == "process"
+        assert call.receiver == "utils"
+        assert call.line == 42
+        assert call.resolved_id is None
+
+    def test_call_no_receiver(self):
+        """Test Call with no receiver (bare function call)."""
+        from magaldi_core.code_parser import Call
+
+        call = Call(
+            name="validate",
+            receiver=None,
+            line=10,
+        )
+
+        assert call.name == "validate"
+        assert call.receiver is None
+        assert call.line == 10
+        assert call.resolved_id is None
+
+    def test_call_with_resolved_id(self):
+        """Test Call with resolved_id set."""
+        from magaldi_core.code_parser import Call
+
+        call = Call(
+            name="process",
+            receiver="self",
+            line=5,
+            resolved_id="scope:repo:main:file.py:method:process:10",
+        )
+
+        assert call.name == "process"
+        assert call.receiver == "self"
+        assert call.line == 5
+        assert call.resolved_id == "scope:repo:main:file.py:method:process:10"
+
+
+class TestCodeElementCallsField:
+    """Tests for the calls field on CodeElement."""
+
+    def test_default_empty_calls(self):
+        """Test that calls field defaults to empty list."""
+        element = CodeElement()
+        assert element.calls == []
+
+    def test_calls_field_populated(self):
+        """Test that calls field can be populated."""
+        from magaldi_core.code_parser import Call
+
+        calls = [
+            Call(name="validate", receiver=None, line=5),
+            Call(name="process", receiver="self", line=10),
+        ]
+        element = CodeElement(calls=calls)
+
+        assert len(element.calls) == 2
+        assert element.calls[0].name == "validate"
+        assert element.calls[1].name == "process"

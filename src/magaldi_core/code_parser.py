@@ -19,13 +19,16 @@ from typing import Any
 
 from magaldi_core.change_detection import ChangeManifest, FileInfo
 from magaldi_core.tree_sitter_manager import (
+    ExtractedCall,
     ExtractedElement,
     ExtractedImport,
     ExtractedReference,
+    extract_javascript_calls,
     extract_javascript_class_members,
     extract_javascript_elements,
     extract_javascript_imports,
     extract_javascript_references,
+    extract_python_calls,
     extract_python_class_members,
     extract_python_elements,
     extract_python_imports,
@@ -138,6 +141,16 @@ class Import:
 
 
 @dataclass
+class Call:
+    """Represents a function call within an element."""
+
+    name: str  # Function name (e.g., "process", "validate")
+    receiver: str | None  # Receiver object (e.g., "self", "utils", None for bare calls)
+    line: int  # Line number
+    resolved_id: str | None = None  # Filled in resolution phase (not at parse time)
+
+
+@dataclass
 class CodeElement:
     """A parsed code element (class, function, method, variable)."""
 
@@ -183,6 +196,9 @@ class CodeElement:
 
     # Imports (only populated on file elements)
     imports: list[Import] = field(default_factory=list)
+
+    # Calls (only populated on function/method elements)
+    calls: list[Call] = field(default_factory=list)
 
     # Content hash for change detection (computed from raw_code)
     content_hash: str | None = None
@@ -578,6 +594,15 @@ class PythonParser(TreeSitterParser):
         """Convert extracted function to CodeElement."""
         docstring = _extract_docstring(lines, ext.line_start)
 
+        # Extract calls from function body
+        calls: list[Call] = []
+        if ext.node:
+            extracted_calls = extract_python_calls(ext.node)
+            calls = [
+                Call(name=c.name, receiver=c.receiver, line=c.line)
+                for c in extracted_calls
+            ]
+
         elem = CodeElement(
             scope=scope,
             repository=repository,
@@ -595,6 +620,7 @@ class PythonParser(TreeSitterParser):
             is_async=ext.is_async,
             visibility=_determine_visibility(ext.name),
             level=2,
+            calls=calls,
         )
         elem.element_id = generate_element_id(
             scope, repository, username, file_info.relative_path, "function", ext.name, ext.line_start
@@ -614,6 +640,15 @@ class PythonParser(TreeSitterParser):
         """Convert extracted method to CodeElement."""
         docstring = _extract_docstring(lines, ext.line_start)
 
+        # Extract calls from method body
+        calls: list[Call] = []
+        if ext.node:
+            extracted_calls = extract_python_calls(ext.node)
+            calls = [
+                Call(name=c.name, receiver=c.receiver, line=c.line)
+                for c in extracted_calls
+            ]
+
         elem = CodeElement(
             scope=scope,
             repository=repository,
@@ -632,6 +667,7 @@ class PythonParser(TreeSitterParser):
             visibility=_determine_visibility(ext.name),
             level=2,
             parent_id=parent_class.element_id,
+            calls=calls,
         )
         elem.element_id = generate_element_id(
             scope, repository, username, file_info.relative_path, "method", ext.name, ext.line_start
@@ -804,6 +840,15 @@ class JavaScriptParser(TreeSitterParser):
         lines: list[str],
     ) -> CodeElement:
         """Convert extracted function to CodeElement."""
+        # Extract calls from function body
+        calls: list[Call] = []
+        if ext.node:
+            extracted_calls = extract_javascript_calls(ext.node)
+            calls = [
+                Call(name=c.name, receiver=c.receiver, line=c.line)
+                for c in extracted_calls
+            ]
+
         elem = CodeElement(
             scope=scope,
             repository=repository,
@@ -818,6 +863,7 @@ class JavaScriptParser(TreeSitterParser):
             signature=ext.signature,
             is_async=ext.is_async,
             level=2,
+            calls=calls,
         )
         elem.element_id = generate_element_id(
             scope, repository, username, file_info.relative_path, "function", ext.name, ext.line_start
@@ -835,6 +881,15 @@ class JavaScriptParser(TreeSitterParser):
         lines: list[str],
     ) -> CodeElement:
         """Convert extracted method to CodeElement."""
+        # Extract calls from method body
+        calls: list[Call] = []
+        if ext.node:
+            extracted_calls = extract_javascript_calls(ext.node)
+            calls = [
+                Call(name=c.name, receiver=c.receiver, line=c.line)
+                for c in extracted_calls
+            ]
+
         elem = CodeElement(
             scope=scope,
             repository=repository,
@@ -850,6 +905,7 @@ class JavaScriptParser(TreeSitterParser):
             is_async=ext.is_async,
             level=2,
             parent_id=parent_class.element_id,
+            calls=calls,
         )
         elem.element_id = generate_element_id(
             scope, repository, username, file_info.relative_path, "method", ext.name, ext.line_start

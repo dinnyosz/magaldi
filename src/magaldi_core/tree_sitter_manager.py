@@ -66,6 +66,18 @@ class ExtractedReference:
     context_snippet: str = ""  # brief code context for rich descriptions
 
 
+@dataclass
+class ExtractedCall:
+    """A function/method call extracted from within a function body.
+
+    Used for building call graphs between functions.
+    """
+
+    name: str  # Function/method name (e.g., "process", "validate")
+    receiver: str | None  # Receiver object (e.g., "self", "utils", None for bare calls)
+    line: int  # 1-indexed line number
+
+
 class TreeSitterManager:
     """Manages tree-sitter parsers for multiple languages.
 
@@ -659,6 +671,117 @@ def extract_python_references(tree: Tree, lines: list[str]) -> list[ExtractedRef
 
 
 # =============================================================================
+# PYTHON CALL EXTRACTION
+# =============================================================================
+
+
+def extract_python_calls(function_node: Node) -> list[ExtractedCall]:
+    """Extract all function/method calls from within a Python function/method body.
+
+    Handles:
+    - process(x) -> ExtractedCall(name="process", receiver=None, line=45)
+    - self.validate() -> ExtractedCall(name="validate", receiver="self", line=48)
+    - utils.run() -> ExtractedCall(name="run", receiver="utils", line=52)
+    - obj.method().chain() -> Extracts each call in the chain
+
+    Args:
+        function_node: A function_definition node from tree-sitter.
+
+    Returns:
+        List of extracted calls.
+    """
+    calls: list[ExtractedCall] = []
+    seen: set[tuple[str, str | None, int]] = set()  # (name, receiver, line) to dedupe
+
+    # Get the function body
+    body_node = get_child_by_field(function_node, "body")
+    if not body_node:
+        return calls
+
+    # Walk all nodes in the function body
+    for node in walk_tree(body_node):
+        if node.type == "call":
+            extracted = _extract_python_call(node)
+            if extracted:
+                for call in extracted:
+                    key = (call.name, call.receiver, call.line)
+                    if key not in seen:
+                        seen.add(key)
+                        calls.append(call)
+
+    return calls
+
+
+def _extract_python_call(node: Node) -> list[ExtractedCall]:
+    """Extract call information from a Python call node.
+
+    Handles method chaining by extracting each call in the chain.
+
+    Args:
+        node: A 'call' node from tree-sitter.
+
+    Returns:
+        List of ExtractedCall objects (multiple for chained calls).
+    """
+    calls: list[ExtractedCall] = []
+    func_node = get_child_by_field(node, "function")
+    if not func_node:
+        return calls
+
+    line = node.start_point[0] + 1
+
+    if func_node.type == "identifier":
+        # Direct function call: func()
+        name = get_node_text(func_node)
+        calls.append(ExtractedCall(name=name, receiver=None, line=line))
+
+    elif func_node.type == "attribute":
+        # Method call: obj.method() or self.method() or utils.run()
+        attr_node = get_child_by_field(func_node, "attribute")
+        obj_node = get_child_by_field(func_node, "object")
+
+        if attr_node:
+            method_name = get_node_text(attr_node)
+            receiver = None
+
+            if obj_node:
+                if obj_node.type == "identifier":
+                    # Simple receiver: self.method(), utils.run()
+                    receiver = get_node_text(obj_node)
+                elif obj_node.type == "call":
+                    # Chained call: obj.method1().method2()
+                    # Get the receiver text for context (first identifier in chain)
+                    receiver = _get_chain_root(obj_node)
+                elif obj_node.type == "attribute":
+                    # Nested attribute: a.b.method()
+                    receiver = get_node_text(obj_node)
+
+            calls.append(ExtractedCall(name=method_name, receiver=receiver, line=line))
+
+    return calls
+
+
+def _get_chain_root(node: Node) -> str | None:
+    """Get the root identifier from a call chain.
+
+    For obj.method1().method2(), returns "obj".
+    """
+    current = node
+    while current:
+        if current.type == "identifier":
+            return get_node_text(current)
+        elif current.type == "call":
+            func = get_child_by_field(current, "function")
+            current = func
+        elif current.type == "attribute":
+            obj = get_child_by_field(current, "object")
+            current = obj
+        else:
+            break
+    return None
+
+
+# =============================================================================
 # JAVASCRIPT EXTRACTOR
 # =============================================================================
 
@@ -734,10 +857,20 @@ def _extract_js_function(node: Node, lines: list[str]) -> ExtractedElement:
 
 
 def _extract_js_arrow_function(node: Node, name: str, lines: list[str]) -> ExtractedElement:
-    """Extract a JavaScript arrow function."""
+    """Extract a JavaScript arrow function.
+
+    Args:
+        node: The variable_declarator node containing the arrow function.
+        name: The name of the arrow function (from the variable name).
+        lines: Source code lines.
+    """
     line_start = node.start_point[0] + 1
     line_end = node.end_point[0] + 1
     raw_code = "\n".join(lines[line_start - 1 : line_end])
+
+    # Get the actual arrow function node for call extraction
+    value_node = get_child_by_field(node, "value")
+    arrow_func_node = value_node if value_node and value_node.type == "arrow_function" else node
 
     return ExtractedElement(
         element_type="function",
@@ -745,7 +878,7 @@ def _extract_js_arrow_function(node: Node, name: str, lines: list[str]) -> Extra
         line_start=line_start,
         line_end=line_end,
         raw_code=raw_code,
-        node=node,
+        node=arrow_func_node,
     )
 
 
@@ -1083,6 +1216,121 @@ def extract_javascript_references(tree: Tree, lines: list[str]) -> list[Extracte
                             ))
 
     return refs
+
+
+# =============================================================================
+# JAVASCRIPT CALL EXTRACTION
+# =============================================================================
+
+
+def extract_javascript_calls(function_node: Node) -> list[ExtractedCall]:
+    """Extract all function/method calls from within a JavaScript function body.
+
+    Handles:
+    - process(x) -> ExtractedCall(name="process", receiver=None, line=45)
+    - this.validate() -> ExtractedCall(name="validate", receiver="this", line=48)
+    - utils.run() -> ExtractedCall(name="run", receiver="utils", line=52)
+    - obj.method().chain() -> Extracts each call in the chain
+
+    Args:
+        function_node: A function_declaration, method_definition, or arrow_function node.
+
+    Returns:
+        List of extracted calls.
+    """
+    calls: list[ExtractedCall] = []
+    seen: set[tuple[str, str | None, int]] = set()  # (name, receiver, line) to dedupe
+
+    # Get the function body
+    body_node = get_child_by_field(function_node, "body")
+    if not body_node:
+        return calls
+
+    # Walk all nodes in the function body
+    for node in walk_tree(body_node):
+        if node.type == "call_expression":
+            extracted = _extract_js_call(node)
+            if extracted:
+                for call in extracted:
+                    key = (call.name, call.receiver, call.line)
+                    if key not in seen:
+                        seen.add(key)
+                        calls.append(call)
+
+    return calls
+
+
+def _extract_js_call(node: Node) -> list[ExtractedCall]:
+    """Extract call information from a JavaScript call_expression node.
+
+    Handles method chaining by extracting each call in the chain.
+
+    Args:
+        node: A 'call_expression' node from tree-sitter.
+
+    Returns:
+        List of ExtractedCall objects (multiple for chained calls).
+    """
+    calls: list[ExtractedCall] = []
+    func_node = get_child_by_field(node, "function")
+    if not func_node:
+        return calls
+
+    line = node.start_point[0] + 1
+
+    if func_node.type == "identifier":
+        # Direct function call: func()
+        name = get_node_text(func_node)
+        calls.append(ExtractedCall(name=name, receiver=None, line=line))
+
+    elif func_node.type == "member_expression":
+        # Method call: obj.method() or this.method() or utils.run()
+        prop_node = get_child_by_field(func_node, "property")
+        obj_node = get_child_by_field(func_node, "object")
+
+        if prop_node:
+            method_name = get_node_text(prop_node)
+            receiver = None
+
+            if obj_node:
+                if obj_node.type == "identifier":
+                    # Simple receiver: this.method(), utils.run()
+                    receiver = get_node_text(obj_node)
+                elif obj_node.type == "this":
+                    # Explicit this keyword
+                    receiver = "this"
+                elif obj_node.type == "call_expression":
+                    # Chained call: obj.method1().method2()
+                    receiver = _get_js_chain_root(obj_node)
+                elif obj_node.type == "member_expression":
+                    # Nested property: a.b.method()
+                    receiver = get_node_text(obj_node)
+
+            calls.append(ExtractedCall(name=method_name, receiver=receiver, line=line))
+
+    return calls
+
+
+def _get_js_chain_root(node: Node) -> str | None:
+    """Get the root identifier from a JavaScript call chain.
+
+    For obj.method1().method2(), returns "obj".
+    """
+    current = node
+    while current:
+        if current.type == "identifier":
+            return get_node_text(current)
+        elif current.type == "this":
+            return "this"
+        elif current.type == "call_expression":
+            func = get_child_by_field(current, "function")
+            current = func
+        elif current.type == "member_expression":
+            obj = get_child_by_field(current, "object")
+            current = obj
+        else:
+            break
+    return None
 
 
 # =============================================================================
