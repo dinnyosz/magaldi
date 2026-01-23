@@ -1303,7 +1303,7 @@ The codebase is pre-indexed with:
 
 | User Request | USE THIS | NOT THIS |
 |--------------|----------|----------|
-| "grep for X" / "find pattern X" | `mcp__magaldi__grep_code` | Built-in Grep |
+| "grep for X" / "find pattern X" | `mcp__magaldi__pattern_search` (mode="regexp") | Built-in Grep |
 | "find where X is used/called" | `mcp__magaldi__find_usages` | Built-in Grep |
 | "search for functions that do X" | `mcp__magaldi__search_code` | Built-in Grep |
 | "find files matching *.py" | `mcp__magaldi__find_files` | Built-in Glob |
@@ -1332,13 +1332,18 @@ mcp__magaldi__search_code(query="authentication logic", brief=true)
 - Returns summaries, not just file:line
 - Use `brief=true` for exploration
 
-### 2. PATTERN SEARCH (For literal patterns, regex)
+### 2. PATTERN SEARCH (For literal patterns, regex, wildcards)
 ```
-mcp__magaldi__grep_code(pattern="\\\\.add_job\\\\(", context_lines=2)
+mcp__magaldi__pattern_search(pattern="add_job.*\\\\(", mode="regexp", scope="...", repository="...")
 ```
-- Regex patterns
-- Exact string matches
-- When you need literal occurrences
+- **Three modes:**
+  - `regexp`: Lucene regex (e.g., `"add_column.*Model"`)
+  - `wildcard`: Simple wildcards (e.g., `"*column*Model*"`)
+  - `proximity`: Terms near each other (e.g., `"add column Model"` with slop=5)
+- ES-native - queries run server-side for better performance
+- Requires `scope` and `repository` parameters
+
+**Note:** `grep_code` is deprecated - use `pattern_search` with `mode="regexp"` instead.
 
 ### 3. USAGE TRACKING (For "where is X called")
 ```
@@ -1360,8 +1365,10 @@ mcp__magaldi__find_implementations(class_name="BaseClass")
 
 ### "Grep for X" / "Find pattern X"
 ```
-1. mcp__magaldi__grep_code(pattern="X", context_lines=2)
+1. mcp__magaldi__pattern_search(pattern="X", mode="regexp", scope="...", repository="...")
    - NOT: built-in Grep tool
+   - For wildcards: mode="wildcard" with patterns like "*X*"
+   - For proximity: mode="proximity" with slop parameter
 ```
 
 ### "Find where function X is called"
@@ -1401,19 +1408,24 @@ mcp__magaldi__find_implementations(class_name="BaseClass")
 
 ## Anti-Patterns (NEVER Do These)
 
-1. **Using built-in Grep instead of magaldi__grep_code**
-   - Magaldi grep has indexed context, built-in doesn't
+1. **Using built-in Grep instead of magaldi__pattern_search**
+   - Magaldi pattern_search runs queries server-side in Elasticsearch
+   - Built-in Grep scans files one by one
 
-2. **Using built-in Glob instead of magaldi__find_files**
+2. **Using deprecated grep_code**
+   - Use `pattern_search` with `mode="regexp"` instead
+   - grep_code is deprecated and will be removed
+
+3. **Using built-in Glob instead of magaldi__find_files**
    - Magaldi knows which files are indexed
 
-3. **Grepping for function calls instead of find_usages**
+4. **Grepping for function calls instead of find_usages**
    - find_usages filters definitions, has context
 
-4. **Reading whole files to understand them**
+5. **Reading whole files to understand them**
    - Use search_code -> get_element with summaries
 
-5. **Skipping semantic search**
+6. **Skipping semantic search**
    - Summaries save tokens, embeddings find related code
 
 ## Available Tools Quick Reference
@@ -1422,9 +1434,10 @@ mcp__magaldi__find_implementations(class_name="BaseClass")
 |------|---------|
 | `search_code` | Semantic search by meaning |
 | `search_features` | Find high-level capabilities |
-| `grep_code` | Regex pattern search (USE THIS not built-in Grep) |
-| `find_usages` | Where is this called/used |
-| `find_implementations` | What implements this interface |
+| `pattern_search` | **ES-native pattern search** - regexp, wildcard, or proximity mode |
+| `grep_code` | ~~Deprecated~~ - use `pattern_search` with mode="regexp" |
+| `find_usages` | Where is this called/used (uses ES regexp internally) |
+| `find_implementations` | What implements this interface (uses ES regexp internally) |
 | `get_call_graph` | Callers and callees |
 | `find_similar` | Similar code patterns |
 | `get_element` | Full element details |
