@@ -498,6 +498,20 @@ class MagaldiMCPServer:
                         "required": [],
                     },
                 ),
+                Tool(
+                    name="explain_element",
+                    description="EXPLAIN ELEMENT: Comprehensive overview of a code element. "
+                    "Returns element details (name, type, signature, summary), callers (top 5), "
+                    "callees (all direct calls), imports (if file), similar code (top 3), and parent context. "
+                    "Use to understand any element in one call.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "element_id": {"type": "string", "description": "Element ID to explain"},
+                        },
+                        "required": ["element_id"],
+                    },
+                ),
                 # =============================================================
                 # GLOSSARY - Domain terminology discovery
                 # =============================================================
@@ -614,6 +628,7 @@ class MagaldiMCPServer:
         from magaldi_mcp.tools import (
             batch_get_elements,
             dependency_graph,
+            explain_element,
             find_call_chain,
             find_callers,
             find_dead_code,
@@ -859,6 +874,12 @@ class MagaldiMCPServer:
                 project_root=args.get("project_root"),
                 skill_name=args.get("skill_name", "magaldi"),
                 scope=args.get("scope", "project"),
+            )
+        elif name == "explain_element":
+            return await asyncio.to_thread(
+                explain_element,
+                es,
+                element_id=args["element_id"],
             )
         elif name == "list_glossary":
             return await asyncio.to_thread(
@@ -1367,6 +1388,89 @@ def _format_result(result: Any) -> str:
 
             if not dependents:
                 lines.append("  (no dependents found)")
+
+            return "\n".join(lines)
+
+        # explain_element result (has "element", "callers", "callees", "similar_code", "parent")
+        if "element" in result and "similar_code" in result and "parent" in result:
+            elem = result.get("element", {})
+            lines = [f"Element Overview: [{elem.get('type')}] {elem.get('name')}"]
+            lines.append(f"  File: {elem.get('file')}:{elem.get('line')}")
+            if elem.get('signature'):
+                lines.append(f"  Signature: {elem['signature']}")
+            if elem.get('summary'):
+                lines.append(f"  Summary: {elem['summary']}")
+            if elem.get('docstring'):
+                lines.append(f"  Docstring: {elem['docstring'][:200]}..." if len(elem.get('docstring', '')) > 200 else f"  Docstring: {elem.get('docstring')}")
+            if elem.get('decorators'):
+                lines.append(f"  Decorators: {', '.join(elem['decorators'])}")
+            lines.append("")
+
+            # Parent context
+            parent = result.get("parent")
+            if parent:
+                lines.append(f"Parent: [{parent.get('type')}] {parent.get('name')} ({parent.get('file')}:{parent.get('line')})")
+                if parent.get('summary'):
+                    lines.append(f"  {parent['summary'][:100]}...")
+                lines.append("")
+
+            # Callers
+            callers = result.get("callers", [])
+            if callers:
+                lines.append(f"Callers ({len(callers)}):")
+                for c in callers:
+                    loc = f"{c.get('file')}:{c.get('line')}" if c.get('file') else "?"
+                    lines.append(f"  [{c.get('type', '?')}] {c.get('name')} ({loc})")
+                    if c.get('summary'):
+                        summary = c['summary'][:80] + "..." if len(c.get('summary', '')) > 80 else c.get('summary', '')
+                        lines.append(f"    {summary}")
+                lines.append("")
+
+            # Callees
+            callees = result.get("callees", [])
+            if callees:
+                lines.append(f"Callees ({len(callees)}):")
+                for c in callees:
+                    if c.get("element_id"):
+                        loc = f"{c.get('file')}:{c.get('target_line')}" if c.get('file') else "?"
+                        lines.append(f"  [{c.get('type', '?')}] {c.get('name')} ({loc})")
+                        if c.get('summary'):
+                            summary = c['summary'][:80] + "..." if len(c.get('summary', '')) > 80 else c.get('summary', '')
+                            lines.append(f"    {summary}")
+                    else:
+                        receiver = f"{c.get('receiver')}." if c.get('receiver') else ""
+                        lines.append(f"  {receiver}{c.get('name')}() @ line {c.get('line')} (unresolved)")
+                lines.append("")
+
+            # Imports (for file elements)
+            imports = result.get("imports", [])
+            if imports:
+                lines.append(f"Imports ({len(imports)}):")
+                for imp in imports[:10]:
+                    module = imp.get("module", "")
+                    name = imp.get("name", "")
+                    alias = imp.get("alias", "")
+                    if alias:
+                        lines.append(f"  from {module} import {name} as {alias}")
+                    elif module:
+                        lines.append(f"  from {module} import {name}")
+                    else:
+                        lines.append(f"  import {name}")
+                if len(imports) > 10:
+                    lines.append(f"  ... and {len(imports) - 10} more")
+                lines.append("")
+
+            # Similar code
+            similar = result.get("similar_code", [])
+            if similar:
+                lines.append(f"Similar Code ({len(similar)}):")
+                for s in similar:
+                    loc = f"{s.get('file')}:{s.get('line')}" if s.get('file') else "?"
+                    sim_score = s.get('similarity', 0)
+                    lines.append(f"  [{s.get('type', '?')}] {s.get('name')} ({loc}) - {sim_score:.1%} similar")
+                    if s.get('summary'):
+                        summary = s['summary'][:80] + "..." if len(s.get('summary', '')) > 80 else s.get('summary', '')
+                        lines.append(f"    {summary}")
 
             return "\n".join(lines)
 
