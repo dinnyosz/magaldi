@@ -544,6 +544,59 @@ class MagaldiMCPServer:
                         "required": ["scope", "repository", "query"],
                     },
                 ),
+                # =============================================================
+                # DEPENDENCY ANALYSIS - Module-level dependency tracking
+                # =============================================================
+                Tool(
+                    name="find_dependencies",
+                    description="FIND DEPENDENCIES: Get imports for a file. "
+                    "Shows what a file depends on - both internal (from within the repo) "
+                    "and external (third-party packages) imports.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "file_path": {"type": "string", "description": "Relative file path (e.g., 'src/utils.py')"},
+                            "element_id": {"type": "string", "description": "Or provide file element ID directly"},
+                            "scope": {"type": "string", "description": "Repository scope (required if using file_path)"},
+                            "repository": {"type": "string", "description": "Repository name (required if using file_path)"},
+                            "username": {"type": "string", "description": "User branch"},
+                        },
+                        "required": [],
+                    },
+                ),
+                Tool(
+                    name="find_dependents",
+                    description="FIND DEPENDENTS: Find files that import a module. "
+                    "Shows what depends on a given module - useful for impact analysis "
+                    "before making changes to a module.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "module": {"type": "string", "description": "Module name (e.g., 'utils', 'shared.config', './utils')"},
+                            "scope": {"type": "string", "description": "Repository scope (required)"},
+                            "repository": {"type": "string", "description": "Repository name (required)"},
+                            "username": {"type": "string", "description": "User branch"},
+                            "limit": {"type": "integer", "default": 50, "description": "Maximum files to return"},
+                        },
+                        "required": ["module", "scope", "repository"],
+                    },
+                ),
+                Tool(
+                    name="dependency_graph",
+                    description="DEPENDENCY GRAPH: Build a module-level dependency graph. "
+                    "Creates a directed graph of module dependencies within the repository. "
+                    "Useful for understanding code architecture and detecting circular dependencies.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "scope": {"type": "string", "description": "Repository scope (required)"},
+                            "repository": {"type": "string", "description": "Repository name (required)"},
+                            "username": {"type": "string", "description": "User branch"},
+                            "internal_only": {"type": "boolean", "default": True, "description": "Only include internal imports"},
+                        },
+                        "required": ["scope", "repository"],
+                    },
+                ),
             ]
 
         @self.server.call_tool()
@@ -560,9 +613,12 @@ class MagaldiMCPServer:
         """Dispatch tool call to implementation."""
         from magaldi_mcp.tools import (
             batch_get_elements,
+            dependency_graph,
             find_call_chain,
             find_callers,
             find_dead_code,
+            find_dependencies,
+            find_dependents,
             find_entry_points,
             find_files,
             find_implementations,
@@ -830,6 +886,35 @@ class MagaldiMCPServer:
                 repository=args["repository"],
                 query=args["query"],
                 username=args.get("username", self.default_username),
+            )
+        elif name == "find_dependencies":
+            return await asyncio.to_thread(
+                find_dependencies,
+                es,
+                file_path=args.get("file_path"),
+                element_id=args.get("element_id"),
+                scope=args.get("scope"),
+                repository=args.get("repository"),
+                username=args.get("username"),
+            )
+        elif name == "find_dependents":
+            return await asyncio.to_thread(
+                find_dependents,
+                es,
+                module=args["module"],
+                scope=args["scope"],
+                repository=args["repository"],
+                username=args.get("username"),
+                limit=args.get("limit", 50),
+            )
+        elif name == "dependency_graph":
+            return await asyncio.to_thread(
+                dependency_graph,
+                es,
+                scope=args["scope"],
+                repository=args["repository"],
+                username=args.get("username"),
+                internal_only=args.get("internal_only", True),
             )
         else:
             raise ValueError(f"Unknown tool: {name}")
@@ -1226,6 +1311,90 @@ def _format_result(result: Any) -> str:
             format_entries("Test Fixtures", result.get("test", []))
             format_entries("Main Functions", result.get("main", []))
             format_entries("Async Tasks", result.get("async_tasks", []))
+
+            return "\n".join(lines)
+
+        # find_dependencies result (has "internal_imports" and "external_imports" keys)
+        if "internal_imports" in result and "external_imports" in result:
+            file_info = result.get("file_info", {})
+            stats = result.get("stats", {})
+            lines = [f"Dependencies for {file_info.get('path', '?')}\n"]
+            lines.append(f"Stats: {stats.get('total', 0)} total ({stats.get('internal', 0)} internal, {stats.get('external', 0)} external)")
+            lines.append("")
+
+            internal = result.get("internal_imports", [])
+            if internal:
+                lines.append(f"Internal Imports ({len(internal)}):")
+                for imp in internal:
+                    module = imp.get("module", "")
+                    name = imp.get("name", "")
+                    alias = imp.get("alias", "")
+                    line_num = imp.get("line", "?")
+                    if alias:
+                        lines.append(f"  from {module} import {name} as {alias} (line {line_num})")
+                    elif module:
+                        lines.append(f"  from {module} import {name} (line {line_num})")
+                    else:
+                        lines.append(f"  import {name} (line {line_num})")
+                lines.append("")
+
+            external = result.get("external_imports", [])
+            if external:
+                lines.append(f"External Imports ({len(external)}):")
+                for imp in external:
+                    module = imp.get("module", "")
+                    name = imp.get("name", "")
+                    alias = imp.get("alias", "")
+                    line_num = imp.get("line", "?")
+                    if alias:
+                        lines.append(f"  from {module} import {name} as {alias} (line {line_num})")
+                    elif module:
+                        lines.append(f"  from {module} import {name} (line {line_num})")
+                    else:
+                        lines.append(f"  import {name} (line {line_num})")
+
+            return "\n".join(lines)
+
+        # find_dependents result (has "module" and "dependents" keys)
+        if "module" in result and "dependents" in result and "total" in result:
+            module = result.get("module", "?")
+            dependents = result.get("dependents", [])
+            total = result.get("total", 0)
+            lines = [f"Files importing '{module}' ({total}):\n"]
+
+            for dep in dependents:
+                lines.append(f"  {dep.get('file', '?')}")
+
+            if not dependents:
+                lines.append("  (no dependents found)")
+
+            return "\n".join(lines)
+
+        # dependency_graph result (has "nodes", "edges", "cycles" keys)
+        if "nodes" in result and "edges" in result and "cycles" in result:
+            stats = result.get("stats", {})
+            lines = [f"Dependency Graph"]
+            lines.append(f"  Nodes: {stats.get('node_count', 0)}")
+            lines.append(f"  Edges: {stats.get('edge_count', 0)}")
+            lines.append(f"  Cycles: {stats.get('cycle_count', 0)}")
+            lines.append("")
+
+            cycles = result.get("cycles", [])
+            if cycles:
+                lines.append(f"Circular Dependencies ({len(cycles)}):")
+                for i, cycle in enumerate(cycles[:10], 1):  # Show up to 10 cycles
+                    lines.append(f"  {i}. {' -> '.join(cycle)}")
+                if len(cycles) > 10:
+                    lines.append(f"  ... and {len(cycles) - 10} more")
+                lines.append("")
+
+            edges = result.get("edges", [])
+            if edges:
+                lines.append(f"Dependencies ({len(edges)}):")
+                for edge in edges[:50]:  # Show up to 50 edges
+                    lines.append(f"  {edge.get('from', '?')} -> {edge.get('to', '?')}")
+                if len(edges) > 50:
+                    lines.append(f"  ... and {len(edges) - 50} more")
 
             return "\n".join(lines)
 
