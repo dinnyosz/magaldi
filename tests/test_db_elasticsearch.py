@@ -1455,15 +1455,15 @@ class TestFindElementsImporting:
 
     def test_find_elements_importing(self, es_repo, elements_with_imports):
         """Test finding elements that import a module."""
-        # Both app.py and utils.py import os
-        results = es_repo.find_elements_importing("os")
+        # Both app.py and utils.py import os (filter by scope to avoid other test data)
+        results = es_repo.find_elements_importing("os", scope="test-imports")
         assert len(results) == 2
         names = {r["name"] for r in results}
         assert names == {"app.py", "utils.py"}
 
     def test_find_elements_importing_single_importer(self, es_repo, elements_with_imports):
         """Test finding elements when only one imports the module."""
-        results = es_repo.find_elements_importing("json")
+        results = es_repo.find_elements_importing("json", scope="test-imports")
         assert len(results) == 1
         assert results[0]["name"] == "app.py"
 
