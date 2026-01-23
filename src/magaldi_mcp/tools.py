@@ -1044,6 +1044,28 @@ def grep_code(
     }
 
 
+def _escape_for_lucene_regexp(name: str) -> str:
+    """Escape special characters for Lucene regexp syntax.
+
+    Lucene regexp has different special chars than Python regex.
+    Key chars to escape: . + * ? ^ $ { } [ ] | ( ) \
+
+    Args:
+        name: The name to escape.
+
+    Returns:
+        Escaped string safe for Lucene regexp.
+    """
+    # Lucene regexp special chars that need escaping
+    special_chars = r'.\+*?^${}[]|()'
+    result = []
+    for char in name:
+        if char in special_chars:
+            result.append('\\')
+        result.append(char)
+    return ''.join(result)
+
+
 def find_usages(
     es: ElasticsearchRepository,
     element_id: str,
@@ -1051,7 +1073,7 @@ def find_usages(
 ) -> list[dict[str, Any]]:
     """Find where an element is used/called/referenced.
 
-    Searches indexed code in Elasticsearch - no filesystem access needed.
+    Searches indexed code in Elasticsearch using regexp search - no filesystem access needed.
 
     Args:
         es: Elasticsearch repository.
@@ -1061,8 +1083,6 @@ def find_usages(
     Returns:
         List of usage locations with context.
     """
-    import re
-
     # Get the element to find its name
     doc = es.get_document(element_id)
     if not doc:
@@ -1076,57 +1096,76 @@ def find_usages(
     repository = doc.get("repository")
     username = doc.get("username", "main")
 
-    # Build search pattern based on element type
-    if element_type == "function":
-        # Function calls: name(
-        pattern = rf"\b{re.escape(name)}\s*\("
-    elif element_type == "method":
-        # Method calls: .name( or self.name(
-        pattern = rf"\.{re.escape(name)}\s*\("
-    elif element_type == "class":
-        # Class references: inheritance, instantiation, type hints
-        pattern = rf"\b{re.escape(name)}\b"
-    else:
-        # Generic: just the name as word boundary
-        pattern = rf"\b{re.escape(name)}\b"
+    # Escape name for Lucene regexp
+    escaped_name = _escape_for_lucene_regexp(name)
 
-    # Search with grep_code (now uses ES)
-    grep_results = grep_code(
-        es=es,
+    # Build Lucene regexp pattern based on element type
+    # Note: .* in Lucene matches any string, \\( is literal paren
+    if element_type == "function":
+        # Function calls: name followed by optional whitespace then paren
+        # Lucene: name.*\( (dots match any char, .* matches any string)
+        pattern = f"{escaped_name}.*\\("
+    elif element_type == "method":
+        # Method calls: .name( (dot then name then paren)
+        pattern = f"\\.{escaped_name}.*\\("
+    elif element_type == "class":
+        # Class references: just the name (word boundaries are tricky in Lucene)
+        pattern = escaped_name
+    else:
+        # Generic: just the name
+        pattern = escaped_name
+
+    # Search using ES regexp search (server-side)
+    results = es.search_by_regexp(
         pattern=pattern,
         scope=scope,
         repository=repository,
         username=username,
         glob="*.py",  # TODO: detect language from element
-        context_lines=1,
-        limit=limit + 10,  # Get extra to filter out definition
+        size=limit + 10,  # Get extra to filter out definition
+        include_tests=True,
     )
 
-    # Combine code and test results
-    matches = grep_results["code_results"] + grep_results["test_results"]
-
-    # Filter out the definition itself
+    # Filter out the definition itself and process results
     usages = []
-    for match in matches:
-        # Skip if it's the definition line
-        if match["file"] == defining_file and match["line"] == defining_line:
+    for result in results:
+        result_file = result.get("relative_path")
+        result_line = result.get("line_start")
+        raw_code = result.get("raw_code", "")
+
+        # Skip if it's the defining element itself (same file and line)
+        if result_file == defining_file and result_line == defining_line:
             continue
 
-        # Skip if it looks like a definition (def/class keyword)
-        content = match["content"].strip()
-        if element_type == "function" and content.startswith("def "):
-            continue
-        if element_type == "class" and content.startswith("class "):
-            continue
-        if element_type == "method" and content.startswith("def "):
-            continue
+        # Get the first line of raw_code as content
+        lines = raw_code.splitlines() if raw_code else []
+        content = lines[0] if lines else ""
+
+        # For functions/methods, skip if this element IS a definition of the target
+        # (i.e., if the first line defines a function/method with the same name)
+        # This catches cases where a function has the same name in different files
+        content_stripped = content.strip()
+        if element_type == "function":
+            # Skip only if this is defining the SAME function
+            if content_stripped.startswith(f"def {name}(") or content_stripped.startswith(f"def {name} ("):
+                continue
+        elif element_type == "class":
+            if content_stripped.startswith(f"class {name}(") or content_stripped.startswith(f"class {name}:"):
+                continue
+        elif element_type == "method":
+            if content_stripped.startswith(f"def {name}(") or content_stripped.startswith(f"def {name} ("):
+                continue
+
+        # Build context from raw_code lines
+        context_before = []  # Empty for now (we only have the element, not surrounding code)
+        context_after = lines[1:2] if len(lines) > 1 else []  # Second line if exists
 
         usages.append({
-            "file": match["file"],
-            "line": match["line"],
-            "content": match["content"],
-            "context_before": match.get("context_before", []),
-            "context_after": match.get("context_after", []),
+            "file": result_file,
+            "line": result_line,
+            "content": content,
+            "context_before": context_before,
+            "context_after": context_after,
         })
 
         if len(usages) >= limit:

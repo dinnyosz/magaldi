@@ -1990,6 +1990,189 @@ class TestPatternSearch:
 
 
 # =============================================================================
+# FIND USAGES WITH PATTERN SEARCH TESTS
+# =============================================================================
+
+
+class TestFindUsagesWithPatternSearch:
+    """Tests for find_usages using search_by_regexp."""
+
+    def test_find_usages_uses_regexp_search(self, mock_es_repo):
+        """Test that find_usages uses search_by_regexp internally."""
+        mock_es_repo.get_document.return_value = {
+            "element_id": "test:repo:main:file.py:function:my_func:10",
+            "name": "my_func",
+            "element_type": "function",
+            "relative_path": "file.py",
+            "line_start": 10,
+            "scope": "test",
+            "repository": "repo",
+            "username": "main",
+        }
+        mock_es_repo.search_by_regexp.return_value = [
+            {
+                "element_id": "test:repo:main:other.py:function:caller:20",
+                "name": "caller",
+                "element_type": "function",
+                "relative_path": "other.py",
+                "line_start": 20,
+                "raw_code": "def caller():\n    my_func()",
+                "is_test": False,
+            }
+        ]
+
+        result = find_usages(
+            es=mock_es_repo,
+            element_id="test:repo:main:file.py:function:my_func:10",
+        )
+
+        # Verify search_by_regexp was called (not the old client.search or grep_code)
+        mock_es_repo.search_by_regexp.assert_called()
+        assert len(result) >= 0  # May filter out definition
+
+    def test_find_usages_builds_function_call_pattern(self, mock_es_repo):
+        """Test that find_usages builds correct Lucene regexp for function calls."""
+        mock_es_repo.get_document.return_value = {
+            "element_id": "test:repo:main:file.py:function:my_func:10",
+            "name": "my_func",
+            "element_type": "function",
+            "relative_path": "file.py",
+            "line_start": 10,
+            "scope": "test",
+            "repository": "repo",
+            "username": "main",
+        }
+        mock_es_repo.search_by_regexp.return_value = []
+
+        find_usages(
+            es=mock_es_repo,
+            element_id="test:repo:main:file.py:function:my_func:10",
+        )
+
+        # Verify the pattern is Lucene-compatible (name followed by paren)
+        call_args = mock_es_repo.search_by_regexp.call_args
+        pattern = call_args[1]["pattern"]
+        # Should match function name followed by optional spaces then paren
+        assert "my_func" in pattern
+        assert "\\(" in pattern  # Escaped paren for Lucene
+
+    def test_find_usages_builds_method_call_pattern(self, mock_es_repo):
+        """Test that find_usages builds correct Lucene regexp for method calls."""
+        mock_es_repo.get_document.return_value = {
+            "element_id": "test:repo:main:file.py:method:my_method:10",
+            "name": "my_method",
+            "element_type": "method",
+            "relative_path": "file.py",
+            "line_start": 10,
+            "scope": "test",
+            "repository": "repo",
+            "username": "main",
+        }
+        mock_es_repo.search_by_regexp.return_value = []
+
+        find_usages(
+            es=mock_es_repo,
+            element_id="test:repo:main:file.py:method:my_method:10",
+        )
+
+        # Verify the pattern includes dot before method name
+        call_args = mock_es_repo.search_by_regexp.call_args
+        pattern = call_args[1]["pattern"]
+        assert "\\.my_method" in pattern  # Dot then method name
+
+    def test_find_usages_builds_class_reference_pattern(self, mock_es_repo):
+        """Test that find_usages builds correct Lucene regexp for class references."""
+        mock_es_repo.get_document.return_value = {
+            "element_id": "test:repo:main:file.py:class:MyClass:10",
+            "name": "MyClass",
+            "element_type": "class",
+            "relative_path": "file.py",
+            "line_start": 10,
+            "scope": "test",
+            "repository": "repo",
+            "username": "main",
+        }
+        mock_es_repo.search_by_regexp.return_value = []
+
+        find_usages(
+            es=mock_es_repo,
+            element_id="test:repo:main:file.py:class:MyClass:10",
+        )
+
+        # Verify the pattern contains the class name
+        call_args = mock_es_repo.search_by_regexp.call_args
+        pattern = call_args[1]["pattern"]
+        assert "MyClass" in pattern
+
+    def test_find_usages_filters_definitions(self, mock_es_repo):
+        """Test that find_usages filters out definition lines."""
+        mock_es_repo.get_document.return_value = {
+            "element_id": "test:repo:main:file.py:function:my_func:10",
+            "name": "my_func",
+            "element_type": "function",
+            "relative_path": "file.py",
+            "line_start": 10,
+            "scope": "test",
+            "repository": "repo",
+            "username": "main",
+        }
+        mock_es_repo.search_by_regexp.return_value = [
+            {
+                "element_id": "test:repo:main:file.py:function:my_func:10",
+                "name": "my_func",
+                "element_type": "function",
+                "relative_path": "file.py",
+                "line_start": 10,
+                "raw_code": "def my_func():\n    pass",
+                "is_test": False,
+            },
+            {
+                "element_id": "test:repo:main:other.py:function:caller:20",
+                "name": "caller",
+                "element_type": "function",
+                "relative_path": "other.py",
+                "line_start": 20,
+                "raw_code": "def caller():\n    my_func()",
+                "is_test": False,
+            },
+        ]
+
+        result = find_usages(
+            es=mock_es_repo,
+            element_id="test:repo:main:file.py:function:my_func:10",
+        )
+
+        # The definition in file.py should be filtered out
+        assert len(result) == 1
+        assert result[0]["file"] == "other.py"
+
+    def test_find_usages_escapes_special_chars_for_lucene(self, mock_es_repo):
+        """Test that find_usages escapes special chars for Lucene regexp."""
+        mock_es_repo.get_document.return_value = {
+            "element_id": "test:repo:main:file.py:function:func_with_dots:10",
+            "name": "func.with.dots",  # Name with dots (unusual but possible)
+            "element_type": "function",
+            "relative_path": "file.py",
+            "line_start": 10,
+            "scope": "test",
+            "repository": "repo",
+            "username": "main",
+        }
+        mock_es_repo.search_by_regexp.return_value = []
+
+        find_usages(
+            es=mock_es_repo,
+            element_id="test:repo:main:file.py:function:func_with_dots:10",
+        )
+
+        # Verify dots in name are escaped for Lucene
+        call_args = mock_es_repo.search_by_regexp.call_args
+        pattern = call_args[1]["pattern"]
+        # Dots should be escaped as \.
+        assert "\\." in pattern
+
+
+# =============================================================================
 # GREP CODE DEPRECATION TESTS
 # =============================================================================
 
