@@ -329,6 +329,40 @@ class MagaldiMCPServer:
                     },
                 ),
                 Tool(
+                    name="pattern_search",
+                    description="PATTERN SEARCH: ES-native pattern matching on code. "
+                    "Faster than grep_code - query runs server-side. "
+                    "Three modes: regexp (Lucene syntax), wildcard (* and ?), proximity (terms near each other).",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "pattern": {
+                                "type": "string",
+                                "description": "Search pattern. Syntax depends on mode.",
+                            },
+                            "mode": {
+                                "type": "string",
+                                "enum": ["regexp", "wildcard", "proximity"],
+                                "description": "regexp: Lucene regex (e.g., 'add_column.*Model'). "
+                                "wildcard: Simple wildcards (e.g., '*column*'). "
+                                "proximity: Terms near each other (e.g., 'add column Model').",
+                            },
+                            "scope": {"type": "string", "description": "Filter by scope (required)"},
+                            "repository": {"type": "string", "description": "Filter by repo (required)"},
+                            "username": {"type": "string", "description": "User branch to search"},
+                            "slop": {
+                                "type": "integer",
+                                "default": 5,
+                                "description": "For proximity mode: max word distance",
+                            },
+                            "glob": {"type": "string", "description": "File filter (e.g., '*.py')"},
+                            "limit": {"type": "integer", "default": 50},
+                            "include_tests": {"type": "boolean", "default": True},
+                        },
+                        "required": ["pattern", "mode", "scope", "repository"],
+                    },
+                ),
+                Tool(
                     name="find_usages",
                     description="FIND USAGES: Find where a function/class/method is called or referenced. "
                     "USE THIS instead of grepping for 'functionName(' - automatically filters definitions, "
@@ -473,6 +507,7 @@ class MagaldiMCPServer:
             list_features,
             list_glossary,
             list_repos,
+            pattern_search,
             search_code,
             search_features,
             search_glossary,
@@ -604,6 +639,21 @@ class MagaldiMCPServer:
                 repository=args.get("repository"),
                 glob=args.get("glob"),
                 context_lines=args.get("context_lines", 0),
+                limit=args.get("limit", 50),
+                include_tests=args.get("include_tests", True),
+            )
+        elif name == "pattern_search":
+            # ES-native pattern search - faster than grep_code
+            return await asyncio.to_thread(
+                pattern_search,
+                es,
+                pattern=args["pattern"],
+                mode=args["mode"],
+                scope=args["scope"],
+                repository=args["repository"],
+                username=args.get("username"),  # Pass None if not provided
+                slop=args.get("slop", 5),
+                glob=args.get("glob"),
                 limit=args.get("limit", 50),
                 include_tests=args.get("include_tests", True),
             )

@@ -1047,6 +1047,73 @@ class TestCallToolErrorHandling:
 # =============================================================================
 
 
+class TestPatternSearchTool:
+    """Tests for pattern_search tool."""
+
+    @pytest.mark.asyncio
+    async def test_pattern_search_tool_registered(self, server):
+        """Test that pattern_search tool is registered."""
+        from mcp.types import ListToolsRequest
+
+        # Get the list_tools handler from the MCP server
+        handler = server.server.request_handlers.get(ListToolsRequest)
+        assert handler is not None, "ListToolsRequest handler not registered"
+
+        # Call the handler to get tools list
+        # The handler returns ServerResult with root.tools
+        result = await handler(None)
+        tools = result.root.tools
+        tool_names = [t.name for t in tools]
+        assert "pattern_search" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_pattern_search_tool_schema(self, server):
+        """Test pattern_search tool has correct schema."""
+        from mcp.types import ListToolsRequest
+
+        # Get the list_tools handler from the MCP server
+        handler = server.server.request_handlers.get(ListToolsRequest)
+        result = await handler(None)
+        tools = result.root.tools
+        pattern_tool = next(t for t in tools if t.name == "pattern_search")
+
+        schema = pattern_tool.inputSchema
+        assert "pattern" in schema["properties"]
+        assert "mode" in schema["properties"]
+        assert schema["properties"]["mode"]["enum"] == ["regexp", "wildcard", "proximity"]
+        assert "scope" in schema["required"]
+        assert "repository" in schema["required"]
+
+    @pytest.mark.asyncio
+    async def test_pattern_search_returns_results(self, server, mock_es_repo):
+        """Test pattern_search tool returns results."""
+        mock_es_repo.search_by_regexp.return_value = [
+            {
+                "element_id": "scope:repo:user:file.py:function:test:1",
+                "name": "test",
+                "element_type": "function",
+                "relative_path": "file.py",
+                "line_start": 1,
+                "raw_code": "def test(): pass",
+                "is_test": False,
+            }
+        ]
+
+        result = await server._handle_tool(
+            "pattern_search",
+            {
+                "pattern": "test.*",
+                "mode": "regexp",
+                "scope": "scope",
+                "repository": "repo",
+            },
+        )
+
+        assert "code_results" in result
+        assert "test_results" in result
+        assert len(result["code_results"]) == 1
+
+
 class TestRunServer:
     """Tests for run_server function."""
 
