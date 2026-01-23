@@ -95,6 +95,26 @@ INDEX_MAPPING = {
                 "index": True,
                 "similarity": "cosine",
             },
+            # On file elements - stores imports
+            "imports": {
+                "type": "nested",
+                "properties": {
+                    "name": {"type": "keyword"},        # Imported name
+                    "module": {"type": "keyword"},      # Source module
+                    "alias": {"type": "keyword"},       # Alias if any
+                    "line": {"type": "integer"},        # Line number
+                },
+            },
+            # On function/method elements - stores calls
+            "calls": {
+                "type": "nested",
+                "properties": {
+                    "name": {"type": "keyword"},        # Function name
+                    "receiver": {"type": "keyword"},    # self, utils, null
+                    "line": {"type": "integer"},        # Line number
+                    "resolved_id": {"type": "keyword"}, # Resolved element ID (or null)
+                },
+            },
         }
     },
     "settings": {
@@ -556,6 +576,192 @@ class ElasticsearchRepository:
             return True
         except NotFoundError:
             return False
+
+    def store_imports(self, element_id: str, imports: list[dict]) -> bool:
+        """Store imports for a file element.
+
+        Args:
+            element_id: Element ID to update (should be a file element).
+            imports: List of import dicts with keys: name, module, alias, line.
+
+        Returns:
+            True on success, False if element not found.
+        """
+        try:
+            client = self._get_client()
+            client.update(
+                index=INDEX_NAME,
+                id=element_id,
+                body={"doc": {"imports": imports}},
+            )
+            return True
+        except NotFoundError:
+            return False
+
+    def store_calls(self, element_id: str, calls: list[dict]) -> bool:
+        """Store calls for a function/method element.
+
+        Args:
+            element_id: Element ID to update (should be a function/method).
+            calls: List of call dicts with keys: name, receiver, line, resolved_id.
+
+        Returns:
+            True on success, False if element not found.
+        """
+        try:
+            client = self._get_client()
+            client.update(
+                index=INDEX_NAME,
+                id=element_id,
+                body={"doc": {"calls": calls}},
+            )
+            return True
+        except NotFoundError:
+            return False
+
+    def get_imports(self, element_id: str) -> list[dict]:
+        """Get imports for a file element.
+
+        Args:
+            element_id: Element ID to retrieve imports for.
+
+        Returns:
+            List of import dicts, or empty list if not found.
+        """
+        doc = self.get_document(element_id)
+        if doc:
+            return doc.get("imports", []) or []
+        return []
+
+    def get_calls(self, element_id: str) -> list[dict]:
+        """Get calls for a function/method element.
+
+        Args:
+            element_id: Element ID to retrieve calls for.
+
+        Returns:
+            List of call dicts, or empty list if not found.
+        """
+        doc = self.get_document(element_id)
+        if doc:
+            return doc.get("calls", []) or []
+        return []
+
+    def find_elements_calling(
+        self,
+        target_id: str,
+        scope: str | None = None,
+        repository: str | None = None,
+        username: str | None = None,
+        limit: int = 30,
+    ) -> list[dict]:
+        """Find elements that call the target (query calls.resolved_id).
+
+        Args:
+            target_id: Element ID of the target being called.
+            scope: Filter by scope.
+            repository: Filter by repository.
+            username: Filter by username.
+            limit: Maximum results to return.
+
+        Returns:
+            List of element documents that call the target.
+        """
+        filter_clauses: list[dict[str, Any]] = []
+
+        if scope:
+            filter_clauses.append({"term": {"scope": scope}})
+        if repository:
+            filter_clauses.append({"term": {"repository": repository}})
+        if username:
+            filter_clauses.append({"term": {"username": username}})
+
+        # Nested query to find elements with calls.resolved_id matching target
+        nested_query: dict[str, Any] = {
+            "nested": {
+                "path": "calls",
+                "query": {
+                    "term": {"calls.resolved_id": target_id}
+                },
+            }
+        }
+
+        query: dict[str, Any]
+        if filter_clauses:
+            query = {
+                "bool": {
+                    "must": [nested_query],
+                    "filter": filter_clauses,
+                }
+            }
+        else:
+            query = nested_query
+
+        client = self._get_client()
+        result = client.search(
+            index=INDEX_NAME,
+            body={"query": query, "size": limit},
+        )
+
+        return [hit["_source"] for hit in result.get("hits", {}).get("hits", [])]
+
+    def find_elements_importing(
+        self,
+        module: str,
+        scope: str | None = None,
+        repository: str | None = None,
+        username: str | None = None,
+        limit: int = 30,
+    ) -> list[dict]:
+        """Find elements that import the module (query imports.module).
+
+        Args:
+            module: Module name to search for.
+            scope: Filter by scope.
+            repository: Filter by repository.
+            username: Filter by username.
+            limit: Maximum results to return.
+
+        Returns:
+            List of element documents that import the module.
+        """
+        filter_clauses: list[dict[str, Any]] = []
+
+        if scope:
+            filter_clauses.append({"term": {"scope": scope}})
+        if repository:
+            filter_clauses.append({"term": {"repository": repository}})
+        if username:
+            filter_clauses.append({"term": {"username": username}})
+
+        # Nested query to find elements with imports.module matching
+        nested_query: dict[str, Any] = {
+            "nested": {
+                "path": "imports",
+                "query": {
+                    "term": {"imports.module": module}
+                },
+            }
+        }
+
+        query: dict[str, Any]
+        if filter_clauses:
+            query = {
+                "bool": {
+                    "must": [nested_query],
+                    "filter": filter_clauses,
+                }
+            }
+        else:
+            query = nested_query
+
+        client = self._get_client()
+        result = client.search(
+            index=INDEX_NAME,
+            body={"query": query, "size": limit},
+        )
+
+        return [hit["_source"] for hit in result.get("hits", {}).get("hits", [])]
 
     def search_by_text(
         self,
