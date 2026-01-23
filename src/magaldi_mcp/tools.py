@@ -1185,7 +1185,7 @@ def find_implementations(
 ) -> list[dict[str, Any]]:
     """Find classes that implement/inherit from a protocol or base class.
 
-    Searches indexed code in Elasticsearch - no filesystem access needed.
+    Searches indexed code in Elasticsearch using regexp search - no filesystem access needed.
 
     Args:
         es: Elasticsearch repository.
@@ -1215,39 +1215,52 @@ def find_implementations(
     else:
         raise ValueError("Either element_id or class_name required")
 
-    # Search for class definitions that inherit from this name
-    # Pattern: class SomeClass(Name) or class SomeClass(Name, Other)
-    pattern = rf"class\s+\w+\s*\([^)]*\b{re.escape(name)}\b"
+    # Escape name for Lucene regexp
+    escaped_name = _escape_for_lucene_regexp(name)
 
-    grep_results = grep_code(
-        es=es,
+    # Build Lucene regexp pattern for class inheritance
+    # Pattern: class.*\(.*{name}.*\) - matches class definitions with name in parents
+    # Note: Lucene regexp uses .* for any string, \\( for literal paren
+    pattern = f"class.*\\(.*{escaped_name}.*\\)"
+
+    # Search using ES regexp search (server-side)
+    results = es.search_by_regexp(
         pattern=pattern,
         scope=scope,
         repository=repository,
         username=username,
-        glob="*.py",
-        context_lines=2,
-        limit=limit,
+        glob="*.py",  # TODO: support other languages
+        size=limit,
+        include_tests=True,
     )
 
-    # Combine code and test results
-    matches = grep_results["code_results"] + grep_results["test_results"]
+    # Process results and extract implementing class names
+    implementations = []
+    for result in results:
+        # Skip the base class itself
+        if result.get("name") == name:
+            continue
 
-    results = []
-    for match in matches:
-        # Extract class name from the match
-        class_match = re.search(r"class\s+(\w+)", match["content"])
+        raw_code = result.get("raw_code", "")
+        lines = raw_code.splitlines() if raw_code else []
+        first_line = lines[0] if lines else ""
+
+        # Extract class name from the first line
+        class_match = re.search(r"class\s+(\w+)", first_line)
         impl_name = class_match.group(1) if class_match else "Unknown"
 
-        results.append({
+        # Get context (second line if exists)
+        context_after = lines[1:3] if len(lines) > 1 else []
+
+        implementations.append({
             "class_name": impl_name,
-            "file": match["file"],
-            "line": match["line"],
-            "definition": match["content"].strip(),
-            "context_after": match.get("context_after", []),
+            "file": result.get("relative_path"),
+            "line": result.get("line_start"),
+            "definition": first_line.strip(),
+            "context_after": context_after,
         })
 
-    return results
+    return implementations
 
 
 def generate_skill(

@@ -2198,3 +2198,133 @@ class TestGrepCodeDeprecation:
             assert len(w) == 1
             assert issubclass(w[0].category, DeprecationWarning)
             assert "pattern_search" in str(w[0].message)
+
+
+# =============================================================================
+# FIND IMPLEMENTATIONS WITH PATTERN SEARCH TESTS
+# =============================================================================
+
+
+class TestFindImplementationsWithPatternSearch:
+    """Tests for find_implementations using pattern_search."""
+
+    def test_find_implementations_uses_regexp_search(self, mock_es_repo):
+        """Test that find_implementations uses search_by_regexp."""
+        mock_es_repo.get_document.return_value = {
+            "element_id": "test:repo:main:base.py:class:BaseClass:1",
+            "name": "BaseClass",
+            "element_type": "class",
+            "scope": "test",
+            "repository": "repo",
+        }
+        mock_es_repo.search_by_regexp.return_value = [
+            {
+                "element_id": "test:repo:main:impl.py:class:MyImpl:10",
+                "name": "MyImpl",
+                "element_type": "class",
+                "relative_path": "impl.py",
+                "line_start": 10,
+                "raw_code": "class MyImpl(BaseClass):\n    pass",
+                "is_test": False,
+            }
+        ]
+
+        result = find_implementations(
+            es=mock_es_repo,
+            element_id="test:repo:main:base.py:class:BaseClass:1",
+        )
+
+        mock_es_repo.search_by_regexp.assert_called()
+        assert len(result) >= 1
+
+    def test_find_implementations_builds_inheritance_pattern(self, mock_es_repo):
+        """Test that find_implementations builds correct Lucene pattern for inheritance."""
+        mock_es_repo.get_document.return_value = {
+            "element_id": "test:repo:main:base.py:class:BaseClass:1",
+            "name": "BaseClass",
+            "element_type": "class",
+            "scope": "test",
+            "repository": "repo",
+        }
+        mock_es_repo.search_by_regexp.return_value = []
+
+        find_implementations(
+            es=mock_es_repo,
+            element_id="test:repo:main:base.py:class:BaseClass:1",
+        )
+
+        # Verify pattern looks for class inheritance
+        call_args = mock_es_repo.search_by_regexp.call_args
+        pattern = call_args[1]["pattern"]
+        # Pattern should match: class SomeClass(BaseClass) or class SomeClass(Other, BaseClass)
+        assert "class" in pattern
+        assert "BaseClass" in pattern
+        assert "\\(" in pattern  # Escaped paren for Lucene
+
+    def test_find_implementations_by_class_name_uses_regexp(self, mock_es_repo):
+        """Test find_implementations by class_name also uses search_by_regexp."""
+        mock_es_repo.search_by_regexp.return_value = []
+
+        find_implementations(
+            es=mock_es_repo,
+            class_name="Protocol",
+            scope="test",
+            repository="repo",
+        )
+
+        mock_es_repo.search_by_regexp.assert_called()
+        call_args = mock_es_repo.search_by_regexp.call_args
+        pattern = call_args[1]["pattern"]
+        assert "Protocol" in pattern
+
+    def test_find_implementations_extracts_class_name(self, mock_es_repo):
+        """Test that find_implementations correctly extracts implementing class names."""
+        mock_es_repo.get_document.return_value = {
+            "element_id": "test:repo:main:base.py:class:BaseClass:1",
+            "name": "BaseClass",
+            "element_type": "class",
+            "scope": "test",
+            "repository": "repo",
+        }
+        mock_es_repo.search_by_regexp.return_value = [
+            {
+                "element_id": "test:repo:main:impl.py:class:DerivedClass:10",
+                "name": "DerivedClass",
+                "element_type": "class",
+                "relative_path": "impl.py",
+                "line_start": 10,
+                "raw_code": "class DerivedClass(BaseClass):\n    pass",
+                "is_test": False,
+            }
+        ]
+
+        result = find_implementations(
+            es=mock_es_repo,
+            element_id="test:repo:main:base.py:class:BaseClass:1",
+        )
+
+        assert len(result) == 1
+        assert result[0]["class_name"] == "DerivedClass"
+        assert result[0]["file"] == "impl.py"
+        assert result[0]["line"] == 10
+
+    def test_find_implementations_escapes_special_chars(self, mock_es_repo):
+        """Test that find_implementations escapes special chars for Lucene."""
+        mock_es_repo.get_document.return_value = {
+            "element_id": "test:repo:main:base.py:class:Base.Class:1",
+            "name": "Base.Class",  # Name with dot (unusual)
+            "element_type": "class",
+            "scope": "test",
+            "repository": "repo",
+        }
+        mock_es_repo.search_by_regexp.return_value = []
+
+        find_implementations(
+            es=mock_es_repo,
+            element_id="test:repo:main:base.py:class:Base.Class:1",
+        )
+
+        call_args = mock_es_repo.search_by_regexp.call_args
+        pattern = call_args[1]["pattern"]
+        # Dot should be escaped
+        assert "\\." in pattern
