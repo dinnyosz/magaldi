@@ -712,8 +712,18 @@ export interface CallChainNode {
   missing: boolean
 }
 
+export interface CallChainRoot {
+  element_id: string
+  hash_id: string | null
+  name: string
+  element_type: string
+  file_path: string
+  line: number
+  summary: string | null
+}
+
 export interface CallChainResponse {
-  root: Record<string, unknown>
+  root: CallChainRoot
   direction: string
   max_depth: number
   callers: CallChainNode[]

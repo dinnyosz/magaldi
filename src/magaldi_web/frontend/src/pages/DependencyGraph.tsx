@@ -18,15 +18,13 @@ import { getDependencyGraph } from '../api'
 
 function DependencyGraph() {
   const { scope, repo } = useParams<{ scope: string; repo: string }>()
-  const [maxDepth, setMaxDepth] = useState(3)
-  const [includeExternal, setIncludeExternal] = useState(false)
+  const [internalOnly, setInternalOnly] = useState(true)
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['dependency-graph', scope, repo, maxDepth, includeExternal],
+    queryKey: ['dependency-graph', scope, repo, internalOnly],
     queryFn: () =>
       getDependencyGraph(scope!, repo!, {
-        max_depth: maxDepth,
-        include_external: includeExternal,
+        internal_only: internalOnly,
       }),
     enabled: !!scope && !!repo,
   })
@@ -89,20 +87,20 @@ function DependencyGraph() {
         <Card.Body>
           <Row>
             <Col md={3} className="text-center border-end">
-              <h3 className="text-primary mb-0">{data?.stats.total_modules ?? 0}</h3>
+              <h3 className="text-primary mb-0">{data?.stats.node_count ?? 0}</h3>
               <small className="text-muted">Modules</small>
             </Col>
             <Col md={3} className="text-center border-end">
-              <h3 className="text-success mb-0">{data?.stats.total_edges ?? 0}</h3>
+              <h3 className="text-success mb-0">{data?.stats.edge_count ?? 0}</h3>
               <small className="text-muted">Dependencies</small>
             </Col>
             <Col md={3} className="text-center border-end">
-              <h3 className="text-info mb-0">{data?.stats.internal_edges ?? 0}</h3>
-              <small className="text-muted">Internal</small>
+              <h3 className="text-info mb-0">{data?.nodes.length ?? 0}</h3>
+              <small className="text-muted">Nodes</small>
             </Col>
             <Col md={3} className="text-center">
-              <h3 className={`mb-0 ${(data?.cycles.length || 0) > 0 ? 'text-danger' : 'text-secondary'}`}>
-                {data?.cycles.length ?? 0}
+              <h3 className={`mb-0 ${(data?.stats.cycle_count || 0) > 0 ? 'text-danger' : 'text-secondary'}`}>
+                {data?.stats.cycle_count ?? 0}
               </h3>
               <small className="text-muted">Cycles</small>
             </Col>
@@ -113,28 +111,13 @@ function DependencyGraph() {
       {/* Controls */}
       <Card className="mb-4">
         <Card.Body>
-          <Row>
-            <Col md={6}>
-              <Form.Group>
-                <Form.Label>Max Depth: {maxDepth}</Form.Label>
-                <Form.Range
-                  min={1}
-                  max={10}
-                  value={maxDepth}
-                  onChange={(e) => setMaxDepth(parseInt(e.target.value))}
-                />
-              </Form.Group>
-            </Col>
-            <Col md={6} className="d-flex align-items-center">
-              <Form.Check
-                type="switch"
-                id="include-external"
-                label="Include external dependencies"
-                checked={includeExternal}
-                onChange={(e) => setIncludeExternal(e.target.checked)}
-              />
-            </Col>
-          </Row>
+          <Form.Check
+            type="switch"
+            id="internal-only"
+            label="Show only internal dependencies"
+            checked={internalOnly}
+            onChange={(e) => setInternalOnly(e.target.checked)}
+          />
         </Card.Body>
       </Card>
 

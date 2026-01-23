@@ -58,8 +58,9 @@ function DeadCode() {
   }
 
   // Group by file
-  const byFile: Record<string, typeof data.potentially_dead> = {}
-  data?.potentially_dead.forEach((item) => {
+  const deadItems = data?.potentially_dead || []
+  const byFile: Record<string, typeof deadItems> = {}
+  deadItems.forEach((item) => {
     if (!byFile[item.file_path]) {
       byFile[item.file_path] = []
     }
