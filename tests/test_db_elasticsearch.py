@@ -820,6 +820,28 @@ class TestPatternSearch:
         )
         assert len(results) >= 1
 
+    def test_search_by_proximity(self, es_repo, sample_elements):
+        """Test proximity search with slop."""
+        # Search for terms that appear near each other in the raw_code
+        # "def add_column(table, Model)" - "table" and "Model" are close
+        results = es_repo.search_by_proximity(
+            terms="table Model",
+            slop=3,
+            scope="test-pattern",
+            repository="repo",
+        )
+        assert len(results) >= 1
+
+    def test_search_by_proximity_exact_phrase(self, es_repo, sample_elements):
+        """Test proximity search with slop=0 for exact phrase."""
+        results = es_repo.search_by_proximity(
+            terms="def process",
+            slop=0,
+            scope="test-pattern",
+            repository="repo",
+        )
+        assert len(results) >= 1
+
 
 class TestOldDataHandling:
     """Tests for handling old data without element_count."""
