@@ -1965,6 +1965,7 @@ def find_dead_code(
         if not callers:
             potentially_dead.append({
                 "element_id": element_id,
+                "hash_id": source.get("hash_id"),
                 "name": name,
                 "type": source.get("element_type"),
                 "file": source.get("relative_path"),
@@ -2055,6 +2056,7 @@ def find_entry_points(
 
         entry = {
             "element_id": source.get("element_id"),
+            "hash_id": source.get("hash_id"),
             "name": name,
             "type": source.get("element_type"),
             "file": source.get("relative_path"),
