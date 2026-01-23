@@ -24,6 +24,7 @@ from magaldi_mcp.tools import (
     find_usages,
     find_implementations,
     get_call_graph,
+    pattern_search,
 )
 
 
@@ -1788,3 +1789,200 @@ class TestGetFeatureMembersGlossary:
         assert "members" in result
         assert "glossary_terms" in result
         assert result["glossary_terms"] == []
+
+
+# =============================================================================
+# PATTERN SEARCH TESTS
+# =============================================================================
+
+
+class TestPatternSearch:
+    """Tests for pattern_search function."""
+
+    def test_pattern_search_regexp_mode(self, mock_es_repo):
+        """Test pattern_search with regexp mode."""
+        mock_es_repo.search_by_regexp.return_value = [
+            {
+                "element_id": "test:repo:main:file.py:function:add_column:10",
+                "name": "add_column",
+                "element_type": "function",
+                "relative_path": "file.py",
+                "line_start": 10,
+                "raw_code": "def add_column(table, Model):\n    pass",
+                "is_test": False,
+            }
+        ]
+
+        result = pattern_search(
+            es=mock_es_repo,
+            pattern="add_column.*Model",
+            mode="regexp",
+            scope="test",
+            repository="repo",
+        )
+
+        assert "code_results" in result
+        assert len(result["code_results"]) == 1
+        assert result["code_results"][0]["name"] == "add_column"
+        assert result["mode"] == "regexp"
+        assert result["pattern"] == "add_column.*Model"
+        mock_es_repo.search_by_regexp.assert_called_once_with(
+            pattern="add_column.*Model",
+            scope="test",
+            repository="repo",
+            username=None,
+            glob=None,
+            size=50,
+            include_tests=True,
+        )
+
+    def test_pattern_search_wildcard_mode(self, mock_es_repo):
+        """Test pattern_search with wildcard mode."""
+        mock_es_repo.search_by_wildcard.return_value = []
+
+        result = pattern_search(
+            es=mock_es_repo,
+            pattern="*column*",
+            mode="wildcard",
+            scope="test",
+            repository="repo",
+        )
+
+        assert "code_results" in result
+        assert result["mode"] == "wildcard"
+        mock_es_repo.search_by_wildcard.assert_called_once_with(
+            pattern="*column*",
+            scope="test",
+            repository="repo",
+            username=None,
+            glob=None,
+            size=50,
+            include_tests=True,
+        )
+
+    def test_pattern_search_proximity_mode(self, mock_es_repo):
+        """Test pattern_search with proximity mode."""
+        mock_es_repo.search_by_proximity.return_value = []
+
+        result = pattern_search(
+            es=mock_es_repo,
+            pattern="add column Model",
+            mode="proximity",
+            slop=5,
+            scope="test",
+            repository="repo",
+            username="main",
+        )
+
+        assert "code_results" in result
+        assert result["mode"] == "proximity"
+        mock_es_repo.search_by_proximity.assert_called_once_with(
+            terms="add column Model",
+            slop=5,
+            scope="test",
+            repository="repo",
+            username="main",
+            glob=None,
+            size=50,
+            include_tests=True,
+        )
+
+    def test_pattern_search_invalid_mode(self, mock_es_repo):
+        """Test pattern_search with invalid mode raises error."""
+        with pytest.raises(ValueError, match="Invalid mode"):
+            pattern_search(
+                es=mock_es_repo,
+                pattern="test",
+                mode="invalid",
+                scope="test",
+                repository="repo",
+            )
+
+    def test_pattern_search_groups_test_results(self, mock_es_repo):
+        """Test pattern_search groups code and test results separately."""
+        mock_es_repo.search_by_regexp.return_value = [
+            {
+                "element_id": "test:repo:main:src/app.py:function:process:10",
+                "name": "process",
+                "element_type": "function",
+                "relative_path": "src/app.py",
+                "line_start": 10,
+                "raw_code": "def process(): pass",
+                "is_test": False,
+            },
+            {
+                "element_id": "test:repo:main:tests/test_app.py:function:test_process:5",
+                "name": "test_process",
+                "element_type": "function",
+                "relative_path": "tests/test_app.py",
+                "line_start": 5,
+                "raw_code": "def test_process(): pass",
+                "is_test": True,
+            },
+        ]
+
+        result = pattern_search(
+            es=mock_es_repo,
+            pattern="process",
+            mode="regexp",
+            scope="test",
+            repository="repo",
+        )
+
+        assert len(result["code_results"]) == 1
+        assert len(result["test_results"]) == 1
+        assert result["totals"]["code"] == 1
+        assert result["totals"]["tests"] == 1
+        assert result["code_results"][0]["name"] == "process"
+        assert result["test_results"][0]["name"] == "test_process"
+
+    def test_pattern_search_with_glob_filter(self, mock_es_repo):
+        """Test pattern_search passes glob filter to ES method."""
+        mock_es_repo.search_by_regexp.return_value = []
+
+        pattern_search(
+            es=mock_es_repo,
+            pattern="test",
+            mode="regexp",
+            scope="test",
+            repository="repo",
+            glob="*.py",
+        )
+
+        mock_es_repo.search_by_regexp.assert_called_once()
+        call_kwargs = mock_es_repo.search_by_regexp.call_args[1]
+        assert call_kwargs["glob"] == "*.py"
+
+    def test_pattern_search_with_custom_limit(self, mock_es_repo):
+        """Test pattern_search passes limit to ES method."""
+        mock_es_repo.search_by_wildcard.return_value = []
+
+        pattern_search(
+            es=mock_es_repo,
+            pattern="*test*",
+            mode="wildcard",
+            scope="test",
+            repository="repo",
+            limit=100,
+        )
+
+        mock_es_repo.search_by_wildcard.assert_called_once()
+        call_kwargs = mock_es_repo.search_by_wildcard.call_args[1]
+        assert call_kwargs["size"] == 100
+
+    def test_pattern_search_with_include_tests_false(self, mock_es_repo):
+        """Test pattern_search passes include_tests to ES method."""
+        mock_es_repo.search_by_proximity.return_value = []
+
+        pattern_search(
+            es=mock_es_repo,
+            pattern="test pattern",
+            mode="proximity",
+            scope="test",
+            repository="repo",
+            include_tests=False,
+        )
+
+        mock_es_repo.search_by_proximity.assert_called_once()
+        call_kwargs = mock_es_repo.search_by_proximity.call_args[1]
+        assert call_kwargs["include_tests"] is False
