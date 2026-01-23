@@ -472,7 +472,7 @@ FOCUS on the class itself. Use the file context only to understand how this clas
 Address:
 - What this class represents, models, or encapsulates
 - Its core responsibility and the problem it solves
-- How and when to instantiate or use this class
+- How and when to instantiate or use this class (see usage examples below if available)
 - Key state it manages and invariants it maintains
 - How it collaborates with other classes or modules
 
@@ -485,6 +485,7 @@ Class: {class_name}
 
 Code:
 {code}
+{usages_section}
 
 IMPORTANT: Write ONLY the 4-6 sentence summary below. Do NOT include any reasoning, analysis, bullet points, or explanations. Start directly with the first sentence of the summary.
 
@@ -496,7 +497,7 @@ FOCUS on the function itself. Use file/class context only to understand the func
 Address:
 - What operation, transformation, or task this function performs
 - The inputs it accepts (with their purposes) and what it returns
-- When to call this function - what scenarios or tasks require it
+- When to call this function - what scenarios or tasks require it (see usage examples below if available)
 - Side effects: external state changes, I/O, exceptions raised
 - Key edge cases or preconditions the caller should know
 
@@ -509,6 +510,7 @@ Signature: {signature}
 
 Code:
 {code}
+{usages_section}
 
 IMPORTANT: Write ONLY the 4-6 sentence summary below. Do NOT include any reasoning, analysis, bullet points, or explanations. Start directly with the first sentence of the summary.
 
@@ -521,7 +523,7 @@ Address:
 - What operation this method performs on or for the object
 - The inputs it accepts (with their purposes) and what it returns
 - How it reads or modifies the object's state
-- When to call this method in the object's lifecycle
+- When to call this method in the object's lifecycle (see usage examples below if available)
 - Side effects, exceptions, or preconditions the caller should know
 
 File context (for understanding only): {file_summary}
@@ -533,6 +535,7 @@ Signature: {signature}
 
 Code:
 {code}
+{usages_section}
 
 IMPORTANT: Write ONLY the 4-6 sentence summary below. Do NOT include any reasoning, analysis, bullet points, or explanations. Start directly with the first sentence of the summary.
 

@@ -12,17 +12,21 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from magaldi_core.change_detection import ChangeManifest, FileInfo
 from magaldi_core.tree_sitter_manager import (
     ExtractedElement,
+    ExtractedReference,
     extract_javascript_class_members,
     extract_javascript_elements,
+    extract_javascript_references,
     extract_python_class_members,
     extract_python_elements,
+    extract_python_references,
     get_manager,
 )
 
@@ -185,6 +189,7 @@ class ParsedFile:
 
     file_info: FileInfo
     elements: list[CodeElement] = field(default_factory=list)
+    references: list[ExtractedReference] = field(default_factory=list)  # Cross-file refs
     parse_errors: list[str] = field(default_factory=list)
     line_count: int = 0
 
@@ -905,6 +910,15 @@ def parse_file(
         # Parse and extract elements
         result.elements = parser.parse(content, file_info, scope, repository, username)
 
+        # Extract cross-file references
+        lines = content.split("\n")
+        if file_info.language == "python":
+            tree = parser.manager.parse(content.encode("utf-8"), "python")
+            result.references = extract_python_references(tree, lines)
+        elif file_info.language in ("javascript", "typescript"):
+            tree = parser.manager.parse(content.encode("utf-8"), file_info.language)
+            result.references = extract_javascript_references(tree, lines)
+
         # Detect if this is a test file
         file_is_test = is_test_path(file_info.relative_path, file_info.language)
 
@@ -925,6 +939,101 @@ def parse_file(
         result.parse_errors.append(str(e))
 
     return result
+
+
+# =============================================================================
+# CROSS-FILE REFERENCE LINKING
+# =============================================================================
+
+
+def _build_rich_context(
+    ref: ExtractedReference,
+    source_file: str,
+) -> str:
+    """Build a rich context string describing a reference.
+
+    Args:
+        ref: The extracted reference.
+        source_file: Relative path of the file containing the reference.
+
+    Returns:
+        Human-readable description like "instantiated in setup() at db/init.py:45"
+    """
+    # Build location part
+    location = f"at {source_file}:{ref.line}"
+
+    # Build action part based on ref type
+    if ref.ref_type == "instantiation":
+        action = "instantiated"
+    elif ref.ref_type == "function_call":
+        action = "called"
+    elif ref.ref_type == "method_call":
+        action = "method called"
+    elif ref.ref_type == "type_hint":
+        action = "used as type"
+    else:
+        action = "referenced"
+
+    # Build context part
+    context = f"in {ref.containing_element}()" if ref.containing_element else "at module level"
+
+    # Add snippet for method calls
+    extra = ""
+    if ref.ref_type == "method_call" and ref.context_snippet.startswith("called on "):
+        extra = f" ({ref.context_snippet})"
+
+    return f"{action} {context} {location}{extra}"
+
+
+def link_references(result: ParsingResult) -> None:
+    """Link extracted references to their target definitions.
+
+    Populates context_usages on CodeElement with rich descriptions.
+    This enables better summarization by showing how elements are used
+    across the codebase.
+
+    Args:
+        result: ParsingResult to process (modified in place).
+    """
+    from collections import defaultdict
+
+    # Build name -> elements lookup (handle duplicate names across files)
+    definitions: dict[str, list[CodeElement]] = defaultdict(list)
+    for pf in result.parsed_files:
+        for elem in pf.elements:
+            if elem.element_type in ("class", "function", "method", "constant"):
+                definitions[elem.name].append(elem)
+
+    # Track which usages we've added to avoid duplicates
+    added: dict[str, set[str]] = defaultdict(set)  # element_id -> set of context strings
+
+    # Match references to definitions
+    for pf in result.parsed_files:
+        source_file = pf.file_info.relative_path
+
+        for ref in pf.references:
+            if ref.target_name not in definitions:
+                continue
+
+            # Build rich context string
+            context = _build_rich_context(ref, source_file)
+
+            # Add to all matching definitions (usually just one)
+            for elem in definitions[ref.target_name]:
+                # Skip if this is a self-reference (same file, same element)
+                if elem.relative_path == source_file and ref.containing_element == elem.name:
+                    continue
+
+                # Skip duplicates
+                if context in added[elem.element_id]:
+                    continue
+
+                # Limit usages per element to avoid bloat
+                if len(elem.context_usages) >= 10:
+                    continue
+
+                elem.context_usages.append(context)
+                added[elem.element_id].add(context)
 
 
 def parse_files(
@@ -964,5 +1073,8 @@ def parse_files(
 
         if on_progress:
             on_progress(i + 1, total)
+
+    # Link cross-file references to their definitions
+    link_references(result)
 
     return result
