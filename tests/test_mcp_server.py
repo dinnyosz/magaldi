@@ -493,23 +493,30 @@ class TestGetFeatureMembersTool:
 
     @pytest.mark.asyncio
     async def test_get_feature_members_returns_members(self, server, mock_es_repo):
-        """Test get_feature_members tool returns feature members."""
+        """Test get_feature_members tool returns feature members with glossary terms."""
         # The tool first gets the feature document, then fetches members
-        mock_es_repo.get_document.return_value = {
-            "feature_id": "feature:auth:1",
-            "member_ids": ["elem1", "elem2"],
-        }
-        mock_es_repo.get_documents.return_value = [
-            {"element_id": "elem1", "name": "auth_login"},
-            {"element_id": "elem2", "name": "auth_logout"},
+        mock_es_repo.get_document.side_effect = [
+            # First call: get feature document
+            {
+                "feature_id": "feature:auth:1",
+                "member_ids": ["elem1", "elem2"],
+            },
+            # Second call: get first member
+            {"element_id": "elem1", "name": "auth_login", "element_type": "function"},
+            # Third call: get second member
+            {"element_id": "elem2", "name": "auth_logout", "element_type": "function"},
         ]
+        mock_es_repo.get_glossary_terms.return_value = []
 
         result = await server._handle_tool(
             "get_feature_members",
             {"feature_id": "feature:auth:1"},
         )
 
-        assert isinstance(result, list)
+        assert isinstance(result, dict)
+        assert "members" in result
+        assert "glossary_terms" in result
+        assert len(result["members"]) == 2
 
 
 class TestBatchGetElementsTool:
