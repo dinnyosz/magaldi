@@ -765,6 +765,22 @@ def _index_element(
     if code_embedding is not None:
         es_repo.store_code_embedding(element.element_id, code_embedding)
 
+    # Store imports for file elements
+    if element.element_type == "file" and element.imports:
+        imports_data = [
+            {"name": imp.name, "module": imp.module, "alias": imp.alias, "line": imp.line}
+            for imp in element.imports
+        ]
+        es_repo.store_imports(element.element_id, imports_data)
+
+    # Store calls for function/method elements
+    if element.element_type in ("function", "method") and element.calls:
+        calls_data = [
+            {"name": call.name, "receiver": call.receiver, "line": call.line, "resolved_id": call.resolved_id}
+            for call in element.calls
+        ]
+        es_repo.store_calls(element.element_id, calls_data)
+
     return True
 
 

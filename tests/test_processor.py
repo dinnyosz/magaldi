@@ -642,3 +642,270 @@ class TestProcessedElement:
 
         assert elem.success is False
         assert elem.error == "API timeout"
+
+
+# =============================================================================
+# INDEX ELEMENT TESTS (IMPORTS AND CALLS)
+# =============================================================================
+
+
+class TestIndexElementImportsAndCalls:
+    """Tests for _index_element storing imports and calls."""
+
+    def test_file_element_with_imports_stores_imports(self):
+        """File elements with imports should have imports stored in ES."""
+        from magaldi_core.processor import _index_element
+        from magaldi_core.code_parser import Import
+
+        # Create file element with imports
+        file_elem = CodeElement(
+            element_id="scope:repo:user:file.py:file:file.py:1",
+            element_type="file",
+            name="file.py",
+            relative_path="file.py",
+            line_start=1,
+            line_end=100,
+            level=0,
+            raw_code="",
+            imports=[
+                Import(name="os", module="os", alias=None, line=1),
+                Import(name="pd", module="pandas", alias="pd", line=2),
+            ],
+        )
+
+        # Mock ES repository
+        mock_es = MagicMock()
+
+        # Call _index_element
+        result = _index_element(
+            element=file_elem,
+            summary="File summary",
+            summary_embedding=None,
+            code_embedding=None,
+            es_repo=mock_es,
+        )
+
+        assert result is True
+        mock_es.index_element.assert_called_once()
+        mock_es.store_summary.assert_called_once_with(file_elem.element_id, "File summary")
+
+        # Verify store_imports was called with correct data
+        mock_es.store_imports.assert_called_once()
+        call_args = mock_es.store_imports.call_args
+        assert call_args[0][0] == file_elem.element_id
+        imports_data = call_args[0][1]
+        assert len(imports_data) == 2
+        assert imports_data[0] == {"name": "os", "module": "os", "alias": None, "line": 1}
+        assert imports_data[1] == {"name": "pd", "module": "pandas", "alias": "pd", "line": 2}
+
+    def test_function_element_with_calls_stores_calls(self):
+        """Function elements with calls should have calls stored in ES."""
+        from magaldi_core.processor import _index_element
+        from magaldi_core.code_parser import Call
+
+        # Create function element with calls
+        func_elem = CodeElement(
+            element_id="scope:repo:user:file.py:function:my_func:10",
+            element_type="function",
+            name="my_func",
+            relative_path="file.py",
+            line_start=10,
+            line_end=20,
+            level=2,
+            raw_code="def my_func(): pass",
+            calls=[
+                Call(name="helper", receiver=None, line=11, resolved_id=None),
+                Call(name="process", receiver="utils", line=12, resolved_id="scope:repo:user:utils.py:function:process:5"),
+            ],
+        )
+
+        # Mock ES repository
+        mock_es = MagicMock()
+
+        # Call _index_element
+        result = _index_element(
+            element=func_elem,
+            summary="Function summary",
+            summary_embedding=None,
+            code_embedding=None,
+            es_repo=mock_es,
+        )
+
+        assert result is True
+
+        # Verify store_calls was called with correct data
+        mock_es.store_calls.assert_called_once()
+        call_args = mock_es.store_calls.call_args
+        assert call_args[0][0] == func_elem.element_id
+        calls_data = call_args[0][1]
+        assert len(calls_data) == 2
+        assert calls_data[0] == {"name": "helper", "receiver": None, "line": 11, "resolved_id": None}
+        assert calls_data[1] == {
+            "name": "process",
+            "receiver": "utils",
+            "line": 12,
+            "resolved_id": "scope:repo:user:utils.py:function:process:5",
+        }
+
+    def test_method_element_with_calls_stores_calls(self):
+        """Method elements with calls should have calls stored in ES."""
+        from magaldi_core.processor import _index_element
+        from magaldi_core.code_parser import Call
+
+        # Create method element with calls
+        method_elem = CodeElement(
+            element_id="scope:repo:user:file.py:method:my_method:15",
+            element_type="method",
+            name="my_method",
+            relative_path="file.py",
+            line_start=15,
+            line_end=25,
+            level=2,
+            raw_code="def my_method(self): pass",
+            calls=[
+                Call(name="_internal", receiver="self", line=16, resolved_id=None),
+            ],
+        )
+
+        # Mock ES repository
+        mock_es = MagicMock()
+
+        # Call _index_element
+        result = _index_element(
+            element=method_elem,
+            summary="Method summary",
+            summary_embedding=None,
+            code_embedding=None,
+            es_repo=mock_es,
+        )
+
+        assert result is True
+
+        # Verify store_calls was called
+        mock_es.store_calls.assert_called_once()
+        calls_data = mock_es.store_calls.call_args[0][1]
+        assert len(calls_data) == 1
+        assert calls_data[0]["name"] == "_internal"
+        assert calls_data[0]["receiver"] == "self"
+
+    def test_element_without_imports_does_not_call_store_imports(self):
+        """Elements without imports should not call store_imports."""
+        from magaldi_core.processor import _index_element
+
+        # Create file element without imports
+        file_elem = CodeElement(
+            element_id="scope:repo:user:empty.py:file:empty.py:1",
+            element_type="file",
+            name="empty.py",
+            relative_path="empty.py",
+            line_start=1,
+            line_end=10,
+            level=0,
+            raw_code="",
+            imports=[],  # Empty imports
+        )
+
+        mock_es = MagicMock()
+
+        _index_element(
+            element=file_elem,
+            summary="Empty file",
+            summary_embedding=None,
+            code_embedding=None,
+            es_repo=mock_es,
+        )
+
+        # store_imports should NOT be called when imports is empty
+        mock_es.store_imports.assert_not_called()
+
+    def test_element_without_calls_does_not_call_store_calls(self):
+        """Elements without calls should not call store_calls."""
+        from magaldi_core.processor import _index_element
+
+        # Create function element without calls
+        func_elem = CodeElement(
+            element_id="scope:repo:user:file.py:function:empty_func:10",
+            element_type="function",
+            name="empty_func",
+            relative_path="file.py",
+            line_start=10,
+            line_end=15,
+            level=2,
+            raw_code="def empty_func(): pass",
+            calls=[],  # Empty calls
+        )
+
+        mock_es = MagicMock()
+
+        _index_element(
+            element=func_elem,
+            summary="Empty function",
+            summary_embedding=None,
+            code_embedding=None,
+            es_repo=mock_es,
+        )
+
+        # store_calls should NOT be called when calls is empty
+        mock_es.store_calls.assert_not_called()
+
+    def test_class_element_does_not_store_calls(self):
+        """Class elements should not store calls (only function/method do)."""
+        from magaldi_core.processor import _index_element
+        from magaldi_core.code_parser import Call
+
+        # Create class element (classes shouldn't have calls stored directly)
+        class_elem = CodeElement(
+            element_id="scope:repo:user:file.py:class:MyClass:5",
+            element_type="class",
+            name="MyClass",
+            relative_path="file.py",
+            line_start=5,
+            line_end=50,
+            level=1,
+            raw_code="class MyClass: pass",
+            calls=[Call(name="ignored", receiver=None, line=6)],  # Even if present, shouldn't be stored
+        )
+
+        mock_es = MagicMock()
+
+        _index_element(
+            element=class_elem,
+            summary="Class summary",
+            summary_embedding=None,
+            code_embedding=None,
+            es_repo=mock_es,
+        )
+
+        # store_calls should NOT be called for class elements
+        mock_es.store_calls.assert_not_called()
+
+    def test_non_file_element_does_not_store_imports(self):
+        """Non-file elements should not store imports (only file does)."""
+        from magaldi_core.processor import _index_element
+        from magaldi_core.code_parser import Import
+
+        # Create function element with imports (shouldn't happen normally, but test the guard)
+        func_elem = CodeElement(
+            element_id="scope:repo:user:file.py:function:my_func:10",
+            element_type="function",
+            name="my_func",
+            relative_path="file.py",
+            line_start=10,
+            line_end=20,
+            level=2,
+            raw_code="def my_func(): pass",
+            imports=[Import(name="os", module="os", alias=None, line=1)],  # Shouldn't be on function
+        )
+
+        mock_es = MagicMock()
+
+        _index_element(
+            element=func_elem,
+            summary="Function summary",
+            summary_embedding=None,
+            code_embedding=None,
+            es_repo=mock_es,
+        )
+
+        # store_imports should NOT be called for non-file elements
+        mock_es.store_imports.assert_not_called()
