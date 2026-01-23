@@ -286,7 +286,7 @@ async def get_element_detail(
         file_path=source.get("relative_path", ""),
         line_start=source.get("line_start", 0),
         line_end=source.get("line_end"),
-        language=source.get("language", ""),
+        language=source.get("language", "unknown"),
         summary=source.get("summary"),
         signature=source.get("signature"),
         docstring=source.get("docstring"),
