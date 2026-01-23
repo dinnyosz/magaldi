@@ -6,16 +6,54 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Magaldi is an open-source code discovery engine that helps AI agents and developers navigate codebases through intelligent indexing and semantic search. Named after Agustín Magaldi (who helped launch Eva Perón's career).
 
+## Development Commands
+
+```bash
+# Setup
+make setup                  # Create venv and install dependencies
+source .venv/bin/activate   # Activate virtual environment
+
+# Start services (Elasticsearch, Redis, Kibana)
+make services               # Core services only
+make services-full          # Include Ollama
+make services-down          # Stop all
+
+# Testing
+make test                   # Run all tests
+make test-fast              # Skip slow and integration tests
+make test-integration       # Integration tests only (needs services)
+pytest tests/test_foo.py::test_bar -v  # Single test
+
+# Code quality
+make lint                   # Run ruff linter
+make format                 # Format with ruff
+make typecheck              # Run mypy on src/magaldi
+make check                  # All: lint + typecheck + test
+
+# Pull Ollama models (for AI features)
+make ollama-pull            # qwen2.5-coder:7b, snowflake-arctic-embed2
+```
+
 ## Architecture
 
 The system consists of two pipelines:
 
 **Parser Pipeline (Phases 1-4):**
 - Discovery → Change Detection → Parsing → Storage
-- CLI-based invocation: `magaldi parse /path/to/repo --user <username>`
+- CLI: `magaldi parse /path/to/repo --user <username>`
 
 **AI Processing Pipeline (Phases 5-8):**
 - Summarization → Embedding → MCP Server → Web UI
+
+### Source Layout
+
+```
+src/
+├── magaldi_core/      # Parser pipeline (phases 1-4)
+├── magaldi_mcp/       # MCP server for Claude Code integration
+├── magaldi_web/       # FastAPI web UI
+└── shared/            # CLI, config, AI client, common modules
+```
 
 ### Core Components
 
@@ -40,6 +78,13 @@ The system consists of two pipelines:
 - Level 1: Class
 - Level 2: Function/Method
 - Level 3: Variable
+
+### Test Markers
+
+```python
+@pytest.mark.slow          # Exclude with: -m "not slow"
+@pytest.mark.integration   # Tests requiring external services
+```
 
 ## Planning Documents
 
