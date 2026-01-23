@@ -223,6 +223,22 @@ class TimingStats:
             return total_time / total_count if total_count > 0 else 0.0
 
     @property
+    def avg_summary_embed_time(self) -> float:
+        """Global average summary embedding time."""
+        with self._lock:
+            total_time = sum(self.total_summary_embed_by_type.values())
+            total_count = sum(self.summary_embed_counts_by_type.values())
+            return total_time / total_count if total_count > 0 else 0.0
+
+    @property
+    def avg_code_embed_time(self) -> float:
+        """Global average code embedding time."""
+        with self._lock:
+            total_time = sum(self.total_code_embed_by_type.values())
+            total_count = sum(self.code_embed_counts_by_type.values())
+            return total_time / total_count if total_count > 0 else 0.0
+
+    @property
     def elapsed(self) -> float:
         return time.time() - self.phase_start
 
@@ -682,6 +698,7 @@ def _embed_element(
     summary_cache: _SummaryCache,
     embed_client: CodeEmbeddingClient,
     config: ProcessingConfig,
+    on_stage_change: Callable[[str], None] | None = None,
 ) -> tuple[list[float], list[float], float, float]:
     """Generate both embeddings for an element.
 
@@ -690,6 +707,7 @@ def _embed_element(
         summary_cache: Cache with summaries for context.
         embed_client: Embedding client.
         config: Processing configuration.
+        on_stage_change: Optional callback to update status stage.
 
     Returns:
         Tuple of (summary_embedding, code_embedding, summary_embed_time, code_embed_time).
@@ -700,6 +718,8 @@ def _embed_element(
     import time as _time
 
     # Summary embedding (existing logic)
+    if on_stage_change:
+        on_stage_change("summ_embed")
     summary_text = build_summary_embedding_text(element, summary_cache, config.embed_max_context)
     summary_start = _time.time()
     summary_embedding = embed_client.embed_single(summary_text, timeout=config.embed_timeout)
@@ -714,6 +734,8 @@ def _embed_element(
     summary_embedding = normalize_vector(summary_embedding)
 
     # Code embedding (new)
+    if on_stage_change:
+        on_stage_change("code_embed")
     code_text = build_code_embedding_text(element, config.embed_max_context)
     code_start = _time.time()
     code_embedding = embed_client.embed_single(code_text, timeout=config.embed_timeout)
@@ -863,18 +885,22 @@ def _process_single_element(
         summary_cache.add_summary(element.element_id, summary)
 
         # Step 2: Embed (if applicable) - generate both summary and code embeddings
-        update_status("embedding", config.embed_model)
         summary_embedding: list[float] | None = None
         code_embedding: list[float] | None = None
         if should_embed(element):
             if config.skip_ai:
                 # Generate dummy embeddings for testing
+                update_status("summ_embed", config.embed_model)
                 summary_embedding = [0.0] * config.embed_dimensions
+                update_status("code_embed", config.embed_model)
                 code_embedding = [0.0] * config.embed_dimensions
             else:
                 # Generate both embeddings (returns tuple with timing)
+                # Pass callback to update status between embedding phases
+                def on_embed_stage(stage: str) -> None:
+                    update_status(stage, config.embed_model)
                 summary_embedding, code_embedding, summary_embed_time, code_embed_time = _embed_element(
-                    element, summary_cache, embed_client, config
+                    element, summary_cache, embed_client, config, on_embed_stage
                 )
                 embed_time = summary_embed_time + code_embed_time
 

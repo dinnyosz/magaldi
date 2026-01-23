@@ -444,6 +444,35 @@ class TestTimingStats:
         # Average of 0.3 and 0.5 = 0.4
         assert abs(stats.avg_embed_time - 0.4) < 0.001
 
+    def test_avg_summary_embed_time(self):
+        """Test average summary embedding time calculation."""
+        stats = TimingStats()
+        stats.set_totals_by_type({"function": 2})
+
+        stats.record(1.0, 0.5, 0.5, "function", True, summary_embed_time=0.2, code_embed_time=0.3)
+        stats.record(1.0, 0.5, 0.5, "function", True, summary_embed_time=0.4, code_embed_time=0.1)
+
+        # Average of 0.2 and 0.4 = 0.3
+        assert abs(stats.avg_summary_embed_time - 0.3) < 0.001
+
+    def test_avg_code_embed_time(self):
+        """Test average code embedding time calculation."""
+        stats = TimingStats()
+        stats.set_totals_by_type({"function": 2})
+
+        stats.record(1.0, 0.5, 0.5, "function", True, summary_embed_time=0.2, code_embed_time=0.3)
+        stats.record(1.0, 0.5, 0.5, "function", True, summary_embed_time=0.4, code_embed_time=0.1)
+
+        # Average of 0.3 and 0.1 = 0.2
+        assert abs(stats.avg_code_embed_time - 0.2) < 0.001
+
+    def test_avg_embed_times_empty(self):
+        """Test average embed times when no data."""
+        stats = TimingStats()
+
+        assert stats.avg_summary_embed_time == 0.0
+        assert stats.avg_code_embed_time == 0.0
+
     def test_get_type_stats(self):
         """Test getting per-type statistics."""
         stats = TimingStats()

@@ -1275,7 +1275,10 @@ def run_processing(
         api_processed = state.completed - state.skipped
         effective_wall = state.timing.elapsed / api_processed if api_processed > 0 else 0.0
         total_api = state.timing.avg_summarize_time + state.timing.avg_embed_time
-        stats = f"  [dim]Throughput:[/] [green]{effective_wall:.2f}s[/]/item [dim]|[/] [dim]API:[/] [green]{total_api:.1f}s[/]/item [dim]([/][green]{state.timing.avg_summarize_time:.1f}s[/] summ + [green]{state.timing.avg_embed_time:.1f}s[/] embed[dim])[/]"
+        # Show separate summary_embed and code_embed times
+        summ_emb = state.timing.avg_summary_embed_time
+        code_emb = state.timing.avg_code_embed_time
+        stats = f"  [dim]Throughput:[/] [green]{effective_wall:.2f}s[/]/item [dim]|[/] [dim]API:[/] [green]{total_api:.1f}s[/]/item [dim]([/][green]{state.timing.avg_summarize_time:.1f}s[/] summ + [cyan]{summ_emb:.1f}s[/] summ_emb + [cyan]{code_emb:.1f}s[/] code_emb[dim])[/]"
 
         parts: list[RenderableType] = [bar_text, worker_table]
         if type_line:
