@@ -89,9 +89,14 @@ async def _get_or_create_session_async() -> aiohttp.ClientSession:
                 timeout=timeout,
             )
             # Configure LiteLLM to use our managed session for async calls
-            litellm.base_llm_aiohttp_handler = BaseLLMAIOHTTPHandler(
-                client_session=_aiohttp_session
-            )
+            # This may fail on newer LiteLLM versions with changed API
+            try:
+                litellm.base_llm_aiohttp_handler = BaseLLMAIOHTTPHandler(
+                    client_session=_aiohttp_session
+                )
+            except TypeError:
+                # Newer LiteLLM version with different API - use default handling
+                pass
 
     return _aiohttp_session
 
