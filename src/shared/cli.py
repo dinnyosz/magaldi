@@ -308,14 +308,15 @@ def extract_features(
     config = load_config(skip_validation=False)
 
     # Load repo config to get scope/repository
-    repo_config_path = Path(repo_path) / "magaldi.yaml"
+    repo_path_obj = Path(repo_path)
+    repo_config_path = repo_path_obj / "magaldi.yaml"
     if not repo_config_path.exists():
         console.print(f"[red]Error:[/] magaldi.yaml not found in {repo_path}")
         sys.exit(1)
 
-    repo_config = load_repo_config(repo_config_path)
+    repo_config = load_repo_config(repo_path_obj)
     scope = repo_config["scope"]
-    repository = Path(repo_path).name
+    repository = repo_path_obj.name
 
     console.print("[bold blue]Feature Extraction[/]")
     console.print(f"  Repository: {scope}/{repository} @{user}")
@@ -370,14 +371,15 @@ def extract_glossary(
     config = load_config(skip_validation=False)
 
     # Load repo config to get scope/repository
-    repo_config_path = Path(repo_path) / "magaldi.yaml"
+    repo_path_obj = Path(repo_path)
+    repo_config_path = repo_path_obj / "magaldi.yaml"
     if not repo_config_path.exists():
         console.print(f"[red]Error:[/] magaldi.yaml not found in {repo_path}")
         sys.exit(1)
 
-    repo_config = load_repo_config(repo_config_path)
+    repo_config = load_repo_config(repo_path_obj)
     scope = repo_config["scope"]
-    repository = Path(repo_path).name
+    repository = repo_path_obj.name
 
     console.print("[bold blue]Glossary Extraction[/]")
     console.print(f"  Repository: {scope}/{repository} @{user}")
