@@ -145,6 +145,9 @@ function ElementRow({ element, username }: { element: BrowseElement; username: s
                 <Badge bg="secondary" className="me-2">{element.member_count} members</Badge>
               )}
               {element.subfeatures && element.subfeatures.length > 0 && (
+                <Badge bg="info" className="me-2">{element.subfeatures.length} subfeatures</Badge>
+              )}
+              {element.subfeatures && element.subfeatures.length > 0 && (
                 <div className="small mt-1">
                   <span className="text-muted">Subfeatures: </span>
                   {element.subfeatures.map((sf, i) => (
