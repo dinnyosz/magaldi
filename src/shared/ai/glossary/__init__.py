@@ -4,10 +4,12 @@ from shared.ai.glossary.ai_extractor import (
     GlossaryItem,
     call_llm_for_glossary,
     extract_glossary_from_feature,
+    extract_glossary_from_features,
 )
 
 __all__ = [
     "GlossaryItem",
     "call_llm_for_glossary",
     "extract_glossary_from_feature",
+    "extract_glossary_from_features",
 ]

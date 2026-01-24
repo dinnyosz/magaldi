@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -284,3 +285,36 @@ def merge_glossary_items(items: list[GlossaryItem]) -> list[GlossaryItem]:
 
     merged.sort(key=lambda x: x.name)
     return merged
+
+
+async def extract_glossary_from_features(
+    features: list[dict[str, Any]],
+    config: MagaldiConfig | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> list[GlossaryItem]:
+    """Extract and merge glossary items from multiple features.
+
+    Processes each feature through the LLM, then merges duplicates.
+
+    Args:
+        features: List of feature/subfeature dicts with feature_id, label, summary.
+        config: Optional config for LLM client.
+        progress_callback: Optional callback(current, total) for progress updates.
+
+    Returns:
+        List of merged GlossaryItem.
+    """
+    if not features:
+        return []
+
+    all_items: list[GlossaryItem] = []
+    total = len(features)
+
+    for i, feature in enumerate(features):
+        if progress_callback:
+            progress_callback(i + 1, total)
+
+        items = await extract_glossary_from_feature(feature, config)
+        all_items.extend(items)
+
+    return merge_glossary_items(all_items)

@@ -11,6 +11,7 @@ from shared.ai.glossary.ai_extractor import (
     build_glossary_prompt,
     call_llm_for_glossary,
     extract_glossary_from_feature,
+    extract_glossary_from_features,
     merge_glossary_items,
     normalize_term,
     parse_llm_response,
@@ -615,3 +616,173 @@ class TestMergeGlossaryItems:
         assert merged[0].name == "user"  # Normalized
         assert merged[0].description == "People who use the system"
         assert merged[0].source_feature_ids == ["f1"]
+
+
+class TestExtractGlossaryFromFeatures:
+    """Tests for the full extraction pipeline."""
+
+    @pytest.mark.asyncio
+    async def test_processes_multiple_features(self):
+        """Test processing multiple features and merging results."""
+        features = [
+            {"feature_id": "f1", "label": "authentication", "summary": "Handles user login."},
+            {"feature_id": "f2", "label": "registration", "summary": "Manages user registration."},
+        ]
+
+        mock_responses = [
+            [{"name": "user", "description": "A system user"}],
+            [
+                {"name": "user", "description": "A person registering"},
+                {"name": "registration", "description": "Account creation process"},
+            ],
+        ]
+
+        call_count = 0
+
+        async def mock_call(*_args, **_kwargs):
+            nonlocal call_count
+            result = mock_responses[call_count]
+            call_count += 1
+            return result
+
+        with patch(
+            "shared.ai.glossary.ai_extractor.call_llm_for_glossary", side_effect=mock_call
+        ):
+            result = await extract_glossary_from_features(features)
+
+        # "user" appears in both, should be merged
+        assert len(result) == 2
+        user_item = next(i for i in result if i.name == "user")
+        assert set(user_item.source_feature_ids) == {"f1", "f2"}
+
+    @pytest.mark.asyncio
+    async def test_handles_empty_features_list(self):
+        """Test that empty features list returns empty result."""
+        result = await extract_glossary_from_features([])
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_skips_features_without_summary(self):
+        """Test that features without summary are skipped (no LLM call)."""
+        features = [
+            {"feature_id": "f1", "label": "test", "summary": ""},
+            {"feature_id": "f2", "label": "real", "summary": "Real feature."},
+        ]
+
+        with patch(
+            "shared.ai.glossary.ai_extractor.call_llm_for_glossary",
+            new_callable=AsyncMock,
+            return_value=[{"name": "item", "description": "An item"}],
+        ) as mock_call:
+            await extract_glossary_from_features(features)
+
+        # Should only be called once (for f2)
+        assert mock_call.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_calls_progress_callback(self):
+        """Test that progress callback is called for each feature."""
+        features = [
+            {"feature_id": "f1", "label": "a", "summary": "Summary 1"},
+            {"feature_id": "f2", "label": "b", "summary": "Summary 2"},
+        ]
+
+        progress_calls = []
+
+        def callback(current, total):
+            progress_calls.append((current, total))
+
+        with patch(
+            "shared.ai.glossary.ai_extractor.call_llm_for_glossary",
+            new_callable=AsyncMock,
+            return_value=[],
+        ):
+            await extract_glossary_from_features(features, progress_callback=callback)
+
+        assert progress_calls == [(1, 2), (2, 2)]
+
+    @pytest.mark.asyncio
+    async def test_merges_items_across_features(self):
+        """Test that items from different features are merged correctly."""
+        features = [
+            {"feature_id": "f1", "label": "auth", "summary": "Auth feature"},
+            {"feature_id": "f2", "label": "profile", "summary": "Profile feature"},
+            {"feature_id": "f3", "label": "settings", "summary": "Settings feature"},
+        ]
+
+        mock_responses = [
+            [{"name": "user", "description": "Auth user"}],
+            [{"name": "user", "description": "Profile user with extended details"}],
+            [{"name": "settings", "description": "User settings"}],
+        ]
+
+        call_count = 0
+
+        async def mock_call(*_args, **_kwargs):
+            nonlocal call_count
+            result = mock_responses[call_count]
+            call_count += 1
+            return result
+
+        with patch(
+            "shared.ai.glossary.ai_extractor.call_llm_for_glossary", side_effect=mock_call
+        ):
+            result = await extract_glossary_from_features(features)
+
+        assert len(result) == 2  # "user" merged, "settings" separate
+
+        user_item = next(i for i in result if i.name == "user")
+        assert set(user_item.source_feature_ids) == {"f1", "f2"}
+        # Should have the longer description
+        assert "extended details" in user_item.description
+
+        settings_item = next(i for i in result if i.name == "setting")  # normalized
+        assert settings_item.source_feature_ids == ["f3"]
+
+    @pytest.mark.asyncio
+    async def test_handles_llm_returning_empty_for_some_features(self):
+        """Test that features with no glossary items are handled gracefully."""
+        features = [
+            {"feature_id": "f1", "label": "auth", "summary": "Has terms"},
+            {"feature_id": "f2", "label": "utils", "summary": "No domain terms"},
+        ]
+
+        mock_responses = [
+            [{"name": "user", "description": "A user"}],
+            [],  # No items for utils
+        ]
+
+        call_count = 0
+
+        async def mock_call(*_args, **_kwargs):
+            nonlocal call_count
+            result = mock_responses[call_count]
+            call_count += 1
+            return result
+
+        with patch(
+            "shared.ai.glossary.ai_extractor.call_llm_for_glossary", side_effect=mock_call
+        ):
+            result = await extract_glossary_from_features(features)
+
+        assert len(result) == 1
+        assert result[0].name == "user"
+
+    @pytest.mark.asyncio
+    async def test_passes_config_to_extract_function(self):
+        """Test that config is passed through to the extraction function."""
+        from shared.config import MagaldiConfig
+
+        config = MagaldiConfig()
+        features = [
+            {"feature_id": "f1", "label": "test", "summary": "Test feature"},
+        ]
+
+        with patch(
+            "shared.ai.glossary.ai_extractor.extract_glossary_from_feature",
+            new_callable=AsyncMock,
+            return_value=[],
+        ) as mock_extract:
+            await extract_glossary_from_features(features, config=config)
+
+        mock_extract.assert_called_once_with(features[0], config)
