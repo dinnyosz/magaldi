@@ -316,7 +316,7 @@ def extract_features(
 
     repo_config = load_repo_config(repo_path_obj)
     scope = repo_config.scope
-    repository = repo_path_obj.name
+    repository = repo_config.name
 
     console.print("[bold blue]Feature Extraction[/]")
     console.print(f"  Repository: {scope}/{repository} @{user}")
@@ -379,7 +379,7 @@ def extract_glossary(
 
     repo_config = load_repo_config(repo_path_obj)
     scope = repo_config.scope
-    repository = repo_path_obj.name
+    repository = repo_config.name
 
     console.print("[bold blue]Glossary Extraction[/]")
     console.print(f"  Repository: {scope}/{repository} @{user}")

@@ -196,7 +196,8 @@ def load_repo_config(repo_path: Path) -> RepoConfig:
 
     # Build config with defaults
     scope = raw_config["scope"]
-    name = raw_config.get("name") or repo_path.name
+    # Support both "name" and "repository" fields (repository is an alias)
+    name = raw_config.get("name") or raw_config.get("repository") or repo_path.name
     description = raw_config.get("description")
     tags = raw_config.get("tags", [])
     user = raw_config.get("user")
