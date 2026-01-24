@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from shared.ai.glossary.ai_extractor import (
     GlossaryItem,
+    build_glossary_prompt,
+    call_llm_for_glossary,
     extract_glossary_from_feature,
+    parse_llm_response,
 )
 
 
@@ -183,3 +186,242 @@ class TestGlossaryItem:
         )
 
         assert item.source_feature_ids == []
+
+
+class TestBuildGlossaryPrompt:
+    """Tests for prompt construction."""
+
+    def test_includes_summary_in_prompt(self):
+        """Test that the summary is included in the prompt."""
+        prompt = build_glossary_prompt(
+            summary="Handles user authentication and login.",
+            label="authentication",
+        )
+
+        assert "Handles user authentication and login." in prompt
+        assert "authentication" in prompt
+
+    def test_instructs_for_actors_and_concepts(self):
+        """Test that prompt asks for actors and concepts."""
+        prompt = build_glossary_prompt(
+            summary="Test summary",
+            label="test",
+        )
+
+        assert "actor" in prompt.lower() or "concept" in prompt.lower()
+
+    def test_includes_json_format_instruction(self):
+        """Test that prompt includes JSON format instructions."""
+        prompt = build_glossary_prompt(
+            summary="Test summary",
+            label="test",
+        )
+
+        assert "JSON" in prompt
+        assert "name" in prompt.lower()
+        assert "description" in prompt.lower()
+
+    def test_includes_example_output(self):
+        """Test that prompt includes example output for LLM guidance."""
+        prompt = build_glossary_prompt(
+            summary="Test summary",
+            label="test",
+        )
+
+        # Should have example JSON to guide the model
+        assert '{"name"' in prompt or '"name":' in prompt
+
+
+class TestParseLLMResponse:
+    """Tests for parsing LLM response."""
+
+    def test_parses_valid_json_array(self):
+        """Test parsing valid JSON array."""
+        response = '[{"name": "user", "description": "A person"}]'
+        result = parse_llm_response(response)
+
+        assert len(result) == 1
+        assert result[0]["name"] == "user"
+        assert result[0]["description"] == "A person"
+
+    def test_parses_json_in_markdown_code_block(self):
+        """Test parsing JSON wrapped in markdown code blocks."""
+        response = """```json
+[{"name": "user", "description": "A person"}]
+```"""
+        result = parse_llm_response(response)
+
+        assert len(result) == 1
+        assert result[0]["name"] == "user"
+
+    def test_parses_json_in_markdown_code_block_without_lang(self):
+        """Test parsing JSON in code block without language specifier."""
+        response = """```
+[{"name": "user", "description": "A person"}]
+```"""
+        result = parse_llm_response(response)
+
+        assert len(result) == 1
+        assert result[0]["name"] == "user"
+
+    def test_returns_empty_list_for_invalid_json(self):
+        """Test that invalid JSON returns empty list."""
+        response = "This is not JSON at all"
+        result = parse_llm_response(response)
+
+        assert result == []
+
+    def test_filters_items_missing_name(self):
+        """Test that items without 'name' key are filtered out."""
+        response = """[
+            {"name": "user", "description": "Valid"},
+            {"description": "Missing name"},
+            {"other": "field"}
+        ]"""
+        result = parse_llm_response(response)
+
+        assert len(result) == 1
+        assert result[0]["name"] == "user"
+
+    def test_filters_items_missing_description(self):
+        """Test that items without 'description' key are filtered out."""
+        response = """[
+            {"name": "user", "description": "Valid"},
+            {"name": "orphan"},
+            {"name": "other", "other": "field"}
+        ]"""
+        result = parse_llm_response(response)
+
+        assert len(result) == 1
+        assert result[0]["name"] == "user"
+
+    def test_handles_empty_array(self):
+        """Test handling of empty JSON array."""
+        response = "[]"
+        result = parse_llm_response(response)
+
+        assert result == []
+
+    def test_handles_non_list_json(self):
+        """Test that non-list JSON returns empty list."""
+        response = '{"name": "user", "description": "Single object"}'
+        result = parse_llm_response(response)
+
+        assert result == []
+
+    def test_handles_whitespace_around_json(self):
+        """Test handling of whitespace around JSON."""
+        response = """
+
+        [{"name": "user", "description": "A person"}]
+
+        """
+        result = parse_llm_response(response)
+
+        assert len(result) == 1
+        assert result[0]["name"] == "user"
+
+    def test_filters_non_dict_items(self):
+        """Test that non-dict items in array are filtered out."""
+        response = '[{"name": "user", "description": "Valid"}, "string", 123, null]'
+        result = parse_llm_response(response)
+
+        assert len(result) == 1
+        assert result[0]["name"] == "user"
+
+
+class TestCallLLMForGlossary:
+    """Tests for the LLM call function."""
+
+    @pytest.mark.asyncio
+    async def test_calls_llm_with_constructed_prompt(self):
+        """Test that LLM is called with properly constructed prompt."""
+        mock_client = MagicMock()
+        mock_client.generate.return_value = '[{"name": "user", "description": "A person"}]'
+
+        with patch(
+            "shared.ai.glossary.ai_extractor.LLMClient",
+            return_value=mock_client,
+        ):
+            result = await call_llm_for_glossary(
+                summary="Handles user authentication.",
+                label="authentication",
+            )
+
+        assert len(result) == 1
+        assert result[0]["name"] == "user"
+        mock_client.generate.assert_called_once()
+
+        # Verify the prompt contains expected content
+        call_args = mock_client.generate.call_args
+        prompt = call_args.kwargs.get("prompt") or call_args.args[0]
+        assert "Handles user authentication." in prompt
+        assert "authentication" in prompt
+
+    @pytest.mark.asyncio
+    async def test_uses_config_for_llm_client(self):
+        """Test that config is used to create the LLM client."""
+        from shared.config import MagaldiConfig
+
+        config = MagaldiConfig()
+        config.llm.provider = "ollama"
+        config.llm.url = "http://test:11434"
+        config.llm.summarize_model = "test-model"
+
+        mock_client = MagicMock()
+        mock_client.generate.return_value = "[]"
+
+        with patch(
+            "shared.ai.glossary.ai_extractor.LLMClient",
+            return_value=mock_client,
+        ) as mock_llm_class:
+            await call_llm_for_glossary(
+                summary="Test summary",
+                label="test",
+                config=config,
+            )
+
+        # Verify LLMClient was instantiated with config values
+        mock_llm_class.assert_called_once()
+        call_kwargs = mock_llm_class.call_args.kwargs
+        assert call_kwargs["model"] == "ollama/test-model"
+        assert call_kwargs["api_base"] == "http://test:11434"
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_list_on_llm_error(self):
+        """Test that LLM errors result in empty list."""
+        from shared.ai.llm_client import LLMError
+
+        mock_client = MagicMock()
+        mock_client.generate.side_effect = LLMError("Connection failed")
+
+        with patch(
+            "shared.ai.glossary.ai_extractor.LLMClient",
+            return_value=mock_client,
+        ):
+            result = await call_llm_for_glossary(
+                summary="Test summary",
+                label="test",
+            )
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_parses_markdown_wrapped_response(self):
+        """Test that markdown-wrapped JSON response is parsed correctly."""
+        mock_client = MagicMock()
+        mock_client.generate.return_value = """```json
+[{"name": "user", "description": "A person"}]
+```"""
+
+        with patch(
+            "shared.ai.glossary.ai_extractor.LLMClient",
+            return_value=mock_client,
+        ):
+            result = await call_llm_for_glossary(
+                summary="Test summary",
+                label="test",
+            )
+
+        assert len(result) == 1
+        assert result[0]["name"] == "user"
