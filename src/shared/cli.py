@@ -355,18 +355,24 @@ def extract_features(
 @click.argument("repo_path", type=click.Path(exists=True, file_okay=False, dir_okay=True))
 @click.option("--user", "-u", required=True, help="Username/branch to extract glossary from")
 @click.option("--link-features", is_flag=True, help="Also link glossary to existing features")
+@click.option("--ai", is_flag=True, help="Use AI-powered extraction from feature summaries")
 def extract_glossary(
     repo_path: str,
     user: str,
     link_features: bool,
+    ai: bool,
 ) -> None:
     """Extract glossary terms from indexed code elements.
 
     Scans element names to identify domain-specific terminology
     and stores them for enhanced code discovery.
 
+    With --ai flag, uses AI to extract terms from feature summaries
+    instead of parsing element names.
+
     REPO_PATH is the path to the repository (used to load magaldi.yaml).
     """
+    import asyncio
     from pathlib import Path
     from magaldi_core.discovery import load_repo_config
 
@@ -384,19 +390,31 @@ def extract_glossary(
 
     console.print("[bold blue]Glossary Extraction[/]")
     console.print(f"  Repository: {scope}/{repository} @{user}")
+    console.print(f"  Mode: {'AI-powered' if ai else 'Name-based'}")
     console.print()
 
     try:
-        result = run_glossary_extraction(
-            scope=scope,
-            repository=repository,
-            username=user,
-            config=config,
-            link_features=link_features,
-        )
+        if ai:
+            result = asyncio.run(
+                run_glossary_extraction_ai(
+                    scope=scope,
+                    repository=repository,
+                    username=user,
+                    config=config,
+                )
+            )
+        else:
+            result = run_glossary_extraction(
+                scope=scope,
+                repository=repository,
+                username=user,
+                config=config,
+                link_features=link_features,
+            )
 
         if result:
-            console.print(f"\n[green]Glossary extraction complete.[/]")
+            terms_count = result.get("terms_count", 0)
+            console.print(f"\n[green]Done![/] Extracted {terms_count} terms")
         else:
             console.print("[yellow]No elements to extract glossary from.[/]")
 
@@ -1133,6 +1151,108 @@ def run_glossary_extraction(
 
     finally:
         es_repo.close()
+
+
+async def run_glossary_extraction_ai(
+    scope: str,
+    repository: str,
+    username: str,
+    config: MagaldiConfig,
+    es_repo: "ElasticsearchRepository | None" = None,
+) -> dict | None:
+    """Run AI-powered Glossary Extraction.
+
+    Args:
+        scope: Repository scope.
+        repository: Repository name.
+        username: Username/branch.
+        config: Magaldi configuration.
+        es_repo: Optional ES repository (creates one if not provided).
+
+    Returns:
+        Dict with glossary extraction results or None if no features.
+    """
+    from shared.ai.glossary.ai_extractor import extract_glossary_from_features
+    from shared.db.elasticsearch import ElasticsearchRepository
+
+    own_es_repo = es_repo is None
+    if es_repo is None:
+        es_repo = ElasticsearchRepository(config)
+
+    try:
+        # Fetch features and subfeatures
+        with console.status("[bold blue]Fetching features...[/]"):
+            features = es_repo.get_features(scope, repository, username)
+            subfeatures = es_repo.get_subfeatures(scope, repository, username)
+
+        all_features = features + subfeatures
+
+        if not all_features:
+            console.print("  [dim]No features found[/]")
+            return None
+
+        console.print(f"  Found {len(features)} features, {len(subfeatures)} subfeatures")
+
+        # Extract glossary using AI
+        with console.status("[bold blue]Extracting glossary with AI...[/]"):
+            glossary_items = await extract_glossary_from_features(all_features, config)
+
+        if not glossary_items:
+            console.print("  [dim]No glossary items extracted[/]")
+            return {"terms_count": 0}
+
+        console.print(f"  Extracted [green]{len(glossary_items)}[/] glossary items")
+
+        # Delete existing glossary entries
+        with console.status("[bold blue]Clearing existing glossary...[/]"):
+            deleted = es_repo.delete_glossary(scope, repository, username)
+            if deleted > 0:
+                console.print(f"  Deleted {deleted} existing entries")
+
+        # Index new glossary entries
+        with console.status("[bold blue]Indexing glossary entries...[/]"):
+            for item in glossary_items:
+                glossary_id = f"{scope}:{repository}:{username}:glossary:{item.name}"
+
+                es_repo.index_glossary(
+                    glossary_id=glossary_id,
+                    scope=scope,
+                    repository=repository,
+                    username=username,
+                    term=item.name,
+                    total_count=len(item.source_feature_ids),
+                    element_ids=item.source_feature_ids,
+                    file_paths=[],
+                    description=item.description,
+                )
+
+        console.print(f"  Indexed [green]{len(glossary_items)}[/] glossary entries")
+
+        # Print top terms
+        top_terms = sorted(
+            glossary_items,
+            key=lambda x: len(x.source_feature_ids),
+            reverse=True,
+        )[:10]
+
+        if top_terms:
+            console.print()
+            console.print("[bold]Top terms:[/]")
+            for item in top_terms:
+                console.print(
+                    f"  [cyan]{item.name}[/]: {len(item.source_feature_ids)} features - {item.description[:50]}..."
+                    if len(item.description) > 50
+                    else f"  [cyan]{item.name}[/]: {len(item.source_feature_ids)} features - {item.description}"
+                )
+
+        return {
+            "terms_count": len(glossary_items),
+            "terms": [item.name for item in glossary_items],
+        }
+
+    finally:
+        if own_es_repo:
+            es_repo.close()
 
 
 def run_parsing(manifest: ChangeManifest) -> ParsingResult:

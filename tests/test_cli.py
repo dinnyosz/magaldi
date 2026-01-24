@@ -371,6 +371,7 @@ class TestExtractGlossaryCommand:
         assert result.exit_code == 0
         assert "Extract glossary" in result.output
         assert "--link-features" in result.output
+        assert "--ai" in result.output
 
     def test_extract_glossary_missing_user(self, cli_runner, tmp_path):
         """Test extract-glossary fails without --user."""
@@ -409,6 +410,46 @@ class TestExtractGlossaryCommand:
 
         assert result.exit_code != 0
         assert "magaldi.yaml" in result.output
+
+    @patch("shared.cli.load_config")
+    @patch("shared.cli.run_glossary_extraction_ai")
+    @patch("magaldi_core.discovery.load_repo_config")
+    def test_extract_glossary_ai_flag_calls_ai_extractor(
+        self,
+        mock_load_repo_config,
+        mock_run_ai,
+        mock_load_config,
+        cli_runner,
+        mock_config,
+        tmp_path,
+    ):
+        """Test that --ai flag calls the AI extraction function."""
+        import asyncio
+
+        repo_path = tmp_path / "test-repo"
+        repo_path.mkdir()
+        (repo_path / "magaldi.yaml").write_text("scope: test")
+
+        mock_load_config.return_value = mock_config
+        mock_load_repo_config.return_value = {"scope": "test"}
+
+        # Create a coroutine that returns a result
+        async def mock_ai_extraction(*args, **kwargs):
+            return {"terms_count": 5}
+
+        mock_run_ai.side_effect = mock_ai_extraction
+
+        result = cli_runner.invoke(main, [
+            "extract-glossary",
+            str(repo_path),
+            "--user", "testuser",
+            "--ai",
+        ])
+
+        # Check that AI mode was printed
+        assert "AI-powered" in result.output
+        # Check that run_glossary_extraction_ai was called
+        mock_run_ai.assert_called_once()
 
 
 class TestWebCommands:
