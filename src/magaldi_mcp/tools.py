@@ -1887,27 +1887,71 @@ def find_dead_code(
     """
     username = username or "main"
 
-    # Entry point decorators to exclude
+    # Entry point decorators to exclude (functions with these are likely called externally)
     entry_point_decorators = {
-        "app.route", "route", "get", "post", "put", "delete", "patch",
+        # Web frameworks
+        "app.route", "route", "get", "post", "put", "delete", "patch", "head", "options",
+        "router.get", "router.post", "router.put", "router.delete", "router.patch",
+        "api_view", "action", "endpoint",
+        # FastAPI
+        "app.get", "app.post", "app.put", "app.delete", "app.patch",
+        "app.websocket", "websocket",
+        "depends", "Depends",
+        # CLI
         "click.command", "command", "click.group", "group",
-        "pytest.fixture", "fixture",
+        "typer.command", "typer.callback",
+        "argparse",
+        # Testing
+        "pytest.fixture", "fixture", "pytest.mark", "mark.",
+        "parametrize", "pytest.parametrize",
+        # Class internals
         "property", "staticmethod", "classmethod",
         "abstractmethod", "abstractproperty",
-        "celery.task", "task",
-        "api_view", "action",
+        "cached_property", "functools.cached_property",
+        # Async/background
+        "celery.task", "task", "dramatiq.actor", "actor",
+        "asyncio", "async_generator",
+        # Event handlers
+        "on_event", "lifespan", "startup", "shutdown",
+        "event_handler", "listener", "subscriber",
+        # Serialization/validation
+        "validator", "field_validator", "model_validator",
+        "serializer", "deserializer",
+        # Registration patterns
+        "register", "registry", "handler",
+        "callback", "hook",
     }
 
-    # Names to exclude (entry points, magic methods)
+    # Names to exclude (entry points, magic methods, common public API patterns)
     excluded_names = {
-        "main", "__main__", "__init__", "__new__", "__del__",
+        # Entry points
+        "main", "__main__", "run", "start", "execute", "cli",
+        # Magic methods
+        "__init__", "__new__", "__del__", "__post_init__",
         "__str__", "__repr__", "__hash__", "__eq__", "__ne__",
-        "__lt__", "__le__", "__gt__", "__ge__",
-        "__add__", "__sub__", "__mul__", "__truediv__",
-        "__iter__", "__next__", "__getitem__", "__setitem__",
+        "__lt__", "__le__", "__gt__", "__ge__", "__cmp__",
+        "__add__", "__sub__", "__mul__", "__truediv__", "__floordiv__",
+        "__mod__", "__pow__", "__and__", "__or__", "__xor__",
+        "__radd__", "__rsub__", "__rmul__", "__rtruediv__",
+        "__iadd__", "__isub__", "__imul__", "__itruediv__",
+        "__neg__", "__pos__", "__abs__", "__invert__",
+        "__iter__", "__next__", "__getitem__", "__setitem__", "__delitem__",
         "__len__", "__call__", "__enter__", "__exit__",
-        "__contains__", "__bool__", "__getattr__", "__setattr__",
+        "__contains__", "__bool__", "__index__", "__int__", "__float__",
+        "__getattr__", "__setattr__", "__delattr__", "__getattribute__",
+        "__get__", "__set__", "__delete__",  # Descriptors
+        "__class_getitem__", "__init_subclass__", "__set_name__",
+        "__reduce__", "__reduce_ex__", "__getstate__", "__setstate__",
+        "__copy__", "__deepcopy__",
+        "__format__", "__sizeof__", "__bytes__",
+        "__aiter__", "__anext__", "__await__",  # Async magic
+        "__aenter__", "__aexit__",
+        # Testing
         "setUp", "tearDown", "setUpClass", "tearDownClass",
+        "setUpModule", "tearDownModule",
+        # Common callback/handler names
+        "on_start", "on_stop", "on_error", "on_success",
+        "handle", "process", "callback",
     }
 
     client = es._get_client()
@@ -1928,7 +1972,7 @@ def find_dead_code(
         body={
             "query": {"bool": {"filter": filters}},
             "_source": ["element_id", "hash_id", "name", "element_type", "relative_path",
-                        "line_start", "decorators", "is_test", "summary"],
+                        "line_start", "decorators", "is_test", "summary", "visibility", "level"],
             "size": 2000,
         },
     )
@@ -1944,10 +1988,19 @@ def find_dead_code(
         source = hit["_source"]
         element_id = source.get("element_id")
         name = source.get("name")
+        element_type = source.get("element_type")
         decorators = source.get("decorators", []) or []
+        level = source.get("level", 2)  # Default to function level
 
         # Skip excluded names
         if name in excluded_names:
+            excluded_count += 1
+            continue
+
+        # Skip public module-level functions (they're likely public API)
+        # Level 2 = function, level 3 = method/nested
+        # Public = doesn't start with underscore
+        if element_type == "function" and level == 2 and not name.startswith("_"):
             excluded_count += 1
             continue
 
