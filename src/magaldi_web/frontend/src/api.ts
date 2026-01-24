@@ -203,6 +203,19 @@ export interface FeatureInfo {
   subfeatures: SubfeatureInfo[]
 }
 
+export interface GlossaryFeatureAssociation {
+  feature_id: string
+  feature_label: string
+}
+
+export interface GlossaryInfo {
+  description: string
+  total_count: number
+  feature_count: number
+  file_paths: string[]
+  feature_associations: GlossaryFeatureAssociation[]
+}
+
 export interface ClassAttributeInfo {
   name: string
   type: string | null
@@ -263,6 +276,7 @@ export interface ElementDetail {
     name: string
   }
   feature_info: FeatureInfo | null
+  glossary_info: GlossaryInfo | null
 }
 
 export interface SimilarElement {

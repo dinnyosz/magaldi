@@ -384,6 +384,23 @@ class FeatureInfo(BaseModel):
     subfeatures: list[SubfeatureInfo] = Field(default_factory=list)
 
 
+class GlossaryFeatureAssociation(BaseModel):
+    """A feature association for a glossary term."""
+
+    feature_id: str
+    feature_label: str
+
+
+class GlossaryInfo(BaseModel):
+    """Glossary-specific information for glossary elements."""
+
+    description: str = ""
+    total_count: int = 0
+    feature_count: int = 0
+    file_paths: list[str] = Field(default_factory=list)
+    feature_associations: list[GlossaryFeatureAssociation] = Field(default_factory=list)
+
+
 class ClassAttributeInfo(BaseModel):
     """Information about a class attribute."""
 
@@ -434,6 +451,7 @@ class ElementDetailResponse(BaseModel):
     context: ElementContext
     repository: RepoRef
     feature_info: FeatureInfo | None = None
+    glossary_info: GlossaryInfo | None = None
 
 
 # =============================================================================

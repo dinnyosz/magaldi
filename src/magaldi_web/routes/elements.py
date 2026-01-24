@@ -14,6 +14,8 @@ from magaldi_web.models import (
     FeatureInfo,
     FeatureMember,
     FileContext,
+    GlossaryFeatureAssociation,
+    GlossaryInfo,
     ImportInfo,
     ParentContext,
     ParentFeatureInfo,
@@ -336,6 +338,27 @@ async def get_element_detail(
             subfeatures=subfeatures,
         )
 
+    # Get glossary info for glossary elements
+    glossary_info = None
+    if source["element_type"] == "glossary":
+        feature_associations = []
+        raw_associations = source.get("feature_associations", [])
+        for assoc in raw_associations:
+            feature_associations.append(
+                GlossaryFeatureAssociation(
+                    feature_id=assoc.get("feature_id", ""),
+                    feature_label=assoc.get("feature_label", ""),
+                )
+            )
+
+        glossary_info = GlossaryInfo(
+            description=source.get("description", ""),
+            total_count=source.get("total_count", 0),
+            feature_count=source.get("feature_count", 0),
+            file_paths=source.get("file_paths", []),
+            feature_associations=feature_associations,
+        )
+
     # Parse class attributes
     class_attributes = []
     raw_class_attrs = source.get("class_attributes", [])
@@ -377,6 +400,11 @@ async def get_element_detail(
                 )
             )
 
+    # For glossary elements, use description as summary
+    summary = source.get("summary")
+    if source["element_type"] == "glossary":
+        summary = source.get("description", "")
+
     return ElementDetailResponse(
         element_id=source["element_id"],
         hash_id=source.get("hash_id"),
@@ -386,7 +414,7 @@ async def get_element_detail(
         line_start=source.get("line_start", 0),
         line_end=source.get("line_end"),
         language=source.get("language", "unknown"),
-        summary=source.get("summary"),
+        summary=summary,
         signature=source.get("signature"),
         docstring=source.get("docstring"),
         raw_code=source.get("raw_code"),
@@ -417,4 +445,5 @@ async def get_element_detail(
             name=source["repository"],
         ),
         feature_info=feature_info,
+        glossary_info=glossary_info,
     )

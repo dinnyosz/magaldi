@@ -24,6 +24,7 @@ const typeConfig: Record<string, { icon: string; color: string; label: string }>
   constant: { icon: 'bi-hash', color: 'warning', label: 'Constant' },
   feature: { icon: 'bi-collection', color: 'info', label: 'Feature' },
   subfeature: { icon: 'bi-collection-fill', color: 'info', label: 'Subfeature' },
+  glossary: { icon: 'bi-book', color: 'primary', label: 'Glossary Term' },
 }
 
 function getTypeConfig(type: string) {
@@ -105,6 +106,7 @@ function Element() {
   const isCallable = ['function', 'method'].includes(element.element_type)
   const isContainer = ['file', 'class'].includes(element.element_type)
   const isFeature = ['feature', 'subfeature'].includes(element.element_type)
+  const isGlossary = element.element_type === 'glossary'
 
   // Detect entry point type from decorators (multi-language support)
   const entryPointPatterns: Record<string, { decorators: string[], label: string, icon: string, color: string }> = {
@@ -336,6 +338,11 @@ function Element() {
                       {element.feature_info.member_count} members
                     </Badge>
                   )}
+                  {isGlossary && element.glossary_info && (
+                    <Badge bg="secondary" className="ms-2">
+                      {element.glossary_info.total_count} occurrences
+                    </Badge>
+                  )}
                 </div>
               </div>
 
@@ -365,6 +372,57 @@ function Element() {
                   <i className="bi bi-lightbulb me-2 text-warning"></i>
                   {element.summary}
                 </Alert>
+              )}
+
+              {/* Glossary Info */}
+              {isGlossary && element.glossary_info && (
+                <>
+                  {/* Source Features */}
+                  {element.glossary_info.feature_associations.length > 0 && (
+                    <div className="mb-3">
+                      <small className="text-uppercase text-muted fw-bold d-block mb-1">
+                        <i className="bi bi-diagram-3 me-1"></i>
+                        Extracted From ({element.glossary_info.feature_associations.length} features)
+                      </small>
+                      <div className="d-flex flex-wrap gap-2">
+                        {element.glossary_info.feature_associations.map((assoc) => (
+                          <Link
+                            key={assoc.feature_id}
+                            to={`/element/${encodeURIComponent(assoc.feature_id)}`}
+                            className="text-decoration-none"
+                          >
+                            <Badge bg="info" className="fw-normal">
+                              <i className="bi bi-collection me-1"></i>
+                              {assoc.feature_label}
+                            </Badge>
+                          </Link>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* File Paths */}
+                  {element.glossary_info.file_paths.length > 0 && (
+                    <div className="mb-3">
+                      <small className="text-uppercase text-muted fw-bold d-block mb-1">
+                        <i className="bi bi-file-earmark-code me-1"></i>
+                        Files ({element.glossary_info.file_paths.length})
+                      </small>
+                      <div className="bg-light p-2 rounded" style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                        {element.glossary_info.file_paths.slice(0, 20).map((path, i) => (
+                          <div key={i} className="py-1">
+                            <code className="small text-muted">{path}</code>
+                          </div>
+                        ))}
+                        {element.glossary_info.file_paths.length > 20 && (
+                          <div className="py-1 text-muted small">
+                            ... and {element.glossary_info.file_paths.length - 20} more files
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
 
               {/* Docstring */}
@@ -1058,6 +1116,22 @@ function Element() {
                   <span className="text-muted">Subfeatures</span>
                   <span>{element.feature_info.subfeatures.length}</span>
                 </ListGroup.Item>
+              )}
+              {isGlossary && element.glossary_info && (
+                <>
+                  <ListGroup.Item className="d-flex justify-content-between">
+                    <span className="text-muted">Occurrences</span>
+                    <span>{element.glossary_info.total_count}</span>
+                  </ListGroup.Item>
+                  <ListGroup.Item className="d-flex justify-content-between">
+                    <span className="text-muted">Files</span>
+                    <span>{element.glossary_info.file_paths.length}</span>
+                  </ListGroup.Item>
+                  <ListGroup.Item className="d-flex justify-content-between">
+                    <span className="text-muted">Source Features</span>
+                    <span>{element.glossary_info.feature_count}</span>
+                  </ListGroup.Item>
+                </>
               )}
               {element.visibility && (
                 <ListGroup.Item className="d-flex justify-content-between">
