@@ -556,6 +556,40 @@ function Element() {
             </Card>
           )}
 
+          {/* Subfeatures - shown for features (above members) */}
+          {element.element_type === 'feature' && element.feature_info && element.feature_info.subfeatures && element.feature_info.subfeatures.length > 0 && (
+            <Card className="mb-4">
+              <Card.Header>
+                <i className="bi bi-collection-fill me-2"></i>
+                Subfeatures ({element.feature_info.subfeatures.length})
+              </Card.Header>
+              <ListGroup variant="flush">
+                {element.feature_info.subfeatures.map((subfeature) => (
+                  <ListGroup.Item
+                    key={subfeature.element_id}
+                    action
+                    as={Link}
+                    to={`/element/${encodeURIComponent(subfeature.hash_id || subfeature.element_id)}`}
+                    className="d-flex justify-content-between align-items-start"
+                  >
+                    <div>
+                      <Badge bg="info" className="me-2">
+                        <i className="bi bi-collection-fill"></i>
+                      </Badge>
+                      <span className="fw-medium">{subfeature.label}</span>
+                      {subfeature.summary && (
+                        <small className="d-block text-muted ms-4 mt-1">{subfeature.summary}</small>
+                      )}
+                    </div>
+                    <Badge bg="secondary" pill>
+                      {subfeature.member_count} members
+                    </Badge>
+                  </ListGroup.Item>
+                ))}
+              </ListGroup>
+            </Card>
+          )}
+
           {/* Members - shown for features and subfeatures */}
           {isFeature && element.feature_info && (
             <Card className="mb-4">
@@ -664,40 +698,6 @@ function Element() {
                   </div>
                 )}
               </Card.Body>
-            </Card>
-          )}
-
-          {/* Subfeatures - shown for features */}
-          {element.element_type === 'feature' && element.feature_info && element.feature_info.subfeatures && element.feature_info.subfeatures.length > 0 && (
-            <Card className="mb-4">
-              <Card.Header>
-                <i className="bi bi-collection-fill me-2"></i>
-                Subfeatures ({element.feature_info.subfeatures.length})
-              </Card.Header>
-              <ListGroup variant="flush">
-                {element.feature_info.subfeatures.map((subfeature) => (
-                  <ListGroup.Item
-                    key={subfeature.element_id}
-                    action
-                    as={Link}
-                    to={`/element/${encodeURIComponent(subfeature.hash_id || subfeature.element_id)}`}
-                    className="d-flex justify-content-between align-items-start"
-                  >
-                    <div>
-                      <Badge bg="info" className="me-2">
-                        <i className="bi bi-collection-fill"></i>
-                      </Badge>
-                      <span className="fw-medium">{subfeature.label}</span>
-                      {subfeature.summary && (
-                        <small className="d-block text-muted ms-4 mt-1">{subfeature.summary}</small>
-                      )}
-                    </div>
-                    <Badge bg="secondary" pill>
-                      {subfeature.member_count} members
-                    </Badge>
-                  </ListGroup.Item>
-                ))}
-              </ListGroup>
             </Card>
           )}
 
