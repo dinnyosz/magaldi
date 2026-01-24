@@ -125,7 +125,7 @@ async def browse_elements(
         parent_result = client.mget(
             index=INDEX_NAME,
             ids=list(parent_ids),
-            _source=["name", "element_type", "relative_path"],
+            _source=["name", "element_type", "relative_path", "hash_id"],
         )
         for doc in parent_result.get("docs", []):
             if doc.get("found") and doc.get("_source"):
@@ -142,6 +142,7 @@ async def browse_elements(
             pinfo = parent_info[parent_id]
             container = {
                 "element_id": parent_id,
+                "hash_id": pinfo.get("hash_id"),
                 "name": pinfo.get("name"),
                 "element_type": pinfo.get("element_type"),
             }

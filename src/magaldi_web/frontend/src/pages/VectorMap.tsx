@@ -392,7 +392,7 @@ function VectorMap() {
 
   const handlePointClick = useCallback(
     (point: VectorPoint) => {
-      navigate(`/element/${encodeURIComponent(point.element_id)}`)
+      navigate(`/element/${encodeURIComponent(point.hash_id || point.element_id)}`)
     },
     [navigate]
   )

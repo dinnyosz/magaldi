@@ -494,7 +494,7 @@ function Element() {
                 {element.context.file && element.element_type !== 'file' && (
                   <ListGroup.Item>
                     <small className="text-uppercase text-muted d-block">File</small>
-                    <Link to={`/element/${element.context.file.element_id}`}>
+                    <Link to={`/element/${encodeURIComponent(element.context.file.hash_id || element.context.file.element_id)}`}>
                       <i className="bi bi-file-code me-1"></i>
                       {element.context.file.name}
                     </Link>
@@ -506,7 +506,7 @@ function Element() {
                 {element.context.parent && (
                   <ListGroup.Item>
                     <small className="text-uppercase text-muted d-block">Parent</small>
-                    <Link to={`/element/${element.context.parent.element_id}`}>
+                    <Link to={`/element/${encodeURIComponent(element.context.parent.hash_id || element.context.parent.element_id)}`}>
                       <Badge
                         bg={getTypeConfig(element.context.parent.element_type).color}
                         style={getTypeBadgeStyle(element.context.parent.element_type)}

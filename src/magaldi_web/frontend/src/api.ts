@@ -239,6 +239,7 @@ export interface VectorPoint {
   y: number
   z?: number
   element_id: string
+  hash_id: string | null
   name: string
   element_type: string
   file_path: string
@@ -447,6 +448,7 @@ export interface BrowseFilters {
 
 export interface ContainerInfo {
   element_id: string
+  hash_id: string | null
   name: string
   element_type: string
 }

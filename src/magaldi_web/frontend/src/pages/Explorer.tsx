@@ -143,7 +143,7 @@ function ElementRow({ element, username }: { element: BrowseElement; username: s
             <div className="small">
               <i className={`bi ${typeConfig[element.container.element_type]?.icon || 'bi-dot'} me-1 text-${typeConfig[element.container.element_type]?.color || 'secondary'}`}></i>
               <Link
-                to={`/element/${element.container.element_id}`}
+                to={`/element/${encodeURIComponent(element.container.hash_id || element.container.element_id)}`}
                 className="text-decoration-none text-primary"
               >
                 {element.container.name}

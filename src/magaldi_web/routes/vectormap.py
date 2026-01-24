@@ -114,6 +114,7 @@ async def get_vector_map(
             },
             "_source": [
                 "element_id",
+                "hash_id",
                 "name",
                 "element_type",
                 "relative_path",
@@ -146,6 +147,7 @@ async def get_vector_map(
             metadata.append(
                 {
                     "element_id": source["element_id"],
+                    "hash_id": source.get("hash_id"),
                     "name": source["name"],
                     "element_type": source["element_type"],
                     "file_path": source["relative_path"],
@@ -174,6 +176,7 @@ async def get_vector_map(
             y=float(coords[i][1]),
             z=float(coords[i][2]) if dimensions == 3 else None,
             element_id=meta["element_id"],
+            hash_id=meta["hash_id"],
             name=meta["name"],
             element_type=meta["element_type"],
             file_path=meta["file_path"],
