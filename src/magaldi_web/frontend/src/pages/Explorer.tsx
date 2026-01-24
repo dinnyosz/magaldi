@@ -188,13 +188,7 @@ function ElementRow({ element, username }: { element: BrowseElement; username: s
             </>
           )}
         </td>
-        <td>
-          {/* Hide language for features */}
-          {element.element_type !== 'feature' && element.element_type !== 'subfeature' ? (
-            <Badge bg="secondary">{element.language}</Badge>
-          ) : null}
-        </td>
-        <td className="small text-muted" style={{ maxWidth: '400px' }}>
+        <td className="small text-muted">
           {element.summary ? (
             <OverlayTrigger
               placement="top"
@@ -215,7 +209,7 @@ function ElementRow({ element, username }: { element: BrowseElement; username: s
       {/* Children panel for files/classes */}
       {hasChildren && (
         <tr>
-          <td colSpan={6} className="p-0 border-0">
+          <td colSpan={5} className="p-0 border-0">
             <Collapse in={expanded}>
               <div>
                 {childrenLoading ? (
@@ -276,7 +270,7 @@ function ElementRow({ element, username }: { element: BrowseElement; username: s
       {/* Details panel for functions/methods with call graph */}
       {canShowDetails && (
         <tr>
-          <td colSpan={6} className="p-0 border-0">
+          <td colSpan={5} className="p-0 border-0">
             <Collapse in={showDetails}>
               <div className="ps-5 py-2 bg-body-tertiary border-bottom">
                 {detailsLoading ? (
@@ -620,10 +614,9 @@ function Explorer() {
               <thead className="bg-body-secondary">
                 <tr>
                   <th style={{ width: '30px' }}></th>
-                  <th>Name</th>
-                  <th style={{ width: '100px' }}>Type</th>
-                  <th>Location</th>
-                  <th style={{ width: '100px' }}>Language</th>
+                  <th style={{ width: '200px' }}>Name</th>
+                  <th style={{ width: '80px' }}>Type</th>
+                  <th style={{ width: '300px' }}>Details</th>
                   <th>Summary</th>
                 </tr>
               </thead>
