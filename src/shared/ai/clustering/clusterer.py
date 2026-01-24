@@ -44,7 +44,7 @@ class ClusterConfig:
 
     # LLM settings for labeling (based on arxiv.org/html/2507.03160v2)
     api_base: str = "http://localhost:11434"
-    labeling_model: str = "qwen2.5-coder:3b"
+    labeling_model: str = "qwen3:4b-instruct"
     label_temperature: float = 0.2
     label_top_p: float = 0.95
     label_max_tokens: int = 32

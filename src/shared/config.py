@@ -91,9 +91,9 @@ class LLMConfig:
     api_key: str | None = None  # For cloud providers (or set via env vars)
 
     # Summarization model (for files, classes, features)
-    summarize_model: str = "qwen2.5-coder:3b"
+    summarize_model: str = "qwen3:4b-instruct"
     # Smaller model for functions, methods, variables, constants
-    summarize_model_small: str = "qwen2.5-coder:1.5b"
+    summarize_model_small: str = "qwen3:1.7b"
     # Generation settings (based on arxiv.org/html/2507.03160v2)
     summarize_temperature: float = 0.2
     summarize_top_p: float = 0.95

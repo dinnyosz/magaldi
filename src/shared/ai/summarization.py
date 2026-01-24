@@ -43,7 +43,7 @@ class SummarizationConfig:
 
     # LLM settings (supports any LiteLLM provider)
     ollama_url: str = "http://localhost:11434"  # For Ollama provider
-    model: str = "qwen2.5-coder:3b"
+    model: str = "qwen3:4b-instruct"
     provider: str = "ollama"  # ollama, openai, anthropic, etc.
     api_key: str | None = None  # For cloud providers
 

@@ -270,10 +270,10 @@ class LLMConfig:
 
     # Model identifier (format: provider/model or just model for OpenAI)
     # Examples:
-    #   - "ollama/qwen2.5-coder:3b"
+    #   - "ollama/qwen3:4b-instruct"
     #   - "gpt-4o-mini"
     #   - "claude-3-haiku-20240307"
-    model: str = "ollama/qwen2.5-coder:3b"
+    model: str = "ollama/qwen3:4b-instruct"
 
     # API configuration
     api_base: str | None = None  # For Ollama: "http://localhost:11434"
