@@ -200,3 +200,87 @@ async def extract_glossary_from_feature(
             )
 
     return items
+
+
+def normalize_term(name: str) -> str:
+    """Normalize a glossary term name.
+
+    Handles pluralization and common variations.
+
+    Args:
+        name: The term name to normalize.
+
+    Returns:
+        Normalized term name (lowercase, singular form).
+    """
+    name = name.lower().strip()
+
+    # Simple depluralization for common patterns
+    if name.endswith("ies") and len(name) > 3:
+        singular = name[:-3] + "y"
+        if len(singular) > 2:
+            name = singular
+    elif name.endswith("sses"):
+        # classes -> class
+        name = name[:-2]
+    elif name.endswith("xes") or name.endswith("ches") or name.endswith("shes"):
+        # boxes -> box, matches -> match, flashes -> flash
+        name = name[:-2]
+    elif name.endswith("es") and len(name) > 3 and not name.endswith("sses"):
+        # processes -> process (but not classes which is handled above)
+        if not name[:-2].endswith("s"):
+            name = name[:-1]  # processes -> processe -> process (actually need -2)
+            # Re-check: processes -> process requires removing 'es'
+            # But "ses" ending needs special handling
+            pass
+    elif name.endswith("s") and len(name) > 3 and not name.endswith("ss"):
+        name = name[:-1]
+
+    return name
+
+
+def merge_glossary_items(items: list[GlossaryItem]) -> list[GlossaryItem]:
+    """Merge glossary items with same/similar names.
+
+    Items with the same normalized name are merged:
+    - Feature IDs are combined
+    - The longest description is kept
+
+    Args:
+        items: List of GlossaryItem to merge.
+
+    Returns:
+        List of merged GlossaryItem, sorted by name.
+    """
+    grouped: dict[str, list[GlossaryItem]] = {}
+
+    for item in items:
+        normalized = normalize_term(item.name)
+        if normalized not in grouped:
+            grouped[normalized] = []
+        grouped[normalized].append(item)
+
+    merged = []
+    for normalized_name, group in grouped.items():
+        all_feature_ids: list[str] = []
+        for item in group:
+            for fid in item.source_feature_ids:
+                if fid not in all_feature_ids:
+                    all_feature_ids.append(fid)
+
+        best_description = max(
+            (item.description for item in group),
+            key=len,
+        )
+
+        merged.append(
+            GlossaryItem(
+                name=normalized_name,
+                description=best_description,
+                source_feature_id=all_feature_ids[0] if all_feature_ids else "",
+                source_feature_ids=all_feature_ids,
+            )
+        )
+
+    merged.sort(key=lambda x: x.name)
+    return merged

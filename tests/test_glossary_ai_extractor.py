@@ -11,6 +11,8 @@ from shared.ai.glossary.ai_extractor import (
     build_glossary_prompt,
     call_llm_for_glossary,
     extract_glossary_from_feature,
+    merge_glossary_items,
+    normalize_term,
     parse_llm_response,
 )
 
@@ -425,3 +427,191 @@ class TestCallLLMForGlossary:
 
         assert len(result) == 1
         assert result[0]["name"] == "user"
+
+
+class TestNormalizeTerm:
+    """Tests for term normalization."""
+
+    def test_normalizes_simple_plural(self):
+        """Test that simple plurals (ending in 's') are normalized."""
+        assert normalize_term("users") == "user"
+        assert normalize_term("emails") == "email"
+        assert normalize_term("accounts") == "account"
+
+    def test_normalizes_ies_plural(self):
+        """Test that -ies plurals are normalized to -y."""
+        assert normalize_term("entries") == "entry"
+        assert normalize_term("categories") == "category"
+        assert normalize_term("queries") == "query"
+
+    def test_normalizes_es_plural(self):
+        """Test that -es plurals are normalized correctly."""
+        assert normalize_term("classes") == "class"
+        assert normalize_term("processes") == "process"
+        assert normalize_term("boxes") == "box"
+        assert normalize_term("matches") == "match"
+        assert normalize_term("flashes") == "flash"
+
+    def test_preserves_short_words(self):
+        """Test that short words are preserved."""
+        assert normalize_term("as") == "as"
+        assert normalize_term("is") == "is"
+
+    def test_handles_lowercase_and_whitespace(self):
+        """Test that terms are lowercased and trimmed."""
+        assert normalize_term("User") == "user"
+        assert normalize_term("  USER  ") == "user"
+        assert normalize_term("Users") == "user"
+
+    def test_preserves_already_singular(self):
+        """Test that singular terms are preserved."""
+        assert normalize_term("user") == "user"
+        assert normalize_term("email") == "email"
+        assert normalize_term("authentication") == "authentication"
+
+    def test_handles_double_s_words(self):
+        """Test that words ending in 'ss' are not depluralized."""
+        assert normalize_term("class") == "class"
+        assert normalize_term("process") == "process"
+        assert normalize_term("access") == "access"
+
+
+class TestMergeGlossaryItems:
+    """Tests for merging glossary items from multiple features."""
+
+    def test_merges_identical_names(self):
+        """Test that items with same name are merged."""
+        items = [
+            GlossaryItem(
+                name="user",
+                description="A person using the system",
+                source_feature_id="feature:auth",
+            ),
+            GlossaryItem(
+                name="user",
+                description="An authenticated individual",
+                source_feature_id="feature:profile",
+            ),
+        ]
+
+        merged = merge_glossary_items(items)
+
+        assert len(merged) == 1
+        assert merged[0].name == "user"
+        assert set(merged[0].source_feature_ids) == {"feature:auth", "feature:profile"}
+
+    def test_normalizes_name_variations(self):
+        """Test that similar names are normalized and merged."""
+        items = [
+            GlossaryItem(name="user", description="Desc 1", source_feature_id="f1"),
+            GlossaryItem(name="users", description="Desc 2", source_feature_id="f2"),
+        ]
+
+        merged = merge_glossary_items(items)
+
+        # "users" should normalize to "user"
+        assert len(merged) == 1
+        assert merged[0].name == "user"
+
+    def test_keeps_distinct_items_separate(self):
+        """Test that different terms stay separate."""
+        items = [
+            GlossaryItem(name="user", description="A person", source_feature_id="f1"),
+            GlossaryItem(name="email", description="Electronic mail", source_feature_id="f2"),
+        ]
+
+        merged = merge_glossary_items(items)
+
+        assert len(merged) == 2
+        names = {item.name for item in merged}
+        assert names == {"user", "email"}
+
+    def test_picks_longest_description(self):
+        """Test that the most detailed description is kept."""
+        items = [
+            GlossaryItem(name="user", description="A person", source_feature_id="f1"),
+            GlossaryItem(
+                name="user",
+                description="A person who interacts with the system through the UI",
+                source_feature_id="f2",
+            ),
+        ]
+
+        merged = merge_glossary_items(items)
+
+        assert "interacts with the system" in merged[0].description
+
+    def test_combines_feature_ids_preserving_order(self):
+        """Test that feature IDs are combined in order of appearance."""
+        items = [
+            GlossaryItem(name="user", description="Short", source_feature_id="f1"),
+            GlossaryItem(name="user", description="Medium desc", source_feature_id="f2"),
+            GlossaryItem(name="user", description="Another desc", source_feature_id="f3"),
+        ]
+
+        merged = merge_glossary_items(items)
+
+        assert len(merged) == 1
+        assert merged[0].source_feature_ids == ["f1", "f2", "f3"]
+
+    def test_does_not_duplicate_feature_ids(self):
+        """Test that duplicate feature IDs are not added twice."""
+        items = [
+            GlossaryItem(name="user", description="Desc 1", source_feature_id="f1"),
+            GlossaryItem(name="user", description="Desc 2", source_feature_id="f1"),
+        ]
+
+        merged = merge_glossary_items(items)
+
+        assert len(merged) == 1
+        assert merged[0].source_feature_ids == ["f1"]
+
+    def test_returns_sorted_by_name(self):
+        """Test that merged items are sorted alphabetically by name."""
+        items = [
+            GlossaryItem(name="zebra", description="An animal", source_feature_id="f1"),
+            GlossaryItem(name="apple", description="A fruit", source_feature_id="f2"),
+            GlossaryItem(name="banana", description="Another fruit", source_feature_id="f3"),
+        ]
+
+        merged = merge_glossary_items(items)
+
+        assert len(merged) == 3
+        assert [item.name for item in merged] == ["apple", "banana", "zebra"]
+
+    def test_handles_empty_list(self):
+        """Test that empty input returns empty output."""
+        merged = merge_glossary_items([])
+        assert merged == []
+
+    def test_merges_ies_plural_variations(self):
+        """Test merging items with -ies/-y variations."""
+        items = [
+            GlossaryItem(name="entry", description="A single entry", source_feature_id="f1"),
+            GlossaryItem(name="entries", description="Multiple entries in the system", source_feature_id="f2"),
+        ]
+
+        merged = merge_glossary_items(items)
+
+        assert len(merged) == 1
+        assert merged[0].name == "entry"
+        assert set(merged[0].source_feature_ids) == {"f1", "f2"}
+        # Should keep the longer description
+        assert "Multiple entries in the system" in merged[0].description
+
+    def test_handles_single_item(self):
+        """Test that a single item is returned unchanged (but normalized)."""
+        items = [
+            GlossaryItem(
+                name="Users",
+                description="People who use the system",
+                source_feature_id="f1",
+            ),
+        ]
+
+        merged = merge_glossary_items(items)
+
+        assert len(merged) == 1
+        assert merged[0].name == "user"  # Normalized
+        assert merged[0].description == "People who use the system"
+        assert merged[0].source_feature_ids == ["f1"]
