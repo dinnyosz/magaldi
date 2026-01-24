@@ -134,7 +134,7 @@ Example output for a "User Authentication" feature:
 JSON output:"""
 
 # Prompt template for glossary summary generation (Phase 2: generate holistic summary)
-GLOSSARY_SUMMARY_PROMPT = """You are generating a glossary definition for a domain term found in a codebase.
+GLOSSARY_SUMMARY_PROMPT = """You are generating a glossary entry for a domain term found in a codebase.
 
 Term: {term}
 
@@ -142,14 +142,16 @@ This term appears in the following features/capabilities of the codebase:
 
 {features_context}
 
-Based on how this term is used across these features, write a single comprehensive definition (1-2 sentences) that:
-- Explains what "{term}" represents in this codebase
-- Captures the different contexts or roles it plays
-- Uses clear, domain-appropriate language
+Write a glossary entry with:
+
+1. **Definition** (1 sentence): A clear, concise definition of what "{term}" represents in this codebase.
+
+2. **Details** (2-4 sentences): Explain how this term is used across the different features. Describe the different contexts, roles, or relationships it has in the system.
 
 Focus on the business/domain meaning, not technical implementation details.
+Use markdown formatting (bold for emphasis, bullet points if listing multiple aspects).
 
-Definition:"""
+Entry:"""
 
 
 @dataclass
@@ -466,7 +468,7 @@ def generate_glossary_summary_sync(
             prompt=prompt,
             temperature=llm_config.summarize_temperature,
             top_p=llm_config.summarize_top_p,
-            max_tokens=256,  # Summaries should be concise
+            max_tokens=512,  # Allow for definition + details
         )
         api_time = time.time() - start_time
         return response.strip(), api_time
