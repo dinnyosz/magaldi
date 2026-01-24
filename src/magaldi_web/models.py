@@ -365,12 +365,23 @@ class ParentFeatureInfo(BaseModel):
     summary: str | None = None
 
 
+class SubfeatureInfo(BaseModel):
+    """Info about a subfeature belonging to a feature."""
+
+    element_id: str
+    hash_id: str | None = None
+    label: str
+    summary: str | None = None
+    member_count: int = 0
+
+
 class FeatureInfo(BaseModel):
     """Feature-specific information for feature/subfeature elements."""
 
     member_count: int = 0
     members: list[FeatureMember] = Field(default_factory=list)
     parent_feature: ParentFeatureInfo | None = None
+    subfeatures: list[SubfeatureInfo] = Field(default_factory=list)
 
 
 class ClassAttributeInfo(BaseModel):

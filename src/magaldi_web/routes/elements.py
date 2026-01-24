@@ -19,6 +19,7 @@ from magaldi_web.models import (
     ParentFeatureInfo,
     RepoRef,
     SiblingInfo,
+    SubfeatureInfo,
 )
 from shared.db.elasticsearch import ElasticsearchRepository, INDEX_NAME
 
@@ -291,10 +292,48 @@ async def get_element_detail(
                     summary=source.get("parent_feature_summary"),
                 )
 
+        # Get subfeatures for features
+        subfeatures = []
+        if source["element_type"] == "feature":
+            feature_label = source.get("cluster_label") or source.get("name")
+            if feature_label:
+                # Query subfeatures by parent_feature_label
+                subfeatures_result = client.search(
+                    index=INDEX_NAME,
+                    body={
+                        "size": 50,
+                        "query": {
+                            "bool": {
+                                "filter": [
+                                    {"term": {"scope": source["scope"]}},
+                                    {"term": {"repository": source["repository"]}},
+                                    {"term": {"username": source.get("username", "main")}},
+                                    {"term": {"element_type": "subfeature"}},
+                                    {"term": {"parent_feature_label": feature_label}},
+                                ],
+                            },
+                        },
+                        "_source": ["element_id", "hash_id", "cluster_label", "summary", "member_count"],
+                        "sort": [{"member_count": "desc"}],
+                    },
+                )
+                for hit in subfeatures_result.get("hits", {}).get("hits", []):
+                    sf = hit["_source"]
+                    subfeatures.append(
+                        SubfeatureInfo(
+                            element_id=sf["element_id"],
+                            hash_id=sf.get("hash_id"),
+                            label=sf.get("cluster_label", ""),
+                            summary=sf.get("summary"),
+                            member_count=sf.get("member_count", 0),
+                        )
+                    )
+
         feature_info = FeatureInfo(
             member_count=source.get("member_count", len(member_ids)),
             members=members,
             parent_feature=parent_feature,
+            subfeatures=subfeatures,
         )
 
     # Parse class attributes
