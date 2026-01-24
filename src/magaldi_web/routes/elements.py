@@ -238,15 +238,18 @@ async def get_element_detail(
                 )
             )
 
-    # Parse decorators
+    # Get decorators (already a list in ES, but handle string for backwards compat)
     decorators = []
-    if source.get("decorators"):
-        import json
-
-        try:
-            decorators = json.loads(source["decorators"])
-        except (json.JSONDecodeError, TypeError):
-            decorators = []
+    raw_decorators = source.get("decorators")
+    if raw_decorators:
+        if isinstance(raw_decorators, list):
+            decorators = raw_decorators
+        elif isinstance(raw_decorators, str):
+            import json
+            try:
+                decorators = json.loads(raw_decorators)
+            except (json.JSONDecodeError, TypeError):
+                decorators = []
 
     # Get feature info for features/subfeatures
     feature_info = None
