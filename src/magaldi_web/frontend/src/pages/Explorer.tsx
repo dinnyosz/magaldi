@@ -194,14 +194,16 @@ function ElementRow({ element, username }: { element: BrowseElement; username: s
             <Badge bg="secondary">{element.language}</Badge>
           ) : null}
         </td>
-        <td className="small text-muted" style={{ maxWidth: '300px' }}>
+        <td className="small text-muted" style={{ maxWidth: '400px' }}>
           {element.summary ? (
             <OverlayTrigger
               placement="top"
               overlay={<Tooltip>{element.summary}</Tooltip>}
             >
-              <span className="text-truncate d-inline-block" style={{ maxWidth: '280px' }}>
-                {element.summary}
+              <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                {element.summary.length > 100
+                  ? element.summary.slice(0, 100) + '...'
+                  : element.summary}
               </span>
             </OverlayTrigger>
           ) : (
