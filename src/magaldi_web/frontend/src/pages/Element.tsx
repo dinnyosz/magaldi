@@ -338,9 +338,9 @@ function Element() {
                       {element.feature_info.member_count} members
                     </Badge>
                   )}
-                  {isGlossary && element.glossary_info && (
+                  {isGlossary && element.glossary_info && element.glossary_info.feature_count > 0 && (
                     <Badge bg="secondary" className="ms-2">
-                      {element.glossary_info.total_count} occurrences
+                      {element.glossary_info.feature_count} source features
                     </Badge>
                   )}
                 </div>
@@ -379,30 +379,42 @@ function Element() {
                 <>
                   {/* Source Features */}
                   {element.glossary_info.feature_associations.length > 0 && (
-                    <div className="mb-3">
-                      <small className="text-uppercase text-muted fw-bold d-block mb-1">
-                        <i className="bi bi-diagram-3 me-1"></i>
+                    <Card className="mb-3">
+                      <Card.Header>
+                        <i className="bi bi-diagram-3 me-2"></i>
                         Extracted From ({element.glossary_info.feature_associations.length} features)
-                      </small>
-                      <div className="d-flex flex-wrap gap-2">
+                      </Card.Header>
+                      <ListGroup variant="flush">
                         {element.glossary_info.feature_associations.map((assoc) => (
-                          <Link
+                          <ListGroup.Item
                             key={assoc.feature_id}
-                            to={`/element/${encodeURIComponent(assoc.feature_id)}`}
-                            className="text-decoration-none"
+                            action
+                            as={Link}
+                            to={`/element/${encodeURIComponent(assoc.hash_id || assoc.feature_id)}`}
+                            className="d-flex justify-content-between align-items-start"
                           >
-                            <Badge bg="info" className="fw-normal">
-                              <i className="bi bi-collection me-1"></i>
-                              {assoc.feature_label}
-                            </Badge>
-                          </Link>
+                            <div>
+                              <Badge bg="info" className="me-2">
+                                <i className="bi bi-collection"></i>
+                              </Badge>
+                              <span className="fw-medium">{assoc.feature_label}</span>
+                              {assoc.summary && (
+                                <small className="d-block text-muted ms-4 mt-1">{assoc.summary}</small>
+                              )}
+                            </div>
+                            {assoc.member_count > 0 && (
+                              <Badge bg="secondary" pill>
+                                {assoc.member_count} members
+                              </Badge>
+                            )}
+                          </ListGroup.Item>
                         ))}
-                      </div>
-                    </div>
+                      </ListGroup>
+                    </Card>
                   )}
 
-                  {/* File Paths */}
-                  {element.glossary_info.file_paths.length > 0 && (
+                  {/* File Paths - only show if we have data */}
+                  {element.glossary_info.file_paths && element.glossary_info.file_paths.length > 0 && (
                     <div className="mb-3">
                       <small className="text-uppercase text-muted fw-bold d-block mb-1">
                         <i className="bi bi-file-earmark-code me-1"></i>
@@ -1120,17 +1132,15 @@ function Element() {
               {isGlossary && element.glossary_info && (
                 <>
                   <ListGroup.Item className="d-flex justify-content-between">
-                    <span className="text-muted">Occurrences</span>
-                    <span>{element.glossary_info.total_count}</span>
-                  </ListGroup.Item>
-                  <ListGroup.Item className="d-flex justify-content-between">
-                    <span className="text-muted">Files</span>
-                    <span>{element.glossary_info.file_paths.length}</span>
-                  </ListGroup.Item>
-                  <ListGroup.Item className="d-flex justify-content-between">
                     <span className="text-muted">Source Features</span>
                     <span>{element.glossary_info.feature_count}</span>
                   </ListGroup.Item>
+                  {element.glossary_info.file_paths && element.glossary_info.file_paths.length > 0 && (
+                    <ListGroup.Item className="d-flex justify-content-between">
+                      <span className="text-muted">Files</span>
+                      <span>{element.glossary_info.file_paths.length}</span>
+                    </ListGroup.Item>
+                  )}
                 </>
               )}
               {element.visibility && (

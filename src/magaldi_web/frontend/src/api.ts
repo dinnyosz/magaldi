@@ -205,7 +205,10 @@ export interface FeatureInfo {
 
 export interface GlossaryFeatureAssociation {
   feature_id: string
+  hash_id: string | null
   feature_label: string
+  summary: string | null
+  member_count: number
 }
 
 export interface GlossaryInfo {

@@ -388,7 +388,10 @@ class GlossaryFeatureAssociation(BaseModel):
     """A feature association for a glossary term."""
 
     feature_id: str
+    hash_id: str | None = None
     feature_label: str
+    summary: str | None = None
+    member_count: int = 0
 
 
 class GlossaryInfo(BaseModel):

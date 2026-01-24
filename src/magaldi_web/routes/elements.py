@@ -341,20 +341,39 @@ async def get_element_detail(
     # Get glossary info for glossary elements
     glossary_info = None
     if source["element_type"] == "glossary":
-        feature_associations = []
         raw_associations = source.get("feature_associations", [])
+        feature_ids = [assoc.get("feature_id") for assoc in raw_associations if assoc.get("feature_id")]
+
+        # Fetch full feature details
+        feature_details: dict[str, dict] = {}
+        if feature_ids:
+            features_result = client.mget(
+                index=INDEX_NAME,
+                ids=feature_ids,
+                _source=["element_id", "hash_id", "cluster_label", "summary", "member_count"],
+            )
+            for doc in features_result.get("docs", []):
+                if doc.get("found") and doc.get("_source"):
+                    feature_details[doc["_id"]] = doc["_source"]
+
+        feature_associations = []
         for assoc in raw_associations:
+            feature_id = assoc.get("feature_id", "")
+            details = feature_details.get(feature_id, {})
             feature_associations.append(
                 GlossaryFeatureAssociation(
-                    feature_id=assoc.get("feature_id", ""),
-                    feature_label=assoc.get("feature_label", ""),
+                    feature_id=feature_id,
+                    hash_id=details.get("hash_id"),
+                    feature_label=details.get("cluster_label") or assoc.get("feature_label", ""),
+                    summary=details.get("summary"),
+                    member_count=details.get("member_count", 0),
                 )
             )
 
         glossary_info = GlossaryInfo(
             description=source.get("description", ""),
             total_count=source.get("total_count", 0),
-            feature_count=source.get("feature_count", 0),
+            feature_count=len(feature_associations),
             file_paths=source.get("file_paths", []),
             feature_associations=feature_associations,
         )
