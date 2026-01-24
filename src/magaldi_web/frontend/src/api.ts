@@ -661,6 +661,7 @@ export async function getElementDetails(
 // Glossary Types
 export interface GlossaryTermSummary {
   term: string
+  description: string
   total_count: number
   file_count: number
   feature_count: number
@@ -676,6 +677,7 @@ export interface FeatureAssociationSummary {
 
 export interface GlossaryTermDetail {
   term: string
+  description: string
   total_count: number
   element_ids: string[]
   file_paths: string[]

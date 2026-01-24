@@ -564,6 +564,7 @@ class GlossaryTermSummary(BaseModel):
     """Summary of a glossary term."""
 
     term: str
+    description: str = ""
     total_count: int
     file_count: int
     feature_count: int
@@ -583,6 +584,7 @@ class GlossaryTermResponse(BaseModel):
     """Detailed glossary term response."""
 
     term: str
+    description: str = ""
     total_count: int
     element_ids: list[str]
     file_paths: list[str]

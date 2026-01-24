@@ -46,6 +46,19 @@ function TermDetail({ term, scope, repository }: { term: string; scope: string; 
         <small className="text-muted">{data.total_count} occurrences</small>
       </h4>
 
+      {/* Description */}
+      {data.description && (
+        <Card className="mb-3 border-start border-primary border-3">
+          <Card.Body className="py-2">
+            <small className="text-muted d-block mb-1">
+              <i className="bi bi-info-circle me-1"></i>
+              Definition
+            </small>
+            <span>{data.description}</span>
+          </Card.Body>
+        </Card>
+      )}
+
       {/* Files */}
       <Card className="mb-3">
         <Card.Header>
@@ -242,15 +255,22 @@ function Glossary() {
                     action
                     active={selectedTerm === t.term}
                     onClick={() => setSelectedTerm(t.term)}
-                    className="d-flex justify-content-between align-items-center"
+                    className="py-2"
                   >
-                    <span>{t.term}</span>
-                    <div>
-                      <Badge bg="secondary" className="me-1">{t.total_count}</Badge>
-                      {t.feature_count > 0 && (
-                        <Badge bg="info" title="Related features">{t.feature_count}</Badge>
-                      )}
+                    <div className="d-flex justify-content-between align-items-center">
+                      <span>{t.term}</span>
+                      <div>
+                        <Badge bg="secondary" className="me-1">{t.total_count}</Badge>
+                        {t.feature_count > 0 && (
+                          <Badge bg="info" title="Related features">{t.feature_count}</Badge>
+                        )}
+                      </div>
                     </div>
+                    {t.description && (
+                      <small className={`d-block mt-1 ${selectedTerm === t.term ? 'text-light opacity-75' : 'text-muted'}`} style={{ fontSize: '0.75rem' }}>
+                        {t.description.length > 60 ? `${t.description.substring(0, 60)}...` : t.description}
+                      </small>
+                    )}
                   </ListGroup.Item>
                 ))
               ) : (

@@ -1647,6 +1647,7 @@ class ElasticsearchRepository:
         element_ids: list[str],
         file_paths: list[str],
         description: str = "",
+        feature_associations: list[dict[str, Any]] | None = None,
     ) -> bool:
         """Index a glossary entry document.
 
@@ -1660,6 +1661,8 @@ class ElasticsearchRepository:
             element_ids: List of element IDs containing this term.
             file_paths: List of file paths containing this term.
             description: AI-generated description of the term.
+            feature_associations: List of feature association dicts with feature_id,
+                feature_label, frequency, total_members, percentage.
 
         Returns:
             True on success.
@@ -1677,7 +1680,7 @@ class ElasticsearchRepository:
             "element_ids": element_ids,
             "file_paths": file_paths,
             "description": description,
-            "feature_associations": [],
+            "feature_associations": feature_associations or [],
             "indexed_at": datetime.now().isoformat(),
             "level": -3,  # Glossary terms are at the highest conceptual level
         }

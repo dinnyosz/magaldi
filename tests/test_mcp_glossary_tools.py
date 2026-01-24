@@ -5,11 +5,9 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from magaldi_mcp.tools import (
-    list_glossary,
     get_glossary_term,
+    list_glossary,
     search_glossary,
 )
 
@@ -21,8 +19,8 @@ class TestListGlossary:
         """Test listing glossary terms."""
         mock_es = MagicMock()
         mock_es.get_glossary_terms.return_value = [
-            {"term": "user", "total_count": 10},
-            {"term": "email", "total_count": 5},
+            {"term": "user", "total_count": 10, "description": "User-related functionality"},
+            {"term": "email", "total_count": 5, "description": "Email handling code"},
         ]
 
         result = list_glossary(
@@ -33,6 +31,8 @@ class TestListGlossary:
 
         assert len(result) == 2
         assert result[0]["term"] == "user"
+        assert result[0]["description"] == "User-related functionality"
+        assert result[1]["description"] == "Email handling code"
         mock_es.get_glossary_terms.assert_called_once()
 
     def test_passes_min_count_parameter(self):
@@ -85,6 +85,7 @@ class TestGetGlossaryTerm:
             "total_count": 10,
             "element_ids": ["id1", "id2"],
             "file_paths": ["user.py"],
+            "description": "Code elements related to user management and authentication",
             "feature_associations": [
                 {"feature_label": "auth", "frequency": 3, "percentage": 60.0}
             ],
@@ -99,6 +100,7 @@ class TestGetGlossaryTerm:
 
         assert result["term"] == "user"
         assert result["total_count"] == 10
+        assert result["description"] == "Code elements related to user management and authentication"
         assert len(result["feature_associations"]) == 1
 
     def test_returns_none_for_missing_term(self):
@@ -123,8 +125,8 @@ class TestSearchGlossary:
         """Test searching glossary by partial match."""
         mock_es = MagicMock()
         mock_es.search_glossary.return_value = [
-            {"term": "user", "total_count": 10},
-            {"term": "username", "total_count": 3},
+            {"term": "user", "total_count": 10, "description": "User management code"},
+            {"term": "username", "total_count": 3, "description": "Username handling"},
         ]
 
         result = search_glossary(
@@ -135,6 +137,8 @@ class TestSearchGlossary:
         )
 
         assert len(result) == 2
+        assert result[0]["description"] == "User management code"
+        assert result[1]["description"] == "Username handling"
         mock_es.search_glossary.assert_called_once_with(
             scope="scope",
             repository="repo",

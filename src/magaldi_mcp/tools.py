@@ -2342,6 +2342,7 @@ def list_glossary(
         List of glossary terms sorted by count, each with:
         - term: The domain term
         - total_count: Number of elements containing this term
+        - description: AI-generated description explaining the term's meaning
         - file_paths: Files where term appears
         - feature_associations: Linked features (if glossary was linked)
     """
@@ -2373,6 +2374,7 @@ def get_glossary_term(
         Glossary entry with:
         - term: The domain term
         - total_count: Number of elements containing this term
+        - description: AI-generated description explaining the term's meaning
         - element_ids: List of element IDs containing this term
         - file_paths: Files where term appears
         - feature_associations: Linked features with frequency/percentage
@@ -2406,7 +2408,10 @@ def search_glossary(
         username: User branch (default: main).
 
     Returns:
-        List of matching glossary terms with term and total_count.
+        List of matching glossary terms with:
+        - term: The domain term
+        - total_count: Number of occurrences
+        - description: AI-generated description explaining the term's meaning
     """
     return es.search_glossary(
         scope=scope,

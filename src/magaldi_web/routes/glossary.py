@@ -32,6 +32,7 @@ async def list_glossary_terms(
         terms=[
             GlossaryTermSummary(
                 term=t.get("term", ""),
+                description=t.get("description", ""),
                 total_count=t.get("total_count", 0),
                 file_count=len(t.get("file_paths", [])),
                 feature_count=len(t.get("feature_associations", [])),
@@ -60,6 +61,7 @@ async def get_glossary_term(
 
     return GlossaryTermResponse(
         term=entry.get("term", ""),
+        description=entry.get("description", ""),
         total_count=entry.get("total_count", 0),
         element_ids=entry.get("element_ids", []),
         file_paths=entry.get("file_paths", []),
@@ -94,6 +96,7 @@ async def search_glossary_terms(
         terms=[
             GlossaryTermSummary(
                 term=t.get("term", ""),
+                description=t.get("description", ""),
                 total_count=t.get("total_count", 0),
                 file_count=len(t.get("file_paths", [])),
                 feature_count=len(t.get("feature_associations", [])),

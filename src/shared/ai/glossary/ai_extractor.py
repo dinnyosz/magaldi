@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 import re
+import threading
+import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -14,33 +17,118 @@ if TYPE_CHECKING:
     from shared.config import MagaldiConfig
 
 
+# =============================================================================
+# PROGRESS STATE CLASSES
+# =============================================================================
+
+
+@dataclass
+class GlossaryTimingStats:
+    """Timing statistics for glossary extraction."""
+
+    start_time: float = 0.0
+    total_api_time: float = 0.0
+    features_processed: int = 0
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    @property
+    def elapsed(self) -> float:
+        """Elapsed wall time since start."""
+        if self.start_time == 0:
+            return 0.0
+        return time.time() - self.start_time
+
+    @property
+    def avg_api_time(self) -> float:
+        """Average API time per feature."""
+        if self.features_processed == 0:
+            return 0.0
+        return self.total_api_time / self.features_processed
+
+    def record_api_call(self, api_time: float) -> None:
+        """Record an API call timing."""
+        with self._lock:
+            self.total_api_time += api_time
+            self.features_processed += 1
+
+    def eta_seconds(self, completed: int, total: int, num_workers: int) -> float:
+        """Estimate time remaining based on current progress."""
+        if completed == 0 or self.elapsed == 0:
+            return 0.0
+        rate = completed / self.elapsed
+        remaining = total - completed
+        return remaining / rate if rate > 0 else 0.0
+
+
+class GlossaryWorkerStatus:
+    """Thread-safe tracking of worker status."""
+
+    def __init__(self) -> None:
+        self._status: dict[int, tuple[str, str]] = {}  # worker_id -> (feature_label, model)
+        self._lock = threading.Lock()
+
+    def set_status(self, worker_id: int, feature_label: str, model: str) -> None:
+        """Set worker status."""
+        with self._lock:
+            self._status[worker_id] = (feature_label, model)
+
+    def clear_status(self, worker_id: int) -> None:
+        """Clear worker status (worker is idle)."""
+        with self._lock:
+            if worker_id in self._status:
+                del self._status[worker_id]
+
+    def get_all(self) -> dict[int, tuple[str, str]]:
+        """Get all worker statuses."""
+        with self._lock:
+            return dict(self._status)
+
+
+@dataclass
+class GlossaryProgressState:
+    """Progress state for glossary extraction."""
+
+    total: int
+    completed: int
+    failed: int
+    terms_extracted: int
+    timing: GlossaryTimingStats
+    workers: GlossaryWorkerStatus
+    num_workers: int
+
+
 # Prompt template for glossary extraction
-GLOSSARY_EXTRACTION_PROMPT = """You are extracting glossary terms from a code feature description.
+GLOSSARY_EXTRACTION_PROMPT = """You are extracting domain glossary terms from a code feature description.
 
 Feature: {label}
 Description: {summary}
 
-Extract domain-specific glossary items that represent:
-- Actors: entities that perform actions (e.g., user, admin, worker, client)
-- Concepts: domain objects or processes (e.g., email, registration, authentication, payment)
+Extract ALL domain-specific glossary items found. Look for:
+- Actors: entities that perform actions (user, admin, worker, client, customer, owner, member)
+- Objects: domain entities being manipulated (order, invoice, product, account, subscription)
+- Processes: business operations (registration, authentication, checkout, payment, approval)
+- States: conditions or statuses (pending, active, expired, verified)
 
 For each item, provide:
-- name: a short lowercase term (1-2 words)
+- name: a short lowercase term (1-2 words, singular form preferred)
 - description: one sentence explaining what it represents in this codebase
 
 Rules:
-- Only extract terms that are meaningful in the domain context
-- Ignore generic programming terms (function, class, method, variable, etc.)
-- Ignore technical implementation details (cache, queue, handler, etc.)
-- Focus on business/domain concepts
+- Extract MULTIPLE terms - most features contain 2-5 domain concepts
+- Only extract terms meaningful in the business/domain context
+- Ignore generic programming terms (function, class, method, handler, service, controller)
+- Ignore technical implementation details (cache, queue, thread, buffer, stream)
+- If the description mentions specific entities or processes, extract them
 
 Return a JSON array of objects with "name" and "description" fields.
-Return an empty array [] if no domain-specific terms are found.
+Return an empty array [] ONLY if absolutely no domain terms are found.
 
-Example output:
+Example output for a "User Authentication" feature:
 [
-  {{"name": "user", "description": "A person who interacts with the system"}},
-  {{"name": "registration", "description": "The process of creating a new account"}}
+  {{"name": "user", "description": "A person who has an account in the system"}},
+  {{"name": "authentication", "description": "The process of verifying a user's identity"}},
+  {{"name": "credential", "description": "Login information like username and password"}},
+  {{"name": "session", "description": "An authenticated user's active connection to the system"}}
 ]
 
 JSON output:"""
@@ -287,6 +375,207 @@ def merge_glossary_items(items: list[GlossaryItem]) -> list[GlossaryItem]:
     return merged
 
 
+def extract_glossary_from_feature_sync(
+    feature: dict[str, Any],
+    config: MagaldiConfig | None = None,
+) -> tuple[list[GlossaryItem], float]:
+    """Synchronous version of extract_glossary_from_feature for thread pool.
+
+    Args:
+        feature: Feature dict with feature_id, label, summary.
+        config: Optional MagaldiConfig. If None, uses default config.
+
+    Returns:
+        Tuple of (list of GlossaryItem, api_time in seconds).
+    """
+    feature_id = feature.get("feature_id") or feature.get("subfeature_id", "")
+    label = feature.get("label", "")
+    summary = feature.get("summary", "")
+
+    if not summary:
+        return [], 0.0
+
+    start_time = time.time()
+    raw_items = call_llm_for_glossary_sync(summary, label, config)
+    api_time = time.time() - start_time
+
+    items = []
+    for raw in raw_items:
+        name = raw.get("name", "").lower().strip()
+        description = raw.get("description", "").strip()
+
+        if name and description:
+            items.append(
+                GlossaryItem(
+                    name=name,
+                    description=description,
+                    source_feature_id=feature_id,
+                )
+            )
+
+    return items, api_time
+
+
+def call_llm_for_glossary_sync(
+    summary: str,
+    label: str,
+    config: MagaldiConfig | None = None,
+) -> list[dict[str, str]]:
+    """Synchronous LLM call for glossary extraction.
+
+    Args:
+        summary: The feature summary text to extract terms from.
+        label: The feature label for context.
+        config: Optional MagaldiConfig. If None, uses default config.
+
+    Returns:
+        List of dicts with 'name' and 'description' keys.
+    """
+    if config is None:
+        from shared.config import MagaldiConfig
+
+        config = MagaldiConfig()
+
+    prompt = build_glossary_prompt(summary, label)
+
+    # Build model identifier based on provider
+    llm_config = config.llm
+    if llm_config.provider == "ollama":
+        model = f"ollama/{llm_config.summarize_model}"
+        api_base = llm_config.url
+    elif llm_config.provider == "openai":
+        model = llm_config.summarize_model
+        api_base = None
+    else:
+        model = f"{llm_config.provider}/{llm_config.summarize_model}"
+        api_base = None
+
+    client = LLMClient(
+        model=model,
+        api_base=api_base,
+        api_key=llm_config.api_key,
+    )
+
+    try:
+        response = client.generate(
+            prompt=prompt,
+            temperature=llm_config.summarize_temperature,
+            top_p=llm_config.summarize_top_p,
+            max_tokens=llm_config.summarize_max_tokens,
+        )
+    except LLMError:
+        return []
+
+    return parse_llm_response(response)
+
+
+def extract_glossary_from_features_concurrent(
+    features: list[dict[str, Any]],
+    config: MagaldiConfig | None = None,
+    num_workers: int = 4,
+    on_progress: Callable[[GlossaryProgressState], None] | None = None,
+    on_status_change: Callable[[], None] | None = None,
+    worker_status: GlossaryWorkerStatus | None = None,
+    timing_stats: GlossaryTimingStats | None = None,
+) -> list[GlossaryItem]:
+    """Extract and merge glossary items from multiple features using concurrent workers.
+
+    Args:
+        features: List of feature/subfeature dicts with feature_id, label, summary.
+        config: Optional config for LLM client.
+        num_workers: Number of concurrent workers.
+        on_progress: Callback for progress updates.
+        on_status_change: Callback when worker status changes.
+        worker_status: Shared worker status tracker.
+        timing_stats: Shared timing statistics.
+
+    Returns:
+        List of merged GlossaryItem.
+    """
+    if not features:
+        return []
+
+    if worker_status is None:
+        worker_status = GlossaryWorkerStatus()
+    if timing_stats is None:
+        timing_stats = GlossaryTimingStats()
+
+    timing_stats.start_time = time.time()
+    all_items: list[GlossaryItem] = []
+    items_lock = threading.Lock()
+    progress_lock = threading.Lock()
+    # Use a mutable container for thread-safe counter updates
+    counters = {"completed": 0, "failed": 0, "terms_extracted": 0}
+
+    # Get model name for display
+    if config is None:
+        from shared.config import MagaldiConfig
+        config = MagaldiConfig()
+    model_name = config.llm.summarize_model
+
+    def process_feature(
+        worker_id: int,
+        feature: dict[str, Any],
+    ) -> tuple[list[GlossaryItem], float, bool]:
+        """Process a single feature in a worker thread."""
+        label = feature.get("label", "")[:40]  # Truncate for display
+
+        # Update worker status
+        worker_status.set_status(worker_id, label, model_name)
+        if on_status_change:
+            on_status_change()
+
+        try:
+            items, api_time = extract_glossary_from_feature_sync(feature, config)
+            return items, api_time, True
+        except Exception:
+            return [], 0.0, False
+        finally:
+            worker_status.clear_status(worker_id)
+            if on_status_change:
+                on_status_change()
+
+    total = len(features)
+
+    with ThreadPoolExecutor(max_workers=num_workers) as executor:
+        # Submit all tasks with worker IDs
+        futures = {}
+        for i, feature in enumerate(features):
+            worker_id = i % num_workers
+            future = executor.submit(process_feature, worker_id, feature)
+            futures[future] = feature
+
+        # Process completed futures
+        for future in as_completed(futures):
+            items, api_time, success = future.result()
+
+            with progress_lock:
+                counters["completed"] += 1
+                if not success:
+                    counters["failed"] += 1
+                else:
+                    counters["terms_extracted"] += len(items)
+                    timing_stats.record_api_call(api_time)
+
+            with items_lock:
+                all_items.extend(items)
+
+            # Report progress
+            if on_progress:
+                state = GlossaryProgressState(
+                    total=total,
+                    completed=counters["completed"],
+                    failed=counters["failed"],
+                    terms_extracted=counters["terms_extracted"],
+                    timing=timing_stats,
+                    workers=worker_status,
+                    num_workers=num_workers,
+                )
+                on_progress(state)
+
+    return merge_glossary_items(all_items)
+
+
 async def extract_glossary_from_features(
     features: list[dict[str, Any]],
     config: MagaldiConfig | None = None,
@@ -295,6 +584,8 @@ async def extract_glossary_from_features(
     """Extract and merge glossary items from multiple features.
 
     Processes each feature through the LLM, then merges duplicates.
+    This is a simple sequential version - use extract_glossary_from_features_concurrent
+    for multi-threaded execution with progress display.
 
     Args:
         features: List of feature/subfeature dicts with feature_id, label, summary.

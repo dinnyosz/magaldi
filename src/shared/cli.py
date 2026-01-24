@@ -241,19 +241,14 @@ def parse(
 
         # Phase 6: Glossary Extraction (after features so we can extract from summaries)
         if not skip_ai and not dry_run and processed > 0:
-            import asyncio
             console.print("\n[bold blue]Phase 6:[/] Glossary Extraction")
-            glossary_result = asyncio.run(
-                run_glossary_extraction(
-                    scope=discovery_result.scope,
-                    repository=discovery_result.repository,
-                    username=user,
-                    config=config,
-                )
+            run_glossary_extraction(
+                scope=discovery_result.scope,
+                repository=discovery_result.repository,
+                username=user,
+                config=config,
+                workers=workers,
             )
-            if glossary_result:
-                terms = glossary_result.get("terms_count", 0)
-                console.print(f"  [green]{terms} terms[/] extracted")
 
         print_summary(discovery_result, manifest, processed, indexed, skip_ai)
 
@@ -353,9 +348,11 @@ def extract_features(
 @main.command("extract-glossary")
 @click.argument("repo_path", type=click.Path(exists=True, file_okay=False, dir_okay=True))
 @click.option("--user", "-u", required=True, help="Username/branch to extract glossary from")
+@click.option("--workers", "-w", default=4, help="Number of concurrent workers (default: 4)")
 def extract_glossary(
     repo_path: str,
     user: str,
+    workers: int,
 ) -> None:
     """Extract glossary terms from feature summaries using AI.
 
@@ -364,7 +361,6 @@ def extract_glossary(
 
     REPO_PATH is the path to the repository (used to load magaldi.yaml).
     """
-    import asyncio
     from pathlib import Path
     from magaldi_core.discovery import load_repo_config
 
@@ -386,13 +382,12 @@ def extract_glossary(
     console.print()
 
     try:
-        result = asyncio.run(
-            run_glossary_extraction(
-                scope=scope,
-                repository=repository,
-                username=user,
-                config=config,
-            )
+        result = run_glossary_extraction(
+            scope=scope,
+            repository=repository,
+            username=user,
+            config=config,
+            workers=workers,
         )
 
         if result:
@@ -998,12 +993,13 @@ def run_feature_extraction(
         es_repo.close()
 
 
-async def run_glossary_extraction(
+def run_glossary_extraction(
     scope: str,
     repository: str,
     username: str,
     config: MagaldiConfig,
     es_repo: "ElasticsearchRepository | None" = None,
+    workers: int = 4,
 ) -> dict | None:
     """Run Glossary Extraction using AI-powered extraction from feature summaries.
 
@@ -1013,11 +1009,17 @@ async def run_glossary_extraction(
         username: Username/branch.
         config: Magaldi configuration.
         es_repo: Optional ES repository (creates one if not provided).
+        workers: Number of concurrent workers.
 
     Returns:
         Dict with glossary extraction results or None if no features.
     """
-    from shared.ai.glossary.ai_extractor import extract_glossary_from_features
+    from shared.ai.glossary.ai_extractor import (
+        GlossaryProgressState,
+        GlossaryTimingStats,
+        GlossaryWorkerStatus,
+        extract_glossary_from_features_concurrent,
+    )
     from shared.db.elasticsearch import ElasticsearchRepository
 
     own_es_repo = es_repo is None
@@ -1038,26 +1040,170 @@ async def run_glossary_extraction(
 
         console.print(f"  Found {len(features)} features, {len(subfeatures)} subfeatures")
 
-        # Extract glossary using AI
-        with console.status("[bold blue]Extracting glossary with AI...[/]"):
-            glossary_items = await extract_glossary_from_features(all_features, config)
-
-        if not glossary_items:
-            console.print("  [dim]No glossary items extracted[/]")
-            return {"terms_count": 0}
-
-        console.print(f"  Extracted [green]{len(glossary_items)}[/] glossary items")
-
-        # Delete existing glossary entries
+        # Delete existing glossary entries BEFORE extraction (fresh start)
         with console.status("[bold blue]Clearing existing glossary...[/]"):
             deleted = es_repo.delete_glossary(scope, repository, username)
             if deleted > 0:
                 console.print(f"  Deleted {deleted} existing entries")
 
-        # Index new glossary entries
-        with console.status("[bold blue]Indexing glossary entries...[/]"):
+        # Get model name for display
+        model_name = config.llm.summarize_model
+
+        def build_glossary_display(state: GlossaryProgressState, num_workers: int) -> RenderableType:
+            """Build Rich display for glossary extraction progress."""
+            # Progress info
+            pct = (state.completed / state.total * 100) if state.total > 0 else 0
+            eta = state.timing.eta_seconds(state.completed, state.total, state.num_workers)
+            elapsed_str = format_duration(state.timing.elapsed)
+
+            # Build visual progress bar
+            bar_width = 30
+            filled = int(bar_width * pct / 100)
+            bar = "━" * filled + "╺" + "─" * (bar_width - filled - 1) if filled < bar_width else "━" * bar_width
+            bar_text = Text()
+            bar_text.append("  ")
+            bar_text.append(bar[:filled], style="green")
+            if filled < bar_width:
+                bar_text.append(bar[filled:], style="dim")
+            bar_text.append(" ")
+            bar_text.append(f"{state.completed}", style="green")
+            bar_text.append("/", style="dim")
+            bar_text.append(f"{state.total}", style="cyan")
+            bar_text.append(f" ({pct:.0f}%)", style="green")
+            bar_text.append(" | ", style="dim")
+            bar_text.append(elapsed_str, style="cyan")
+            bar_text.append(" elapsed", style="dim")
+            if eta > 0:
+                bar_text.append(" | ~", style="dim")
+                bar_text.append(format_duration(eta), style="yellow")
+                bar_text.append(" ETA", style="dim")
+
+            # Worker table
+            worker_table = Table(show_header=False, box=None, padding=0)
+            worker_table.add_column("ID", style="dim", width=4)
+            worker_table.add_column("Stage", style="cyan", width=14)
+            worker_table.add_column("Model", style="yellow", width=26)
+            worker_table.add_column("Feature")
+
+            workers_data = state.workers.get_all()
+            for wid in range(num_workers):
+                if wid in workers_data:
+                    feature_label, model = workers_data[wid]
+                    worker_table.add_row(f"[{wid}]", "extracting", model, feature_label)
+                else:
+                    worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "")
+
+            # Stats line
+            avg_api = state.timing.avg_api_time
+            wall_time = state.timing.elapsed / state.completed if state.completed > 0 else 0
+            terms_per_feature = state.terms_extracted / state.completed if state.completed > 0 else 0
+            stats = Text()
+            stats.append("  ")
+            stats.append("Wall: ", style="dim")
+            stats.append(f"{wall_time:.2f}s", style="green")
+            stats.append("/feature | ", style="dim")
+            stats.append("API: ", style="dim")
+            stats.append(f"{avg_api:.1f}s", style="green")
+            stats.append("/feature | ", style="dim")
+            stats.append("Terms: ", style="dim")
+            stats.append(f"{state.terms_extracted}", style="cyan")
+            stats.append(f" ({terms_per_feature:.1f}/feature)", style="dim")
+            if state.failed > 0:
+                stats.append(" | ", style="dim")
+                stats.append(f"{state.failed} failed", style="red")
+
+            return Group(bar_text, worker_table, stats)
+
+        # Create shared state objects
+        timing_stats = GlossaryTimingStats()
+        worker_status = GlossaryWorkerStatus()
+        total = len(all_features)
+
+        # Initialize state
+        current_state = GlossaryProgressState(
+            total=total,
+            completed=0,
+            failed=0,
+            terms_extracted=0,
+            timing=timing_stats,
+            workers=worker_status,
+            num_workers=workers,
+        )
+
+        class LiveGlossaryDisplay:
+            """Wrapper that Rich can call to get current display."""
+            def __rich__(self) -> RenderableType:
+                return build_glossary_display(current_state, workers)
+
+        # Print header before Live display
+        console.print(f"  Extracting glossary from {total} features with {workers} workers...")
+
+        with Live(LiveGlossaryDisplay(), console=console, refresh_per_second=10) as live:
+            def on_progress(state: GlossaryProgressState) -> None:
+                nonlocal current_state
+                current_state = state
+                live.refresh()
+
+            def on_status_change() -> None:
+                live.refresh()
+
+            glossary_items = extract_glossary_from_features_concurrent(
+                all_features,
+                config,
+                num_workers=workers,
+                on_progress=on_progress,
+                on_status_change=on_status_change,
+                worker_status=worker_status,
+                timing_stats=timing_stats,
+            )
+
+        if not glossary_items:
+            console.print("  [dim]No glossary items extracted[/]")
+            return {"terms_count": 0}
+
+        # Print summary stats
+        avg_api = timing_stats.avg_api_time
+        elapsed = timing_stats.elapsed
+        console.print()
+        console.print(f"  [green]{len(glossary_items)}[/] unique terms extracted in [cyan]{format_duration(elapsed)}[/]")
+        console.print(f"  Avg: [green]{avg_api:.1f}s[/]/feature | Model: [yellow]{model_name}[/]")
+
+        # Build feature lookup for feature associations
+        feature_lookup: dict[str, dict] = {}
+        for feature in all_features:
+            fid = feature.get("feature_id") or feature.get("subfeature_id", "")
+            if fid:
+                feature_lookup[fid] = {
+                    "label": feature.get("label", ""),
+                    "member_count": feature.get("member_count", 0),
+                }
+
+        # Index new glossary entries with progress
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[bold blue]Indexing glossary[/]"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TextColumn("({task.completed}/{task.total})"),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Indexing", total=len(glossary_items))
+
             for item in glossary_items:
                 glossary_id = f"{scope}:{repository}:{username}:glossary:{item.name}"
+
+                # Build feature associations
+                feature_associations = []
+                for fid in item.source_feature_ids:
+                    if fid in feature_lookup:
+                        feature_data = feature_lookup[fid]
+                        feature_associations.append({
+                            "feature_id": fid,
+                            "feature_label": feature_data["label"],
+                            "frequency": 1,  # Term appears once in this feature
+                            "total_members": feature_data["member_count"],
+                            "percentage": 100.0,  # Term was extracted from this feature
+                        })
 
                 es_repo.index_glossary(
                     glossary_id=glossary_id,
@@ -1069,7 +1215,9 @@ async def run_glossary_extraction(
                     element_ids=item.source_feature_ids,
                     file_paths=[],
                     description=item.description,
+                    feature_associations=feature_associations,
                 )
+                progress.update(task, advance=1)
 
         console.print(f"  Indexed [green]{len(glossary_items)}[/] glossary entries")
 

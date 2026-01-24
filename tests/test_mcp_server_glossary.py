@@ -1,10 +1,10 @@
 """Tests for MCP server glossary tool registration."""
 
-import pytest
 from unittest.mock import MagicMock, patch
 
-from magaldi_mcp.server import MagaldiMCPServer
+import pytest
 
+from magaldi_mcp.server import MagaldiMCPServer
 
 # =============================================================================
 # FIXTURES
@@ -65,8 +65,8 @@ class TestListGlossaryTool:
     async def test_list_glossary_returns_terms(self, server, mock_es_repo):
         """Test list_glossary tool returns glossary terms."""
         mock_es_repo.get_glossary_terms.return_value = [
-            {"term": "user", "total_count": 5},
-            {"term": "email", "total_count": 3},
+            {"term": "user", "total_count": 5, "description": "User-related code"},
+            {"term": "email", "total_count": 3, "description": "Email handling"},
         ]
 
         result = await server._handle_tool(
@@ -77,6 +77,7 @@ class TestListGlossaryTool:
         assert isinstance(result, list)
         assert len(result) == 2
         assert result[0]["term"] == "user"
+        assert result[0]["description"] == "User-related code"
         mock_es_repo.get_glossary_terms.assert_called_once_with(
             scope="test",
             repository="repo",
@@ -132,6 +133,7 @@ class TestGetGlossaryTermTool:
             "total_count": 5,
             "element_ids": ["id1", "id2"],
             "file_paths": ["file1.py", "file2.py"],
+            "description": "Code related to user management and authentication",
         }
 
         result = await server._handle_tool(
@@ -142,6 +144,7 @@ class TestGetGlossaryTermTool:
         assert isinstance(result, dict)
         assert result["term"] == "user"
         assert result["total_count"] == 5
+        assert result["description"] == "Code related to user management and authentication"
         mock_es_repo.get_glossary_term.assert_called_once_with(
             scope="test",
             repository="repo",
@@ -186,8 +189,8 @@ class TestSearchGlossaryTool:
     async def test_search_glossary_returns_matches(self, server, mock_es_repo):
         """Test search_glossary tool returns matching terms."""
         mock_es_repo.search_glossary.return_value = [
-            {"term": "user", "total_count": 5},
-            {"term": "username", "total_count": 3},
+            {"term": "user", "total_count": 5, "description": "User management"},
+            {"term": "username", "total_count": 3, "description": "Username handling"},
         ]
 
         result = await server._handle_tool(
@@ -197,6 +200,8 @@ class TestSearchGlossaryTool:
 
         assert isinstance(result, list)
         assert len(result) == 2
+        assert result[0]["description"] == "User management"
+        assert result[1]["description"] == "Username handling"
         mock_es_repo.search_glossary.assert_called_once_with(
             scope="test",
             repository="repo",
