@@ -802,7 +802,7 @@ def run_feature_extraction(
                 # Current feature and model
                 current_text = Text()
                 if state.current_feature:
-                    current_text.append("  labeling  ", style="cyan")
+                    current_text.append("  clustering  ", style="cyan")
                     if state.model:
                         current_text.append(f"{state.model}  ", style="yellow")
                     current_text.append(state.current_feature, style="white")
@@ -834,7 +834,7 @@ def run_feature_extraction(
 
                 # Header (plain text like Phase 5)
                 header_text = Text()
-                header_text.append(f"  Processing {state.total} sub-features with {num_workers} workers...")
+                header_text.append(f"  Summarizing {state.total} sub-features with {num_workers} workers...")
 
                 # Progress bar
                 bar_width = 30
@@ -936,7 +936,7 @@ def run_feature_extraction(
                         return build_labeling_display(current_labeling_state)
 
             # Print header before Live display (matches Phase 5 style)
-            console.print(f"  Labeling {large_cluster_count} features...")
+            console.print(f"  Discovering sub-clusters in {large_cluster_count} large features...")
 
             with Live(LiveSubfeatureDisplay(), console=console, refresh_per_second=10) as live:
                 combined_live = live  # Make accessible to on_labeling_progress
