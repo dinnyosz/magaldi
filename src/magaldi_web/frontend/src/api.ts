@@ -204,7 +204,8 @@ export interface ElementImportInfo {
   name: string
   module: string
   alias: string | null
-  line: number | null
+  line: number
+  is_internal: boolean
 }
 
 export interface ElementDetail {

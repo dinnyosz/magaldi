@@ -381,15 +381,6 @@ class ClassAttributeInfo(BaseModel):
     line: int | None = None
 
 
-class ImportInfo(BaseModel):
-    """Information about an import statement."""
-
-    name: str
-    module: str
-    alias: str | None = None
-    line: int | None = None
-
-
 class ElementDetailResponse(BaseModel):
     """Response for element detail endpoint."""
 

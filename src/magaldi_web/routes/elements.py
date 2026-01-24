@@ -316,7 +316,8 @@ async def get_element_detail(
                     name=imp.get("name", ""),
                     module=imp.get("module", ""),
                     alias=imp.get("alias"),
-                    line=imp.get("line"),
+                    line=imp.get("line", 0),
+                    is_internal=imp.get("is_internal", False),
                 )
             )
 
