@@ -36,8 +36,9 @@ from litellm.llms.custom_httpx.aiohttp_handler import BaseLLMAIOHTTPHandler
 
 T = TypeVar("T")
 
-# Disable LiteLLM telemetry
+# Disable LiteLLM telemetry and debug info
 litellm.telemetry = False
+litellm.suppress_debug_info = True
 
 # Suppress Pydantic 2.12+ serialization warnings from LiteLLM
 # See: https://github.com/BerriAI/litellm/issues/11759

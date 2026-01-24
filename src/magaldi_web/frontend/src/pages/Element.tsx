@@ -12,6 +12,7 @@ import {
   Tab,
   Tabs,
 } from 'react-bootstrap'
+import ReactMarkdown from 'react-markdown'
 import { getElement, getSimilarElements, explainElement, getGlossaryTermsForFeature, type ElementDetail as _ElementDetail } from '../api'
 
 // Type configuration
@@ -370,7 +371,11 @@ function Element() {
               {element.summary && (
                 <Alert variant="light" className="border mb-3">
                   <i className="bi bi-lightbulb me-2 text-warning"></i>
-                  {element.summary}
+                  {isGlossary ? (
+                    <div className="glossary-summary"><ReactMarkdown>{element.summary}</ReactMarkdown></div>
+                  ) : (
+                    element.summary
+                  )}
                 </Alert>
               )}
 
@@ -689,7 +694,7 @@ function Element() {
                         {term.term}
                       </Badge>
                       {term.description && (
-                        <small className="text-muted">{term.description}</small>
+                        <small className="text-muted d-block mt-1 glossary-description"><ReactMarkdown>{term.description}</ReactMarkdown></small>
                       )}
                     </div>
                     {term.feature_count > 1 && (

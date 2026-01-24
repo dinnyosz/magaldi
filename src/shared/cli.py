@@ -1154,6 +1154,9 @@ def run_glossary_extraction(
         console.print(f"  Phase 1: Extract terms | Phase 2: Generate summaries")
         console.print()
 
+        # Track Phase 1 final stats for display after completion
+        phase1_stats: dict[str, Any] = {}
+
         with Live(LiveGlossaryDisplay(), console=console, refresh_per_second=10) as live:
             def on_progress(state: GlossaryProgressState) -> None:
                 nonlocal current_state
@@ -1164,6 +1167,25 @@ def run_glossary_extraction(
                 live.refresh()
 
             def on_phase_change(phase_name: str) -> None:
+                # If switching to Phase 2, print Phase 1 summary first
+                if "summary" in phase_name.lower() and current_state.completed > 0:
+                    # Capture Phase 1 stats before they get reset
+                    phase1_stats["completed"] = current_state.completed
+                    phase1_stats["elapsed"] = current_state.timing.elapsed
+                    phase1_stats["avg_api"] = current_state.timing.avg_api_time
+                    phase1_stats["terms"] = current_state.terms_extracted
+                    phase1_stats["failed"] = current_state.failed
+
+                    # Print Phase 1 completion summary above the live display
+                    wall_time = phase1_stats["elapsed"] / phase1_stats["completed"] if phase1_stats["completed"] > 0 else 0
+                    live.console.print()
+                    live.console.print(f"  [bold green]✓ Phase 1 complete[/]")
+                    live.console.print(f"    [green]{phase1_stats['completed']}[/] features processed in [cyan]{format_duration(phase1_stats['elapsed'])}[/]")
+                    live.console.print(f"    [cyan]{phase1_stats['terms']}[/] terms extracted | Wall: [green]{wall_time:.2f}s[/]/feature | API: [green]{phase1_stats['avg_api']:.1f}s[/]/feature")
+                    if phase1_stats["failed"] > 0:
+                        live.console.print(f"    [red]{phase1_stats['failed']} failed[/]")
+                    live.console.print()
+
                 current_phase["name"] = phase_name
                 live.refresh()
 
@@ -1242,23 +1264,6 @@ def run_glossary_extraction(
                 progress.update(task, advance=1)
 
         console.print(f"  Indexed [green]{len(glossary_items)}[/] glossary entries")
-
-        # Print top terms
-        top_terms = sorted(
-            glossary_items,
-            key=lambda x: len(x.source_feature_ids),
-            reverse=True,
-        )[:10]
-
-        if top_terms:
-            console.print()
-            console.print("[bold]Top terms:[/]")
-            for item in top_terms:
-                console.print(
-                    f"  [cyan]{item.name}[/]: {len(item.source_feature_ids)} features - {item.description[:50]}..."
-                    if len(item.description) > 50
-                    else f"  [cyan]{item.name}[/]: {len(item.source_feature_ids)} features - {item.description}"
-                )
 
         return {
             "terms_count": len(glossary_items),

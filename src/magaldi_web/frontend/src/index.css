@@ -122,6 +122,34 @@ mark {
   color: var(--bs-body-color);
 }
 
+/* Glossary markdown styling */
+.glossary-summary p,
+.glossary-description p {
+  margin-bottom: 0.5rem;
+}
+
+.glossary-summary p:last-child,
+.glossary-description p:last-child {
+  margin-bottom: 0;
+}
+
+.glossary-summary ul,
+.glossary-summary ol,
+.glossary-description ul,
+.glossary-description ol {
+  margin-bottom: 0.5rem;
+  padding-left: 1.25rem;
+}
+
+.glossary-summary strong,
+.glossary-description strong {
+  color: var(--bs-body-color);
+}
+
+.glossary-description {
+  font-size: 0.875rem;
+}
+
 /* Responsive adjustments */
 @media (max-width: 768px) {
   .sidebar {

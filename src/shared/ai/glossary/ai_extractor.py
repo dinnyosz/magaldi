@@ -135,7 +135,9 @@ Write a glossary entry with:
 
 1. **Definition** (1 sentence): A clear, concise definition of what "{term}" represents in this codebase.
 
-2. **Details** (2-4 sentences): Explain how this term is used across the different features. Describe the different contexts, roles, or relationships it has in the system.
+2. **Details** (2-4 sentences): Synthesize a holistic description of the term's role and meaning in the system. Do NOT describe each feature separately - instead, write about the term itself: what it represents, its purpose, and its significance in the domain.
+
+IMPORTANT: Write about the TERM, not about the features. The features are context to help you understand the term, but your entry should read like a dictionary/glossary definition.
 
 Focus on the business/domain meaning, not technical implementation details.
 Use markdown formatting (bold for emphasis, bullet points if listing multiple aspects).
@@ -680,6 +682,19 @@ def extract_glossary_from_features_concurrent(
 
     # Merge items by term name
     merged_items = merge_glossary_items(all_items)
+
+    # Emit final Phase 1 progress state before switching phases
+    if on_progress:
+        state = GlossaryProgressState(
+            total=total,
+            completed=counters["completed"],
+            failed=counters["failed"],
+            terms_extracted=counters["terms_extracted"],
+            timing=timing_stats,
+            workers=worker_status,
+            num_workers=num_workers,
+        )
+        on_progress(state)
 
     # =========================================================================
     # PHASE 2: Generate holistic summaries for each merged term
