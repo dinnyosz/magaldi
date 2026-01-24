@@ -315,7 +315,7 @@ def extract_features(
         sys.exit(1)
 
     repo_config = load_repo_config(repo_path_obj)
-    scope = repo_config["scope"]
+    scope = repo_config.scope
     repository = repo_path_obj.name
 
     console.print("[bold blue]Feature Extraction[/]")
@@ -378,7 +378,7 @@ def extract_glossary(
         sys.exit(1)
 
     repo_config = load_repo_config(repo_path_obj)
-    scope = repo_config["scope"]
+    scope = repo_config.scope
     repository = repo_path_obj.name
 
     console.print("[bold blue]Glossary Extraction[/]")
