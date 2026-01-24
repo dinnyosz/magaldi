@@ -97,7 +97,7 @@ class GlossaryProgressState:
     num_workers: int
 
 
-# Prompt template for glossary extraction
+# Prompt template for glossary term extraction (Phase 1: just extract term names)
 GLOSSARY_EXTRACTION_PROMPT = """You are extracting domain glossary terms from a code feature description.
 
 Feature: {label}
@@ -132,6 +132,24 @@ Example output for a "User Authentication" feature:
 ]
 
 JSON output:"""
+
+# Prompt template for glossary summary generation (Phase 2: generate holistic summary)
+GLOSSARY_SUMMARY_PROMPT = """You are generating a glossary definition for a domain term found in a codebase.
+
+Term: {term}
+
+This term appears in the following features/capabilities of the codebase:
+
+{features_context}
+
+Based on how this term is used across these features, write a single comprehensive definition (1-2 sentences) that:
+- Explains what "{term}" represents in this codebase
+- Captures the different contexts or roles it plays
+- Uses clear, domain-appropriate language
+
+Focus on the business/domain meaning, not technical implementation details.
+
+Definition:"""
 
 
 @dataclass
@@ -375,6 +393,88 @@ def merge_glossary_items(items: list[GlossaryItem]) -> list[GlossaryItem]:
     return merged
 
 
+def build_features_context(
+    feature_ids: list[str],
+    features_by_id: dict[str, dict[str, Any]],
+) -> str:
+    """Build context string for summary generation from connected features.
+
+    Args:
+        feature_ids: List of feature IDs this term appears in.
+        features_by_id: Dict mapping feature_id to feature data.
+
+    Returns:
+        Formatted string with feature labels and summaries.
+    """
+    lines = []
+    for fid in feature_ids:
+        feature = features_by_id.get(fid, {})
+        label = feature.get("label", "Unknown")
+        summary = feature.get("summary", "")
+        if summary:
+            lines.append(f"- {label}: {summary}")
+        else:
+            lines.append(f"- {label}")
+    return "\n".join(lines) if lines else "No feature context available."
+
+
+def generate_glossary_summary_sync(
+    term: str,
+    feature_ids: list[str],
+    features_by_id: dict[str, dict[str, Any]],
+    config: MagaldiConfig | None = None,
+) -> tuple[str, float]:
+    """Generate a holistic summary for a glossary term based on all its connected features.
+
+    Args:
+        term: The glossary term name.
+        feature_ids: List of feature IDs where this term appears.
+        features_by_id: Dict mapping feature_id to feature data.
+        config: Optional MagaldiConfig.
+
+    Returns:
+        Tuple of (summary string, api_time in seconds).
+    """
+    if config is None:
+        from shared.config import MagaldiConfig
+        config = MagaldiConfig()
+
+    features_context = build_features_context(feature_ids, features_by_id)
+    prompt = GLOSSARY_SUMMARY_PROMPT.format(term=term, features_context=features_context)
+
+    # Build model identifier
+    llm_config = config.llm
+    if llm_config.provider == "ollama":
+        model = f"ollama/{llm_config.summarize_model}"
+        api_base = llm_config.url
+    elif llm_config.provider == "openai":
+        model = llm_config.summarize_model
+        api_base = None
+    else:
+        model = f"{llm_config.provider}/{llm_config.summarize_model}"
+        api_base = None
+
+    client = LLMClient(
+        model=model,
+        api_base=api_base,
+        api_key=llm_config.api_key,
+    )
+
+    start_time = time.time()
+    try:
+        response = client.generate(
+            prompt=prompt,
+            temperature=llm_config.summarize_temperature,
+            top_p=llm_config.summarize_top_p,
+            max_tokens=256,  # Summaries should be concise
+        )
+        api_time = time.time() - start_time
+        return response.strip(), api_time
+    except LLMError:
+        api_time = time.time() - start_time
+        return "", api_time
+
+
 def extract_glossary_from_feature_sync(
     feature: dict[str, Any],
     config: MagaldiConfig | None = None,
@@ -477,8 +577,13 @@ def extract_glossary_from_features_concurrent(
     on_status_change: Callable[[], None] | None = None,
     worker_status: GlossaryWorkerStatus | None = None,
     timing_stats: GlossaryTimingStats | None = None,
+    on_phase_change: Callable[[str], None] | None = None,
 ) -> list[GlossaryItem]:
     """Extract and merge glossary items from multiple features using concurrent workers.
+
+    Two-phase process:
+    1. Extract term names from each feature (concurrent)
+    2. Generate holistic summaries for each merged term (concurrent)
 
     Args:
         features: List of feature/subfeature dicts with feature_id, label, summary.
@@ -488,9 +593,10 @@ def extract_glossary_from_features_concurrent(
         on_status_change: Callback when worker status changes.
         worker_status: Shared worker status tracker.
         timing_stats: Shared timing statistics.
+        on_phase_change: Callback when phase changes (phase name).
 
     Returns:
-        List of merged GlossaryItem.
+        List of merged GlossaryItem with generated summaries.
     """
     if not features:
         return []
@@ -504,7 +610,6 @@ def extract_glossary_from_features_concurrent(
     all_items: list[GlossaryItem] = []
     items_lock = threading.Lock()
     progress_lock = threading.Lock()
-    # Use a mutable container for thread-safe counter updates
     counters = {"completed": 0, "failed": 0, "terms_extracted": 0}
 
     # Get model name for display
@@ -513,14 +618,26 @@ def extract_glossary_from_features_concurrent(
         config = MagaldiConfig()
     model_name = config.llm.summarize_model
 
+    # Build features lookup for summary generation
+    features_by_id: dict[str, dict[str, Any]] = {}
+    for feature in features:
+        fid = feature.get("feature_id") or feature.get("subfeature_id", "")
+        if fid:
+            features_by_id[fid] = feature
+
+    # =========================================================================
+    # PHASE 1: Extract term names from features
+    # =========================================================================
+    if on_phase_change:
+        on_phase_change("Extracting terms from features")
+
     def process_feature(
         worker_id: int,
         feature: dict[str, Any],
     ) -> tuple[list[GlossaryItem], float, bool]:
         """Process a single feature in a worker thread."""
-        label = feature.get("label", "")[:40]  # Truncate for display
+        label = feature.get("label", "")[:40]
 
-        # Update worker status
         worker_status.set_status(worker_id, label, model_name)
         if on_status_change:
             on_status_change()
@@ -538,14 +655,12 @@ def extract_glossary_from_features_concurrent(
     total = len(features)
 
     with ThreadPoolExecutor(max_workers=num_workers) as executor:
-        # Submit all tasks with worker IDs
         futures = {}
         for i, feature in enumerate(features):
             worker_id = i % num_workers
             future = executor.submit(process_feature, worker_id, feature)
             futures[future] = feature
 
-        # Process completed futures
         for future in as_completed(futures):
             items, api_time, success = future.result()
 
@@ -560,7 +675,6 @@ def extract_glossary_from_features_concurrent(
             with items_lock:
                 all_items.extend(items)
 
-            # Report progress
             if on_progress:
                 state = GlossaryProgressState(
                     total=total,
@@ -573,7 +687,83 @@ def extract_glossary_from_features_concurrent(
                 )
                 on_progress(state)
 
-    return merge_glossary_items(all_items)
+    # Merge items by term name
+    merged_items = merge_glossary_items(all_items)
+
+    # =========================================================================
+    # PHASE 2: Generate holistic summaries for each merged term
+    # =========================================================================
+    if on_phase_change:
+        on_phase_change("Generating summaries for terms")
+
+    # Reset progress counters for phase 2
+    counters["completed"] = 0
+    counters["failed"] = 0
+    total_terms = len(merged_items)
+
+    def generate_summary_for_term(
+        worker_id: int,
+        item: GlossaryItem,
+    ) -> tuple[GlossaryItem, float, bool]:
+        """Generate summary for a merged glossary term."""
+        worker_status.set_status(worker_id, item.name, model_name)
+        if on_status_change:
+            on_status_change()
+
+        try:
+            summary, api_time = generate_glossary_summary_sync(
+                term=item.name,
+                feature_ids=item.source_feature_ids,
+                features_by_id=features_by_id,
+                config=config,
+            )
+            if summary:
+                item.description = summary
+            return item, api_time, True
+        except Exception:
+            return item, 0.0, False
+        finally:
+            worker_status.clear_status(worker_id)
+            if on_status_change:
+                on_status_change()
+
+    final_items: list[GlossaryItem] = []
+    final_lock = threading.Lock()
+
+    with ThreadPoolExecutor(max_workers=num_workers) as executor:
+        futures = {}
+        for i, item in enumerate(merged_items):
+            worker_id = i % num_workers
+            future = executor.submit(generate_summary_for_term, worker_id, item)
+            futures[future] = item
+
+        for future in as_completed(futures):
+            item, api_time, success = future.result()
+
+            with progress_lock:
+                counters["completed"] += 1
+                if not success:
+                    counters["failed"] += 1
+                else:
+                    timing_stats.record_api_call(api_time)
+
+            with final_lock:
+                final_items.append(item)
+
+            if on_progress:
+                state = GlossaryProgressState(
+                    total=total_terms,
+                    completed=counters["completed"],
+                    failed=counters["failed"],
+                    terms_extracted=len(final_items),
+                    timing=timing_stats,
+                    workers=worker_status,
+                    num_workers=num_workers,
+                )
+                on_progress(state)
+
+    final_items.sort(key=lambda x: x.name)
+    return final_items
 
 
 async def extract_glossary_from_features(

@@ -585,6 +585,7 @@ class GlossaryTermSummary(BaseModel):
     """Summary of a glossary term."""
 
     term: str
+    hash_id: str | None = None
     description: str = ""
     total_count: int
     file_count: int

@@ -681,6 +681,7 @@ export async function getElementDetails(
 // Glossary Types
 export interface GlossaryTermSummary {
   term: string
+  hash_id: string | null
   description: string
   total_count: number
   file_count: number

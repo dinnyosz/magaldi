@@ -1049,8 +1049,16 @@ def run_glossary_extraction(
         # Get model name for display
         model_name = config.llm.summarize_model
 
-        def build_glossary_display(state: GlossaryProgressState, num_workers: int) -> RenderableType:
+        # Track current phase
+        current_phase = {"name": "Extracting terms from features"}
+
+        def build_glossary_display(state: GlossaryProgressState, num_workers: int, phase: str) -> RenderableType:
             """Build Rich display for glossary extraction progress."""
+            # Phase header
+            phase_text = Text()
+            phase_text.append("  ")
+            phase_text.append(phase, style="bold magenta")
+
             # Progress info
             pct = (state.completed / state.total * 100) if state.total > 0 else 0
             eta = state.timing.eta_seconds(state.completed, state.total, state.num_workers)
@@ -1083,36 +1091,35 @@ def run_glossary_extraction(
             worker_table.add_column("ID", style="dim", width=4)
             worker_table.add_column("Stage", style="cyan", width=14)
             worker_table.add_column("Model", style="yellow", width=26)
-            worker_table.add_column("Feature")
+            worker_table.add_column("Item")
 
             workers_data = state.workers.get_all()
             for wid in range(num_workers):
                 if wid in workers_data:
-                    feature_label, model = workers_data[wid]
-                    worker_table.add_row(f"[{wid}]", "extracting", model, feature_label)
+                    item_label, model = workers_data[wid]
+                    stage = "summarizing" if "summary" in phase.lower() else "extracting"
+                    worker_table.add_row(f"[{wid}]", stage, model, item_label)
                 else:
                     worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "")
 
             # Stats line
             avg_api = state.timing.avg_api_time
             wall_time = state.timing.elapsed / state.completed if state.completed > 0 else 0
-            terms_per_feature = state.terms_extracted / state.completed if state.completed > 0 else 0
             stats = Text()
             stats.append("  ")
             stats.append("Wall: ", style="dim")
             stats.append(f"{wall_time:.2f}s", style="green")
-            stats.append("/feature | ", style="dim")
+            stats.append("/item | ", style="dim")
             stats.append("API: ", style="dim")
             stats.append(f"{avg_api:.1f}s", style="green")
-            stats.append("/feature | ", style="dim")
+            stats.append("/item | ", style="dim")
             stats.append("Terms: ", style="dim")
             stats.append(f"{state.terms_extracted}", style="cyan")
-            stats.append(f" ({terms_per_feature:.1f}/feature)", style="dim")
             if state.failed > 0:
                 stats.append(" | ", style="dim")
                 stats.append(f"{state.failed} failed", style="red")
 
-            return Group(bar_text, worker_table, stats)
+            return Group(phase_text, bar_text, worker_table, stats)
 
         # Create shared state objects
         timing_stats = GlossaryTimingStats()
@@ -1133,10 +1140,12 @@ def run_glossary_extraction(
         class LiveGlossaryDisplay:
             """Wrapper that Rich can call to get current display."""
             def __rich__(self) -> RenderableType:
-                return build_glossary_display(current_state, workers)
+                return build_glossary_display(current_state, workers, current_phase["name"])
 
         # Print header before Live display
-        console.print(f"  Extracting glossary from {total} features with {workers} workers...")
+        console.print(f"  Processing {total} features with {workers} workers...")
+        console.print(f"  Phase 1: Extract terms | Phase 2: Generate summaries")
+        console.print()
 
         with Live(LiveGlossaryDisplay(), console=console, refresh_per_second=10) as live:
             def on_progress(state: GlossaryProgressState) -> None:
@@ -1147,6 +1156,10 @@ def run_glossary_extraction(
             def on_status_change() -> None:
                 live.refresh()
 
+            def on_phase_change(phase_name: str) -> None:
+                current_phase["name"] = phase_name
+                live.refresh()
+
             glossary_items = extract_glossary_from_features_concurrent(
                 all_features,
                 config,
@@ -1155,6 +1168,7 @@ def run_glossary_extraction(
                 on_status_change=on_status_change,
                 worker_status=worker_status,
                 timing_stats=timing_stats,
+                on_phase_change=on_phase_change,
             )
 
         if not glossary_items:

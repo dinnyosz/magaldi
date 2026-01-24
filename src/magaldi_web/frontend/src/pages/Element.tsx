@@ -680,17 +680,23 @@ function Element() {
                     key={term.term}
                     action
                     as={Link}
-                    to={`/glossary/${element.repository.scope}/${element.repository.name}?term=${encodeURIComponent(term.term)}`}
-                    className="py-2"
+                    to={term.hash_id ? `/element/${term.hash_id}` : `/glossary/${element.repository.scope}/${element.repository.name}?term=${encodeURIComponent(term.term)}`}
+                    className="d-flex justify-content-between align-items-start py-2"
                   >
-                    <div className="d-flex justify-content-between align-items-start">
-                      <div>
-                        <Badge bg="primary" className="me-2">{term.term}</Badge>
-                        {term.description && (
-                          <small className="text-muted">{term.description}</small>
-                        )}
-                      </div>
+                    <div>
+                      <Badge bg="primary" className="me-2">
+                        <i className="bi bi-book me-1"></i>
+                        {term.term}
+                      </Badge>
+                      {term.description && (
+                        <small className="text-muted">{term.description}</small>
+                      )}
                     </div>
+                    {term.feature_count > 1 && (
+                      <Badge bg="secondary" pill>
+                        {term.feature_count} features
+                      </Badge>
+                    )}
                   </ListGroup.Item>
                 ))}
               </ListGroup>
