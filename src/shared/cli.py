@@ -348,7 +348,7 @@ def extract_features(
 @main.command("extract-glossary")
 @click.argument("repo_path", type=click.Path(exists=True, file_okay=False, dir_okay=True))
 @click.option("--user", "-u", required=True, help="Username/branch to extract glossary from")
-@click.option("--workers", "-w", default=4, help="Number of concurrent workers (default: 4)")
+@click.option("--workers", "-w", default=8, type=int, help="Number of concurrent workers (default: 8)")
 def extract_glossary(
     repo_path: str,
     user: str,
@@ -999,7 +999,7 @@ def run_glossary_extraction(
     username: str,
     config: MagaldiConfig,
     es_repo: "ElasticsearchRepository | None" = None,
-    workers: int = 4,
+    workers: int = 8,
 ) -> dict | None:
     """Run Glossary Extraction using AI-powered extraction from feature summaries.
 
