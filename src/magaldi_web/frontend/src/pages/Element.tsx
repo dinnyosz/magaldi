@@ -169,6 +169,11 @@ function Element() {
                       async
                     </Badge>
                   )}
+                  {element.is_test && (
+                    <Badge bg="warning" text="dark" className="ms-2" pill>
+                      test
+                    </Badge>
+                  )}
                 </div>
 
                 <div className="text-end">
@@ -228,6 +233,97 @@ function Element() {
                     <pre className="mb-0" style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>
                       {element.docstring}
                     </pre>
+                  </div>
+                </div>
+              )}
+
+              {/* Base Classes - for classes */}
+              {element.element_type === 'class' && element.base_classes && element.base_classes.length > 0 && (
+                <div className="mb-3">
+                  <small className="text-uppercase text-muted fw-bold d-block mb-1">
+                    <i className="bi bi-diagram-2 me-1"></i>
+                    Inherits From
+                  </small>
+                  <div className="d-flex flex-wrap gap-2">
+                    {element.base_classes.map((base, i) => (
+                      <Badge key={i} bg="secondary" className="fw-normal">
+                        {base}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Class Attributes - for classes */}
+              {element.element_type === 'class' && element.class_attributes && element.class_attributes.length > 0 && (
+                <div className="mb-3">
+                  <small className="text-uppercase text-muted fw-bold d-block mb-1">
+                    <i className="bi bi-box me-1"></i>
+                    Instance Attributes
+                  </small>
+                  <div className="bg-light p-2 rounded">
+                    {element.class_attributes.map((attr, i) => (
+                      <div key={i} className="d-flex align-items-center py-1">
+                        <code className="me-2">{attr.name}</code>
+                        {attr.type && <small className="text-muted">: {attr.type}</small>}
+                        {attr.line && <small className="text-muted ms-auto">L{attr.line}</small>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Exceptions Raised - for functions/methods */}
+              {isCallable && element.exceptions_raised && element.exceptions_raised.length > 0 && (
+                <div className="mb-3">
+                  <small className="text-uppercase text-muted fw-bold d-block mb-1">
+                    <i className="bi bi-exclamation-triangle me-1"></i>
+                    Raises
+                  </small>
+                  <div className="d-flex flex-wrap gap-2">
+                    {element.exceptions_raised.map((exc, i) => (
+                      <Badge key={i} bg="danger" className="fw-normal">
+                        {exc}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Attributes Modified - for methods */}
+              {element.element_type === 'method' && element.attributes_modified && element.attributes_modified.length > 0 && (
+                <div className="mb-3">
+                  <small className="text-uppercase text-muted fw-bold d-block mb-1">
+                    <i className="bi bi-pencil me-1"></i>
+                    Modifies Attributes
+                  </small>
+                  <div className="d-flex flex-wrap gap-2">
+                    {element.attributes_modified.map((attr, i) => (
+                      <Badge key={i} bg="warning" text="dark" className="fw-normal">
+                        self.{attr}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Imports - for file elements */}
+              {element.element_type === 'file' && element.imports && element.imports.length > 0 && (
+                <div className="mb-3">
+                  <small className="text-uppercase text-muted fw-bold d-block mb-1">
+                    <i className="bi bi-box-arrow-in-down me-1"></i>
+                    Imports ({element.imports.length})
+                  </small>
+                  <div className="bg-light p-2 rounded" style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                    {element.imports.map((imp, i) => (
+                      <div key={i} className="d-flex align-items-center py-1">
+                        <code className="me-2">
+                          {imp.alias ? `${imp.name} as ${imp.alias}` : imp.name}
+                        </code>
+                        <small className="text-muted">from {imp.module}</small>
+                        {imp.line && <small className="text-muted ms-auto">L{imp.line}</small>}
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
@@ -782,6 +878,50 @@ function Element() {
                   <Badge bg="success">
                     <i className="bi bi-check"></i> Yes
                   </Badge>
+                </ListGroup.Item>
+              )}
+              {element.is_test && (
+                <ListGroup.Item className="d-flex justify-content-between">
+                  <span className="text-muted">Test Code</span>
+                  <Badge bg="warning" text="dark">
+                    <i className="bi bi-check"></i> Yes
+                  </Badge>
+                </ListGroup.Item>
+              )}
+              {element.element_type === 'file' && element.element_count !== null && element.element_count !== undefined && (
+                <ListGroup.Item className="d-flex justify-content-between">
+                  <span className="text-muted">Total Elements</span>
+                  <span>{element.element_count}</span>
+                </ListGroup.Item>
+              )}
+              {element.element_type === 'class' && element.base_classes && element.base_classes.length > 0 && (
+                <ListGroup.Item className="d-flex justify-content-between">
+                  <span className="text-muted">Base Classes</span>
+                  <span>{element.base_classes.length}</span>
+                </ListGroup.Item>
+              )}
+              {element.element_type === 'class' && element.class_attributes && element.class_attributes.length > 0 && (
+                <ListGroup.Item className="d-flex justify-content-between">
+                  <span className="text-muted">Attributes</span>
+                  <span>{element.class_attributes.length}</span>
+                </ListGroup.Item>
+              )}
+              {isCallable && element.exceptions_raised && element.exceptions_raised.length > 0 && (
+                <ListGroup.Item className="d-flex justify-content-between">
+                  <span className="text-muted">Exceptions</span>
+                  <span>{element.exceptions_raised.length}</span>
+                </ListGroup.Item>
+              )}
+              {element.element_type === 'file' && element.imports && element.imports.length > 0 && (
+                <ListGroup.Item className="d-flex justify-content-between">
+                  <span className="text-muted">Imports</span>
+                  <span>{element.imports.length}</span>
+                </ListGroup.Item>
+              )}
+              {element.indexed_at && (
+                <ListGroup.Item className="d-flex justify-content-between">
+                  <span className="text-muted">Indexed</span>
+                  <small>{new Date(element.indexed_at).toLocaleDateString()}</small>
                 </ListGroup.Item>
               )}
             </ListGroup>

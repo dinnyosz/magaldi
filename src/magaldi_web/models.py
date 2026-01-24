@@ -373,6 +373,23 @@ class FeatureInfo(BaseModel):
     parent_feature: ParentFeatureInfo | None = None
 
 
+class ClassAttributeInfo(BaseModel):
+    """Information about a class attribute."""
+
+    name: str
+    type: str | None = None
+    line: int | None = None
+
+
+class ImportInfo(BaseModel):
+    """Information about an import statement."""
+
+    name: str
+    module: str
+    alias: str | None = None
+    line: int | None = None
+
+
 class ElementDetailResponse(BaseModel):
     """Response for element detail endpoint."""
 
@@ -391,6 +408,18 @@ class ElementDetailResponse(BaseModel):
     decorators: list[str] = Field(default_factory=list)
     visibility: str | None = None
     is_async: bool = False
+    is_test: bool = False
+    indexed_at: str | None = None
+    # Enhanced context for classes
+    base_classes: list[str] = Field(default_factory=list)
+    class_attributes: list[ClassAttributeInfo] = Field(default_factory=list)
+    # Enhanced context for functions/methods
+    exceptions_raised: list[str] = Field(default_factory=list)
+    attributes_modified: list[str] = Field(default_factory=list)
+    # For file elements
+    imports: list[ImportInfo] = Field(default_factory=list)
+    element_count: int | None = None
+    # Context and relationships
     context: ElementContext
     repository: RepoRef
     feature_info: FeatureInfo | None = None

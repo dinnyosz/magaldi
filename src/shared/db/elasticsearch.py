@@ -115,6 +115,22 @@ INDEX_MAPPING = {
                     "resolved_id": {"type": "keyword"}, # Resolved element ID (or null)
                 },
             },
+            # Enhanced context fields (extracted during parsing)
+            # For classes: instance attributes from __init__
+            "class_attributes": {
+                "type": "nested",
+                "properties": {
+                    "name": {"type": "keyword"},
+                    "type": {"type": "keyword"},
+                    "line": {"type": "integer"},
+                },
+            },
+            # For classes: base class names
+            "base_classes": {"type": "keyword"},
+            # For functions/methods: exception types raised
+            "exceptions_raised": {"type": "keyword"},
+            # For methods: attributes modified (self.X assignments)
+            "attributes_modified": {"type": "keyword"},
         }
     },
     "settings": {
@@ -211,6 +227,16 @@ class ElasticsearchRepository:
         # Add element_count for file-level elements (used for completeness verification)
         if element_count is not None:
             doc["element_count"] = element_count
+
+        # Add enhanced context fields if present
+        if element.class_attributes:
+            doc["class_attributes"] = element.class_attributes
+        if element.base_classes:
+            doc["base_classes"] = element.base_classes
+        if element.exceptions_raised:
+            doc["exceptions_raised"] = element.exceptions_raised
+        if element.attributes_modified:
+            doc["attributes_modified"] = element.attributes_modified
 
         client = self._get_client()
         client.index(index=INDEX_NAME, id=element.element_id, document=doc)

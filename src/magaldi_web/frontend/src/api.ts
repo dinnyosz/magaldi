@@ -194,6 +194,19 @@ export interface FeatureInfo {
   parent_feature: ParentFeatureInfo | null
 }
 
+export interface ClassAttributeInfo {
+  name: string
+  type: string | null
+  line: number | null
+}
+
+export interface ElementImportInfo {
+  name: string
+  module: string
+  alias: string | null
+  line: number | null
+}
+
 export interface ElementDetail {
   element_id: string
   hash_id: string | null
@@ -210,6 +223,18 @@ export interface ElementDetail {
   decorators: string[]
   visibility: string | null
   is_async: boolean
+  is_test: boolean
+  indexed_at: string | null
+  // Enhanced context for classes
+  base_classes: string[]
+  class_attributes: ClassAttributeInfo[]
+  // Enhanced context for functions/methods
+  exceptions_raised: string[]
+  attributes_modified: string[]
+  // For file elements
+  imports: ElementImportInfo[]
+  element_count: number | null
+  // Context and relationships
   context: {
     file: ElementDetailFile | null
     parent: ElementDetailParent | null

@@ -7,11 +7,13 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from magaldi_web.dependencies import get_es_repository
 from magaldi_web.models import (
     ChildInfo,
+    ClassAttributeInfo,
     ElementContext,
     ElementDetailResponse,
     FeatureInfo,
     FeatureMember,
     FileContext,
+    ImportInfo,
     ParentContext,
     ParentFeatureInfo,
     RepoRef,
@@ -291,6 +293,33 @@ async def get_element_detail(
             parent_feature=parent_feature,
         )
 
+    # Parse class attributes
+    class_attributes = []
+    raw_class_attrs = source.get("class_attributes", [])
+    if raw_class_attrs:
+        for attr in raw_class_attrs:
+            class_attributes.append(
+                ClassAttributeInfo(
+                    name=attr.get("name", ""),
+                    type=attr.get("type"),
+                    line=attr.get("line"),
+                )
+            )
+
+    # Parse imports (for file elements)
+    imports = []
+    raw_imports = source.get("imports", [])
+    if raw_imports:
+        for imp in raw_imports:
+            imports.append(
+                ImportInfo(
+                    name=imp.get("name", ""),
+                    module=imp.get("module", ""),
+                    alias=imp.get("alias"),
+                    line=imp.get("line"),
+                )
+            )
+
     return ElementDetailResponse(
         element_id=source["element_id"],
         hash_id=source.get("hash_id"),
@@ -307,6 +336,18 @@ async def get_element_detail(
         decorators=decorators,
         visibility=source.get("visibility"),
         is_async=source.get("is_async", False),
+        is_test=source.get("is_test", False),
+        indexed_at=source.get("indexed_at"),
+        # Enhanced context for classes
+        base_classes=source.get("base_classes", []),
+        class_attributes=class_attributes,
+        # Enhanced context for functions/methods
+        exceptions_raised=source.get("exceptions_raised", []),
+        attributes_modified=source.get("attributes_modified", []),
+        # For file elements
+        imports=imports,
+        element_count=source.get("element_count"),
+        # Context and relationships
         context=ElementContext(
             file=file_context,
             parent=parent_context,
