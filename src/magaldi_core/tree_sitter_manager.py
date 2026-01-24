@@ -782,6 +782,194 @@ def _get_chain_root(node: Node) -> str | None:
 
 
 # =============================================================================
+# PYTHON ENHANCED CONTEXT EXTRACTION
+# =============================================================================
+
+
+def extract_python_class_attributes(class_node: Node) -> list[dict[str, str | int]]:
+    """Extract instance attributes defined in __init__.
+
+    Finds assignments to self.X in __init__ method to identify class state.
+
+    Args:
+        class_node: A class_definition node from tree-sitter.
+
+    Returns:
+        List of dicts with "name" and "line" keys.
+        Example: [{"name": "x", "line": 10}, {"name": "_cache", "line": 11}]
+    """
+    attrs: list[dict[str, str | int]] = []
+    seen: set[str] = set()
+
+    body_node = get_child_by_field(class_node, "body")
+    if not body_node:
+        return attrs
+
+    # Find __init__ method
+    for child in body_node.children:
+        method_node = None
+        if child.type == "function_definition":
+            method_node = child
+        elif child.type == "decorated_definition":
+            inner = get_child_by_field(child, "definition")
+            if inner and inner.type == "function_definition":
+                method_node = inner
+
+        if not method_node:
+            continue
+
+        name_node = get_child_by_field(method_node, "name")
+        if not name_node or get_node_text(name_node) != "__init__":
+            continue
+
+        # Found __init__, now find self.X = assignments
+        method_body = get_child_by_field(method_node, "body")
+        if not method_body:
+            continue
+
+        for node in walk_tree(method_body):
+            if node.type == "assignment":
+                left = node.children[0] if node.children else None
+                if left and left.type == "attribute":
+                    # Check if it's self.X
+                    obj = left.children[0] if left.children else None
+                    if obj and get_node_text(obj) == "self" and len(left.children) >= 2:
+                        attr_name = get_node_text(left.children[-1])
+                        if attr_name and attr_name not in seen:
+                            seen.add(attr_name)
+                            attrs.append({
+                                "name": attr_name,
+                                "line": left.start_point[0] + 1,
+                            })
+
+        break  # Only process first __init__
+
+    return attrs
+
+
+def extract_python_base_classes(class_node: Node) -> list[str]:
+    """Extract base class names from class definition.
+
+    For: class Foo(Bar, Baz): ...
+    Returns: ["Bar", "Baz"]
+
+    Args:
+        class_node: A class_definition node from tree-sitter.
+
+    Returns:
+        List of base class names.
+    """
+    bases: list[str] = []
+
+    if class_node.type != "class_definition":
+        return bases
+
+    # Find argument_list (superclasses)
+    for child in class_node.children:
+        if child.type == "argument_list":
+            for arg in child.children:
+                if arg.type == "identifier":
+                    bases.append(get_node_text(arg))
+                elif arg.type == "attribute":
+                    # Handle qualified names like typing.Protocol
+                    bases.append(get_node_text(arg))
+                elif arg.type == "subscript":
+                    # Handle Generic[T], Protocol[T], etc.
+                    # Just get the base type, not the subscript
+                    subscripted = arg.children[0] if arg.children else None
+                    if subscripted:
+                        bases.append(get_node_text(subscripted))
+            break
+
+    return bases
+
+
+def extract_python_raised_exceptions(function_node: Node) -> list[str]:
+    """Extract exception types from raise statements in a function/method.
+
+    For: raise ValueError("bad")
+    Returns: ["ValueError"]
+
+    Args:
+        function_node: A function_definition node from tree-sitter.
+
+    Returns:
+        List of exception type names (deduplicated).
+    """
+    exceptions: list[str] = []
+    seen: set[str] = set()
+
+    body_node = get_child_by_field(function_node, "body")
+    if not body_node:
+        return exceptions
+
+    for node in walk_tree(body_node):
+        if node.type == "raise_statement":
+            # raise ValueError("msg") -> find the exception type
+            for child in node.children:
+                if child.type == "call":
+                    # raise Exception("msg")
+                    func = get_child_by_field(child, "function")
+                    if func:
+                        exc_name = get_node_text(func)
+                        if exc_name and exc_name not in seen:
+                            seen.add(exc_name)
+                            exceptions.append(exc_name)
+                    break
+                elif child.type == "identifier":
+                    # raise exc (re-raising or bare exception name)
+                    exc_name = get_node_text(child)
+                    if exc_name and exc_name not in seen:
+                        seen.add(exc_name)
+                        exceptions.append(exc_name)
+                    break
+                elif child.type == "attribute":
+                    # raise module.Exception
+                    exc_name = get_node_text(child)
+                    if exc_name and exc_name not in seen:
+                        seen.add(exc_name)
+                        exceptions.append(exc_name)
+                    break
+
+    return exceptions
+
+
+def extract_python_modified_attributes(method_node: Node) -> list[str]:
+    """Extract self.X attributes that are assigned to in a method.
+
+    Finds both regular assignments (self.x = ...) and augmented
+    assignments (self.x += ...).
+
+    Args:
+        method_node: A function_definition node representing a method.
+
+    Returns:
+        List of attribute names that are modified (deduplicated).
+    """
+    modified: list[str] = []
+    seen: set[str] = set()
+
+    body_node = get_child_by_field(method_node, "body")
+    if not body_node:
+        return modified
+
+    for node in walk_tree(body_node):
+        # Check both assignment and augmented_assignment
+        if node.type in ("assignment", "augmented_assignment"):
+            left = node.children[0] if node.children else None
+            if left and left.type == "attribute":
+                # Check if it's self.X
+                obj = left.children[0] if left.children else None
+                if obj and get_node_text(obj) == "self" and len(left.children) >= 2:
+                    attr_name = get_node_text(left.children[-1])
+                    if attr_name and attr_name not in seen:
+                        seen.add(attr_name)
+                        modified.append(attr_name)
+
+    return modified
+
+
+# =============================================================================
 # JAVASCRIPT EXTRACTOR
 # =============================================================================
 
@@ -1331,6 +1519,1318 @@ def _get_js_chain_root(node: Node) -> str | None:
         else:
             break
     return None
+
+
+# =============================================================================
+# JAVASCRIPT ENHANCED CONTEXT EXTRACTION
+# =============================================================================
+
+
+def extract_javascript_class_fields(class_node: Node) -> list[dict[str, str | int]]:
+    """Extract class fields from a JavaScript/TypeScript class.
+
+    Finds:
+    - Class field definitions: `field = value;`
+    - Constructor assignments: `this.x = x;`
+
+    Args:
+        class_node: A class_declaration node from tree-sitter.
+
+    Returns:
+        List of dicts with "name" and "line" keys.
+    """
+    fields: list[dict[str, str | int]] = []
+    seen: set[str] = set()
+
+    body_node = get_child_by_field(class_node, "body")
+    if not body_node:
+        return fields
+
+    for child in body_node.children:
+        # Class field definitions: `field = value;` or `#field = value;`
+        if child.type in ("field_definition", "public_field_definition"):
+            prop_node = get_child_by_field(child, "property")
+            if prop_node:
+                name = get_node_text(prop_node)
+                if name and name not in seen:
+                    seen.add(name)
+                    fields.append({
+                        "name": name,
+                        "line": child.start_point[0] + 1,
+                    })
+
+        # Constructor method - find this.x = assignments
+        elif child.type == "method_definition":
+            name_node = get_child_by_field(child, "name")
+            if name_node and get_node_text(name_node) == "constructor":
+                method_body = get_child_by_field(child, "body")
+                if method_body:
+                    for node in walk_tree(method_body):
+                        if node.type == "assignment_expression":
+                            left = node.children[0] if node.children else None
+                            if left and left.type == "member_expression":
+                                obj = get_child_by_field(left, "object")
+                                prop = get_child_by_field(left, "property")
+                                if obj and obj.type == "this" and prop:
+                                    field_name = get_node_text(prop)
+                                    if field_name and field_name not in seen:
+                                        seen.add(field_name)
+                                        fields.append({
+                                            "name": field_name,
+                                            "line": left.start_point[0] + 1,
+                                        })
+
+    return fields
+
+
+def extract_javascript_base_class(class_node: Node) -> list[str]:
+    """Extract the base class name from a JavaScript/TypeScript class.
+
+    For: class Foo extends Bar { ... }
+    Returns: ["Bar"]
+
+    Args:
+        class_node: A class_declaration node from tree-sitter.
+
+    Returns:
+        List with single base class name, or empty list.
+    """
+    bases: list[str] = []
+
+    if class_node.type != "class_declaration":
+        return bases
+
+    # Find class_heritage node which contains extends clause
+    for child in class_node.children:
+        if child.type == "class_heritage":
+            # The base class identifier is directly under class_heritage
+            for heritage_child in child.children:
+                if heritage_child.type == "identifier":
+                    bases.append(get_node_text(heritage_child))
+                    break
+                elif heritage_child.type == "member_expression":
+                    # Handle qualified names like module.ClassName
+                    bases.append(get_node_text(heritage_child))
+                    break
+            break
+
+    return bases
+
+
+def extract_javascript_thrown_exceptions(function_node: Node) -> list[str]:
+    """Extract exception types from throw statements in a JS/TS function.
+
+    For: throw new Error("msg")
+    Returns: ["Error"]
+
+    Args:
+        function_node: A function_declaration, method_definition, or arrow_function node.
+
+    Returns:
+        List of exception type names (deduplicated).
+    """
+    exceptions: list[str] = []
+    seen: set[str] = set()
+
+    body_node = get_child_by_field(function_node, "body")
+    if not body_node:
+        return exceptions
+
+    for node in walk_tree(body_node):
+        if node.type == "throw_statement":
+            # throw new Error("msg") -> find the exception type
+            for child in node.children:
+                if child.type == "new_expression":
+                    # throw new Error("msg")
+                    constructor = get_child_by_field(child, "constructor")
+                    if constructor:
+                        exc_name = get_node_text(constructor)
+                        if exc_name and exc_name not in seen:
+                            seen.add(exc_name)
+                            exceptions.append(exc_name)
+                    break
+                elif child.type == "identifier":
+                    # throw err (re-throwing)
+                    exc_name = get_node_text(child)
+                    if exc_name and exc_name not in seen:
+                        seen.add(exc_name)
+                        exceptions.append(exc_name)
+                    break
+                elif child.type == "call_expression":
+                    # throw createError("msg") - less common but possible
+                    func = get_child_by_field(child, "function")
+                    if func:
+                        exc_name = get_node_text(func)
+                        if exc_name and exc_name not in seen:
+                            seen.add(exc_name)
+                            exceptions.append(exc_name)
+                    break
+
+    return exceptions
+
+
+def extract_javascript_modified_properties(method_node: Node) -> list[str]:
+    """Extract this.X properties that are assigned to in a method.
+
+    Finds both regular assignments (this.x = ...) and compound
+    assignments (this.x += ...).
+
+    Args:
+        method_node: A method_definition or function node.
+
+    Returns:
+        List of property names that are modified (deduplicated).
+    """
+    modified: list[str] = []
+    seen: set[str] = set()
+
+    body_node = get_child_by_field(method_node, "body")
+    if not body_node:
+        return modified
+
+    for node in walk_tree(body_node):
+        # Check both assignment_expression and augmented_assignment_expression
+        if node.type in ("assignment_expression", "augmented_assignment_expression"):
+            left = node.children[0] if node.children else None
+            if left and left.type == "member_expression":
+                obj = get_child_by_field(left, "object")
+                prop = get_child_by_field(left, "property")
+                if obj and obj.type == "this" and prop:
+                    prop_name = get_node_text(prop)
+                    if prop_name and prop_name not in seen:
+                        seen.add(prop_name)
+                        modified.append(prop_name)
+
+    return modified
+
+
+# =============================================================================
+# PHP CORE EXTRACTION
+# =============================================================================
+
+
+def extract_php_elements(tree: Tree, lines: list[str]) -> list[ExtractedElement]:
+    """Extract classes and functions from PHP code.
+
+    Args:
+        tree: Parsed tree-sitter tree.
+        lines: Source code lines.
+
+    Returns:
+        List of extracted elements (classes, functions).
+    """
+    elements: list[ExtractedElement] = []
+    root = tree.root_node
+
+    for node in root.children:
+        if node.type == "class_declaration":
+            elem = _extract_php_class(node, lines)
+            if elem:
+                elements.append(elem)
+        elif node.type == "function_definition":
+            elem = _extract_php_function(node, lines)
+            if elem:
+                elements.append(elem)
+
+    return elements
+
+
+def _extract_php_class(node: Node, lines: list[str]) -> ExtractedElement | None:
+    """Extract a PHP class definition."""
+    name = None
+    for child in node.children:
+        if child.type == "name":
+            name = get_node_text(child)
+            break
+
+    if not name:
+        return None
+
+    return ExtractedElement(
+        element_type="class",
+        name=name,
+        line_start=node.start_point[0] + 1,
+        line_end=node.end_point[0] + 1,
+        raw_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+        node=node,
+    )
+
+
+def _extract_php_function(node: Node, lines: list[str]) -> ExtractedElement | None:
+    """Extract a PHP function definition."""
+    name = None
+    for child in node.children:
+        if child.type == "name":
+            name = get_node_text(child)
+            break
+
+    if not name:
+        return None
+
+    # Build signature from formal_parameters
+    signature = f"function {name}"
+    for child in node.children:
+        if child.type == "formal_parameters":
+            signature += get_node_text(child)
+            break
+
+    return ExtractedElement(
+        element_type="function",
+        name=name,
+        line_start=node.start_point[0] + 1,
+        line_end=node.end_point[0] + 1,
+        raw_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+        signature=signature,
+        node=node,
+    )
+
+
+def extract_php_class_members(
+    class_node: Node, lines: list[str]
+) -> tuple[list[ExtractedElement], list[ExtractedElement]]:
+    """Extract methods and properties from a PHP class.
+
+    Args:
+        class_node: A class_declaration node.
+        lines: Source code lines.
+
+    Returns:
+        Tuple of (methods, properties).
+    """
+    methods: list[ExtractedElement] = []
+    properties: list[ExtractedElement] = []
+
+    # Find declaration_list (class body)
+    decl_list = None
+    for child in class_node.children:
+        if child.type == "declaration_list":
+            decl_list = child
+            break
+
+    if not decl_list:
+        return methods, properties
+
+    for child in decl_list.children:
+        if child.type == "method_declaration":
+            elem = _extract_php_method(child, lines)
+            if elem:
+                methods.append(elem)
+        elif child.type == "property_declaration":
+            elems = _extract_php_property(child, lines)
+            properties.extend(elems)
+
+    return methods, properties
+
+
+def _extract_php_method(node: Node, lines: list[str]) -> ExtractedElement | None:
+    """Extract a PHP method definition."""
+    name = None
+    is_async = False
+    visibility = "public"
+    decorators: list[str] = []
+
+    for child in node.children:
+        if child.type == "name":
+            name = get_node_text(child)
+        elif child.type == "visibility_modifier":
+            visibility = get_node_text(child)
+        elif child.type == "static_modifier":
+            decorators.append("static")
+
+    if not name:
+        return None
+
+    # Build signature
+    signature = f"{visibility} function {name}"
+    for child in node.children:
+        if child.type == "formal_parameters":
+            signature += get_node_text(child)
+            break
+
+    return ExtractedElement(
+        element_type="method",
+        name=name,
+        line_start=node.start_point[0] + 1,
+        line_end=node.end_point[0] + 1,
+        raw_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+        signature=signature,
+        decorators=decorators,
+        node=node,
+    )
+
+
+def _extract_php_property(node: Node, lines: list[str]) -> list[ExtractedElement]:
+    """Extract PHP property declarations."""
+    properties: list[ExtractedElement] = []
+    visibility = "public"
+
+    for child in node.children:
+        if child.type == "visibility_modifier":
+            visibility = get_node_text(child)
+        elif child.type == "property_element":
+            for prop_child in child.children:
+                if prop_child.type == "variable_name":
+                    for name_child in prop_child.children:
+                        if name_child.type == "name":
+                            name = get_node_text(name_child)
+                            properties.append(ExtractedElement(
+                                element_type="variable",
+                                name=name,
+                                line_start=node.start_point[0] + 1,
+                                line_end=node.end_point[0] + 1,
+                                raw_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+                                decorators=[visibility],
+                            ))
+
+    return properties
+
+
+def extract_php_imports(tree: Tree, lines: list[str]) -> list[ExtractedImport]:
+    """Extract use statements from PHP code.
+
+    Args:
+        tree: Parsed tree-sitter tree.
+        lines: Source code lines.
+
+    Returns:
+        List of extracted imports.
+    """
+    imports: list[ExtractedImport] = []
+    root = tree.root_node
+
+    for node in walk_tree(root):
+        if node.type == "namespace_use_declaration":
+            # use Foo\Bar\Baz;
+            for child in node.children:
+                if child.type == "namespace_use_clause":
+                    name = None
+                    alias = None
+                    for clause_child in child.children:
+                        if clause_child.type == "qualified_name":
+                            name = get_node_text(clause_child)
+                        elif clause_child.type == "namespace_aliasing_clause":
+                            for alias_child in clause_child.children:
+                                if alias_child.type == "name":
+                                    alias = get_node_text(alias_child)
+
+                    if name:
+                        # Extract the class name from full path
+                        parts = name.split("\\")
+                        class_name = parts[-1]
+                        imports.append(ExtractedImport(
+                            name=alias or class_name,
+                            module=name,
+                            alias=alias,
+                            line=node.start_point[0] + 1,
+                        ))
+
+    return imports
+
+
+def extract_php_calls(function_node: Node) -> list[ExtractedCall]:
+    """Extract function/method calls from PHP code.
+
+    Args:
+        function_node: A function_definition or method_declaration node.
+
+    Returns:
+        List of extracted calls.
+    """
+    calls: list[ExtractedCall] = []
+    seen: set[tuple[str, str | None, int]] = set()
+
+    for node in walk_tree(function_node):
+        if node.type == "function_call_expression":
+            # Regular function call: func()
+            func_node = node.children[0] if node.children else None
+            if func_node and func_node.type == "name":
+                name = get_node_text(func_node)
+                line = node.start_point[0] + 1
+                key = (name, None, line)
+                if key not in seen:
+                    seen.add(key)
+                    calls.append(ExtractedCall(name=name, receiver=None, line=line))
+
+        elif node.type == "member_call_expression":
+            # Method call: $obj->method()
+            line = node.start_point[0] + 1
+            receiver = None
+            method_name = None
+
+            for child in node.children:
+                if child.type == "variable_name":
+                    for vn_child in child.children:
+                        if vn_child.type == "name":
+                            receiver = get_node_text(vn_child)
+                elif child.type == "name":
+                    method_name = get_node_text(child)
+
+            if method_name:
+                key = (method_name, receiver, line)
+                if key not in seen:
+                    seen.add(key)
+                    calls.append(ExtractedCall(name=method_name, receiver=receiver, line=line))
+
+        elif node.type == "scoped_call_expression":
+            # Static call: Class::method()
+            line = node.start_point[0] + 1
+            receiver = None
+            method_name = None
+
+            for child in node.children:
+                if child.type in ("name", "qualified_name", "relative_scope"):
+                    receiver = get_node_text(child)
+                elif child.type == "name" and receiver:
+                    method_name = get_node_text(child)
+
+            # Try getting method name differently
+            if not method_name:
+                for i, child in enumerate(node.children):
+                    if child.type == "::":
+                        if i + 1 < len(node.children):
+                            next_child = node.children[i + 1]
+                            if next_child.type == "name":
+                                method_name = get_node_text(next_child)
+
+            if method_name:
+                key = (method_name, receiver, line)
+                if key not in seen:
+                    seen.add(key)
+                    calls.append(ExtractedCall(name=method_name, receiver=receiver, line=line))
+
+    return calls
+
+
+# =============================================================================
+# PHP ENHANCED CONTEXT EXTRACTION
+# =============================================================================
+
+
+def extract_php_class_properties(class_node: Node) -> list[dict[str, str | int]]:
+    """Extract class properties from a PHP class.
+
+    Finds:
+    - Property declarations: `private $config;`
+    - Constructor assignments: `$this->x = $x;`
+
+    Args:
+        class_node: A class_declaration node from tree-sitter.
+
+    Returns:
+        List of dicts with "name" and "line" keys.
+    """
+    properties: list[dict[str, str | int]] = []
+    seen: set[str] = set()
+
+    if class_node.type != "class_declaration":
+        return properties
+
+    # Find declaration_list (class body)
+    decl_list = None
+    for child in class_node.children:
+        if child.type == "declaration_list":
+            decl_list = child
+            break
+
+    if not decl_list:
+        return properties
+
+    for child in decl_list.children:
+        # Property declarations: `private $config;`
+        if child.type == "property_declaration":
+            for prop_child in child.children:
+                if prop_child.type == "property_element":
+                    for var_child in prop_child.children:
+                        if var_child.type == "variable_name":
+                            # Get the property name (without $)
+                            for name_child in var_child.children:
+                                if name_child.type == "name":
+                                    name = get_node_text(name_child)
+                                    if name and name not in seen:
+                                        seen.add(name)
+                                        properties.append({
+                                            "name": name,
+                                            "line": var_child.start_point[0] + 1,
+                                        })
+
+        # Also check constructor for $this->x = ... assignments
+        elif child.type == "method_declaration":
+            method_name = None
+            for method_child in child.children:
+                if method_child.type == "name":
+                    method_name = get_node_text(method_child)
+                    break
+
+            if method_name == "__construct":
+                # Find assignments in constructor body
+                for node in walk_tree(child):
+                    if node.type == "assignment_expression":
+                        left = node.children[0] if node.children else None
+                        if left and left.type == "member_access_expression":
+                            # Check if it's $this->property
+                            obj = None
+                            prop = None
+                            for mac_child in left.children:
+                                if mac_child.type == "variable_name":
+                                    for vn_child in mac_child.children:
+                                        if vn_child.type == "name" and get_node_text(vn_child) == "this":
+                                            obj = mac_child
+                                elif mac_child.type == "name":
+                                    prop = mac_child
+
+                            if obj and prop:
+                                prop_name = get_node_text(prop)
+                                if prop_name and prop_name not in seen:
+                                    seen.add(prop_name)
+                                    properties.append({
+                                        "name": prop_name,
+                                        "line": left.start_point[0] + 1,
+                                    })
+
+    return properties
+
+
+def extract_php_base_class(class_node: Node) -> list[str]:
+    """Extract the base class and interfaces from a PHP class.
+
+    For: class Foo extends Bar implements Baz { ... }
+    Returns: ["Bar", "Baz"]
+
+    Args:
+        class_node: A class_declaration node from tree-sitter.
+
+    Returns:
+        List of base class and interface names.
+    """
+    bases: list[str] = []
+
+    if class_node.type != "class_declaration":
+        return bases
+
+    for child in class_node.children:
+        # Base class: extends BaseClass
+        if child.type == "base_clause":
+            for bc_child in child.children:
+                if bc_child.type == "name":
+                    bases.append(get_node_text(bc_child))
+
+        # Interfaces: implements Interface1, Interface2
+        elif child.type == "class_interface_clause":
+            for ic_child in child.children:
+                if ic_child.type == "name":
+                    bases.append(get_node_text(ic_child))
+
+    return bases
+
+
+def extract_php_thrown_exceptions(method_node: Node) -> list[str]:
+    """Extract exception types from throw statements in a PHP method.
+
+    For: throw new ValidationException("msg")
+    Returns: ["ValidationException"]
+
+    Args:
+        method_node: A method_declaration or function_definition node.
+
+    Returns:
+        List of exception type names (deduplicated).
+    """
+    exceptions: list[str] = []
+    seen: set[str] = set()
+
+    for node in walk_tree(method_node):
+        if node.type == "throw_expression":
+            # throw new Exception("msg") -> find the exception type
+            for child in node.children:
+                if child.type == "object_creation_expression":
+                    # Find the class name being instantiated
+                    for oc_child in child.children:
+                        if oc_child.type == "name":
+                            exc_name = get_node_text(oc_child)
+                            if exc_name and exc_name not in seen:
+                                seen.add(exc_name)
+                                exceptions.append(exc_name)
+                            break
+                        elif oc_child.type == "qualified_name":
+                            exc_name = get_node_text(oc_child)
+                            if exc_name and exc_name not in seen:
+                                seen.add(exc_name)
+                                exceptions.append(exc_name)
+                            break
+                    break
+                elif child.type == "variable_name":
+                    # throw $exception (re-throwing)
+                    for vn_child in child.children:
+                        if vn_child.type == "name":
+                            exc_name = get_node_text(vn_child)
+                            if exc_name and exc_name not in seen:
+                                seen.add(exc_name)
+                                exceptions.append(exc_name)
+                    break
+
+    return exceptions
+
+
+def extract_php_modified_properties(method_node: Node) -> list[str]:
+    """Extract $this->X properties that are assigned to in a PHP method.
+
+    Args:
+        method_node: A method_declaration node.
+
+    Returns:
+        List of property names that are modified (deduplicated).
+    """
+    modified: list[str] = []
+    seen: set[str] = set()
+
+    for node in walk_tree(method_node):
+        if node.type in ("assignment_expression", "augmented_assignment_expression"):
+            left = node.children[0] if node.children else None
+            if left and left.type == "member_access_expression":
+                # Check if it's $this->property
+                is_this = False
+                prop_name = None
+
+                for mac_child in left.children:
+                    if mac_child.type == "variable_name":
+                        for vn_child in mac_child.children:
+                            if vn_child.type == "name" and get_node_text(vn_child) == "this":
+                                is_this = True
+                    elif mac_child.type == "name":
+                        prop_name = get_node_text(mac_child)
+
+                if is_this and prop_name and prop_name not in seen:
+                    seen.add(prop_name)
+                    modified.append(prop_name)
+
+    return modified
+
+
+# =============================================================================
+# RUST CORE EXTRACTION
+# =============================================================================
+
+
+def extract_rust_elements(tree: Tree, lines: list[str]) -> list[ExtractedElement]:
+    """Extract structs, enums, and functions from Rust code.
+
+    Args:
+        tree: Parsed tree-sitter tree.
+        lines: Source code lines.
+
+    Returns:
+        List of extracted elements.
+    """
+    elements: list[ExtractedElement] = []
+    root = tree.root_node
+
+    for node in root.children:
+        if node.type == "struct_item":
+            elem = _extract_rust_struct(node, lines)
+            if elem:
+                elements.append(elem)
+        elif node.type == "enum_item":
+            elem = _extract_rust_enum(node, lines)
+            if elem:
+                elements.append(elem)
+        elif node.type == "function_item":
+            elem = _extract_rust_function(node, lines)
+            if elem:
+                elements.append(elem)
+        elif node.type == "impl_item":
+            # impl blocks become "class" elements for consistency
+            elem = _extract_rust_impl(node, lines)
+            if elem:
+                elements.append(elem)
+
+    return elements
+
+
+def _extract_rust_struct(node: Node, lines: list[str]) -> ExtractedElement | None:
+    """Extract a Rust struct definition."""
+    name = None
+    for child in node.children:
+        if child.type == "type_identifier":
+            name = get_node_text(child)
+            break
+
+    if not name:
+        return None
+
+    return ExtractedElement(
+        element_type="class",  # Treat struct as class for consistency
+        name=name,
+        line_start=node.start_point[0] + 1,
+        line_end=node.end_point[0] + 1,
+        raw_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+        node=node,
+    )
+
+
+def _extract_rust_enum(node: Node, lines: list[str]) -> ExtractedElement | None:
+    """Extract a Rust enum definition."""
+    name = None
+    for child in node.children:
+        if child.type == "type_identifier":
+            name = get_node_text(child)
+            break
+
+    if not name:
+        return None
+
+    return ExtractedElement(
+        element_type="class",  # Treat enum as class for consistency
+        name=name,
+        line_start=node.start_point[0] + 1,
+        line_end=node.end_point[0] + 1,
+        raw_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+        decorators=["enum"],
+        node=node,
+    )
+
+
+def _extract_rust_function(node: Node, lines: list[str]) -> ExtractedElement | None:
+    """Extract a Rust function definition."""
+    name = None
+    is_async = False
+    visibility = "private"
+    decorators: list[str] = []
+
+    for child in node.children:
+        if child.type == "identifier":
+            name = get_node_text(child)
+        elif child.type == "visibility_modifier":
+            visibility = "public"
+        elif child.type == "async":
+            is_async = True
+            decorators.append("async")
+
+    if not name:
+        return None
+
+    # Build signature
+    signature = f"fn {name}"
+    for child in node.children:
+        if child.type == "parameters":
+            signature += get_node_text(child)
+            break
+
+    # Add return type
+    for i, child in enumerate(node.children):
+        if child.type == "->":
+            if i + 1 < len(node.children):
+                ret_type = node.children[i + 1]
+                signature += f" -> {get_node_text(ret_type)}"
+            break
+
+    return ExtractedElement(
+        element_type="function",
+        name=name,
+        line_start=node.start_point[0] + 1,
+        line_end=node.end_point[0] + 1,
+        raw_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+        signature=signature,
+        is_async=is_async,
+        decorators=decorators,
+        node=node,
+    )
+
+
+def _extract_rust_impl(node: Node, lines: list[str]) -> ExtractedElement | None:
+    """Extract a Rust impl block."""
+    # Find the type being implemented for
+    impl_type = None
+    trait_name = None
+    has_for = False
+
+    for child in node.children:
+        if child.type == "for":
+            has_for = True
+        elif child.type == "type_identifier":
+            if has_for:
+                impl_type = get_node_text(child)
+            else:
+                # This could be the trait or the type
+                if impl_type is None:
+                    impl_type = get_node_text(child)
+                else:
+                    trait_name = impl_type
+                    impl_type = get_node_text(child)
+        elif child.type == "generic_type":
+            # For impl Trait for Type or impl<T> Type
+            for gt_child in child.children:
+                if gt_child.type == "type_identifier":
+                    if has_for:
+                        impl_type = get_node_text(gt_child)
+                    elif trait_name is None:
+                        trait_name = get_node_text(gt_child)
+                    break
+
+    if not impl_type:
+        return None
+
+    name = impl_type
+    if trait_name:
+        name = f"{impl_type}::{trait_name}"
+
+    return ExtractedElement(
+        element_type="class",  # Treat impl as class for consistency
+        name=name,
+        line_start=node.start_point[0] + 1,
+        line_end=node.end_point[0] + 1,
+        raw_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+        decorators=["impl"] + ([trait_name] if trait_name else []),
+        node=node,
+    )
+
+
+def extract_rust_impl_members(
+    impl_node: Node, lines: list[str]
+) -> tuple[list[ExtractedElement], list[ExtractedElement]]:
+    """Extract methods and associated items from a Rust impl block.
+
+    Args:
+        impl_node: An impl_item node.
+        lines: Source code lines.
+
+    Returns:
+        Tuple of (methods, constants).
+    """
+    methods: list[ExtractedElement] = []
+    constants: list[ExtractedElement] = []
+
+    # Find declaration_list
+    decl_list = None
+    for child in impl_node.children:
+        if child.type == "declaration_list":
+            decl_list = child
+            break
+
+    if not decl_list:
+        return methods, constants
+
+    for child in decl_list.children:
+        if child.type == "function_item":
+            elem = _extract_rust_method(child, lines)
+            if elem:
+                methods.append(elem)
+        elif child.type == "const_item":
+            elem = _extract_rust_const(child, lines)
+            if elem:
+                constants.append(elem)
+
+    return methods, constants
+
+
+def _extract_rust_method(node: Node, lines: list[str]) -> ExtractedElement | None:
+    """Extract a Rust method from an impl block."""
+    name = None
+    is_async = False
+    visibility = "private"
+    decorators: list[str] = []
+    has_self = False
+
+    for child in node.children:
+        if child.type == "identifier":
+            name = get_node_text(child)
+        elif child.type == "visibility_modifier":
+            visibility = "public"
+        elif child.type == "async":
+            is_async = True
+            decorators.append("async")
+        elif child.type == "parameters":
+            # Check for self parameter
+            for param in child.children:
+                if param.type in ("self_parameter", "self"):
+                    has_self = True
+                    break
+                if param.type == "parameter":
+                    for pc in param.children:
+                        if pc.type == "self":
+                            has_self = True
+                            break
+
+    if not name:
+        return None
+
+    # Build signature
+    signature = f"fn {name}"
+    for child in node.children:
+        if child.type == "parameters":
+            signature += get_node_text(child)
+            break
+
+    # Add return type
+    for i, child in enumerate(node.children):
+        if child.type == "->":
+            if i + 1 < len(node.children):
+                ret_type = node.children[i + 1]
+                signature += f" -> {get_node_text(ret_type)}"
+            break
+
+    # Method vs associated function
+    elem_type = "method" if has_self else "function"
+
+    return ExtractedElement(
+        element_type=elem_type,
+        name=name,
+        line_start=node.start_point[0] + 1,
+        line_end=node.end_point[0] + 1,
+        raw_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+        signature=signature,
+        is_async=is_async,
+        decorators=decorators,
+        node=node,
+    )
+
+
+def _extract_rust_const(node: Node, lines: list[str]) -> ExtractedElement | None:
+    """Extract a Rust const from an impl block."""
+    name = None
+    for child in node.children:
+        if child.type == "identifier":
+            name = get_node_text(child)
+            break
+
+    if not name:
+        return None
+
+    return ExtractedElement(
+        element_type="constant",
+        name=name,
+        line_start=node.start_point[0] + 1,
+        line_end=node.end_point[0] + 1,
+        raw_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+    )
+
+
+def extract_rust_imports(tree: Tree, lines: list[str]) -> list[ExtractedImport]:
+    """Extract use statements from Rust code.
+
+    Args:
+        tree: Parsed tree-sitter tree.
+        lines: Source code lines.
+
+    Returns:
+        List of extracted imports.
+    """
+    imports: list[ExtractedImport] = []
+    root = tree.root_node
+
+    for node in walk_tree(root):
+        if node.type == "use_declaration":
+            # Extract imports from use statement
+            for child in node.children:
+                if child.type == "use_clause" or child.type == "scoped_identifier":
+                    path = get_node_text(child)
+                    if path:
+                        # Get the last component as the name
+                        parts = path.replace("::", ".").split(".")
+                        name = parts[-1] if parts else path
+                        imports.append(ExtractedImport(
+                            name=name,
+                            module=path,
+                            alias=None,
+                            line=node.start_point[0] + 1,
+                        ))
+                elif child.type == "use_as_clause":
+                    # use foo as bar
+                    original = None
+                    alias = None
+                    for ac_child in child.children:
+                        if ac_child.type == "scoped_identifier":
+                            original = get_node_text(ac_child)
+                        elif ac_child.type == "identifier" and original:
+                            alias = get_node_text(ac_child)
+                    if original:
+                        parts = original.replace("::", ".").split(".")
+                        name = alias or (parts[-1] if parts else original)
+                        imports.append(ExtractedImport(
+                            name=name,
+                            module=original,
+                            alias=alias,
+                            line=node.start_point[0] + 1,
+                        ))
+
+    return imports
+
+
+def extract_rust_calls(function_node: Node) -> list[ExtractedCall]:
+    """Extract function/method calls from Rust code.
+
+    Args:
+        function_node: A function_item node.
+
+    Returns:
+        List of extracted calls.
+    """
+    calls: list[ExtractedCall] = []
+    seen: set[tuple[str, str | None, int]] = set()
+
+    # Find function body (block)
+    body = None
+    for child in function_node.children:
+        if child.type == "block":
+            body = child
+            break
+
+    if not body:
+        return calls
+
+    for node in walk_tree(body):
+        if node.type == "call_expression":
+            func_node = node.children[0] if node.children else None
+            line = node.start_point[0] + 1
+
+            if func_node:
+                if func_node.type == "identifier":
+                    # Direct call: func()
+                    name = get_node_text(func_node)
+                    key = (name, None, line)
+                    if key not in seen:
+                        seen.add(key)
+                        calls.append(ExtractedCall(name=name, receiver=None, line=line))
+
+                elif func_node.type == "field_expression":
+                    # Method call: self.method() or obj.method()
+                    receiver = None
+                    method = None
+                    for fe_child in func_node.children:
+                        if fe_child.type == "identifier":
+                            receiver = get_node_text(fe_child)
+                        elif fe_child.type == "field_identifier":
+                            method = get_node_text(fe_child)
+
+                    if method:
+                        key = (method, receiver, line)
+                        if key not in seen:
+                            seen.add(key)
+                            calls.append(ExtractedCall(name=method, receiver=receiver, line=line))
+
+                elif func_node.type == "scoped_identifier":
+                    # Static/associated call: Type::method()
+                    text = get_node_text(func_node)
+                    if "::" in text:
+                        parts = text.split("::")
+                        receiver = parts[0] if len(parts) > 1 else None
+                        method = parts[-1]
+                        key = (method, receiver, line)
+                        if key not in seen:
+                            seen.add(key)
+                            calls.append(ExtractedCall(name=method, receiver=receiver, line=line))
+
+    return calls
+
+
+# =============================================================================
+# RUST ENHANCED CONTEXT EXTRACTION
+# =============================================================================
+
+
+def extract_rust_struct_fields(struct_node: Node) -> list[dict[str, str | int]]:
+    """Extract fields from a Rust struct.
+
+    For: struct Foo { x: i32, y: String }
+    Returns: [{"name": "x", "line": 2}, {"name": "y", "line": 3}]
+
+    Args:
+        struct_node: A struct_item node from tree-sitter.
+
+    Returns:
+        List of dicts with "name" and "line" keys.
+    """
+    fields: list[dict[str, str | int]] = []
+    seen: set[str] = set()
+
+    if struct_node.type != "struct_item":
+        return fields
+
+    # Find field_declaration_list
+    for child in struct_node.children:
+        if child.type == "field_declaration_list":
+            for field_child in child.children:
+                if field_child.type == "field_declaration":
+                    # Find field_identifier
+                    for fd_child in field_child.children:
+                        if fd_child.type == "field_identifier":
+                            name = get_node_text(fd_child)
+                            if name and name not in seen:
+                                seen.add(name)
+                                fields.append({
+                                    "name": name,
+                                    "line": fd_child.start_point[0] + 1,
+                                })
+                            break
+
+    return fields
+
+
+def extract_rust_impl_traits(impl_node: Node) -> list[str]:
+    """Extract trait implementations from a Rust impl block.
+
+    For: impl From<Config> for MyService { ... }
+    Returns: ["From"]
+
+    For: impl MyService { ... }
+    Returns: []
+
+    Args:
+        impl_node: An impl_item node from tree-sitter.
+
+    Returns:
+        List of trait names being implemented.
+    """
+    traits: list[str] = []
+
+    if impl_node.type != "impl_item":
+        return traits
+
+    # Check if this is a trait impl (has 'for' keyword)
+    has_for = False
+    for child in impl_node.children:
+        if child.type == "for":
+            has_for = True
+            break
+
+    if not has_for:
+        return traits
+
+    # Find the trait type (before 'for')
+    for child in impl_node.children:
+        if child.type == "for":
+            break
+        if child.type == "type_identifier":
+            traits.append(get_node_text(child))
+        elif child.type == "generic_type":
+            # From<Config> -> get "From"
+            for gt_child in child.children:
+                if gt_child.type == "type_identifier":
+                    traits.append(get_node_text(gt_child))
+                    break
+
+    return traits
+
+
+def extract_rust_panics(function_node: Node) -> list[str]:
+    """Extract panic/error types from a Rust function.
+
+    Finds:
+    - panic!("msg") -> ["panic"]
+    - Err(Error::ValidationError(...)) -> inside Err call
+    - return Err(...) -> ["Err"]
+
+    Args:
+        function_node: A function_item node from tree-sitter.
+
+    Returns:
+        List of panic/error type names (deduplicated).
+    """
+    errors: list[str] = []
+    seen: set[str] = set()
+
+    # Find the function body (block)
+    body_node = None
+    for child in function_node.children:
+        if child.type == "block":
+            body_node = child
+            break
+
+    if not body_node:
+        return errors
+
+    for node in walk_tree(body_node):
+        # panic!(...) macro
+        if node.type == "macro_invocation":
+            for mac_child in node.children:
+                if mac_child.type == "identifier":
+                    macro_name = get_node_text(mac_child)
+                    if macro_name in ("panic", "unreachable", "unimplemented", "todo"):
+                        if macro_name not in seen:
+                            seen.add(macro_name)
+                            errors.append(macro_name)
+                    break
+
+        # Err(...) call
+        elif node.type == "call_expression":
+            func = node.children[0] if node.children else None
+            if func:
+                if func.type == "identifier":
+                    name = get_node_text(func)
+                    if name == "Err":
+                        if name not in seen:
+                            seen.add(name)
+                            errors.append(name)
+                        # Also check for error type inside Err(...)
+                        args = None
+                        for child in node.children:
+                            if child.type == "arguments":
+                                args = child
+                                break
+                        if args:
+                            for arg in walk_tree(args):
+                                if arg.type == "scoped_identifier":
+                                    text = get_node_text(arg)
+                                    if "::" in text and "Error" in text:
+                                        parts = text.split("::")
+                                        variant = parts[-1]
+                                        if variant not in seen:
+                                            seen.add(variant)
+                                            errors.append(variant)
+                elif func.type == "scoped_identifier":
+                    # Only capture if it looks like an error (contains "Error")
+                    text = get_node_text(func)
+                    if "::" in text and "Error" in text:
+                        parts = text.split("::")
+                        variant = parts[-1]
+                        if variant not in seen:
+                            seen.add(variant)
+                            errors.append(variant)
+
+    return errors
+
+
+def extract_rust_modified_fields(function_node: Node) -> list[str]:
+    """Extract self.X fields that are assigned to in a Rust method.
+
+    Args:
+        function_node: A function_item node.
+
+    Returns:
+        List of field names that are modified (deduplicated).
+    """
+    modified: list[str] = []
+    seen: set[str] = set()
+
+    # Find the function body (block)
+    body_node = None
+    for child in function_node.children:
+        if child.type == "block":
+            body_node = child
+            break
+
+    if not body_node:
+        return modified
+
+    for node in walk_tree(body_node):
+        if node.type == "assignment_expression":
+            left = node.children[0] if node.children else None
+            if left and left.type == "field_expression":
+                # Check if it's self.field
+                obj = None
+                field = None
+                for fe_child in left.children:
+                    if fe_child.type == "identifier" and get_node_text(fe_child) == "self":
+                        obj = fe_child
+                    elif fe_child.type == "field_identifier":
+                        field = fe_child
+
+                if obj and field:
+                    field_name = get_node_text(field)
+                    if field_name and field_name not in seen:
+                        seen.add(field_name)
+                        modified.append(field_name)
+
+    return modified
 
 
 # =============================================================================

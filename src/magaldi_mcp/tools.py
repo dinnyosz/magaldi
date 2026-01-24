@@ -1913,7 +1913,7 @@ def find_dead_code(
         index="magaldi-code-elements",
         body={
             "query": {"bool": {"filter": filters}},
-            "_source": ["element_id", "name", "element_type", "relative_path",
+            "_source": ["element_id", "hash_id", "name", "element_type", "relative_path",
                         "line_start", "decorators", "is_test", "summary"],
             "size": 2000,
         },
@@ -2033,7 +2033,7 @@ def find_entry_points(
         index="magaldi-code-elements",
         body={
             "query": {"bool": {"filter": filters}},
-            "_source": ["element_id", "name", "element_type", "relative_path",
+            "_source": ["element_id", "hash_id", "name", "element_type", "relative_path",
                         "line_start", "decorators", "is_test", "summary"],
             "size": 2000,
         },

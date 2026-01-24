@@ -448,37 +448,41 @@ def truncate_code(code: str, max_tokens: int = 4000) -> str:
 # =============================================================================
 
 PROMPTS = {
-    "file": """Summarize this {language} file in 4-6 sentences for an AI agent navigating this codebase. Address:
-- The primary purpose and responsibility of this module
-- What problem domain or capability it provides to the system
-- Key patterns, abstractions, or architectural decisions used
-- When an agent should look in this file (what tasks or questions lead here)
-- Important dependencies or integrations with other parts of the system
+    "file": """Summarize this {language} file in 4-6 sentences for an AI agent navigating this codebase.
 
-Do NOT enumerate individual classes or functions - those are documented separately.
+Answer these questions:
+1. PURPOSE: What is this module's primary job? What capability does it provide?
+2. DOMAIN: What problem space does this code address?
+3. ARCHITECTURE: What design patterns or abstractions does it use? (e.g., factory, repository, decorator, event-driven)
+4. DISCOVERY: When should an agent look here? What questions or tasks lead to this file?
+5. DEPENDENCIES: What external modules or systems does this integrate with?
+{imports_section}
+
+Do NOT list individual classes/functions - those are documented separately.
 
 File: {file_path}
 
 Code:
 {code}
 
-IMPORTANT: Write ONLY the 4-6 sentence summary below. Do NOT include any reasoning, analysis, bullet points, or explanations. Start directly with the first sentence of the summary.
+Write ONLY the 4-6 sentence summary. No reasoning or bullet points.
 
 Summary:""",
-    "class": """Summarize this {language} class in 4-6 sentences for an AI agent navigating this codebase.
+    "class": """Summarize this {language} class in 4-6 sentences for an AI agent.
 
-FOCUS on the class itself. Use the file context only to understand how this class fits in - do not repeat or summarize the file context.
+FOCUS on the class itself. Use file context only to understand how it fits in.
 
-Address:
-- What this class represents, models, or encapsulates
-- Its core responsibility and the problem it solves
-- How and when to instantiate or use this class (see usage examples below if available)
-- Key state it manages and invariants it maintains
-- How it collaborates with other classes or modules
+Answer these questions:
+1. IDENTITY: What real-world concept or data structure does this class model?
+2. RESPONSIBILITY: What problem does using this class solve?
+3. INSTANTIATION: How do you create an instance? What parameters are required? Any factory methods or singletons?{instantiation_hints}
+4. STATE: What key attributes does it hold? What makes an instance valid vs invalid?{attributes_section}
+5. COLLABORATORS: What other classes or modules does it work with?{collaborators_section}
 
-Do NOT enumerate individual methods - those are documented separately.
+Do NOT list methods - those are documented separately.
+{base_classes_section}
 
-File context (for understanding only): {file_summary}
+File context: {file_summary}
 
 Class: {class_name}
 {decorators}
@@ -487,21 +491,21 @@ Code:
 {code}
 {usages_section}
 
-IMPORTANT: Write ONLY the 4-6 sentence summary below. Do NOT include any reasoning, analysis, bullet points, or explanations. Start directly with the first sentence of the summary.
+Write ONLY the 4-6 sentence summary. No reasoning or bullet points.
 
 Summary:""",
-    "function": """Describe this function in 4-6 sentences for an AI agent navigating this codebase.
+    "function": """Describe this function in 4-6 sentences for an AI agent.
 
-FOCUS on the function itself. Use file/class context only to understand the function's role - do not repeat or summarize the context.
+FOCUS on the function itself. Use context only to understand its role.
 
-Address:
-- What operation, transformation, or task this function performs
-- The inputs it accepts (with their purposes) and what it returns
-- When to call this function - what scenarios or tasks require it (see usage examples below if available)
-- Side effects: external state changes, I/O, exceptions raised
-- Key edge cases or preconditions the caller should know
+Answer these questions:
+1. OPERATION: What does calling this function accomplish?
+2. INTERFACE: What are the parameters and return value? What types?
+3. WHEN TO USE: In what scenario should an agent call this? What task requires it?{usage_examples}
+4. SIDE EFFECTS: Does it modify external state, perform I/O, or raise exceptions?{exceptions_section}
+5. EDGE CASES: What happens with empty/None inputs? What preconditions must hold? What errors can occur?
 
-File context (for understanding only): {file_summary}
+File context: {file_summary}
 {class_context}
 
 Function: {function_name}
@@ -510,24 +514,23 @@ Signature: {signature}
 
 Code:
 {code}
-{usages_section}
 
-IMPORTANT: Write ONLY the 4-6 sentence summary below. Do NOT include any reasoning, analysis, bullet points, or explanations. Start directly with the first sentence of the summary.
+Write ONLY the 4-6 sentence summary. No reasoning or bullet points.
 
 Summary:""",
-    "method": """Describe this method in 4-6 sentences for an AI agent navigating this codebase.
+    "method": """Describe this method in 4-6 sentences for an AI agent.
 
-FOCUS on the method itself. Use file/class context only to understand the method's role - do not repeat or summarize the context.
+FOCUS on the method itself. Use context only to understand its role.
 
-Address:
-- What operation this method performs on or for the object
-- The inputs it accepts (with their purposes) and what it returns
-- How it reads or modifies the object's state
-- When to call this method in the object's lifecycle (see usage examples below if available)
-- Side effects, exceptions, or preconditions the caller should know
+Answer these questions:
+1. OPERATION: What does this method do to/for the object?
+2. INTERFACE: What parameters does it take? What does it return?
+3. STATE: Which instance attributes does it read? Which does it modify?{state_section}
+4. LIFECYCLE: Is this a setup/init method? Cleanup/teardown? Called once or repeatedly? Must it be called in a specific order relative to other methods?
+5. ERRORS: What exceptions can it raise? What preconditions must hold?{exceptions_section}
 
-File context (for understanding only): {file_summary}
-Class context (for understanding only): {class_summary}
+File context: {file_summary}
+Class context: {class_summary}
 
 Method: {method_name}
 Signature: {signature}
@@ -537,39 +540,38 @@ Code:
 {code}
 {usages_section}
 
-IMPORTANT: Write ONLY the 4-6 sentence summary below. Do NOT include any reasoning, analysis, bullet points, or explanations. Start directly with the first sentence of the summary.
+Write ONLY the 4-6 sentence summary. No reasoning or bullet points.
 
 Summary:""",
-    "constant": """Describe this constant in 2-3 sentences for an AI agent navigating this codebase.
+    "constant": """Describe this constant in 2-3 sentences for an AI agent.
 
-FOCUS on the constant itself. Use context only to understand its purpose - do not repeat or summarize the context.
+FOCUS on the constant itself.
 
-Address:
-- What configuration, value, or data this constant represents
-- Where and why this constant is used in the system
-- Any important constraints or relationships with other values
+Answer these questions:
+1. MEANING: What does this value represent or configure?
+2. USAGE: Where in the system is it used?{usage_examples}
+3. CONSTRAINTS: What are valid values? Any min/max bounds? Related constants that must stay consistent?
 
-File context (for understanding only): {file_summary}
+File context: {file_summary}
 {function_context}
 
 Name: {name}
 Value:
 {code}
-{usages_section}
 
-IMPORTANT: Write ONLY the 2-3 sentence description below. Do NOT include any reasoning, analysis, bullet points, or explanations. Start directly with the first sentence.
+Write ONLY the 2-3 sentence description. No reasoning or bullet points.
 
 Description:""",
-    "variable": """Describe this variable in 2-3 sentences for an AI agent navigating this codebase.
+    "variable": """Describe this variable in 2-3 sentences for an AI agent.
 
-FOCUS on the variable itself. Use context only to understand its purpose - do not repeat or summarize the context.
+FOCUS on the variable itself.
 
-Address:
-- What data, state, or configuration this variable holds
-- How it is initialized and when it changes
-- Its role in the containing scope's behavior
+Answer these questions:
+1. DATA: What information does this variable hold?
+2. LIFECYCLE: How is it initialized? When and why does it change?
+3. ROLE: How does this variable influence the behavior of its containing scope?
 
-File context (for understanding only): {file_summary}
+File context: {file_summary}
 {class_context}
 {function_context}
 
@@ -578,10 +580,131 @@ Value:
 {code}
 {usages_section}
 
-IMPORTANT: Write ONLY the 2-3 sentence description below. Do NOT include any reasoning, analysis, bullet points, or explanations. Start directly with the first sentence.
+Write ONLY the 2-3 sentence description. No reasoning or bullet points.
 
 Description:""",
 }
+
+
+# =============================================================================
+# CONTEXT BUILDER HELPERS
+# =============================================================================
+
+
+def _build_imports_section(element: CodeElement) -> str:
+    """Build imports section for file prompt.
+
+    Shows key external imports to indicate dependencies.
+    """
+    if not element.imports:
+        return ""
+
+    # Filter to external imports (not relative)
+    external = [
+        imp.module for imp in element.imports
+        if not imp.module.startswith(".")
+    ][:5]  # Limit to 5
+
+    if not external:
+        return ""
+
+    return f"\nKey imports: {', '.join(external)}"
+
+
+def _build_attributes_section(element: CodeElement) -> str:
+    """Build attributes section for class prompt.
+
+    Shows instance attributes defined in __init__.
+    """
+    if not element.class_attributes:
+        return ""
+
+    attr_names = [a["name"] for a in element.class_attributes][:5]  # Limit to 5
+    if not attr_names:
+        return ""
+
+    return f"\nInstance attributes: {', '.join(attr_names)}"
+
+
+def _build_base_classes_section(element: CodeElement) -> str:
+    """Build base classes section for class prompt."""
+    if not element.base_classes:
+        return ""
+
+    return f"\nInherits from: {', '.join(element.base_classes)}"
+
+
+def _build_collaborators_section(element: CodeElement) -> str:
+    """Build collaborators section for class prompt.
+
+    Shows types this class interacts with based on calls.
+    """
+    if not element.calls:
+        return ""
+
+    # Get unique receivers that aren't 'self'
+    receivers = list({
+        c.receiver for c in element.calls
+        if c.receiver and c.receiver != "self"
+    })[:3]  # Limit to 3
+
+    if not receivers:
+        return ""
+
+    return f"\nUses: {', '.join(receivers)}"
+
+
+def _build_instantiation_hints(element: CodeElement) -> str:
+    """Build instantiation hints for class prompt.
+
+    Filters context_usages for instantiation examples.
+    """
+    if not element.context_usages:
+        return ""
+
+    # Filter for instantiation usages
+    insts = [
+        u for u in element.context_usages
+        if "instantiated" in u.lower()
+    ][:2]  # Limit to 2
+
+    if not insts:
+        return ""
+
+    return "\nInstantiation examples:\n" + "\n".join(f"- {u}" for u in insts)
+
+
+def _build_exceptions_section(element: CodeElement) -> str:
+    """Build exceptions section for function/method prompt."""
+    if not element.exceptions_raised:
+        return ""
+
+    return f"\nRaises: {', '.join(element.exceptions_raised)}"
+
+
+def _build_state_section(element: CodeElement) -> str:
+    """Build state section for method prompt.
+
+    Shows which attributes this method modifies.
+    """
+    if not element.attributes_modified:
+        return ""
+
+    return f"\nModifies attributes: {', '.join(element.attributes_modified)}"
+
+
+def _build_usage_examples(element: CodeElement) -> str:
+    """Build usage examples section for function/constant prompts."""
+    if not element.context_usages:
+        return ""
+
+    examples = element.context_usages[:3]  # Limit to 3
+    return "\nUsage examples:\n" + "\n".join(f"- {u}" for u in examples)
+
+
+# =============================================================================
+# PROMPT BUILDING
+# =============================================================================
 
 
 def build_prompt(
@@ -589,7 +712,7 @@ def build_prompt(
     parent_summaries: dict[str, str],
     max_code_tokens: int = 4000,
 ) -> str:
-    """Build prompt with parent context.
+    """Build prompt with parent context and enhanced context sections.
 
     Args:
         element: Code element to summarize.
@@ -609,18 +732,18 @@ def build_prompt(
     else:
         template = PROMPTS["function"]
 
-    # Build context sections
+    # Build parent context sections
     file_summary = parent_summaries.get("file", "No file context available.")
     class_summary = parent_summaries.get("class", "")
     function_summary = parent_summaries.get("function", "")
 
     class_context = ""
     if class_summary and element_type in ("method", "function", "variable", "constant"):
-        class_context = f"Class context (for understanding only): {class_summary}"
+        class_context = f"Class context: {class_summary}"
 
     function_context = ""
     if function_summary and element_type in ("variable", "constant"):
-        function_context = f"Function/method context (for understanding only): {function_summary}"
+        function_context = f"Function/method context: {function_summary}"
 
     docstring_section = ""
     if element.docstring:
@@ -634,6 +757,16 @@ def build_prompt(
     usages_section = ""
     if element.context_usages:
         usages_section = "\nUsed in:\n" + "\n".join(f"- {u}" for u in element.context_usages)
+
+    # Build enhanced context sections based on element type
+    imports_section = _build_imports_section(element) if element_type == "file" else ""
+    attributes_section = _build_attributes_section(element) if element_type == "class" else ""
+    base_classes_section = _build_base_classes_section(element) if element_type == "class" else ""
+    collaborators_section = _build_collaborators_section(element) if element_type == "class" else ""
+    instantiation_hints = _build_instantiation_hints(element) if element_type == "class" else ""
+    exceptions_section = _build_exceptions_section(element) if element_type in ("function", "method") else ""
+    state_section = _build_state_section(element) if element_type == "method" else ""
+    usage_examples = _build_usage_examples(element) if element_type in ("function", "constant") else ""
 
     # Truncate code
     code = truncate_code(element.raw_code or "", max_code_tokens)
@@ -654,6 +787,15 @@ def build_prompt(
         decorators=decorators,
         code=code,
         usages_section=usages_section,
+        # Enhanced context sections
+        imports_section=imports_section,
+        attributes_section=attributes_section,
+        base_classes_section=base_classes_section,
+        collaborators_section=collaborators_section,
+        instantiation_hints=instantiation_hints,
+        exceptions_section=exceptions_section,
+        state_section=state_section,
+        usage_examples=usage_examples,
     )
 
 

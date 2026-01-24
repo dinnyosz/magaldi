@@ -23,16 +23,40 @@ from magaldi_core.tree_sitter_manager import (
     ExtractedElement,
     ExtractedImport,
     ExtractedReference,
+    extract_javascript_base_class,
     extract_javascript_calls,
+    extract_javascript_class_fields,
     extract_javascript_class_members,
     extract_javascript_elements,
     extract_javascript_imports,
+    extract_javascript_modified_properties,
     extract_javascript_references,
+    extract_javascript_thrown_exceptions,
+    extract_php_base_class,
+    extract_php_calls,
+    extract_php_class_members,
+    extract_php_class_properties,
+    extract_php_elements,
+    extract_php_imports,
+    extract_php_modified_properties,
+    extract_php_thrown_exceptions,
+    extract_python_base_classes,
     extract_python_calls,
+    extract_python_class_attributes,
     extract_python_class_members,
     extract_python_elements,
     extract_python_imports,
+    extract_python_modified_attributes,
+    extract_python_raised_exceptions,
     extract_python_references,
+    extract_rust_calls,
+    extract_rust_elements,
+    extract_rust_impl_members,
+    extract_rust_impl_traits,
+    extract_rust_imports,
+    extract_rust_modified_fields,
+    extract_rust_panics,
+    extract_rust_struct_fields,
     get_manager,
 )
 
@@ -199,6 +223,16 @@ class CodeElement:
 
     # Calls (only populated on function/method elements)
     calls: list[Call] = field(default_factory=list)
+
+    # Enhanced context for summarization (populated during parsing)
+    # For classes: instance attributes from __init__
+    class_attributes: list[dict[str, Any]] | None = None
+    # For classes: base class names
+    base_classes: list[str] | None = None
+    # For functions/methods: exception types raised
+    exceptions_raised: list[str] | None = None
+    # For methods: attributes modified (self.X = ...)
+    attributes_modified: list[str] | None = None
 
     # Content hash for change detection (computed from raw_code)
     content_hash: str | None = None
@@ -561,6 +595,13 @@ class PythonParser(TreeSitterParser):
         """Convert extracted class to CodeElement."""
         docstring = _extract_docstring(lines, ext.line_start)
 
+        # Extract class attributes and base classes from AST
+        class_attributes = None
+        base_classes = None
+        if ext.node:
+            class_attributes = extract_python_class_attributes(ext.node) or None
+            base_classes = extract_python_base_classes(ext.node) or None
+
         elem = CodeElement(
             scope=scope,
             repository=repository,
@@ -576,6 +617,8 @@ class PythonParser(TreeSitterParser):
             decorators=ext.decorators or [],
             level=1,
             visibility=_determine_visibility(ext.name),
+            class_attributes=class_attributes,
+            base_classes=base_classes,
         )
         elem.element_id = generate_element_id(
             scope, repository, username, file_info.relative_path, "class", ext.name, ext.line_start
@@ -594,14 +637,16 @@ class PythonParser(TreeSitterParser):
         """Convert extracted function to CodeElement."""
         docstring = _extract_docstring(lines, ext.line_start)
 
-        # Extract calls from function body
+        # Extract calls and exceptions from function body
         calls: list[Call] = []
+        exceptions_raised = None
         if ext.node:
             extracted_calls = extract_python_calls(ext.node)
             calls = [
                 Call(name=c.name, receiver=c.receiver, line=c.line)
                 for c in extracted_calls
             ]
+            exceptions_raised = extract_python_raised_exceptions(ext.node) or None
 
         elem = CodeElement(
             scope=scope,
@@ -621,6 +666,7 @@ class PythonParser(TreeSitterParser):
             visibility=_determine_visibility(ext.name),
             level=2,
             calls=calls,
+            exceptions_raised=exceptions_raised,
         )
         elem.element_id = generate_element_id(
             scope, repository, username, file_info.relative_path, "function", ext.name, ext.line_start
@@ -640,14 +686,18 @@ class PythonParser(TreeSitterParser):
         """Convert extracted method to CodeElement."""
         docstring = _extract_docstring(lines, ext.line_start)
 
-        # Extract calls from method body
+        # Extract calls, exceptions, and modified attributes from method body
         calls: list[Call] = []
+        exceptions_raised = None
+        attributes_modified = None
         if ext.node:
             extracted_calls = extract_python_calls(ext.node)
             calls = [
                 Call(name=c.name, receiver=c.receiver, line=c.line)
                 for c in extracted_calls
             ]
+            exceptions_raised = extract_python_raised_exceptions(ext.node) or None
+            attributes_modified = extract_python_modified_attributes(ext.node) or None
 
         elem = CodeElement(
             scope=scope,
@@ -668,6 +718,8 @@ class PythonParser(TreeSitterParser):
             level=2,
             parent_id=parent_class.element_id,
             calls=calls,
+            exceptions_raised=exceptions_raised,
+            attributes_modified=attributes_modified,
         )
         elem.element_id = generate_element_id(
             scope, repository, username, file_info.relative_path, "method", ext.name, ext.line_start
@@ -812,6 +864,14 @@ class JavaScriptParser(TreeSitterParser):
         lines: list[str],
     ) -> CodeElement:
         """Convert extracted class to CodeElement."""
+        # Extract class fields and base class from AST
+        class_attributes = None
+        base_classes = None
+        if ext.node:
+            fields = extract_javascript_class_fields(ext.node)
+            class_attributes = fields if fields else None
+            base_classes = extract_javascript_base_class(ext.node) or None
+
         elem = CodeElement(
             scope=scope,
             repository=repository,
@@ -824,6 +884,8 @@ class JavaScriptParser(TreeSitterParser):
             line_end=ext.line_end,
             raw_code=ext.raw_code,
             level=1,
+            class_attributes=class_attributes,
+            base_classes=base_classes,
         )
         elem.element_id = generate_element_id(
             scope, repository, username, file_info.relative_path, "class", ext.name, ext.line_start
@@ -840,14 +902,16 @@ class JavaScriptParser(TreeSitterParser):
         lines: list[str],
     ) -> CodeElement:
         """Convert extracted function to CodeElement."""
-        # Extract calls from function body
+        # Extract calls and exceptions from function body
         calls: list[Call] = []
+        exceptions_raised = None
         if ext.node:
             extracted_calls = extract_javascript_calls(ext.node)
             calls = [
                 Call(name=c.name, receiver=c.receiver, line=c.line)
                 for c in extracted_calls
             ]
+            exceptions_raised = extract_javascript_thrown_exceptions(ext.node) or None
 
         elem = CodeElement(
             scope=scope,
@@ -864,6 +928,7 @@ class JavaScriptParser(TreeSitterParser):
             is_async=ext.is_async,
             level=2,
             calls=calls,
+            exceptions_raised=exceptions_raised,
         )
         elem.element_id = generate_element_id(
             scope, repository, username, file_info.relative_path, "function", ext.name, ext.line_start
@@ -881,14 +946,18 @@ class JavaScriptParser(TreeSitterParser):
         lines: list[str],
     ) -> CodeElement:
         """Convert extracted method to CodeElement."""
-        # Extract calls from method body
+        # Extract calls, exceptions, and modified properties from method body
         calls: list[Call] = []
+        exceptions_raised = None
+        attributes_modified = None
         if ext.node:
             extracted_calls = extract_javascript_calls(ext.node)
             calls = [
                 Call(name=c.name, receiver=c.receiver, line=c.line)
                 for c in extracted_calls
             ]
+            exceptions_raised = extract_javascript_thrown_exceptions(ext.node) or None
+            attributes_modified = extract_javascript_modified_properties(ext.node) or None
 
         elem = CodeElement(
             scope=scope,
@@ -906,6 +975,8 @@ class JavaScriptParser(TreeSitterParser):
             level=2,
             parent_id=parent_class.element_id,
             calls=calls,
+            exceptions_raised=exceptions_raised,
+            attributes_modified=attributes_modified,
         )
         elem.element_id = generate_element_id(
             scope, repository, username, file_info.relative_path, "method", ext.name, ext.line_start
@@ -951,6 +1022,490 @@ class JavaScriptParser(TreeSitterParser):
                 elem.parent_id = file_element.element_id
 
 
+class PhpParser(TreeSitterParser):
+    """Parse PHP files using tree-sitter."""
+
+    def __init__(self) -> None:
+        super().__init__("php")
+
+    def parse(
+        self,
+        content: str,
+        file_info: FileInfo,
+        scope: str,
+        repository: str,
+        username: str,
+    ) -> list[CodeElement]:
+        """Parse PHP content and extract elements."""
+        elements: list[CodeElement] = []
+        lines = content.split("\n")
+        line_count = len(lines)
+
+        # Create file-level element
+        file_element = CodeElement(
+            scope=scope,
+            repository=repository,
+            username=username,
+            relative_path=file_info.relative_path,
+            element_type="file",
+            name=Path(file_info.relative_path).name,
+            language="php",
+            line_start=1,
+            line_end=line_count,
+            level=0,
+        )
+        file_element.element_id = generate_element_id(
+            scope, repository, username, file_info.relative_path, "file", file_element.name, 1
+        )
+        elements.append(file_element)
+
+        # Parse with tree-sitter
+        tree = self.manager.parse(content.encode("utf-8"), "php")
+        extracted = extract_php_elements(tree, lines)
+
+        # Extract imports
+        extracted_imports = extract_php_imports(tree, lines)
+        file_element.imports = [
+            Import(name=imp.name, module=imp.module, alias=imp.alias, line=imp.line)
+            for imp in extracted_imports
+        ]
+
+        # Convert ExtractedElements to CodeElements
+        for ext in extracted:
+            if ext.element_type == "class":
+                class_elem = self._convert_class(ext, file_info, scope, repository, username, lines)
+                elements.append(class_elem)
+
+                # Extract class members
+                if ext.node:
+                    methods, properties = extract_php_class_members(ext.node, lines)
+
+                    for method_ext in methods:
+                        method_elem = self._convert_method(
+                            method_ext, class_elem, file_info, scope, repository, username, lines
+                        )
+                        elements.append(method_elem)
+
+                    for prop_ext in properties:
+                        prop_elem = self._convert_variable(
+                            prop_ext, file_info, scope, repository, username, lines, parent=class_elem
+                        )
+                        elements.append(prop_elem)
+
+            elif ext.element_type == "function":
+                func_elem = self._convert_function(ext, file_info, scope, repository, username, lines)
+                elements.append(func_elem)
+
+        # Set parent IDs
+        self._set_hierarchy(elements, file_element)
+
+        return elements
+
+    def _convert_class(
+        self,
+        ext: ExtractedElement,
+        file_info: FileInfo,
+        scope: str,
+        repository: str,
+        username: str,
+        lines: list[str],
+    ) -> CodeElement:
+        """Convert extracted class to CodeElement."""
+        class_attributes = None
+        base_classes = None
+        if ext.node:
+            props = extract_php_class_properties(ext.node)
+            class_attributes = props if props else None
+            base_classes = extract_php_base_class(ext.node) or None
+
+        elem = CodeElement(
+            scope=scope,
+            repository=repository,
+            username=username,
+            relative_path=file_info.relative_path,
+            element_type="class",
+            name=ext.name,
+            language="php",
+            line_start=ext.line_start,
+            line_end=ext.line_end,
+            raw_code=ext.raw_code,
+            level=1,
+            class_attributes=class_attributes,
+            base_classes=base_classes,
+        )
+        elem.element_id = generate_element_id(
+            scope, repository, username, file_info.relative_path, "class", ext.name, ext.line_start
+        )
+        return elem
+
+    def _convert_function(
+        self,
+        ext: ExtractedElement,
+        file_info: FileInfo,
+        scope: str,
+        repository: str,
+        username: str,
+        lines: list[str],
+    ) -> CodeElement:
+        """Convert extracted function to CodeElement."""
+        calls: list[Call] = []
+        exceptions_raised = None
+        if ext.node:
+            extracted_calls = extract_php_calls(ext.node)
+            calls = [Call(name=c.name, receiver=c.receiver, line=c.line) for c in extracted_calls]
+            exceptions_raised = extract_php_thrown_exceptions(ext.node) or None
+
+        elem = CodeElement(
+            scope=scope,
+            repository=repository,
+            username=username,
+            relative_path=file_info.relative_path,
+            element_type="function",
+            name=ext.name,
+            language="php",
+            line_start=ext.line_start,
+            line_end=ext.line_end,
+            raw_code=ext.raw_code,
+            signature=ext.signature,
+            level=2,
+            calls=calls,
+            exceptions_raised=exceptions_raised,
+        )
+        elem.element_id = generate_element_id(
+            scope, repository, username, file_info.relative_path, "function", ext.name, ext.line_start
+        )
+        return elem
+
+    def _convert_method(
+        self,
+        ext: ExtractedElement,
+        parent_class: CodeElement,
+        file_info: FileInfo,
+        scope: str,
+        repository: str,
+        username: str,
+        lines: list[str],
+    ) -> CodeElement:
+        """Convert extracted method to CodeElement."""
+        calls: list[Call] = []
+        exceptions_raised = None
+        attributes_modified = None
+        if ext.node:
+            extracted_calls = extract_php_calls(ext.node)
+            calls = [Call(name=c.name, receiver=c.receiver, line=c.line) for c in extracted_calls]
+            exceptions_raised = extract_php_thrown_exceptions(ext.node) or None
+            attributes_modified = extract_php_modified_properties(ext.node) or None
+
+        elem = CodeElement(
+            scope=scope,
+            repository=repository,
+            username=username,
+            relative_path=file_info.relative_path,
+            element_type="method",
+            name=ext.name,
+            language="php",
+            line_start=ext.line_start,
+            line_end=ext.line_end,
+            raw_code=ext.raw_code,
+            signature=ext.signature,
+            decorators=ext.decorators or [],
+            level=2,
+            parent_id=parent_class.element_id,
+            calls=calls,
+            exceptions_raised=exceptions_raised,
+            attributes_modified=attributes_modified,
+        )
+        elem.element_id = generate_element_id(
+            scope, repository, username, file_info.relative_path, "method", ext.name, ext.line_start
+        )
+        return elem
+
+    def _convert_variable(
+        self,
+        ext: ExtractedElement,
+        file_info: FileInfo,
+        scope: str,
+        repository: str,
+        username: str,
+        lines: list[str],
+        parent: CodeElement | None = None,
+    ) -> CodeElement:
+        """Convert extracted variable/property to CodeElement."""
+        elem = CodeElement(
+            scope=scope,
+            repository=repository,
+            username=username,
+            relative_path=file_info.relative_path,
+            element_type="variable",
+            name=ext.name,
+            language="php",
+            line_start=ext.line_start,
+            line_end=ext.line_end,
+            raw_code=ext.raw_code,
+            decorators=ext.decorators or [],
+            level=3,
+            parent_id=parent.element_id if parent else None,
+        )
+        elem.element_id = generate_element_id(
+            scope, repository, username, file_info.relative_path, "variable", ext.name, ext.line_start
+        )
+        return elem
+
+    def _set_hierarchy(self, elements: list[CodeElement], file_element: CodeElement) -> None:
+        """Set parent IDs for elements without explicit parents."""
+        for elem in elements:
+            if elem.element_type == "file":
+                continue
+            if not elem.parent_id:
+                elem.parent_id = file_element.element_id
+
+
+class RustParser(TreeSitterParser):
+    """Parse Rust files using tree-sitter."""
+
+    def __init__(self) -> None:
+        super().__init__("rust")
+
+    def parse(
+        self,
+        content: str,
+        file_info: FileInfo,
+        scope: str,
+        repository: str,
+        username: str,
+    ) -> list[CodeElement]:
+        """Parse Rust content and extract elements."""
+        elements: list[CodeElement] = []
+        lines = content.split("\n")
+        line_count = len(lines)
+
+        # Create file-level element
+        file_element = CodeElement(
+            scope=scope,
+            repository=repository,
+            username=username,
+            relative_path=file_info.relative_path,
+            element_type="file",
+            name=Path(file_info.relative_path).name,
+            language="rust",
+            line_start=1,
+            line_end=line_count,
+            level=0,
+        )
+        file_element.element_id = generate_element_id(
+            scope, repository, username, file_info.relative_path, "file", file_element.name, 1
+        )
+        elements.append(file_element)
+
+        # Parse with tree-sitter
+        tree = self.manager.parse(content.encode("utf-8"), "rust")
+        extracted = extract_rust_elements(tree, lines)
+
+        # Extract imports
+        extracted_imports = extract_rust_imports(tree, lines)
+        file_element.imports = [
+            Import(name=imp.name, module=imp.module, alias=imp.alias, line=imp.line)
+            for imp in extracted_imports
+        ]
+
+        # Convert ExtractedElements to CodeElements
+        for ext in extracted:
+            if ext.element_type == "class":
+                # Could be struct, enum, or impl
+                class_elem = self._convert_class(ext, file_info, scope, repository, username, lines)
+                elements.append(class_elem)
+
+                # For impl blocks, extract methods
+                if ext.node and ext.node.type == "impl_item":
+                    methods, constants = extract_rust_impl_members(ext.node, lines)
+
+                    for method_ext in methods:
+                        method_elem = self._convert_method(
+                            method_ext, class_elem, file_info, scope, repository, username, lines
+                        )
+                        elements.append(method_elem)
+
+                    for const_ext in constants:
+                        const_elem = self._convert_constant(
+                            const_ext, file_info, scope, repository, username, lines, parent=class_elem
+                        )
+                        elements.append(const_elem)
+
+            elif ext.element_type == "function":
+                func_elem = self._convert_function(ext, file_info, scope, repository, username, lines)
+                elements.append(func_elem)
+
+        # Set parent IDs
+        self._set_hierarchy(elements, file_element)
+
+        return elements
+
+    def _convert_class(
+        self,
+        ext: ExtractedElement,
+        file_info: FileInfo,
+        scope: str,
+        repository: str,
+        username: str,
+        lines: list[str],
+    ) -> CodeElement:
+        """Convert extracted struct/enum/impl to CodeElement."""
+        class_attributes = None
+        base_classes = None
+
+        if ext.node:
+            if ext.node.type == "struct_item":
+                fields = extract_rust_struct_fields(ext.node)
+                class_attributes = fields if fields else None
+            elif ext.node.type == "impl_item":
+                traits = extract_rust_impl_traits(ext.node)
+                base_classes = traits if traits else None
+
+        elem = CodeElement(
+            scope=scope,
+            repository=repository,
+            username=username,
+            relative_path=file_info.relative_path,
+            element_type="class",
+            name=ext.name,
+            language="rust",
+            line_start=ext.line_start,
+            line_end=ext.line_end,
+            raw_code=ext.raw_code,
+            decorators=ext.decorators or [],
+            level=1,
+            class_attributes=class_attributes,
+            base_classes=base_classes,
+        )
+        elem.element_id = generate_element_id(
+            scope, repository, username, file_info.relative_path, "class", ext.name, ext.line_start
+        )
+        return elem
+
+    def _convert_function(
+        self,
+        ext: ExtractedElement,
+        file_info: FileInfo,
+        scope: str,
+        repository: str,
+        username: str,
+        lines: list[str],
+    ) -> CodeElement:
+        """Convert extracted function to CodeElement."""
+        calls: list[Call] = []
+        exceptions_raised = None
+        if ext.node:
+            extracted_calls = extract_rust_calls(ext.node)
+            calls = [Call(name=c.name, receiver=c.receiver, line=c.line) for c in extracted_calls]
+            exceptions_raised = extract_rust_panics(ext.node) or None
+
+        elem = CodeElement(
+            scope=scope,
+            repository=repository,
+            username=username,
+            relative_path=file_info.relative_path,
+            element_type="function",
+            name=ext.name,
+            language="rust",
+            line_start=ext.line_start,
+            line_end=ext.line_end,
+            raw_code=ext.raw_code,
+            signature=ext.signature,
+            is_async=ext.is_async,
+            decorators=ext.decorators or [],
+            level=2,
+            calls=calls,
+            exceptions_raised=exceptions_raised,
+        )
+        elem.element_id = generate_element_id(
+            scope, repository, username, file_info.relative_path, "function", ext.name, ext.line_start
+        )
+        return elem
+
+    def _convert_method(
+        self,
+        ext: ExtractedElement,
+        parent_class: CodeElement,
+        file_info: FileInfo,
+        scope: str,
+        repository: str,
+        username: str,
+        lines: list[str],
+    ) -> CodeElement:
+        """Convert extracted method to CodeElement."""
+        calls: list[Call] = []
+        exceptions_raised = None
+        attributes_modified = None
+        if ext.node:
+            extracted_calls = extract_rust_calls(ext.node)
+            calls = [Call(name=c.name, receiver=c.receiver, line=c.line) for c in extracted_calls]
+            exceptions_raised = extract_rust_panics(ext.node) or None
+            attributes_modified = extract_rust_modified_fields(ext.node) or None
+
+        elem = CodeElement(
+            scope=scope,
+            repository=repository,
+            username=username,
+            relative_path=file_info.relative_path,
+            element_type=ext.element_type,  # method or function (associated)
+            name=ext.name,
+            language="rust",
+            line_start=ext.line_start,
+            line_end=ext.line_end,
+            raw_code=ext.raw_code,
+            signature=ext.signature,
+            is_async=ext.is_async,
+            decorators=ext.decorators or [],
+            level=2,
+            parent_id=parent_class.element_id,
+            calls=calls,
+            exceptions_raised=exceptions_raised,
+            attributes_modified=attributes_modified,
+        )
+        elem.element_id = generate_element_id(
+            scope, repository, username, file_info.relative_path, ext.element_type, ext.name, ext.line_start
+        )
+        return elem
+
+    def _convert_constant(
+        self,
+        ext: ExtractedElement,
+        file_info: FileInfo,
+        scope: str,
+        repository: str,
+        username: str,
+        lines: list[str],
+        parent: CodeElement | None = None,
+    ) -> CodeElement:
+        """Convert extracted constant to CodeElement."""
+        elem = CodeElement(
+            scope=scope,
+            repository=repository,
+            username=username,
+            relative_path=file_info.relative_path,
+            element_type="constant",
+            name=ext.name,
+            language="rust",
+            line_start=ext.line_start,
+            line_end=ext.line_end,
+            raw_code=ext.raw_code,
+            level=3,
+            parent_id=parent.element_id if parent else None,
+        )
+        elem.element_id = generate_element_id(
+            scope, repository, username, file_info.relative_path, "constant", ext.name, ext.line_start
+        )
+        return elem
+
+    def _set_hierarchy(self, elements: list[CodeElement], file_element: CodeElement) -> None:
+        """Set parent IDs for elements without explicit parents."""
+        for elem in elements:
+            if elem.element_type == "file":
+                continue
+            if not elem.parent_id:
+                elem.parent_id = file_element.element_id
+
+
 # =============================================================================
 # PARSER REGISTRY
 # =============================================================================
@@ -960,6 +1515,8 @@ PARSERS: dict[str, TreeSitterParser] = {
     "python": PythonParser(),
     "javascript": JavaScriptParser("javascript"),
     "typescript": JavaScriptParser("typescript"),
+    "php": PhpParser(),
+    "rust": RustParser(),
 }
 
 
