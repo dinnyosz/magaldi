@@ -12,7 +12,6 @@ import {
   ListGroup,
   Form,
   InputGroup,
-  ProgressBar,
 } from 'react-bootstrap'
 import {
   getRepositories,
@@ -79,33 +78,20 @@ function TermDetail({ term, scope, repository }: { term: string; scope: string; 
         </ListGroup>
       </Card>
 
-      {/* Feature Associations */}
+      {/* Source Features - features/subfeatures this term was extracted from */}
       {data.feature_associations.length > 0 && (
         <Card>
           <Card.Header>
             <i className="bi bi-diagram-3 me-2"></i>
-            Related Features ({data.feature_associations.length})
+            Extracted From ({data.feature_associations.length} features)
           </Card.Header>
           <ListGroup variant="flush">
             {data.feature_associations.map((assoc) => (
               <ListGroup.Item key={assoc.feature_id} className="py-2">
-                <div className="d-flex justify-content-between align-items-center">
-                  <span>
-                    <strong>{assoc.feature_label}</strong>
-                    <small className="text-muted ms-2">
-                      {assoc.frequency} / {assoc.total_members} members
-                    </small>
-                  </span>
-                  <Badge bg={assoc.percentage >= 50 ? 'success' : 'secondary'}>
-                    {assoc.percentage.toFixed(0)}%
-                  </Badge>
-                </div>
-                <ProgressBar
-                  now={assoc.percentage}
-                  variant={assoc.percentage >= 50 ? 'success' : 'info'}
-                  className="mt-1"
-                  style={{ height: '4px' }}
-                />
+                <i className="bi bi-tag me-2 text-muted"></i>
+                <Link to={`/element/${encodeURIComponent(assoc.feature_id)}`}>
+                  {assoc.feature_label}
+                </Link>
               </ListGroup.Item>
             ))}
           </ListGroup>

@@ -105,3 +105,29 @@ async def search_glossary_terms(
         ],
         total=len(terms),
     )
+
+
+@router.get(
+    "/glossary/by-feature/{feature_id:path}",
+    response_model=GlossaryListResponse,
+)
+async def get_glossary_terms_for_feature(
+    feature_id: str = Path(..., description="Feature or subfeature element_id"),
+    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+) -> GlossaryListResponse:
+    """Get glossary terms extracted from a specific feature/subfeature."""
+    terms = es_repo.get_glossary_terms_for_feature(feature_id)
+
+    return GlossaryListResponse(
+        terms=[
+            GlossaryTermSummary(
+                term=t.get("term", ""),
+                description=t.get("description", ""),
+                total_count=t.get("total_count", 0),
+                file_count=0,
+                feature_count=1,
+            )
+            for t in terms
+        ],
+        total=len(terms),
+    )

@@ -525,6 +525,9 @@ export interface BrowseElement {
   // For features
   member_count?: number
   subfeatures?: BrowseSubfeature[]
+  // For glossary
+  total_count?: number
+  feature_count?: number
 }
 
 export interface BrowseResponse {
@@ -712,6 +715,12 @@ export async function searchGlossaryTerms(
   query: string
 ): Promise<GlossaryListResponse> {
   return fetchJson(`${API_BASE}/repos/${scope}/${repository}/glossary/search/${encodeURIComponent(query)}`)
+}
+
+export async function getGlossaryTermsForFeature(
+  featureId: string
+): Promise<GlossaryListResponse> {
+  return fetchJson(`${API_BASE}/glossary/by-feature/${encodeURIComponent(featureId)}`)
 }
 
 // =============================================================================

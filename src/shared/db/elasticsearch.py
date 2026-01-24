@@ -1833,6 +1833,64 @@ class ElasticsearchRepository:
 
         return results
 
+    def get_glossary_terms_for_feature(
+        self,
+        feature_id: str,
+    ) -> list[dict[str, Any]]:
+        """Get glossary terms extracted from a specific feature/subfeature.
+
+        Args:
+            feature_id: The feature or subfeature element_id.
+
+        Returns:
+            List of glossary terms that were extracted from this feature.
+        """
+        client = self._get_client()
+
+        # Search for glossary terms where feature_associations contains this feature_id
+        es_query: dict[str, Any] = {
+            "bool": {
+                "must": [
+                    {"term": {"element_type": "glossary"}},
+                    {"nested": {
+                        "path": "feature_associations",
+                        "query": {
+                            "term": {"feature_associations.feature_id": feature_id}
+                        }
+                    }} if False else {"term": {"feature_associations.feature_id": feature_id}},
+                ]
+            }
+        }
+
+        # feature_associations is not nested, so use simple term query
+        es_query = {
+            "bool": {
+                "must": [
+                    {"term": {"element_type": "glossary"}},
+                    {"term": {"feature_associations.feature_id": feature_id}},
+                ]
+            }
+        }
+
+        response = client.search(
+            index=INDEX_NAME,
+            query=es_query,
+            size=100,
+            sort=[{"term": "asc"}],
+        )
+
+        results: list[dict[str, Any]] = []
+        for hit in response.get("hits", {}).get("hits", []):
+            source = hit.get("_source", {})
+            results.append({
+                "glossary_id": hit.get("_id"),
+                "term": source.get("term"),
+                "description": source.get("description", ""),
+                "total_count": source.get("total_count", 0),
+            })
+
+        return results
+
     def update_glossary_feature_associations(
         self,
         glossary_id: str,

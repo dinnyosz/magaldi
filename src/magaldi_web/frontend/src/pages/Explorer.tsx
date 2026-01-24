@@ -43,6 +43,7 @@ const typeConfig: Record<string, TypeConfig> = {
   constant: { icon: 'bi-hash', color: 'danger' },
   feature: { icon: 'bi-collection', color: 'info' },
   subfeature: { icon: 'bi-collection-fill', color: 'info' },
+  glossary: { icon: 'bi-book', color: 'primary' },
 }
 
 const defaultTypeConfig: TypeConfig = { icon: 'bi-dot', color: 'secondary' }
@@ -162,6 +163,15 @@ function ElementRow({ element, username }: { element: BrowseElement; username: s
                     </span>
                   ))}
                 </div>
+              )}
+            </div>
+          ) : element.element_type === 'glossary' ? (
+            <div>
+              {element.total_count !== undefined && (
+                <Badge bg="secondary" className="me-2">{element.total_count} occurrences</Badge>
+              )}
+              {element.feature_count !== undefined && element.feature_count > 0 && (
+                <Badge bg="info">{element.feature_count} source features</Badge>
               )}
             </div>
           ) : (

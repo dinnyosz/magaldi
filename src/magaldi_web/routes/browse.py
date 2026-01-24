@@ -106,6 +106,9 @@ async def browse_elements(
                 "level",
                 "member_count",  # For features/subfeatures
                 "cluster_label",  # For features/subfeatures
+                "description",  # For glossary
+                "total_count",  # For glossary
+                "feature_count",  # For glossary
             ],
         },
     )
@@ -198,6 +201,11 @@ async def browse_elements(
                 "element_type": pinfo.get("element_type"),
             }
 
+        # For glossary elements, use description as summary
+        summary = source.get("summary")
+        if source.get("element_type") == "glossary":
+            summary = source.get("description", "")
+
         elem = {
             "element_id": source["element_id"],
             "hash_id": source.get("hash_id"),
@@ -207,7 +215,7 @@ async def browse_elements(
             "line_start": source.get("line_start", 0),
             "line_end": source.get("line_end"),
             "language": source.get("language", ""),
-            "summary": source.get("summary"),
+            "summary": summary,
             "signature": source.get("signature"),
             "repository": source["repository"],
             "scope": source["scope"],
@@ -224,6 +232,11 @@ async def browse_elements(
         if source.get("element_type") == "feature":
             elem["member_count"] = source.get("member_count", 0)
             elem["subfeatures"] = subfeatures_by_feature.get(source["element_id"], [])
+
+        # Add glossary-specific fields
+        if source.get("element_type") == "glossary":
+            elem["total_count"] = source.get("total_count", 0)
+            elem["feature_count"] = source.get("feature_count", 0)
 
         elements.append(elem)
 

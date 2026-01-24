@@ -12,7 +12,7 @@ import {
   Tab,
   Tabs,
 } from 'react-bootstrap'
-import { getElement, getSimilarElements, explainElement, type ElementDetail as _ElementDetail } from '../api'
+import { getElement, getSimilarElements, explainElement, getGlossaryTermsForFeature, type ElementDetail as _ElementDetail } from '../api'
 
 // Type configuration
 const typeConfig: Record<string, { icon: string; color: string; label: string }> = {
@@ -67,6 +67,13 @@ function Element() {
     queryKey: ['explain', decodedId],
     queryFn: () => explainElement(decodedId),
     enabled: !!decodedId && !!element && ['function', 'method'].includes(element.element_type),
+  })
+
+  // Fetch glossary terms for features/subfeatures
+  const { data: glossaryTerms } = useQuery({
+    queryKey: ['glossaryForFeature', decodedId],
+    queryFn: () => getGlossaryTermsForFeature(decodedId),
+    enabled: !!decodedId && !!element && ['feature', 'subfeature'].includes(element.element_type),
   })
 
   if (isLoading) {
@@ -584,6 +591,36 @@ function Element() {
                     <Badge bg="secondary" pill>
                       {subfeature.member_count} members
                     </Badge>
+                  </ListGroup.Item>
+                ))}
+              </ListGroup>
+            </Card>
+          )}
+
+          {/* Glossary Terms - shown for features and subfeatures */}
+          {isFeature && glossaryTerms && glossaryTerms.terms.length > 0 && (
+            <Card className="mb-4">
+              <Card.Header>
+                <i className="bi bi-book me-2"></i>
+                Domain Terms ({glossaryTerms.terms.length})
+              </Card.Header>
+              <ListGroup variant="flush">
+                {glossaryTerms.terms.map((term) => (
+                  <ListGroup.Item
+                    key={term.term}
+                    action
+                    as={Link}
+                    to={`/glossary/${element.repository.scope}/${element.repository.name}?term=${encodeURIComponent(term.term)}`}
+                    className="py-2"
+                  >
+                    <div className="d-flex justify-content-between align-items-start">
+                      <div>
+                        <Badge bg="primary" className="me-2">{term.term}</Badge>
+                        {term.description && (
+                          <small className="text-muted">{term.description}</small>
+                        )}
+                      </div>
+                    </div>
                   </ListGroup.Item>
                 ))}
               </ListGroup>

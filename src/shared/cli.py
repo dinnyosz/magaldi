@@ -1192,7 +1192,7 @@ def run_glossary_extraction(
             for item in glossary_items:
                 glossary_id = f"{scope}:{repository}:{username}:glossary:{item.name}"
 
-                # Build feature associations
+                # Build feature associations (source features this term was extracted from)
                 feature_associations = []
                 for fid in item.source_feature_ids:
                     if fid in feature_lookup:
@@ -1200,9 +1200,10 @@ def run_glossary_extraction(
                         feature_associations.append({
                             "feature_id": fid,
                             "feature_label": feature_data["label"],
-                            "frequency": 1,  # Term appears once in this feature
-                            "total_members": feature_data["member_count"],
-                            "percentage": 100.0,  # Term was extracted from this feature
+                            # Legacy fields kept for API compatibility
+                            "frequency": 1,
+                            "total_members": 0,
+                            "percentage": 0.0,
                         })
 
                 es_repo.index_glossary(
