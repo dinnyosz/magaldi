@@ -104,6 +104,8 @@ async def browse_elements(
                 "docstring",
                 "decorators",
                 "level",
+                "member_count",  # For features/subfeatures
+                "cluster_label",  # For features/subfeatures
             ],
         },
     )

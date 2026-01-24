@@ -217,11 +217,11 @@ function ElementRow({ element, username }: { element: BrowseElement; username: s
             <Collapse in={expanded}>
               <div>
                 {childrenLoading ? (
-                  <div className="p-3 ps-5 bg-light">
+                  <div className="p-3 ps-5 bg-body-tertiary">
                     <Spinner size="sm" animation="border" /> Loading children...
                   </div>
                 ) : children && children.total_children > 0 ? (
-                  <div className="ps-5 py-2 bg-light border-bottom">
+                  <div className="ps-5 py-2 bg-body-tertiary border-bottom">
                     {Object.entries(children.children).map(([type, items]) => (
                       <div key={type} className="mb-2">
                         <small className="text-uppercase text-muted fw-bold">{type}s ({items.length})</small>
@@ -261,7 +261,7 @@ function ElementRow({ element, username }: { element: BrowseElement; username: s
                     ))}
                   </div>
                 ) : expanded ? (
-                  <div className="p-3 ps-5 bg-light text-muted small">
+                  <div className="p-3 ps-5 bg-body-tertiary text-muted small">
                     No child elements
                   </div>
                 ) : null}
@@ -276,7 +276,7 @@ function ElementRow({ element, username }: { element: BrowseElement; username: s
         <tr>
           <td colSpan={6} className="p-0 border-0">
             <Collapse in={showDetails}>
-              <div className="ps-5 py-2 bg-light border-bottom">
+              <div className="ps-5 py-2 bg-body-tertiary border-bottom">
                 {detailsLoading ? (
                   <div className="p-2">
                     <Spinner size="sm" animation="border" /> Loading details...
@@ -615,7 +615,7 @@ function Explorer() {
             </div>
           ) : elements?.elements.length ? (
             <Table hover responsive className="mb-0">
-              <thead className="bg-light">
+              <thead className="bg-body-secondary">
                 <tr>
                   <th style={{ width: '30px' }}></th>
                   <th>Name</th>
