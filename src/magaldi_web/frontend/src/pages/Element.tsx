@@ -99,50 +99,115 @@ function Element() {
   const isContainer = ['file', 'class'].includes(element.element_type)
   const isFeature = ['feature', 'subfeature'].includes(element.element_type)
 
-  // Detect entry point type from decorators
+  // Detect entry point type from decorators (multi-language support)
   const entryPointPatterns: Record<string, { decorators: string[], label: string, icon: string, color: string }> = {
     http: {
-      decorators: ['app.route', 'route', 'get', 'post', 'put', 'delete', 'patch', 'api_view', 'action', 'router.get', 'router.post', 'router.put', 'router.delete', 'router.patch'],
+      decorators: [
+        // Python: Flask, FastAPI, Django REST
+        'app.route', 'router.get', 'router.post', 'router.put', 'router.delete', 'router.patch',
+        'api_view', 'action',
+        // JavaScript/TypeScript: NestJS, Express decorators
+        '@get', '@post', '@put', '@delete', '@patch', '@controller', '@requestmapping',
+        // PHP: Symfony attributes
+        '#[route', '#[get', '#[post', '#[put', '#[delete',
+        // Rust: Actix-web, Rocket, Axum
+        '#[get(', '#[post(', '#[put(', '#[delete(', '#[route(',
+        'actix_web::get', 'actix_web::post', 'rocket::get', 'rocket::post',
+        // Generic patterns
+        'route', 'endpoint', 'api',
+      ],
       label: 'HTTP Endpoint',
       icon: 'bi-globe',
       color: 'primary',
     },
     cli: {
-      decorators: ['click.command', 'command', 'click.group', 'group'],
+      decorators: [
+        // Python: Click, Typer
+        'click.command', 'click.group', 'typer.command',
+        // Rust: Clap
+        '#[command', '#[clap',
+        // Generic
+        'command', 'subcommand',
+      ],
       label: 'CLI Command',
       icon: 'bi-terminal',
       color: 'success',
     },
     test: {
-      decorators: ['pytest.fixture', 'fixture'],
-      label: 'Test Fixture',
+      decorators: [
+        // Python: pytest
+        'pytest.fixture', 'fixture',
+        // Rust
+        '#[test', '#[tokio::test', '#[async_std::test',
+        // PHP: PHPUnit
+        '@test', '#[test',
+        // JavaScript/TypeScript: Jest, Mocha (usually function names, but some use decorators)
+        '@test', '@it', '@describe',
+      ],
+      label: 'Test',
       icon: 'bi-check2-circle',
       color: 'info',
     },
-    async: {
-      decorators: ['celery.task', 'task'],
+    async_task: {
+      decorators: [
+        // Python: Celery, RQ, Dramatiq
+        'celery.task', 'dramatiq.actor', 'rq.job',
+        // JavaScript: Bull, Agenda
+        '@processor', '@process', '@queue',
+        // Generic
+        'task', 'job', 'worker', 'background',
+      ],
       label: 'Async Task',
       icon: 'bi-lightning',
       color: 'warning',
+    },
+    event: {
+      decorators: [
+        // JavaScript/TypeScript: EventEmitter, NestJS
+        '@on', '@subscribe', '@eventhandler', '@listener',
+        // PHP: Symfony
+        '#[aseventslistener',
+        // Generic
+        'event', 'handler', 'listener',
+      ],
+      label: 'Event Handler',
+      icon: 'bi-broadcast',
+      color: 'secondary',
+    },
+    scheduled: {
+      decorators: [
+        // Python: APScheduler, Celery beat
+        '@scheduled', 'cron', 'interval',
+        // JavaScript: NestJS
+        '@cron', '@interval',
+        // Generic
+        'schedule', 'periodic',
+      ],
+      label: 'Scheduled',
+      icon: 'bi-clock',
+      color: 'dark',
     },
   }
 
   let entryPointType: { label: string, icon: string, color: string } | null = null
   if (element.decorators && element.decorators.length > 0) {
-    for (const [, config] of Object.entries(entryPointPatterns)) {
+    for (const [, epConfig] of Object.entries(entryPointPatterns)) {
       for (const decorator of element.decorators) {
         const decoratorLower = decorator.toLowerCase()
-        if (config.decorators.some(d => decoratorLower.includes(d))) {
-          entryPointType = { label: config.label, icon: config.icon, color: config.color }
+        if (epConfig.decorators.some(d => decoratorLower.includes(d.toLowerCase()))) {
+          entryPointType = { label: epConfig.label, icon: epConfig.icon, color: epConfig.color }
           break
         }
       }
       if (entryPointType) break
     }
   }
-  // Also check for main function
-  if (!entryPointType && element.name === 'main' && element.element_type === 'function') {
-    entryPointType = { label: 'Main Entry', icon: 'bi-play-circle', color: 'danger' }
+  // Also check for main function (common across languages)
+  if (!entryPointType && element.element_type === 'function') {
+    const mainNames = ['main', '__main__', 'run', 'start', 'bootstrap', 'init']
+    if (mainNames.includes(element.name.toLowerCase())) {
+      entryPointType = { label: 'Main Entry', icon: 'bi-play-circle', color: 'danger' }
+    }
   }
 
   return (
@@ -914,9 +979,16 @@ function Element() {
                 </ListGroup.Item>
               )}
               {element.decorators && element.decorators.length > 0 && (
-                <ListGroup.Item className="d-flex justify-content-between">
-                  <span className="text-muted">Decorators</span>
-                  <span>{element.decorators.length}</span>
+                <ListGroup.Item>
+                  <div className="d-flex justify-content-between mb-1">
+                    <span className="text-muted">Decorators</span>
+                    <small className="text-muted">{element.decorators.length}</small>
+                  </div>
+                  <div className="d-flex flex-wrap gap-1">
+                    {element.decorators.map((d, i) => (
+                      <code key={i} className="small bg-light px-1 rounded">@{d}</code>
+                    ))}
+                  </div>
                 </ListGroup.Item>
               )}
               {isContainer && (
