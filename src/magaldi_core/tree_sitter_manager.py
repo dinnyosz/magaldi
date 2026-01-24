@@ -37,6 +37,15 @@ class ExtractedImport:
 
 
 @dataclass
+class DecoratorInfo:
+    """Detailed information about a decorator."""
+
+    name: str  # e.g., "router.get", "click.option"
+    args: str | None = None  # e.g., '"/users/{id}"', '"--verbose"'
+    full: str | None = None  # e.g., 'router.get("/users/{id}")'
+
+
+@dataclass
 class ExtractedElement:
     """A code element extracted from the AST."""
 
@@ -47,6 +56,7 @@ class ExtractedElement:
     raw_code: str
     signature: str | None = None
     decorators: list[str] | None = None
+    decorator_details: list[DecoratorInfo] | None = None  # Rich decorator info
     is_async: bool = False
     parent_node: Node | None = None  # For tracking hierarchy
     node: Node | None = None  # The AST node itself
@@ -189,12 +199,14 @@ def extract_python_elements(tree: Tree, lines: list[str]) -> list[ExtractedEleme
         elif node.type == "decorated_definition":
             inner = get_child_by_field(node, "definition")
             if inner and inner.type == "class_definition":
+                deco_names, deco_details = _get_decorators(node)
                 elements.append(
-                    _extract_python_class(inner, lines, decorators=_get_decorators(node), decorated_node=node)
+                    _extract_python_class(inner, lines, decorators=deco_names, decorator_details=deco_details, decorated_node=node)
                 )
             elif inner and inner.type == "function_definition":
+                deco_names, deco_details = _get_decorators(node)
                 elements.append(
-                    _extract_python_function(inner, lines, decorators=_get_decorators(node), decorated_node=node)
+                    _extract_python_function(inner, lines, decorators=deco_names, decorator_details=deco_details, decorated_node=node)
                 )
         elif node.type == "function_definition":
             elements.append(_extract_python_function(node, lines))
@@ -210,7 +222,11 @@ def extract_python_elements(tree: Tree, lines: list[str]) -> list[ExtractedEleme
 
 
 def _extract_python_class(
-    node: Node, lines: list[str], decorators: list[str] | None = None, decorated_node: Node | None = None
+    node: Node,
+    lines: list[str],
+    decorators: list[str] | None = None,
+    decorator_details: list[DecoratorInfo] | None = None,
+    decorated_node: Node | None = None,
 ) -> ExtractedElement:
     """Extract a class definition.
 
@@ -237,6 +253,7 @@ def _extract_python_class(
         line_end=line_end,
         raw_code=raw_code,
         decorators=decorators,
+        decorator_details=decorator_details,
         node=node,
     )
 
@@ -247,6 +264,7 @@ def _extract_python_function(
     node: Node,
     lines: list[str],
     decorators: list[str] | None = None,
+    decorator_details: list[DecoratorInfo] | None = None,
     is_method: bool = False,
     decorated_node: Node | None = None,
 ) -> ExtractedElement:
@@ -293,6 +311,7 @@ def _extract_python_function(
         raw_code=raw_code,
         signature=signature,
         decorators=decorators,
+        decorator_details=decorator_details,
         is_async=is_async,
         node=node,
     )
@@ -333,31 +352,52 @@ def _extract_python_assignment(
     )
 
 
-def _get_decorators(decorated_node: Node) -> list[str]:
-    """Extract decorator names from a decorated_definition node.
+def _get_decorators(decorated_node: Node) -> tuple[list[str], list[DecoratorInfo]]:
+    """Extract decorator names and details from a decorated_definition node.
 
     Handles both simple decorators (@foo) and call decorators (@foo.bar(...)).
+
+    Returns:
+        Tuple of (decorator_names, decorator_details).
+        decorator_names: Simple list of names for backwards compatibility.
+        decorator_details: Rich info with args for entry point display.
     """
-    decorators = []
+    decorators: list[str] = []
+    details: list[DecoratorInfo] = []
+
     for child in decorated_node.children:
         if child.type == "decorator":
+            # Get the full decorator text (excluding @)
+            full_text = get_node_text(child)
+            if full_text.startswith("@"):
+                full_text = full_text[1:].strip()
+
             # Get the name part (after @, before ())
             for deco_child in child.children:
                 if deco_child.type == "identifier":
                     # Simple decorator: @foo
-                    decorators.append(get_node_text(deco_child))
+                    name = get_node_text(deco_child)
+                    decorators.append(name)
+                    details.append(DecoratorInfo(name=name, args=None, full=full_text))
                     break
                 elif deco_child.type == "attribute":
                     # Attribute decorator: @foo.bar
-                    decorators.append(get_node_text(deco_child))
+                    name = get_node_text(deco_child)
+                    decorators.append(name)
+                    details.append(DecoratorInfo(name=name, args=None, full=full_text))
                     break
                 elif deco_child.type == "call":
                     # Call decorator: @foo(...) or @foo.bar(...)
                     func_node = get_child_by_field(deco_child, "function")
+                    args_node = get_child_by_field(deco_child, "arguments")
                     if func_node:
-                        decorators.append(get_node_text(func_node))
+                        name = get_node_text(func_node)
+                        args = get_node_text(args_node) if args_node else None
+                        decorators.append(name)
+                        details.append(DecoratorInfo(name=name, args=args, full=full_text))
                     break
-    return decorators
+
+    return decorators, details
 
 
 def extract_python_class_members(
@@ -385,9 +425,10 @@ def extract_python_class_members(
         elif child.type == "decorated_definition":
             inner = get_child_by_field(child, "definition")
             if inner and inner.type == "function_definition":
+                deco_names, deco_details = _get_decorators(child)
                 methods.append(
                     _extract_python_function(
-                        inner, lines, decorators=_get_decorators(child), is_method=True, decorated_node=child
+                        inner, lines, decorators=deco_names, decorator_details=deco_details, is_method=True, decorated_node=child
                     )
                 )
         elif child.type == "expression_statement":

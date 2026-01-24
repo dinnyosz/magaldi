@@ -19,6 +19,7 @@ from typing import Any
 
 from magaldi_core.change_detection import ChangeManifest, FileInfo
 from magaldi_core.tree_sitter_manager import (
+    DecoratorInfo,
     ExtractedCall,
     ExtractedElement,
     ExtractedImport,
@@ -203,6 +204,7 @@ class CodeElement:
 
     # Metadata
     decorators: list[str] = field(default_factory=list)
+    decorator_details: list[dict[str, Any]] | None = None  # Rich decorator info: {name, args, full}
     is_async: bool = False
     is_test: bool = False  # Whether this element is test code
     visibility: str = "public"  # 'public', 'private', 'protected'
@@ -602,6 +604,14 @@ class PythonParser(TreeSitterParser):
             class_attributes = extract_python_class_attributes(ext.node) or None
             base_classes = extract_python_base_classes(ext.node) or None
 
+        # Convert decorator_details to dicts for storage
+        decorator_details = None
+        if ext.decorator_details:
+            decorator_details = [
+                {"name": d.name, "args": d.args, "full": d.full}
+                for d in ext.decorator_details
+            ]
+
         elem = CodeElement(
             scope=scope,
             repository=repository,
@@ -615,6 +625,7 @@ class PythonParser(TreeSitterParser):
             raw_code=ext.raw_code,
             docstring=docstring,
             decorators=ext.decorators or [],
+            decorator_details=decorator_details,
             level=1,
             visibility=_determine_visibility(ext.name),
             class_attributes=class_attributes,
@@ -648,6 +659,14 @@ class PythonParser(TreeSitterParser):
             ]
             exceptions_raised = extract_python_raised_exceptions(ext.node) or None
 
+        # Convert decorator_details to dicts for storage
+        decorator_details = None
+        if ext.decorator_details:
+            decorator_details = [
+                {"name": d.name, "args": d.args, "full": d.full}
+                for d in ext.decorator_details
+            ]
+
         elem = CodeElement(
             scope=scope,
             repository=repository,
@@ -662,6 +681,7 @@ class PythonParser(TreeSitterParser):
             signature=ext.signature,
             docstring=docstring,
             decorators=ext.decorators or [],
+            decorator_details=decorator_details,
             is_async=ext.is_async,
             visibility=_determine_visibility(ext.name),
             level=2,
@@ -699,6 +719,14 @@ class PythonParser(TreeSitterParser):
             exceptions_raised = extract_python_raised_exceptions(ext.node) or None
             attributes_modified = extract_python_modified_attributes(ext.node) or None
 
+        # Convert decorator_details to dicts for storage
+        decorator_details = None
+        if ext.decorator_details:
+            decorator_details = [
+                {"name": d.name, "args": d.args, "full": d.full}
+                for d in ext.decorator_details
+            ]
+
         elem = CodeElement(
             scope=scope,
             repository=repository,
@@ -713,6 +741,7 @@ class PythonParser(TreeSitterParser):
             signature=ext.signature,
             docstring=docstring,
             decorators=ext.decorators or [],
+            decorator_details=decorator_details,
             is_async=ext.is_async,
             visibility=_determine_visibility(ext.name),
             level=2,

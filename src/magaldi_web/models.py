@@ -381,6 +381,14 @@ class ClassAttributeInfo(BaseModel):
     line: int | None = None
 
 
+class DecoratorDetailInfo(BaseModel):
+    """Detailed information about a decorator including arguments."""
+
+    name: str  # e.g., "router.get", "click.option"
+    args: str | None = None  # e.g., '"/users/{id}"', '"--verbose"'
+    full: str | None = None  # e.g., 'router.get("/users/{id}")'
+
+
 class ElementDetailResponse(BaseModel):
     """Response for element detail endpoint."""
 
@@ -397,6 +405,7 @@ class ElementDetailResponse(BaseModel):
     docstring: str | None = None
     raw_code: str | None = None
     decorators: list[str] = Field(default_factory=list)
+    decorator_details: list[DecoratorDetailInfo] = Field(default_factory=list)
     visibility: str | None = None
     is_async: bool = False
     is_test: bool = False

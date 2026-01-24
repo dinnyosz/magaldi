@@ -357,10 +357,24 @@ def get_element(
         result["docstring"] = doc["docstring"]
     if doc.get("decorators"):
         result["decorators"] = doc["decorators"]
+    if doc.get("decorator_details"):
+        result["decorator_details"] = doc["decorator_details"]
     if doc.get("is_async"):
         result["is_async"] = True
+    if doc.get("is_test"):
+        result["is_test"] = True
     if doc.get("parent_id"):
         result["parent_id"] = doc["parent_id"]
+
+    # Enhanced context fields
+    if doc.get("base_classes"):
+        result["base_classes"] = doc["base_classes"]
+    if doc.get("class_attributes"):
+        result["class_attributes"] = doc["class_attributes"]
+    if doc.get("exceptions_raised"):
+        result["exceptions_raised"] = doc["exceptions_raised"]
+    if doc.get("attributes_modified"):
+        result["attributes_modified"] = doc["attributes_modified"]
 
     if include_code:
         result["code"] = doc.get("raw_code", "")
@@ -2808,19 +2822,35 @@ def explain_element(
     repository = doc.get("repository")
     username = doc.get("username", "main")
 
+    element_info: dict[str, Any] = {
+        "element_id": element_id,
+        "name": name,
+        "type": element_type,
+        "file": relative_path,
+        "line": line_start,
+        "signature": doc.get("signature"),
+        "summary": doc.get("summary", ""),
+        "docstring": doc.get("docstring"),
+        "decorators": doc.get("decorators", []),
+        "is_test": doc.get("is_test", False),
+    }
+
+    # Add enhanced context fields if present
+    if doc.get("decorator_details"):
+        element_info["decorator_details"] = doc["decorator_details"]
+    if doc.get("base_classes"):
+        element_info["base_classes"] = doc["base_classes"]
+    if doc.get("class_attributes"):
+        element_info["class_attributes"] = doc["class_attributes"]
+    if doc.get("exceptions_raised"):
+        element_info["exceptions_raised"] = doc["exceptions_raised"]
+    if doc.get("attributes_modified"):
+        element_info["attributes_modified"] = doc["attributes_modified"]
+    if doc.get("is_async"):
+        element_info["is_async"] = True
+
     result: dict[str, Any] = {
-        "element": {
-            "element_id": element_id,
-            "name": name,
-            "type": element_type,
-            "file": relative_path,
-            "line": line_start,
-            "signature": doc.get("signature"),
-            "summary": doc.get("summary", ""),
-            "docstring": doc.get("docstring"),
-            "decorators": doc.get("decorators", []),
-            "is_test": doc.get("is_test", False),
-        },
+        "element": element_info,
         "callers": [],
         "callees": [],
         "imports": [],

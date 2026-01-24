@@ -8,6 +8,7 @@ from magaldi_web.dependencies import get_es_repository
 from magaldi_web.models import (
     ChildInfo,
     ClassAttributeInfo,
+    DecoratorDetailInfo,
     ElementContext,
     ElementDetailResponse,
     FeatureInfo,
@@ -324,6 +325,19 @@ async def get_element_detail(
                 )
             )
 
+    # Parse decorator details (rich decorator info with args)
+    decorator_details = []
+    raw_decorator_details = source.get("decorator_details", [])
+    if raw_decorator_details:
+        for dec in raw_decorator_details:
+            decorator_details.append(
+                DecoratorDetailInfo(
+                    name=dec.get("name", ""),
+                    args=dec.get("args"),
+                    full=dec.get("full"),
+                )
+            )
+
     return ElementDetailResponse(
         element_id=source["element_id"],
         hash_id=source.get("hash_id"),
@@ -338,6 +352,7 @@ async def get_element_detail(
         docstring=source.get("docstring"),
         raw_code=source.get("raw_code"),
         decorators=decorators,
+        decorator_details=decorator_details,
         visibility=source.get("visibility"),
         is_async=source.get("is_async", False),
         is_test=source.get("is_test", False),

@@ -131,6 +131,15 @@ INDEX_MAPPING = {
             "exceptions_raised": {"type": "keyword"},
             # For methods: attributes modified (self.X assignments)
             "attributes_modified": {"type": "keyword"},
+            # Rich decorator info (name, args, full text)
+            "decorator_details": {
+                "type": "nested",
+                "properties": {
+                    "name": {"type": "keyword"},
+                    "args": {"type": "text"},
+                    "full": {"type": "text"},
+                },
+            },
         }
     },
     "settings": {
@@ -237,6 +246,8 @@ class ElasticsearchRepository:
             doc["exceptions_raised"] = element.exceptions_raised
         if element.attributes_modified:
             doc["attributes_modified"] = element.attributes_modified
+        if element.decorator_details:
+            doc["decorator_details"] = element.decorator_details
 
         client = self._get_client()
         client.index(index=INDEX_NAME, id=element.element_id, document=doc)

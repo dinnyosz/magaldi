@@ -189,13 +189,23 @@ function Element() {
     },
   }
 
-  let entryPointType: { label: string, icon: string, color: string } | null = null
+  let entryPointType: { label: string, icon: string, color: string, args?: string } | null = null
   if (element.decorators && element.decorators.length > 0) {
     for (const [, epConfig] of Object.entries(entryPointPatterns)) {
       for (const decorator of element.decorators) {
         const decoratorLower = decorator.toLowerCase()
         if (epConfig.decorators.some(d => decoratorLower.includes(d.toLowerCase()))) {
-          entryPointType = { label: epConfig.label, icon: epConfig.icon, color: epConfig.color }
+          // Try to find matching decorator_details to get args
+          let args: string | undefined
+          if (element.decorator_details) {
+            const matchingDetail = element.decorator_details.find(
+              dd => dd.name && decorator.toLowerCase().includes(dd.name.toLowerCase())
+            )
+            if (matchingDetail?.args) {
+              args = matchingDetail.args
+            }
+          }
+          entryPointType = { label: epConfig.label, icon: epConfig.icon, color: epConfig.color, args }
           break
         }
       }
@@ -250,9 +260,14 @@ function Element() {
               {/* Decorators */}
               {element.decorators && element.decorators.length > 0 && (
                 <div className="mb-2">
-                  {element.decorators.map((d, i) => (
-                    <code key={i} className="me-2 text-info">@{d}</code>
-                  ))}
+                  {element.decorator_details && element.decorator_details.length > 0
+                    ? element.decorator_details.map((dd, i) => (
+                        <code key={i} className="me-2 text-info">@{dd.full || dd.name}</code>
+                      ))
+                    : element.decorators.map((d, i) => (
+                        <code key={i} className="me-2 text-info">@{d}</code>
+                      ))
+                  }
                 </div>
               )}
 
@@ -289,6 +304,9 @@ function Element() {
                     <Badge bg={entryPointType.color} className="ms-2" pill>
                       <i className={`bi ${entryPointType.icon} me-1`}></i>
                       {entryPointType.label}
+                      {entryPointType.args && (
+                        <code className="ms-1 fw-normal" style={{ opacity: 0.9 }}>{entryPointType.args}</code>
+                      )}
                     </Badge>
                   )}
                 </div>
@@ -985,9 +1003,14 @@ function Element() {
                     <small className="text-muted">{element.decorators.length}</small>
                   </div>
                   <div className="d-flex flex-wrap gap-1">
-                    {element.decorators.map((d, i) => (
-                      <code key={i} className="small bg-light px-1 rounded">@{d}</code>
-                    ))}
+                    {element.decorator_details && element.decorator_details.length > 0
+                      ? element.decorator_details.map((dd, i) => (
+                          <code key={i} className="small bg-light px-1 rounded">@{dd.full || dd.name}</code>
+                        ))
+                      : element.decorators.map((d, i) => (
+                          <code key={i} className="small bg-light px-1 rounded">@{d}</code>
+                        ))
+                    }
                   </div>
                 </ListGroup.Item>
               )}
@@ -1014,12 +1037,17 @@ function Element() {
                 </ListGroup.Item>
               )}
               {entryPointType && (
-                <ListGroup.Item className="d-flex justify-content-between">
-                  <span className="text-muted">Entry Point</span>
-                  <Badge bg={entryPointType.color}>
-                    <i className={`bi ${entryPointType.icon} me-1`}></i>
-                    {entryPointType.label}
-                  </Badge>
+                <ListGroup.Item>
+                  <div className="d-flex justify-content-between align-items-center">
+                    <span className="text-muted">Entry Point</span>
+                    <Badge bg={entryPointType.color}>
+                      <i className={`bi ${entryPointType.icon} me-1`}></i>
+                      {entryPointType.label}
+                    </Badge>
+                  </div>
+                  {entryPointType.args && (
+                    <code className="d-block mt-1 small text-break">{entryPointType.args}</code>
+                  )}
                 </ListGroup.Item>
               )}
               {element.element_type === 'file' && element.element_count !== null && element.element_count !== undefined && (

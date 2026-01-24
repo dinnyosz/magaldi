@@ -208,6 +208,12 @@ export interface ElementImportInfo {
   is_internal: boolean
 }
 
+export interface DecoratorDetailInfo {
+  name: string  // e.g., "router.get", "click.option"
+  args: string | null  // e.g., '"/users/{id}"', '"--verbose"'
+  full: string | null  // e.g., 'router.get("/users/{id}")'
+}
+
 export interface ElementDetail {
   element_id: string
   hash_id: string | null
@@ -222,6 +228,7 @@ export interface ElementDetail {
   docstring: string | null
   raw_code: string | null
   decorators: string[]
+  decorator_details: DecoratorDetailInfo[]
   visibility: string | null
   is_async: boolean
   is_test: boolean
