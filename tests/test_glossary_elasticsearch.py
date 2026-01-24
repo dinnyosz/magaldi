@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
-from datetime import datetime
 
 import pytest
 
-from shared.db.elasticsearch import ElasticsearchRepository, INDEX_NAME
-
+from shared.db.elasticsearch import INDEX_NAME, ElasticsearchRepository
 
 # =============================================================================
 # FIXTURES
@@ -101,6 +99,41 @@ class TestIndexGlossary:
         assert doc["file_paths"] == []
         assert doc["total_count"] == 0
 
+    def test_indexes_glossary_with_description(self, mock_repo, mock_es_client):
+        """Test that description field is indexed."""
+        mock_repo.index_glossary(
+            glossary_id="test:repo:main:glossary:user",
+            scope="test",
+            repository="repo",
+            username="main",
+            term="user",
+            total_count=5,
+            element_ids=["e1", "e2"],
+            file_paths=["path/to/file.py"],
+            description="A person who uses the system",
+        )
+
+        call_args = mock_es_client.index.call_args
+        body = call_args[1]["document"]
+        assert body["description"] == "A person who uses the system"
+
+    def test_indexes_glossary_with_empty_description_by_default(self, mock_repo, mock_es_client):
+        """Test that description defaults to empty string."""
+        mock_repo.index_glossary(
+            glossary_id="test:repo:main:glossary:user",
+            scope="test",
+            repository="repo",
+            username="main",
+            term="user",
+            total_count=5,
+            element_ids=["e1"],
+            file_paths=["path/to/file.py"],
+        )
+
+        call_args = mock_es_client.index.call_args
+        body = call_args[1]["document"]
+        assert body["description"] == ""
+
 
 # =============================================================================
 # GET GLOSSARY TERMS TESTS
@@ -183,12 +216,66 @@ class TestGetGlossaryTerms:
         call_kwargs = mock_es_client.search.call_args[1]
         query = call_kwargs["query"]
         # Check that min_count filter is in the query
-        range_filter = next(
-            (m for m in query["bool"]["must"] if "range" in m),
-            None
-        )
+        range_filter = next((m for m in query["bool"]["must"] if "range" in m), None)
         assert range_filter is not None
         assert range_filter["range"]["total_count"]["gte"] == 5
+
+    def test_returns_description_field(self, mock_repo, mock_es_client):
+        """Test that description field is returned."""
+        mock_es_client.search.return_value = {
+            "hits": {
+                "hits": [
+                    {
+                        "_id": "scope:repo:main:glossary:user",
+                        "_source": {
+                            "term": "user",
+                            "total_count": 10,
+                            "element_ids": ["id1"],
+                            "file_paths": ["user.py"],
+                            "description": "A person who uses the system",
+                            "feature_associations": [],
+                        },
+                    },
+                ]
+            }
+        }
+
+        result = mock_repo.get_glossary_terms(
+            scope="scope",
+            repository="repo",
+            username="main",
+        )
+
+        assert len(result) == 1
+        assert result[0]["description"] == "A person who uses the system"
+
+    def test_returns_empty_description_when_missing(self, mock_repo, mock_es_client):
+        """Test that description defaults to empty string when not in source."""
+        mock_es_client.search.return_value = {
+            "hits": {
+                "hits": [
+                    {
+                        "_id": "scope:repo:main:glossary:user",
+                        "_source": {
+                            "term": "user",
+                            "total_count": 10,
+                            "element_ids": ["id1"],
+                            "file_paths": ["user.py"],
+                            "feature_associations": [],
+                        },
+                    },
+                ]
+            }
+        }
+
+        result = mock_repo.get_glossary_terms(
+            scope="scope",
+            repository="repo",
+            username="main",
+        )
+
+        assert len(result) == 1
+        assert result[0]["description"] == ""
 
 
 # =============================================================================
@@ -251,6 +338,53 @@ class TestGetGlossaryTerm:
 
         assert result is None
 
+    def test_returns_description_field(self, mock_repo, mock_es_client):
+        """Test that description field is returned."""
+        mock_es_client.get.return_value = {
+            "found": True,
+            "_source": {
+                "term": "user",
+                "total_count": 10,
+                "element_ids": ["id1"],
+                "file_paths": ["user.py"],
+                "description": "A person who uses the system",
+                "feature_associations": [],
+            },
+        }
+
+        result = mock_repo.get_glossary_term(
+            scope="scope",
+            repository="repo",
+            term="user",
+            username="main",
+        )
+
+        assert result is not None
+        assert result["description"] == "A person who uses the system"
+
+    def test_returns_empty_description_when_missing(self, mock_repo, mock_es_client):
+        """Test that description defaults to empty string when not in source."""
+        mock_es_client.get.return_value = {
+            "found": True,
+            "_source": {
+                "term": "user",
+                "total_count": 10,
+                "element_ids": ["id1"],
+                "file_paths": ["user.py"],
+                "feature_associations": [],
+            },
+        }
+
+        result = mock_repo.get_glossary_term(
+            scope="scope",
+            repository="repo",
+            term="user",
+            username="main",
+        )
+
+        assert result is not None
+        assert result["description"] == ""
+
 
 # =============================================================================
 # SEARCH GLOSSARY TESTS
@@ -297,12 +431,62 @@ class TestSearchGlossary:
         # Verify wildcard query is used
         call_kwargs = mock_es_client.search.call_args[1]
         query = call_kwargs["query"]
-        wildcard_filter = next(
-            (m for m in query["bool"]["must"] if "wildcard" in m),
-            None
-        )
+        wildcard_filter = next((m for m in query["bool"]["must"] if "wildcard" in m), None)
         assert wildcard_filter is not None
         assert "*user*" in wildcard_filter["wildcard"]["term"]
+
+    def test_returns_description_field(self, mock_repo, mock_es_client):
+        """Test that description field is returned in search results."""
+        mock_es_client.search.return_value = {
+            "hits": {
+                "hits": [
+                    {
+                        "_id": "scope:repo:main:glossary:user",
+                        "_source": {
+                            "term": "user",
+                            "total_count": 10,
+                            "description": "A person who uses the system",
+                        },
+                    },
+                ]
+            }
+        }
+
+        result = mock_repo.search_glossary(
+            scope="scope",
+            repository="repo",
+            query="user",
+            username="main",
+        )
+
+        assert len(result) == 1
+        assert result[0]["description"] == "A person who uses the system"
+
+    def test_returns_empty_description_when_missing(self, mock_repo, mock_es_client):
+        """Test that description defaults to empty string when not in source."""
+        mock_es_client.search.return_value = {
+            "hits": {
+                "hits": [
+                    {
+                        "_id": "scope:repo:main:glossary:user",
+                        "_source": {
+                            "term": "user",
+                            "total_count": 10,
+                        },
+                    },
+                ]
+            }
+        }
+
+        result = mock_repo.search_glossary(
+            scope="scope",
+            repository="repo",
+            query="user",
+            username="main",
+        )
+
+        assert len(result) == 1
+        assert result[0]["description"] == ""
 
 
 # =============================================================================

@@ -1646,6 +1646,7 @@ class ElasticsearchRepository:
         total_count: int,
         element_ids: list[str],
         file_paths: list[str],
+        description: str = "",
     ) -> bool:
         """Index a glossary entry document.
 
@@ -1658,6 +1659,7 @@ class ElasticsearchRepository:
             total_count: Total occurrences of this term.
             element_ids: List of element IDs containing this term.
             file_paths: List of file paths containing this term.
+            description: AI-generated description of the term.
 
         Returns:
             True on success.
@@ -1674,6 +1676,7 @@ class ElasticsearchRepository:
             "total_count": total_count,
             "element_ids": element_ids,
             "file_paths": file_paths,
+            "description": description,
             "feature_associations": [],
             "indexed_at": datetime.now().isoformat(),
             "level": -3,  # Glossary terms are at the highest conceptual level
@@ -1731,6 +1734,7 @@ class ElasticsearchRepository:
                 "total_count": source.get("total_count"),
                 "element_ids": source.get("element_ids", []),
                 "file_paths": source.get("file_paths", []),
+                "description": source.get("description", ""),
                 "feature_associations": source.get("feature_associations", []),
             })
 
@@ -1767,6 +1771,7 @@ class ElasticsearchRepository:
                     "total_count": source.get("total_count"),
                     "element_ids": source.get("element_ids", []),
                     "file_paths": source.get("file_paths", []),
+                    "description": source.get("description", ""),
                     "feature_associations": source.get("feature_associations", []),
                 }
         except Exception:
@@ -1820,6 +1825,7 @@ class ElasticsearchRepository:
                 "glossary_id": hit.get("_id"),
                 "term": source.get("term"),
                 "total_count": source.get("total_count"),
+                "description": source.get("description", ""),
             })
 
         return results
