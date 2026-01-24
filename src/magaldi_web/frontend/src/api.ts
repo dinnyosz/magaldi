@@ -495,6 +495,13 @@ export interface ContainerInfo {
   element_type: string
 }
 
+export interface BrowseSubfeature {
+  element_id: string
+  hash_id: string | null
+  label: string
+  member_count: number
+}
+
 export interface BrowseElement {
   element_id: string
   hash_id: string | null
@@ -515,6 +522,9 @@ export interface BrowseElement {
   has_docstring: boolean
   decorators: string[]
   level: number
+  // For features
+  member_count?: number
+  subfeatures?: BrowseSubfeature[]
 }
 
 export interface BrowseResponse {

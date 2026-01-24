@@ -131,6 +131,55 @@ async def browse_elements(
             if doc.get("found") and doc.get("_source"):
                 parent_info[doc["_id"]] = doc["_source"]
 
+    # Collect feature labels to fetch subfeatures
+    feature_labels: dict[str, str] = {}  # element_id -> cluster_label
+    for hit in hits.get("hits", []):
+        source = hit["_source"]
+        if source.get("element_type") == "feature":
+            feature_labels[source["element_id"]] = source.get("cluster_label") or source.get("name")
+
+    # Batch fetch subfeatures for features
+    subfeatures_by_feature: dict[str, list[dict]] = {}
+    if feature_labels:
+        # Get a sample feature to know scope/repo/username
+        sample_hit = next((h for h in hits.get("hits", []) if h["_source"].get("element_type") == "feature"), None)
+        if sample_hit:
+            sample_src = sample_hit["_source"]
+            # Query all subfeatures for these features
+            subfeature_result = client.search(
+                index=INDEX_NAME,
+                body={
+                    "size": 1000,
+                    "query": {
+                        "bool": {
+                            "filter": [
+                                {"term": {"scope": sample_src.get("scope")}},
+                                {"term": {"repository": sample_src.get("repository")}},
+                                {"term": {"username": sample_src.get("username", "main")}},
+                                {"term": {"element_type": "subfeature"}},
+                                {"terms": {"parent_feature_label": list(feature_labels.values())}},
+                            ],
+                        },
+                    },
+                    "_source": ["element_id", "hash_id", "cluster_label", "member_count", "parent_feature_label"],
+                },
+            )
+            for sf_hit in subfeature_result.get("hits", {}).get("hits", []):
+                sf_src = sf_hit["_source"]
+                parent_label = sf_src.get("parent_feature_label")
+                # Find which feature this belongs to
+                for fid, flabel in feature_labels.items():
+                    if flabel == parent_label:
+                        if fid not in subfeatures_by_feature:
+                            subfeatures_by_feature[fid] = []
+                        subfeatures_by_feature[fid].append({
+                            "element_id": sf_src["element_id"],
+                            "hash_id": sf_src.get("hash_id"),
+                            "label": sf_src.get("cluster_label"),
+                            "member_count": sf_src.get("member_count", 0),
+                        })
+                        break
+
     elements = []
     for hit in hits.get("hits", []):
         source = hit["_source"]
@@ -147,7 +196,7 @@ async def browse_elements(
                 "element_type": pinfo.get("element_type"),
             }
 
-        elements.append({
+        elem = {
             "element_id": source["element_id"],
             "hash_id": source.get("hash_id"),
             "name": source["name"],
@@ -167,7 +216,14 @@ async def browse_elements(
             "has_docstring": bool(source.get("docstring")),
             "decorators": source.get("decorators", []),
             "level": source.get("level", 0),
-        })
+        }
+
+        # Add subfeature info for features
+        if source.get("element_type") == "feature":
+            elem["member_count"] = source.get("member_count", 0)
+            elem["subfeatures"] = subfeatures_by_feature.get(source["element_id"], [])
+
+        elements.append(elem)
 
     return {
         "elements": elements,

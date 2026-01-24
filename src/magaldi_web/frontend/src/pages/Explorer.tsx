@@ -138,28 +138,58 @@ function ElementRow({ element, username }: { element: BrowseElement; username: s
           <Badge bg={config.color}>{element.element_type}</Badge>
         </td>
         <td>
-          {/* Container info for methods */}
-          {element.container && (
-            <div className="small">
-              <i className={`bi ${typeConfig[element.container.element_type]?.icon || 'bi-dot'} me-1 text-${typeConfig[element.container.element_type]?.color || 'secondary'}`}></i>
-              <Link
-                to={`/element/${encodeURIComponent(element.container.hash_id || element.container.element_id)}`}
-                className="text-decoration-none text-primary"
-              >
-                {element.container.name}
-              </Link>
+          {/* For features: show member count and subfeatures */}
+          {element.element_type === 'feature' || element.element_type === 'subfeature' ? (
+            <div>
+              {element.member_count !== undefined && (
+                <Badge bg="secondary" className="me-2">{element.member_count} members</Badge>
+              )}
+              {element.subfeatures && element.subfeatures.length > 0 && (
+                <div className="small mt-1">
+                  <span className="text-muted">Subfeatures: </span>
+                  {element.subfeatures.map((sf, i) => (
+                    <span key={sf.element_id}>
+                      <Link
+                        to={`/element/${encodeURIComponent(sf.hash_id || sf.element_id)}`}
+                        className="text-decoration-none"
+                      >
+                        {sf.label}
+                      </Link>
+                      {i < element.subfeatures!.length - 1 && ', '}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
-          <code className="small text-muted">{element.file_path}</code>
-          {element.line_start > 0 && (
-            <span className="text-muted small ms-1">:{element.line_start}</span>
-          )}
-          {element.line_end && element.line_end !== element.line_start && (
-            <span className="text-muted small">-{element.line_end}</span>
+          ) : (
+            <>
+              {/* Container info for methods */}
+              {element.container && (
+                <div className="small">
+                  <i className={`bi ${typeConfig[element.container.element_type]?.icon || 'bi-dot'} me-1 text-${typeConfig[element.container.element_type]?.color || 'secondary'}`}></i>
+                  <Link
+                    to={`/element/${encodeURIComponent(element.container.hash_id || element.container.element_id)}`}
+                    className="text-decoration-none text-primary"
+                  >
+                    {element.container.name}
+                  </Link>
+                </div>
+              )}
+              <code className="small text-muted">{element.file_path}</code>
+              {element.line_start > 0 && (
+                <span className="text-muted small ms-1">:{element.line_start}</span>
+              )}
+              {element.line_end && element.line_end !== element.line_start && (
+                <span className="text-muted small">-{element.line_end}</span>
+              )}
+            </>
           )}
         </td>
         <td>
-          <Badge bg="secondary">{element.language}</Badge>
+          {/* Hide language for features */}
+          {element.element_type !== 'feature' && element.element_type !== 'subfeature' ? (
+            <Badge bg="secondary">{element.language}</Badge>
+          ) : null}
         </td>
         <td className="small text-muted" style={{ maxWidth: '300px' }}>
           {element.summary ? (
