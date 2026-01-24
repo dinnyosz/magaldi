@@ -1102,19 +1102,26 @@ def run_glossary_extraction(
                 else:
                     worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "")
 
-            # Stats line
+            # Stats line - different labels for each phase
             avg_api = state.timing.avg_api_time
             wall_time = state.timing.elapsed / state.completed if state.completed > 0 else 0
+            is_phase2 = "summary" in phase.lower()
             stats = Text()
             stats.append("  ")
             stats.append("Wall: ", style="dim")
             stats.append(f"{wall_time:.2f}s", style="green")
-            stats.append("/item | ", style="dim")
+            if is_phase2:
+                stats.append("/term | ", style="dim")
+            else:
+                stats.append("/feature | ", style="dim")
             stats.append("API: ", style="dim")
             stats.append(f"{avg_api:.1f}s", style="green")
-            stats.append("/item | ", style="dim")
-            stats.append("Terms: ", style="dim")
-            stats.append(f"{state.terms_extracted}", style="cyan")
+            if is_phase2:
+                stats.append("/term", style="dim")
+            else:
+                stats.append("/feature | ", style="dim")
+                stats.append("Terms: ", style="dim")
+                stats.append(f"{state.terms_extracted}", style="cyan")
             if state.failed > 0:
                 stats.append(" | ", style="dim")
                 stats.append(f"{state.failed} failed", style="red")
