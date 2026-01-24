@@ -98,40 +98,29 @@ class GlossaryProgressState:
 
 
 # Prompt template for glossary term extraction (Phase 1: just extract term names)
-GLOSSARY_EXTRACTION_PROMPT = """You are extracting domain glossary terms from a code feature description.
+GLOSSARY_EXTRACTION_PROMPT = """Extract domain glossary terms from this code feature.
 
 Feature: {label}
 Description: {summary}
 
-Extract ALL domain-specific glossary items found. Look for:
-- Actors: entities that perform actions (user, admin, worker, client, customer, owner, member)
-- Objects: domain entities being manipulated (order, invoice, product, account, subscription)
-- Processes: business operations (registration, authentication, checkout, payment, approval)
-- States: conditions or statuses (pending, active, expired, verified)
-
-For each item, provide:
-- name: a short lowercase term (1-2 words, singular form preferred)
-- description: one sentence explaining what it represents in this codebase
+Extract terms for:
+- Actors: entities that perform actions (user, admin, client, customer)
+- Objects: domain entities (order, invoice, product, account)
+- Processes: business operations (registration, authentication, checkout)
+- States: conditions or statuses (pending, active, expired)
 
 Rules:
-- Extract MULTIPLE terms - most features contain 2-5 domain concepts
-- Only extract terms meaningful in the business/domain context
-- Ignore generic programming terms (function, class, method, handler, service, controller)
-- Ignore technical implementation details (cache, queue, thread, buffer, stream)
-- If the description mentions specific entities or processes, extract them
+- Extract 2-5 terms per feature
+- Use lowercase, singular form (1-2 words)
+- Only domain/business terms, NOT programming terms (function, class, handler, service)
+- NOT technical terms (cache, queue, thread, buffer)
 
-Return a JSON array of objects with "name" and "description" fields.
-Return an empty array [] ONLY if absolutely no domain terms are found.
+Return JSON array of term names only:
+["term1", "term2", "term3"]
 
-Example output for a "User Authentication" feature:
-[
-  {{"name": "user", "description": "A person who has an account in the system"}},
-  {{"name": "authentication", "description": "The process of verifying a user's identity"}},
-  {{"name": "credential", "description": "Login information like username and password"}},
-  {{"name": "session", "description": "An authenticated user's active connection to the system"}}
-]
+Return [] if no domain terms found.
 
-JSON output:"""
+JSON:"""
 
 # Prompt template for glossary summary generation (Phase 2: generate holistic summary)
 GLOSSARY_SUMMARY_PROMPT = """You are generating a glossary entry for a domain term found in a codebase.
@@ -181,19 +170,19 @@ def build_glossary_prompt(summary: str, label: str) -> str:
     return GLOSSARY_EXTRACTION_PROMPT.format(label=label, summary=summary)
 
 
-def parse_llm_response(response: str) -> list[dict[str, str]]:
-    """Parse LLM response to extract glossary items.
+def parse_llm_response(response: str) -> list[str]:
+    """Parse LLM response to extract glossary term names.
 
     Handles:
-    - Plain JSON arrays
+    - Plain JSON arrays of strings ["term1", "term2"]
     - JSON wrapped in markdown code blocks (```json ... ```)
-    - Filters out malformed items
+    - Legacy format with objects [{"name": "term1", ...}]
 
     Args:
         response: Raw response string from the LLM.
 
     Returns:
-        List of dicts with 'name' and 'description' keys.
+        List of term name strings.
         Returns empty list if parsing fails or no valid items found.
     """
     response = response.strip()
@@ -207,11 +196,15 @@ def parse_llm_response(response: str) -> list[dict[str, str]]:
     try:
         data = json.loads(response)
         if isinstance(data, list):
-            return [
-                item
-                for item in data
-                if isinstance(item, dict) and "name" in item and "description" in item
-            ]
+            terms = []
+            for item in data:
+                if isinstance(item, str):
+                    # New format: ["term1", "term2"]
+                    terms.append(item)
+                elif isinstance(item, dict) and "name" in item:
+                    # Legacy format: [{"name": "term1", ...}]
+                    terms.append(item["name"])
+            return terms
     except json.JSONDecodeError:
         pass
 
@@ -222,8 +215,8 @@ async def call_llm_for_glossary(
     summary: str,
     label: str,
     config: MagaldiConfig | None = None,
-) -> list[dict[str, str]]:
-    """Call LLM to extract glossary items from a summary.
+) -> list[str]:
+    """Call LLM to extract glossary term names from a summary.
 
     Args:
         summary: The feature summary text to extract terms from.
@@ -231,7 +224,7 @@ async def call_llm_for_glossary(
         config: Optional MagaldiConfig. If None, uses default config.
 
     Returns:
-        List of dicts with 'name' and 'description' keys.
+        List of term name strings.
         Returns empty list if LLM call fails or returns invalid data.
     """
     if config is None:
@@ -264,7 +257,7 @@ async def call_llm_for_glossary(
             prompt=prompt,
             temperature=llm_config.summarize_temperature,
             top_p=llm_config.summarize_top_p,
-            max_tokens=llm_config.summarize_max_tokens,
+            max_tokens=128,  # Just term names, not full descriptions
         )
     except LLMError:
         return []
@@ -292,18 +285,16 @@ async def extract_glossary_from_feature(
     if not summary:
         return []
 
-    raw_items = await call_llm_for_glossary(summary, label, config)
+    term_names = await call_llm_for_glossary(summary, label, config)
 
     items = []
-    for raw in raw_items:
-        name = raw.get("name", "").lower().strip()
-        description = raw.get("description", "").strip()
-
-        if name and description:
+    for name in term_names:
+        name = name.lower().strip()
+        if name:
             items.append(
                 GlossaryItem(
                     name=name,
-                    description=description,
+                    description="",  # Will be generated in Phase 2
                     source_feature_id=feature_id,
                 )
             )
@@ -498,19 +489,17 @@ def extract_glossary_from_feature_sync(
         return [], 0.0
 
     start_time = time.time()
-    raw_items = call_llm_for_glossary_sync(summary, label, config)
+    term_names = call_llm_for_glossary_sync(summary, label, config)
     api_time = time.time() - start_time
 
     items = []
-    for raw in raw_items:
-        name = raw.get("name", "").lower().strip()
-        description = raw.get("description", "").strip()
-
-        if name and description:
+    for name in term_names:
+        name = name.lower().strip()
+        if name:
             items.append(
                 GlossaryItem(
                     name=name,
-                    description=description,
+                    description="",  # Will be generated in Phase 2
                     source_feature_id=feature_id,
                 )
             )
@@ -522,8 +511,8 @@ def call_llm_for_glossary_sync(
     summary: str,
     label: str,
     config: MagaldiConfig | None = None,
-) -> list[dict[str, str]]:
-    """Synchronous LLM call for glossary extraction.
+) -> list[str]:
+    """Synchronous LLM call for glossary term extraction.
 
     Args:
         summary: The feature summary text to extract terms from.
@@ -531,7 +520,7 @@ def call_llm_for_glossary_sync(
         config: Optional MagaldiConfig. If None, uses default config.
 
     Returns:
-        List of dicts with 'name' and 'description' keys.
+        List of term name strings.
     """
     if config is None:
         from shared.config import MagaldiConfig
@@ -563,7 +552,7 @@ def call_llm_for_glossary_sync(
             prompt=prompt,
             temperature=llm_config.summarize_temperature,
             top_p=llm_config.summarize_top_p,
-            max_tokens=llm_config.summarize_max_tokens,
+            max_tokens=128,  # Just term names, not full descriptions
         )
     except LLMError:
         return []
