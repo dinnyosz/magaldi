@@ -99,6 +99,52 @@ function Element() {
   const isContainer = ['file', 'class'].includes(element.element_type)
   const isFeature = ['feature', 'subfeature'].includes(element.element_type)
 
+  // Detect entry point type from decorators
+  const entryPointPatterns: Record<string, { decorators: string[], label: string, icon: string, color: string }> = {
+    http: {
+      decorators: ['app.route', 'route', 'get', 'post', 'put', 'delete', 'patch', 'api_view', 'action', 'router.get', 'router.post', 'router.put', 'router.delete', 'router.patch'],
+      label: 'HTTP Endpoint',
+      icon: 'bi-globe',
+      color: 'primary',
+    },
+    cli: {
+      decorators: ['click.command', 'command', 'click.group', 'group'],
+      label: 'CLI Command',
+      icon: 'bi-terminal',
+      color: 'success',
+    },
+    test: {
+      decorators: ['pytest.fixture', 'fixture'],
+      label: 'Test Fixture',
+      icon: 'bi-check2-circle',
+      color: 'info',
+    },
+    async: {
+      decorators: ['celery.task', 'task'],
+      label: 'Async Task',
+      icon: 'bi-lightning',
+      color: 'warning',
+    },
+  }
+
+  let entryPointType: { label: string, icon: string, color: string } | null = null
+  if (element.decorators && element.decorators.length > 0) {
+    for (const [, config] of Object.entries(entryPointPatterns)) {
+      for (const decorator of element.decorators) {
+        const decoratorLower = decorator.toLowerCase()
+        if (config.decorators.some(d => decoratorLower.includes(d))) {
+          entryPointType = { label: config.label, icon: config.icon, color: config.color }
+          break
+        }
+      }
+      if (entryPointType) break
+    }
+  }
+  // Also check for main function
+  if (!entryPointType && element.name === 'main' && element.element_type === 'function') {
+    entryPointType = { label: 'Main Entry', icon: 'bi-play-circle', color: 'danger' }
+  }
+
   return (
     <div>
       {/* Breadcrumb */}
@@ -172,6 +218,12 @@ function Element() {
                   {element.is_test && (
                     <Badge bg="warning" text="dark" className="ms-2" pill>
                       test
+                    </Badge>
+                  )}
+                  {entryPointType && (
+                    <Badge bg={entryPointType.color} className="ms-2" pill>
+                      <i className={`bi ${entryPointType.icon} me-1`}></i>
+                      {entryPointType.label}
                     </Badge>
                   )}
                 </div>
@@ -599,7 +651,8 @@ function Element() {
                     )}
                   </ListGroup.Item>
                 )}
-                {element.context.parent && (
+                {/* Only show parent if it's different from file (not a file type itself) */}
+                {element.context.parent && element.context.parent.element_type !== 'file' && (
                   <ListGroup.Item>
                     <small className="text-uppercase text-muted d-block">Parent</small>
                     <Link to={`/element/${encodeURIComponent(element.context.parent.hash_id || element.context.parent.element_id)}`}>
@@ -885,6 +938,15 @@ function Element() {
                   <span className="text-muted">Test Code</span>
                   <Badge bg="warning" text="dark">
                     <i className="bi bi-check"></i> Yes
+                  </Badge>
+                </ListGroup.Item>
+              )}
+              {entryPointType && (
+                <ListGroup.Item className="d-flex justify-content-between">
+                  <span className="text-muted">Entry Point</span>
+                  <Badge bg={entryPointType.color}>
+                    <i className={`bi ${entryPointType.icon} me-1`}></i>
+                    {entryPointType.label}
                   </Badge>
                 </ListGroup.Item>
               )}
