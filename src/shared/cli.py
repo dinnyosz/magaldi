@@ -802,7 +802,7 @@ def run_feature_extraction(
                 # Current feature and model
                 current_text = Text()
                 if state.current_feature:
-                    current_text.append("  clustering  ", style="cyan")
+                    current_text.append("  labeling  ", style="cyan")
                     if state.model:
                         current_text.append(f"{state.model}  ", style="yellow")
                     current_text.append(state.current_feature, style="white")
@@ -813,7 +813,7 @@ def run_feature_extraction(
                 stats_text = Text()
                 if state.subclusters_labeled > 0:
                     stats_text.append("  ")
-                    stats_text.append(f"{state.subclusters_labeled} subclusters found", style="green")
+                    stats_text.append(f"{state.subclusters_labeled} sub-clusters labeled", style="green")
 
                 return Group(bar_text, current_text, stats_text)
 
@@ -920,7 +920,7 @@ def run_feature_extraction(
                 stats_line.append(f"{avg_time:.1f}s", style="green")
                 stats_line.append("/feature | ", style="dim")
                 stats_line.append(f"{state.subclusters_labeled}", style="cyan")
-                stats_line.append(" subclusters found", style="dim")
+                stats_line.append(" sub-clusters labeled", style="dim")
 
                 return Group(empty_line, stats_line)
 
@@ -936,7 +936,7 @@ def run_feature_extraction(
                         return build_labeling_display(current_labeling_state)
 
             # Print header before Live display (matches Phase 5 style)
-            console.print(f"  Discovering sub-clusters in {large_cluster_count} large features...")
+            console.print(f"  Finding and labeling sub-clusters in {large_cluster_count} large features...")
 
             with Live(LiveSubfeatureDisplay(), console=console, refresh_per_second=10) as live:
                 combined_live = live  # Make accessible to on_labeling_progress
