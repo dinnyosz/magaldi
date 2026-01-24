@@ -687,9 +687,12 @@ def extract_glossary_from_features_concurrent(
     if on_phase_change:
         on_phase_change("Generating summaries for terms")
 
-    # Reset progress counters for phase 2
+    # Reset progress counters and timing for phase 2
     counters["completed"] = 0
     counters["failed"] = 0
+    timing_stats.start_time = time.time()
+    timing_stats.total_api_time = 0.0
+    timing_stats.features_processed = 0
     total_terms = len(merged_items)
 
     def generate_summary_for_term(
