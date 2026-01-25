@@ -22,8 +22,14 @@ from magaldi_core.tree_sitter_manager import (
     DecoratorInfo,
     ExtractedCall,
     ExtractedElement,
-    ExtractedImport,
     ExtractedReference,
+    analyze_purity,
+    associate_comments,
+    detect_cli_commands,
+    detect_http_routes,
+    detect_patterns,
+    detect_public_api,
+    extract_comments,
     extract_javascript_base_class,
     extract_javascript_calls,
     extract_javascript_class_fields,
@@ -58,6 +64,11 @@ from magaldi_core.tree_sitter_manager import (
     extract_rust_modified_fields,
     extract_rust_panics,
     extract_rust_struct_fields,
+    extract_section_markers,
+    extract_side_effects,
+    # Extended code intelligence extractors
+    extract_todos,
+    extract_type_annotations,
     get_manager,
 )
 
@@ -606,6 +617,121 @@ class PythonParser(TreeSitterParser):
 
         # Set parent IDs for elements without explicit parents
         self._set_hierarchy(elements, file_element)
+
+        # === EXTENDED CODE INTELLIGENCE EXTRACTION ===
+
+        # Extract file-level documentation
+        todos = extract_todos(content)
+        section_markers = extract_section_markers(content)
+        all_comments = extract_comments(content)
+
+        # Populate file element with documentation
+        file_element.todos = [
+            {"kind": t.kind, "text": t.text, "line": t.line,
+             "assignee": t.assignee, "priority": t.priority, "issue_ref": t.issue_ref}
+            for t in todos
+        ]
+        file_element.section_markers = [
+            {"label": m.label, "line": m.line, "style": m.style}
+            for m in section_markers
+        ]
+
+        # Build list of ExtractedCall objects from element calls for purity analysis
+        def build_extracted_calls(elem_calls: list[Call] | None) -> list[ExtractedCall]:
+            if not elem_calls:
+                return []
+            return [
+                ExtractedCall(
+                    name=c.name,
+                    receiver=c.receiver,
+                    line=c.line
+                )
+                for c in elem_calls
+            ]
+
+        # Process each element for extended intelligence
+        for elem in elements:
+            if elem.element_type == "file":
+                continue
+
+            # Associate comments
+            assoc_comments = associate_comments(elem.line_start, all_comments)
+            elem.associated_comments = [
+                {"text": c.text, "line": c.line, "kind": c.kind, "position": c.position}
+                for c in assoc_comments
+            ]
+
+            # Type annotations (for functions/methods)
+            if elem.element_type in ("function", "method"):
+                # Parse for type annotations if we have raw_code
+                if elem.raw_code:
+                    try:
+                        elem_tree = self.manager.parse(elem.raw_code.encode("utf-8"), "python")
+                        type_annots = extract_type_annotations(elem_tree.root_node, "python")
+                        elem.type_annotations = [
+                            {"name": a.name, "kind": a.kind, "location": a.location,
+                             "line": a.line, "generic_args": a.generic_args}
+                            for a in type_annots
+                        ]
+                    except Exception:
+                        pass  # Skip type extraction if parsing fails
+
+                # Purity analysis
+                calls = build_extracted_calls(elem.calls)
+                mutations = elem.attributes_modified or []
+                purity = analyze_purity(calls, mutations, "python")
+                elem.purity = {
+                    "level": purity.level,
+                    "confidence": purity.confidence,
+                    "reasons": purity.reasons,
+                }
+                effects = extract_side_effects(calls, mutations, "python")
+                elem.side_effects = [
+                    {"kind": e.kind, "target": e.target, "line": e.line}
+                    for e in effects
+                ]
+                elem.mutated_state = mutations
+
+            # API surface detection
+            if elem.decorator_details:
+                dec_infos = [
+                    DecoratorInfo(name=d.get("name", ""), args=d.get("args"), full=d.get("full"))
+                    for d in elem.decorator_details
+                ]
+                routes = detect_http_routes(dec_infos, "python")
+                elem.http_routes = [
+                    {"method": r.method, "path": r.path,
+                     "path_params": r.path_params, "framework": r.framework}
+                    for r in routes
+                ]
+                commands = detect_cli_commands(dec_infos, elem.name, "python")
+                elem.cli_commands = [
+                    {"name": c.name, "options": c.options, "framework": c.framework}
+                    for c in commands
+                ]
+                elem.is_public_api = detect_public_api(
+                    elem.name, dec_infos, elem.visibility, "python"
+                )
+            else:
+                elem.is_public_api = detect_public_api(
+                    elem.name, [], elem.visibility, "python"
+                )
+
+            # Pattern detection (for classes)
+            if elem.element_type == "class":
+                # Collect method names from child elements
+                class_methods = [
+                    e.name for e in elements
+                    if e.parent_id == elem.element_id and e.element_type == "method"
+                ]
+                class_info = {
+                    "name": elem.name,
+                    "attributes": [a.get("name", "") for a in (elem.class_attributes or [])],
+                    "methods": class_methods,
+                }
+                patterns, confidence = detect_patterns(class_info, [], "python")
+                elem.detected_patterns = patterns
+                elem.pattern_confidence = confidence
 
         return elements
 
