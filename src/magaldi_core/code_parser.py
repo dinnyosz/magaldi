@@ -239,6 +239,30 @@ class CodeElement:
     # Content hash for change detection (computed from raw_code)
     content_hash: str | None = None
 
+    # === EXTENDED CODE INTELLIGENCE FIELDS ===
+
+    # Type Flow
+    type_annotations: list[dict[str, Any]] = field(default_factory=list)
+
+    # Pattern Detection
+    detected_patterns: list[str] = field(default_factory=list)  # ["singleton", "factory"]
+    pattern_confidence: dict[str, float] = field(default_factory=dict)  # {"singleton": 0.95}
+
+    # Documentation
+    todos: list[dict[str, Any]] = field(default_factory=list)
+    section_markers: list[dict[str, Any]] = field(default_factory=list)
+    associated_comments: list[dict[str, Any]] = field(default_factory=list)
+
+    # API Surface
+    is_public_api: bool = False
+    http_routes: list[dict[str, Any]] = field(default_factory=list)
+    cli_commands: list[dict[str, Any]] = field(default_factory=list)
+
+    # Purity/Mutation
+    purity: dict[str, Any] | None = None
+    side_effects: list[dict[str, Any]] = field(default_factory=list)
+    mutated_state: list[str] = field(default_factory=list)
+
     def compute_content_hash(self) -> str:
         """Compute SHA256 hash of the element's content for change detection.
 

@@ -99,6 +99,90 @@ class ExtractedCall:
     line: int  # 1-indexed line number
 
 
+# =============================================================================
+# EXTENDED CODE INTELLIGENCE DATA STRUCTURES
+# =============================================================================
+
+
+@dataclass
+class TypeAnnotation:
+    """Type annotation extracted from source code."""
+
+    name: str  # "User", "List[str]", "Optional[int]"
+    kind: str  # "parameter", "return", "variable", "attribute"
+    location: str  # "param:user_id", "return", "var:result"
+    line: int
+    generic_args: list[str] | None = None  # ["str"] for List[str]
+
+
+@dataclass
+class TodoItem:
+    """A TODO/FIXME comment extracted from source code."""
+
+    kind: str  # "TODO", "FIXME", "HACK", "XXX", "BUG", "NOTE"
+    text: str
+    line: int
+    assignee: str | None = None  # "alice" from TODO(alice)
+    priority: str | None = None  # "high", "low" (from ! markers)
+    issue_ref: str | None = None  # "GH-123", "#456"
+
+
+@dataclass
+class SectionMarker:
+    """A section marker comment (e.g., # === HELPERS ===)."""
+
+    label: str  # "HELPERS", "PRIVATE METHODS"
+    line: int
+    style: str  # "equals", "dashes", "hash"
+
+
+@dataclass
+class Comment:
+    """A comment associated with a code element."""
+
+    text: str
+    line: int
+    kind: str  # "inline", "block", "docstring"
+    position: str  # "above", "inline", "below"
+
+
+@dataclass
+class HttpRoute:
+    """An HTTP route extracted from a web framework."""
+
+    method: str  # "GET", "POST", "PUT", "DELETE"
+    path: str  # "/users/{id}"
+    path_params: list[str]  # ["id"]
+    framework: str  # "fastapi", "flask", "express"
+
+
+@dataclass
+class CliCommand:
+    """A CLI command extracted from a CLI framework."""
+
+    name: str  # "parse", "index"
+    options: list[dict[str, Any]]  # CliOption as dicts
+    framework: str  # "click", "typer", "argparse"
+
+
+@dataclass
+class PurityInfo:
+    """Purity analysis result for a function."""
+
+    level: str  # "pure", "read_only", "mutates_self", "mutates_external"
+    confidence: str  # "high", "medium", "low"
+    reasons: list[str]  # ["calls print()", "modifies self.cache"]
+
+
+@dataclass
+class SideEffect:
+    """A side effect detected in a function."""
+
+    kind: str  # "state_mutation", "io_file", "io_network", "console", "subprocess"
+    target: str | None  # "self.cache", "/tmp/file.txt"
+    line: int
+
+
 class TreeSitterManager:
     """Manages tree-sitter parsers for multiple languages.
 

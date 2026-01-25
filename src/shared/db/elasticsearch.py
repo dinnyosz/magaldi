@@ -151,6 +151,87 @@ INDEX_MAPPING = {
                     "default": {"type": "keyword"},
                 },
             },
+            # === EXTENDED CODE INTELLIGENCE MAPPINGS ===
+            # Type Flow
+            "type_annotations": {
+                "type": "nested",
+                "properties": {
+                    "name": {"type": "keyword"},
+                    "kind": {"type": "keyword"},
+                    "location": {"type": "keyword"},
+                    "line": {"type": "integer"},
+                    "generic_args": {"type": "keyword"},
+                },
+            },
+            # Pattern Detection
+            "detected_patterns": {"type": "keyword"},
+            "pattern_confidence": {"type": "object"},
+            # Documentation
+            "todos": {
+                "type": "nested",
+                "properties": {
+                    "kind": {"type": "keyword"},
+                    "text": {"type": "text"},
+                    "line": {"type": "integer"},
+                    "assignee": {"type": "keyword"},
+                    "priority": {"type": "keyword"},
+                    "issue_ref": {"type": "keyword"},
+                },
+            },
+            "section_markers": {
+                "type": "nested",
+                "properties": {
+                    "label": {"type": "keyword"},
+                    "line": {"type": "integer"},
+                    "style": {"type": "keyword"},
+                },
+            },
+            "associated_comments": {
+                "type": "nested",
+                "properties": {
+                    "text": {"type": "text"},
+                    "line": {"type": "integer"},
+                    "kind": {"type": "keyword"},
+                    "position": {"type": "keyword"},
+                },
+            },
+            # API Surface
+            "is_public_api": {"type": "boolean"},
+            "http_routes": {
+                "type": "nested",
+                "properties": {
+                    "method": {"type": "keyword"},
+                    "path": {"type": "keyword"},
+                    "path_params": {"type": "keyword"},
+                    "framework": {"type": "keyword"},
+                },
+            },
+            "cli_commands": {
+                "type": "nested",
+                "properties": {
+                    "name": {"type": "keyword"},
+                    "options": {"type": "nested"},
+                    "framework": {"type": "keyword"},
+                },
+            },
+            # Purity/Mutation
+            "purity": {
+                "type": "object",
+                "properties": {
+                    "level": {"type": "keyword"},
+                    "confidence": {"type": "keyword"},
+                    "reasons": {"type": "keyword"},
+                },
+            },
+            "side_effects": {
+                "type": "nested",
+                "properties": {
+                    "kind": {"type": "keyword"},
+                    "target": {"type": "keyword"},
+                    "line": {"type": "integer"},
+                },
+            },
+            "mutated_state": {"type": "keyword"},
         }
     },
     "settings": {
@@ -263,6 +344,32 @@ class ElasticsearchRepository:
             doc["return_type"] = element.return_type
         if element.parameters:
             doc["parameters"] = element.parameters
+
+        # Extended code intelligence fields
+        if element.type_annotations:
+            doc["type_annotations"] = element.type_annotations
+        if element.detected_patterns:
+            doc["detected_patterns"] = element.detected_patterns
+        if element.pattern_confidence:
+            doc["pattern_confidence"] = element.pattern_confidence
+        if element.todos:
+            doc["todos"] = element.todos
+        if element.section_markers:
+            doc["section_markers"] = element.section_markers
+        if element.associated_comments:
+            doc["associated_comments"] = element.associated_comments
+        if element.is_public_api:
+            doc["is_public_api"] = element.is_public_api
+        if element.http_routes:
+            doc["http_routes"] = element.http_routes
+        if element.cli_commands:
+            doc["cli_commands"] = element.cli_commands
+        if element.purity:
+            doc["purity"] = element.purity
+        if element.side_effects:
+            doc["side_effects"] = element.side_effects
+        if element.mutated_state:
+            doc["mutated_state"] = element.mutated_state
 
         client = self._get_client()
         client.index(index=INDEX_NAME, id=element.element_id, document=doc)
