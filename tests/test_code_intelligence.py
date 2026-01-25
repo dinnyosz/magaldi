@@ -2,10 +2,14 @@
 
 from magaldi_core.tree_sitter_manager import (
     Comment,
+    DecoratorInfo,
     ExtractedCall,
     TreeSitterManager,
     analyze_purity,
     associate_comments,
+    detect_cli_commands,
+    detect_http_routes,
+    detect_public_api,
     extract_comments,
     extract_section_markers,
     extract_side_effects,
@@ -194,3 +198,165 @@ class TestTypeAnnotationExtraction:
         list_type = next((a for a in annotations if "List" in a.name), None)
         assert list_type is not None
         assert list_type.generic_args == ["str"]
+
+
+class TestHttpRouteDetection:
+    """Tests for HTTP route detection."""
+
+    def test_detect_fastapi_route(self):
+        decorators = [
+            DecoratorInfo(
+                name="router.get", args='"/users/{id}"', full='router.get("/users/{id}")'
+            )
+        ]
+        routes = detect_http_routes(decorators, "python")
+        assert len(routes) == 1
+        assert routes[0].method == "GET"
+        assert routes[0].path == "/users/{id}"
+        assert routes[0].path_params == ["id"]
+        assert routes[0].framework == "fastapi"
+
+    def test_detect_flask_route(self):
+        decorators = [
+            DecoratorInfo(
+                name="app.route",
+                args='"/api/items", methods=["POST"]',
+                full='app.route("/api/items", methods=["POST"])',
+            )
+        ]
+        routes = detect_http_routes(decorators, "python")
+        assert len(routes) == 1
+        assert routes[0].method == "POST"
+        assert routes[0].path == "/api/items"
+
+    def test_no_route_decorators(self):
+        decorators = [DecoratorInfo(name="staticmethod", args=None, full="staticmethod")]
+        routes = detect_http_routes(decorators, "python")
+        assert len(routes) == 0
+
+    def test_detect_fastapi_post(self):
+        decorators = [
+            DecoratorInfo(
+                name="router.post", args='"/items"', full='router.post("/items")'
+            )
+        ]
+        routes = detect_http_routes(decorators, "python")
+        assert len(routes) == 1
+        assert routes[0].method == "POST"
+        assert routes[0].framework == "fastapi"
+
+    def test_detect_flask_route_default_get(self):
+        decorators = [
+            DecoratorInfo(name="app.route", args='"/index"', full='app.route("/index")')
+        ]
+        routes = detect_http_routes(decorators, "python")
+        assert len(routes) == 1
+        assert routes[0].method == "GET"
+        assert routes[0].framework == "flask"
+
+    def test_detect_multiple_path_params(self):
+        decorators = [
+            DecoratorInfo(
+                name="router.get",
+                args='"/users/{user_id}/posts/{post_id}"',
+                full='router.get("/users/{user_id}/posts/{post_id}")',
+            )
+        ]
+        routes = detect_http_routes(decorators, "python")
+        assert len(routes) == 1
+        assert routes[0].path_params == ["user_id", "post_id"]
+
+    def test_detect_flask_path_params(self):
+        decorators = [
+            DecoratorInfo(
+                name="app.route",
+                args='"/users/<user_id>"',
+                full='app.route("/users/<user_id>")',
+            )
+        ]
+        routes = detect_http_routes(decorators, "python")
+        assert len(routes) == 1
+        assert routes[0].path_params == ["user_id"]
+
+
+class TestCliCommandDetection:
+    """Tests for CLI command detection."""
+
+    def test_detect_click_command(self):
+        decorators = [DecoratorInfo(name="click.command", args=None, full="click.command()")]
+        commands = detect_cli_commands(decorators, "parse", "python")
+        assert len(commands) == 1
+        assert commands[0].name == "parse"
+        assert commands[0].framework == "click"
+
+    def test_detect_typer_command(self):
+        decorators = [DecoratorInfo(name="app.command", args=None, full="app.command()")]
+        commands = detect_cli_commands(decorators, "run", "python")
+        assert len(commands) == 1
+        assert commands[0].framework == "typer"
+
+    def test_no_cli_decorators(self):
+        decorators = [DecoratorInfo(name="property", args=None, full="property")]
+        commands = detect_cli_commands(decorators, "getter", "python")
+        assert len(commands) == 0
+
+    def test_detect_click_group(self):
+        decorators = [DecoratorInfo(name="click.group", args=None, full="click.group()")]
+        commands = detect_cli_commands(decorators, "main", "python")
+        assert len(commands) == 1
+        assert commands[0].framework == "click"
+
+    def test_detect_command_with_options(self):
+        decorators = [
+            DecoratorInfo(name="click.command", args=None, full="click.command()"),
+            DecoratorInfo(
+                name="click.option",
+                args='"--verbose", "-v", is_flag=True',
+                full='click.option("--verbose", "-v", is_flag=True)',
+            ),
+            DecoratorInfo(
+                name="click.argument",
+                args='"path", required=True',
+                full='click.argument("path", required=True)',
+            ),
+        ]
+        commands = detect_cli_commands(decorators, "process", "python")
+        assert len(commands) == 1
+        assert len(commands[0].options) == 2
+        # Check that required option is detected
+        option_names = [opt["name"] for opt in commands[0].options]
+        assert "--verbose" in option_names or "path" in option_names
+
+
+class TestPublicApiDetection:
+    """Tests for public API detection."""
+
+    def test_public_function(self):
+        assert detect_public_api("process_data", [], "public", "python") is True
+
+    def test_private_function(self):
+        assert detect_public_api("_helper", [], "private", "python") is False
+
+    def test_dunder_method(self):
+        assert detect_public_api("__init__", [], "public", "python") is False
+
+    def test_api_decorator(self):
+        decorators = [DecoratorInfo(name="api_endpoint", args=None, full="api_endpoint")]
+        assert detect_public_api("handler", decorators, "public", "python") is True
+
+    def test_route_is_public_api(self):
+        decorators = [
+            DecoratorInfo(name="router.get", args='"/users"', full='router.get("/users")')
+        ]
+        assert detect_public_api("get_users", decorators, "public", "python") is True
+
+    def test_cli_command_is_public_api(self):
+        decorators = [DecoratorInfo(name="click.command", args=None, full="click.command()")]
+        assert detect_public_api("run_task", decorators, "public", "python") is True
+
+    def test_protected_function(self):
+        assert detect_public_api("_internal_helper", [], "protected", "python") is False
+
+    def test_public_with_export_decorator(self):
+        decorators = [DecoratorInfo(name="export", args=None, full="export")]
+        assert detect_public_api("exported_func", decorators, "public", "python") is True

@@ -3757,6 +3757,221 @@ def _extract_typescript_type_annotations(node: Node) -> list[TypeAnnotation]:
 
 
 # =============================================================================
+# API SURFACE DETECTION
+# =============================================================================
+
+# HTTP route decorator patterns
+_HTTP_ROUTE_PATTERNS: dict[str, tuple[str, str]] = {
+    # FastAPI patterns
+    "router.get": ("GET", "fastapi"),
+    "router.post": ("POST", "fastapi"),
+    "router.put": ("PUT", "fastapi"),
+    "router.delete": ("DELETE", "fastapi"),
+    "router.patch": ("PATCH", "fastapi"),
+    "app.get": ("GET", "fastapi"),
+    "app.post": ("POST", "fastapi"),
+    "app.put": ("PUT", "fastapi"),
+    "app.delete": ("DELETE", "fastapi"),
+    # Flask patterns
+    "app.route": ("*", "flask"),
+    "blueprint.route": ("*", "flask"),
+}
+
+
+def _extract_path_params(path: str) -> list[str]:
+    """Extract path parameters from a route path."""
+    params = []
+    # FastAPI/OpenAPI style: {param}
+    for match in re.finditer(r"\{(\w+)\}", path):
+        params.append(match.group(1))
+    # Flask style: <param>
+    for match in re.finditer(r"<(\w+)>", path):
+        params.append(match.group(1))
+    return params
+
+
+def _extract_path_from_args(args: str | None) -> str | None:
+    """Extract path from decorator arguments."""
+    if not args:
+        return None
+    match = re.match(r'["\']([^"\']+)["\']', args.strip())
+    if match:
+        return match.group(1)
+    return None
+
+
+def _extract_method_from_flask_args(args: str | None) -> str:
+    """Extract HTTP method from Flask route arguments."""
+    if not args:
+        return "GET"
+    match = re.search(r'methods\s*=\s*\[([^\]]+)\]', args)
+    if match:
+        methods_str = match.group(1)
+        method_match = re.search(r'["\'](\w+)["\']', methods_str)
+        if method_match:
+            return method_match.group(1).upper()
+    return "GET"
+
+
+def detect_http_routes(
+    decorators: list[DecoratorInfo],
+    language: str,  # noqa: ARG001 - reserved for future language-specific patterns
+) -> list[HttpRoute]:
+    """Detect HTTP routes from decorator information.
+
+    Args:
+        decorators: List of decorator information extracted from a function.
+        language: The programming language (e.g., "python", "javascript").
+
+    Returns:
+        List of detected HTTP routes.
+    """
+    routes = []
+
+    for dec in decorators:
+        if dec.name in _HTTP_ROUTE_PATTERNS:
+            method, framework = _HTTP_ROUTE_PATTERNS[dec.name]
+            path = _extract_path_from_args(dec.args)
+
+            if path:
+                if method == "*":
+                    method = _extract_method_from_flask_args(dec.args)
+
+                routes.append(
+                    HttpRoute(
+                        method=method,
+                        path=path,
+                        path_params=_extract_path_params(path),
+                        framework=framework,
+                    )
+                )
+
+    return routes
+
+
+# CLI command decorator patterns
+_CLI_COMMAND_PATTERNS: dict[str, str] = {
+    "click.command": "click",
+    "click.group": "click",
+    "app.command": "typer",
+    "typer.command": "typer",
+}
+
+
+def detect_cli_commands(
+    decorators: list[DecoratorInfo],
+    function_name: str,
+    language: str,  # noqa: ARG001 - reserved for future language-specific patterns
+) -> list[CliCommand]:
+    """Detect CLI commands from decorator information.
+
+    Args:
+        decorators: List of decorator information extracted from a function.
+        function_name: Name of the decorated function.
+        language: The programming language (e.g., "python").
+
+    Returns:
+        List of detected CLI commands.
+    """
+    commands = []
+
+    for dec in decorators:
+        if dec.name in _CLI_COMMAND_PATTERNS:
+            framework = _CLI_COMMAND_PATTERNS[dec.name]
+
+            # Extract options from sibling decorators
+            options = []
+            for other_dec in decorators:
+                if other_dec.name in (
+                    "click.option",
+                    "click.argument",
+                    "typer.Option",
+                    "typer.Argument",
+                ):
+                    option_name = ""
+                    if other_dec.args:
+                        # Extract the first argument as the option name
+                        args_parts = other_dec.args.split(",")
+                        if args_parts:
+                            option_name = args_parts[0].strip().strip("\"'")
+
+                    options.append(
+                        {
+                            "name": option_name,
+                            "type": None,
+                            "required": "required=True" in (other_dec.full or ""),
+                        }
+                    )
+
+            commands.append(
+                CliCommand(
+                    name=function_name,
+                    options=options,
+                    framework=framework,
+                )
+            )
+
+    return commands
+
+
+# Decorators that indicate public API
+_PUBLIC_API_DECORATORS = {
+    "api_endpoint",
+    "public",
+    "export",
+    "exposed",
+    "router.get",
+    "router.post",
+    "router.put",
+    "router.delete",
+    "router.patch",
+    "app.get",
+    "app.post",
+    "app.put",
+    "app.delete",
+    "app.route",
+    "blueprint.route",
+    "click.command",
+    "click.group",
+    "app.command",
+}
+
+
+def detect_public_api(
+    name: str,
+    decorators: list[DecoratorInfo],
+    visibility: str,
+    language: str,  # noqa: ARG001 - reserved for future language-specific patterns
+) -> bool:
+    """Detect if an element is a public API.
+
+    Args:
+        name: Name of the element (function, method, class).
+        decorators: List of decorator information.
+        visibility: Visibility level ("public", "private", "protected").
+        language: The programming language.
+
+    Returns:
+        True if the element is considered a public API, False otherwise.
+    """
+    # Private/protected are not public API
+    if visibility != "public":
+        return False
+
+    # Dunder methods are not public API
+    if name.startswith("__") and name.endswith("__"):
+        return False
+
+    # Check for public API decorators
+    for dec in decorators:
+        if dec.name in _PUBLIC_API_DECORATORS:
+            return True
+
+    # Default: public visibility and not private naming = public API
+    return True
+
+
+# =============================================================================
 # GLOBAL SINGLETON
 # =============================================================================
 
