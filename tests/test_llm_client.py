@@ -52,7 +52,7 @@ class TestLLMConfig:
         """Test default configuration values."""
         config = LLMConfig()
 
-        assert config.model == "ollama/qwen2.5-coder:3b"
+        assert config.model == "ollama/qwen3:4b-instruct"
         assert config.api_base is None
         assert config.api_key is None
         assert config.temperature == 0.2

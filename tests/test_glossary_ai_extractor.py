@@ -30,11 +30,8 @@ class TestExtractGlossaryFromFeature:
             "summary": "Handles user login and registration workflows.",
         }
 
-        mock_response = [
-            {"name": "user", "description": "Person who authenticates with the system"},
-            {"name": "login", "description": "Process of verifying user credentials"},
-            {"name": "registration", "description": "Process of creating a new user account"},
-        ]
+        # New format: LLM returns list of term names only
+        mock_response = ["user", "login", "registration"]
 
         with patch(
             "shared.ai.glossary.ai_extractor.call_llm_for_glossary",
@@ -46,7 +43,8 @@ class TestExtractGlossaryFromFeature:
         assert len(result) == 3
         assert all(isinstance(item, GlossaryItem) for item in result)
         assert result[0].name == "user"
-        assert result[0].description == "Person who authenticates with the system"
+        # Description is empty in Phase 1; will be generated in Phase 2
+        assert result[0].description == ""
         assert result[0].source_feature_id == "scope:repo:main:feature:auth"
 
     @pytest.mark.asyncio
@@ -107,18 +105,15 @@ class TestExtractGlossaryFromFeature:
 
     @pytest.mark.asyncio
     async def test_filters_malformed_items_missing_name(self):
-        """Test that items missing 'name' are filtered out."""
+        """Test that empty term names are filtered out."""
         feature = {
             "feature_id": "scope:repo:main:feature:auth",
             "label": "authentication",
             "summary": "Handles user login.",
         }
 
-        mock_response = [
-            {"name": "user", "description": "A valid user"},
-            {"description": "Missing name field"},  # No 'name' key
-            {"name": "", "description": "Empty name"},  # Empty 'name'
-        ]
+        # New format: list of strings with some empty/invalid entries
+        mock_response = ["user", "", "  "]  # Empty strings should be filtered
 
         with patch(
             "shared.ai.glossary.ai_extractor.call_llm_for_glossary",
@@ -131,19 +126,16 @@ class TestExtractGlossaryFromFeature:
         assert result[0].name == "user"
 
     @pytest.mark.asyncio
-    async def test_filters_malformed_items_missing_description(self):
-        """Test that items missing 'description' are filtered out."""
+    async def test_handles_valid_terms_with_no_descriptions(self):
+        """Test that valid terms are extracted even without descriptions (Phase 1 behavior)."""
         feature = {
             "feature_id": "scope:repo:main:feature:auth",
             "label": "authentication",
             "summary": "Handles user login.",
         }
 
-        mock_response = [
-            {"name": "user", "description": "A valid user"},
-            {"name": "orphan"},  # No 'description' key
-            {"name": "empty_desc", "description": ""},  # Empty 'description'
-        ]
+        # New format: terms are just strings, descriptions come in Phase 2
+        mock_response = ["user", "orphan", "empty_desc"]
 
         with patch(
             "shared.ai.glossary.ai_extractor.call_llm_for_glossary",
@@ -152,8 +144,10 @@ class TestExtractGlossaryFromFeature:
         ):
             result = await extract_glossary_from_feature(feature)
 
-        assert len(result) == 1
+        # All 3 terms should be valid (descriptions are generated in Phase 2)
+        assert len(result) == 3
         assert result[0].name == "user"
+        assert result[0].description == ""  # Empty until Phase 2
 
 
 class TestGlossaryItem:
@@ -231,41 +225,55 @@ class TestBuildGlossaryPrompt:
             label="test",
         )
 
-        # Should have example JSON to guide the model
-        assert '{"name"' in prompt or '"name":' in prompt
+        # Should have example JSON array to guide the model (new format: ["term1", "term2"])
+        assert '["term1"' in prompt or '"term"' in prompt.lower()
 
 
 class TestParseLLMResponse:
-    """Tests for parsing LLM response."""
+    """Tests for parsing LLM response.
 
-    def test_parses_valid_json_array(self):
-        """Test parsing valid JSON array."""
+    Note: The new format returns list[str] (term names), not list[dict].
+    Legacy dict format with {"name": ..., "description": ...} is also supported
+    for backward compatibility.
+    """
+
+    def test_parses_valid_json_array_of_strings(self):
+        """Test parsing valid JSON array of strings (new format)."""
+        response = '["user", "login", "registration"]'
+        result = parse_llm_response(response)
+
+        assert len(result) == 3
+        assert result[0] == "user"
+        assert result[1] == "login"
+        assert result[2] == "registration"
+
+    def test_parses_legacy_dict_format(self):
+        """Test parsing legacy dict format for backward compatibility."""
         response = '[{"name": "user", "description": "A person"}]'
         result = parse_llm_response(response)
 
         assert len(result) == 1
-        assert result[0]["name"] == "user"
-        assert result[0]["description"] == "A person"
+        assert result[0] == "user"
 
     def test_parses_json_in_markdown_code_block(self):
         """Test parsing JSON wrapped in markdown code blocks."""
         response = """```json
-[{"name": "user", "description": "A person"}]
+["user", "login"]
 ```"""
         result = parse_llm_response(response)
 
-        assert len(result) == 1
-        assert result[0]["name"] == "user"
+        assert len(result) == 2
+        assert result[0] == "user"
 
     def test_parses_json_in_markdown_code_block_without_lang(self):
         """Test parsing JSON in code block without language specifier."""
         response = """```
-[{"name": "user", "description": "A person"}]
+["user", "login"]
 ```"""
         result = parse_llm_response(response)
 
-        assert len(result) == 1
-        assert result[0]["name"] == "user"
+        assert len(result) == 2
+        assert result[0] == "user"
 
     def test_returns_empty_list_for_invalid_json(self):
         """Test that invalid JSON returns empty list."""
@@ -274,29 +282,16 @@ class TestParseLLMResponse:
 
         assert result == []
 
-    def test_filters_items_missing_name(self):
-        """Test that items without 'name' key are filtered out."""
-        response = """[
-            {"name": "user", "description": "Valid"},
-            {"description": "Missing name"},
-            {"other": "field"}
-        ]"""
+    def test_filters_empty_strings(self):
+        """Test that empty strings are returned but will be filtered in extract phase."""
+        response = '["user", "", "login"]'
         result = parse_llm_response(response)
 
-        assert len(result) == 1
-        assert result[0]["name"] == "user"
-
-    def test_filters_items_missing_description(self):
-        """Test that items without 'description' key are filtered out."""
-        response = """[
-            {"name": "user", "description": "Valid"},
-            {"name": "orphan"},
-            {"name": "other", "other": "field"}
-        ]"""
-        result = parse_llm_response(response)
-
-        assert len(result) == 1
-        assert result[0]["name"] == "user"
+        # parse_llm_response returns all strings; filtering is done in extract phase
+        assert len(result) == 3
+        assert result[0] == "user"
+        assert result[1] == ""
+        assert result[2] == "login"
 
     def test_handles_empty_array(self):
         """Test handling of empty JSON array."""
@@ -316,21 +311,23 @@ class TestParseLLMResponse:
         """Test handling of whitespace around JSON."""
         response = """
 
-        [{"name": "user", "description": "A person"}]
+        ["user", "login"]
 
         """
         result = parse_llm_response(response)
 
-        assert len(result) == 1
-        assert result[0]["name"] == "user"
+        assert len(result) == 2
+        assert result[0] == "user"
 
-    def test_filters_non_dict_items(self):
-        """Test that non-dict items in array are filtered out."""
-        response = '[{"name": "user", "description": "Valid"}, "string", 123, null]'
+    def test_extracts_names_from_mixed_format(self):
+        """Test that mixed formats are handled (strings and dicts with name)."""
+        response = '["user", {"name": "login"}, "register"]'
         result = parse_llm_response(response)
 
-        assert len(result) == 1
-        assert result[0]["name"] == "user"
+        assert len(result) == 3
+        assert result[0] == "user"
+        assert result[1] == "login"
+        assert result[2] == "register"
 
 
 class TestCallLLMForGlossary:
@@ -340,7 +337,7 @@ class TestCallLLMForGlossary:
     async def test_calls_llm_with_constructed_prompt(self):
         """Test that LLM is called with properly constructed prompt."""
         mock_client = MagicMock()
-        mock_client.generate.return_value = '[{"name": "user", "description": "A person"}]'
+        mock_client.generate.return_value = '["user", "login"]'
 
         with patch(
             "shared.ai.glossary.ai_extractor.LLMClient",
@@ -351,8 +348,9 @@ class TestCallLLMForGlossary:
                 label="authentication",
             )
 
-        assert len(result) == 1
-        assert result[0]["name"] == "user"
+        assert len(result) == 2
+        assert result[0] == "user"
+        assert result[1] == "login"
         mock_client.generate.assert_called_once()
 
         # Verify the prompt contains expected content
@@ -414,7 +412,7 @@ class TestCallLLMForGlossary:
         """Test that markdown-wrapped JSON response is parsed correctly."""
         mock_client = MagicMock()
         mock_client.generate.return_value = """```json
-[{"name": "user", "description": "A person"}]
+["user", "login"]
 ```"""
 
         with patch(
@@ -426,8 +424,9 @@ class TestCallLLMForGlossary:
                 label="test",
             )
 
-        assert len(result) == 1
-        assert result[0]["name"] == "user"
+        assert len(result) == 2
+        assert result[0] == "user"
+        assert result[1] == "login"
 
 
 class TestNormalizeTerm:
@@ -629,12 +628,10 @@ class TestExtractGlossaryFromFeatures:
             {"feature_id": "f2", "label": "registration", "summary": "Manages user registration."},
         ]
 
+        # New format: lists of term names
         mock_responses = [
-            [{"name": "user", "description": "A system user"}],
-            [
-                {"name": "user", "description": "A person registering"},
-                {"name": "registration", "description": "Account creation process"},
-            ],
+            ["user"],
+            ["user", "registration"],
         ]
 
         call_count = 0
@@ -672,7 +669,7 @@ class TestExtractGlossaryFromFeatures:
         with patch(
             "shared.ai.glossary.ai_extractor.call_llm_for_glossary",
             new_callable=AsyncMock,
-            return_value=[{"name": "item", "description": "An item"}],
+            return_value=["item"],
         ) as mock_call:
             await extract_glossary_from_features(features)
 
@@ -710,10 +707,11 @@ class TestExtractGlossaryFromFeatures:
             {"feature_id": "f3", "label": "settings", "summary": "Settings feature"},
         ]
 
+        # New format: lists of term names
         mock_responses = [
-            [{"name": "user", "description": "Auth user"}],
-            [{"name": "user", "description": "Profile user with extended details"}],
-            [{"name": "settings", "description": "User settings"}],
+            ["user"],
+            ["user"],
+            ["settings"],
         ]
 
         call_count = 0
@@ -733,8 +731,6 @@ class TestExtractGlossaryFromFeatures:
 
         user_item = next(i for i in result if i.name == "user")
         assert set(user_item.source_feature_ids) == {"f1", "f2"}
-        # Should have the longer description
-        assert "extended details" in user_item.description
 
         settings_item = next(i for i in result if i.name == "setting")  # normalized
         assert settings_item.source_feature_ids == ["f3"]
@@ -747,8 +743,9 @@ class TestExtractGlossaryFromFeatures:
             {"feature_id": "f2", "label": "utils", "summary": "No domain terms"},
         ]
 
+        # New format: lists of term names
         mock_responses = [
-            [{"name": "user", "description": "A user"}],
+            ["user"],
             [],  # No items for utils
         ]
 

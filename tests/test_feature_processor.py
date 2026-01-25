@@ -112,7 +112,7 @@ class TestFeatureProcessingConfig:
         """Test that default values are set correctly."""
         config = FeatureProcessingConfig()
 
-        assert config.summarize_model == "qwen2.5-coder:3b"
+        assert config.summarize_model == "qwen3:4b-instruct"
         assert config.embed_model == "snowflake-arctic-embed2"
         assert config.api_base == "http://localhost:11434"
         assert config.provider == "ollama"

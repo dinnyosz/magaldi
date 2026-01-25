@@ -2663,31 +2663,35 @@ class TestFindDeadCode:
         """Test find_dead_code returns functions with no callers."""
         mock_client = MagicMock()
         mock_es_repo._get_client.return_value = mock_client
+        # Use private function names (underscore prefix) since public module-level
+        # functions are excluded from dead code analysis (assumed to be public API)
         mock_client.search.return_value = {
             "hits": {
                 "hits": [
                     {
                         "_source": {
-                            "element_id": "scope:repo:main:utils.py:function:unused:10",
-                            "name": "unused",
+                            "element_id": "scope:repo:main:utils.py:function:_unused:10",
+                            "name": "_unused",
                             "element_type": "function",
                             "relative_path": "utils.py",
                             "line_start": 10,
                             "decorators": [],
                             "is_test": False,
                             "summary": "Unused function",
+                            "level": 2,
                         }
                     },
                     {
                         "_source": {
-                            "element_id": "scope:repo:main:utils.py:function:used:20",
-                            "name": "used",
+                            "element_id": "scope:repo:main:utils.py:function:_used:20",
+                            "name": "_used",
                             "element_type": "function",
                             "relative_path": "utils.py",
                             "line_start": 20,
                             "decorators": [],
                             "is_test": False,
                             "summary": "Used function",
+                            "level": 2,
                         }
                     },
                 ]
@@ -2705,7 +2709,7 @@ class TestFindDeadCode:
         assert "potentially_dead" in result
         assert "stats" in result
         assert len(result["potentially_dead"]) == 1
-        assert result["potentially_dead"][0]["name"] == "unused"
+        assert result["potentially_dead"][0]["name"] == "_unused"
         assert result["stats"]["total_functions"] == 2
         assert result["stats"]["potentially_dead"] == 1
 

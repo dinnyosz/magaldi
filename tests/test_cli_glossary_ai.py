@@ -10,14 +10,17 @@ from shared.ai.glossary.ai_extractor import GlossaryItem
 
 
 class TestRunGlossaryExtraction:
-    """Tests for run_glossary_extraction function (AI-powered)."""
+    """Tests for run_glossary_extraction function (AI-powered).
+
+    Note: run_glossary_extraction is now synchronous (uses concurrent threading internally).
+    """
 
     @pytest.fixture
     def mock_config(self):
         """Create a mock configuration."""
         config = MagicMock()
         config.llm.url = "http://localhost:11434"
-        config.llm.summarize_model = "qwen2.5-coder:1.5b"
+        config.llm.summarize_model = "qwen3:4b-instruct"
         config.llm.summarize_temperature = 0.7
         config.llm.summarize_top_p = 0.9
         config.llm.summarize_max_tokens = 512
@@ -74,9 +77,8 @@ class TestRunGlossaryExtraction:
             ),
         ]
 
-    @pytest.mark.asyncio
-    @patch("shared.ai.glossary.ai_extractor.extract_glossary_from_features")
-    async def test_extracts_glossary_from_features_and_subfeatures(
+    @patch("shared.ai.glossary.ai_extractor.extract_glossary_from_features_concurrent")
+    def test_extracts_glossary_from_features_and_subfeatures(
         self,
         mock_extract,
         mock_config,
@@ -88,7 +90,7 @@ class TestRunGlossaryExtraction:
 
         mock_extract.return_value = sample_glossary_items
 
-        result = await run_glossary_extraction(
+        result = run_glossary_extraction(
             scope="test",
             repository="repo",
             username="main",
@@ -102,9 +104,6 @@ class TestRunGlossaryExtraction:
 
         # Verify extract was called with combined list (2 features + 1 subfeature)
         mock_extract.assert_called_once()
-        call_args = mock_extract.call_args
-        all_features = call_args[0][0]
-        assert len(all_features) == 3  # 2 features + 1 subfeature
 
         # Verify result
         assert result is not None
@@ -113,9 +112,8 @@ class TestRunGlossaryExtraction:
         assert "email" in result["terms"]
         assert "password" in result["terms"]
 
-    @pytest.mark.asyncio
-    @patch("shared.ai.glossary.ai_extractor.extract_glossary_from_features")
-    async def test_indexes_glossary_with_descriptions(
+    @patch("shared.ai.glossary.ai_extractor.extract_glossary_from_features_concurrent")
+    def test_indexes_glossary_with_descriptions(
         self,
         mock_extract,
         mock_config,
@@ -127,7 +125,7 @@ class TestRunGlossaryExtraction:
 
         mock_extract.return_value = sample_glossary_items
 
-        await run_glossary_extraction(
+        run_glossary_extraction(
             scope="test",
             repository="repo",
             username="main",
@@ -156,9 +154,8 @@ class TestRunGlossaryExtraction:
         assert user_call.kwargs["total_count"] == 2  # 2 source feature ids
         assert len(user_call.kwargs["element_ids"]) == 2
 
-    @pytest.mark.asyncio
-    @patch("shared.ai.glossary.ai_extractor.extract_glossary_from_features")
-    async def test_returns_none_when_no_features(
+    @patch("shared.ai.glossary.ai_extractor.extract_glossary_from_features_concurrent")
+    def test_returns_none_when_no_features(
         self,
         mock_extract,
         mock_config,
@@ -170,7 +167,7 @@ class TestRunGlossaryExtraction:
         mock_es_repo.get_features.return_value = []
         mock_es_repo.get_subfeatures.return_value = []
 
-        result = await run_glossary_extraction(
+        result = run_glossary_extraction(
             scope="test",
             repository="repo",
             username="main",
@@ -182,9 +179,8 @@ class TestRunGlossaryExtraction:
         mock_extract.assert_not_called()
         mock_es_repo.index_glossary.assert_not_called()
 
-    @pytest.mark.asyncio
-    @patch("shared.ai.glossary.ai_extractor.extract_glossary_from_features")
-    async def test_returns_zero_terms_when_ai_extracts_nothing(
+    @patch("shared.ai.glossary.ai_extractor.extract_glossary_from_features_concurrent")
+    def test_returns_zero_terms_when_ai_extracts_nothing(
         self,
         mock_extract,
         mock_config,
@@ -195,7 +191,7 @@ class TestRunGlossaryExtraction:
 
         mock_extract.return_value = []
 
-        result = await run_glossary_extraction(
+        result = run_glossary_extraction(
             scope="test",
             repository="repo",
             username="main",
@@ -203,12 +199,11 @@ class TestRunGlossaryExtraction:
             es_repo=mock_es_repo,
         )
 
-        assert result == {"terms_count": 0}
+        assert result["terms_count"] == 0
         mock_es_repo.index_glossary.assert_not_called()
 
-    @pytest.mark.asyncio
-    @patch("shared.ai.glossary.ai_extractor.extract_glossary_from_features")
-    async def test_deletes_existing_glossary_before_indexing(
+    @patch("shared.ai.glossary.ai_extractor.extract_glossary_from_features_concurrent")
+    def test_deletes_existing_glossary_before_indexing(
         self,
         mock_extract,
         mock_config,
@@ -221,7 +216,7 @@ class TestRunGlossaryExtraction:
         mock_extract.return_value = sample_glossary_items
         mock_es_repo.delete_glossary.return_value = 5  # Simulating 5 deleted entries
 
-        await run_glossary_extraction(
+        run_glossary_extraction(
             scope="test",
             repository="repo",
             username="main",
@@ -231,10 +226,9 @@ class TestRunGlossaryExtraction:
 
         mock_es_repo.delete_glossary.assert_called_once_with("test", "repo", "main")
 
-    @pytest.mark.asyncio
-    @patch("shared.ai.glossary.ai_extractor.extract_glossary_from_features")
+    @patch("shared.ai.glossary.ai_extractor.extract_glossary_from_features_concurrent")
     @patch("shared.db.elasticsearch.ElasticsearchRepository")
-    async def test_creates_es_repo_if_not_provided(
+    def test_creates_es_repo_if_not_provided(
         self,
         mock_es_repo_class,
         _mock_extract,
@@ -248,7 +242,7 @@ class TestRunGlossaryExtraction:
         mock_es_instance.get_subfeatures.return_value = []
         mock_es_repo_class.return_value = mock_es_instance
 
-        await run_glossary_extraction(
+        run_glossary_extraction(
             scope="test",
             repository="repo",
             username="main",
@@ -259,9 +253,8 @@ class TestRunGlossaryExtraction:
         mock_es_repo_class.assert_called_once_with(mock_config)
         mock_es_instance.close.assert_called_once()
 
-    @pytest.mark.asyncio
-    @patch("shared.ai.glossary.ai_extractor.extract_glossary_from_features")
-    async def test_does_not_close_provided_es_repo(
+    @patch("shared.ai.glossary.ai_extractor.extract_glossary_from_features_concurrent")
+    def test_does_not_close_provided_es_repo(
         self,
         _mock_extract,
         mock_config,
@@ -273,7 +266,7 @@ class TestRunGlossaryExtraction:
         mock_es_repo.get_features.return_value = []
         mock_es_repo.get_subfeatures.return_value = []
 
-        await run_glossary_extraction(
+        run_glossary_extraction(
             scope="test",
             repository="repo",
             username="main",

@@ -32,7 +32,7 @@ class TestClusterConfig:
         assert config.min_samples == 3
         assert config.element_types == ["function", "method"]
         assert config.api_base == "http://localhost:11434"
-        assert config.labeling_model == "qwen2.5-coder:3b"
+        assert config.labeling_model == "qwen3:4b-instruct"
         assert config.label_temperature == 0.2
         assert config.label_max_tokens == 32
         assert config.label_timeout == 30

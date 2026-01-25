@@ -221,7 +221,7 @@ def parse(
             console.print(f"\n  [red]Errors ({len(failed_elements)}):[/]")
             for element_id, error in failed_elements[:10]:  # Show first 10
                 # Shorten element_id for display
-                short_id = element_id.split(":")[-3:]  # type:name:line
+                short_id = element_id.split(":")[-3:]  # format: type:name:line
                 console.print(f"    [dim]{':'.join(short_id)}[/] → [red]{error}[/]")
             if len(failed_elements) > 10:
                 console.print(f"    [dim]... and {len(failed_elements) - 10} more errors[/]")

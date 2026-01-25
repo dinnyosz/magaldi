@@ -427,15 +427,16 @@ class TestExtractGlossaryCommand:
         (repo_path / "magaldi.yaml").write_text("scope: test")
 
         mock_load_config.return_value = mock_config
-        mock_load_repo_config.return_value = {"scope": "test"}
+        # load_repo_config returns RepoConfig object, not dict
+        mock_repo_config = MagicMock()
+        mock_repo_config.scope = "test"
+        mock_repo_config.name = "test-repo"
+        mock_load_repo_config.return_value = mock_repo_config
 
-        # Create a coroutine that returns a result
-        async def mock_ai_extraction(*args, **kwargs):
-            return {"terms_count": 5}
+        # run_glossary_extraction is now synchronous
+        mock_run_extraction.return_value = {"terms_count": 5}
 
-        mock_run_extraction.side_effect = mock_ai_extraction
-
-        result = cli_runner.invoke(main, [
+        cli_runner.invoke(main, [
             "extract-glossary",
             str(repo_path),
             "--user", "testuser",

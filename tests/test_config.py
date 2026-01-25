@@ -95,7 +95,7 @@ class TestLLMConfigDefaults:
 
     def test_default_summarize_model(self):
         config = LLMConfig()
-        assert config.summarize_model == "qwen2.5-coder:3b"
+        assert config.summarize_model == "qwen3:4b-instruct"
 
     def test_default_summarize_temperature(self):
         config = LLMConfig()
