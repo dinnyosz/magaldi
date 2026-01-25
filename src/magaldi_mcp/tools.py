@@ -3015,3 +3015,611 @@ def explain_element(
             }
 
     return result
+
+
+# =============================================================================
+# EXTENDED CODE INTELLIGENCE TOOLS
+# =============================================================================
+
+
+def find_todos(
+    es: ElasticsearchRepository,
+    scope: str | None = None,
+    repository: str | None = None,
+    username: str = "main",
+    kind: str | None = None,
+    assignee: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Find TODO/FIXME comments in the codebase.
+
+    Args:
+        es: Elasticsearch repository.
+        scope: Filter by scope.
+        repository: Filter by repository.
+        username: User branch.
+        kind: Filter by kind (TODO, FIXME, HACK, etc.).
+        assignee: Filter by assignee.
+        limit: Maximum results.
+
+    Returns:
+        List of TODO items with file and line info.
+    """
+    must_clauses = []
+    if scope:
+        must_clauses.append({"term": {"scope": scope}})
+    if repository:
+        must_clauses.append({"term": {"repository": repository}})
+    must_clauses.append({"term": {"username": username}})
+
+    # Need elements that have todos
+    nested_must = []
+    if kind:
+        nested_must.append({"term": {"todos.kind": kind.upper()}})
+    if assignee:
+        nested_must.append({"term": {"todos.assignee": assignee}})
+
+    nested_query = {"bool": {"must": nested_must}} if nested_must else {"exists": {"field": "todos.kind"}}
+
+    must_clauses.append({
+        "nested": {
+            "path": "todos",
+            "query": nested_query,
+        }
+    })
+
+    client = es._get_client()
+    result = client.search(
+        index="magaldi-code-elements",
+        body={
+            "query": {"bool": {"must": must_clauses}},
+            "size": limit,
+            "_source": ["relative_path", "todos", "name"],
+        },
+    )
+
+    todos = []
+    for hit in result.get("hits", {}).get("hits", []):
+        source = hit["_source"]
+        file_path = source.get("relative_path", "")
+        for todo in source.get("todos", []):
+            if kind and todo.get("kind") != kind.upper():
+                continue
+            if assignee and todo.get("assignee") != assignee:
+                continue
+            todos.append({
+                "file": file_path,
+                "line": todo.get("line"),
+                "kind": todo.get("kind"),
+                "text": todo.get("text"),
+                "assignee": todo.get("assignee"),
+                "priority": todo.get("priority"),
+                "issue_ref": todo.get("issue_ref"),
+            })
+
+    return todos[:limit]
+
+
+def get_purity(
+    es: ElasticsearchRepository,
+    element_id: str,
+) -> dict[str, Any]:
+    """Get purity analysis for a function/method.
+
+    Args:
+        es: Elasticsearch repository.
+        element_id: Element ID.
+
+    Returns:
+        Purity info dict.
+    """
+    doc = es.get_document_by_id_or_hash(element_id)
+    if not doc:
+        raise ValueError(f"Element not found: {element_id}")
+
+    return {
+        "element_id": doc.get("element_id"),
+        "name": doc.get("name"),
+        "purity": doc.get("purity"),
+        "side_effects": doc.get("side_effects", []),
+        "mutated_state": doc.get("mutated_state", []),
+    }
+
+
+def find_pure_functions(
+    es: ElasticsearchRepository,
+    scope: str | None = None,
+    repository: str | None = None,
+    username: str = "main",
+    confidence: str = "high",
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Find pure functions in the codebase.
+
+    Args:
+        es: Elasticsearch repository.
+        scope: Filter by scope.
+        repository: Filter by repository.
+        username: User branch.
+        confidence: Minimum confidence level.
+        limit: Maximum results.
+
+    Returns:
+        List of pure functions.
+    """
+    must_clauses = [
+        {"term": {"purity.level": "pure"}},
+        {"term": {"username": username}},
+    ]
+    if scope:
+        must_clauses.append({"term": {"scope": scope}})
+    if repository:
+        must_clauses.append({"term": {"repository": repository}})
+    if confidence:
+        must_clauses.append({"term": {"purity.confidence": confidence}})
+
+    client = es._get_client()
+    result = client.search(
+        index="magaldi-code-elements",
+        body={
+            "query": {"bool": {"must": must_clauses}},
+            "size": limit,
+            "_source": ["element_id", "name", "relative_path", "line_start", "purity"],
+        },
+    )
+
+    return [
+        {
+            "element_id": hit["_source"].get("element_id"),
+            "name": hit["_source"].get("name"),
+            "file": hit["_source"].get("relative_path"),
+            "line": hit["_source"].get("line_start"),
+            "confidence": hit["_source"].get("purity", {}).get("confidence"),
+        }
+        for hit in result.get("hits", {}).get("hits", [])
+    ]
+
+
+def find_side_effects(
+    es: ElasticsearchRepository,
+    effect_kind: str | None = None,
+    scope: str | None = None,
+    repository: str | None = None,
+    username: str = "main",
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Find functions with specific side effects.
+
+    Args:
+        es: Elasticsearch repository.
+        effect_kind: Type of side effect (io_file, io_network, console, etc.).
+        scope: Filter by scope.
+        repository: Filter by repository.
+        username: User branch.
+        limit: Maximum results.
+
+    Returns:
+        List of functions with side effects.
+    """
+    must_clauses = [{"term": {"username": username}}]
+    if scope:
+        must_clauses.append({"term": {"scope": scope}})
+    if repository:
+        must_clauses.append({"term": {"repository": repository}})
+
+    nested_filter = {"exists": {"field": "side_effects.kind"}}
+    if effect_kind:
+        nested_filter = {"term": {"side_effects.kind": effect_kind}}
+
+    must_clauses.append({
+        "nested": {
+            "path": "side_effects",
+            "query": nested_filter,
+        }
+    })
+
+    client = es._get_client()
+    result = client.search(
+        index="magaldi-code-elements",
+        body={
+            "query": {"bool": {"must": must_clauses}},
+            "size": limit,
+            "_source": ["element_id", "name", "relative_path", "line_start", "side_effects"],
+        },
+    )
+
+    return [
+        {
+            "element_id": hit["_source"].get("element_id"),
+            "name": hit["_source"].get("name"),
+            "file": hit["_source"].get("relative_path"),
+            "line": hit["_source"].get("line_start"),
+            "side_effects": hit["_source"].get("side_effects", []),
+        }
+        for hit in result.get("hits", {}).get("hits", [])
+    ]
+
+
+def trace_type(
+    es: ElasticsearchRepository,
+    type_name: str,
+    scope: str | None = None,
+    repository: str | None = None,
+    username: str = "main",
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Track where a type is used in the codebase.
+
+    Args:
+        es: Elasticsearch repository.
+        type_name: Type name to search for.
+        scope: Filter by scope.
+        repository: Filter by repository.
+        username: User branch.
+        limit: Maximum results.
+
+    Returns:
+        Dict with producers, consumers, and other usages.
+    """
+    must_clauses = [{"term": {"username": username}}]
+    if scope:
+        must_clauses.append({"term": {"scope": scope}})
+    if repository:
+        must_clauses.append({"term": {"repository": repository}})
+
+    must_clauses.append({
+        "nested": {
+            "path": "type_annotations",
+            "query": {"wildcard": {"type_annotations.name": f"*{type_name}*"}},
+        }
+    })
+
+    client = es._get_client()
+    result = client.search(
+        index="magaldi-code-elements",
+        body={
+            "query": {"bool": {"must": must_clauses}},
+            "size": limit,
+            "_source": ["element_id", "name", "relative_path", "line_start", "type_annotations"],
+        },
+    )
+
+    producers = []
+    consumers = []
+
+    for hit in result.get("hits", {}).get("hits", []):
+        source = hit["_source"]
+        for annot in source.get("type_annotations", []):
+            if type_name not in annot.get("name", ""):
+                continue
+
+            entry = {
+                "element_id": source.get("element_id"),
+                "name": source.get("name"),
+                "file": source.get("relative_path"),
+                "line": source.get("line_start"),
+                "location": annot.get("location"),
+            }
+
+            if annot.get("kind") == "return":
+                producers.append(entry)
+            elif annot.get("kind") == "parameter":
+                consumers.append(entry)
+
+    return {
+        "type": type_name,
+        "producers": producers[:limit],
+        "consumers": consumers[:limit],
+        "total_producers": len(producers),
+        "total_consumers": len(consumers),
+    }
+
+
+def find_type_producers(
+    es: ElasticsearchRepository,
+    type_name: str,
+    scope: str | None = None,
+    repository: str | None = None,
+    username: str = "main",
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """Find functions that return a specific type."""
+    result = trace_type(es, type_name, scope, repository, username, limit)
+    return result["producers"]
+
+
+def find_type_consumers(
+    es: ElasticsearchRepository,
+    type_name: str,
+    scope: str | None = None,
+    repository: str | None = None,
+    username: str = "main",
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """Find functions that take a specific type as parameter."""
+    result = trace_type(es, type_name, scope, repository, username, limit)
+    return result["consumers"]
+
+
+def find_http_routes(
+    es: ElasticsearchRepository,
+    method: str | None = None,
+    path_pattern: str | None = None,
+    framework: str | None = None,
+    scope: str | None = None,
+    repository: str | None = None,
+    username: str = "main",
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Find HTTP route handlers.
+
+    Args:
+        es: Elasticsearch repository.
+        method: HTTP method filter (GET, POST, etc.).
+        path_pattern: Path pattern to match.
+        framework: Framework filter (fastapi, flask, etc.).
+        scope: Filter by scope.
+        repository: Filter by repository.
+        username: User branch.
+        limit: Maximum results.
+
+    Returns:
+        List of HTTP route handlers.
+    """
+    must_clauses = [{"term": {"username": username}}]
+    if scope:
+        must_clauses.append({"term": {"scope": scope}})
+    if repository:
+        must_clauses.append({"term": {"repository": repository}})
+
+    nested_must = [{"exists": {"field": "http_routes.method"}}]
+    if method:
+        nested_must.append({"term": {"http_routes.method": method.upper()}})
+    if framework:
+        nested_must.append({"term": {"http_routes.framework": framework}})
+    if path_pattern:
+        nested_must.append({"wildcard": {"http_routes.path": f"*{path_pattern}*"}})
+
+    must_clauses.append({
+        "nested": {
+            "path": "http_routes",
+            "query": {"bool": {"must": nested_must}},
+        }
+    })
+
+    client = es._get_client()
+    result = client.search(
+        index="magaldi-code-elements",
+        body={
+            "query": {"bool": {"must": must_clauses}},
+            "size": limit,
+            "_source": ["element_id", "name", "relative_path", "line_start", "http_routes"],
+        },
+    )
+
+    routes = []
+    for hit in result.get("hits", {}).get("hits", []):
+        source = hit["_source"]
+        for route in source.get("http_routes", []):
+            if method and route.get("method") != method.upper():
+                continue
+            if framework and route.get("framework") != framework:
+                continue
+
+            routes.append({
+                "element_id": source.get("element_id"),
+                "handler": source.get("name"),
+                "file": source.get("relative_path"),
+                "line": source.get("line_start"),
+                "method": route.get("method"),
+                "path": route.get("path"),
+                "path_params": route.get("path_params", []),
+                "framework": route.get("framework"),
+            })
+
+    return routes[:limit]
+
+
+def find_cli_commands(
+    es: ElasticsearchRepository,
+    command_name: str | None = None,
+    framework: str | None = None,
+    scope: str | None = None,
+    repository: str | None = None,
+    username: str = "main",
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Find CLI command handlers.
+
+    Args:
+        es: Elasticsearch repository.
+        command_name: Command name filter.
+        framework: Framework filter (click, typer, etc.).
+        scope: Filter by scope.
+        repository: Filter by repository.
+        username: User branch.
+        limit: Maximum results.
+
+    Returns:
+        List of CLI command handlers.
+    """
+    must_clauses = [{"term": {"username": username}}]
+    if scope:
+        must_clauses.append({"term": {"scope": scope}})
+    if repository:
+        must_clauses.append({"term": {"repository": repository}})
+
+    nested_must = [{"exists": {"field": "cli_commands.name"}}]
+    if command_name:
+        nested_must.append({"term": {"cli_commands.name": command_name}})
+    if framework:
+        nested_must.append({"term": {"cli_commands.framework": framework}})
+
+    must_clauses.append({
+        "nested": {
+            "path": "cli_commands",
+            "query": {"bool": {"must": nested_must}},
+        }
+    })
+
+    client = es._get_client()
+    result = client.search(
+        index="magaldi-code-elements",
+        body={
+            "query": {"bool": {"must": must_clauses}},
+            "size": limit,
+            "_source": ["element_id", "name", "relative_path", "line_start", "cli_commands"],
+        },
+    )
+
+    commands = []
+    for hit in result.get("hits", {}).get("hits", []):
+        source = hit["_source"]
+        for cmd in source.get("cli_commands", []):
+            commands.append({
+                "element_id": source.get("element_id"),
+                "handler": source.get("name"),
+                "file": source.get("relative_path"),
+                "line": source.get("line_start"),
+                "command": cmd.get("name"),
+                "options": cmd.get("options", []),
+                "framework": cmd.get("framework"),
+            })
+
+    return commands[:limit]
+
+
+def get_public_api(
+    es: ElasticsearchRepository,
+    scope: str | None = None,
+    repository: str | None = None,
+    username: str = "main",
+    limit: int = 100,
+) -> dict[str, Any]:
+    """Get public API surface for a repository.
+
+    Args:
+        es: Elasticsearch repository.
+        scope: Filter by scope.
+        repository: Filter by repository.
+        username: User branch.
+        limit: Maximum results per category.
+
+    Returns:
+        Dict with http_routes and cli_commands.
+    """
+    return {
+        "http_routes": find_http_routes(es, scope=scope, repository=repository, username=username, limit=limit),
+        "cli_commands": find_cli_commands(es, scope=scope, repository=repository, username=username, limit=limit),
+    }
+
+
+def find_patterns(
+    es: ElasticsearchRepository,
+    pattern: str | None = None,
+    min_confidence: float = 0.6,
+    scope: str | None = None,
+    repository: str | None = None,
+    username: str = "main",
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Find elements matching a design pattern.
+
+    Args:
+        es: Elasticsearch repository.
+        pattern: Pattern name (singleton, factory, builder, repository).
+        min_confidence: Minimum confidence score.
+        scope: Filter by scope.
+        repository: Filter by repository.
+        username: User branch.
+        limit: Maximum results.
+
+    Returns:
+        List of elements matching the pattern.
+    """
+    must_clauses = [{"term": {"username": username}}]
+    if scope:
+        must_clauses.append({"term": {"scope": scope}})
+    if repository:
+        must_clauses.append({"term": {"repository": repository}})
+    if pattern:
+        must_clauses.append({"term": {"detected_patterns": pattern}})
+    else:
+        must_clauses.append({"exists": {"field": "detected_patterns"}})
+
+    client = es._get_client()
+    result = client.search(
+        index="magaldi-code-elements",
+        body={
+            "query": {"bool": {"must": must_clauses}},
+            "size": limit,
+            "_source": ["element_id", "name", "relative_path", "line_start",
+                       "detected_patterns", "pattern_confidence"],
+        },
+    )
+
+    elements = []
+    for hit in result.get("hits", {}).get("hits", []):
+        source = hit["_source"]
+        confidence = source.get("pattern_confidence", {})
+
+        if pattern and confidence.get(pattern, 0) < min_confidence:
+            continue
+
+        elements.append({
+            "element_id": source.get("element_id"),
+            "name": source.get("name"),
+            "file": source.get("relative_path"),
+            "line": source.get("line_start"),
+            "patterns": source.get("detected_patterns", []),
+            "confidence": confidence,
+        })
+
+    return elements[:limit]
+
+
+def list_patterns(
+    es: ElasticsearchRepository,
+    scope: str | None = None,
+    repository: str | None = None,
+    username: str = "main",
+) -> dict[str, int]:
+    """List all detected patterns and their counts.
+
+    Args:
+        es: Elasticsearch repository.
+        scope: Filter by scope.
+        repository: Filter by repository.
+        username: User branch.
+
+    Returns:
+        Dict mapping pattern names to counts.
+    """
+    must_clauses = [{"term": {"username": username}}]
+    if scope:
+        must_clauses.append({"term": {"scope": scope}})
+    if repository:
+        must_clauses.append({"term": {"repository": repository}})
+    must_clauses.append({"exists": {"field": "detected_patterns"}})
+
+    client = es._get_client()
+    result = client.search(
+        index="magaldi-code-elements",
+        body={
+            "query": {"bool": {"must": must_clauses}},
+            "size": 0,
+            "aggs": {
+                "patterns": {
+                    "terms": {
+                        "field": "detected_patterns",
+                        "size": 100,
+                    }
+                }
+            },
+        },
+    )
+
+    return {
+        bucket["key"]: bucket["doc_count"]
+        for bucket in result.get("aggregations", {}).get("patterns", {}).get("buckets", [])
+    }
