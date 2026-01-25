@@ -3,12 +3,14 @@
 from magaldi_core.tree_sitter_manager import (
     Comment,
     ExtractedCall,
+    TreeSitterManager,
     analyze_purity,
     associate_comments,
     extract_comments,
     extract_section_markers,
     extract_side_effects,
     extract_todos,
+    extract_type_annotations,
 )
 
 
@@ -158,3 +160,37 @@ class TestPurityAnalysis:
         effect_kinds = [e.kind for e in effects]
         assert "console" in effect_kinds
         assert "state_mutation" in effect_kinds
+
+
+class TestTypeAnnotationExtraction:
+    """Tests for type annotation extraction."""
+
+    def test_extract_parameter_types(self):
+        source = "def foo(x: int, y: str) -> bool: pass"
+        manager = TreeSitterManager()
+        tree = manager.parse(source.encode(), "python")
+        annotations = extract_type_annotations(tree.root_node, "python")
+
+        param_types = [a for a in annotations if a.kind == "parameter"]
+        assert len(param_types) == 2
+        assert any(a.name == "int" and a.location == "param:x" for a in param_types)
+
+    def test_extract_return_type(self):
+        source = "def foo() -> str: pass"
+        manager = TreeSitterManager()
+        tree = manager.parse(source.encode(), "python")
+        annotations = extract_type_annotations(tree.root_node, "python")
+
+        return_types = [a for a in annotations if a.kind == "return"]
+        assert len(return_types) == 1
+        assert return_types[0].name == "str"
+
+    def test_extract_generic_types(self):
+        source = "def foo(items: List[str]) -> Dict[str, int]: pass"
+        manager = TreeSitterManager()
+        tree = manager.parse(source.encode(), "python")
+        annotations = extract_type_annotations(tree.root_node, "python")
+
+        list_type = next((a for a in annotations if "List" in a.name), None)
+        assert list_type is not None
+        assert list_type.generic_args == ["str"]

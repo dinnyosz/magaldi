@@ -3607,6 +3607,156 @@ def extract_side_effects(
 
 
 # =============================================================================
+# TYPE ANNOTATION EXTRACTION
+# =============================================================================
+
+
+def _parse_generic_type(type_str: str) -> tuple[str, list[str] | None]:
+    """Parse a generic type like List[str] into base and args.
+
+    Args:
+        type_str: Type string like "List[str]" or "Dict[str, int]"
+
+    Returns:
+        Tuple of (full_type, generic_args or None)
+    """
+    if "[" not in type_str:
+        return type_str, None
+
+    bracket_pos = type_str.index("[")
+    # Extract the content between brackets
+    inner = type_str[bracket_pos + 1 : -1]  # Remove outer brackets
+    # Simple split by comma (doesn't handle nested generics perfectly)
+    args = [arg.strip() for arg in inner.split(",")]
+    return type_str, args
+
+
+def extract_type_annotations(node: Node, language: str) -> list[TypeAnnotation]:
+    """Extract type annotations from an AST node.
+
+    Args:
+        node: Root AST node to search.
+        language: Programming language.
+
+    Returns:
+        List of TypeAnnotation objects.
+    """
+    annotations = []
+
+    if language == "python":
+        annotations.extend(_extract_python_type_annotations(node))
+    elif language in ("typescript", "javascript"):
+        annotations.extend(_extract_typescript_type_annotations(node))
+
+    return annotations
+
+
+def _extract_python_type_annotations(node: Node) -> list[TypeAnnotation]:
+    """Extract type annotations from Python AST."""
+    annotations = []
+
+    for func_node in find_nodes(node, "function_definition"):
+        func_line = func_node.start_point[0] + 1
+
+        # Get parameters
+        params = get_child_by_field(func_node, "parameters")
+        if params:
+            for param in params.children:
+                if param.type == "typed_parameter":
+                    name_node = param.children[0] if param.children else None
+                    type_node = get_child_by_field(param, "type")
+
+                    if name_node and type_node:
+                        param_name = get_node_text(name_node)
+                        type_str = get_node_text(type_node)
+                        full_type, generic_args = _parse_generic_type(type_str)
+
+                        annotations.append(
+                            TypeAnnotation(
+                                name=full_type,
+                                kind="parameter",
+                                location=f"param:{param_name}",
+                                line=func_line,
+                                generic_args=generic_args,
+                            )
+                        )
+
+        # Get return type
+        return_type = get_child_by_field(func_node, "return_type")
+        if return_type:
+            type_str = get_node_text(return_type)
+            full_type, generic_args = _parse_generic_type(type_str)
+
+            annotations.append(
+                TypeAnnotation(
+                    name=full_type,
+                    kind="return",
+                    location="return",
+                    line=func_line,
+                    generic_args=generic_args,
+                )
+            )
+
+    return annotations
+
+
+def _extract_typescript_type_annotations(node: Node) -> list[TypeAnnotation]:
+    """Extract type annotations from TypeScript AST."""
+    annotations = []
+
+    # Find function declarations and arrow functions
+    for func_type in ("function_declaration", "arrow_function", "method_definition"):
+        for func_node in find_nodes(node, func_type):
+            func_line = func_node.start_point[0] + 1
+
+            # Look for type annotations in parameters
+            params = get_child_by_field(func_node, "parameters")
+            if params:
+                for param in params.children:
+                    if param.type in ("required_parameter", "optional_parameter"):
+                        # Look for type_annotation child
+                        for child in param.children:
+                            if child.type == "type_annotation":
+                                type_node = child.children[-1] if child.children else None
+                                name_node = param.children[0] if param.children else None
+
+                                if type_node and name_node:
+                                    param_name = get_node_text(name_node)
+                                    type_str = get_node_text(type_node)
+                                    full_type, generic_args = _parse_generic_type(type_str)
+
+                                    annotations.append(
+                                        TypeAnnotation(
+                                            name=full_type,
+                                            kind="parameter",
+                                            location=f"param:{param_name}",
+                                            line=func_line,
+                                            generic_args=generic_args,
+                                        )
+                                    )
+
+            # Look for return type annotation
+            for child in func_node.children:
+                if child.type == "type_annotation":
+                    type_node = child.children[-1] if child.children else None
+                    if type_node:
+                        type_str = get_node_text(type_node)
+                        full_type, generic_args = _parse_generic_type(type_str)
+
+                        annotations.append(
+                            TypeAnnotation(
+                                name=full_type,
+                                kind="return",
+                                location="return",
+                                line=func_line,
+                                generic_args=generic_args,
+                            )
+                        )
+
+    return annotations
+
+
+# =============================================================================
 # GLOBAL SINGLETON
 # =============================================================================
 
