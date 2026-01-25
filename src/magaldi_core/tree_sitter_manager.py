@@ -3342,6 +3342,72 @@ _SECTION_PATTERN = re.compile(
     r"\s*(?P<style_end>={3,}|-{3,})?\s*$",
 )
 
+# Impure function call patterns by language
+IMPURE_CALLS: dict[str, dict[str, list[str]]] = {
+    "python": {
+        "io_file": [
+            "open", "read", "write", "Path.write_text", "Path.read_text",
+            "Path.mkdir", "os.remove", "shutil.copy", "shutil.move",
+        ],
+        "io_network": [
+            "requests.get", "requests.post", "requests.put", "requests.delete",
+            "httpx.get", "httpx.post", "urllib.request.urlopen", "socket.connect",
+        ],
+        "console": [
+            "print", "logging.info", "logging.debug", "logging.warning",
+            "logging.error", "logger.info", "logger.debug", "logger.warning",
+        ],
+        "subprocess": [
+            "subprocess.run", "subprocess.call", "subprocess.Popen",
+            "os.system", "os.popen",
+        ],
+        "database": [
+            "cursor.execute", "session.commit", "session.add", "session.delete",
+        ],
+    },
+    "javascript": {
+        "io_file": [
+            "fs.readFile", "fs.writeFile", "fs.readFileSync", "fs.writeFileSync",
+            "fs.appendFile", "fs.unlink", "fs.mkdir",
+        ],
+        "io_network": [
+            "fetch", "axios.get", "axios.post", "http.get", "http.request",
+        ],
+        "console": [
+            "console.log", "console.error", "console.warn", "console.info",
+        ],
+        "subprocess": [
+            "child_process.exec", "child_process.spawn", "child_process.execSync",
+        ],
+    },
+    "typescript": {},  # Falls back to javascript
+    "php": {
+        "io_file": [
+            "file_get_contents", "file_put_contents", "fopen", "fwrite", "fread",
+        ],
+        "io_network": [
+            "curl_exec", "file_get_contents",
+        ],
+        "console": [
+            "echo", "print", "var_dump", "print_r",
+        ],
+    },
+    "rust": {
+        "io_file": [
+            "File::open", "File::create", "fs::read", "fs::write",
+        ],
+        "io_network": [
+            "TcpStream::connect", "reqwest::get",
+        ],
+        "console": [
+            "println!", "eprintln!", "print!", "dbg!",
+        ],
+        "subprocess": [
+            "Command::new", "process::Command",
+        ],
+    },
+}
+
 
 def extract_section_markers(source: str) -> list[SectionMarker]:
     """Extract section marker comments from source code."""
@@ -3434,6 +3500,110 @@ def associate_comments(
             associated.append(comment)
 
     return associated
+
+
+# =============================================================================
+# PURITY ANALYSIS
+# =============================================================================
+
+
+def analyze_purity(
+    calls: list[ExtractedCall],
+    mutations: list[str],
+    language: str,
+) -> PurityInfo:
+    """Analyze function purity based on calls and mutations.
+
+    Args:
+        calls: List of function calls within the function.
+        mutations: List of mutated attributes (e.g., ["self.cache"]).
+        language: Programming language.
+
+    Returns:
+        PurityInfo with level, confidence, and reasons.
+    """
+    reasons = []
+    level = "pure"
+
+    # Get impure patterns for this language (fall back to python for unknown)
+    lang_patterns = IMPURE_CALLS.get(language, IMPURE_CALLS.get("python", {}))
+
+    # If language not found and no fallback, use python patterns
+    if not lang_patterns and language == "typescript":
+        lang_patterns = IMPURE_CALLS.get("javascript", {})
+
+    # Check for impure calls
+    for call in calls:
+        call_name = call.name
+        if call.receiver:
+            call_name = f"{call.receiver}.{call.name}"
+
+        for effect_kind, patterns in lang_patterns.items():
+            for pattern in patterns:
+                if call_name == pattern or call.name == pattern:
+                    reasons.append(f"calls {call_name} ({effect_kind})")
+                    level = "mutates_external"
+                    break
+
+    # Check for self mutations
+    for mutation in mutations:
+        if mutation.startswith("self.") or mutation.startswith("this."):
+            reasons.append(f"modifies {mutation}")
+            if level == "pure":
+                level = "mutates_self"
+
+    # Determine confidence
+    if level == "pure" and not calls:
+        confidence = "high"
+    elif level == "pure" and calls:
+        # Has calls but none matched impure patterns - lower confidence
+        confidence = "medium"
+    else:
+        confidence = "high"
+
+    return PurityInfo(level=level, confidence=confidence, reasons=reasons)
+
+
+def extract_side_effects(
+    calls: list[ExtractedCall],
+    mutations: list[str],
+    language: str,
+) -> list[SideEffect]:
+    """Extract individual side effects from calls and mutations.
+
+    Args:
+        calls: List of function calls.
+        mutations: List of mutations.
+        language: Programming language.
+
+    Returns:
+        List of SideEffect objects.
+    """
+    effects = []
+    lang_patterns = IMPURE_CALLS.get(language, IMPURE_CALLS.get("python", {}))
+
+    if not lang_patterns and language == "typescript":
+        lang_patterns = IMPURE_CALLS.get("javascript", {})
+
+    for call in calls:
+        call_name = call.name
+        if call.receiver:
+            call_name = f"{call.receiver}.{call.name}"
+
+        for effect_kind, patterns in lang_patterns.items():
+            for pattern in patterns:
+                if call_name == pattern or call.name == pattern:
+                    effects.append(
+                        SideEffect(kind=effect_kind, target=call_name, line=call.line)
+                    )
+                    break
+
+    for mutation in mutations:
+        effects.append(
+            SideEffect(kind="state_mutation", target=mutation, line=0)
+        )
+
+    return effects
 
 
 # =============================================================================
