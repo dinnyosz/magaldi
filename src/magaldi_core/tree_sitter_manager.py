@@ -8,6 +8,7 @@ This module provides:
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
@@ -3279,6 +3280,160 @@ def extract_rust_modified_fields(function_node: Node) -> list[str]:
                         modified.append(field_name)
 
     return modified
+
+
+# =============================================================================
+# EXTENDED CODE INTELLIGENCE EXTRACTION
+# =============================================================================
+
+# TODO extraction pattern
+_TODO_PATTERN = re.compile(
+    r"(?P<kind>TODO|FIXME|HACK|XXX|BUG|NOTE|OPTIMIZE)"
+    r"(?:\((?P<assignee>\w+)\))?"  # TODO(alice)
+    r"(?:\s*(?P<priority>!+))?"  # TODO!!
+    r"(?:\s*(?P<issue>[#]?\w+-?\d+))?"  # TODO #123 or GH-456
+    r"\s*:?\s*"
+    r"(?P<text>.+)",
+    re.IGNORECASE,
+)
+
+
+def extract_todos(source: str) -> list[TodoItem]:
+    """Extract TODO/FIXME comments from source code."""
+    todos = []
+    lines = source.split("\n")
+
+    for line_num, line in enumerate(lines, start=1):
+        comment_start = -1
+        for marker in ("#", "//", "/*", "*"):
+            idx = line.find(marker)
+            if idx != -1 and (comment_start == -1 or idx < comment_start):
+                comment_start = idx
+
+        if comment_start == -1:
+            continue
+
+        comment_text = line[comment_start:]
+        match = _TODO_PATTERN.search(comment_text)
+        if match:
+            priority = None
+            if match.group("priority"):
+                priority = "high" if len(match.group("priority")) >= 2 else "low"
+
+            todos.append(
+                TodoItem(
+                    kind=match.group("kind").upper(),
+                    text=match.group("text").strip(),
+                    line=line_num,
+                    assignee=match.group("assignee"),
+                    priority=priority,
+                    issue_ref=match.group("issue"),
+                )
+            )
+
+    return todos
+
+
+# Section marker pattern
+_SECTION_PATTERN = re.compile(
+    r"^\s*[#/]+\s*"
+    r"(?P<style_start>={3,}|-{3,})?\s*"
+    r"(?P<label>[A-Z][A-Z0-9 _]+)"
+    r"\s*(?P<style_end>={3,}|-{3,})?\s*$",
+)
+
+
+def extract_section_markers(source: str) -> list[SectionMarker]:
+    """Extract section marker comments from source code."""
+    markers = []
+    lines = source.split("\n")
+
+    for line_num, line in enumerate(lines, start=1):
+        match = _SECTION_PATTERN.match(line)
+        if match:
+            style_start = match.group("style_start") or ""
+            style_end = match.group("style_end") or ""
+
+            if "=" in style_start or "=" in style_end:
+                style = "equals"
+            elif "-" in style_start or "-" in style_end:
+                style = "dashes"
+            else:
+                style = "hash"
+
+            markers.append(
+                SectionMarker(
+                    label=match.group("label").strip(),
+                    line=line_num,
+                    style=style,
+                )
+            )
+
+    return markers
+
+
+def extract_comments(source: str) -> list[Comment]:
+    """Extract all comments from source code."""
+    comments = []
+    lines = source.split("\n")
+
+    for line_num, line in enumerate(lines, start=1):
+        stripped = line.strip()
+
+        if not stripped:
+            continue
+
+        # Python/shell style comments
+        if "#" in line:
+            hash_pos = line.find("#")
+            code_before = line[:hash_pos].strip()
+            kind = "inline" if code_before else "block"
+            position = "inline" if kind == "inline" else "above"
+
+            comments.append(
+                Comment(
+                    text=line[hash_pos + 1 :].strip(),
+                    line=line_num,
+                    kind=kind,
+                    position=position,
+                )
+            )
+        # C-style single line comments
+        elif "//" in line:
+            slash_pos = line.find("//")
+            code_before = line[:slash_pos].strip()
+            kind = "inline" if code_before else "block"
+            position = "inline" if kind == "inline" else "above"
+
+            comments.append(
+                Comment(
+                    text=line[slash_pos + 2 :].strip(),
+                    line=line_num,
+                    kind=kind,
+                    position=position,
+                )
+            )
+
+    return comments
+
+
+def associate_comments(
+    element_line: int,
+    all_comments: list[Comment],
+    max_distance: int = 3,
+) -> list[Comment]:
+    """Associate comments with an element based on proximity."""
+    associated = []
+
+    for comment in all_comments:
+        if element_line - max_distance <= comment.line < element_line:
+            comment.position = "above"
+            associated.append(comment)
+        elif comment.line == element_line and comment.kind == "inline":
+            comment.position = "inline"
+            associated.append(comment)
+
+    return associated
 
 
 # =============================================================================
