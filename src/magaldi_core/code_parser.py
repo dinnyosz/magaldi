@@ -667,6 +667,14 @@ class PythonParser(TreeSitterParser):
                 for d in ext.decorator_details
             ]
 
+        # Convert parameters to dicts for storage
+        parameters = None
+        if ext.parameters:
+            parameters = [
+                {"name": p.name, "type": p.type, "default": p.default}
+                for p in ext.parameters
+            ]
+
         elem = CodeElement(
             scope=scope,
             repository=repository,
@@ -687,6 +695,8 @@ class PythonParser(TreeSitterParser):
             level=2,
             calls=calls,
             exceptions_raised=exceptions_raised,
+            return_type=ext.return_type,
+            parameters=parameters or [],
         )
         elem.element_id = generate_element_id(
             scope, repository, username, file_info.relative_path, "function", ext.name, ext.line_start
@@ -727,6 +737,14 @@ class PythonParser(TreeSitterParser):
                 for d in ext.decorator_details
             ]
 
+        # Convert parameters to dicts for storage
+        parameters = None
+        if ext.parameters:
+            parameters = [
+                {"name": p.name, "type": p.type, "default": p.default}
+                for p in ext.parameters
+            ]
+
         elem = CodeElement(
             scope=scope,
             repository=repository,
@@ -749,6 +767,8 @@ class PythonParser(TreeSitterParser):
             calls=calls,
             exceptions_raised=exceptions_raised,
             attributes_modified=attributes_modified,
+            return_type=ext.return_type,
+            parameters=parameters or [],
         )
         elem.element_id = generate_element_id(
             scope, repository, username, file_info.relative_path, "method", ext.name, ext.line_start
@@ -942,6 +962,14 @@ class JavaScriptParser(TreeSitterParser):
             ]
             exceptions_raised = extract_javascript_thrown_exceptions(ext.node) or None
 
+        # Convert parameters to dicts for storage
+        parameters = None
+        if ext.parameters:
+            parameters = [
+                {"name": p.name, "type": p.type, "default": p.default}
+                for p in ext.parameters
+            ]
+
         elem = CodeElement(
             scope=scope,
             repository=repository,
@@ -958,6 +986,8 @@ class JavaScriptParser(TreeSitterParser):
             level=2,
             calls=calls,
             exceptions_raised=exceptions_raised,
+            return_type=ext.return_type,
+            parameters=parameters or [],
         )
         elem.element_id = generate_element_id(
             scope, repository, username, file_info.relative_path, "function", ext.name, ext.line_start
@@ -988,6 +1018,14 @@ class JavaScriptParser(TreeSitterParser):
             exceptions_raised = extract_javascript_thrown_exceptions(ext.node) or None
             attributes_modified = extract_javascript_modified_properties(ext.node) or None
 
+        # Convert parameters to dicts for storage
+        parameters = None
+        if ext.parameters:
+            parameters = [
+                {"name": p.name, "type": p.type, "default": p.default}
+                for p in ext.parameters
+            ]
+
         elem = CodeElement(
             scope=scope,
             repository=repository,
@@ -1006,6 +1044,8 @@ class JavaScriptParser(TreeSitterParser):
             calls=calls,
             exceptions_raised=exceptions_raised,
             attributes_modified=attributes_modified,
+            return_type=ext.return_type,
+            parameters=parameters or [],
         )
         elem.element_id = generate_element_id(
             scope, repository, username, file_info.relative_path, "method", ext.name, ext.line_start
@@ -1184,6 +1224,14 @@ class PhpParser(TreeSitterParser):
             calls = [Call(name=c.name, receiver=c.receiver, line=c.line) for c in extracted_calls]
             exceptions_raised = extract_php_thrown_exceptions(ext.node) or None
 
+        # Convert parameters to dicts for storage
+        parameters = None
+        if ext.parameters:
+            parameters = [
+                {"name": p.name, "type": p.type, "default": p.default}
+                for p in ext.parameters
+            ]
+
         elem = CodeElement(
             scope=scope,
             repository=repository,
@@ -1199,6 +1247,8 @@ class PhpParser(TreeSitterParser):
             level=2,
             calls=calls,
             exceptions_raised=exceptions_raised,
+            return_type=ext.return_type,
+            parameters=parameters or [],
         )
         elem.element_id = generate_element_id(
             scope, repository, username, file_info.relative_path, "function", ext.name, ext.line_start
@@ -1225,6 +1275,14 @@ class PhpParser(TreeSitterParser):
             exceptions_raised = extract_php_thrown_exceptions(ext.node) or None
             attributes_modified = extract_php_modified_properties(ext.node) or None
 
+        # Convert parameters to dicts for storage
+        parameters = None
+        if ext.parameters:
+            parameters = [
+                {"name": p.name, "type": p.type, "default": p.default}
+                for p in ext.parameters
+            ]
+
         elem = CodeElement(
             scope=scope,
             repository=repository,
@@ -1243,6 +1301,8 @@ class PhpParser(TreeSitterParser):
             calls=calls,
             exceptions_raised=exceptions_raised,
             attributes_modified=attributes_modified,
+            return_type=ext.return_type,
+            parameters=parameters or [],
         )
         elem.element_id = generate_element_id(
             scope, repository, username, file_info.relative_path, "method", ext.name, ext.line_start
@@ -1428,6 +1488,14 @@ class RustParser(TreeSitterParser):
             calls = [Call(name=c.name, receiver=c.receiver, line=c.line) for c in extracted_calls]
             exceptions_raised = extract_rust_panics(ext.node) or None
 
+        # Convert parameters to dicts for storage
+        parameters = None
+        if ext.parameters:
+            parameters = [
+                {"name": p.name, "type": p.type, "default": p.default}
+                for p in ext.parameters
+            ]
+
         elem = CodeElement(
             scope=scope,
             repository=repository,
@@ -1445,6 +1513,8 @@ class RustParser(TreeSitterParser):
             level=2,
             calls=calls,
             exceptions_raised=exceptions_raised,
+            return_type=ext.return_type,
+            parameters=parameters or [],
         )
         elem.element_id = generate_element_id(
             scope, repository, username, file_info.relative_path, "function", ext.name, ext.line_start
@@ -1471,6 +1541,14 @@ class RustParser(TreeSitterParser):
             exceptions_raised = extract_rust_panics(ext.node) or None
             attributes_modified = extract_rust_modified_fields(ext.node) or None
 
+        # Convert parameters to dicts for storage
+        parameters = None
+        if ext.parameters:
+            parameters = [
+                {"name": p.name, "type": p.type, "default": p.default}
+                for p in ext.parameters
+            ]
+
         elem = CodeElement(
             scope=scope,
             repository=repository,
@@ -1490,6 +1568,8 @@ class RustParser(TreeSitterParser):
             calls=calls,
             exceptions_raised=exceptions_raised,
             attributes_modified=attributes_modified,
+            return_type=ext.return_type,
+            parameters=parameters or [],
         )
         elem.element_id = generate_element_id(
             scope, repository, username, file_info.relative_path, ext.element_type, ext.name, ext.line_start

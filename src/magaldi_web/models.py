@@ -420,6 +420,23 @@ class DecoratorDetailInfo(BaseModel):
     full: str | None = None  # e.g., 'router.get("/users/{id}")'
 
 
+class ParameterInfo(BaseModel):
+    """Information about a function/method parameter."""
+
+    name: str
+    type: str | None = None
+    default: str | None = None
+
+
+class CallInfo(BaseModel):
+    """Information about a function call."""
+
+    name: str
+    receiver: str | None = None
+    line: int
+    resolved_id: str | None = None  # Resolved element ID if known
+
+
 class ElementDetailResponse(BaseModel):
     """Response for element detail endpoint."""
 
@@ -445,8 +462,11 @@ class ElementDetailResponse(BaseModel):
     base_classes: list[str] = Field(default_factory=list)
     class_attributes: list[ClassAttributeInfo] = Field(default_factory=list)
     # Enhanced context for functions/methods
+    return_type: str | None = None
+    parameters: list[ParameterInfo] = Field(default_factory=list)
     exceptions_raised: list[str] = Field(default_factory=list)
     attributes_modified: list[str] = Field(default_factory=list)
+    calls: list[CallInfo] = Field(default_factory=list)
     # For file elements
     imports: list[ImportInfo] = Field(default_factory=list)
     element_count: int | None = None

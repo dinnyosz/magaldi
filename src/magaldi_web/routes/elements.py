@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
 from magaldi_web.dependencies import get_es_repository
 from magaldi_web.models import (
+    CallInfo,
     ChildInfo,
     ClassAttributeInfo,
     DecoratorDetailInfo,
@@ -17,6 +18,7 @@ from magaldi_web.models import (
     GlossaryFeatureAssociation,
     GlossaryInfo,
     ImportInfo,
+    ParameterInfo,
     ParentContext,
     ParentFeatureInfo,
     RepoRef,
@@ -419,6 +421,33 @@ async def get_element_detail(
                 )
             )
 
+    # Parse parameters (for functions/methods)
+    parameters = []
+    raw_parameters = source.get("parameters", [])
+    if raw_parameters:
+        for param in raw_parameters:
+            parameters.append(
+                ParameterInfo(
+                    name=param.get("name", ""),
+                    type=param.get("type"),
+                    default=param.get("default"),
+                )
+            )
+
+    # Parse calls (for functions/methods)
+    calls = []
+    raw_calls = source.get("calls", [])
+    if raw_calls:
+        for call in raw_calls:
+            calls.append(
+                CallInfo(
+                    name=call.get("name", ""),
+                    receiver=call.get("receiver"),
+                    line=call.get("line", 0),
+                    resolved_id=call.get("resolved_id"),
+                )
+            )
+
     # For glossary elements, use description as summary
     summary = source.get("summary")
     if source["element_type"] == "glossary":
@@ -447,8 +476,11 @@ async def get_element_detail(
         base_classes=source.get("base_classes", []),
         class_attributes=class_attributes,
         # Enhanced context for functions/methods
+        return_type=source.get("return_type"),
+        parameters=parameters,
         exceptions_raised=source.get("exceptions_raised", []),
         attributes_modified=source.get("attributes_modified", []),
+        calls=calls,
         # For file elements
         imports=imports,
         element_count=source.get("element_count"),

@@ -46,6 +46,15 @@ class DecoratorInfo:
 
 
 @dataclass
+class ParameterInfo:
+    """Information about a function parameter."""
+
+    name: str
+    type: str | None = None
+    default: str | None = None
+
+
+@dataclass
 class ExtractedElement:
     """A code element extracted from the AST."""
 
@@ -60,6 +69,8 @@ class ExtractedElement:
     is_async: bool = False
     parent_node: Node | None = None  # For tracking hierarchy
     node: Node | None = None  # The AST node itself
+    return_type: str | None = None  # For functions/methods
+    parameters: list[ParameterInfo] | None = None  # For functions/methods
 
 
 @dataclass
@@ -260,6 +271,81 @@ def _extract_python_class(
     return elem
 
 
+def _extract_python_parameters(params_node: Node) -> list[ParameterInfo]:
+    """Extract structured parameter info from Python parameters node.
+
+    Args:
+        params_node: The 'parameters' AST node.
+
+    Returns:
+        List of ParameterInfo with name, type, and default value.
+    """
+    parameters: list[ParameterInfo] = []
+    if not params_node:
+        return parameters
+
+    for child in params_node.children:
+        # Skip commas, parens, etc.
+        if child.type not in (
+            "identifier",
+            "typed_parameter",
+            "default_parameter",
+            "typed_default_parameter",
+            "list_splat_pattern",
+            "dictionary_splat_pattern",
+        ):
+            continue
+
+        param_name: str | None = None
+        param_type: str | None = None
+        param_default: str | None = None
+
+        if child.type == "identifier":
+            # Simple parameter: x
+            param_name = get_node_text(child)
+        elif child.type == "typed_parameter":
+            # Typed parameter: x: int
+            name_node = child.children[0] if child.children else None
+            param_name = get_node_text(name_node) if name_node else None
+            type_node = get_child_by_field(child, "type")
+            param_type = get_node_text(type_node) if type_node else None
+        elif child.type == "default_parameter":
+            # Default parameter: x=5
+            name_node = get_child_by_field(child, "name")
+            param_name = get_node_text(name_node) if name_node else None
+            value_node = get_child_by_field(child, "value")
+            param_default = get_node_text(value_node) if value_node else None
+        elif child.type == "typed_default_parameter":
+            # Typed default: x: int = 5
+            name_node = get_child_by_field(child, "name")
+            param_name = get_node_text(name_node) if name_node else None
+            type_node = get_child_by_field(child, "type")
+            param_type = get_node_text(type_node) if type_node else None
+            value_node = get_child_by_field(child, "value")
+            param_default = get_node_text(value_node) if value_node else None
+        elif child.type == "list_splat_pattern":
+            # *args
+            for c in child.children:
+                if c.type == "identifier":
+                    param_name = f"*{get_node_text(c)}"
+                    break
+        elif child.type == "dictionary_splat_pattern":
+            # **kwargs
+            for c in child.children:
+                if c.type == "identifier":
+                    param_name = f"**{get_node_text(c)}"
+                    break
+
+        if param_name:
+            parameters.append(ParameterInfo(
+                name=param_name,
+                type=param_type,
+                default=param_default,
+            ))
+
+    return parameters
+
+
 def _extract_python_function(
     node: Node,
     lines: list[str],
@@ -286,6 +372,9 @@ def _extract_python_function(
 
     return_node = get_child_by_field(node, "return_type")
     return_type = get_node_text(return_node) if return_node else None
+
+    # Extract structured parameters
+    parameters = _extract_python_parameters(params_node) if params_node else []
 
     # Check for async
     is_async = any(child.type == "async" for child in node.children)
@@ -314,6 +403,8 @@ def _extract_python_function(
         decorator_details=decorator_details,
         is_async=is_async,
         node=node,
+        return_type=return_type,
+        parameters=parameters or None,
     )
 
 
@@ -1056,6 +1147,94 @@ def _extract_js_class(node: Node, lines: list[str]) -> ExtractedElement:
     )
 
 
+def _extract_js_parameters(params_node: Node) -> list[ParameterInfo]:
+    """Extract structured parameter info from JavaScript/TypeScript parameters node.
+
+    Args:
+        params_node: The 'formal_parameters' AST node.
+
+    Returns:
+        List of ParameterInfo with name, type, and default value.
+    """
+    parameters: list[ParameterInfo] = []
+    if not params_node:
+        return parameters
+
+    for child in params_node.children:
+        # Skip commas, parens
+        if child.type in ("(", ")", ","):
+            continue
+
+        param_name: str | None = None
+        param_type: str | None = None
+        param_default: str | None = None
+
+        if child.type == "identifier":
+            # Simple parameter: x
+            param_name = get_node_text(child)
+        elif child.type == "required_parameter":
+            # TypeScript required parameter with type: x: number
+            pattern_node = get_child_by_field(child, "pattern")
+            param_name = get_node_text(pattern_node) if pattern_node else None
+            type_node = get_child_by_field(child, "type")
+            param_type = get_node_text(type_node) if type_node else None
+            # Strip leading ': ' from type annotation
+            if param_type and param_type.startswith(": "):
+                param_type = param_type[2:]
+        elif child.type == "optional_parameter":
+            # TypeScript optional parameter: x?: number or x: number = 5
+            pattern_node = get_child_by_field(child, "pattern")
+            param_name = get_node_text(pattern_node) if pattern_node else None
+            type_node = get_child_by_field(child, "type")
+            param_type = get_node_text(type_node) if type_node else None
+            # Strip leading ': ' from type annotation
+            if param_type and param_type.startswith(": "):
+                param_type = param_type[2:]
+            value_node = get_child_by_field(child, "value")
+            param_default = get_node_text(value_node) if value_node else None
+        elif child.type == "assignment_pattern":
+            # JavaScript default parameter: x = 5
+            left_node = get_child_by_field(child, "left")
+            param_name = get_node_text(left_node) if left_node else None
+            right_node = get_child_by_field(child, "right")
+            param_default = get_node_text(right_node) if right_node else None
+        elif child.type == "rest_pattern":
+            # ...args
+            for c in child.children:
+                if c.type == "identifier":
+                    param_name = f"...{get_node_text(c)}"
+                    break
+
+        if param_name:
+            parameters.append(ParameterInfo(
+                name=param_name,
+                type=param_type,
+                default=param_default,
+            ))
+
+    return parameters
+
+
+def _extract_js_return_type(node: Node) -> str | None:
+    """Extract return type from JavaScript/TypeScript function node.
+
+    Args:
+        node: A function_declaration or method_definition node.
+
+    Returns:
+        Return type string or None.
+    """
+    # TypeScript return type annotation comes after parameters
+    return_type_node = get_child_by_field(node, "return_type")
+    if return_type_node:
+        ret_type = get_node_text(return_type_node)
+        # Strip leading ': ' from type annotation
+        if ret_type and ret_type.startswith(": "):
+            ret_type = ret_type[2:]
+        return ret_type
+    return None
+
+
 def _extract_js_function(node: Node, lines: list[str]) -> ExtractedElement:
     """Extract a JavaScript function."""
     name_node = get_child_by_field(node, "name")
@@ -1063,6 +1242,10 @@ def _extract_js_function(node: Node, lines: list[str]) -> ExtractedElement:
 
     params_node = get_child_by_field(node, "parameters")
     params = get_node_text(params_node) if params_node else "()"
+
+    # Extract structured parameters and return type
+    parameters = _extract_js_parameters(params_node) if params_node else []
+    return_type = _extract_js_return_type(node)
 
     # Check for async
     is_async = any(child.type == "async" for child in node.children)
@@ -1072,6 +1255,8 @@ def _extract_js_function(node: Node, lines: list[str]) -> ExtractedElement:
     raw_code = "\n".join(lines[line_start - 1 : line_end])
 
     signature = f"{'async ' if is_async else ''}function {name}{params}"
+    if return_type:
+        signature += f": {return_type}"
 
     return ExtractedElement(
         element_type="function",
@@ -1082,6 +1267,8 @@ def _extract_js_function(node: Node, lines: list[str]) -> ExtractedElement:
         signature=signature,
         is_async=is_async,
         node=node,
+        return_type=return_type,
+        parameters=parameters or None,
     )
 
 
@@ -1130,11 +1317,19 @@ def extract_javascript_class_members(
             params_node = get_child_by_field(child, "parameters")
             params = get_node_text(params_node) if params_node else "()"
 
+            # Extract structured parameters and return type
+            parameters = _extract_js_parameters(params_node) if params_node else []
+            return_type = _extract_js_return_type(child)
+
             is_async = any(c.type == "async" for c in child.children)
 
             line_start = child.start_point[0] + 1
             line_end = child.end_point[0] + 1
             raw_code = "\n".join(lines[line_start - 1 : line_end])
+
+            signature = f"{name}{params}"
+            if return_type:
+                signature += f": {return_type}"
 
             methods.append(
                 ExtractedElement(
@@ -1143,9 +1338,11 @@ def extract_javascript_class_members(
                     line_start=line_start,
                     line_end=line_end,
                     raw_code=raw_code,
-                    signature=f"{name}{params}",
+                    signature=signature,
                     is_async=is_async,
                     node=child,
+                    return_type=return_type,
+                    parameters=parameters or None,
                 )
             )
         elif child.type == "field_definition":
@@ -1797,23 +1994,86 @@ def _extract_php_class(node: Node, lines: list[str]) -> ExtractedElement | None:
     )
 
 
+def _extract_php_parameters(params_node: Node) -> list[ParameterInfo]:
+    """Extract structured parameter info from PHP formal_parameters node.
+
+    Args:
+        params_node: The 'formal_parameters' AST node.
+
+    Returns:
+        List of ParameterInfo with name, type, and default value.
+    """
+    parameters: list[ParameterInfo] = []
+    if not params_node:
+        return parameters
+
+    for child in params_node.children:
+        if child.type not in ("simple_parameter", "variadic_parameter", "property_promotion_parameter"):
+            continue
+
+        param_name: str | None = None
+        param_type: str | None = None
+        param_default: str | None = None
+
+        # Get variable name
+        for c in child.children:
+            if c.type == "variable_name":
+                for nc in c.children:
+                    if nc.type == "name":
+                        param_name = get_node_text(nc)
+                        break
+            elif c.type in ("named_type", "primitive_type", "nullable_type", "union_type"):
+                param_type = get_node_text(c)
+            elif c.type == "variadic_placeholder":
+                param_name = "..." + (param_name or "")
+
+        # Get default value if present
+        default_node = get_child_by_field(child, "default_value")
+        if default_node:
+            param_default = get_node_text(default_node)
+
+        if param_name:
+            parameters.append(ParameterInfo(
+                name=param_name,
+                type=param_type,
+                default=param_default,
+            ))
+
+    return parameters
+
+
+def _extract_php_return_type(node: Node) -> str | None:
+    """Extract return type from PHP function/method node."""
+    return_type_node = get_child_by_field(node, "return_type")
+    if return_type_node:
+        return get_node_text(return_type_node)
+    return None
+
+
 def _extract_php_function(node: Node, lines: list[str]) -> ExtractedElement | None:
     """Extract a PHP function definition."""
     name = None
+    params_node = None
+
     for child in node.children:
         if child.type == "name":
             name = get_node_text(child)
-            break
+        elif child.type == "formal_parameters":
+            params_node = child
 
     if not name:
         return None
 
+    # Extract structured parameters and return type
+    parameters = _extract_php_parameters(params_node) if params_node else []
+    return_type = _extract_php_return_type(node)
+
     # Build signature from formal_parameters
     signature = f"function {name}"
-    for child in node.children:
-        if child.type == "formal_parameters":
-            signature += get_node_text(child)
-            break
+    if params_node:
+        signature += get_node_text(params_node)
+    if return_type:
+        signature += f": {return_type}"
 
     return ExtractedElement(
         element_type="function",
@@ -1823,6 +2083,8 @@ def _extract_php_function(node: Node, lines: list[str]) -> ExtractedElement | No
         raw_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
         signature=signature,
         node=node,
+        return_type=return_type,
+        parameters=parameters or None,
     )
 
 
@@ -1869,6 +2131,7 @@ def _extract_php_method(node: Node, lines: list[str]) -> ExtractedElement | None
     is_async = False
     visibility = "public"
     decorators: list[str] = []
+    params_node = None
 
     for child in node.children:
         if child.type == "name":
@@ -1877,16 +2140,22 @@ def _extract_php_method(node: Node, lines: list[str]) -> ExtractedElement | None
             visibility = get_node_text(child)
         elif child.type == "static_modifier":
             decorators.append("static")
+        elif child.type == "formal_parameters":
+            params_node = child
 
     if not name:
         return None
 
+    # Extract structured parameters and return type
+    parameters = _extract_php_parameters(params_node) if params_node else []
+    return_type = _extract_php_return_type(node)
+
     # Build signature
     signature = f"{visibility} function {name}"
-    for child in node.children:
-        if child.type == "formal_parameters":
-            signature += get_node_text(child)
-            break
+    if params_node:
+        signature += get_node_text(params_node)
+    if return_type:
+        signature += f": {return_type}"
 
     return ExtractedElement(
         element_type="method",
@@ -1897,6 +2166,8 @@ def _extract_php_method(node: Node, lines: list[str]) -> ExtractedElement | None
         signature=signature,
         decorators=decorators,
         node=node,
+        return_type=return_type,
+        parameters=parameters or None,
     )
 
 
@@ -2330,12 +2601,64 @@ def _extract_rust_enum(node: Node, lines: list[str]) -> ExtractedElement | None:
     )
 
 
+def _extract_rust_parameters(params_node: Node) -> list[ParameterInfo]:
+    """Extract structured parameter info from Rust parameters node.
+
+    Args:
+        params_node: The 'parameters' AST node.
+
+    Returns:
+        List of ParameterInfo with name, type, and default value.
+    """
+    parameters: list[ParameterInfo] = []
+    if not params_node:
+        return parameters
+
+    for child in params_node.children:
+        if child.type == "self_parameter":
+            # &self, &mut self, self
+            self_text = get_node_text(child)
+            parameters.append(ParameterInfo(name=self_text, type=None, default=None))
+        elif child.type == "parameter":
+            param_name: str | None = None
+            param_type: str | None = None
+
+            # Find pattern (name) and type
+            pattern_node = get_child_by_field(child, "pattern")
+            type_node = get_child_by_field(child, "type")
+
+            if pattern_node:
+                param_name = get_node_text(pattern_node)
+            if type_node:
+                param_type = get_node_text(type_node)
+
+            if param_name:
+                parameters.append(ParameterInfo(
+                    name=param_name,
+                    type=param_type,
+                    default=None,  # Rust doesn't have default parameters
+                ))
+
+    return parameters
+
+
+def _extract_rust_return_type(node: Node) -> str | None:
+    """Extract return type from Rust function/method node."""
+    for i, child in enumerate(node.children):
+        if child.type == "->":
+            if i + 1 < len(node.children):
+                ret_type = node.children[i + 1]
+                return get_node_text(ret_type)
+    return None
+
+
 def _extract_rust_function(node: Node, lines: list[str]) -> ExtractedElement | None:
     """Extract a Rust function definition."""
     name = None
     is_async = False
     visibility = "private"
     decorators: list[str] = []
+    params_node = None
 
     for child in node.children:
         if child.type == "identifier":
@@ -2345,24 +2668,22 @@ def _extract_rust_function(node: Node, lines: list[str]) -> ExtractedElement | N
         elif child.type == "async":
             is_async = True
             decorators.append("async")
+        elif child.type == "parameters":
+            params_node = child
 
     if not name:
         return None
 
+    # Extract structured parameters and return type
+    parameters = _extract_rust_parameters(params_node) if params_node else []
+    return_type = _extract_rust_return_type(node)
+
     # Build signature
     signature = f"fn {name}"
-    for child in node.children:
-        if child.type == "parameters":
-            signature += get_node_text(child)
-            break
-
-    # Add return type
-    for i, child in enumerate(node.children):
-        if child.type == "->":
-            if i + 1 < len(node.children):
-                ret_type = node.children[i + 1]
-                signature += f" -> {get_node_text(ret_type)}"
-            break
+    if params_node:
+        signature += get_node_text(params_node)
+    if return_type:
+        signature += f" -> {return_type}"
 
     return ExtractedElement(
         element_type="function",
@@ -2374,6 +2695,8 @@ def _extract_rust_function(node: Node, lines: list[str]) -> ExtractedElement | N
         is_async=is_async,
         decorators=decorators,
         node=node,
+        return_type=return_type,
+        parameters=parameters or None,
     )
 
 
@@ -2470,6 +2793,7 @@ def _extract_rust_method(node: Node, lines: list[str]) -> ExtractedElement | Non
     visibility = "private"
     decorators: list[str] = []
     has_self = False
+    params_node = None
 
     for child in node.children:
         if child.type == "identifier":
@@ -2480,6 +2804,7 @@ def _extract_rust_method(node: Node, lines: list[str]) -> ExtractedElement | Non
             is_async = True
             decorators.append("async")
         elif child.type == "parameters":
+            params_node = child
             # Check for self parameter
             for param in child.children:
                 if param.type in ("self_parameter", "self"):
@@ -2494,20 +2819,16 @@ def _extract_rust_method(node: Node, lines: list[str]) -> ExtractedElement | Non
     if not name:
         return None
 
+    # Extract structured parameters and return type
+    parameters = _extract_rust_parameters(params_node) if params_node else []
+    return_type = _extract_rust_return_type(node)
+
     # Build signature
     signature = f"fn {name}"
-    for child in node.children:
-        if child.type == "parameters":
-            signature += get_node_text(child)
-            break
-
-    # Add return type
-    for i, child in enumerate(node.children):
-        if child.type == "->":
-            if i + 1 < len(node.children):
-                ret_type = node.children[i + 1]
-                signature += f" -> {get_node_text(ret_type)}"
-            break
+    if params_node:
+        signature += get_node_text(params_node)
+    if return_type:
+        signature += f" -> {return_type}"
 
     # Method vs associated function
     elem_type = "method" if has_self else "function"
@@ -2522,6 +2843,8 @@ def _extract_rust_method(node: Node, lines: list[str]) -> ExtractedElement | Non
         is_async=is_async,
         decorators=decorators,
         node=node,
+        return_type=return_type,
+        parameters=parameters or None,
     )
 
 

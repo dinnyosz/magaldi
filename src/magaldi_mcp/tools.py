@@ -376,6 +376,20 @@ def get_element(
     if doc.get("attributes_modified"):
         result["attributes_modified"] = doc["attributes_modified"]
 
+    # Function/method return type and parameters
+    if doc.get("return_type"):
+        result["return_type"] = doc["return_type"]
+    if doc.get("parameters"):
+        result["parameters"] = doc["parameters"]
+
+    # Imports (for file elements)
+    if doc.get("imports"):
+        result["imports"] = doc["imports"]
+
+    # Calls (for function/method elements)
+    if doc.get("calls"):
+        result["calls"] = doc["calls"]
+
     if include_code:
         result["code"] = doc.get("raw_code", "")
 

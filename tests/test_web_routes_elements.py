@@ -132,6 +132,7 @@ class TestGetSimilarElements:
     def test_returns_404_when_element_not_found(self, client, mock_es_repo):
         """Test returns 404 when element not found."""
         mock_es_repo.get_document_by_hash_id.return_value = None
+        mock_es_repo.get_document.return_value = None
 
         response = client.get(f"/elements/similar/{'a' * 64}")
 
@@ -271,6 +272,7 @@ class TestGetElementDetail:
     def test_returns_404_when_not_found(self, client, mock_es_repo):
         """Test returns 404 when element not found."""
         mock_es_repo.get_document_by_hash_id.return_value = None
+        mock_es_repo.get_document.return_value = None
 
         response = client.get(f"/elements/{'a' * 64}")
 

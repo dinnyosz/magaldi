@@ -140,6 +140,17 @@ INDEX_MAPPING = {
                     "full": {"type": "text"},
                 },
             },
+            # Function/method return type
+            "return_type": {"type": "keyword"},
+            # Function/method parameters (structured)
+            "parameters": {
+                "type": "nested",
+                "properties": {
+                    "name": {"type": "keyword"},
+                    "type": {"type": "keyword"},
+                    "default": {"type": "keyword"},
+                },
+            },
         }
     },
     "settings": {
@@ -248,6 +259,10 @@ class ElasticsearchRepository:
             doc["attributes_modified"] = element.attributes_modified
         if element.decorator_details:
             doc["decorator_details"] = element.decorator_details
+        if element.return_type:
+            doc["return_type"] = element.return_type
+        if element.parameters:
+            doc["parameters"] = element.parameters
 
         client = self._get_client()
         client.index(index=INDEX_NAME, id=element.element_id, document=doc)
