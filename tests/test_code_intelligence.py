@@ -9,6 +9,7 @@ from magaldi_core.tree_sitter_manager import (
     associate_comments,
     detect_cli_commands,
     detect_http_routes,
+    detect_patterns,
     detect_public_api,
     extract_comments,
     extract_section_markers,
@@ -360,3 +361,60 @@ class TestPublicApiDetection:
     def test_public_with_export_decorator(self):
         decorators = [DecoratorInfo(name="export", args=None, full="export")]
         assert detect_public_api("exported_func", decorators, "public", "python") is True
+
+
+class TestPatternDetection:
+    """Tests for design pattern detection."""
+
+    def test_detect_singleton(self):
+        class_info = {
+            "name": "DatabaseConnection",
+            "attributes": ["_instance"],
+            "methods": ["get_instance", "__new__"],
+            "method_returns_self": True,
+        }
+        patterns, confidence = detect_patterns(class_info, [], "python")
+        assert "singleton" in patterns
+        assert confidence.get("singleton", 0) >= 0.6
+
+    def test_detect_builder(self):
+        class_info = {
+            "name": "QueryBuilder",
+            "attributes": ["_query"],
+            "methods": ["select", "where", "order_by", "build"],
+            "methods_return_self": ["select", "where", "order_by"],
+        }
+        patterns, confidence = detect_patterns(class_info, [], "python")
+        assert "builder" in patterns
+
+    def test_detect_factory(self):
+        class_info = {
+            "name": "UserFactory",
+            "attributes": [],
+            "methods": ["create_admin", "create_guest"],
+        }
+        # Simulate calls that instantiate other classes
+        calls = [
+            ExtractedCall(name="AdminUser", receiver=None, line=10),
+            ExtractedCall(name="GuestUser", receiver=None, line=15),
+        ]
+        patterns, confidence = detect_patterns(class_info, calls, "python")
+        assert "factory" in patterns
+
+    def test_detect_repository(self):
+        class_info = {
+            "name": "UserRepository",
+            "attributes": ["_db"],
+            "methods": ["find_by_id", "find_all", "save", "delete"],
+        }
+        patterns, confidence = detect_patterns(class_info, [], "python")
+        assert "repository" in patterns
+
+    def test_no_pattern(self):
+        class_info = {
+            "name": "SimpleClass",
+            "attributes": ["value"],
+            "methods": ["get_value", "set_value"],
+        }
+        patterns, confidence = detect_patterns(class_info, [], "python")
+        assert len(patterns) == 0

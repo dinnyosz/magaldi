@@ -3972,6 +3972,149 @@ def detect_public_api(
 
 
 # =============================================================================
+# DESIGN PATTERN DETECTION
+# =============================================================================
+
+
+def detect_patterns(
+    class_info: dict[str, Any],
+    calls: list[ExtractedCall],
+    _language: str,
+) -> tuple[list[str], dict[str, float]]:
+    """Detect design patterns in a class.
+
+    Args:
+        class_info: Dict with class name, attributes, methods, etc.
+        calls: Calls made within the class methods.
+        language: Programming language.
+
+    Returns:
+        Tuple of (detected pattern names, confidence scores).
+    """
+    patterns = []
+    confidence = {}
+
+    # Singleton detection
+    singleton_score = _detect_singleton(class_info)
+    if singleton_score >= 0.6:
+        patterns.append("singleton")
+        confidence["singleton"] = singleton_score
+
+    # Builder detection
+    builder_score = _detect_builder(class_info)
+    if builder_score >= 0.6:
+        patterns.append("builder")
+        confidence["builder"] = builder_score
+
+    # Factory detection
+    factory_score = _detect_factory(class_info, calls)
+    if factory_score >= 0.6:
+        patterns.append("factory")
+        confidence["factory"] = factory_score
+
+    # Repository detection
+    repository_score = _detect_repository(class_info)
+    if repository_score >= 0.6:
+        patterns.append("repository")
+        confidence["repository"] = repository_score
+
+    return patterns, confidence
+
+
+def _detect_singleton(class_info: dict[str, Any]) -> float:
+    """Detect singleton pattern."""
+    score = 0.0
+    attributes = class_info.get("attributes", [])
+    methods = class_info.get("methods", [])
+
+    # Has _instance attribute
+    if "_instance" in attributes or "instance" in attributes:
+        score += 0.3
+
+    # Has get_instance method
+    if "get_instance" in methods or "getInstance" in methods:
+        score += 0.3
+
+    # Has __new__ method (Python singleton pattern)
+    if "__new__" in methods:
+        score += 0.2
+
+    # Returns self/instance from get_instance
+    if class_info.get("method_returns_self"):
+        score += 0.2
+
+    return score
+
+
+def _detect_builder(class_info: dict[str, Any]) -> float:
+    """Detect builder pattern."""
+    score = 0.0
+    methods = class_info.get("methods", [])
+    returns_self = class_info.get("methods_return_self", [])
+
+    # Multiple methods that return self (method chaining)
+    if len(returns_self) >= 2:
+        score += 0.4
+
+    # Has a build() method
+    if "build" in methods:
+        score += 0.3
+
+    # Name ends with Builder
+    if class_info.get("name", "").endswith("Builder"):
+        score += 0.3
+
+    return score
+
+
+def _detect_factory(class_info: dict[str, Any], calls: list[ExtractedCall]) -> float:
+    """Detect factory pattern."""
+    score = 0.0
+    methods = class_info.get("methods", [])
+    name = class_info.get("name", "")
+
+    # Name contains Factory
+    if "Factory" in name or "factory" in name.lower():
+        score += 0.3
+
+    # Has create* methods
+    create_methods = [m for m in methods if m.startswith("create") or m.startswith("make")]
+    if create_methods:
+        score += 0.3
+
+    # Methods instantiate other classes
+    instantiation_calls = [c for c in calls if c.receiver is None and c.name[0].isupper()]
+    if instantiation_calls:
+        score += 0.4
+
+    return score
+
+
+def _detect_repository(class_info: dict[str, Any]) -> float:
+    """Detect repository pattern."""
+    score = 0.0
+    methods = class_info.get("methods", [])
+    name = class_info.get("name", "")
+
+    # Name contains Repository
+    if "Repository" in name or "Repo" in name:
+        score += 0.3
+
+    # Has CRUD-like methods
+    crud_methods = {"get", "find", "save", "update", "delete", "create", "add", "remove"}
+    found_crud = [m for m in methods if any(crud in m.lower() for crud in crud_methods)]
+    if len(found_crud) >= 2:
+        score += 0.4
+
+    # Has find_by_* methods
+    find_by_methods = [m for m in methods if m.startswith("find_by") or m.startswith("get_by")]
+    if find_by_methods:
+        score += 0.3
+
+    return score
+
+
+# =============================================================================
 # GLOBAL SINGLETON
 # =============================================================================
 
