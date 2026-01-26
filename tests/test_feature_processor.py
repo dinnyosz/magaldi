@@ -318,20 +318,20 @@ class TestFeatureWorkerStatus:
         """Test setting and getting worker status."""
         status = FeatureWorkerStatus()
 
-        status.set(0, "feature_1", "summarizing", "model_a")
-        status.set(1, "feature_2", "embedding", "model_b")
+        status.set(0, "feature_1", "summarizing", "model_a", "2K")
+        status.set(1, "feature_2", "embedding", "model_b", "4K")
 
         all_status = status.get_all()
 
         assert len(all_status) == 2
-        assert all_status[0] == ("feature_1", "summarizing", "model_a")
-        assert all_status[1] == ("feature_2", "embedding", "model_b")
+        assert all_status[0] == ("feature_1", "summarizing", "model_a", "2K")
+        assert all_status[1] == ("feature_2", "embedding", "model_b", "4K")
 
     def test_clear(self):
         """Test clearing worker status."""
         status = FeatureWorkerStatus()
 
-        status.set(0, "feature_1", "summarizing", "model_a")
+        status.set(0, "feature_1", "summarizing", "model_a", "2K")
         status.clear(0)
 
         all_status = status.get_all()
@@ -352,7 +352,7 @@ class TestFeatureWorkerStatus:
 
         def set_and_clear():
             for i in range(100):
-                status.set(i % 4, f"feature_{i}", "stage", "")
+                status.set(i % 4, f"feature_{i}", "stage", "", "")
                 status.clear(i % 4)
 
         threads = [threading.Thread(target=set_and_clear) for _ in range(4)]
@@ -373,14 +373,14 @@ class TestSubfeatureWorkerStatus:
         """Test setting and getting worker status."""
         status = SubfeatureWorkerStatus()
 
-        status.set(0, "parent_feature", "summarize", "model", "sub1")
-        status.set(1, "parent_feature", "embed", "", "sub2")
+        status.set(0, "parent_feature", "summarize", "model", "sub1", "2K")
+        status.set(1, "parent_feature", "embed", "", "sub2", "")
 
         all_status = status.get_all()
 
         assert len(all_status) == 2
-        assert all_status[0] == ("parent_feature", "summarize", "model", "sub1")
-        assert all_status[1] == ("parent_feature", "embed", "", "sub2")
+        assert all_status[0] == ("parent_feature", "summarize", "model", "sub1", "2K")
+        assert all_status[1] == ("parent_feature", "embed", "", "sub2", "")
 
 
 # =============================================================================
@@ -542,54 +542,56 @@ class TestGenerateFeatureSummary:
             "elem2": "Second function summary.",
         }
 
-        result = _generate_feature_summary(
+        summary, num_ctx = _generate_feature_summary(
             cluster=sample_cluster,
             member_summaries=member_summaries,
             llm_client=mock_llm_client,
             config=feature_config,
         )
 
-        assert result == "This is a test summary."
+        assert summary == "This is a test summary."
+        assert num_ctx > 0  # Should return a valid context size
         mock_llm_client.generate_from_messages.assert_called_once()
 
     def test_generates_summary_without_member_summaries(
         self, sample_cluster, mock_llm_client, feature_config
     ):
         """Test summary generation without member summaries."""
-        result = _generate_feature_summary(
+        summary, num_ctx = _generate_feature_summary(
             cluster=sample_cluster,
             member_summaries={},
             llm_client=mock_llm_client,
             config=feature_config,
         )
 
-        assert result == "This is a test summary."
+        assert summary == "This is a test summary."
+        assert num_ctx > 0
 
     def test_cleans_summary_prefix(self, sample_cluster, mock_llm_client, feature_config):
         """Test that 'Summary:' prefix is removed."""
         mock_llm_client.generate_from_messages.return_value = "Summary: This is the actual summary"
 
-        result = _generate_feature_summary(
+        summary, num_ctx = _generate_feature_summary(
             cluster=sample_cluster,
             member_summaries={},
             llm_client=mock_llm_client,
             config=feature_config,
         )
 
-        assert result == "This is the actual summary."
+        assert summary == "This is the actual summary."
 
     def test_adds_period_if_missing(self, sample_cluster, mock_llm_client, feature_config):
         """Test that period is added if missing."""
         mock_llm_client.generate_from_messages.return_value = "A summary without period"
 
-        result = _generate_feature_summary(
+        summary, num_ctx = _generate_feature_summary(
             cluster=sample_cluster,
             member_summaries={},
             llm_client=mock_llm_client,
             config=feature_config,
         )
 
-        assert result.endswith(".")
+        assert summary.endswith(".")
 
     def test_uses_cluster_label(self, mock_llm_client, feature_config):
         """Test that cluster label is used in prompt."""
@@ -613,21 +615,20 @@ class TestGenerateFeatureSummary:
         user_content = messages[1]["content"]  # User message is second
         assert "cluster_5" in user_content
 
-    def test_uses_aggregation_context_size(self, sample_cluster, mock_llm_client):
-        """Test that aggregation_context_size is passed as num_ctx."""
-        config = FeatureProcessingConfig(
-            aggregation_context_size=32768,
-        )
-
-        _generate_feature_summary(
+    def test_uses_dynamic_context_size(self, sample_cluster, mock_llm_client, feature_config):
+        """Test that dynamic context size is computed based on prompt length."""
+        # Small prompt should use smallest tier
+        summary, num_ctx = _generate_feature_summary(
             cluster=sample_cluster,
-            member_summaries={"elem1": "Summary 1"},
+            member_summaries={"elem1": "Short summary."},
             llm_client=mock_llm_client,
-            config=config,
+            config=feature_config,
         )
 
         call_args = mock_llm_client.generate_from_messages.call_args
-        assert call_args.kwargs["num_ctx"] == 32768
+        # Context should be one of the tiers
+        assert call_args.kwargs["num_ctx"] in [2048, 4096, 8192, 16384, 32768]
+        assert call_args.kwargs["num_ctx"] == num_ctx
 
 
 class TestGenerateSubfeatureSummary:
@@ -637,7 +638,7 @@ class TestGenerateSubfeatureSummary:
         self, sample_cluster, mock_llm_client, feature_config
     ):
         """Test subfeature summary includes parent context."""
-        _generate_subfeature_summary(
+        summary, num_ctx = _generate_subfeature_summary(
             cluster=sample_cluster,
             member_summaries={"elem1": "Summary 1"},
             parent_label="auth_feature",
@@ -651,24 +652,23 @@ class TestGenerateSubfeatureSummary:
         user_content = messages[1]["content"]  # User message is second
         assert "auth_feature" in user_content
         assert "Authentication feature" in user_content
+        assert num_ctx > 0  # Should return valid context size
 
-    def test_uses_aggregation_context_size(self, sample_cluster, mock_llm_client):
-        """Test that aggregation_context_size is passed as num_ctx for subfeatures."""
-        config = FeatureProcessingConfig(
-            aggregation_context_size=24576,
-        )
-
-        _generate_subfeature_summary(
+    def test_uses_dynamic_context_size(self, sample_cluster, mock_llm_client, feature_config):
+        """Test that dynamic context size is computed based on prompt length."""
+        summary, num_ctx = _generate_subfeature_summary(
             cluster=sample_cluster,
             member_summaries={"elem1": "Summary 1"},
             parent_label="auth_feature",
             parent_summary="Authentication feature.",
             llm_client=mock_llm_client,
-            config=config,
+            config=feature_config,
         )
 
         call_args = mock_llm_client.generate_from_messages.call_args
-        assert call_args.kwargs["num_ctx"] == 24576
+        # Context should be one of the tiers
+        assert call_args.kwargs["num_ctx"] in [2048, 4096, 8192, 16384, 32768]
+        assert call_args.kwargs["num_ctx"] == num_ctx
 
 
 # =============================================================================

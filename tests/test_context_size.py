@@ -2,6 +2,7 @@
 
 from shared.ai.context_size import (
     CONTEXT_TIERS,
+    compute_aggregation_num_ctx,
     compute_context_sizes,
     compute_element_num_ctx,
     compute_num_ctx,
@@ -142,4 +143,70 @@ class TestComputeElementNumCtx:
         """Very large elements should use the largest available tier."""
         # 500000 chars = 125000 tokens + overhead > 32768
         result = compute_element_num_ctx("file", 500000)
+        assert result == CONTEXT_TIERS[-1]
+
+
+class TestComputeAggregationNumCtx:
+    """Tests for aggregation context size computation (features, glossary)."""
+
+    def test_small_prompt_uses_smallest_tier(self):
+        """Small prompts should use 2048 tier.
+
+        1000 chars / 3.5 = 286 tokens + 200 overhead = 486 total.
+        With 2x multiplier = 972 < 2048 → 2048 tier.
+        """
+        result = compute_aggregation_num_ctx(1000, task_type="feature")
+        assert result == 2048
+
+    def test_medium_prompt_uses_4096(self):
+        """Medium prompts should use 4096 tier.
+
+        4000 chars / 3.5 = 1143 tokens + 200 overhead = 1343 total.
+        With 2x multiplier = 2686 > 2048 but < 4096 → 4096 tier.
+        """
+        result = compute_aggregation_num_ctx(4000, task_type="feature")
+        assert result == 4096
+
+    def test_large_prompt_uses_8192(self):
+        """Large prompts should use 8192 tier.
+
+        10000 chars / 3.5 = 2857 tokens + 200 overhead = 3057 total.
+        With 2x multiplier = 6114 > 4096 but < 8192 → 8192 tier.
+        """
+        result = compute_aggregation_num_ctx(10000, task_type="feature")
+        assert result == 8192
+
+    def test_different_task_types_have_different_overhead(self):
+        """Different task types should have different overhead values."""
+        # Same prompt chars, different overhead
+        labeling = compute_aggregation_num_ctx(500, task_type="labeling")
+        glossary_summary = compute_aggregation_num_ctx(500, task_type="glossary_summary")
+
+        # glossary_summary has more overhead (350 vs 150), may result in different tier
+        assert labeling in CONTEXT_TIERS
+        assert glossary_summary in CONTEXT_TIERS
+
+    def test_custom_safety_multiplier(self):
+        """Safety multiplier should affect tier selection.
+
+        3000 chars / 3.5 = 857 tokens + 200 overhead = 1057 total.
+        With 1.5x multiplier = 1586 < 2048 → 2048 tier.
+        With 3.0x multiplier = 3171 > 2048 but < 4096 → 4096 tier.
+        """
+        result_1_5x = compute_aggregation_num_ctx(3000, safety_multiplier=1.5)
+        result_3x = compute_aggregation_num_ctx(3000, safety_multiplier=3.0)
+
+        assert result_1_5x == 2048
+        assert result_3x == 4096
+
+    def test_returns_valid_tier(self):
+        """Result should always be a valid context tier."""
+        for chars in [100, 500, 1000, 5000, 10000, 50000]:
+            result = compute_aggregation_num_ctx(chars)
+            assert result in CONTEXT_TIERS
+
+    def test_huge_prompt_uses_largest_tier(self):
+        """Very large prompts should use the largest available tier."""
+        # 100000 chars / 3.5 = 28571 tokens + overhead > 32768
+        result = compute_aggregation_num_ctx(100000)
         assert result == CONTEXT_TIERS[-1]

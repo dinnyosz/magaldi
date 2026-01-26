@@ -286,21 +286,23 @@ def run_feature_extraction(
             # Worker table
             worker_table = Table(show_header=False, box=None, padding=0)
             worker_table.add_column("ID", style="dim", width=4)
-            worker_table.add_column("Stage", style="cyan", width=14)
-            worker_table.add_column("Model", style="yellow", width=26)
+            worker_table.add_column("Stage", style="cyan", width=12)
+            worker_table.add_column("Model", style="yellow", width=20)
+            worker_table.add_column("Ctx", style="magenta", width=4)
             worker_table.add_column("Feature")
 
             workers_data = state.workers.get_all()
             for wid in range(num_workers):
                 if wid in workers_data:
-                    feature_name, stage, model = workers_data[wid]
-                    worker_table.add_row(f"[{wid}]", stage, model, feature_name)
+                    feature_name, stage, model, ctx_size = workers_data[wid]
+                    worker_table.add_row(f"[{wid}]", stage, model, ctx_size, feature_name)
                 else:
-                    worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "")
+                    worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "", "")
 
-            # Stats line
+            # Stats line - show both wall time and API time
             avg_api = state.timing.avg_summarize_time + state.timing.avg_embed_time
-            stats = f"  [dim]Avg:[/] [green]{avg_api:.1f}s[/]/feature [dim]([/][green]{state.timing.avg_summarize_time:.1f}s[/] summ + [green]{state.timing.avg_embed_time:.1f}s[/] embed[dim])[/]"
+            wall_time = state.timing.elapsed / state.completed if state.completed > 0 else 0
+            stats = f"  [dim]Wall:[/] [green]{wall_time:.2f}s[/]/feature [dim]|[/] [dim]API:[/] [green]{avg_api:.1f}s[/]/feature [dim]([/][green]{state.timing.avg_summarize_time:.1f}s[/] summ + [green]{state.timing.avg_embed_time:.1f}s[/] embed[dim])[/]"
 
             return Group(bar_text, worker_table, stats)
 
@@ -453,27 +455,32 @@ def run_feature_extraction(
                 # Worker table
                 worker_table = Table(show_header=False, box=None, padding=0)
                 worker_table.add_column("ID", style="dim", width=4)
-                worker_table.add_column("Stage", style="cyan", width=14)
-                worker_table.add_column("Model", style="yellow", width=26)
-                worker_table.add_column("Parent", style="magenta", width=20)
+                worker_table.add_column("Stage", style="cyan", width=10)
+                worker_table.add_column("Model", style="yellow", width=20)
+                worker_table.add_column("Ctx", style="blue", width=4)
+                worker_table.add_column("Parent", style="magenta", width=22)
                 worker_table.add_column("Subfeature")
 
                 workers_data = state.workers.get_all()
                 for wid in range(num_workers):
                     if wid in workers_data:
-                        parent_feature, stage, model, subfeature = workers_data[wid]
-                        display_parent = parent_feature[:17] + "..." if len(parent_feature) > 20 else parent_feature
-                        display_sub = subfeature[:25] + "..." if len(subfeature) > 28 else subfeature
-                        worker_table.add_row(f"[{wid}]", stage, model, display_parent, display_sub)
+                        parent_feature, stage, model, subfeature, ctx_size = workers_data[wid]
+                        display_parent = parent_feature[:19] + "..." if len(parent_feature) > 22 else parent_feature
+                        display_sub = subfeature[:30] + "..." if len(subfeature) > 33 else subfeature
+                        worker_table.add_row(f"[{wid}]", stage, model, ctx_size, display_parent, display_sub)
                     else:
-                        worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "", "")
+                        worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "", "", "")
 
-                # Stats line
+                # Stats line - show both wall time and API time
                 avg_api = state.timing.avg_summarize_time + state.timing.avg_embed_time
+                wall_time = state.timing.elapsed / state.completed if state.completed > 0 else 0
                 stats_text = Text()
                 if state.timing.summarize_count > 0:
                     stats_text.append("  ")
-                    stats_text.append("Avg: ", style="dim")
+                    stats_text.append("Wall: ", style="dim")
+                    stats_text.append(f"{wall_time:.2f}s", style="green")
+                    stats_text.append("/subfeature | ", style="dim")
+                    stats_text.append("API: ", style="dim")
                     stats_text.append(f"{avg_api:.1f}s", style="green")
                     stats_text.append("/subfeature (", style="dim")
                     stats_text.append(f"{state.timing.avg_summarize_time:.1f}s", style="cyan")
@@ -806,12 +813,14 @@ def run_glossary_extraction(
             console.print("  [dim]No glossary items extracted[/]")
             return {"terms_count": 0}
 
-        # Print summary stats
+        # Print summary stats - show both wall time and API time
         avg_api = timing_stats.avg_api_time
         elapsed = timing_stats.elapsed
+        features_processed = timing_stats.features_processed
+        wall_time = elapsed / features_processed if features_processed > 0 else 0
         console.print()
         console.print(f"  [green]{len(glossary_items)}[/] unique terms extracted in [cyan]{format_duration(elapsed)}[/]")
-        console.print(f"  Avg: [green]{avg_api:.1f}s[/]/feature | Model: [yellow]{model_name}[/]")
+        console.print(f"  Wall: [green]{wall_time:.2f}s[/]/feature | API: [green]{avg_api:.1f}s[/]/feature | Model: [yellow]{model_name}[/]")
 
         # Build feature lookup for feature associations
         feature_lookup: dict[str, dict] = {}

@@ -99,3 +99,52 @@ def compute_context_sizes(max_chars_by_type: dict[str, int]) -> dict[str, int]:
         element_type: compute_element_num_ctx(element_type, max_chars)
         for element_type, max_chars in max_chars_by_type.items()
     }
+
+
+# Prompt overhead estimates for aggregation tasks (in tokens)
+# These include system prompts, templates, and typical output sizes
+AGGREGATION_OVERHEAD = {
+    "labeling": 150,        # System (~100) + output (~50)
+    "feature": 200,         # System (~120) + template (~30) + output (~50)
+    "subfeature": 250,      # System (~130) + parent context (~70) + output (~50)
+    "glossary_extract": 250,  # System (~200) + output (~50)
+    "glossary_summary": 350,  # System (~250) + output (~100)
+}
+
+
+def compute_aggregation_num_ctx(
+    prompt_chars: int,
+    task_type: str = "feature",
+    safety_multiplier: float = 2.0,
+) -> int:
+    """Compute optimal context size for aggregation tasks (features, glossary).
+
+    Uses a safety multiplier (default 2x) to ensure sufficient headroom for
+    variable content lengths and model output.
+
+    Args:
+        prompt_chars: Total character count of the prompt content (excluding
+            system prompt overhead which is added automatically).
+        task_type: Type of aggregation task for overhead calculation.
+            One of: labeling, feature, subfeature, glossary_extract, glossary_summary.
+        safety_multiplier: Multiplier for safety margin (default 2.0 = double).
+
+    Returns:
+        Optimal num_ctx value from CONTEXT_TIERS.
+
+    Example:
+        - 2000 char feature summaries → ~570 tokens + 200 overhead = 770
+        - With 2x multiplier → 1540 → 2048 tier
+    """
+    # Estimate tokens: ~3.5 chars per token for natural language summaries
+    estimated_tokens = int(prompt_chars / 3.5)
+    overhead = AGGREGATION_OVERHEAD.get(task_type, 200)
+    total_tokens = int((estimated_tokens + overhead) * safety_multiplier)
+
+    # Find smallest tier that fits
+    for tier in CONTEXT_TIERS:
+        if total_tokens < tier:
+            return tier
+
+    # Fallback to largest tier
+    return CONTEXT_TIERS[-1]

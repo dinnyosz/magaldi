@@ -307,6 +307,12 @@ async def call_llm_for_glossary(
     # Build messages optimized for prefix caching
     messages = build_glossary_messages(summary, label)
 
+    # Compute dynamic context size based on prompt length
+    from shared.ai.context_size import compute_aggregation_num_ctx
+    user_content = GLOSSARY_EXTRACTION_USER_PROMPT.format(label=label, summary=summary)
+    prompt_chars = len(GLOSSARY_EXTRACTION_SYSTEM_PROMPT) + len(user_content)
+    num_ctx = compute_aggregation_num_ctx(prompt_chars, task_type="glossary_extract")
+
     # Get model config from LLM config
     model_config = config.llm.get_summarize_model()
     client = LLMClient(
@@ -321,7 +327,7 @@ async def call_llm_for_glossary(
             temperature=config.llm.summarize_temperature,
             top_p=config.llm.summarize_top_p,
             max_tokens=128,  # Just term names, not full descriptions
-            num_ctx=config.llm.aggregation_context_size,
+            num_ctx=num_ctx,
         )
     except LLMError:
         return []
@@ -512,6 +518,11 @@ def generate_glossary_summary_sync(
         {"role": "user", "content": user_content},
     ]
 
+    # Compute dynamic context size based on prompt length
+    from shared.ai.context_size import compute_aggregation_num_ctx
+    prompt_chars = len(GLOSSARY_SUMMARY_SYSTEM_PROMPT) + len(user_content)
+    num_ctx = compute_aggregation_num_ctx(prompt_chars, task_type="glossary_summary")
+
     # Get model config from LLM config
     model_config = config.llm.get_summarize_model()
     client = LLMClient(
@@ -527,7 +538,7 @@ def generate_glossary_summary_sync(
             temperature=config.llm.summarize_temperature,
             top_p=config.llm.summarize_top_p,
             max_tokens=512,  # Allow for definition + details
-            num_ctx=config.llm.aggregation_context_size,
+            num_ctx=num_ctx,
         )
         api_time = time.time() - start_time
         return response.strip(), api_time
@@ -602,6 +613,12 @@ def call_llm_for_glossary_sync(
     # Build messages optimized for prefix caching
     messages = build_glossary_messages(summary, label)
 
+    # Compute dynamic context size based on prompt length
+    from shared.ai.context_size import compute_aggregation_num_ctx
+    user_content = GLOSSARY_EXTRACTION_USER_PROMPT.format(label=label, summary=summary)
+    prompt_chars = len(GLOSSARY_EXTRACTION_SYSTEM_PROMPT) + len(user_content)
+    num_ctx = compute_aggregation_num_ctx(prompt_chars, task_type="glossary_extract")
+
     # Get model config from LLM config
     model_config = config.llm.get_summarize_model()
     client = LLMClient(
@@ -616,7 +633,7 @@ def call_llm_for_glossary_sync(
             temperature=config.llm.summarize_temperature,
             top_p=config.llm.summarize_top_p,
             max_tokens=128,  # Just term names, not full descriptions
-            num_ctx=config.llm.aggregation_context_size,
+            num_ctx=num_ctx,
         )
     except LLMError:
         return []

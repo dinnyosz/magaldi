@@ -370,6 +370,11 @@ class FeatureClusterer:
                 {"role": "user", "content": user_content},
             ]
 
+            # Compute dynamic context size based on prompt length
+            from shared.ai.context_size import compute_aggregation_num_ctx
+            prompt_chars = len(LABEL_SYSTEM_PROMPT) + len(user_content)
+            num_ctx = compute_aggregation_num_ctx(prompt_chars, task_type="labeling")
+
             try:
                 api_start = time.time()
                 raw_label = llm_client.generate_from_messages(
@@ -378,6 +383,7 @@ class FeatureClusterer:
                     top_p=self.config.label_top_p,
                     max_tokens=self.config.label_max_tokens,
                     timeout=self.config.label_timeout,
+                    num_ctx=num_ctx,
                 )
                 label_time = time.time() - api_start
                 timing_stats.record(label_time)

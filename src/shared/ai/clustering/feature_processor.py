@@ -132,17 +132,17 @@ class FeatureWorkerStatus:
     """Track what each worker is doing."""
 
     _lock: threading.Lock = field(default_factory=threading.Lock)
-    _status: dict[int, tuple[str, str, str]] = field(default_factory=dict)  # worker_id -> (feature_name, stage, model)
+    _status: dict[int, tuple[str, str, str, str]] = field(default_factory=dict)  # worker_id -> (feature_name, stage, model, ctx_size)
 
-    def set(self, worker_id: int, feature_name: str, stage: str, model: str = "") -> None:
+    def set(self, worker_id: int, feature_name: str, stage: str, model: str = "", ctx_size: str = "") -> None:
         with self._lock:
-            self._status[worker_id] = (feature_name, stage, model)
+            self._status[worker_id] = (feature_name, stage, model, ctx_size)
 
     def clear(self, worker_id: int) -> None:
         with self._lock:
             self._status.pop(worker_id, None)
 
-    def get_all(self) -> dict[int, tuple[str, str, str]]:
+    def get_all(self) -> dict[int, tuple[str, str, str, str]]:
         with self._lock:
             return dict(self._status)
 
@@ -213,17 +213,17 @@ class SubfeatureWorkerStatus:
     """Track what each worker is doing for subfeature processing."""
 
     _lock: threading.Lock = field(default_factory=threading.Lock)
-    _status: dict[int, tuple[str, str, str, str]] = field(default_factory=dict)  # worker_id -> (parent_feature, stage, model, subfeature)
+    _status: dict[int, tuple[str, str, str, str, str]] = field(default_factory=dict)  # worker_id -> (parent_feature, stage, model, subfeature, ctx_size)
 
-    def set(self, worker_id: int, parent_feature: str, stage: str, model: str = "", subfeature: str = "") -> None:
+    def set(self, worker_id: int, parent_feature: str, stage: str, model: str = "", subfeature: str = "", ctx_size: str = "") -> None:
         with self._lock:
-            self._status[worker_id] = (parent_feature, stage, model, subfeature)
+            self._status[worker_id] = (parent_feature, stage, model, subfeature, ctx_size)
 
     def clear(self, worker_id: int) -> None:
         with self._lock:
             self._status.pop(worker_id, None)
 
-    def get_all(self) -> dict[int, tuple[str, str, str, str]]:
+    def get_all(self) -> dict[int, tuple[str, str, str, str, str]]:
         with self._lock:
             return dict(self._status)
 
@@ -337,7 +337,7 @@ def _generate_feature_summary(
     member_summaries: dict[str, str],
     llm_client: SummarizationLLMClient,
     config: FeatureProcessingConfig,
-) -> str:
+) -> tuple[str, int]:
     """Generate summary for a feature based on member summaries.
 
     Uses message-based format (system + user) optimized for Ollama's KV cache
@@ -351,8 +351,10 @@ def _generate_feature_summary(
         config: Processing configuration.
 
     Returns:
-        Generated feature summary.
+        Tuple of (generated feature summary, num_ctx used).
     """
+    from shared.ai.context_size import compute_aggregation_num_ctx
+
     # Build member summaries text
     summaries_text = []
     for i, element_id in enumerate(cluster.element_ids[:config.max_member_summaries]):
@@ -377,13 +379,17 @@ def _generate_feature_summary(
         {"role": "user", "content": user_content},
     ]
 
+    # Compute dynamic context size based on prompt length
+    prompt_chars = len(FEATURE_SYSTEM_PROMPT) + len(user_content)
+    num_ctx = compute_aggregation_num_ctx(prompt_chars, task_type="feature")
+
     raw_summary = llm_client.generate_from_messages(
         messages=messages,
         temperature=config.summarize_temperature,
         top_p=config.summarize_top_p,
         max_tokens=config.summarize_max_tokens,
         timeout=config.summarize_timeout,
-        num_ctx=config.aggregation_context_size,
+        num_ctx=num_ctx,
     )
 
     # Clean summary
@@ -393,7 +399,7 @@ def _generate_feature_summary(
     if not summary.endswith("."):
         summary += "."
 
-    return summary
+    return summary, num_ctx
 
 
 def _embed_feature(
@@ -461,17 +467,21 @@ def _process_single_feature(
     label = cluster.label or f"cluster_{cluster.cluster_id}"
     display_name = f"{label} ({cluster.size} members)"
 
-    def update_status(stage: str, model: str = "") -> None:
-        worker_status.set(worker_id, display_name, stage, model)
+    def update_status(stage: str, model: str = "", ctx_size: str = "") -> None:
+        worker_status.set(worker_id, display_name, stage, model, ctx_size)
         if on_status_change:
             on_status_change()
+
+    def format_ctx(num_ctx: int) -> str:
+        return f"{num_ctx // 1024}K" if num_ctx >= 1024 else str(num_ctx)
 
     try:
         # Step 1: Generate feature summary
         update_status("summarizing", config.summarize_model)
         api_start = time.time()
-        summary = _generate_feature_summary(cluster, member_summaries, llm_client, config)
+        summary, num_ctx = _generate_feature_summary(cluster, member_summaries, llm_client, config)
         summarize_time = time.time() - api_start
+        update_status("summarizing", config.summarize_model, format_ctx(num_ctx))
 
         # Step 2: Embed feature summary
         update_status("embedding")
@@ -768,7 +778,7 @@ def _generate_subfeature_summary(
     parent_summary: str,
     llm_client: SummarizationLLMClient,
     config: FeatureProcessingConfig,
-) -> str:
+) -> tuple[str, int]:
     """Generate summary for a subfeature based on member summaries.
 
     Uses message-based format (system + user) optimized for Ollama's KV cache
@@ -785,8 +795,10 @@ def _generate_subfeature_summary(
         config: Processing configuration.
 
     Returns:
-        Generated subfeature summary.
+        Tuple of (generated subfeature summary, num_ctx used).
     """
+    from shared.ai.context_size import compute_aggregation_num_ctx
+
     # Build member summaries text
     summaries_text = []
     for i, element_id in enumerate(cluster.element_ids[:config.max_member_summaries]):
@@ -813,13 +825,17 @@ def _generate_subfeature_summary(
         {"role": "user", "content": user_content},
     ]
 
+    # Compute dynamic context size based on prompt length
+    prompt_chars = len(SUBFEATURE_SYSTEM_PROMPT) + len(user_content)
+    num_ctx = compute_aggregation_num_ctx(prompt_chars, task_type="subfeature")
+
     raw_summary = llm_client.generate_from_messages(
         messages=messages,
         temperature=config.summarize_temperature,
         top_p=config.summarize_top_p,
         max_tokens=config.summarize_max_tokens,
         timeout=config.summarize_timeout,
-        num_ctx=config.aggregation_context_size,
+        num_ctx=num_ctx,
     )
 
     # Clean summary
@@ -829,7 +845,7 @@ def _generate_subfeature_summary(
     if not summary.endswith("."):
         summary += "."
 
-    return summary
+    return summary, num_ctx
 
 
 def _process_single_subfeature(
@@ -851,6 +867,9 @@ def _process_single_subfeature(
     summarize_time = 0.0
     embed_time = 0.0
 
+    def format_ctx(num_ctx: int) -> str:
+        return f"{num_ctx // 1024}K" if num_ctx >= 1024 else str(num_ctx)
+
     try:
         # Update status: summarizing
         worker_status.set(worker_id, work_item.parent_label, "summarize", config.summarize_model, sub_label)
@@ -859,12 +878,14 @@ def _process_single_subfeature(
 
         # Generate subfeature summary
         summ_start = time.time()
-        summary = _generate_subfeature_summary(
+        summary, num_ctx = _generate_subfeature_summary(
             work_item.sub_cluster, work_item.member_summaries,
             work_item.parent_label, work_item.parent_summary,
             llm_client, config,
         )
         summarize_time = time.time() - summ_start
+        # Update status with context size
+        worker_status.set(worker_id, work_item.parent_label, "summarize", config.summarize_model, sub_label, format_ctx(num_ctx))
 
         # Update status: embedding
         worker_status.set(worker_id, work_item.parent_label, "embed", config.embed_model, sub_label)
