@@ -1052,3 +1052,57 @@ class TestPerElementContextSize:
 
         assert func_num_ctx == 4096
         assert file_num_ctx == 2048
+
+    def test_status_shows_context_tier(self):
+        """Status should display context tier (e.g., 'summ@2K')."""
+        from magaldi_core.processor import (
+            _process_single_element,
+            WorkerStatus,
+            _SummaryCache,
+        )
+
+        mock_llm = MagicMock()
+        mock_llm.generate.return_value = "test summary"
+        mock_embed = MagicMock()
+        mock_es = MagicMock()
+
+        # Small function should show 2K tier
+        small_element = CodeElement(
+            element_id="test:repo:user:file.py:function:small:1",
+            element_type="function",
+            name="small",
+            raw_code="def small(): pass",
+            relative_path="file.py",
+        )
+
+        config = ProcessingConfig()
+        config.skip_ai = True  # Skip actual LLM calls
+        cache = _SummaryCache()
+        cache.add_element(small_element)
+        worker_status = WorkerStatus()
+        status_updates = []
+
+        def on_status_change():
+            status_updates.append(worker_status.get_all().copy())
+
+        _process_single_element(
+            element=small_element,
+            summary_cache=cache,
+            llm_client=mock_llm,
+            embed_client=mock_embed,
+            config=config,
+            file_hashes={},
+            element_counts={},
+            es_repo=mock_es,
+            worker_id=0,
+            worker_status=worker_status,
+            on_status_change=on_status_change,
+        )
+
+        # Check that at least one status update had the context tier
+        summ_stages = [
+            s[0][1] for s in status_updates
+            if 0 in s and s[0][1].startswith("summ@")
+        ]
+        assert len(summ_stages) > 0
+        assert "summ@2K" in summ_stages  # Small function should be 2K tier

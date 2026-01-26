@@ -894,7 +894,14 @@ def _process_single_element(
 
     try:
         # Step 1: Summarize
-        update_status("summarizing", element_model.name)
+        # Compute context tier for display
+        num_ctx = compute_element_num_ctx(
+            element.element_type,
+            len(element.raw_code or ""),
+        )
+        # Format tier compactly: 2048 -> "2K", 32768 -> "32K"
+        ctx_display = f"{num_ctx // 1024}K" if num_ctx >= 1024 else str(num_ctx)
+        update_status(f"summ@{ctx_display}", element_model.name)
         if config.skip_ai:
             summary = f"{element.element_type.title()}: {element.name}"
         else:
