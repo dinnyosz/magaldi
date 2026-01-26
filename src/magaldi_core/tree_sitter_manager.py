@@ -275,6 +275,44 @@ def get_children_by_type(node: Node, node_type: str) -> list[Node]:
 # =============================================================================
 
 
+def _extract_nested_functions(func_node: Node, lines: list[str]) -> list[ExtractedElement]:
+    """Extract nested function definitions from within a function body.
+
+    Args:
+        func_node: A function_definition node.
+        lines: Source code lines.
+
+    Returns:
+        List of nested function elements.
+    """
+    nested: list[ExtractedElement] = []
+    body_node = get_child_by_field(func_node, "body")
+    if not body_node:
+        return nested
+
+    for child in body_node.children:
+        if child.type == "function_definition":
+            elem = _extract_python_function(child, lines, is_nested=True)
+            elem.parent_node = func_node
+            nested.append(elem)
+            # Recursively extract nested functions from this nested function
+            nested.extend(_extract_nested_functions(child, lines))
+        elif child.type == "decorated_definition":
+            inner = get_child_by_field(child, "definition")
+            if inner and inner.type == "function_definition":
+                deco_names, deco_details = _get_decorators(child)
+                elem = _extract_python_function(
+                    inner, lines, decorators=deco_names, decorator_details=deco_details,
+                    decorated_node=child, is_nested=True
+                )
+                elem.parent_node = func_node
+                nested.append(elem)
+                # Recursively extract nested functions
+                nested.extend(_extract_nested_functions(inner, lines))
+
+    return nested
+
+
 def extract_python_elements(tree: Tree, lines: list[str]) -> list[ExtractedElement]:
     """Extract code elements from a Python AST.
 
@@ -301,11 +339,15 @@ def extract_python_elements(tree: Tree, lines: list[str]) -> list[ExtractedEleme
                 )
             elif inner and inner.type == "function_definition":
                 deco_names, deco_details = _get_decorators(node)
-                elements.append(
-                    _extract_python_function(inner, lines, decorators=deco_names, decorator_details=deco_details, decorated_node=node)
-                )
+                func_elem = _extract_python_function(inner, lines, decorators=deco_names, decorator_details=deco_details, decorated_node=node)
+                elements.append(func_elem)
+                # Extract nested functions
+                elements.extend(_extract_nested_functions(inner, lines))
         elif node.type == "function_definition":
-            elements.append(_extract_python_function(node, lines))
+            func_elem = _extract_python_function(node, lines)
+            elements.append(func_elem)
+            # Extract nested functions
+            elements.extend(_extract_nested_functions(node, lines))
         elif node.type == "expression_statement":
             # Module-level assignments
             assign = get_children_by_type(node, "assignment")
@@ -438,6 +480,7 @@ def _extract_python_function(
     decorator_details: list[DecoratorInfo] | None = None,
     is_method: bool = False,
     decorated_node: Node | None = None,
+    is_nested: bool = False,
 ) -> ExtractedElement:
     """Extract a function/method definition.
 
@@ -448,6 +491,7 @@ def _extract_python_function(
         is_method: Whether this is a method (vs standalone function).
         decorated_node: The outer decorated_definition node (if function is decorated).
                        Used to include decorator lines in raw_code.
+        is_nested: Whether this is a nested function (defined inside another function).
     """
     name_node = get_child_by_field(node, "name")
     name = get_node_text(name_node) if name_node else "unknown"
