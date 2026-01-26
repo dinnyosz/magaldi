@@ -11,17 +11,22 @@ from __future__ import annotations
 CONTEXT_TIERS = [2048, 4096, 8192, 16384, 32768]
 
 # Estimated prompt overhead per element type (tokens)
-# Accounts for system prompt, context, and formatting
+# Accounts for system prompt, user template, and parent context
+# - file: system prompt (~162) + template (~50) + imports (~50) = ~262
+# - class: system prompt (~150) + file_summary (~200) + attrs (~100) = ~450
+# - function: system prompt (~137) + file_summary (~200) + class_context (~200) + sig/docstring (~100) = ~637
+# - method: system prompt (~137) + file_summary (~200) + class_summary (~200) + sig/state (~100) = ~637
+# - variable/constant: system prompt (~80) + file_summary (~200) + class_context (~200) + function_context (~200) = ~680
 PROMPT_OVERHEAD = {
-    "file": 400,
+    "file": 300,
     "class": 500,
-    "function": 400,
-    "method": 450,
-    "variable": 200,
-    "constant": 200,
+    "function": 700,
+    "method": 700,
+    "variable": 700,
+    "constant": 700,
 }
 
-DEFAULT_OVERHEAD = 300
+DEFAULT_OVERHEAD = 500
 
 
 def compute_num_ctx(element_type: str, max_chars: int) -> int:

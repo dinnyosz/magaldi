@@ -18,8 +18,8 @@ class TestComputeNumCtx:
     def test_medium_function_returns_4096(self):
         """Function with 8000 chars should use 4096 context.
 
-        Calculation: 8000 chars / 4 = 2000 tokens + 400 overhead = 2400 total.
-        2400 > 2048, so it needs 4096 tier.
+        Calculation: 8000 chars / 4 = 2000 tokens + 700 overhead = 2700 total.
+        2700 > 2048, so it needs 4096 tier.
         """
         result = compute_num_ctx("function", 8000)
         assert result == 4096

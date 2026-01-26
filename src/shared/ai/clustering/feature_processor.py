@@ -296,9 +296,10 @@ class ProcessedSubfeature:
 FEATURE_SYSTEM_PROMPT = """You are analyzing a code feature containing related functions/methods.
 Based on the member function summaries provided, describe what this feature does.
 
-Write a 2-4 sentence summary describing:
+Write a 6-8 sentence summary describing:
 1. The overall purpose of this feature
 2. The key operations it provides
+3. How the member functions work together
 
 Write ONLY the summary. No reasoning, explanations, or bullet points."""
 
@@ -318,9 +319,10 @@ Number of members: {member_count}
 Member function summaries:
 {member_summaries}
 
-Write a 2-4 sentence summary describing:
+Write a 6-8 sentence summary describing:
 1. The overall purpose of this feature
 2. The key operations it provides
+3. How the member functions work together
 
 Summary:"""
 
@@ -720,7 +722,10 @@ def process_features(
 
 SUBFEATURE_SYSTEM_PROMPT = """You are analyzing a sub-group of related functions/methods within a larger feature.
 
-Write a 1-2 sentence summary describing what this specific sub-group does within the context of the parent feature.
+Write a 6-8 sentence summary describing:
+1. What this specific sub-group does within the context of the parent feature
+2. How the member functions work together
+3. The key operations this sub-group provides
 
 Write ONLY the summary. No reasoning, explanations, or bullet points."""
 
@@ -743,7 +748,10 @@ This sub-group contains {member_count} related functions within the parent featu
 Member function summaries:
 {member_summaries}
 
-Write a 1-2 sentence summary describing what this specific sub-group does within the context of the parent feature.
+Write a 6-8 sentence summary describing:
+1. What this specific sub-group does within the context of the parent feature
+2. How the member functions work together
+3. The key operations this sub-group provides
 
 Summary:"""
 
