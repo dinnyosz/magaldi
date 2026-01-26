@@ -613,6 +613,22 @@ class TestGenerateFeatureSummary:
         user_content = messages[1]["content"]  # User message is second
         assert "cluster_5" in user_content
 
+    def test_uses_aggregation_context_size(self, sample_cluster, mock_llm_client):
+        """Test that aggregation_context_size is passed as num_ctx."""
+        config = FeatureProcessingConfig(
+            aggregation_context_size=32768,
+        )
+
+        _generate_feature_summary(
+            cluster=sample_cluster,
+            member_summaries={"elem1": "Summary 1"},
+            llm_client=mock_llm_client,
+            config=config,
+        )
+
+        call_args = mock_llm_client.generate_from_messages.call_args
+        assert call_args.kwargs["num_ctx"] == 32768
+
 
 class TestGenerateSubfeatureSummary:
     """Tests for _generate_subfeature_summary function."""
@@ -635,6 +651,24 @@ class TestGenerateSubfeatureSummary:
         user_content = messages[1]["content"]  # User message is second
         assert "auth_feature" in user_content
         assert "Authentication feature" in user_content
+
+    def test_uses_aggregation_context_size(self, sample_cluster, mock_llm_client):
+        """Test that aggregation_context_size is passed as num_ctx for subfeatures."""
+        config = FeatureProcessingConfig(
+            aggregation_context_size=24576,
+        )
+
+        _generate_subfeature_summary(
+            cluster=sample_cluster,
+            member_summaries={"elem1": "Summary 1"},
+            parent_label="auth_feature",
+            parent_summary="Authentication feature.",
+            llm_client=mock_llm_client,
+            config=config,
+        )
+
+        call_args = mock_llm_client.generate_from_messages.call_args
+        assert call_args.kwargs["num_ctx"] == 24576
 
 
 # =============================================================================

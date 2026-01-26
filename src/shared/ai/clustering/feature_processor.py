@@ -59,6 +59,9 @@ class FeatureProcessingConfig:
     # Feature summary settings
     max_member_summaries: int = 20  # Max member summaries to include in prompt
 
+    # Context size for aggregation tasks (feature/subfeature summaries)
+    aggregation_context_size: int = 16384  # Fixed large context for aggregation tasks
+
 
 @dataclass
 class SubClusterConfig:
@@ -378,6 +381,7 @@ def _generate_feature_summary(
         top_p=config.summarize_top_p,
         max_tokens=config.summarize_max_tokens,
         timeout=config.summarize_timeout,
+        num_ctx=config.aggregation_context_size,
     )
 
     # Clean summary
@@ -807,6 +811,7 @@ def _generate_subfeature_summary(
         top_p=config.summarize_top_p,
         max_tokens=config.summarize_max_tokens,
         timeout=config.summarize_timeout,
+        num_ctx=config.aggregation_context_size,
     )
 
     # Clean summary
