@@ -2637,10 +2637,10 @@ def benchmark_models(
             for range_label in sorted(range_data.keys(), key=lambda x: range_order.get(x, 99)):
                 model_scores_data = range_data[range_label]
                 count = max(len(s) for s in model_scores_data.values()) if model_scores_data else 0
-                count = count // len(eval_models) if eval_display_names else count
+                count = count // len(eval_display_names) if eval_display_names else count
                 row = [elem_type, range_label, str(count)]
                 for model_name in tested_model_names:
-                    if model in model_scores_data and model_scores_data[model_name]:
+                    if model_name in model_scores_data and model_scores_data[model_name]:
                         avg = sum(model_scores_data[model_name]) / len(model_scores_data[model_name])
                         if avg >= 8:
                             row.append(f"[bold green]{avg:.1f}[/]")
@@ -2742,7 +2742,7 @@ def benchmark_models(
                     if criterion in criterion_data:
                         row = [elem_type, range_label, criterion, str(count)]
                         for model_name in tested_model_names:
-                            if model in criterion_data[criterion] and criterion_data[criterion][model_name]:
+                            if model_name in criterion_data[criterion] and criterion_data[criterion][model_name]:
                                 scores = criterion_data[criterion][model_name]
                                 avg = calc_avg(scores)
                                 if avg is not None:
@@ -2797,7 +2797,7 @@ def benchmark_models(
             if successful:
                 total_prompt = sum(r.prompt_tokens for r in successful)
                 total_output = sum(r.output_tokens for r in successful)
-                console.print(f"  {model}: {total_prompt:,} prompt tokens, {total_output:,} output tokens")
+                console.print(f"  {model_name}: {total_prompt:,} prompt tokens, {total_output:,} output tokens")
 
         # Save results to markdown
         markdown_path = _save_benchmark_markdown(
