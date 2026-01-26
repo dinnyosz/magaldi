@@ -66,7 +66,9 @@ def mock_es_repo():
 def mock_llm_client():
     """Create a mock LLM client."""
     client = MagicMock()
+    # Mock both methods for backwards compatibility
     client.generate.return_value = "This is a test summary."
+    client.generate_from_messages.return_value = "This is a test summary."
     return client
 
 
@@ -548,7 +550,7 @@ class TestGenerateFeatureSummary:
         )
 
         assert result == "This is a test summary."
-        mock_llm_client.generate.assert_called_once()
+        mock_llm_client.generate_from_messages.assert_called_once()
 
     def test_generates_summary_without_member_summaries(
         self, sample_cluster, mock_llm_client, feature_config
@@ -565,7 +567,7 @@ class TestGenerateFeatureSummary:
 
     def test_cleans_summary_prefix(self, sample_cluster, mock_llm_client, feature_config):
         """Test that 'Summary:' prefix is removed."""
-        mock_llm_client.generate.return_value = "Summary: This is the actual summary"
+        mock_llm_client.generate_from_messages.return_value = "Summary: This is the actual summary"
 
         result = _generate_feature_summary(
             cluster=sample_cluster,
@@ -578,7 +580,7 @@ class TestGenerateFeatureSummary:
 
     def test_adds_period_if_missing(self, sample_cluster, mock_llm_client, feature_config):
         """Test that period is added if missing."""
-        mock_llm_client.generate.return_value = "A summary without period"
+        mock_llm_client.generate_from_messages.return_value = "A summary without period"
 
         result = _generate_feature_summary(
             cluster=sample_cluster,
@@ -605,9 +607,11 @@ class TestGenerateFeatureSummary:
             config=feature_config,
         )
 
-        # Should use fallback label
-        call_args = mock_llm_client.generate.call_args
-        assert "cluster_5" in call_args.kwargs["prompt"]
+        # Should use fallback label (in user message)
+        call_args = mock_llm_client.generate_from_messages.call_args
+        messages = call_args.kwargs["messages"]
+        user_content = messages[1]["content"]  # User message is second
+        assert "cluster_5" in user_content
 
 
 class TestGenerateSubfeatureSummary:
@@ -626,10 +630,11 @@ class TestGenerateSubfeatureSummary:
             config=feature_config,
         )
 
-        call_args = mock_llm_client.generate.call_args
-        prompt = call_args.kwargs["prompt"]
-        assert "auth_feature" in prompt
-        assert "Authentication feature" in prompt
+        call_args = mock_llm_client.generate_from_messages.call_args
+        messages = call_args.kwargs["messages"]
+        user_content = messages[1]["content"]  # User message is second
+        assert "auth_feature" in user_content
+        assert "Authentication feature" in user_content
 
 
 # =============================================================================
@@ -717,7 +722,7 @@ class TestProcessSingleFeature:
         feature_config,
     ):
         """Test error handling during processing."""
-        mock_llm_client.generate.side_effect = Exception("LLM error")
+        mock_llm_client.generate_from_messages.side_effect = Exception("LLM error")
         worker_status = FeatureWorkerStatus()
 
         result = _process_single_feature(
@@ -803,7 +808,7 @@ class TestProcessFeatures:
     ):
         """Test successful processing of clusters."""
         mock_llm = MagicMock()
-        mock_llm.generate.return_value = "Test summary."
+        mock_llm.generate_from_messages.return_value = "Test summary."
 
         mock_embed = MagicMock()
         mock_embed.embed_single.return_value = [0.1] * 1024
@@ -836,7 +841,7 @@ class TestProcessFeatures:
             progress_states.append(state)
 
         mock_llm = MagicMock()
-        mock_llm.generate.return_value = "Test summary."
+        mock_llm.generate_from_messages.return_value = "Test summary."
 
         mock_embed = MagicMock()
         mock_embed.embed_single.return_value = [0.1] * 1024
@@ -945,7 +950,7 @@ class TestProcessSingleSubfeature:
         feature_config,
     ):
         """Test error handling in subfeature processing."""
-        mock_llm_client.generate.side_effect = Exception("Generation failed")
+        mock_llm_client.generate_from_messages.side_effect = Exception("Generation failed")
         worker_status = SubfeatureWorkerStatus()
 
         work_item = SubfeatureWorkItem(

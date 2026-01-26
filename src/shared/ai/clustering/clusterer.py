@@ -132,9 +132,21 @@ class LabelingProgressState:
 
 
 # =============================================================================
-# CLUSTER LABELING PROMPT
+# CLUSTER LABELING PROMPTS (Optimized for Prefix Caching)
 # =============================================================================
+# System message is STATIC and gets cached by Ollama's KV cache.
+# User message contains VARIABLE content (function names).
 
+LABEL_SYSTEM_PROMPT = """Given function/method names from a code cluster, generate a short label (1-5 words) that describes the common feature or functionality they share.
+
+Generate ONLY a short label like: "user authentication", "database query handling", "REST API endpoints", "file processing utilities", "input validation", etc.
+
+Write ONLY the label, nothing else."""
+
+LABEL_USER_PROMPT = """Function names:
+{names}"""
+
+# Legacy single-prompt template (kept for backwards compatibility)
 LABEL_PROMPT = """Given these function/method names from a code cluster, generate a short label (1-5 words) that describes the common feature or functionality they share.
 
 Function names:
@@ -351,12 +363,17 @@ class FeatureClusterer:
                     model=labeling_model,
                 ))
 
-            prompt = LABEL_PROMPT.format(names=names_str)
+            # Build messages optimized for prefix caching
+            user_content = LABEL_USER_PROMPT.format(names=names_str)
+            messages = [
+                {"role": "system", "content": LABEL_SYSTEM_PROMPT},
+                {"role": "user", "content": user_content},
+            ]
 
             try:
                 api_start = time.time()
-                raw_label = llm_client.generate(
-                    prompt=prompt,
+                raw_label = llm_client.generate_from_messages(
+                    messages=messages,
                     temperature=self.config.label_temperature,
                     top_p=self.config.label_top_p,
                     max_tokens=self.config.label_max_tokens,

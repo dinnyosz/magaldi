@@ -97,7 +97,36 @@ class GlossaryProgressState:
     num_workers: int
 
 
-# Prompt template for glossary term extraction (Phase 1: just extract term names)
+# =============================================================================
+# GLOSSARY EXTRACTION PROMPTS (Optimized for Prefix Caching)
+# =============================================================================
+# System messages are STATIC and get cached by Ollama's KV cache.
+# User messages contain VARIABLE content (feature info, term context).
+
+# Phase 1: Extract term names
+GLOSSARY_EXTRACTION_SYSTEM_PROMPT = """Extract domain glossary terms from a code feature.
+
+Extract terms for:
+- Actors: entities that perform actions (user, admin, client, customer)
+- Objects: domain entities (order, invoice, product, account)
+- Processes: business operations (registration, authentication, checkout)
+- States: conditions or statuses (pending, active, expired)
+
+Rules:
+- Extract 2-5 terms per feature
+- Use lowercase, singular form (1-2 words)
+- Only domain/business terms, NOT programming terms (function, class, handler, service)
+- NOT technical terms (cache, queue, thread, buffer)
+
+Return JSON array of term names only:
+["term1", "term2", "term3"]
+
+Return [] if no domain terms found."""
+
+GLOSSARY_EXTRACTION_USER_PROMPT = """Feature: {label}
+Description: {summary}"""
+
+# Legacy single-prompt template (kept for backwards compatibility)
 GLOSSARY_EXTRACTION_PROMPT = """Extract domain glossary terms from this code feature.
 
 Feature: {label}
@@ -122,7 +151,27 @@ Return [] if no domain terms found.
 
 JSON:"""
 
-# Prompt template for glossary summary generation (Phase 2: generate holistic summary)
+# Phase 2: Generate holistic summary
+GLOSSARY_SUMMARY_SYSTEM_PROMPT = """You are generating a glossary entry for a domain term found in a codebase.
+
+Write a glossary entry with:
+
+1. **Definition** (1 sentence): A clear, concise definition of what the term represents in this codebase.
+
+2. **Details** (2-4 sentences): Synthesize a holistic description of the term's role and meaning in the system. Do NOT describe each feature separately - instead, write about the term itself: what it represents, its purpose, and its significance in the domain.
+
+IMPORTANT: Write about the TERM, not about the features. The features are context to help you understand the term, but your entry should read like a dictionary/glossary definition.
+
+Focus on the business/domain meaning, not technical implementation details.
+Use markdown formatting (bold for emphasis, bullet points if listing multiple aspects)."""
+
+GLOSSARY_SUMMARY_USER_PROMPT = """Term: {term}
+
+This term appears in the following features/capabilities of the codebase:
+
+{features_context}"""
+
+# Legacy single-prompt template (kept for backwards compatibility)
 GLOSSARY_SUMMARY_PROMPT = """You are generating a glossary entry for a domain term found in a codebase.
 
 Term: {term}
@@ -160,7 +209,7 @@ class GlossaryItem:
 
 
 def build_glossary_prompt(summary: str, label: str) -> str:
-    """Build the prompt for glossary extraction.
+    """Build the prompt for glossary extraction (legacy single-prompt format).
 
     Args:
         summary: The feature summary text to extract terms from.
@@ -170,6 +219,23 @@ def build_glossary_prompt(summary: str, label: str) -> str:
         Formatted prompt string for the LLM.
     """
     return GLOSSARY_EXTRACTION_PROMPT.format(label=label, summary=summary)
+
+
+def build_glossary_messages(summary: str, label: str) -> list[dict[str, str]]:
+    """Build messages for glossary extraction (optimized for prefix caching).
+
+    Args:
+        summary: The feature summary text to extract terms from.
+        label: The feature label for context.
+
+    Returns:
+        List of message dicts with 'role' and 'content' keys.
+    """
+    user_content = GLOSSARY_EXTRACTION_USER_PROMPT.format(label=label, summary=summary)
+    return [
+        {"role": "system", "content": GLOSSARY_EXTRACTION_SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
 
 
 def parse_llm_response(response: str) -> list[str]:
@@ -220,6 +286,10 @@ async def call_llm_for_glossary(
 ) -> list[str]:
     """Call LLM to extract glossary term names from a summary.
 
+    Uses message-based format (system + user) optimized for Ollama's KV cache
+    prefix caching. The system message contains static instructions that get
+    cached, while the user message has variable content.
+
     Args:
         summary: The feature summary text to extract terms from.
         label: The feature label for context.
@@ -234,31 +304,22 @@ async def call_llm_for_glossary(
 
         config = MagaldiConfig()
 
-    prompt = build_glossary_prompt(summary, label)
+    # Build messages optimized for prefix caching
+    messages = build_glossary_messages(summary, label)
 
-    # Build model identifier based on provider
-    llm_config = config.llm
-    if llm_config.provider == "ollama":
-        model = f"ollama/{llm_config.summarize_model}"
-        api_base = llm_config.url
-    elif llm_config.provider == "openai":
-        model = llm_config.summarize_model
-        api_base = None
-    else:
-        model = f"{llm_config.provider}/{llm_config.summarize_model}"
-        api_base = None
-
+    # Get model config from LLM config
+    model_config = config.llm.get_summarize_model()
     client = LLMClient(
-        model=model,
-        api_base=api_base,
-        api_key=llm_config.api_key,
+        model=model_config.get_litellm_model(),
+        api_base=model_config.get_api_base(),
+        api_key=model_config.api_key,
     )
 
     try:
-        response = client.generate(
-            prompt=prompt,
-            temperature=llm_config.summarize_temperature,
-            top_p=llm_config.summarize_top_p,
+        response = client.generate_from_messages(
+            messages=messages,
+            temperature=config.llm.summarize_temperature,
+            top_p=config.llm.summarize_top_p,
             max_tokens=128,  # Just term names, not full descriptions
         )
     except LLMError:
@@ -421,6 +482,10 @@ def generate_glossary_summary_sync(
 ) -> tuple[str, float]:
     """Generate a holistic summary for a glossary term based on all its connected features.
 
+    Uses message-based format (system + user) optimized for Ollama's KV cache
+    prefix caching. The system message contains static instructions that get
+    cached, while the user message has variable content.
+
     Args:
         term: The glossary term name.
         feature_ids: List of feature IDs where this term appears.
@@ -435,32 +500,31 @@ def generate_glossary_summary_sync(
         config = MagaldiConfig()
 
     features_context = build_features_context(feature_ids, features_by_id)
-    prompt = GLOSSARY_SUMMARY_PROMPT.format(term=term, features_context=features_context)
 
-    # Build model identifier
-    llm_config = config.llm
-    if llm_config.provider == "ollama":
-        model = f"ollama/{llm_config.summarize_model}"
-        api_base = llm_config.url
-    elif llm_config.provider == "openai":
-        model = llm_config.summarize_model
-        api_base = None
-    else:
-        model = f"{llm_config.provider}/{llm_config.summarize_model}"
-        api_base = None
+    # Build messages optimized for prefix caching
+    user_content = GLOSSARY_SUMMARY_USER_PROMPT.format(
+        term=term,
+        features_context=features_context,
+    )
+    messages = [
+        {"role": "system", "content": GLOSSARY_SUMMARY_SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
 
+    # Get model config from LLM config
+    model_config = config.llm.get_summarize_model()
     client = LLMClient(
-        model=model,
-        api_base=api_base,
-        api_key=llm_config.api_key,
+        model=model_config.get_litellm_model(),
+        api_base=model_config.get_api_base(),
+        api_key=model_config.api_key,
     )
 
     start_time = time.time()
     try:
-        response = client.generate(
-            prompt=prompt,
-            temperature=llm_config.summarize_temperature,
-            top_p=llm_config.summarize_top_p,
+        response = client.generate_from_messages(
+            messages=messages,
+            temperature=config.llm.summarize_temperature,
+            top_p=config.llm.summarize_top_p,
             max_tokens=512,  # Allow for definition + details
         )
         api_time = time.time() - start_time
@@ -516,6 +580,10 @@ def call_llm_for_glossary_sync(
 ) -> list[str]:
     """Synchronous LLM call for glossary term extraction.
 
+    Uses message-based format (system + user) optimized for Ollama's KV cache
+    prefix caching. The system message contains static instructions that get
+    cached, while the user message has variable content.
+
     Args:
         summary: The feature summary text to extract terms from.
         label: The feature label for context.
@@ -529,31 +597,22 @@ def call_llm_for_glossary_sync(
 
         config = MagaldiConfig()
 
-    prompt = build_glossary_prompt(summary, label)
+    # Build messages optimized for prefix caching
+    messages = build_glossary_messages(summary, label)
 
-    # Build model identifier based on provider
-    llm_config = config.llm
-    if llm_config.provider == "ollama":
-        model = f"ollama/{llm_config.summarize_model}"
-        api_base = llm_config.url
-    elif llm_config.provider == "openai":
-        model = llm_config.summarize_model
-        api_base = None
-    else:
-        model = f"{llm_config.provider}/{llm_config.summarize_model}"
-        api_base = None
-
+    # Get model config from LLM config
+    model_config = config.llm.get_summarize_model()
     client = LLMClient(
-        model=model,
-        api_base=api_base,
-        api_key=llm_config.api_key,
+        model=model_config.get_litellm_model(),
+        api_base=model_config.get_api_base(),
+        api_key=model_config.api_key,
     )
 
     try:
-        response = client.generate(
-            prompt=prompt,
-            temperature=llm_config.summarize_temperature,
-            top_p=llm_config.summarize_top_p,
+        response = client.generate_from_messages(
+            messages=messages,
+            temperature=config.llm.summarize_temperature,
+            top_p=config.llm.summarize_top_p,
             max_tokens=128,  # Just term names, not full descriptions
         )
     except LLMError:
@@ -609,7 +668,7 @@ def extract_glossary_from_features_concurrent(
     if config is None:
         from shared.config import MagaldiConfig
         config = MagaldiConfig()
-    model_name = config.llm.summarize_model
+    model_name = config.llm.get_summarize_model().name
 
     # Build features lookup for summary generation
     features_by_id: dict[str, dict[str, Any]] = {}

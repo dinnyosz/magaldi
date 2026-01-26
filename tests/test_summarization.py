@@ -372,9 +372,9 @@ class TestProcessSummarizationJob:
             file_element.element_id, scope="scope", repository="repo", username="main", level=0, parent_id=None, dependencies_met=True
         )
 
-        # Mock Ollama
+        # Mock Ollama (uses generate_from_messages for prefix caching)
         mock_ollama = MagicMock()
-        mock_ollama.generate.return_value = "Flask application for web services."
+        mock_ollama.generate_from_messages.return_value = "Flask application for web services."
 
         # Process
         success = process_summarization_job(
@@ -405,9 +405,9 @@ class TestProcessSummarizationJob:
             file_element.element_id, scope="scope", repository="repo", username="main", level=0, parent_id=None, dependencies_met=True
         )
 
-        # Mock Ollama with error
+        # Mock Ollama with error (uses generate_from_messages for prefix caching)
         mock_ollama = MagicMock()
-        mock_ollama.generate.side_effect = Exception("Connection refused")
+        mock_ollama.generate_from_messages.side_effect = Exception("Connection refused")
 
         # Process - should handle error gracefully
         success = process_summarization_job(
@@ -445,9 +445,9 @@ class TestGenerateSummary:
         class_element.parent_id = file_element.element_id
         summary_store.store_element(class_element)
 
-        # Mock Ollama
+        # Mock Ollama (uses generate_from_messages for prefix caching)
         mock_ollama = MagicMock()
-        mock_ollama.generate.return_value = "User service class."
+        mock_ollama.generate_from_messages.return_value = "User service class."
 
         summary = generate_summary(
             element=class_element,
@@ -456,10 +456,12 @@ class TestGenerateSummary:
             config=config,
         )
 
-        # Verify parent context was included in prompt
-        call_args = mock_ollama.generate.call_args
-        prompt = call_args.kwargs.get("prompt", "")
-        assert "Main application module" in prompt
+        # Verify parent context was included in user message
+        call_args = mock_ollama.generate_from_messages.call_args
+        messages = call_args.kwargs.get("messages", [])
+        # User message is second (after system message) and contains file context
+        user_content = messages[1]["content"] if len(messages) > 1 else ""
+        assert "Main application module" in user_content
 
 
 # =============================================================================

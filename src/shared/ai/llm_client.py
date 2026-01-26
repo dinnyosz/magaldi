@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, TypeVar
 
 import aiohttp
+import httpx
 import litellm
 from litellm import aembedding, completion, embedding
 from litellm.llms.custom_httpx.aiohttp_handler import BaseLLMAIOHTTPHandler
@@ -44,13 +45,27 @@ litellm.suppress_debug_info = True
 # See: https://github.com/BerriAI/litellm/issues/11759
 warnings.filterwarnings("ignore", message="Pydantic serializer warnings")
 
+# =============================================================================
+# SYNC CONNECTION POOL (for completion/embedding calls)
+# =============================================================================
+# Configure httpx client for sync calls with connection pooling
+# This reduces overhead from creating new connections for each request
+# See: https://docs.litellm.ai/docs/providers/openai
+_httpx_client = httpx.Client(
+    limits=httpx.Limits(
+        max_connections=100,
+        max_keepalive_connections=20,
+    ),
+    timeout=httpx.Timeout(300.0, connect=30.0),
+)
+litellm.client_session = _httpx_client
+
 
 # =============================================================================
-# CONNECTION POOL MANAGEMENT
+# ASYNC CONNECTION POOL MANAGEMENT
 # =============================================================================
 
 # Global aiohttp session for async connection pooling
-# Note: Only used for async calls. Sync calls use LiteLLM's internal httpx client.
 _aiohttp_session: aiohttp.ClientSession | None = None
 _session_lock: asyncio.Lock | None = None  # Created lazily to avoid event loop issues
 
@@ -103,7 +118,7 @@ async def _get_or_create_session_async() -> aiohttp.ClientSession:
 
 
 def cleanup_llm_sessions() -> None:
-    """Close the global aiohttp session.
+    """Close global HTTP sessions (sync httpx and async aiohttp).
 
     Call this function during application shutdown to cleanly close
     all HTTP connections. Can be registered with atexit:
@@ -111,8 +126,16 @@ def cleanup_llm_sessions() -> None:
         import atexit
         atexit.register(cleanup_llm_sessions)
     """
-    global _aiohttp_session
+    global _aiohttp_session, _httpx_client
 
+    # Close sync httpx client
+    if _httpx_client is not None:
+        try:
+            _httpx_client.close()
+        except Exception:
+            pass  # Best effort cleanup
+
+    # Close async aiohttp session
     if _aiohttp_session is not None and not _aiohttp_session.closed:
         # For sync cleanup, we need to run in event loop
         try:
@@ -283,7 +306,7 @@ class LLMConfig:
     # Generation settings (based on arxiv.org/html/2507.03160v2)
     temperature: float = 0.2
     max_tokens: int = 512
-    timeout: int = 60
+    timeout: int = 180  # 3 minutes to handle queue wait with many workers
 
     # Retry settings
     max_retries: int = 3
@@ -469,13 +492,17 @@ class LLMClient:
                 "timeout": timeout,
             }
 
-            # Add api_base for Ollama
+            # Add api_base for custom endpoints (Ollama, llama.cpp, etc.)
             if self.api_base:
                 kwargs["api_base"] = self.api_base
 
-            # Add api_key if provided
+            # Add api_key if provided, or use dummy key for OpenAI-compatible local servers
             if self.api_key:
                 kwargs["api_key"] = self.api_key
+            elif use_model.startswith("openai/") and self.api_base:
+                # Local OpenAI-compatible servers (llama.cpp) don't need auth
+                # but LiteLLM requires an API key for openai/ prefix
+                kwargs["api_key"] = "not-needed"
 
             # Disable thinking mode for models that support it
             # LiteLLM added think parameter support in PR #15465 (Sept 2025)
@@ -485,6 +512,77 @@ class LLMClient:
             response = completion(**kwargs)
 
             # Extract text from response
+            content = response.choices[0].message.content
+            if content is None:
+                raise LLMError(f"Empty response from model '{use_model}'")
+
+            return content.strip()
+
+        return _retry_with_backoff(
+            _do_generate,
+            max_retries=self.max_retries,
+            operation=f"LLM generation ({use_model})",
+        )
+
+    def generate_from_messages(
+        self,
+        messages: list[dict[str, str]],
+        temperature: float = 0.2,
+        top_p: float = 0.95,
+        max_tokens: int = 512,
+        timeout: int = 60,
+        model: str | None = None,
+    ) -> str:
+        """Generate text completion from messages (system + user).
+
+        This method is optimized for Ollama's KV cache prefix caching.
+        The system message is static and gets cached, while the user
+        message contains variable content.
+
+        Args:
+            messages: List of message dicts with 'role' and 'content'.
+                      Typically [{"role": "system", "content": "..."}, {"role": "user", "content": "..."}]
+            temperature: Sampling temperature (0.0 to 1.0).
+            top_p: Nucleus sampling parameter (0.0 to 1.0).
+            max_tokens: Maximum tokens to generate.
+            timeout: Request timeout in seconds.
+            model: Optional model override.
+
+        Returns:
+            Generated text.
+
+        Raises:
+            LLMError: If generation fails after retries.
+        """
+        use_model = model or self.model
+
+        # Check if this is a thinking model that needs think=false
+        model_name = use_model.split("/")[-1] if "/" in use_model else use_model
+        is_thinking_model = any(model_name.startswith(tm) for tm in self.THINKING_MODELS)
+
+        def _do_generate() -> str:
+            kwargs: dict[str, Any] = {
+                "model": use_model,
+                "messages": messages,
+                "temperature": temperature,
+                "top_p": top_p,
+                "max_tokens": max_tokens,
+                "timeout": timeout,
+            }
+
+            if self.api_base:
+                kwargs["api_base"] = self.api_base
+
+            if self.api_key:
+                kwargs["api_key"] = self.api_key
+            elif use_model.startswith("openai/") and self.api_base:
+                kwargs["api_key"] = "not-needed"
+
+            if is_thinking_model and use_model.startswith("ollama/"):
+                kwargs["think"] = False
+
+            response = completion(**kwargs)
+
             content = response.choices[0].message.content
             if content is None:
                 raise LLMError(f"Empty response from model '{use_model}'")
@@ -604,8 +702,13 @@ class EmbeddingClient:
             if self.api_base:
                 kwargs["api_base"] = self.api_base
 
+            # Add api_key if provided, or use dummy key for OpenAI-compatible local servers
             if self.api_key:
                 kwargs["api_key"] = self.api_key
+            elif self.model.startswith("openai/") and self.api_base:
+                # Local OpenAI-compatible servers (llama.cpp) don't need auth
+                # but LiteLLM requires an API key for openai/ prefix
+                kwargs["api_key"] = "not-needed"
 
             response = embedding(**kwargs)
 
@@ -648,8 +751,13 @@ class EmbeddingClient:
             if self.api_base:
                 kwargs["api_base"] = self.api_base
 
+            # Add api_key if provided, or use dummy key for OpenAI-compatible local servers
             if self.api_key:
                 kwargs["api_key"] = self.api_key
+            elif self.model.startswith("openai/") and self.api_base:
+                # Local OpenAI-compatible servers (llama.cpp) don't need auth
+                # but LiteLLM requires an API key for openai/ prefix
+                kwargs["api_key"] = "not-needed"
 
             response = await aembedding(**kwargs)
 
@@ -690,8 +798,13 @@ class EmbeddingClient:
             if self.api_base:
                 kwargs["api_base"] = self.api_base
 
+            # Add api_key if provided, or use dummy key for OpenAI-compatible local servers
             if self.api_key:
                 kwargs["api_key"] = self.api_key
+            elif self.model.startswith("openai/") and self.api_base:
+                # Local OpenAI-compatible servers (llama.cpp) don't need auth
+                # but LiteLLM requires an API key for openai/ prefix
+                kwargs["api_key"] = "not-needed"
 
             response = embedding(**kwargs)
 

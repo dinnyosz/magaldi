@@ -335,9 +335,9 @@ class TestCallLLMForGlossary:
 
     @pytest.mark.asyncio
     async def test_calls_llm_with_constructed_prompt(self):
-        """Test that LLM is called with properly constructed prompt."""
+        """Test that LLM is called with properly constructed messages."""
         mock_client = MagicMock()
-        mock_client.generate.return_value = '["user", "login"]'
+        mock_client.generate_from_messages.return_value = '["user", "login"]'
 
         with patch(
             "shared.ai.glossary.ai_extractor.LLMClient",
@@ -351,26 +351,31 @@ class TestCallLLMForGlossary:
         assert len(result) == 2
         assert result[0] == "user"
         assert result[1] == "login"
-        mock_client.generate.assert_called_once()
+        mock_client.generate_from_messages.assert_called_once()
 
-        # Verify the prompt contains expected content
-        call_args = mock_client.generate.call_args
-        prompt = call_args.kwargs.get("prompt") or call_args.args[0]
-        assert "Handles user authentication." in prompt
-        assert "authentication" in prompt
+        # Verify the user message contains expected content
+        call_args = mock_client.generate_from_messages.call_args
+        messages = call_args.kwargs.get("messages")
+        user_content = messages[1]["content"]  # User message is second
+        assert "Handles user authentication." in user_content
+        assert "authentication" in user_content
 
     @pytest.mark.asyncio
     async def test_uses_config_for_llm_client(self):
         """Test that config is used to create the LLM client."""
-        from shared.config import MagaldiConfig
+        from shared.config import MagaldiConfig, ModelConfig
 
         config = MagaldiConfig()
-        config.llm.provider = "ollama"
-        config.llm.url = "http://test:11434"
+        # Add a test model to the models dict
+        config.llm.models["test-model"] = ModelConfig(
+            name="test-model-name",
+            provider="ollama",
+            url="http://test:11434",
+        )
         config.llm.summarize_model = "test-model"
 
         mock_client = MagicMock()
-        mock_client.generate.return_value = "[]"
+        mock_client.generate_from_messages.return_value = "[]"
 
         with patch(
             "shared.ai.glossary.ai_extractor.LLMClient",
@@ -385,7 +390,7 @@ class TestCallLLMForGlossary:
         # Verify LLMClient was instantiated with config values
         mock_llm_class.assert_called_once()
         call_kwargs = mock_llm_class.call_args.kwargs
-        assert call_kwargs["model"] == "ollama/test-model"
+        assert call_kwargs["model"] == "ollama/test-model-name"
         assert call_kwargs["api_base"] == "http://test:11434"
 
     @pytest.mark.asyncio
@@ -394,7 +399,7 @@ class TestCallLLMForGlossary:
         from shared.ai.llm_client import LLMError
 
         mock_client = MagicMock()
-        mock_client.generate.side_effect = LLMError("Connection failed")
+        mock_client.generate_from_messages.side_effect = LLMError("Connection failed")
 
         with patch(
             "shared.ai.glossary.ai_extractor.LLMClient",
@@ -411,7 +416,7 @@ class TestCallLLMForGlossary:
     async def test_parses_markdown_wrapped_response(self):
         """Test that markdown-wrapped JSON response is parsed correctly."""
         mock_client = MagicMock()
-        mock_client.generate.return_value = """```json
+        mock_client.generate_from_messages.return_value = """```json
 ["user", "login"]
 ```"""
 

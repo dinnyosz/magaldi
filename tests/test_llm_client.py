@@ -57,7 +57,7 @@ class TestLLMConfig:
         assert config.api_key is None
         assert config.temperature == 0.2
         assert config.max_tokens == 512
-        assert config.timeout == 60
+        assert config.timeout == 180  # 3 minutes to handle queue wait with many workers
         assert config.max_retries == 3
 
     def test_custom_values(self):

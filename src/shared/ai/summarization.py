@@ -51,7 +51,7 @@ class SummarizationConfig:
     temperature: float = 0.2
     top_p: float = 0.95
     max_tokens: int = 512
-    timeout: int = 60
+    timeout: int = 180  # 3 minutes to handle queue wait with many workers
 
     # Retry settings
     max_retries: int = 3
@@ -94,6 +94,7 @@ class SummarizationLLMClient:
 
     Supports multiple providers through LiteLLM:
     - Ollama (local)
+    - llamacpp (llama.cpp server with continuous batching)
     - OpenAI
     - Anthropic
     - And many more
@@ -109,9 +110,10 @@ class SummarizationLLMClient:
         """Initialize LLM client.
 
         Args:
-            url: API base URL (for Ollama: "http://localhost:11434")
+            url: API base URL (for Ollama: "http://localhost:11434",
+                 for llamacpp: "http://localhost:8080/v1")
             model: Model name (e.g., "qwen2.5-coder:3b", "gpt-4o-mini")
-            provider: LLM provider (ollama, openai, anthropic, etc.)
+            provider: LLM provider (ollama, llamacpp, openai, anthropic, etc.)
             api_key: API key for cloud providers
         """
         self.url = url.rstrip("/") if url else ""
@@ -123,6 +125,10 @@ class SummarizationLLMClient:
         if provider == "ollama":
             full_model = f"ollama/{model}"
             api_base = url
+        elif provider == "llamacpp":
+            # llama.cpp server exposes OpenAI-compatible API
+            full_model = f"openai/{model}"
+            api_base = url  # Should include /v1 suffix
         elif provider == "openai":
             full_model = model
             api_base = None
@@ -170,6 +176,9 @@ class SummarizationLLMClient:
         if model:
             if self.provider == "ollama":
                 use_model = f"ollama/{model}"
+            elif self.provider == "llamacpp":
+                # llama.cpp uses OpenAI-compatible API
+                use_model = f"openai/{model}"
             elif self.provider == "openai":
                 use_model = model
             else:
@@ -178,6 +187,58 @@ class SummarizationLLMClient:
         try:
             return self._client.generate(
                 prompt=prompt,
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens,
+                timeout=timeout,
+                model=use_model,
+            )
+        except LLMError as e:
+            raise ValueError(str(e)) from e
+
+    def generate_from_messages(
+        self,
+        messages: list[dict[str, str]],
+        temperature: float = 0.2,
+        top_p: float = 0.95,
+        max_tokens: int = 512,
+        timeout: int = 60,
+        model: str | None = None,
+    ) -> str:
+        """Generate completion from messages (optimized for prefix caching).
+
+        This method uses system + user messages to maximize Ollama's KV cache
+        reuse. The system message (static instructions) gets cached, while
+        the user message contains variable content.
+
+        Args:
+            messages: List of message dicts with 'role' and 'content'.
+            temperature: Sampling temperature.
+            top_p: Nucleus sampling parameter.
+            max_tokens: Maximum tokens to generate.
+            timeout: Request timeout in seconds.
+            model: Optional model override.
+
+        Returns:
+            Generated text.
+
+        Raises:
+            ValueError: If response is empty or contains an error.
+        """
+        use_model = None
+        if model:
+            if self.provider == "ollama":
+                use_model = f"ollama/{model}"
+            elif self.provider == "llamacpp":
+                use_model = f"openai/{model}"
+            elif self.provider == "openai":
+                use_model = model
+            else:
+                use_model = f"{self.provider}/{model}"
+
+        try:
+            return self._client.generate_from_messages(
+                messages=messages,
                 temperature=temperature,
                 top_p=top_p,
                 max_tokens=max_tokens,
@@ -444,9 +505,147 @@ def truncate_code(code: str, max_tokens: int = 4000) -> str:
 
 
 # =============================================================================
-# PROMPT TEMPLATES
+# PROMPT TEMPLATES (Optimized for Prefix Caching)
 # =============================================================================
+# System messages are STATIC and get cached by Ollama's KV cache.
+# User messages contain VARIABLE content (code, paths, context).
+# This structure maximizes cache reuse across requests of the same type.
 
+SYSTEM_PROMPTS = {
+    "file": """You summarize code files for AI agents navigating codebases.
+
+For each file, provide a 4-6 sentence summary answering:
+1. PURPOSE: What is this module's primary job? What capability does it provide?
+2. DOMAIN: What problem space does this code address?
+3. ARCHITECTURE: What design patterns or abstractions does it use?
+4. DISCOVERY: When should an agent look here? What questions lead to this file?
+5. DEPENDENCIES: What external modules or systems does this integrate with?
+
+Do NOT list individual classes/functions - those are documented separately.
+Write ONLY the 4-6 sentence summary. No reasoning, explanations, or bullet points.""",
+
+    "class": """You summarize classes for AI agents navigating codebases.
+
+For each class, provide a 4-6 sentence summary answering:
+1. IDENTITY: What real-world concept or data structure does this class model?
+2. RESPONSIBILITY: What problem does using this class solve?
+3. INSTANTIATION: How do you create an instance? What parameters are required?
+4. STATE: What key attributes does it hold? What makes an instance valid vs invalid?
+5. COLLABORATORS: What other classes or modules does it work with?
+
+Do NOT list methods - those are documented separately.
+Write ONLY the 4-6 sentence summary. No reasoning, explanations, or bullet points.""",
+
+    "function": """You describe functions for AI agents navigating codebases.
+
+For each function, provide a 4-6 sentence description answering:
+1. OPERATION: What does calling this function accomplish?
+2. INTERFACE: What are the parameters and return value? What types?
+3. WHEN TO USE: In what scenario should an agent call this?
+4. SIDE EFFECTS: Does it modify external state, perform I/O, or raise exceptions?
+5. EDGE CASES: What happens with empty/None inputs? What preconditions must hold?
+
+Write ONLY the 4-6 sentence description. No reasoning, explanations, or bullet points.""",
+
+    "method": """You describe methods for AI agents navigating codebases.
+
+For each method, provide a 4-6 sentence description answering:
+1. OPERATION: What does this method do to/for the object?
+2. INTERFACE: What parameters does it take? What does it return?
+3. STATE: Which instance attributes does it read or modify?
+4. LIFECYCLE: Is this setup/init, cleanup/teardown, or called repeatedly?
+5. ERRORS: What exceptions can it raise? What preconditions must hold?
+
+Write ONLY the 4-6 sentence description. No reasoning, explanations, or bullet points.""",
+
+    "constant": """You describe constants for AI agents navigating codebases.
+
+For each constant, provide a 2-3 sentence description answering:
+1. MEANING: What does this value represent or configure?
+2. USAGE: Where in the system is it used?
+3. CONSTRAINTS: What are valid values? Any min/max bounds?
+
+Write ONLY the 2-3 sentence description. No reasoning, explanations, or bullet points.""",
+
+    "variable": """You describe variables for AI agents navigating codebases.
+
+For each variable, provide a 2-3 sentence description answering:
+1. DATA: What information does this variable hold?
+2. LIFECYCLE: How is it initialized? When does it change?
+3. ROLE: How does this variable influence its containing scope?
+
+Write ONLY the 2-3 sentence description. No reasoning, explanations, or bullet points.""",
+}
+
+# User message templates - contain variable content
+USER_PROMPTS = {
+    "file": """Language: {language}
+File: {file_path}
+{imports_section}
+
+Code:
+{code}""",
+
+    "class": """File context: {file_summary}
+
+Class: {class_name}
+{decorators}
+{base_classes_section}
+{attributes_section}
+{collaborators_section}
+{instantiation_hints}
+
+Code:
+{code}
+{usages_section}""",
+
+    "function": """File context: {file_summary}
+{class_context}
+
+Function: {function_name}
+Signature: {signature}
+{docstring_section}
+{exceptions_section}
+{usage_examples}
+
+Code:
+{code}""",
+
+    "method": """File context: {file_summary}
+Class context: {class_summary}
+
+Method: {method_name}
+Signature: {signature}
+{docstring_section}
+{state_section}
+{exceptions_section}
+
+Code:
+{code}
+{usages_section}""",
+
+    "constant": """File context: {file_summary}
+{class_context}
+{function_context}
+
+Name: {name}
+{usage_examples}
+
+Value:
+{code}""",
+
+    "variable": """File context: {file_summary}
+{class_context}
+{function_context}
+
+Name: {name}
+
+Value:
+{code}
+{usages_section}""",
+}
+
+# Legacy single-prompt templates (kept for backwards compatibility)
 PROMPTS = {
     "file": """Summarize this {language} file in 4-6 sentences for an AI agent navigating this codebase.
 
@@ -799,6 +998,118 @@ def build_prompt(
     )
 
 
+def build_messages(
+    element: CodeElement,
+    parent_summaries: dict[str, str],
+    max_code_tokens: int = 4000,
+) -> list[dict[str, str]]:
+    """Build messages optimized for Ollama KV cache prefix caching.
+
+    Returns system + user messages where:
+    - System message: Static instructions (cached after first request of each type)
+    - User message: Variable content (code, paths, context)
+
+    This structure maximizes cache reuse - the system message tokens are
+    processed once and cached, then reused for all subsequent requests
+    of the same element type.
+
+    Args:
+        element: Code element to summarize.
+        parent_summaries: Dict with 'file' and/or 'class' summaries.
+        max_code_tokens: Max tokens for code in prompt.
+
+    Returns:
+        List of message dicts with 'role' and 'content' keys.
+    """
+    element_type = element.element_type
+
+    # Map element type to template key
+    if element_type == "method":
+        template_key = "method"
+    elif element_type in SYSTEM_PROMPTS:
+        template_key = element_type
+    else:
+        template_key = "function"
+
+    # Get static system prompt (same for all elements of this type)
+    system_prompt = SYSTEM_PROMPTS[template_key]
+
+    # Build variable content for user message
+    file_summary = parent_summaries.get("file", "No file context available.")
+    class_summary = parent_summaries.get("class", "")
+    function_summary = parent_summaries.get("function", "")
+
+    class_context = ""
+    if class_summary and element_type in ("method", "function", "variable", "constant"):
+        class_context = f"Class context: {class_summary}"
+
+    function_context = ""
+    if function_summary and element_type in ("variable", "constant"):
+        function_context = f"Function/method context: {function_summary}"
+
+    docstring_section = ""
+    if element.docstring:
+        docstring_section = f"Docstring: {element.docstring}"
+
+    decorators = ""
+    if element.decorators:
+        decorators = f"Decorators: {', '.join(element.decorators)}"
+
+    usages_section = ""
+    if element.context_usages:
+        usages_section = "\nUsed in:\n" + "\n".join(f"- {u}" for u in element.context_usages)
+
+    # Build enhanced context sections
+    imports_section = _build_imports_section(element) if element_type == "file" else ""
+    attributes_section = _build_attributes_section(element) if element_type == "class" else ""
+    base_classes_section = _build_base_classes_section(element) if element_type == "class" else ""
+    collaborators_section = _build_collaborators_section(element) if element_type == "class" else ""
+    instantiation_hints = _build_instantiation_hints(element) if element_type == "class" else ""
+    exceptions_section = _build_exceptions_section(element) if element_type in ("function", "method") else ""
+    state_section = _build_state_section(element) if element_type == "method" else ""
+    usage_examples = _build_usage_examples(element) if element_type in ("function", "constant") else ""
+
+    # Truncate code
+    code = truncate_code(element.raw_code or "", max_code_tokens)
+
+    # Format user message with variable content
+    user_template = USER_PROMPTS[template_key]
+    user_content = user_template.format(
+        language=element.language or "code",
+        file_path=element.relative_path,
+        file_summary=file_summary,
+        class_summary=class_summary,
+        class_context=class_context,
+        function_context=function_context,
+        class_name=element.name if element_type == "class" else "",
+        function_name=element.name,
+        method_name=element.name,
+        name=element.name,
+        signature=element.signature or "",
+        docstring_section=docstring_section,
+        decorators=decorators,
+        code=code,
+        usages_section=usages_section,
+        imports_section=imports_section,
+        attributes_section=attributes_section,
+        base_classes_section=base_classes_section,
+        collaborators_section=collaborators_section,
+        instantiation_hints=instantiation_hints,
+        exceptions_section=exceptions_section,
+        state_section=state_section,
+        usage_examples=usage_examples,
+    )
+
+    # Clean up extra blank lines from empty optional sections
+    user_content = "\n".join(line for line in user_content.split("\n") if line.strip() or line == "")
+    user_content = user_content.strip()
+
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content},
+    ]
+
+
 # =============================================================================
 # SUMMARY CLEANING
 # =============================================================================
@@ -929,6 +1240,11 @@ def generate_summary(
 ) -> str:
     """Generate summary for a single element.
 
+    Uses message-based format (system + user) optimized for Ollama's KV cache
+    prefix caching. The system message contains static instructions that get
+    cached, while the user message has variable content with shared context
+    (file_summary, class_summary) at the top for maximum cache reuse.
+
     Args:
         element: Code element to summarize.
         summary_store: Summary store for parent context.
@@ -941,12 +1257,14 @@ def generate_summary(
     # Get parent summaries for context
     parent_summaries = summary_store.get_parent_summaries(element)
 
-    # Build prompt
-    prompt = build_prompt(element, parent_summaries, config.max_code_tokens)
+    # Build messages optimized for prefix caching:
+    # - System message: static instructions (cached per element type)
+    # - User message: shared context first (file/class), then element-specific
+    messages = build_messages(element, parent_summaries, config.max_code_tokens)
 
-    # Generate summary
-    raw_summary = llm_client.generate(
-        prompt=prompt,
+    # Generate summary using message-based API
+    raw_summary = llm_client.generate_from_messages(
+        messages=messages,
         temperature=config.temperature,
         top_p=config.top_p,
         max_tokens=config.max_tokens,

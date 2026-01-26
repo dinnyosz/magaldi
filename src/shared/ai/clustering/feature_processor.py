@@ -285,10 +285,27 @@ class ProcessedSubfeature:
 
 
 # =============================================================================
-# FEATURE SUMMARY PROMPT
+# FEATURE SUMMARY PROMPTS (Optimized for Prefix Caching)
 # =============================================================================
+# System message is STATIC and gets cached by Ollama's KV cache.
+# User message contains VARIABLE content (feature name, member summaries).
 
+FEATURE_SYSTEM_PROMPT = """You are analyzing a code feature containing related functions/methods.
+Based on the member function summaries provided, describe what this feature does.
 
+Write a 2-4 sentence summary describing:
+1. The overall purpose of this feature
+2. The key operations it provides
+
+Write ONLY the summary. No reasoning, explanations, or bullet points."""
+
+FEATURE_USER_PROMPT = """Feature name: {label}
+Number of members: {member_count}
+
+Member function summaries:
+{member_summaries}"""
+
+# Legacy single-prompt template (kept for backwards compatibility)
 FEATURE_SUMMARY_PROMPT = """You are analyzing a code feature containing related functions/methods.
 Based on the member function summaries below, describe what this feature does.
 
@@ -318,6 +335,10 @@ def _generate_feature_summary(
 ) -> str:
     """Generate summary for a feature based on member summaries.
 
+    Uses message-based format (system + user) optimized for Ollama's KV cache
+    prefix caching. The system message contains static instructions that get
+    cached, while the user message has variable content.
+
     Args:
         cluster: Cluster result with member info.
         member_summaries: Dict mapping element_id to summary.
@@ -339,14 +360,20 @@ def _generate_feature_summary(
         # Fallback if no summaries available
         summaries_text = [f"- {name}()" for name in cluster.element_names[:10]]
 
-    prompt = FEATURE_SUMMARY_PROMPT.format(
+    # Build messages optimized for prefix caching
+    user_content = FEATURE_USER_PROMPT.format(
         label=cluster.label or f"cluster_{cluster.cluster_id}",
         member_count=cluster.size,
         member_summaries="\n".join(summaries_text),
     )
 
-    raw_summary = llm_client.generate(
-        prompt=prompt,
+    messages = [
+        {"role": "system", "content": FEATURE_SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
+
+    raw_summary = llm_client.generate_from_messages(
+        messages=messages,
         temperature=config.summarize_temperature,
         top_p=config.summarize_top_p,
         max_tokens=config.summarize_max_tokens,
@@ -682,10 +709,26 @@ def process_features(
 
 
 # =============================================================================
-# SUBFEATURE SUMMARY PROMPT
+# SUBFEATURE SUMMARY PROMPTS (Optimized for Prefix Caching)
 # =============================================================================
+# System message is STATIC and gets cached by Ollama's KV cache.
+# User message contains VARIABLE content with parent context at TOP for cache reuse.
 
+SUBFEATURE_SYSTEM_PROMPT = """You are analyzing a sub-group of related functions/methods within a larger feature.
 
+Write a 1-2 sentence summary describing what this specific sub-group does within the context of the parent feature.
+
+Write ONLY the summary. No reasoning, explanations, or bullet points."""
+
+SUBFEATURE_USER_PROMPT = """Parent feature: {parent_label}
+Parent feature description: {parent_summary}
+
+This sub-group contains {member_count} related functions within the parent feature.
+
+Member function summaries:
+{member_summaries}"""
+
+# Legacy single-prompt template (kept for backwards compatibility)
 SUBFEATURE_SUMMARY_PROMPT = """You are analyzing a sub-group of related functions/methods within a larger feature.
 
 Parent feature: {parent_label}
@@ -716,6 +759,11 @@ def _generate_subfeature_summary(
 ) -> str:
     """Generate summary for a subfeature based on member summaries.
 
+    Uses message-based format (system + user) optimized for Ollama's KV cache
+    prefix caching. The system message contains static instructions that get
+    cached, while the user message has parent context at the top for cache
+    reuse across subfeatures of the same parent.
+
     Args:
         cluster: Cluster result with member info.
         member_summaries: Dict mapping element_id to summary.
@@ -739,15 +787,22 @@ def _generate_subfeature_summary(
         # Fallback if no summaries available
         summaries_text = [f"- {name}()" for name in cluster.element_names[:10]]
 
-    prompt = SUBFEATURE_SUMMARY_PROMPT.format(
+    # Build messages optimized for prefix caching
+    # Parent context at top allows cache reuse for subfeatures of same parent
+    user_content = SUBFEATURE_USER_PROMPT.format(
         parent_label=parent_label,
         parent_summary=parent_summary,
         member_count=cluster.size,
         member_summaries="\n".join(summaries_text),
     )
 
-    raw_summary = llm_client.generate(
-        prompt=prompt,
+    messages = [
+        {"role": "system", "content": SUBFEATURE_SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
+
+    raw_summary = llm_client.generate_from_messages(
+        messages=messages,
         temperature=config.summarize_temperature,
         top_p=config.summarize_top_p,
         max_tokens=config.summarize_max_tokens,
