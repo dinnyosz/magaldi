@@ -129,6 +129,7 @@ class LabelingProgressState:
     timing: LabelingTimingStats
     current_cluster: str = ""  # Currently being labeled
     model: str = ""  # Model being used for labeling
+    ctx_size: str = ""  # Context size being used (e.g., "2K")
 
 
 # =============================================================================
@@ -351,18 +352,6 @@ class FeatureClusterer:
                     ))
                 continue
 
-            # Report current cluster being labeled
-            if on_progress:
-                on_progress(LabelingProgressState(
-                    total=total,
-                    completed=completed,
-                    skipped=skipped,
-                    failed=failed,
-                    timing=timing_stats,
-                    current_cluster=current_name,
-                    model=labeling_model,
-                ))
-
             # Build messages optimized for prefix caching
             user_content = LABEL_USER_PROMPT.format(names=names_str)
             messages = [
@@ -374,6 +363,20 @@ class FeatureClusterer:
             from shared.ai.context_size import compute_aggregation_num_ctx
             prompt_chars = len(LABEL_SYSTEM_PROMPT) + len(user_content)
             num_ctx = compute_aggregation_num_ctx(prompt_chars, task_type="labeling")
+            ctx_size_str = f"{num_ctx // 1024}K" if num_ctx >= 1024 else str(num_ctx)
+
+            # Report current cluster being labeled (with context size)
+            if on_progress:
+                on_progress(LabelingProgressState(
+                    total=total,
+                    completed=completed,
+                    skipped=skipped,
+                    failed=failed,
+                    timing=timing_stats,
+                    current_cluster=current_name,
+                    model=labeling_model,
+                    ctx_size=ctx_size_str,
+                ))
 
             try:
                 api_start = time.time()

@@ -332,26 +332,20 @@ Summary:"""
 # =============================================================================
 
 
-def _generate_feature_summary(
+def _build_feature_prompt(
     cluster: ClusterResult,
     member_summaries: dict[str, str],
-    llm_client: SummarizationLLMClient,
     config: FeatureProcessingConfig,
-) -> tuple[str, int]:
-    """Generate summary for a feature based on member summaries.
-
-    Uses message-based format (system + user) optimized for Ollama's KV cache
-    prefix caching. The system message contains static instructions that get
-    cached, while the user message has variable content.
+) -> tuple[list[dict[str, str]], int]:
+    """Build prompt messages and compute context size for feature summary.
 
     Args:
         cluster: Cluster result with member info.
         member_summaries: Dict mapping element_id to summary.
-        llm_client: LLM client for text generation.
         config: Processing configuration.
 
     Returns:
-        Tuple of (generated feature summary, num_ctx used).
+        Tuple of (messages list, num_ctx).
     """
     from shared.ai.context_size import compute_aggregation_num_ctx
 
@@ -382,6 +376,38 @@ def _generate_feature_summary(
     # Compute dynamic context size based on prompt length
     prompt_chars = len(FEATURE_SYSTEM_PROMPT) + len(user_content)
     num_ctx = compute_aggregation_num_ctx(prompt_chars, task_type="feature")
+
+    return messages, num_ctx
+
+
+def _generate_feature_summary(
+    cluster: ClusterResult,
+    member_summaries: dict[str, str],
+    llm_client: SummarizationLLMClient,
+    config: FeatureProcessingConfig,
+    messages: list[dict[str, str]] | None = None,
+    num_ctx: int | None = None,
+) -> tuple[str, int]:
+    """Generate summary for a feature based on member summaries.
+
+    Uses message-based format (system + user) optimized for Ollama's KV cache
+    prefix caching. The system message contains static instructions that get
+    cached, while the user message has variable content.
+
+    Args:
+        cluster: Cluster result with member info.
+        member_summaries: Dict mapping element_id to summary.
+        llm_client: LLM client for text generation.
+        config: Processing configuration.
+        messages: Pre-built messages (optional, will be built if not provided).
+        num_ctx: Pre-computed context size (optional, will be computed if not provided).
+
+    Returns:
+        Tuple of (generated feature summary, num_ctx used).
+    """
+    # Build prompt if not provided
+    if messages is None or num_ctx is None:
+        messages, num_ctx = _build_feature_prompt(cluster, member_summaries, config)
 
     raw_summary = llm_client.generate_from_messages(
         messages=messages,
@@ -477,11 +503,12 @@ def _process_single_feature(
 
     try:
         # Step 1: Generate feature summary
-        update_status("summarizing", config.summarize_model)
-        api_start = time.time()
-        summary, num_ctx = _generate_feature_summary(cluster, member_summaries, llm_client, config)
-        summarize_time = time.time() - api_start
+        # Build prompt and compute context size FIRST so we can display it during LLM call
+        messages, num_ctx = _build_feature_prompt(cluster, member_summaries, config)
         update_status("summarizing", config.summarize_model, format_ctx(num_ctx))
+        api_start = time.time()
+        summary, _ = _generate_feature_summary(cluster, member_summaries, llm_client, config, messages, num_ctx)
+        summarize_time = time.time() - api_start
 
         # Step 2: Embed feature summary
         update_status("embedding")
@@ -771,31 +798,24 @@ Summary:"""
 # =============================================================================
 
 
-def _generate_subfeature_summary(
+def _build_subfeature_prompt(
     cluster: "ClusterResult",
     member_summaries: dict[str, str],
     parent_label: str,
     parent_summary: str,
-    llm_client: SummarizationLLMClient,
     config: FeatureProcessingConfig,
-) -> tuple[str, int]:
-    """Generate summary for a subfeature based on member summaries.
-
-    Uses message-based format (system + user) optimized for Ollama's KV cache
-    prefix caching. The system message contains static instructions that get
-    cached, while the user message has parent context at the top for cache
-    reuse across subfeatures of the same parent.
+) -> tuple[list[dict[str, str]], int]:
+    """Build prompt messages and compute context size for subfeature summary.
 
     Args:
         cluster: Cluster result with member info.
         member_summaries: Dict mapping element_id to summary.
         parent_label: Label of the parent feature.
         parent_summary: Summary of the parent feature.
-        llm_client: LLM client for text generation.
         config: Processing configuration.
 
     Returns:
-        Tuple of (generated subfeature summary, num_ctx used).
+        Tuple of (messages list, num_ctx).
     """
     from shared.ai.context_size import compute_aggregation_num_ctx
 
@@ -828,6 +848,45 @@ def _generate_subfeature_summary(
     # Compute dynamic context size based on prompt length
     prompt_chars = len(SUBFEATURE_SYSTEM_PROMPT) + len(user_content)
     num_ctx = compute_aggregation_num_ctx(prompt_chars, task_type="subfeature")
+
+    return messages, num_ctx
+
+
+def _generate_subfeature_summary(
+    cluster: "ClusterResult",
+    member_summaries: dict[str, str],
+    parent_label: str,
+    parent_summary: str,
+    llm_client: SummarizationLLMClient,
+    config: FeatureProcessingConfig,
+    messages: list[dict[str, str]] | None = None,
+    num_ctx: int | None = None,
+) -> tuple[str, int]:
+    """Generate summary for a subfeature based on member summaries.
+
+    Uses message-based format (system + user) optimized for Ollama's KV cache
+    prefix caching. The system message contains static instructions that get
+    cached, while the user message has parent context at the top for cache
+    reuse across subfeatures of the same parent.
+
+    Args:
+        cluster: Cluster result with member info.
+        member_summaries: Dict mapping element_id to summary.
+        parent_label: Label of the parent feature.
+        parent_summary: Summary of the parent feature.
+        llm_client: LLM client for text generation.
+        config: Processing configuration.
+        messages: Pre-built messages (optional, will be built if not provided).
+        num_ctx: Pre-computed context size (optional, will be computed if not provided).
+
+    Returns:
+        Tuple of (generated subfeature summary, num_ctx used).
+    """
+    # Build prompt if not provided
+    if messages is None or num_ctx is None:
+        messages, num_ctx = _build_subfeature_prompt(
+            cluster, member_summaries, parent_label, parent_summary, config
+        )
 
     raw_summary = llm_client.generate_from_messages(
         messages=messages,
@@ -871,21 +930,25 @@ def _process_single_subfeature(
         return f"{num_ctx // 1024}K" if num_ctx >= 1024 else str(num_ctx)
 
     try:
-        # Update status: summarizing
-        worker_status.set(worker_id, work_item.parent_label, "summarize", config.summarize_model, sub_label)
+        # Build prompt and compute context size FIRST so we can display it during LLM call
+        messages, num_ctx = _build_subfeature_prompt(
+            work_item.sub_cluster, work_item.member_summaries,
+            work_item.parent_label, work_item.parent_summary, config,
+        )
+
+        # Update status: summarizing (with context size)
+        worker_status.set(worker_id, work_item.parent_label, "summarize", config.summarize_model, sub_label, format_ctx(num_ctx))
         if on_status_change:
             on_status_change()
 
         # Generate subfeature summary
         summ_start = time.time()
-        summary, num_ctx = _generate_subfeature_summary(
+        summary, _ = _generate_subfeature_summary(
             work_item.sub_cluster, work_item.member_summaries,
             work_item.parent_label, work_item.parent_summary,
-            llm_client, config,
+            llm_client, config, messages, num_ctx,
         )
         summarize_time = time.time() - summ_start
-        # Update status with context size
-        worker_status.set(worker_id, work_item.parent_label, "summarize", config.summarize_model, sub_label, format_ctx(num_ctx))
 
         # Update status: embedding
         worker_status.set(worker_id, work_item.parent_label, "embed", config.embed_model, sub_label)

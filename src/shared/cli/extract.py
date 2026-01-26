@@ -165,12 +165,14 @@ def run_feature_extraction(
                     bar_text.append(format_duration(eta), style="yellow")
                     bar_text.append(" ETA", style="dim")
 
-                # Current cluster line with model
+                # Current cluster line with model and context size
                 current_text = Text()
                 if state.current_cluster:
                     current_text.append("  labeling  ", style="cyan")
                     if state.model:
                         current_text.append(f"{state.model}  ", style="yellow")
+                    if state.ctx_size:
+                        current_text.append(f"{state.ctx_size}  ", style="magenta")
                     current_text.append(state.current_cluster, style="white")
                 else:
                     current_text.append("  ", style="dim")
