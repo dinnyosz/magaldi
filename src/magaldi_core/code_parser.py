@@ -320,6 +320,32 @@ class ParsingResult:
                 counts[elem.element_type] = counts.get(elem.element_type, 0) + 1
         return counts
 
+    @property
+    def max_chars_by_type(self) -> dict[str, int]:
+        """Get max character count per element type.
+
+        Used for computing optimal context sizes for KV cache optimization.
+        """
+        max_chars: dict[str, int] = {}
+        for pf in self.parsed_files:
+            for elem in pf.elements:
+                code_len = len(elem.raw_code or "")
+                current_max = max_chars.get(elem.element_type, 0)
+                max_chars[elem.element_type] = max(current_max, code_len)
+        return max_chars
+
+    @property
+    def context_sizes(self) -> dict[str, int]:
+        """Get computed context sizes per element type.
+
+        Returns optimal num_ctx values for each element type based on
+        observed maximum code sizes. Used for KV cache optimization
+        during summarization.
+        """
+        from shared.ai.context_size import compute_context_sizes
+
+        return compute_context_sizes(self.max_chars_by_type)  # type: ignore[no-any-return]
+
 
 # =============================================================================
 # ELEMENT ID GENERATION

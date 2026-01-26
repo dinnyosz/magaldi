@@ -722,6 +722,71 @@ class TestParsingResult:
         assert by_type["class"] == 1
         assert by_type["function"] == 2
 
+    def test_max_chars_by_type_property(self):
+        """Should compute max chars per element type."""
+        # Create elements with different code sizes
+        elements = [
+            CodeElement(element_id="1", element_type="function", raw_code="x" * 1000),
+            CodeElement(element_id="2", element_type="function", raw_code="x" * 2000),
+            CodeElement(element_id="3", element_type="class", raw_code="x" * 5000),
+            CodeElement(element_id="4", element_type="file", raw_code="x" * 10000),
+        ]
+
+        # FileInfo is required for ParsedFile
+        file_info = FileInfo(
+            relative_path="file.py",
+            absolute_path=Path("/test/file.py"),
+            language="python",
+        )
+        parsed_file = ParsedFile(
+            file_info=file_info,
+            elements=elements,
+        )
+        result = ParsingResult(
+            scope="test",
+            repository="repo",
+            username="user",
+            parsed_files=[parsed_file],
+        )
+
+        max_chars = result.max_chars_by_type
+
+        assert max_chars["function"] == 2000  # Max of 1000, 2000
+        assert max_chars["class"] == 5000
+        assert max_chars["file"] == 10000
+
+    def test_context_sizes_property(self):
+        """Should compute context sizes from max chars."""
+        from shared.ai.context_size import CONTEXT_TIERS
+
+        elements = [
+            CodeElement(element_id="1", element_type="function", raw_code="x" * 4000),
+            CodeElement(element_id="2", element_type="variable", raw_code="x" * 100),
+        ]
+        file_info = FileInfo(
+            relative_path="file.py",
+            absolute_path=Path("/test/file.py"),
+            language="python",
+        )
+        parsed_file = ParsedFile(
+            file_info=file_info,
+            elements=elements,
+        )
+        result = ParsingResult(
+            scope="test",
+            repository="repo",
+            username="user",
+            parsed_files=[parsed_file],
+        )
+
+        context_sizes = result.context_sizes
+
+        assert "function" in context_sizes
+        assert "variable" in context_sizes
+        # Should be valid context tiers
+        assert context_sizes["function"] in CONTEXT_TIERS
+        assert context_sizes["variable"] in CONTEXT_TIERS
+
 
 # =============================================================================
 # IMPORT EXTRACTION TESTS
