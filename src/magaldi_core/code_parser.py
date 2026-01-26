@@ -588,7 +588,7 @@ class PythonParser(TreeSitterParser):
             line_start=1,
             line_end=line_count,
             level=0,
-            raw_code="",  # Don't store full file content
+            raw_code=content,
         )
         file_element.element_id = generate_element_id(
             scope, repository, username, file_info.relative_path, "file", file_element.name, 1
@@ -1026,6 +1026,7 @@ class JavaScriptParser(TreeSitterParser):
             line_start=1,
             line_end=line_count,
             level=0,
+            raw_code=content,
         )
         file_element.element_id = generate_element_id(
             scope, repository, username, file_info.relative_path, "file", file_element.name, 1
@@ -1298,6 +1299,7 @@ class PhpParser(TreeSitterParser):
             line_start=1,
             line_end=line_count,
             level=0,
+            raw_code=content,
         )
         file_element.element_id = generate_element_id(
             scope, repository, username, file_info.relative_path, "file", file_element.name, 1
@@ -1556,6 +1558,7 @@ class RustParser(TreeSitterParser):
             line_start=1,
             line_end=line_count,
             level=0,
+            raw_code=content,
         )
         file_element.element_id = generate_element_id(
             scope, repository, username, file_info.relative_path, "file", file_element.name, 1

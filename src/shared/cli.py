@@ -1567,9 +1567,12 @@ def print_parsing_result(result: ParsingResult) -> None:
         # Sort by context size descending for readability
         sorted_types = sorted(max_chars.keys(), key=lambda t: context_sizes.get(t, 0), reverse=True)
 
+        from shared.ai.context_size import PROMPT_OVERHEAD, DEFAULT_OVERHEAD
+
         for element_type in sorted_types:
             chars = max_chars[element_type]
-            tokens = chars // 4 + 300  # Rough estimate with overhead
+            overhead = PROMPT_OVERHEAD.get(element_type, DEFAULT_OVERHEAD)
+            tokens = chars // 4 + overhead
             ctx_size = context_sizes.get(element_type, 0)
             console.print(f"  [dim]  {element_type:<14} {chars:>9,}   {tokens:>11,}   {ctx_size:>12,}[/]")
 
