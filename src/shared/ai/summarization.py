@@ -154,6 +154,7 @@ class SummarizationLLMClient:
         max_tokens: int = 512,
         timeout: int = 60,
         model: str | None = None,
+        num_ctx: int | None = None,
     ) -> str:
         """Generate completion from LLM.
 
@@ -164,6 +165,7 @@ class SummarizationLLMClient:
             max_tokens: Maximum tokens to generate.
             timeout: Request timeout in seconds.
             model: Optional model override (uses default if not specified).
+            num_ctx: Context window size for Ollama models.
 
         Returns:
             Generated text.
@@ -192,6 +194,7 @@ class SummarizationLLMClient:
                 max_tokens=max_tokens,
                 timeout=timeout,
                 model=use_model,
+                num_ctx=num_ctx,
             )
         except LLMError as e:
             raise ValueError(str(e)) from e
@@ -204,6 +207,7 @@ class SummarizationLLMClient:
         max_tokens: int = 512,
         timeout: int = 60,
         model: str | None = None,
+        num_ctx: int | None = None,
     ) -> str:
         """Generate completion from messages (optimized for prefix caching).
 
@@ -218,6 +222,7 @@ class SummarizationLLMClient:
             max_tokens: Maximum tokens to generate.
             timeout: Request timeout in seconds.
             model: Optional model override.
+            num_ctx: Context window size for Ollama models.
 
         Returns:
             Generated text.
@@ -244,6 +249,7 @@ class SummarizationLLMClient:
                 max_tokens=max_tokens,
                 timeout=timeout,
                 model=use_model,
+                num_ctx=num_ctx,
             )
         except LLMError as e:
             raise ValueError(str(e)) from e

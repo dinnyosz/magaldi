@@ -500,3 +500,49 @@ class TestSummarizationResult:
         assert result.files_summarized == 0
         assert result.total_jobs == 0
         assert result.errors == []
+
+
+# =============================================================================
+# NUM_CTX PARAMETER
+# =============================================================================
+
+
+class TestSummarizationLLMClientNumCtx:
+    """Tests for num_ctx parameter in SummarizationLLMClient."""
+
+    def test_generate_passes_num_ctx(self):
+        """Should pass num_ctx to underlying client."""
+        mock_client = MagicMock()
+        mock_client.generate.return_value = "test summary"
+
+        client = SummarizationLLMClient(
+            url="http://localhost:11434",
+            model="qwen3:4b",
+            provider="ollama",
+        )
+        client._client = mock_client
+        client.generate("test prompt", num_ctx=4096)
+
+        mock_client.generate.assert_called_once()
+        call_kwargs = mock_client.generate.call_args[1]
+        assert call_kwargs.get("num_ctx") == 4096
+
+    def test_generate_from_messages_passes_num_ctx(self):
+        """Should pass num_ctx in generate_from_messages."""
+        mock_client = MagicMock()
+        mock_client.generate_from_messages.return_value = "test summary"
+
+        client = SummarizationLLMClient(
+            url="http://localhost:11434",
+            model="qwen3:4b",
+            provider="ollama",
+        )
+        client._client = mock_client
+        client.generate_from_messages(
+            [{"role": "user", "content": "test"}],
+            num_ctx=8192
+        )
+
+        mock_client.generate_from_messages.assert_called_once()
+        call_kwargs = mock_client.generate_from_messages.call_args[1]
+        assert call_kwargs.get("num_ctx") == 8192
