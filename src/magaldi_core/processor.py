@@ -21,6 +21,7 @@ from typing import Callable, TYPE_CHECKING
 if TYPE_CHECKING:
     from shared.config import MagaldiConfig
 
+from shared.config import ModelConfig
 from shared.db.elasticsearch import ElasticsearchRepository
 from shared.db.redis import RedisSummarizationJobRepository, RedisEmbeddingJobRepository
 from shared.ai.embedding import (
@@ -47,32 +48,41 @@ from shared.ai.summarization import (
 
 @dataclass
 class ProcessingConfig:
-    """Configuration for unified processing."""
+    """Configuration for unified processing.
 
-    summarize_model: str = "qwen2.5-coder:3b"
-    summarize_model_small: str = "qwen2.5-coder:1.5b"  # For functions, methods, variables, constants
-    embed_model: str = "snowflake-arctic-embed2"
-    api_base: str = "http://localhost:11434"  # API base URL (for Ollama or custom endpoints)
-    provider: str = "ollama"  # LLM provider: ollama, openai, anthropic, etc.
-    api_key: str | None = None  # API key for cloud providers
+    Uses ModelConfig objects that encapsulate name, provider, url, api_key.
+    """
+
+    # Model configurations (encapsulate name + provider + url + api_key)
+    # Note: Each llamacpp model needs its own server instance on a different port
+    summarize_model: ModelConfig = field(default_factory=lambda: ModelConfig(
+        name="qwen3:4b-instruct", provider="llamacpp", url="http://localhost:8080"
+    ))
+    summarize_model_small: ModelConfig = field(default_factory=lambda: ModelConfig(
+        name="qwen3:1.7b", provider="llamacpp", url="http://localhost:8081"
+    ))
+    embed_model: ModelConfig = field(default_factory=lambda: ModelConfig(
+        name="snowflake-arctic-embed2", provider="ollama", url="http://localhost:11434", dimensions=1024
+    ))
+
     skip_ai: bool = False
 
     # Summarization settings (based on arxiv.org/html/2507.03160v2)
     summarize_temperature: float = 0.2
     summarize_max_tokens: int = 512
-    summarize_timeout: int = 60
+    summarize_timeout: int = 180  # 3 minutes to handle queue wait with many workers
     max_code_tokens: int = 4000
 
     # Embedding settings
     embed_dimensions: int = 1024
     embed_max_context: int = 8192
-    embed_timeout: int = 30
+    embed_timeout: int = 120  # 2 minutes for embedding batches
 
     # Parallel processing
     num_workers: int = 4
 
-    def get_model_for_element_type(self, element_type: str) -> str:
-        """Get the appropriate model for an element type.
+    def get_model_for_element_type(self, element_type: str) -> "ModelConfig":
+        """Get the appropriate model config for an element type.
 
         Uses small model for functions, methods, variables, constants.
         Uses main model for files, classes.
@@ -680,13 +690,13 @@ def _summarize_element(
     prompt = build_prompt(element, parent_summaries, config.max_code_tokens)
 
     # Generate summary (select model based on element type)
-    model = config.get_model_for_element_type(element.element_type)
+    model_config = config.get_model_for_element_type(element.element_type)
     raw_summary = llm_client.generate(
         prompt=prompt,
         temperature=config.summarize_temperature,
         max_tokens=config.summarize_max_tokens,
         timeout=config.summarize_timeout,
-        model=model,
+        model=model_config.name,
     )
 
     # Clean and return
@@ -873,7 +883,7 @@ def _process_single_element(
 
     try:
         # Step 1: Summarize
-        update_status("summarizing", element_model)
+        update_status("summarizing", element_model.name)
         if config.skip_ai:
             summary = f"{element.element_type.title()}: {element.name}"
         else:
@@ -890,15 +900,15 @@ def _process_single_element(
         if should_embed(element):
             if config.skip_ai:
                 # Generate dummy embeddings for testing
-                update_status("summ_embed", config.embed_model)
+                update_status("summ_embed", config.embed_model.name)
                 summary_embedding = [0.0] * config.embed_dimensions
-                update_status("code_embed", config.embed_model)
+                update_status("code_embed", config.embed_model.name)
                 code_embedding = [0.0] * config.embed_dimensions
             else:
                 # Generate both embeddings (returns tuple with timing)
                 # Pass callback to update status between embedding phases
                 def on_embed_stage(stage: str) -> None:
-                    update_status(stage, config.embed_model)
+                    update_status(stage, config.embed_model.name)
                 summary_embedding, code_embedding, summary_embed_time, code_embed_time = _embed_element(
                     element, summary_cache, embed_client, config, on_embed_stage
                 )
@@ -1051,17 +1061,19 @@ def process_elements(
     embed_client: CodeEmbeddingClient | None = None
 
     if not config.skip_ai:
+        summarize_cfg = config.summarize_model
         llm_client = SummarizationLLMClient(
-            url=config.api_base,
-            model=config.summarize_model,
-            provider=config.provider,
-            api_key=config.api_key,
+            url=summarize_cfg.get_api_base() or "",
+            model=summarize_cfg.name,
+            provider=summarize_cfg.provider,
+            api_key=summarize_cfg.api_key,
         )
+        embed_cfg = config.embed_model
         embed_client = CodeEmbeddingClient(
-            url=config.api_base,
-            model=config.embed_model,
-            provider=config.provider,
-            api_key=config.api_key,
+            url=embed_cfg.get_api_base() or "",
+            model=embed_cfg.name,
+            provider=embed_cfg.provider,
+            api_key=embed_cfg.api_key,
         )
 
     # Initialize tracking structures (use provided or create new)

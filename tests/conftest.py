@@ -66,15 +66,32 @@ def test_elasticsearch_config() -> ElasticsearchConfig:
 @pytest.fixture
 def test_llm_config() -> LLMConfig:
     """Provide a test LLM configuration."""
+    from shared.config import ModelConfig
     return LLMConfig(
-        provider="ollama",
-        url="http://localhost:11434",
+        models={
+            "test-model": ModelConfig(
+                name="test-model",
+                provider="ollama",
+                url="http://localhost:11434",
+            ),
+            "test-model-small": ModelConfig(
+                name="test-model-small",
+                provider="ollama",
+                url="http://localhost:11434",
+            ),
+            "test-embed": ModelConfig(
+                name="test-embed",
+                provider="ollama",
+                url="http://localhost:11434",
+                dimensions=1024,
+            ),
+        },
         summarize_model="test-model",
+        summarize_model_small="test-model-small",
+        embed_model="test-embed",
         summarize_temperature=0.2,
         summarize_max_tokens=128,
         summarize_context_window=4096,
-        embed_model="test-embed",
-        embed_dimensions=1024,
         embed_context_window=4096,
     )
 

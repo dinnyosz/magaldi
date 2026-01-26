@@ -10,14 +10,26 @@ elasticsearch:
   max_retries: 2
 
 llm:
-  provider: ollama
-  url: http://testhost:11434
+  models:
+    test-model:
+      name: test-model-name
+      provider: ollama
+      url: http://testhost:11434
+    test-model-small:
+      name: test-model-small-name
+      provider: ollama
+      url: http://testhost:11434
+    test-embed:
+      name: test-embed-name
+      provider: ollama
+      url: http://testhost:11434
+      dimensions: 512
   summarize_model: test-model
+  summarize_model_small: test-model-small
+  embed_model: test-embed
   summarize_temperature: 0.5
   summarize_max_tokens: 128
   summarize_context_window: 4096
-  embed_model: test-embed
-  embed_dimensions: 512
   embed_context_window: 4096
 
 workers:

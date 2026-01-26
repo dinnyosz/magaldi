@@ -46,18 +46,33 @@ async def check_elasticsearch_health(es_repo: ElasticsearchRepository) -> dict:
 
 
 async def check_llm_health(config: MagaldiConfig) -> dict:
-    """Check LLM provider health (Ollama-style API)."""
+    """Check LLM providers health for all configured models."""
     import requests
 
-    try:
-        response = requests.get(f"{config.llm.url}/api/tags", timeout=5)
-        if response.ok:
-            data = response.json()
-            models = [m.get("name", "") for m in data.get("models", [])]
-            return {"status": "healthy", "models_loaded": models}
-        return {"status": "unhealthy", "error": f"HTTP {response.status_code}"}
-    except Exception as e:
-        return {"status": "unhealthy", "error": str(e)}
+    results = {}
+
+    for name, model in config.llm.models.items():
+        try:
+            if model.provider == "ollama":
+                response = requests.get(f"{model.url}/api/tags", timeout=5)
+                if response.ok:
+                    results[name] = {"status": "healthy", "provider": "ollama"}
+                else:
+                    results[name] = {"status": "unhealthy", "error": f"HTTP {response.status_code}"}
+            elif model.provider == "llamacpp":
+                response = requests.get(f"{model.url.rstrip('/')}/v1/models", timeout=5)
+                results[name] = {"status": "healthy", "provider": "llamacpp"}
+            else:
+                results[name] = {"status": "unknown", "provider": model.provider}
+        except Exception as e:
+            results[name] = {"status": "unhealthy", "error": str(e)}
+
+    # Overall health: healthy if any model is healthy
+    any_healthy = any(r.get("status") == "healthy" for r in results.values())
+    return {
+        "status": "healthy" if any_healthy else "unhealthy",
+        "models": results,
+    }
 
 
 async def check_redis_health(config: MagaldiConfig) -> dict:

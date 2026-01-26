@@ -75,8 +75,8 @@ def format_duration(seconds: float) -> str:
     return f"{minutes}:{secs:02d}"
 
 
-def check_ollama_models(config: MagaldiConfig, skip_ai: bool) -> list[str]:
-    """Check if required Ollama models are available.
+def check_model_availability(config: MagaldiConfig, skip_ai: bool) -> list[str]:
+    """Check if required models are available from their configured providers.
 
     Returns:
         List of error messages (empty if all models are available).
@@ -87,42 +87,63 @@ def check_ollama_models(config: MagaldiConfig, skip_ai: bool) -> list[str]:
     import requests
 
     errors = []
-    url = config.llm.url.rstrip("/")
 
-    # Check Ollama server is running
-    try:
-        response = requests.get(f"{url}/api/tags", timeout=5)
-        response.raise_for_status()
-        available_models = {m.get("name") for m in response.json().get("models", [])}
-    except requests.exceptions.ConnectionError:
-        return [f"Cannot connect to Ollama at {url}. Is it running?"]
-    except Exception as e:
-        return [f"Error connecting to Ollama: {e}"]
+    # Group models by provider and URL
+    models_to_check = [
+        ("summarize", config.llm.get_summarize_model()),
+        ("summarize_small", config.llm.get_summarize_model_small()),
+        ("embed", config.llm.get_embed_model()),
+    ]
 
-    def model_available(model: str) -> bool:
+    # Cache Ollama model lists per URL
+    ollama_models_cache: dict[str, set[str]] = {}
+
+    def get_ollama_models(url: str) -> set[str] | None:
+        """Get available models from Ollama server."""
+        if url in ollama_models_cache:
+            return ollama_models_cache[url]
+        try:
+            response = requests.get(f"{url.rstrip('/')}/api/tags", timeout=5)
+            response.raise_for_status()
+            models = {m.get("name") for m in response.json().get("models", [])}
+            ollama_models_cache[url] = models
+            return models
+        except requests.exceptions.ConnectionError:
+            return None
+        except Exception:
+            return None
+
+    def model_in_ollama(model_name: str, available: set[str]) -> bool:
         """Check if model is available (handles :latest tag)."""
-        if model in available_models:
+        if model_name in available:
             return True
-        # Try with :latest suffix
-        if f"{model}:latest" in available_models:
+        if f"{model_name}:latest" in available:
             return True
-        # Try without tag if model has one
-        if ":" in model:
-            base = model.rsplit(":", 1)[0]
-            if base in available_models or f"{base}:latest" in available_models:
+        if ":" in model_name:
+            base = model_name.rsplit(":", 1)[0]
+            if base in available or f"{base}:latest" in available:
                 return True
         return False
 
-    # Check required models
-    required_models = [
-        config.llm.summarize_model,
-        config.llm.summarize_model_small,
-        config.llm.embed_model,
-    ]
-
-    for model in required_models:
-        if not model_available(model):
-            errors.append(f"Model '{model}' not found. Run: ollama pull {model}")
+    for purpose, model_cfg in models_to_check:
+        if model_cfg.provider == "ollama":
+            available = get_ollama_models(model_cfg.url)
+            if available is None:
+                errors.append(f"Cannot connect to Ollama at {model_cfg.url} for {purpose} model")
+            elif not model_in_ollama(model_cfg.name, available):
+                errors.append(f"Model '{model_cfg.name}' not found. Run: ollama pull {model_cfg.name}")
+        elif model_cfg.provider == "llamacpp":
+            # Check if llama-server is running
+            try:
+                response = requests.get(f"{model_cfg.url.rstrip('/')}/v1/models", timeout=5)
+                # llama-server returns 200 if running
+            except requests.exceptions.ConnectionError:
+                errors.append(
+                    f"Cannot connect to llama-server at {model_cfg.url} for {purpose} model. "
+                    f"Start with: ./tools/benchmark-llama-server.sh"
+                )
+            except Exception:
+                pass  # Server is running but endpoint may not exist
 
     return errors
 
@@ -164,7 +185,9 @@ def parse(
     # Load configuration (skip validation in dry-run mode)
     config = load_config(skip_validation=dry_run)
     if llm_url:
-        config.llm.url = llm_url
+        # Override URL for all models
+        for model in config.llm.models.values():
+            model.url = llm_url
 
     if dry_run:
         console.print("[yellow]Dry run mode:[/] Using in-memory storage\n")
@@ -203,7 +226,7 @@ def parse(
 
         # Pre-flight check: Verify Ollama models are available
         if not dry_run and not skip_ai:
-            model_errors = check_ollama_models(config, skip_ai)
+            model_errors = check_model_availability(config, skip_ai)
             if model_errors:
                 console.print("\n[red]Pre-flight check failed:[/]")
                 for err in model_errors:
@@ -499,11 +522,12 @@ def run_feature_extraction(
         console.print(f"  Found {len(elements)} functions/methods with embeddings")
 
         # Run HDBSCAN clustering
+        summarize_model = config.llm.get_summarize_model()
         cluster_config = ClusterConfig(
             min_cluster_size=min_cluster_size,
             min_samples=min_samples,
-            api_base=config.llm.url,
-            labeling_model=config.llm.summarize_model,
+            api_base=summarize_model.get_api_base(),
+            labeling_model=summarize_model.name,
         )
 
         clusterer = FeatureClusterer(cluster_config)
@@ -647,12 +671,14 @@ def run_feature_extraction(
         # Process features: summarize -> embed -> index (with progress)
         console.print(f"  Processing {clustering_result.cluster_count} features with {workers} workers...")
 
+        summarize_model = config.llm.get_summarize_model()
+        embed_model = config.llm.get_embed_model()
         proc_config = FeatureProcessingConfig(
-            summarize_model=config.llm.summarize_model,
-            embed_model=config.llm.embed_model,
-            api_base=config.llm.url,
-            provider=config.llm.provider,
-            api_key=config.llm.api_key,
+            summarize_model=summarize_model.name,
+            embed_model=embed_model.name,
+            api_base=summarize_model.get_api_base() or "",
+            provider=summarize_model.provider,
+            api_key=summarize_model.api_key,
             num_workers=workers,
         )
 
@@ -1047,7 +1073,7 @@ def run_glossary_extraction(
                 console.print(f"  Deleted {deleted} existing entries")
 
         # Get model name for display
-        model_name = config.llm.summarize_model
+        model_name = config.llm.get_summarize_model().name
 
         # Track current phase
         current_phase = {"name": "Extracting terms from features"}
@@ -1320,12 +1346,9 @@ def run_processing(
     es_repo = ElasticsearchRepository(config)
 
     proc_config = ProcessingConfig(
-        summarize_model=config.llm.summarize_model,
-        summarize_model_small=config.llm.summarize_model_small,
-        embed_model=config.llm.embed_model,
-        api_base=config.llm.url,
-        provider=config.llm.provider,
-        api_key=config.llm.api_key,
+        summarize_model=config.llm.get_summarize_model(),
+        summarize_model_small=config.llm.get_summarize_model_small(),
+        embed_model=config.llm.get_embed_model(),
         skip_ai=skip_ai,
         num_workers=workers,
     )
@@ -1428,15 +1451,16 @@ def run_processing(
         # Show recent errors if any
         if state.recent_errors:
             error_text = Text()
-            error_text.append("  Errors: ", style="red bold")
+            error_text.append("  Errors:\n", style="red bold")
             for i, (elem_name, error) in enumerate(state.recent_errors):
-                if i > 0:
-                    error_text.append(" | ", style="dim")
-                error_text.append(f"{elem_name}", style="dim")
-                error_text.append(": ", style="dim")
-                # Truncate long error messages
-                short_error = error[:50] + "..." if len(error) > 50 else error
-                error_text.append(short_error, style="red")
+                # Each error on its own line with proper indentation
+                error_text.append("    ", style="dim")
+                error_text.append(f"{elem_name}", style="yellow")
+                error_text.append(":\n", style="dim")
+                # Show full error message (up to 250 chars), wrapped
+                short_error = error[:250] + "..." if len(error) > 250 else error
+                # Indent continuation lines
+                error_text.append(f"      {short_error}\n", style="red")
             parts.append(error_text)
 
         return Group(*parts)
@@ -1656,72 +1680,71 @@ def benchmark_models(
     from shared.ai.ollama_benchmark import BenchmarkClient, BenchmarkResult
     from magaldi_core.change_detection import ChangeManifest, FileInfo
 
+    from shared.config import ModelConfig
+
     # Load config for defaults
     config = load_config(skip_validation=True)
     benchmark_config = config.benchmark
 
-    # Parse models list (CLI overrides config)
-    if models:
-        model_list = [m.strip() for m in models.split(",")]
-    else:
-        model_list = benchmark_config.models
+    def parse_model_spec_to_config(spec: str) -> ModelConfig:
+        """Parse CLI model specification into a ModelConfig.
 
-    # Ollama URL (CLI overrides config, config overrides default)
-    if ollama_url is None:
-        ollama_url = benchmark_config.ollama_url or config.llm.url
-
-    # LM Studio URL
-    lmstudio_url = benchmark_config.lmstudio_url
-
-    def is_lmstudio_model(model_spec: str) -> bool:
-        """Check if the model is an LM Studio model."""
-        return model_spec.startswith("lmstudio:")
-
-    def get_model_api_config(model_spec: str) -> dict:
-        """Get api_base and api_key for a model spec.
-
-        Returns dict with 'api_base' and 'api_key' keys.
+        Formats:
+            "qwen3:4b" → Ollama model (default)
+            "lmstudio:xxx" → LM Studio model
+            "openai:gpt-4" → OpenAI model
         """
-        if is_lmstudio_model(model_spec):
-            return {"api_base": lmstudio_url, "api_key": "lm-studio"}
-        # For Ollama and others, use defaults (handled by client)
-        return {}
-
-    def to_litellm_model(model_spec: str) -> str:
-        """Convert model specification to LiteLLM format for display/tracking.
-
-        Examples:
-            "qwen3:4b" -> "ollama/qwen3:4b"
-            "openai:gpt-4" -> "openai/gpt-4"
-            "lmstudio:ibm/granite" -> "lmstudio/ibm/granite" (keeps lmstudio prefix)
-            "ollama/qwen3:4b" -> "ollama/qwen3:4b" (already in format)
-        """
-        # Check for explicit prefixes FIRST (before checking for /)
-        # This handles cases like "lmstudio:ibm/granite-4-h-tiny"
-        for prefix in ["openai:", "anthropic:", "vllm:", "lmstudio:"]:
-            if model_spec.startswith(prefix):
+        # Check for explicit provider prefix
+        for prefix in ["lmstudio:", "openai:", "anthropic:", "vllm:", "llamacpp:"]:
+            if spec.startswith(prefix):
                 provider = prefix[:-1]
-                model_name = model_spec[len(prefix):]
-                return f"{provider}/{model_name}"
-        # Already in LiteLLM format (provider/model)
-        if "/" in model_spec and not model_spec.startswith("hf.co/"):
-            return model_spec
-        # Default to Ollama
-        return f"ollama/{model_spec}"
+                model_name = spec[len(prefix):]
+                if provider == "lmstudio":
+                    return ModelConfig(
+                        name=model_name,
+                        provider="lmstudio",
+                        url="http://localhost:1234",
+                        api_key="lm-studio",
+                    )
+                elif provider == "openai":
+                    return ModelConfig(name=model_name, provider="openai")
+                else:
+                    return ModelConfig(name=model_name, provider=provider)
 
-    def to_litellm_api_model(model_spec: str) -> str:
-        """Convert model specification to the actual LiteLLM API format.
+        # Default to Ollama with default URL
+        return ModelConfig(
+            name=spec,
+            provider="ollama",
+            url=ollama_url or "http://localhost:11434",
+        )
 
-        LM Studio uses OpenAI-compatible API, so lmstudio/ becomes openai/.
+    # Build list of ModelConfig objects
+    if models:
+        # CLI override: parse model specs
+        model_configs = [parse_model_spec_to_config(m.strip()) for m in models.split(",")]
+    else:
+        # Use models from benchmark config
+        model_configs = benchmark_config.get_benchmark_models()
+
+    # For display purposes, create a list of model names
+    model_names = [mc.name for mc in model_configs]
+
+    def get_model_api_config(model_config: ModelConfig) -> dict:
+        """Get api_base and api_key for a ModelConfig.
+
+        Returns dict with 'api_base' and 'api_key' keys for LiteLLM.
         """
-        litellm_model = to_litellm_model(model_spec)
-        if litellm_model.startswith("lmstudio/"):
-            return "openai/" + litellm_model[9:]
-        return litellm_model
+        result = {}
+        api_base = model_config.get_api_base()
+        if api_base:
+            result["api_base"] = api_base
+        if model_config.api_key:
+            result["api_key"] = model_config.api_key
+        return result
 
     console.print("[bold blue]Magaldi Model Benchmark[/]")
     console.print(f"  Repository: {repo_path}")
-    console.print(f"  Models: {', '.join(model_list)}")
+    console.print(f"  Models: {', '.join(model_names)}")
     console.print()
 
     try:
@@ -1771,108 +1794,114 @@ def benchmark_models(
         # Check backend connections
         console.print("\n[bold blue]Phase 5:[/] Backend Connection")
 
-        # Create unified client (uses LiteLLM)
-        client = BenchmarkClient(api_base=ollama_url)
-        if not client.check_connection():
-            console.print(f"[red]Cannot connect to Ollama at {ollama_url}[/]")
-            sys.exit(1)
+        # Group models by provider to check each backend once
+        from collections import defaultdict
+        models_by_provider: dict[str, list[ModelConfig]] = defaultdict(list)
+        for mc in model_configs:
+            models_by_provider[mc.provider].append(mc)
 
-        available_models = client.list_models()
-        console.print(f"  [green]✓[/] Ollama ({ollama_url}) | {len(available_models)} models")
+        # Check each provider's connection
+        available_models_by_provider: dict[str, list[str]] = {}
 
-        # Check LM Studio connection if any lmstudio models are configured
-        lmstudio_models_configured = any(m.startswith("lmstudio:") for m in model_list)
-        available_lmstudio_models: list[str] = []
-        if lmstudio_models_configured:
-            try:
-                import requests
-                resp = requests.get(f"{lmstudio_url}/models", timeout=5)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    available_lmstudio_models = [m["id"] for m in data.get("data", [])]
-                    console.print(f"  [green]✓[/] LM Studio ({lmstudio_url}) | {len(available_lmstudio_models)} models")
+        for provider, provider_models in models_by_provider.items():
+            # Get URL from first model of this provider
+            url = provider_models[0].url
+
+            if provider == "ollama":
+                client = BenchmarkClient(api_base=url)
+                if client.check_connection():
+                    available = client.list_models()
+                    available_models_by_provider[provider] = available
+                    console.print(f"  [green]✓[/] Ollama ({url}) | {len(available)} models")
                 else:
-                    console.print(f"  [yellow]![/] LM Studio ({lmstudio_url}) | Cannot list models (status {resp.status_code})")
-            except Exception as e:
-                console.print(f"  [yellow]![/] LM Studio ({lmstudio_url}) | Connection failed: {e}")
+                    console.print(f"[red]Cannot connect to Ollama at {url}[/]")
+                    available_models_by_provider[provider] = []
 
-        # Convert model specs to LiteLLM format and check availability
-        # Store mapping from litellm format to original spec for api_config lookup
-        missing_models = []
-        models_to_test = []
-        model_specs: dict[str, str] = {}  # litellm_model -> original_spec
-        for model_spec in model_list:
-            litellm_model = to_litellm_model(model_spec)
-
-            # For Ollama models, check availability
-            if litellm_model.startswith("ollama/"):
-                model_name = litellm_model[7:]  # Remove "ollama/" prefix
-                if model_name in available_models or f"{model_name}:latest" in available_models:
-                    models_to_test.append(litellm_model)
-                    model_specs[litellm_model] = model_spec
-                else:
-                    # Try without tag
-                    base = model_name.rsplit(":", 1)[0] if ":" in model_name else model_name
-                    if base in available_models or f"{base}:latest" in available_models:
-                        models_to_test.append(litellm_model)
-                        model_specs[litellm_model] = model_spec
+            elif provider in ("lmstudio", "llamacpp"):
+                try:
+                    import requests
+                    api_url = f"{url.rstrip('/')}/v1/models"
+                    resp = requests.get(api_url, timeout=5)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        available = [m["id"] for m in data.get("data", [])]
+                        available_models_by_provider[provider] = available
+                        console.print(f"  [green]✓[/] {provider} ({url}) | {len(available)} models")
                     else:
-                        missing_models.append(model_spec)
-            # For LM Studio models, check availability
-            elif litellm_model.startswith("lmstudio/"):
-                model_name = litellm_model[9:]  # Remove "lmstudio/" prefix
-                if available_lmstudio_models:
-                    if model_name in available_lmstudio_models:
-                        models_to_test.append(litellm_model)
-                        model_specs[litellm_model] = model_spec
-                    else:
-                        missing_models.append(model_spec)
-                else:
-                    # LM Studio not reachable, skip these models
-                    missing_models.append(model_spec)
+                        console.print(f"  [yellow]![/] {provider} ({url}) | Cannot list models (status {resp.status_code})")
+                        available_models_by_provider[provider] = []
+                except Exception as e:
+                    console.print(f"  [yellow]![/] {provider} ({url}) | Connection failed: {e}")
+                    available_models_by_provider[provider] = []
+
             else:
-                # Other models - trust they're available
-                models_to_test.append(litellm_model)
-                model_specs[litellm_model] = model_spec
+                # OpenAI, Anthropic, etc. - trust they're available
+                available_models_by_provider[provider] = ["*"]
+                console.print(f"  [green]✓[/] {provider} (cloud API)")
+
+        # Check availability of each configured model
+        missing_models: list[ModelConfig] = []
+        models_to_test: list[ModelConfig] = []
+
+        for mc in model_configs:
+            available = available_models_by_provider.get(mc.provider, [])
+
+            # Cloud providers - trust availability
+            if available == ["*"]:
+                models_to_test.append(mc)
+                continue
+
+            # Check if model is in available list
+            if mc.name in available or f"{mc.name}:latest" in available:
+                models_to_test.append(mc)
+            else:
+                # Try without tag
+                base = mc.name.rsplit(":", 1)[0] if ":" in mc.name else mc.name
+                if base in available or f"{base}:latest" in available:
+                    models_to_test.append(mc)
+                else:
+                    missing_models.append(mc)
 
         if missing_models:
             console.print(f"  [yellow]Missing models (skipped):[/]")
-            for m in missing_models:
-                console.print(f"    [dim]✗ {m}[/]")
+            for mc in missing_models:
+                console.print(f"    [dim]✗ {mc.provider}/{mc.name}[/]")
 
         if not models_to_test:
             console.print("\n[red]No models available to test.[/]")
             console.print("[yellow]Pull models with:[/]")
-            for m in missing_models:
-                console.print(f"  ollama pull {m}")
+            for mc in missing_models:
+                if mc.provider == "ollama":
+                    console.print(f"  ollama pull {mc.name}")
             sys.exit(1)
 
-        console.print(f"  Testing models: {', '.join(models_to_test)}")
+        test_model_names = [f"{mc.provider}/{mc.name}" for mc in models_to_test]
+        console.print(f"  Testing models: {', '.join(test_model_names)}")
 
         # Warmup models
         console.print("\n[bold blue]Phase 6:[/] Model Warmup")
-        models_failed_warmup = []
-        for litellm_model in models_to_test:
-            # Get api config for this model (LM Studio needs different api_base)
-            original_spec = model_specs.get(litellm_model, litellm_model)
-            api_config = get_model_api_config(original_spec)
-            # Use API model format (lmstudio/ -> openai/ for LiteLLM)
-            api_model = to_litellm_api_model(original_spec)
-            with console.status(f"[bold blue]Warming up {litellm_model}...[/]"):
-                success, warmup_time, error = client.warmup(
+        models_failed_warmup: list[ModelConfig] = []
+        for mc in models_to_test:
+            display_name = f"{mc.provider}/{mc.name}"
+            api_config = get_model_api_config(mc)
+            api_model = mc.get_litellm_model()
+            with console.status(f"[bold blue]Warming up {display_name}...[/]"):
+                # Create client with appropriate base URL
+                warmup_client = BenchmarkClient(api_base=mc.url)
+                success, warmup_time, error = warmup_client.warmup(
                     api_model,
                     timeout=120,
                     **api_config,
                 )
             if success:
-                console.print(f"  [green]✓[/] {litellm_model} ({warmup_time:.1f}s)")
+                console.print(f"  [green]✓[/] {display_name} ({warmup_time:.1f}s)")
             else:
-                console.print(f"  [red]✗[/] {litellm_model}: {error}")
-                models_failed_warmup.append(litellm_model)
+                console.print(f"  [red]✗[/] {display_name}: {error}")
+                models_failed_warmup.append(mc)
 
         # Remove failed models
-        for m in models_failed_warmup:
-            models_to_test.remove(m)
+        for mc in models_failed_warmup:
+            models_to_test.remove(mc)
 
         if not models_to_test:
             console.print("[red]No models available after warmup.[/]")
@@ -1880,7 +1909,8 @@ def benchmark_models(
 
         # Run benchmarks with hierarchical context (file → class → method)
         console.print("\n[bold blue]Phase 7:[/] Benchmarking (with hierarchical context)")
-        results: dict[str, list[BenchmarkResult]] = {m: [] for m in models_to_test}
+        # Use display name as key for results dict
+        results: dict[str, list[BenchmarkResult]] = {f"{mc.provider}/{mc.name}": [] for mc in models_to_test}
 
         # Sort elements by hierarchy level: file (0) → class (1) → function/method (2) → variable (3)
         level_order = {"file": 0, "class": 1, "function": 2, "method": 2, "variable": 3, "constant": 3}
@@ -1891,9 +1921,9 @@ def benchmark_models(
         prompts = [(elem, None) for elem in elements]  # Placeholder, prompts built per-model
 
         # Test each model with hierarchical summarization
-        for litellm_model in models_to_test:
-            original_spec = model_specs.get(litellm_model, litellm_model)
-            console.print(f"\n  [cyan]{litellm_model}[/]")
+        for mc in models_to_test:
+            display_name = f"{mc.provider}/{mc.name}"
+            console.print(f"\n  [cyan]{display_name}[/]")
 
             # Track summaries for hierarchical context (per model)
             # file_summaries[relative_path] = summary
@@ -1943,20 +1973,21 @@ def benchmark_models(
 
                 # For thinking models, add directive to skip thinking
                 from shared.ai.ollama_benchmark import BenchmarkClient
-                model_name = litellm_model.split("/")[-1] if "/" in litellm_model else litellm_model
-                if any(model_name.startswith(tm) for tm in BenchmarkClient.THINKING_MODELS):
+                if any(mc.name.startswith(tm) for tm in BenchmarkClient.THINKING_MODELS):
                     prompt = prompt + "\n\n/no_think"
 
                 with console.status(f"    [{len(model_results)+1}/{len(elements)}] {elem_name}..."):
-                    # Get per-model parameters from config (use original spec for pattern matching)
-                    model_params = benchmark_config.get_model_params(original_spec)
+                    # Get per-model parameters from config (use model name for pattern matching)
+                    model_params = benchmark_config.get_model_params(mc.name)
                     # Use per-model max_tokens if set, otherwise default
                     max_tokens = model_params.max_tokens or benchmark_config.max_tokens
-                    # Get api config for this model (LM Studio needs different api_base)
-                    api_config = get_model_api_config(original_spec)
-                    # Use API model format (lmstudio/ -> openai/ for LiteLLM)
-                    api_model = to_litellm_api_model(original_spec)
-                    result = client.generate(
+                    # Get api config for this model
+                    api_config = get_model_api_config(mc)
+                    # Get LiteLLM model identifier
+                    api_model = mc.get_litellm_model()
+                    # Create client for this model's URL
+                    bench_client = BenchmarkClient(api_base=mc.url)
+                    result = bench_client.generate(
                         model=api_model,
                         prompt=prompt,
                         temperature=model_params.temperature,
@@ -1997,7 +2028,7 @@ def benchmark_models(
                     console.print(f"    [red]✗[/] {elem_name:<40} | {result.error}")
 
             # Store results in original element order
-            results[litellm_model] = [model_results[i] for i in range(len(elements))]
+            results[display_name] = [model_results[i] for i in range(len(elements))]
 
         # Phase 8: LLM Evaluation of summaries (multi-criteria JSON-based)
         console.print("\n[bold blue]Phase 8:[/] LLM Evaluation (multi-criteria)")
@@ -2010,35 +2041,31 @@ def benchmark_models(
             parse_evaluation_response,
         )
 
-        # Validate configured eval models, filter to available ones
-        # Store as (original_spec, litellm_model) tuples for api_config lookup
-        eval_model_pairs: list[tuple[str, str]] = []
-        for em in benchmark_config.eval_models:
-            litellm_model = to_litellm_model(em)
-            # For Ollama models, check availability
-            if litellm_model.startswith("ollama/"):
-                model_name = litellm_model[7:]  # Remove "ollama/" prefix
-                if model_name in available_models or f"{model_name}:latest" in available_models:
-                    eval_model_pairs.append((em, litellm_model))
+        # Get eval model configs from benchmark config
+        eval_model_configs: list[ModelConfig] = []
+        for eval_ref in benchmark_config.eval_models:
+            try:
+                eval_mc = benchmark_config.get_model(eval_ref)
+                # Check availability
+                available = available_models_by_provider.get(eval_mc.provider, [])
+                if available == ["*"] or eval_mc.name in available or f"{eval_mc.name}:latest" in available:
+                    eval_model_configs.append(eval_mc)
                 else:
-                    base = model_name.rsplit(":", 1)[0] if ":" in model_name else model_name
-                    if base in available_models or f"{base}:latest" in available_models:
-                        eval_model_pairs.append((em, litellm_model))
+                    base = eval_mc.name.rsplit(":", 1)[0] if ":" in eval_mc.name else eval_mc.name
+                    if base in available or f"{base}:latest" in available:
+                        eval_model_configs.append(eval_mc)
                     else:
-                        console.print(f"  [yellow]Eval model {em} not available, skipping[/]")
-            else:
-                # Non-Ollama models - trust they're available
-                eval_model_pairs.append((em, litellm_model))
+                        console.print(f"  [yellow]Eval model {eval_ref} not available, skipping[/]")
+            except KeyError:
+                console.print(f"  [yellow]Eval model {eval_ref} not configured, skipping[/]")
 
-        if not eval_model_pairs:
-            console.print(f"  [yellow]No eval models available, using {models_to_test[-1]}[/]")
+        if not eval_model_configs:
+            console.print(f"  [yellow]No eval models available, using last tested model[/]")
             # Use last tested model as fallback
-            last_model = model_list[-1]
-            eval_model_pairs = [(last_model, to_litellm_model(last_model))]
+            eval_model_configs = [models_to_test[-1]]
 
-        eval_models = [litellm for _, litellm in eval_model_pairs]
-        eval_model_specs = {litellm: orig for orig, litellm in eval_model_pairs}
-        console.print(f"  Using {len(eval_models)} evaluator(s): [cyan]{', '.join(eval_models)}[/]")
+        eval_display_names = [f"{mc.provider}/{mc.name}" for mc in eval_model_configs]
+        console.print(f"  Using {len(eval_model_configs)} evaluator(s): [cyan]{', '.join(eval_display_names)}[/]")
 
         # Show criteria for each element type
         element_types_in_test = set(elem.element_type for elem, _ in prompts)
@@ -2046,25 +2073,29 @@ def benchmark_models(
             criteria = EVALUATION_CRITERIA.get(elem_type, {})
             console.print(f"  [dim]{elem_type} criteria: {', '.join(criteria.keys())}[/]")
 
-        # evaluation_results[element_index][eval_model] = EvaluationResult
+        # evaluation_results[element_index][eval_model_name] = EvaluationResult
         evaluation_results: dict[int, dict[str, EvaluationResult]] = {
             i: {} for i in range(len(prompts))
         }
         total_elements = len(prompts)
 
+        # Get display names for models (used as keys)
+        tested_model_names = [f"{mc.provider}/{mc.name}" for mc in models_to_test]
+
         for i, (elem, _) in enumerate(prompts):
             elem_name = f"{elem.element_type}:{elem.name}"
             progress = f"[{i+1}/{total_elements}]"
 
-            # Build summaries dict for evaluation
+            # Build summaries dict for evaluation (using display names as keys)
             summaries: dict[str, str] = {}
-            for model in models_to_test:
-                result = results[model][i]
+            for mc in models_to_test:
+                model_key = f"{mc.provider}/{mc.name}"
+                result = results[model_key][i]
                 if result.success and result.response.strip():
                     from shared.ai.summarization import clean_summary
-                    summaries[model] = clean_summary(result.response)
+                    summaries[model_key] = clean_summary(result.response)
                 else:
-                    summaries[model] = ""
+                    summaries[model_key] = ""
 
             # Build evaluation prompt with element-specific criteria
             eval_prompt = build_evaluation_prompt(
@@ -2075,12 +2106,10 @@ def benchmark_models(
             )
 
             # Evaluate with each eval model
-            for eval_model in eval_models:
-                # Get api config for this eval model (LM Studio needs different api_base)
-                eval_original_spec = eval_model_specs.get(eval_model, eval_model)
-                eval_api_config = get_model_api_config(eval_original_spec)
-                # Use API model format (lmstudio/ -> openai/ for LiteLLM)
-                eval_api_model = to_litellm_api_model(eval_original_spec)
+            for eval_mc in eval_model_configs:
+                eval_display_name = f"{eval_mc.provider}/{eval_mc.name}"
+                eval_api_config = get_model_api_config(eval_mc)
+                eval_api_model = eval_mc.get_litellm_model()
 
                 # Retry up to 3 times if parsing fails
                 max_retries = 3
@@ -2090,8 +2119,9 @@ def benchmark_models(
                 )
 
                 for attempt in range(max_retries):
-                    with console.status(f"  {progress} [{eval_model}] Evaluating {elem_name}..." + (f" (retry {attempt})" if attempt > 0 else "")):
-                        eval_result = client.generate(
+                    with console.status(f"  {progress} [{eval_display_name}] Evaluating {elem_name}..." + (f" (retry {attempt})" if attempt > 0 else "")):
+                        eval_client = BenchmarkClient(api_base=eval_mc.url)
+                        eval_result = eval_client.generate(
                             model=eval_api_model,
                             prompt=eval_prompt,
                             temperature=0.1 + (attempt * 0.1),  # Slightly increase temp on retry
@@ -2105,7 +2135,7 @@ def benchmark_models(
                         evaluations, error = parse_evaluation_response(
                             eval_result.response,
                             elem.element_type,
-                            models_to_test,
+                            tested_model_names,
                         )
                         eval_result_obj.evaluations = evaluations
                         eval_result_obj.parse_error = error
@@ -2120,27 +2150,27 @@ def benchmark_models(
                         if attempt < max_retries - 1:
                             continue  # Retry on failure
 
-                evaluation_results[i][eval_model] = eval_result_obj
+                evaluation_results[i][eval_display_name] = eval_result_obj
 
             # Display scores (show average scaled score for each model)
             rating_parts = []
-            for m in models_to_test:
+            for model_name in tested_model_names:
                 model_scores = []
-                for em in eval_models:
-                    eval_res = evaluation_results[i].get(em)
-                    if eval_res and m in eval_res.evaluations:
-                        model_scores.append(eval_res.evaluations[m].average)
+                for eval_name in eval_display_names:
+                    eval_res = evaluation_results[i].get(eval_name)
+                    if eval_res and model_name in eval_res.evaluations:
+                        model_scores.append(eval_res.evaluations[model_name].average)
                 if model_scores:
                     avg = sum(model_scores) / len(model_scores)
-                    rating_parts.append(f"{m}: {avg:.1f}")
+                    rating_parts.append(f"{model_name}: {avg:.1f}")
                 else:
-                    rating_parts.append(f"{m}: ?")
+                    rating_parts.append(f"{model_name}: ?")
             rating_str = " | ".join(rating_parts)
 
             # Check for errors
             errors = [
-                evaluation_results[i].get(em, EvaluationResult("", "")).parse_error
-                for em in eval_models
+                evaluation_results[i].get(eval_name, EvaluationResult("", "")).parse_error
+                for eval_name in eval_display_names
             ]
             has_errors = any(e for e in errors)
 
@@ -2159,36 +2189,36 @@ def benchmark_models(
         # Build real_success_indices once
         real_success_indices_by_model: dict[str, list[int]] = {}
         real_successes_by_model: dict[str, list] = {}
-        for model in models_to_test:
-            model_results = results[model]
+        for model_name in tested_model_names:
+            model_results_list = results[model_name]
             real_successes = []
             real_success_indices = []
-            for i, r in enumerate(model_results):
+            for i, r in enumerate(model_results_list):
                 if r.success and r.response.strip():
                     cleaned = clean_summary(r.response)
                     if cleaned.strip():
                         real_successes.append(r)
                         real_success_indices.append(i)
-            real_success_indices_by_model[model] = real_success_indices
-            real_successes_by_model[model] = real_successes
+            real_success_indices_by_model[model_name] = real_success_indices
+            real_successes_by_model[model_name] = real_successes
 
         # Helper to get scaled score (1-10) from evaluation results
-        def get_average(elem_idx: int, model: str, eval_model: str) -> float | None:
-            eval_res = evaluation_results[elem_idx].get(eval_model)
-            if eval_res and model in eval_res.evaluations:
-                return eval_res.evaluations[model].average
+        def get_average(elem_idx: int, model_name: str, eval_name: str) -> float | None:
+            eval_res = evaluation_results[elem_idx].get(eval_name)
+            if eval_res and model_name in eval_res.evaluations:
+                return eval_res.evaluations[model_name].average
             return None
 
         # Helper to get criteria scores
-        def get_criteria_scores(elem_idx: int, model: str, eval_model: str) -> dict[str, int]:
-            eval_res = evaluation_results[elem_idx].get(eval_model)
-            if eval_res and model in eval_res.evaluations:
-                return eval_res.evaluations[model].scores
+        def get_criteria_scores(elem_idx: int, model_name: str, eval_name: str) -> dict[str, int]:
+            eval_res = evaluation_results[elem_idx].get(eval_name)
+            if eval_res and model_name in eval_res.evaluations:
+                return eval_res.evaluations[model_name].scores
             return {}
 
         # Show summary table per evaluator
-        for eval_model in eval_models:
-            console.print(f"\n[bold]Evaluator: {eval_model}[/]")
+        for eval_name in eval_display_names:
+            console.print(f"\n[bold]Evaluator: {eval_name}[/]")
 
             summary_table = Table(show_header=True, header_style="bold cyan")
             summary_table.add_column("Model", style="cyan", no_wrap=True)
@@ -2197,13 +2227,13 @@ def benchmark_models(
             summary_table.add_column("Avg Time", justify="right")
             summary_table.add_column("tok/s", justify="right")
 
-            for model in models_to_test:
-                real_successes = real_successes_by_model[model]
-                real_success_indices = real_success_indices_by_model[model]
+            for model_name in tested_model_names:
+                real_successes = real_successes_by_model[model_name]
+                real_success_indices = real_success_indices_by_model[model_name]
 
                 # Calculate average scaled score for real successes
                 model_scores = [
-                    get_average(i, model, eval_model)
+                    get_average(i, model_name, eval_name)
                     for i in real_success_indices
                 ]
                 valid_scores = [s for s in model_scores if s is not None]
@@ -2222,17 +2252,17 @@ def benchmark_models(
                         score_style = "red"
 
                     summary_table.add_row(
-                        model,
+                        model_name,
                         f"[{score_style}]{avg_score:.1f}/10[/]" if valid_scores else "-",
-                        f"{len(real_successes)}/{len(results[model])}",
+                        f"{len(real_successes)}/{len(results[model_name])}",
                         f"{avg_wall:.2f}s",
                         f"{avg_tps:.0f}",
                     )
                 else:
                     summary_table.add_row(
-                        model,
+                        model_name,
                         "-",
-                        f"0/{len(results[model])}",
+                        f"0/{len(results[model_name])}",
                         "-",
                         "-",
                     )
@@ -2258,21 +2288,21 @@ def benchmark_models(
             # Build table with criteria as rows, models as columns
             criteria_table = Table(show_header=True, header_style="bold", expand=False)
             criteria_table.add_column("Criterion", style="dim", no_wrap=True, min_width=20)
-            for model in models_to_test:
-                criteria_table.add_column(model.replace("/", "\n"), justify="center")
+            for model_name in tested_model_names:
+                criteria_table.add_column(model_name.replace("/", "\n"), justify="center")
 
             for criterion in criteria.keys():
                 row = [criterion]
-                for model in models_to_test:
+                for model_name in tested_model_names:
                     # Average this criterion across all elements of this type and all evaluators
                     criterion_scores = []
                     for i in indices:
-                        r = results[model][i]
+                        r = results[model_name][i]
                         if r.success and r.response.strip():
                             cleaned = clean_summary(r.response)
                             if cleaned.strip():
-                                for em in eval_models:
-                                    scores = get_criteria_scores(i, model, em)
+                                for eval_name in eval_display_names:
+                                    scores = get_criteria_scores(i, model_name, eval_name)
                                     if criterion in scores:
                                         criterion_scores.append(scores[criterion])
                     if criterion_scores:
@@ -2290,15 +2320,15 @@ def benchmark_models(
 
             # Add overall row
             overall_row = ["[bold]Overall[/]"]
-            for model in models_to_test:
+            for model_name in tested_model_names:
                 model_scores = []
                 for i in indices:
-                    r = results[model][i]
+                    r = results[model_name][i]
                     if r.success and r.response.strip():
                         cleaned = clean_summary(r.response)
                         if cleaned.strip():
-                            for em in eval_models:
-                                score = get_average(i, model, em)
+                            for eval_name in eval_display_names:
+                                score = get_average(i, model_name, eval_name)
                                 if score is not None:
                                     model_scores.append(score)
                 if model_scores:
@@ -2316,8 +2346,8 @@ def benchmark_models(
             console.print(criteria_table)
 
         # Averaged summary across all evaluators
-        if len(eval_models) > 1:
-            console.print(f"\n[bold]Averaged Across {len(eval_models)} Evaluators[/]")
+        if len(eval_display_names) > 1:
+            console.print(f"\n[bold]Averaged Across {len(eval_display_names)} Evaluators[/]")
 
             avg_summary_table = Table(show_header=True, header_style="bold cyan")
             avg_summary_table.add_column("Model", style="cyan", no_wrap=True)
@@ -2326,15 +2356,15 @@ def benchmark_models(
             avg_summary_table.add_column("Avg Time", justify="right")
             avg_summary_table.add_column("tok/s", justify="right")
 
-            for model in models_to_test:
-                real_successes = real_successes_by_model[model]
-                real_success_indices = real_success_indices_by_model[model]
+            for model_name in tested_model_names:
+                real_successes = real_successes_by_model[model_name]
+                real_success_indices = real_success_indices_by_model[model_name]
 
                 # Average across all evaluators
                 all_scores = []
                 for i in real_success_indices:
-                    for em in eval_models:
-                        score = get_average(i, model, em)
+                    for eval_name in eval_display_names:
+                        score = get_average(i, model_name, eval_name)
                         if score is not None:
                             all_scores.append(score)
                 avg_score = sum(all_scores) / len(all_scores) if all_scores else 0
@@ -2351,14 +2381,14 @@ def benchmark_models(
                         score_style = "red"
 
                     avg_summary_table.add_row(
-                        model,
+                        model_name,
                         f"[{score_style}]{avg_score:.1f}/10[/]" if all_scores else "-",
-                        f"{len(real_successes)}/{len(results[model])}",
+                        f"{len(real_successes)}/{len(results[model_name])}",
                         f"{avg_wall:.2f}s",
                         f"{avg_tps:.0f}",
                     )
                 else:
-                    avg_summary_table.add_row(model, "-", f"0/{len(results[model])}", "-", "-")
+                    avg_summary_table.add_row(model_name, "-", f"0/{len(results[model_name])}", "-", "-")
 
             console.print(avg_summary_table)
 
@@ -2386,9 +2416,9 @@ def benchmark_models(
         for i, (elem, _) in enumerate(prompts):
             # Get prompt char count from any successful result
             prompt_chars = 0
-            for model in models_to_test:
-                if results[model][i].success and results[model][i].prompt_chars > 0:
-                    prompt_chars = results[model][i].prompt_chars
+            for model_name in tested_model_names:
+                if results[model_name][i].success and results[model_name][i].prompt_chars > 0:
+                    prompt_chars = results[model_name][i].prompt_chars
                     break
             if prompt_chars == 0:
                 # Fallback: estimate from raw_code length
@@ -2401,23 +2431,23 @@ def benchmark_models(
         char_table = Table(show_header=True, header_style="bold cyan", expand=False)
         char_table.add_column("Char Range", style="cyan", no_wrap=True, min_width=10)
         char_table.add_column("Count", justify="right", no_wrap=True, min_width=5)
-        for model in models_to_test:
-            char_table.add_column(model.replace("/", "\n"), justify="center")
+        for model_name in tested_model_names:
+            char_table.add_column(model_name.replace("/", "\n"), justify="center")
 
         # Sort by range order
         range_order = {label: i for i, (_, _, label) in enumerate(char_ranges)}
         for range_label in sorted(elements_by_char_range.keys(), key=lambda x: range_order.get(x, 99)):
             indices = elements_by_char_range[range_label]
             row = [range_label, str(len(indices))]
-            for model in models_to_test:
+            for model_name in tested_model_names:
                 range_scores = []
                 for i in indices:
-                    r = results[model][i]
+                    r = results[model_name][i]
                     if r.success and r.response.strip():
                         cleaned = clean_summary(r.response)
                         if cleaned.strip():
-                            for em in eval_models:
-                                score = get_average(i, model, em)
+                            for eval_name in eval_display_names:
+                                score = get_average(i, model_name, eval_name)
                                 if score is not None:
                                     range_scores.append(score)
                 if range_scores:
@@ -2444,9 +2474,9 @@ def benchmark_models(
 
         for i, (elem, _) in enumerate(prompts):
             prompt_chars = 0
-            for model in models_to_test:
-                if results[model][i].success and results[model][i].prompt_chars > 0:
-                    prompt_chars = results[model][i].prompt_chars
+            for model_name in tested_model_names:
+                if results[model_name][i].success and results[model_name][i].prompt_chars > 0:
+                    prompt_chars = results[model_name][i].prompt_chars
                     break
             if prompt_chars == 0:
                 prompt_chars = len(elem.raw_code or "") + 200
@@ -2454,34 +2484,34 @@ def benchmark_models(
             range_label = get_char_range_label(prompt_chars)
             elem_type = elem.element_type
 
-            for model in models_to_test:
-                r = results[model][i]
+            for model_name in tested_model_names:
+                r = results[model_name][i]
                 if r.success and r.response.strip():
                     cleaned = clean_summary(r.response)
                     if cleaned.strip():
-                        for em in eval_models:
-                            score = get_average(i, model, em)
+                        for eval_name in eval_display_names:
+                            score = get_average(i, model_name, eval_name)
                             if score is not None:
-                                type_range_scores[elem_type][range_label][model].append(score)
+                                type_range_scores[elem_type][range_label][model_name].append(score)
 
         # Single combined table (element type first, then char range)
         combined_table = Table(show_header=True, header_style="bold cyan", show_lines=False, expand=False)
         combined_table.add_column("Element Type", style="cyan", no_wrap=True, min_width=12)
         combined_table.add_column("Char Range", style="dim", no_wrap=True, min_width=10)
         combined_table.add_column("Count", justify="right", no_wrap=True, min_width=5)
-        for model in models_to_test:
-            combined_table.add_column(model.replace("/", "\n"), justify="center")
+        for model_name in tested_model_names:
+            combined_table.add_column(model_name.replace("/", "\n"), justify="center")
 
         for elem_type in sorted(type_range_scores.keys()):
             range_data = type_range_scores[elem_type]
             for range_label in sorted(range_data.keys(), key=lambda x: range_order.get(x, 99)):
                 model_scores_data = range_data[range_label]
                 count = max(len(s) for s in model_scores_data.values()) if model_scores_data else 0
-                count = count // len(eval_models) if eval_models else count
+                count = count // len(eval_models) if eval_display_names else count
                 row = [elem_type, range_label, str(count)]
-                for model in models_to_test:
-                    if model in model_scores_data and model_scores_data[model]:
-                        avg = sum(model_scores_data[model]) / len(model_scores_data[model])
+                for model_name in tested_model_names:
+                    if model in model_scores_data and model_scores_data[model_name]:
+                        avg = sum(model_scores_data[model_name]) / len(model_scores_data[model_name])
                         if avg >= 8:
                             row.append(f"[bold green]{avg:.1f}[/]")
                         elif avg >= 6:
@@ -2509,9 +2539,9 @@ def benchmark_models(
         for i, (elem, _) in enumerate(prompts):
             # Get prompt chars
             prompt_chars = 0
-            for model in models_to_test:
-                if results[model][i].success and results[model][i].prompt_chars > 0:
-                    prompt_chars = results[model][i].prompt_chars
+            for model_name in tested_model_names:
+                if results[model_name][i].success and results[model_name][i].prompt_chars > 0:
+                    prompt_chars = results[model_name][i].prompt_chars
                     break
             if prompt_chars == 0:
                 prompt_chars = len(elem.raw_code or "") + 200
@@ -2522,8 +2552,8 @@ def benchmark_models(
 
             # Check if any model has a valid response for this element
             has_valid_response = False
-            for model in models_to_test:
-                r = results[model][i]
+            for model_name in tested_model_names:
+                r = results[model_name][i]
                 if r.success and r.response.strip():
                     cleaned = clean_summary(r.response)
                     if cleaned.strip():
@@ -2534,16 +2564,16 @@ def benchmark_models(
                 element_counts[elem_type][range_label] += 1
 
             # Collect per-criterion scores
-            for model in models_to_test:
-                r = results[model][i]
+            for model_name in tested_model_names:
+                r = results[model_name][i]
                 if r.success and r.response.strip():
                     cleaned = clean_summary(r.response)
                     if cleaned.strip():
-                        for em in eval_models:
-                            scores = get_criteria_scores(i, model, em)
+                        for eval_name in eval_display_names:
+                            scores = get_criteria_scores(i, model_name, eval_name)
                             for criterion in criteria.keys():
                                 if criterion in scores:
-                                    full_metrics[elem_type][range_label][criterion][model].append(scores[criterion])
+                                    full_metrics[elem_type][range_label][criterion][model_name].append(scores[criterion])
 
         # Create full metrics table
         metrics_table = Table(show_header=True, header_style="bold magenta", show_lines=True, expand=False)
@@ -2551,8 +2581,8 @@ def benchmark_models(
         metrics_table.add_column("Char Range", style="dim", no_wrap=True, min_width=10)
         metrics_table.add_column("Criterion", style="dim", no_wrap=True, min_width=18)
         metrics_table.add_column("Count", justify="right", no_wrap=True, min_width=5)
-        for model in models_to_test:
-            metrics_table.add_column(model.replace("/", "\n"), justify="center")
+        for model_name in tested_model_names:
+            metrics_table.add_column(model_name.replace("/", "\n"), justify="center")
 
         def format_score(avg: float) -> str:
             if avg >= 8:
@@ -2581,15 +2611,15 @@ def benchmark_models(
                 for criterion in criteria.keys():
                     if criterion in criterion_data:
                         row = [elem_type, range_label, criterion, str(count)]
-                        for model in models_to_test:
-                            if model in criterion_data[criterion] and criterion_data[criterion][model]:
-                                scores = criterion_data[criterion][model]
+                        for model_name in tested_model_names:
+                            if model in criterion_data[criterion] and criterion_data[criterion][model_name]:
+                                scores = criterion_data[criterion][model_name]
                                 avg = calc_avg(scores)
                                 if avg is not None:
                                     row.append(format_score(avg))
-                                    range_totals[model].append(avg)
-                                    type_totals[model].append(avg)
-                                    grand_totals[model].append(avg)
+                                    range_totals[model_name].append(avg)
+                                    type_totals[model_name].append(avg)
+                                    grand_totals[model_name].append(avg)
                                 else:
                                     row.append("-")
                             else:
@@ -2598,9 +2628,9 @@ def benchmark_models(
 
                 # Subtotal for element_type + char_range
                 subtotal_row = ["", "", "[bold]Subtotal[/]", f"[bold]{count}[/]"]
-                for model in models_to_test:
-                    if range_totals[model]:
-                        avg = calc_avg(range_totals[model])
+                for model_name in tested_model_names:
+                    if range_totals[model_name]:
+                        avg = calc_avg(range_totals[model_name])
                         subtotal_row.append(f"[bold]{format_score(avg)}[/]" if avg else "-")
                     else:
                         subtotal_row.append("-")
@@ -2609,9 +2639,9 @@ def benchmark_models(
             # Total for element_type (across all char ranges)
             type_count = sum(element_counts[elem_type].values())
             type_total_row = [f"[bold cyan]{elem_type}[/]", "[bold]TOTAL[/]", "", f"[bold]{type_count}[/]"]
-            for model in models_to_test:
-                if type_totals[model]:
-                    avg = calc_avg(type_totals[model])
+            for model_name in tested_model_names:
+                if type_totals[model_name]:
+                    avg = calc_avg(type_totals[model_name])
                     type_total_row.append(f"[bold]{format_score(avg)}[/]" if avg else "-")
                 else:
                     type_total_row.append("-")
@@ -2620,9 +2650,9 @@ def benchmark_models(
         # Grand total
         total_count = sum(sum(rc.values()) for rc in element_counts.values())
         grand_total_row = ["[bold magenta]GRAND TOTAL[/]", "", "", f"[bold]{total_count}[/]"]
-        for model in models_to_test:
-            if grand_totals[model]:
-                avg = calc_avg(grand_totals[model])
+        for model_name in tested_model_names:
+            if grand_totals[model_name]:
+                avg = calc_avg(grand_totals[model_name])
                 grand_total_row.append(f"[bold]{format_score(avg)}[/]" if avg else "-")
             else:
                 grand_total_row.append("-")
@@ -2632,8 +2662,8 @@ def benchmark_models(
 
         # Token stats
         console.print("\n[bold]Token Statistics[/]")
-        for model in models_to_test:
-            successful = [r for r in results[model] if r.success]
+        for model_name in tested_model_names:
+            successful = [r for r in results[model_name] if r.success]
             if successful:
                 total_prompt = sum(r.prompt_tokens for r in successful)
                 total_output = sum(r.output_tokens for r in successful)
@@ -2642,16 +2672,13 @@ def benchmark_models(
         # Save results to markdown
         markdown_path = _save_benchmark_markdown(
             repo_path=repo_path,
-            models_tested=models_to_test,
-            eval_models=eval_models,
+            models_tested=tested_model_names,
+            eval_models=eval_display_names,
             elements=elements,
             results=results,
             evaluation_results=evaluation_results,
         )
         console.print(f"\n[bold green]Results saved to:[/] {markdown_path}")
-
-        # Close client
-        client.close()
         console.print("\n[green]Benchmark complete.[/]")
 
     except KeyboardInterrupt:
@@ -3097,9 +3124,9 @@ def _save_benchmark_markdown(
             if generation_ok:
                 # Get scores and notes from evaluators
                 score_parts = []
-                for em in eval_models:
-                    score = get_average(i, model, em)
-                    notes = get_notes(i, model, em)
+                for eval_name in eval_display_names:
+                    score = get_average(i, model_name, eval_name)
+                    notes = get_notes(i, model_name, eval_name)
                     em_short = em.split('/')[0] if '/' in em else em
                     if score is not None:
                         if notes:
@@ -3118,8 +3145,8 @@ def _save_benchmark_markdown(
                 criteria = EVALUATION_CRITERIA.get(elem.element_type, {})
                 if criteria:
                     lines.append("Criteria:")
-                    for em in eval_models:
-                        scores = get_criteria_scores(i, model, em)
+                    for eval_name in eval_display_names:
+                        scores = get_criteria_scores(i, model_name, eval_name)
                         if scores:
                             em_short = em.split('/')[0] if '/' in em else em
                             criteria_str = ", ".join(f"{k}={v}" for k, v in scores.items())

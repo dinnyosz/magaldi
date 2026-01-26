@@ -31,7 +31,10 @@ make typecheck              # Run mypy on src/magaldi
 make check                  # All: lint + typecheck + test
 
 # Pull Ollama models (for AI features)
-make ollama-pull            # qwen2.5-coder:7b, snowflake-arctic-embed2
+make ollama-pull            # qwen3:1.7b, qwen3:4b-instruct, snowflake-arctic-embed2
+
+# Use llama.cpp server for summarization (better batching)
+./tools/benchmark-llama-server.sh --model qwen3:4b-instruct
 ```
 
 ## Architecture

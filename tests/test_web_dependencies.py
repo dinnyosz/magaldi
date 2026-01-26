@@ -170,22 +170,18 @@ class TestCheckLlmHealth:
 
     @pytest.mark.asyncio
     async def test_healthy_llm(self, test_config):
-        """Test returns healthy status for healthy LLM."""
+        """Test returns healthy status for healthy LLM models."""
         mock_response = MagicMock()
         mock_response.ok = True
-        mock_response.json.return_value = {
-            "models": [
-                {"name": "llama2"},
-                {"name": "codellama"},
-            ]
-        }
 
         with patch("requests.get", return_value=mock_response):
             result = await check_llm_health(test_config)
 
+        # Now checks each model in config.llm.models individually
         assert result["status"] == "healthy"
-        assert "llama2" in result["models_loaded"]
-        assert "codellama" in result["models_loaded"]
+        assert "models" in result
+        # At least one model should be healthy
+        assert any(m.get("status") == "healthy" for m in result["models"].values())
 
     @pytest.mark.asyncio
     async def test_unhealthy_on_http_error(self, test_config):
@@ -197,8 +193,11 @@ class TestCheckLlmHealth:
         with patch("requests.get", return_value=mock_response):
             result = await check_llm_health(test_config)
 
+        # When all models fail, overall is unhealthy
         assert result["status"] == "unhealthy"
-        assert "HTTP 503" in result["error"]
+        # Individual model errors are in the models dict
+        assert "models" in result
+        assert any("HTTP 503" in m.get("error", "") for m in result["models"].values())
 
     @pytest.mark.asyncio
     async def test_unhealthy_on_exception(self, test_config):
@@ -207,36 +206,44 @@ class TestCheckLlmHealth:
             result = await check_llm_health(test_config)
 
         assert result["status"] == "unhealthy"
-        assert "Connection refused" in result["error"]
+        assert "models" in result
+        # Each model should have the error
+        assert any("Connection refused" in m.get("error", "") for m in result["models"].values())
 
     @pytest.mark.asyncio
-    async def test_handles_empty_models_list(self, test_config):
-        """Test handles empty models list."""
+    async def test_all_models_healthy(self, test_config):
+        """Test healthy when all models respond ok."""
         mock_response = MagicMock()
         mock_response.ok = True
-        mock_response.json.return_value = {"models": []}
 
         with patch("requests.get", return_value=mock_response):
             result = await check_llm_health(test_config)
 
         assert result["status"] == "healthy"
-        assert result["models_loaded"] == []
+        assert "models" in result
+        # All configured models should be in results
+        assert len(result["models"]) == len(test_config.llm.models)
 
     @pytest.mark.asyncio
-    async def test_handles_missing_name_field(self, test_config):
-        """Test handles models without name field."""
-        mock_response = MagicMock()
-        mock_response.ok = True
-        mock_response.json.return_value = {
-            "models": [{"size": 123}, {"name": "test"}]
-        }
+    async def test_partial_healthy(self, test_config):
+        """Test healthy when at least one model responds ok."""
+        call_count = [0]
 
-        with patch("requests.get", return_value=mock_response):
+        def mock_get(url, timeout=None):
+            mock = MagicMock()
+            call_count[0] += 1
+            if call_count[0] == 1:  # First model healthy
+                mock.ok = True
+            else:
+                mock.ok = False
+                mock.status_code = 503
+            return mock
+
+        with patch("requests.get", side_effect=mock_get):
             result = await check_llm_health(test_config)
 
+        # Should be healthy if at least one model is healthy
         assert result["status"] == "healthy"
-        assert "" in result["models_loaded"]  # Empty string for missing name
-        assert "test" in result["models_loaded"]
 
 
 # =============================================================================

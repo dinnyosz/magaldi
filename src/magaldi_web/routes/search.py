@@ -84,10 +84,11 @@ Good example: "Summaries in this codebase are generated through a multi-step pip
 Answer:"""
 
         # Use the configured model (prefer smaller/faster model for summary)
+        summarize_model = config.llm.get_summarize_model()
         llm = LLMClient(
-            model=config.llm.get_litellm_model(config.llm.summarize_model),
-            api_base=config.llm.url if config.llm.provider == "ollama" else None,
-            api_key=config.llm.api_key,
+            model=summarize_model.get_litellm_model(),
+            api_base=summarize_model.get_api_base(),
+            api_key=summarize_model.api_key,
         )
 
         summary = llm.generate(
@@ -148,11 +149,12 @@ async def search(
         try:
             from shared.ai.embedding import CodeEmbeddingClient
 
+            embed_model = config.llm.get_embed_model()
             embed_client = CodeEmbeddingClient(
-                url=config.llm.url,
-                model=config.llm.embed_model,
-                provider=config.llm.provider,
-                api_key=config.llm.embed_api_key or config.llm.api_key,
+                url=embed_model.url,
+                model=embed_model.name,
+                provider=embed_model.provider,
+                api_key=embed_model.api_key,
             )
             query_embedding = await embed_client.embed_single_async(request.query)
             logger.info(f"Query embedding generated successfully (dim={len(query_embedding)})")

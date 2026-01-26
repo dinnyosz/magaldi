@@ -68,83 +68,141 @@ class RedisConfig:
 
 
 @dataclass
-class LLMConfig:
-    """LLM provider configuration.
+class ModelConfig:
+    """Configuration for a single model.
 
-    Supports multiple providers through LiteLLM:
-    - "ollama": Local Ollama server
-    - "openai": OpenAI API
-    - "anthropic": Anthropic API
-    - And many more (see LiteLLM docs)
-
-    Model format depends on provider:
-    - ollama: Just the model name (e.g., "qwen2.5-coder:3b")
-    - openai: Model name (e.g., "gpt-4o-mini")
-    - anthropic: Model name (e.g., "claude-3-haiku-20240307")
+    Encapsulates everything needed to connect to and use a model.
     """
 
-    # Provider selection
-    provider: str = "ollama"  # ollama, openai, anthropic, etc.
+    name: str  # Model name (e.g., "qwen3:4b-instruct", "gpt-4o-mini")
+    provider: str = "ollama"  # ollama, llamacpp, openai, anthropic
+    url: str = "http://localhost:11434"  # API endpoint
+    api_key: str | None = None  # For cloud providers
 
-    # API configuration
-    url: str = "http://localhost:11434"  # For Ollama
-    api_key: str | None = None  # For cloud providers (or set via env vars)
+    # Optional model-specific settings
+    temperature: float | None = None
+    max_tokens: int | None = None
+    dimensions: int | None = None  # For embedding models
 
-    # Summarization model (for files, classes, features)
-    summarize_model: str = "qwen3:4b-instruct"
-    # Smaller model for functions, methods, variables, constants
-    summarize_model_small: str = "qwen3:1.7b"
-    # Generation settings (based on arxiv.org/html/2507.03160v2)
+    def get_litellm_model(self) -> str:
+        """Get the full LiteLLM model identifier."""
+        if self.provider == "ollama":
+            return f"ollama/{self.name}"
+        elif self.provider == "llamacpp":
+            return f"openai/{self.name}"
+        elif self.provider == "openai":
+            return self.name
+        else:
+            return f"{self.provider}/{self.name}"
+
+    def get_api_base(self) -> str | None:
+        """Get the API base URL."""
+        if self.provider == "ollama":
+            return self.url
+        elif self.provider == "llamacpp":
+            return f"{self.url.rstrip('/')}/v1"
+        elif self.provider == "openai":
+            return None
+        else:
+            return self.url
+
+
+@dataclass
+class LLMConfig:
+    """LLM configuration with named model definitions.
+
+    Models are defined once with all their connection details,
+    then referenced by name for different purposes.
+
+    Example config.yaml:
+        llm:
+          models:
+            qwen3-4b:
+              name: qwen3:4b-instruct
+              provider: llamacpp
+              url: http://localhost:8080
+            qwen3-small:
+              name: qwen3:1.7b
+              provider: llamacpp
+              url: http://localhost:8080
+            arctic:
+              name: snowflake-arctic-embed2
+              provider: ollama
+              url: http://localhost:11434
+
+          summarize_model: qwen3-4b
+          summarize_model_small: qwen3-small
+          embed_model: arctic
+    """
+
+    # Named model configurations
+    # All models run via Ollama for simplicity and optimized Apple Silicon performance
+    models: dict[str, ModelConfig] = field(default_factory=lambda: {
+        "qwen3-4b": ModelConfig(
+            name="qwen3:4b-instruct",
+            provider="ollama",
+            url="http://localhost:11434",
+        ),
+        "qwen3-small": ModelConfig(
+            name="qwen3:1.7b",
+            provider="ollama",
+            url="http://localhost:11434",
+        ),
+        "arctic-embed": ModelConfig(
+            name="snowflake-arctic-embed2",
+            provider="ollama",
+            url="http://localhost:11434",
+            dimensions=1024,
+        ),
+    })
+
+    # Which models to use for each purpose (reference by name)
+    summarize_model: str = "qwen3-4b"
+    summarize_model_small: str = "qwen3-small"
+    embed_model: str = "arctic-embed"
+
+    # Generation settings (defaults, can be overridden per-model)
     summarize_temperature: float = 0.2
     summarize_top_p: float = 0.95
-    # TODO: Add per-element-type max_tokens configuration (e.g., files need more than functions)
     summarize_max_tokens: int = 512
     summarize_context_window: int = 8192
-
-    # Embedding model
-    embed_model: str = "snowflake-arctic-embed2"
-    embed_dimensions: int = 1024
     embed_context_window: int = 8192
 
-    # Embedding provider (can be different from summarization)
-    embed_provider: str | None = None  # If None, uses same as provider
-    embed_api_key: str | None = None  # If None, uses same as api_key
+    def get_model(self, model_ref: str) -> ModelConfig:
+        """Get a model configuration by reference name."""
+        if model_ref not in self.models:
+            raise KeyError(f"Model '{model_ref}' not found. Available: {list(self.models.keys())}")
+        return self.models[model_ref]
 
-    def get_model_for_element_type(self, element_type: str) -> str:
+    def get_summarize_model(self) -> ModelConfig:
+        """Get the main summarization model config."""
+        return self.get_model(self.summarize_model)
+
+    def get_summarize_model_small(self) -> ModelConfig:
+        """Get the small summarization model config."""
+        return self.get_model(self.summarize_model_small)
+
+    def get_embed_model(self) -> ModelConfig:
+        """Get the embedding model config."""
+        return self.get_model(self.embed_model)
+
+    def get_model_for_element_type(self, element_type: str) -> ModelConfig:
         """Get the appropriate model for an element type.
 
         Uses small model for functions, methods, variables, constants.
         Uses main model for files, classes.
         """
         if element_type in ("function", "method", "variable", "constant"):
-            return self.summarize_model_small
-        return self.summarize_model
+            return self.get_summarize_model_small()
+        return self.get_summarize_model()
 
-    def get_litellm_model(self, model_name: str) -> str:
-        """Get the full LiteLLM model identifier.
+    # Convenience properties for embedding dimensions
+    @property
+    def embed_dimensions(self) -> int:
+        """Get embedding dimensions from the embed model config."""
+        model = self.get_embed_model()
+        return model.dimensions or 1024
 
-        Args:
-            model_name: The model name (e.g., "qwen2.5-coder:3b")
-
-        Returns:
-            Full model identifier for LiteLLM (e.g., "ollama/qwen2.5-coder:3b")
-        """
-        if self.provider == "ollama":
-            return f"ollama/{model_name}"
-        elif self.provider == "openai":
-            return model_name  # OpenAI models don't need prefix
-        else:
-            return f"{self.provider}/{model_name}"
-
-    def get_embed_litellm_model(self) -> str:
-        """Get the full LiteLLM embedding model identifier."""
-        provider = self.embed_provider or self.provider
-        if provider == "ollama":
-            return f"ollama/{self.embed_model}"
-        elif provider == "openai":
-            return self.embed_model
-        else:
-            return f"{provider}/{self.embed_model}"
 
 
 
@@ -260,32 +318,57 @@ class BenchmarkConfig:
     - Qwen2.5-Coder family: best stability and performance/efficiency ratio
     - 3B models offer sweet spot (59% pass@1, ~11GB VRAM)
     - 10% performance gain typically requires 4x VRAM increase
+
+    Example config.yaml:
+        benchmark:
+          models:
+            qwen3-small:
+              name: qwen3:1.7b
+              provider: ollama
+              url: http://localhost:11434
+            qwen3-4b:
+              name: qwen3:4b-instruct
+              provider: llamacpp
+              url: http://localhost:8080
+          benchmark_models:
+            - qwen3-small
+            - qwen3-4b
+          eval_models:
+            - qwen3-4b
     """
 
-    # Models to benchmark - final selection based on benchmarking
+    # Named model configurations for benchmarking
     # NOTE: qwen3 models after July 2025 split into "thinking" and "instruct" variants
     #       The default qwen3:Xb has thinking baked in, use instruct variants instead
-    models: list[str] = field(default_factory=lambda: [
-        # Qwen2.5-Coder - code-specific models (tested: 1.5b=8.1/10, 3b=7.8/10)
-        "qwen2.5-coder:1.5b",                   # Fast code model (8.1 rating, 147 t/s)
-        "qwen2.5-coder:3b",                     # Quality code model (7.8 rating, 91 t/s)
-        # Qwen3 - general models with good code performance
-        "qwen3:1.7b",                           # Best balance (8.2 rating, 114 t/s)
-        "qwen3:4b-instruct",                    # Best quality (8.7 rating, 65 t/s)
-        # LM Studio models (OpenAI-compatible API)
-        "lmstudio:qwen/qwen3-4b-2507",          # Qwen3-4B via LM Studio
-        "lmstudio:ibm/granite-4-h-tiny",        # IBM Granite 4 Hybrid Tiny via LM Studio
-        "lmstudio:granite-4.0-h-tiny-mlx",      # IBM Granite 4 Hybrid Tiny MLX via LM Studio
+    models: dict[str, ModelConfig] = field(default_factory=lambda: {
+        "qwen3-small": ModelConfig(
+            name="qwen3:1.7b",
+            provider="ollama",
+            url="http://localhost:11434",
+        ),
+        "qwen3-4b": ModelConfig(
+            name="qwen3:4b-instruct",
+            provider="ollama",
+            url="http://localhost:11434",
+        ),
+        "gemma3-4b": ModelConfig(
+            name="gemma3:4b",
+            provider="ollama",
+            url="http://localhost:11434",
+        ),
+    })
+
+    # Which models to benchmark (reference by name)
+    benchmark_models: list[str] = field(default_factory=lambda: [
+        "qwen3-small",   # Best balance (8.2 rating, 114 t/s)
+        "qwen3-4b",      # Best quality (8.7 rating, 65 t/s)
+        "gemma3-4b",     # Google Gemma 3 4B
     ])
 
     # Models used for evaluating/rating summaries (LLM-as-judge)
     eval_models: list[str] = field(default_factory=lambda: [
-        "qwen3:4b-instruct",                # Quality evaluator
+        "qwen3-4b",  # Quality evaluator
     ])
-    # Ollama API URL (defaults to same as llm.url)
-    ollama_url: str | None = None
-    # LM Studio API URL (OpenAI-compatible)
-    lmstudio_url: str = "http://localhost:1234/v1"
 
     # Generation settings (based on paper's methodology)
     # These are defaults; per-model params override when specified
@@ -376,6 +459,20 @@ class BenchmarkConfig:
             max_tokens=1024,  # Thinking models need more tokens
         ),
     })
+
+    def get_model(self, model_ref: str) -> ModelConfig:
+        """Get a model configuration by reference name."""
+        if model_ref not in self.models:
+            raise KeyError(f"Benchmark model '{model_ref}' not found. Available: {list(self.models.keys())}")
+        return self.models[model_ref]
+
+    def get_benchmark_models(self) -> list[ModelConfig]:
+        """Get all models to benchmark."""
+        return [self.get_model(ref) for ref in self.benchmark_models]
+
+    def get_eval_model_configs(self) -> list[ModelConfig]:
+        """Get all evaluation model configs."""
+        return [self.get_model(ref) for ref in self.eval_models]
 
     def get_model_params(self, model_name: str) -> ModelParams:
         """Get parameters for a specific model.
@@ -562,7 +659,6 @@ def _merge_config(config: MagaldiConfig, file_config: dict[str, Any]) -> Magaldi
     section_mapping = {
         "elasticsearch": config.elasticsearch,
         "redis": config.redis,
-        "llm": config.llm,
         "parser": config.parser,
         "search": config.search,
         "web": config.web,
@@ -588,6 +684,43 @@ def _merge_config(config: MagaldiConfig, file_config: dict[str, Any]) -> Magaldi
             for key, value in workers_config["embedding"].items():
                 if hasattr(config.workers.embedding, key):
                     setattr(config.workers.embedding, key, value)
+
+    # Handle LLM config with nested models
+    if "llm" in file_config:
+        llm_config = file_config["llm"]
+
+        # Handle models dict specially
+        if "models" in llm_config:
+            for model_name, model_data in llm_config["models"].items():
+                if isinstance(model_data, dict):
+                    config.llm.models[model_name] = ModelConfig(**model_data)
+
+        # Handle other LLM fields
+        for key, value in llm_config.items():
+            if key != "models" and hasattr(config.llm, key):
+                setattr(config.llm, key, value)
+
+    # Handle benchmark config with nested models
+    if "benchmark" in file_config:
+        bench_config = file_config["benchmark"]
+
+        # Handle models dict specially
+        if "models" in bench_config:
+            for model_name, model_data in bench_config["models"].items():
+                if isinstance(model_data, dict):
+                    config.benchmark.models[model_name] = ModelConfig(**model_data)
+
+        # Handle other benchmark fields (excluding nested dicts that need special handling)
+        skip_keys = {"models", "model_params"}
+        for key, value in bench_config.items():
+            if key not in skip_keys and hasattr(config.benchmark, key):
+                setattr(config.benchmark, key, value)
+
+        # Handle model_params specially (dict of ModelParams)
+        if "model_params" in bench_config:
+            for model_pattern, params_data in bench_config["model_params"].items():
+                if isinstance(params_data, dict):
+                    config.benchmark.model_params[model_pattern] = ModelParams(**params_data)
 
     return config
 
@@ -617,11 +750,9 @@ def _apply_env_overrides(config: MagaldiConfig) -> MagaldiConfig:
         "MAGALDI_REDIS_PORT": ("redis", "port", int),
         "MAGALDI_REDIS_DB": ("redis", "db", int),
         "MAGALDI_REDIS_PASSWORD": ("redis", "password"),
-        # LLM configuration
-        "MAGALDI_LLM_PROVIDER": ("llm", "provider"),
-        "MAGALDI_LLM_URL": ("llm", "url"),
-        "MAGALDI_LLM_API_KEY": ("llm", "api_key"),
+        # LLM configuration - Model references
         "MAGALDI_LLM_SUMMARIZE_MODEL": ("llm", "summarize_model"),
+        "MAGALDI_LLM_SUMMARIZE_MODEL_SMALL": ("llm", "summarize_model_small"),
         "MAGALDI_LLM_EMBED_MODEL": ("llm", "embed_model"),
         # Logging
         "MAGALDI_LOG_LEVEL": ("logging", "level"),
@@ -654,15 +785,27 @@ def _validate_config(config: MagaldiConfig) -> None:
     """
     errors: list[str] = []
 
-    # Consistency checks
-    if (
-        config.llm.embed_dimensions != 1024
-        and config.llm.embed_model == "snowflake-arctic-embed2"
-    ):
-        errors.append(
-            f"snowflake-arctic-embed2 requires embed_dimensions=1024, "
-            f"got {config.llm.embed_dimensions}"
-        )
+    # Validate model references exist
+    try:
+        config.llm.get_summarize_model()
+    except KeyError as e:
+        errors.append(f"Invalid summarize_model reference: {e}")
+
+    try:
+        config.llm.get_summarize_model_small()
+    except KeyError as e:
+        errors.append(f"Invalid summarize_model_small reference: {e}")
+
+    try:
+        embed_model = config.llm.get_embed_model()
+        # Consistency check for snowflake model
+        if embed_model.name == "snowflake-arctic-embed2" and config.llm.embed_dimensions != 1024:
+            errors.append(
+                f"snowflake-arctic-embed2 requires embed_dimensions=1024, "
+                f"got {config.llm.embed_dimensions}"
+            )
+    except KeyError as e:
+        errors.append(f"Invalid embed_model reference: {e}")
 
     # Port range checks
     if not (1 <= config.elasticsearch.port <= 65535):

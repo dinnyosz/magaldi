@@ -85,7 +85,11 @@ class EmbeddingResult:
 class CodeEmbeddingClient:
     """Client for LLM embedding generation.
 
-    Supports multiple providers through LiteLLM: Ollama, OpenAI, and more.
+    Supports multiple providers through LiteLLM:
+    - Ollama (local)
+    - llamacpp (llama.cpp server with --embedding flag)
+    - OpenAI
+    - And many more
     """
 
     def __init__(
@@ -99,13 +103,14 @@ class CodeEmbeddingClient:
         """Initialize embedding client.
 
         Args:
-            url: API base URL (for Ollama: "http://localhost:11434")
+            url: API base URL (for Ollama: "http://localhost:11434",
+                 for llamacpp: "http://localhost:8080/v1")
             model: Model name (e.g., "snowflake-arctic-embed2", "text-embedding-3-small")
-            provider: Embedding provider (ollama, openai, etc.)
+            provider: Embedding provider (ollama, llamacpp, openai, etc.)
             api_key: API key for cloud providers
             dimensions: Expected embedding dimensions
         """
-        self.url = url.rstrip("/")
+        self.url = url.rstrip("/") if url else ""
         self.model = model
         self.provider = provider
         self.api_key = api_key
@@ -115,6 +120,10 @@ class CodeEmbeddingClient:
         if provider == "ollama":
             full_model = f"ollama/{model}"
             api_base = url
+        elif provider == "llamacpp":
+            # llama.cpp server exposes OpenAI-compatible API
+            full_model = f"openai/{model}"
+            api_base = url  # Should include /v1 suffix
         elif provider == "openai":
             full_model = model
             api_base = None

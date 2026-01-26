@@ -220,29 +220,31 @@ class TestProcessingConfig:
 
     def test_default_values(self):
         """Test default configuration values."""
+        from shared.config import ModelConfig
+
         config = ProcessingConfig()
 
-        assert config.summarize_model == "qwen2.5-coder:3b"
-        assert config.summarize_model_small == "qwen2.5-coder:1.5b"
-        assert config.embed_model == "snowflake-arctic-embed2"
-        assert config.api_base == "http://localhost:11434"
-        assert config.provider == "ollama"
-        assert config.api_key is None
+        # Model configs are now ModelConfig objects
+        assert config.summarize_model.name == "qwen3:4b-instruct"
+        assert config.summarize_model.provider == "llamacpp"
+        assert config.summarize_model_small.name == "qwen3:1.7b"
+        assert config.embed_model.name == "snowflake-arctic-embed2"
+        assert config.embed_model.provider == "ollama"
         assert config.skip_ai is False
         assert config.num_workers == 4
 
     def test_custom_values(self):
         """Test custom configuration values."""
+        from shared.config import ModelConfig
+
         config = ProcessingConfig(
-            summarize_model="gpt-4",
-            provider="openai",
-            api_key="test-key",
+            summarize_model=ModelConfig(name="gpt-4", provider="openai", api_key="test-key"),
             num_workers=8,
         )
 
-        assert config.summarize_model == "gpt-4"
-        assert config.provider == "openai"
-        assert config.api_key == "test-key"
+        assert config.summarize_model.name == "gpt-4"
+        assert config.summarize_model.provider == "openai"
+        assert config.summarize_model.api_key == "test-key"
         assert config.num_workers == 8
 
     def test_get_model_for_function(self):

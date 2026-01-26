@@ -124,7 +124,8 @@ check: lint typecheck test
 
 ollama-pull:
 	@echo "Pulling Ollama models (this may take a while)..."
-	ollama pull qwen2.5-coder:7b
+	ollama pull qwen3:1.7b
+	ollama pull qwen3:4b-instruct
 	ollama pull snowflake-arctic-embed2
 	@echo ""
 	@echo "Models ready!"

@@ -10,7 +10,7 @@ from click.testing import CliRunner
 
 from shared.cli import (
     format_duration,
-    check_ollama_models,
+    check_model_availability,
     main,
     print_discovery_result,
     print_change_manifest,
@@ -35,13 +35,25 @@ def cli_runner():
 @pytest.fixture
 def mock_config():
     """Create a mock configuration."""
+    from shared.config import ModelConfig
+
+    # Create mock model configs
+    summarize_model = ModelConfig(name="qwen2.5-coder:1.5b", provider="ollama", url="http://localhost:11434")
+    summarize_model_small = ModelConfig(name="qwen2.5-coder:0.5b", provider="ollama", url="http://localhost:11434")
+    embed_model = ModelConfig(name="nomic-embed-text", provider="ollama", url="http://localhost:11434")
+
     config = MagicMock()
-    config.llm.url = "http://localhost:11434"
-    config.llm.summarize_model = "qwen2.5-coder:1.5b"
+    config.llm.summarize_model = "qwen2.5-coder:1.5b"  # Reference name (for backwards compat in tests)
     config.llm.summarize_model_small = "qwen2.5-coder:0.5b"
     config.llm.embed_model = "nomic-embed-text"
-    config.llm.provider = "ollama"
-    config.llm.api_key = None
+    config.llm.get_summarize_model.return_value = summarize_model
+    config.llm.get_summarize_model_small.return_value = summarize_model_small
+    config.llm.get_embed_model.return_value = embed_model
+    config.llm.models = {
+        "qwen2.5-coder:1.5b": summarize_model,
+        "qwen2.5-coder:0.5b": summarize_model_small,
+        "nomic-embed-text": embed_model,
+    }
     config.web.host = "127.0.0.1"
     config.web.port = 8080
     return config
@@ -128,11 +140,11 @@ class TestFormatDuration:
 
 
 class TestCheckOllamaModels:
-    """Tests for check_ollama_models function."""
+    """Tests for check_model_availability function."""
 
     def test_skip_ai_returns_empty(self, mock_config):
         """Test that skip_ai=True returns no errors."""
-        result = check_ollama_models(mock_config, skip_ai=True)
+        result = check_model_availability(mock_config, skip_ai=True)
         assert result == []
 
     @patch("requests.get")
@@ -141,10 +153,11 @@ class TestCheckOllamaModels:
         import requests
         mock_get.side_effect = requests.exceptions.ConnectionError()
 
-        result = check_ollama_models(mock_config, skip_ai=False)
+        result = check_model_availability(mock_config, skip_ai=False)
 
-        assert len(result) == 1
-        assert "Cannot connect to Ollama" in result[0]
+        # Now checks each model independently, so we get 3 errors (summarize, summarize_small, embed)
+        assert len(result) == 3
+        assert all("Cannot connect to Ollama" in msg for msg in result)
 
     @patch("requests.get")
     def test_all_models_available(self, mock_get, mock_config):
@@ -159,7 +172,7 @@ class TestCheckOllamaModels:
         }
         mock_get.return_value = mock_response
 
-        result = check_ollama_models(mock_config, skip_ai=False)
+        result = check_model_availability(mock_config, skip_ai=False)
 
         assert result == []
 
@@ -175,7 +188,7 @@ class TestCheckOllamaModels:
         }
         mock_get.return_value = mock_response
 
-        result = check_ollama_models(mock_config, skip_ai=False)
+        result = check_model_availability(mock_config, skip_ai=False)
 
         assert len(result) == 1
         assert "qwen2.5-coder:0.5b" in result[0]
@@ -195,7 +208,7 @@ class TestCheckOllamaModels:
         }
         mock_get.return_value = mock_response
 
-        result = check_ollama_models(mock_config, skip_ai=False)
+        result = check_model_availability(mock_config, skip_ai=False)
 
         # Models match with :latest suffix appended
         assert len(result) == 0
@@ -205,10 +218,11 @@ class TestCheckOllamaModels:
         """Test handling of generic exception."""
         mock_get.side_effect = Exception("Unexpected error")
 
-        result = check_ollama_models(mock_config, skip_ai=False)
+        result = check_model_availability(mock_config, skip_ai=False)
 
-        assert len(result) == 1
-        assert "Error connecting to Ollama" in result[0]
+        # Now checks each model independently, so we get 3 errors (summarize, summarize_small, embed)
+        assert len(result) == 3
+        assert all("Cannot connect to Ollama" in msg for msg in result)
 
 
 # =============================================================================
@@ -825,7 +839,7 @@ class TestCliIntegration:
     @patch("shared.cli.load_config")
     @patch("shared.cli.run_discovery")
     @patch("shared.cli.run_change_detection")
-    @patch("shared.cli.check_ollama_models")
+    @patch("shared.cli.check_model_availability")
     @patch("shared.cli.run_parsing")
     @patch("shared.cli.run_processing")
     def test_parse_model_check_fails(
