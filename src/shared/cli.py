@@ -2246,76 +2246,9 @@ def benchmark_models(
         total_type_summary = ", ".join(f"{t}: {c}" for t, c in sorted(total_type_counts.items()))
         console.print(f"  Total: {len(elements)} elements ({total_type_summary})")
 
-        # Check backend connections
+        # Phase 5: Check backend connections
         console.print("\n[bold blue]Phase 5:[/] Backend Connection")
-
-        # Group models by provider to check each backend once
-        from collections import defaultdict
-        models_by_provider: dict[str, list[ModelConfig]] = defaultdict(list)
-        for mc in model_configs:
-            models_by_provider[mc.provider].append(mc)
-
-        # Check each provider's connection
-        available_models_by_provider: dict[str, list[str]] = {}
-
-        for provider, provider_models in models_by_provider.items():
-            # Get URL from first model of this provider
-            url = provider_models[0].url
-
-            if provider == "ollama":
-                client = BenchmarkClient(api_base=url)
-                if client.check_connection():
-                    available = client.list_models()
-                    available_models_by_provider[provider] = available
-                    console.print(f"  [green]✓[/] Ollama ({url}) | {len(available)} models")
-                else:
-                    console.print(f"[red]Cannot connect to Ollama at {url}[/]")
-                    available_models_by_provider[provider] = []
-
-            elif provider in ("lmstudio", "llamacpp"):
-                try:
-                    import requests
-                    api_url = f"{url.rstrip('/')}/v1/models"
-                    resp = requests.get(api_url, timeout=5)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        available = [m["id"] for m in data.get("data", [])]
-                        available_models_by_provider[provider] = available
-                        console.print(f"  [green]✓[/] {provider} ({url}) | {len(available)} models")
-                    else:
-                        console.print(f"  [yellow]![/] {provider} ({url}) | Cannot list models (status {resp.status_code})")
-                        available_models_by_provider[provider] = []
-                except Exception as e:
-                    console.print(f"  [yellow]![/] {provider} ({url}) | Connection failed: {e}")
-                    available_models_by_provider[provider] = []
-
-            else:
-                # OpenAI, Anthropic, etc. - trust they're available
-                available_models_by_provider[provider] = ["*"]
-                console.print(f"  [green]✓[/] {provider} (cloud API)")
-
-        # Check availability of each configured model
-        missing_models: list[ModelConfig] = []
-        models_to_test: list[ModelConfig] = []
-
-        for mc in model_configs:
-            available = available_models_by_provider.get(mc.provider, [])
-
-            # Cloud providers - trust availability
-            if available == ["*"]:
-                models_to_test.append(mc)
-                continue
-
-            # Check if model is in available list
-            if mc.name in available or f"{mc.name}:latest" in available:
-                models_to_test.append(mc)
-            else:
-                # Try without tag
-                base = mc.name.rsplit(":", 1)[0] if ":" in mc.name else mc.name
-                if base in available or f"{base}:latest" in available:
-                    models_to_test.append(mc)
-                else:
-                    missing_models.append(mc)
+        available_models_by_provider, models_to_test, missing_models = _check_backend_connections(model_configs)
 
         if missing_models:
             console.print(f"  [yellow]Missing models (skipped):[/]")
@@ -2333,175 +2266,36 @@ def benchmark_models(
         test_model_names = [f"{mc.provider}/{mc.name}" for mc in models_to_test]
         console.print(f"  Testing models: {', '.join(test_model_names)}")
 
-        # Warmup models
+        # Phase 6: Warmup models
         console.print("\n[bold blue]Phase 6:[/] Model Warmup")
-        models_failed_warmup: list[ModelConfig] = []
-        for mc in models_to_test:
-            display_name = f"{mc.provider}/{mc.name}"
-            api_config = _get_model_api_config(mc)
-            api_model = mc.get_litellm_model()
-            with console.status(f"[bold blue]Warming up {display_name}...[/]"):
-                # Create client with appropriate base URL
-                warmup_client = BenchmarkClient(api_base=mc.url)
-                success, warmup_time, error = warmup_client.warmup(
-                    api_model,
-                    timeout=120,
-                    **api_config,
-                )
-            if success:
-                console.print(f"  [green]✓[/] {display_name} ({warmup_time:.1f}s)")
-            else:
-                console.print(f"  [red]✗[/] {display_name}: {error}")
-                models_failed_warmup.append(mc)
-
-        # Remove failed models
-        for mc in models_failed_warmup:
-            models_to_test.remove(mc)
+        models_to_test = _warmup_benchmark_models(models_to_test, benchmark_config)
 
         if not models_to_test:
             console.print("[red]No models available after warmup.[/]")
             sys.exit(1)
 
-        # Run benchmarks with hierarchical context (file → class → method)
+        # Phase 7: Run benchmarks with hierarchical context (file → class → method)
         console.print("\n[bold blue]Phase 7:[/] Benchmarking (with hierarchical context)")
-        # Use display name as key for results dict
-        results: dict[str, list[BenchmarkResult]] = {f"{mc.provider}/{mc.name}": [] for mc in models_to_test}
+        results = _run_hierarchical_benchmarks(models_to_test, elements, repo_path, benchmark_config)
 
-        # Sort elements by hierarchy level: file (0) → class (1) → function/method (2) → variable (3)
-        level_order = {"file": 0, "class": 1, "function": 2, "method": 2, "variable": 3, "constant": 3}
-        sorted_elements = sorted(elements, key=lambda e: (e.relative_path, level_order.get(e.element_type, 99), e.line_start))
-
-        # Build list of (element, index) to track original order for results
-        element_indices = {id(elem): i for i, elem in enumerate(elements)}
-        prompts = [(elem, None) for elem in elements]  # Placeholder, prompts built per-model
-
-        # Test each model with hierarchical summarization
-        for mc in models_to_test:
-            display_name = f"{mc.provider}/{mc.name}"
-            console.print(f"\n  [cyan]{display_name}[/]")
-
-            # Track summaries for hierarchical context (per model)
-            # file_summaries[relative_path] = summary
-            # class_summaries[(relative_path, class_name)] = summary
-            # function_summaries[element_id] = summary
-            file_summaries: dict[str, str] = {}
-            class_summaries: dict[tuple[str, str], str] = {}
-            function_summaries: dict[str, str] = {}  # element_id -> summary
-
-            # Process elements in hierarchical order
-            model_results: dict[int, BenchmarkResult] = {}  # index -> result
-
-            for elem in sorted_elements:
-                elem_name = f"{elem.element_type}:{elem.name}"
-                elem_idx = element_indices[id(elem)]
-
-                # For file elements, load raw_code from disk (not stored in parsed elements)
-                if elem.element_type == "file" and not elem.raw_code:
-                    file_full_path = Path(repo_path) / elem.relative_path
-                    if file_full_path.exists():
-                        try:
-                            elem.raw_code = file_full_path.read_text(encoding="utf-8")
-                        except Exception:
-                            elem.raw_code = ""
-
-                # Build parent summaries based on element type
-                parent_summaries: dict[str, str] = {}
-                if elem.element_type != "file":
-                    # Add file summary if available
-                    if elem.relative_path in file_summaries:
-                        parent_summaries["file"] = file_summaries[elem.relative_path]
-                if elem.element_type in ("method", "variable", "constant"):
-                    # Add class summary if available (find parent class)
-                    if elem.parent_id:
-                        # Try to find class summary by parent
-                        for (fp, cn), summ in class_summaries.items():
-                            if fp == elem.relative_path:
-                                parent_summaries["class"] = summ
-                                break
-                if elem.element_type in ("variable", "constant"):
-                    # Add function/method summary if parent is a function/method
-                    if elem.parent_id and elem.parent_id in function_summaries:
-                        parent_summaries["function"] = function_summaries[elem.parent_id]
-
-                # Build prompt with parent context
-                prompt = _build_summarization_prompt(elem, parent_summaries)
-
-                # For thinking models, add directive to skip thinking
-                from shared.ai.ollama_benchmark import BenchmarkClient
-                if any(mc.name.startswith(tm) for tm in BenchmarkClient.THINKING_MODELS):
-                    prompt = prompt + "\n\n/no_think"
-
-                with console.status(f"    [{len(model_results)+1}/{len(elements)}] {elem_name}..."):
-                    # Get per-model parameters from config (use model name for pattern matching)
-                    model_params = benchmark_config.get_model_params(mc.name)
-                    # Use per-model max_tokens if set, otherwise default
-                    max_tokens = model_params.max_tokens or benchmark_config.max_tokens
-                    # Get api config for this model
-                    api_config = _get_model_api_config(mc)
-                    # Get LiteLLM model identifier
-                    api_model = mc.get_litellm_model()
-                    # Create client for this model's URL
-                    bench_client = BenchmarkClient(api_base=mc.url)
-                    result = bench_client.generate(
-                        model=api_model,
-                        prompt=prompt,
-                        temperature=model_params.temperature,
-                        top_p=model_params.top_p,
-                        top_k=model_params.top_k,
-                        min_p=model_params.min_p,
-                        repetition_penalty=model_params.repetition_penalty,
-                        presence_penalty=model_params.presence_penalty,
-                        max_tokens=max_tokens,
-                        timeout=benchmark_config.timeout,
-                        **api_config,
-                    )
-                    model_results[elem_idx] = result
-
-                # Store summary for child elements
-                if result.success and result.response.strip():
-                    from shared.ai.summarization import clean_summary
-                    cleaned = clean_summary(result.response)
-                    if elem.element_type == "file":
-                        file_summaries[elem.relative_path] = cleaned
-                    elif elem.element_type == "class":
-                        class_summaries[(elem.relative_path, elem.name)] = cleaned
-                    elif elem.element_type in ("function", "method"):
-                        function_summaries[elem.element_id] = cleaned
-
-                if result.success:
-                    context_str = ""
-                    if parent_summaries:
-                        context_str = f" [dim](+{'+'.join(parent_summaries.keys())} context)[/]"
-                    console.print(
-                        f"    [green]✓[/] {elem_name:<40} | "
-                        f"[bold]{result.total_time:.2f}s[/] | "
-                        f"{result.prompt_chars}→{result.output_chars} chr | "
-                        f"{result.prompt_tokens}→{result.output_tokens} tok | "
-                        f"{result.tokens_per_second:.0f} t/s{context_str}"
-                    )
-                else:
-                    console.print(f"    [red]✗[/] {elem_name:<40} | {result.error}")
-
-            # Store results in original element order
-            results[display_name] = [model_results[i] for i in range(len(elements))]
+        # For prompts tracking in Phase 8 and summary
+        prompts = [(elem, None) for elem in elements]
 
         # Phase 8: LLM Evaluation of summaries (multi-criteria JSON-based)
         console.print("\n[bold blue]Phase 8:[/] LLM Evaluation (multi-criteria)")
-
-        from shared.ai.ollama_benchmark import (
-            EVALUATION_CRITERIA,
-            CriteriaScores,
-            EvaluationResult,
-            build_evaluation_prompt,
-            parse_evaluation_response,
+        evaluation_results = _evaluate_summaries(
+            models_to_test, elements, results, available_models_by_provider, benchmark_config
         )
 
-        # Get eval model configs from benchmark config
-        eval_model_configs: list[ModelConfig] = []
+        # Get display names for results processing
+        tested_model_names = [f"{mc.provider}/{mc.name}" for mc in models_to_test]
+
+        # Get eval models for reporting (same logic as in _evaluate_summaries)
+        from shared.ai.ollama_benchmark import EVALUATION_CRITERIA, EvaluationResult
+        eval_model_configs = []
         for eval_ref in benchmark_config.eval_models:
             try:
                 eval_mc = benchmark_config.get_model(eval_ref)
-                # Check availability
                 available = available_models_by_provider.get(eval_mc.provider, [])
                 if available == ["*"] or eval_mc.name in available or f"{eval_mc.name}:latest" in available:
                     eval_model_configs.append(eval_mc)
@@ -2509,130 +2303,11 @@ def benchmark_models(
                     base = eval_mc.name.rsplit(":", 1)[0] if ":" in eval_mc.name else eval_mc.name
                     if base in available or f"{base}:latest" in available:
                         eval_model_configs.append(eval_mc)
-                    else:
-                        console.print(f"  [yellow]Eval model {eval_ref} not available, skipping[/]")
             except KeyError:
-                console.print(f"  [yellow]Eval model {eval_ref} not configured, skipping[/]")
-
+                pass
         if not eval_model_configs:
-            console.print(f"  [yellow]No eval models available, using last tested model[/]")
-            # Use last tested model as fallback
             eval_model_configs = [models_to_test[-1]]
-
         eval_display_names = [f"{mc.provider}/{mc.name}" for mc in eval_model_configs]
-        console.print(f"  Using {len(eval_model_configs)} evaluator(s): [cyan]{', '.join(eval_display_names)}[/]")
-
-        # Show criteria for each element type
-        element_types_in_test = set(elem.element_type for elem, _ in prompts)
-        for elem_type in sorted(element_types_in_test):
-            criteria = EVALUATION_CRITERIA.get(elem_type, {})
-            console.print(f"  [dim]{elem_type} criteria: {', '.join(criteria.keys())}[/]")
-
-        # evaluation_results[element_index][eval_model_name] = EvaluationResult
-        evaluation_results: dict[int, dict[str, EvaluationResult]] = {
-            i: {} for i in range(len(prompts))
-        }
-        total_elements = len(prompts)
-
-        # Get display names for models (used as keys)
-        tested_model_names = [f"{mc.provider}/{mc.name}" for mc in models_to_test]
-
-        for i, (elem, _) in enumerate(prompts):
-            elem_name = f"{elem.element_type}:{elem.name}"
-            progress = f"[{i+1}/{total_elements}]"
-
-            # Build summaries dict for evaluation (using display names as keys)
-            summaries: dict[str, str] = {}
-            for mc in models_to_test:
-                model_key = f"{mc.provider}/{mc.name}"
-                result = results[model_key][i]
-                if result.success and result.response.strip():
-                    from shared.ai.summarization import clean_summary
-                    summaries[model_key] = clean_summary(result.response)
-                else:
-                    summaries[model_key] = ""
-
-            # Build evaluation prompt with element-specific criteria
-            eval_prompt = build_evaluation_prompt(
-                element_type=elem.element_type,
-                element_name=elem.name,
-                source_code=elem.raw_code or "",
-                summaries=summaries,
-            )
-
-            # Evaluate with each eval model
-            for eval_mc in eval_model_configs:
-                eval_display_name = f"{eval_mc.provider}/{eval_mc.name}"
-                eval_api_config = _get_model_api_config(eval_mc)
-                eval_api_model = eval_mc.get_litellm_model()
-
-                # Retry up to 3 times if parsing fails
-                max_retries = 3
-                eval_result_obj = EvaluationResult(
-                    element_type=elem.element_type,
-                    element_name=elem.name,
-                )
-
-                for attempt in range(max_retries):
-                    with console.status(f"  {progress} [{eval_display_name}] Evaluating {elem_name}..." + (f" (retry {attempt})" if attempt > 0 else "")):
-                        eval_client = BenchmarkClient(api_base=eval_mc.url)
-                        eval_result = eval_client.generate(
-                            model=eval_api_model,
-                            prompt=eval_prompt,
-                            temperature=0.1 + (attempt * 0.1),  # Slightly increase temp on retry
-                            max_tokens=1024,  # More tokens for JSON output
-                            timeout=benchmark_config.timeout,
-                            **eval_api_config,
-                        )
-
-                    if eval_result.success:
-                        eval_result_obj.raw_response = eval_result.response
-                        evaluations, error = parse_evaluation_response(
-                            eval_result.response,
-                            elem.element_type,
-                            tested_model_names,
-                        )
-                        eval_result_obj.evaluations = evaluations
-                        eval_result_obj.parse_error = error
-
-                        # Check if all models got evaluated
-                        if not error:
-                            break  # All ratings present, we're done
-                        elif attempt < max_retries - 1:
-                            continue  # Retry
-                    else:
-                        eval_result_obj.parse_error = eval_result.error
-                        if attempt < max_retries - 1:
-                            continue  # Retry on failure
-
-                evaluation_results[i][eval_display_name] = eval_result_obj
-
-            # Display scores (show average scaled score for each model)
-            rating_parts = []
-            for model_name in tested_model_names:
-                model_scores = []
-                for eval_name in eval_display_names:
-                    eval_res = evaluation_results[i].get(eval_name)
-                    if eval_res and model_name in eval_res.evaluations:
-                        model_scores.append(eval_res.evaluations[model_name].average)
-                if model_scores:
-                    avg = sum(model_scores) / len(model_scores)
-                    rating_parts.append(f"{model_name}: {avg:.1f}")
-                else:
-                    rating_parts.append(f"{model_name}: ?")
-            rating_str = " | ".join(rating_parts)
-
-            # Check for errors
-            errors = [
-                evaluation_results[i].get(eval_name, EvaluationResult("", "")).parse_error
-                for eval_name in eval_display_names
-            ]
-            has_errors = any(e for e in errors)
-
-            if has_errors:
-                console.print(f"  {progress} [yellow]~[/] {elem_name} | {rating_str} [dim](parse issues)[/]")
-            else:
-                console.print(f"  {progress} [green]✓[/] {elem_name} | {rating_str}")
 
         # Benchmark summary table (detailed summaries are saved to markdown file only)
         console.print("\n" + "=" * 70)
