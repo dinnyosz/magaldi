@@ -73,6 +73,11 @@ class ExtractedElement:
     return_type: str | None = None  # For functions/methods
     parameters: list[ParameterInfo] | None = None  # For functions/methods
 
+    @property
+    def char_count(self) -> int:
+        """Character count of the raw code for identifying large elements."""
+        return len(self.raw_code) if self.raw_code else 0
+
 
 @dataclass
 class ExtractedReference:
