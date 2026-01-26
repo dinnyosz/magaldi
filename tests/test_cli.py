@@ -100,6 +100,8 @@ def mock_parsing_result():
     result.total_elements = 20
     result.elements_by_type = {"function": 15, "class": 5}
     result.failed_files = []
+    result.max_chars_by_type = {"function": 5000, "class": 8000}
+    result.context_sizes = {"function": 4096, "class": 8192}
     return result
 
 
@@ -529,6 +531,15 @@ class TestPrintFunctions:
         assert "20" in captured.out  # total_elements
         assert "function" in captured.out
         assert "class" in captured.out
+        # Context size analysis should be displayed
+        assert "Context size analysis" in captured.out
+        assert "Max Chars" in captured.out
+        assert "Est. Tokens" in captured.out
+        assert "Context Size" in captured.out
+        assert "5,000" in captured.out  # max chars for function
+        assert "8,000" in captured.out  # max chars for class
+        assert "4,096" in captured.out  # context size for function
+        assert "8,192" in captured.out  # context size for class
 
     def test_print_parsing_result_with_failures(self, capsys):
         """Test print_parsing_result with failed files."""
@@ -537,6 +548,8 @@ class TestPrintFunctions:
         result.total_elements = 10
         result.elements_by_type = {"function": 10}
         result.failed_files = ["error.py"]
+        result.max_chars_by_type = {"function": 3000}
+        result.context_sizes = {"function": 4096}
 
         print_parsing_result(result)
 

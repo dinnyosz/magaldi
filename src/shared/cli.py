@@ -1545,10 +1545,30 @@ def print_change_manifest(manifest: ChangeManifest) -> None:
 
 
 def print_parsing_result(result: ParsingResult) -> None:
-    """Print parsing results."""
+    """Print parsing results including context size analysis."""
+    # Existing summary line
     types = ", ".join(f"{t}: [green]{c}[/]" for t, c in sorted(result.elements_by_type.items()))
     failed = f" | [red]{len(result.failed_files)} failed[/]" if result.failed_files else ""
     console.print(f"  [green]{len(result.parsed_files)}[/] files → [green]{result.total_elements}[/] elements ({types}){failed}")
+
+    # Context size analysis table
+    max_chars = result.max_chars_by_type
+    context_sizes = result.context_sizes
+
+    if max_chars:
+        console.print()
+        console.print("  [dim]Context size analysis (for KV cache optimization):[/]")
+        console.print("  [dim]  Element Type   Max Chars   Est. Tokens   Context Size[/]")
+        console.print("  [dim]  ─────────────────────────────────────────────────────────[/]")
+
+        # Sort by context size descending for readability
+        sorted_types = sorted(max_chars.keys(), key=lambda t: context_sizes.get(t, 0), reverse=True)
+
+        for element_type in sorted_types:
+            chars = max_chars[element_type]
+            tokens = chars // 4 + 300  # Rough estimate with overhead
+            ctx_size = context_sizes.get(element_type, 0)
+            console.print(f"  [dim]  {element_type:<14} {chars:>9,}   {tokens:>11,}   {ctx_size:>12,}[/]")
 
 
 def print_feature_result(result: dict) -> None:
