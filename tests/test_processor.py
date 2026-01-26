@@ -11,6 +11,8 @@ from magaldi_core.processor import (
     WorkerStatus,
     ProgressState,
     ProcessedElement,
+    _summarize_element,
+    _SummaryCache,
 )
 from magaldi_core.code_parser import CodeElement
 
@@ -940,3 +942,84 @@ class TestIndexElementImportsAndCalls:
 
         # store_imports should NOT be called for non-file elements
         mock_es.store_imports.assert_not_called()
+
+
+# =============================================================================
+# CONTEXT SIZE PASSTHROUGH TESTS
+# =============================================================================
+
+
+class TestContextSizePassthrough:
+    """Tests for passing context sizes to summarization."""
+
+    def test_summarize_element_uses_context_size(self):
+        """Should pass num_ctx from context_sizes dict."""
+        mock_llm = MagicMock()
+        mock_llm.generate.return_value = "test summary"
+
+        element = CodeElement(
+            element_id="test:repo:user:file.py:function:foo:1",
+            element_type="function",
+            name="foo",
+            raw_code="def foo(): pass",
+        )
+
+        config = ProcessingConfig()
+        config.context_sizes = {"function": 4096, "file": 16384}
+
+        cache = _SummaryCache()
+        cache.add_element(element)
+
+        _summarize_element(element, cache, mock_llm, config)
+
+        # Verify num_ctx was passed
+        call_kwargs = mock_llm.generate.call_args[1]
+        assert call_kwargs.get("num_ctx") == 4096
+
+    def test_summarize_element_without_context_size(self):
+        """Should pass None when element type not in context_sizes."""
+        mock_llm = MagicMock()
+        mock_llm.generate.return_value = "test summary"
+
+        element = CodeElement(
+            element_id="test:repo:user:file.py:class:MyClass:1",
+            element_type="class",
+            name="MyClass",
+            raw_code="class MyClass: pass",
+        )
+
+        config = ProcessingConfig()
+        config.context_sizes = {"function": 4096}  # No "class" entry
+
+        cache = _SummaryCache()
+        cache.add_element(element)
+
+        _summarize_element(element, cache, mock_llm, config)
+
+        # Verify num_ctx is None when type not in dict
+        call_kwargs = mock_llm.generate.call_args[1]
+        assert call_kwargs.get("num_ctx") is None
+
+    def test_summarize_element_empty_context_sizes(self):
+        """Should pass None when context_sizes is empty."""
+        mock_llm = MagicMock()
+        mock_llm.generate.return_value = "test summary"
+
+        element = CodeElement(
+            element_id="test:repo:user:file.py:function:bar:1",
+            element_type="function",
+            name="bar",
+            raw_code="def bar(): pass",
+        )
+
+        config = ProcessingConfig()
+        # context_sizes defaults to empty dict
+
+        cache = _SummaryCache()
+        cache.add_element(element)
+
+        _summarize_element(element, cache, mock_llm, config)
+
+        # Verify num_ctx is None when context_sizes is empty
+        call_kwargs = mock_llm.generate.call_args[1]
+        assert call_kwargs.get("num_ctx") is None

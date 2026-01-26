@@ -81,6 +81,9 @@ class ProcessingConfig:
     # Parallel processing
     num_workers: int = 4
 
+    # Context sizes per element type (for LLM num_ctx parameter)
+    context_sizes: dict[str, int] = field(default_factory=dict)
+
     def get_model_for_element_type(self, element_type: str) -> "ModelConfig":
         """Get the appropriate model config for an element type.
 
@@ -691,12 +694,14 @@ def _summarize_element(
 
     # Generate summary (select model based on element type)
     model_config = config.get_model_for_element_type(element.element_type)
+    num_ctx = config.context_sizes.get(element.element_type)
     raw_summary = llm_client.generate(
         prompt=prompt,
         temperature=config.summarize_temperature,
         max_tokens=config.summarize_max_tokens,
         timeout=config.summarize_timeout,
         model=model_config.name,
+        num_ctx=num_ctx,
     )
 
     # Clean and return
