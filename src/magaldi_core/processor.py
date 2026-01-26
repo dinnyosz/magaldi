@@ -105,7 +105,8 @@ class ProcessingResult:
 
     # Counts
     elements_processed: int = 0
-    elements_skipped: int = 0  # Already in ES
+    elements_skipped: int = 0  # Already in ES with same content
+    elements_deleted: int = 0  # Stale elements removed (in ES but not in code)
     elements_failed: int = 0
 
     # By type
@@ -1031,6 +1032,7 @@ def process_elements(
     # Delete only stale elements (e.g., a variable that was removed from code)
     if stale_element_ids:
         es_repo.delete_elements(stale_element_ids)
+        result.elements_deleted = len(stale_element_ids)
 
     # Get content hashes for change detection
     # Unchanged elements stay in ES - no need to re-process or re-index

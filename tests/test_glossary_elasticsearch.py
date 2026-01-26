@@ -34,9 +34,9 @@ def mock_es_client():
 @pytest.fixture
 def mock_repo(mock_config, mock_es_client):
     """Create repository with mocked ES client."""
-    with patch("shared.db.elasticsearch.Elasticsearch", return_value=mock_es_client):
+    with patch("shared.db.repositories.base.Elasticsearch", return_value=mock_es_client):
         repo = ElasticsearchRepository(mock_config)
-        repo._client = mock_es_client
+        repo._base._client = mock_es_client
         return repo
 
 

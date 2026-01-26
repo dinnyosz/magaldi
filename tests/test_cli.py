@@ -266,11 +266,11 @@ class TestParseCommand:
         assert "--user" in result.output
         assert "--dry-run" in result.output
 
-    @patch("shared.cli.load_config")
-    @patch("shared.cli.run_discovery")
-    @patch("shared.cli.run_change_detection")
-    @patch("shared.cli.run_parsing")
-    @patch("shared.cli.run_processing")
+    @patch("shared.cli.parse.load_config")
+    @patch("shared.cli.parse.run_discovery")
+    @patch("shared.cli.parse.run_change_detection")
+    @patch("shared.cli.parse.run_parsing")
+    @patch("shared.cli.parse.run_processing")
     def test_parse_dry_run(
         self,
         mock_run_processing,
@@ -295,7 +295,7 @@ class TestParseCommand:
         mock_run_discovery.return_value = mock_discovery_result
         mock_run_change_detection.return_value = mock_change_manifest
         mock_run_parsing.return_value = mock_parsing_result
-        mock_run_processing.return_value = (10, 0, 10, 0.5, 0.3, 0.2, 5.0, None, [])
+        mock_run_processing.return_value = (10, 0, 10, 0.5, 0.3, 0.2, 5.0, None, [], 0)
 
         result = cli_runner.invoke(main, [
             "parse",
@@ -354,8 +354,8 @@ class TestExtractFeaturesCommand:
 
         assert result.exit_code != 0
 
-    @patch("shared.cli.load_config")
-    @patch("shared.cli.run_feature_extraction")
+    @patch("shared.cli.extract.load_config")
+    @patch("shared.cli.extract.run_feature_extraction")
     def test_extract_features_no_config(
         self,
         mock_run_feature_extraction,
@@ -403,8 +403,8 @@ class TestExtractGlossaryCommand:
 
         assert result.exit_code != 0
 
-    @patch("shared.cli.load_config")
-    @patch("shared.cli.run_glossary_extraction")
+    @patch("shared.cli.extract.load_config")
+    @patch("shared.cli.extract.run_glossary_extraction")
     def test_extract_glossary_no_config(
         self,
         mock_run_glossary_extraction,
@@ -429,8 +429,8 @@ class TestExtractGlossaryCommand:
         assert result.exit_code != 0
         assert "magaldi.yaml" in result.output
 
-    @patch("shared.cli.load_config")
-    @patch("shared.cli.run_glossary_extraction")
+    @patch("shared.cli.extract.load_config")
+    @patch("shared.cli.extract.run_glossary_extraction")
     @patch("magaldi_core.discovery.load_repo_config")
     def test_extract_glossary_calls_ai_extractor(
         self,
@@ -676,7 +676,7 @@ class TestPrintFunctions:
 class TestPhaseRunners:
     """Tests for phase runner functions."""
 
-    @patch("shared.cli.discover")
+    @patch("magaldi_core.discovery.discover")
     def test_run_discovery(self, mock_discover, mock_discovery_result):
         """Test run_discovery function."""
         from shared.cli import run_discovery
@@ -688,8 +688,8 @@ class TestPhaseRunners:
         assert result == mock_discovery_result
         mock_discover.assert_called_once_with("/path/to/repo", "testuser")
 
-    @patch("shared.cli.detect_changes")
-    @patch("shared.cli.InMemoryFileStateRepository")
+    @patch("magaldi_core.change_detection.detect_changes")
+    @patch("magaldi_core.change_detection.InMemoryFileStateRepository")
     def test_run_change_detection_dry_run(
         self,
         mock_in_memory_repo,
@@ -709,7 +709,7 @@ class TestPhaseRunners:
         assert result == mock_change_manifest
         mock_in_memory_repo.assert_called_once()
 
-    @patch("shared.cli.parse_files")
+    @patch("magaldi_core.code_parser.parse_files")
     def test_run_parsing(self, mock_parse_files, mock_change_manifest, mock_parsing_result):
         """Test run_parsing function."""
         from shared.cli import run_parsing
@@ -720,8 +720,8 @@ class TestPhaseRunners:
 
         assert result == mock_parsing_result
 
-    @patch("shared.cli.process_elements")
-    @patch("shared.cli.ElasticsearchRepository", create=True)
+    @patch("magaldi_core.processor.process_elements")
+    @patch("shared.db.elasticsearch.ElasticsearchRepository", create=True)
     def test_run_processing_dry_run(
         self,
         mock_es_repo_class,
@@ -743,7 +743,7 @@ class TestPhaseRunners:
         )
 
         # Dry run should return zeros
-        assert result == (0, 0, 0, 0.0, 0.0, 0.0, 0.0, None, [])
+        assert result == (0, 0, 0, 0.0, 0.0, 0.0, 0.0, None, [], 0)
 
 
 # =============================================================================
@@ -754,8 +754,8 @@ class TestPhaseRunners:
 class TestErrorHandling:
     """Tests for error handling in CLI."""
 
-    @patch("shared.cli.load_config")
-    @patch("shared.cli.run_discovery")
+    @patch("shared.cli.parse.load_config")
+    @patch("shared.cli.parse.run_discovery")
     def test_parse_discovery_error(
         self,
         mock_run_discovery,
@@ -783,8 +783,8 @@ class TestErrorHandling:
         assert result.exit_code != 0
         assert "error" in result.output.lower()
 
-    @patch("shared.cli.load_config")
-    @patch("shared.cli.run_discovery")
+    @patch("shared.cli.parse.load_config")
+    @patch("shared.cli.parse.run_discovery")
     def test_parse_generic_error(
         self,
         mock_run_discovery,
@@ -819,9 +819,9 @@ class TestErrorHandling:
 class TestCliIntegration:
     """Integration-style tests for CLI."""
 
-    @patch("shared.cli.load_config")
-    @patch("shared.cli.run_discovery")
-    @patch("shared.cli.run_change_detection")
+    @patch("shared.cli.parse.load_config")
+    @patch("shared.cli.parse.run_discovery")
+    @patch("shared.cli.parse.run_change_detection")
     def test_parse_no_changes(
         self,
         mock_run_change_detection,
@@ -854,12 +854,12 @@ class TestCliIntegration:
         assert result.exit_code == 0
         assert "up to date" in result.output
 
-    @patch("shared.cli.load_config")
-    @patch("shared.cli.run_discovery")
-    @patch("shared.cli.run_change_detection")
-    @patch("shared.cli.check_model_availability")
-    @patch("shared.cli.run_parsing")
-    @patch("shared.cli.run_processing")
+    @patch("shared.cli.parse.load_config")
+    @patch("shared.cli.parse.run_discovery")
+    @patch("shared.cli.parse.run_change_detection")
+    @patch("shared.cli.parse.check_model_availability")
+    @patch("shared.cli.parse.run_parsing")
+    @patch("shared.cli.parse.run_processing")
     def test_parse_model_check_fails(
         self,
         mock_run_processing,

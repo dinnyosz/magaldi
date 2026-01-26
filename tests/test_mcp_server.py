@@ -814,8 +814,8 @@ class TestFormatResultUsages:
     """Tests for _format_result with usage results."""
 
     def test_format_usage_results(self):
-        """Test formatting usage results (which use grep format with context)."""
-        # Usage results are formatted as grep matches with context
+        """Test formatting usage results (with context_before for distinction from grep)."""
+        # Usage results have context_before/after, distinguishing them from grep results
         result = [
             {
                 "file": "caller.py",
@@ -830,8 +830,8 @@ class TestFormatResultUsages:
 
         assert "caller.py:25" in formatted
         assert "result = my_function()" in formatted
-        # Note: The format function uses "matches" not "usages" since grep format comes first
-        assert "Found 1 matches" in formatted
+        # Results with context_before are formatted as usages
+        assert "Found 1 usages" in formatted
 
 
 class TestFormatResultImplementations:

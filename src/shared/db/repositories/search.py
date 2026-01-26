@@ -1,0 +1,499 @@
+"""Search repository for various search operations.
+
+Handles text search, vector search, pattern matching, and call/import queries.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from .base import INDEX_NAME, ElasticsearchBase
+
+
+class SearchRepository:
+    """Repository for search operations."""
+
+    def __init__(self, base: ElasticsearchBase):
+        self._base = base
+
+    def _get_client(self) -> Any:
+        """Get Elasticsearch client from base."""
+        return self._base._get_client()
+
+    def search_by_text(
+        self,
+        query: str,
+        scope: str | None = None,
+        repository: str | None = None,
+        username: str | None = None,
+        element_types: list[str] | None = None,
+        size: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Search elements by text query.
+
+        Args:
+            query: Search query string.
+            scope: Filter by scope.
+            repository: Filter by repository.
+            username: Filter by username.
+            element_types: Filter by element types.
+            size: Maximum results to return.
+
+        Returns:
+            List of matching documents.
+        """
+        must_clauses: list[dict[str, Any]] = [
+            {
+                "multi_match": {
+                    "query": query,
+                    "fields": ["name^3", "summary^2", "docstring", "raw_code"],
+                }
+            }
+        ]
+
+        if scope:
+            must_clauses.append({"term": {"scope": scope}})
+        if repository:
+            must_clauses.append({"term": {"repository": repository}})
+        if username:
+            must_clauses.append({"term": {"username": username}})
+        if element_types:
+            must_clauses.append({"terms": {"element_type": element_types}})
+
+        client = self._get_client()
+        result = client.search(
+            index=INDEX_NAME,
+            body={"query": {"bool": {"must": must_clauses}}, "size": size},
+        )
+
+        return [hit["_source"] for hit in result["hits"]["hits"]]
+
+    def search_by_vector(
+        self,
+        embedding: list[float],
+        scope: str | None = None,
+        repository: str | None = None,
+        username: str | None = None,
+        element_types: list[str] | None = None,
+        size: int = 10,
+        min_score: float = 0.3,
+        embedding_type: str = "summary",
+    ) -> list[dict[str, Any]]:
+        """Search elements by vector similarity.
+
+        Args:
+            embedding: Query embedding vector.
+            scope: Filter by scope.
+            repository: Filter by repository.
+            username: Filter by username.
+            element_types: Filter by element types.
+            size: Maximum results to return.
+            min_score: Minimum similarity score.
+            embedding_type: Type of embedding to search - "summary" or "code".
+
+        Returns:
+            List of matching documents with scores.
+        """
+        field_name = f"{embedding_type}_embedding"
+        filter_clauses: list[dict[str, Any]] = [
+            # Only search documents that have embeddings of the specified type
+            {"exists": {"field": field_name}}
+        ]
+
+        if scope:
+            filter_clauses.append({"term": {"scope": scope}})
+        if repository:
+            filter_clauses.append({"term": {"repository": repository}})
+        if username:
+            filter_clauses.append({"term": {"username": username}})
+        if element_types:
+            filter_clauses.append({"terms": {"element_type": element_types}})
+
+        query: dict[str, Any] = {
+            "script_score": {
+                "query": {"bool": {"filter": filter_clauses}},
+                "script": {
+                    "source": f"cosineSimilarity(params.query_vector, '{field_name}') + 1.0",
+                    "params": {"query_vector": embedding},
+                },
+            }
+        }
+
+        client = self._get_client()
+        result = client.search(
+            index=INDEX_NAME,
+            body={"query": query, "size": size, "min_score": min_score + 1.0},
+        )
+
+        return [
+            {**hit["_source"], "_score": hit["_score"] - 1.0}
+            for hit in result["hits"]["hits"]
+        ]
+
+    def search_by_keyword(
+        self,
+        query: str,
+        scope: str | None = None,
+        repository: str | None = None,
+        username: str | None = None,
+        element_types: list[str] | None = None,
+        size: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Search elements by keyword matching (BM25).
+
+        Fallback search when vector embeddings are unavailable.
+
+        Args:
+            query: Search query string.
+            scope: Filter by scope.
+            repository: Filter by repository.
+            username: Filter by username.
+            element_types: Filter by element types.
+            size: Maximum results to return.
+
+        Returns:
+            List of matching documents with scores.
+        """
+        filter_clauses: list[dict[str, Any]] = []
+
+        if scope:
+            filter_clauses.append({"term": {"scope": scope}})
+        if repository:
+            filter_clauses.append({"term": {"repository": repository}})
+        if username:
+            filter_clauses.append({"term": {"username": username}})
+        if element_types:
+            filter_clauses.append({"terms": {"element_type": element_types}})
+
+        # Multi-match across name, summary, and signature fields
+        must_clause: dict[str, Any] = {
+            "multi_match": {
+                "query": query,
+                "fields": ["name^3", "summary^2", "signature", "docstring"],
+                "type": "best_fields",
+                "fuzziness": "AUTO",
+            }
+        }
+
+        es_query: dict[str, Any] = {
+            "bool": {
+                "must": [must_clause],
+            }
+        }
+
+        if filter_clauses:
+            es_query["bool"]["filter"] = filter_clauses
+
+        client = self._get_client()
+        result = client.search(
+            index=INDEX_NAME,
+            body={"query": es_query, "size": size},
+        )
+
+        return [
+            {**hit["_source"], "_score": hit["_score"]}
+            for hit in result["hits"]["hits"]
+        ]
+
+    def search_by_regexp(
+        self,
+        pattern: str,
+        scope: str | None = None,
+        repository: str | None = None,
+        username: str | None = None,
+        glob: str | None = None,
+        size: int = 50,
+        include_tests: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Search raw_code field using Elasticsearch regexp query.
+
+        Uses Lucene regexp syntax (not Python re). Key differences:
+        - . matches any character (no need to escape)
+        - * is zero or more of previous
+        - .* matches any string
+        - No lookahead/lookbehind support
+
+        Note: Patterns are automatically wrapped with .* for substring matching
+        (Lucene regexp requires matching the entire field by default).
+
+        Args:
+            pattern: Lucene regexp pattern (e.g., 'add_column.*Model').
+            scope: Filter by scope.
+            repository: Filter by repository.
+            username: Filter by username.
+            glob: File path glob filter (e.g., '*.py').
+            size: Maximum results.
+            include_tests: Include test elements.
+
+        Returns:
+            List of matching documents.
+        """
+        # Wrap pattern with .* for substring matching if not already wrapped
+        # Lucene regexp matches the ENTIRE field, so we need anchors for substring search
+        search_pattern = pattern
+        if not pattern.startswith(".*"):
+            search_pattern = ".*" + search_pattern
+        if not pattern.endswith(".*"):
+            search_pattern = search_pattern + ".*"
+
+        must_clauses: list[dict[str, Any]] = [
+            {"regexp": {"raw_code.keyword": {"value": search_pattern, "flags": "ALL"}}},
+        ]
+
+        filter_clauses: list[dict[str, Any]] = []
+
+        if username:
+            filter_clauses.append({"term": {"username": username}})
+        if scope:
+            filter_clauses.append({"term": {"scope": scope}})
+        if repository:
+            filter_clauses.append({"term": {"repository": repository}})
+        if glob:
+            filter_clauses.append({"wildcard": {"relative_path": glob}})
+        if not include_tests:
+            filter_clauses.append({"term": {"is_test": False}})
+
+        query = {
+            "bool": {
+                "must": must_clauses,
+                "filter": filter_clauses,
+            }
+        }
+
+        client = self._get_client()
+        result = client.search(
+            index=INDEX_NAME,
+            body={"query": query, "size": size},
+        )
+
+        return [hit["_source"] for hit in result["hits"]["hits"]]
+
+    def search_by_wildcard(
+        self,
+        pattern: str,
+        scope: str | None = None,
+        repository: str | None = None,
+        username: str | None = None,
+        glob: str | None = None,
+        size: int = 50,
+        include_tests: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Search raw_code field using Elasticsearch wildcard query.
+
+        Wildcard syntax:
+        - * matches zero or more characters
+        - ? matches exactly one character
+
+        Args:
+            pattern: Wildcard pattern.
+            scope: Filter by scope.
+            repository: Filter by repository.
+            username: Filter by username (optional).
+            glob: File path glob filter.
+            size: Maximum results.
+            include_tests: Include test elements.
+
+        Returns:
+            List of matching documents.
+        """
+        must_clauses: list[dict[str, Any]] = [
+            {"wildcard": {"raw_code.keyword": {"value": pattern, "case_insensitive": True}}},
+        ]
+
+        filter_clauses: list[dict[str, Any]] = []
+
+        if username:
+            filter_clauses.append({"term": {"username": username}})
+        if scope:
+            filter_clauses.append({"term": {"scope": scope}})
+        if repository:
+            filter_clauses.append({"term": {"repository": repository}})
+        if glob:
+            filter_clauses.append({"wildcard": {"relative_path": glob}})
+        if not include_tests:
+            filter_clauses.append({"term": {"is_test": False}})
+
+        query: dict[str, Any] = {"bool": {"must": must_clauses}}
+        if filter_clauses:
+            query["bool"]["filter"] = filter_clauses
+
+        client = self._get_client()
+        result = client.search(
+            index=INDEX_NAME,
+            body={"query": query, "size": size},
+        )
+
+        return [hit["_source"] for hit in result["hits"]["hits"]]
+
+    def search_by_proximity(
+        self,
+        terms: str,
+        slop: int = 5,
+        scope: str | None = None,
+        repository: str | None = None,
+        username: str | None = None,
+        glob: str | None = None,
+        size: int = 50,
+        include_tests: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Search raw_code for terms within proximity of each other.
+
+        Uses match_phrase with slop to find terms that appear near each other.
+
+        Args:
+            terms: Space-separated terms to find near each other.
+            slop: Maximum number of positions between terms (0 = exact phrase).
+            scope: Filter by scope.
+            repository: Filter by repository.
+            username: Filter by username (optional).
+            glob: File path glob filter.
+            size: Maximum results.
+            include_tests: Include test elements.
+
+        Returns:
+            List of matching documents.
+        """
+        must_clauses: list[dict[str, Any]] = [
+            {"match_phrase": {"raw_code": {"query": terms, "slop": slop}}},
+        ]
+
+        filter_clauses: list[dict[str, Any]] = []
+
+        if username:
+            filter_clauses.append({"term": {"username": username}})
+        if scope:
+            filter_clauses.append({"term": {"scope": scope}})
+        if repository:
+            filter_clauses.append({"term": {"repository": repository}})
+        if glob:
+            filter_clauses.append({"wildcard": {"relative_path": glob}})
+        if not include_tests:
+            filter_clauses.append({"term": {"is_test": False}})
+
+        query: dict[str, Any] = {"bool": {"must": must_clauses}}
+        if filter_clauses:
+            query["bool"]["filter"] = filter_clauses
+
+        client = self._get_client()
+        result = client.search(
+            index=INDEX_NAME,
+            body={"query": query, "size": size},
+        )
+
+        return [hit["_source"] for hit in result["hits"]["hits"]]
+
+    def find_elements_calling(
+        self,
+        target_id: str,
+        scope: str | None = None,
+        repository: str | None = None,
+        username: str | None = None,
+        limit: int = 30,
+    ) -> list[dict]:
+        """Find elements that call the target (query calls.resolved_id).
+
+        Args:
+            target_id: Element ID of the target being called.
+            scope: Filter by scope.
+            repository: Filter by repository.
+            username: Filter by username.
+            limit: Maximum results to return.
+
+        Returns:
+            List of element documents that call the target.
+        """
+        filter_clauses: list[dict[str, Any]] = []
+
+        if scope:
+            filter_clauses.append({"term": {"scope": scope}})
+        if repository:
+            filter_clauses.append({"term": {"repository": repository}})
+        if username:
+            filter_clauses.append({"term": {"username": username}})
+
+        # Nested query to find elements with calls.resolved_id matching target
+        nested_query: dict[str, Any] = {
+            "nested": {
+                "path": "calls",
+                "query": {
+                    "term": {"calls.resolved_id": target_id}
+                },
+            }
+        }
+
+        query: dict[str, Any]
+        if filter_clauses:
+            query = {
+                "bool": {
+                    "must": [nested_query],
+                    "filter": filter_clauses,
+                }
+            }
+        else:
+            query = nested_query
+
+        client = self._get_client()
+        result = client.search(
+            index=INDEX_NAME,
+            body={"query": query, "size": limit},
+        )
+
+        return [hit["_source"] for hit in result.get("hits", {}).get("hits", [])]
+
+    def find_elements_importing(
+        self,
+        module: str,
+        scope: str | None = None,
+        repository: str | None = None,
+        username: str | None = None,
+        limit: int = 30,
+    ) -> list[dict]:
+        """Find elements that import the module (query imports.module).
+
+        Args:
+            module: Module name to search for.
+            scope: Filter by scope.
+            repository: Filter by repository.
+            username: Filter by username.
+            limit: Maximum results to return.
+
+        Returns:
+            List of element documents that import the module.
+        """
+        filter_clauses: list[dict[str, Any]] = []
+
+        if scope:
+            filter_clauses.append({"term": {"scope": scope}})
+        if repository:
+            filter_clauses.append({"term": {"repository": repository}})
+        if username:
+            filter_clauses.append({"term": {"username": username}})
+
+        # Nested query to find elements with imports.module matching
+        nested_query: dict[str, Any] = {
+            "nested": {
+                "path": "imports",
+                "query": {
+                    "term": {"imports.module": module}
+                },
+            }
+        }
+
+        query: dict[str, Any]
+        if filter_clauses:
+            query = {
+                "bool": {
+                    "must": [nested_query],
+                    "filter": filter_clauses,
+                }
+            }
+        else:
+            query = nested_query
+
+        client = self._get_client()
+        result = client.search(
+            index=INDEX_NAME,
+            body={"query": query, "size": limit},
+        )
+
+        return [hit["_source"] for hit in result.get("hits", {}).get("hits", [])]

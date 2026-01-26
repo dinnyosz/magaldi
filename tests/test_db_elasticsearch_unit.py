@@ -42,9 +42,9 @@ def mock_es_client():
 @pytest.fixture
 def mock_repo(mock_config, mock_es_client):
     """Create repository with mocked ES client."""
-    with patch("shared.db.elasticsearch.Elasticsearch", return_value=mock_es_client):
+    with patch("shared.db.repositories.base.Elasticsearch", return_value=mock_es_client):
         repo = ElasticsearchRepository(mock_config)
-        repo._client = mock_es_client
+        repo._base._client = mock_es_client
         return repo
 
 
@@ -106,7 +106,7 @@ class TestGenerateHashId:
 class TestElasticsearchRepositoryInit:
     """Tests for ElasticsearchRepository initialization."""
 
-    @patch("shared.db.elasticsearch.Elasticsearch")
+    @patch("shared.db.repositories.base.Elasticsearch")
     def test_init_with_config(self, mock_es_class, mock_config):
         """Test repository initialization with config."""
         mock_es_class.return_value = MagicMock()
@@ -427,11 +427,11 @@ class TestClose:
         mock_repo.close()
 
         mock_es_client.close.assert_called_once()
-        assert mock_repo._client is None
+        assert mock_repo._base._client is None
 
     def test_close_already_closed(self, mock_repo):
         """Test closing already closed connection."""
-        mock_repo._client = None
+        mock_repo._base._client = None
 
         # Should not raise
         mock_repo.close()

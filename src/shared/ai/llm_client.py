@@ -52,6 +52,11 @@ litellm.suppress_debug_info = True
 # See: https://github.com/BerriAI/litellm/issues/11759
 warnings.filterwarnings("ignore", message="Pydantic serializer warnings")
 
+# Note: Python 3.14 may show "_UnixSelectorEventLoop has no attribute '_ssock'"
+# errors during shutdown. These are harmless GC cleanup messages from event loops
+# created internally by LiteLLM/httpx that weren't fully initialized.
+# See: https://github.com/BerriAI/litellm/issues/13220
+
 # =============================================================================
 # SYNC CONNECTION POOL (for completion/embedding calls)
 # =============================================================================
