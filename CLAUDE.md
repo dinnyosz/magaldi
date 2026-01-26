@@ -111,3 +111,4 @@ Repository config file: `magaldi.yaml` in repo root with required `scope` field.
 ## TODOs
 
 - [ ] **LiteLLM Pydantic warning**: Check if [issue #11759](https://github.com/BerriAI/litellm/issues/11759) (Pydantic serialization) is resolved, then remove warning suppression from `src/shared/ai/llm_client.py`
+- [ ] **LiteLLM aiohttp session leak**: Check if [issue #11657](https://github.com/BerriAI/litellm/issues/11657) (Ollama embeddings leak aiohttp sessions causing "Too many open files") is resolved, then remove `DISABLE_AIOHTTP_TRANSPORT` workaround from `src/shared/ai/llm_client.py`
