@@ -335,6 +335,21 @@ class ParsingResult:
         return max_chars
 
     @property
+    def largest_elements_by_type(self) -> dict[str, tuple[str, str, int]]:
+        """Get the largest element info for each type.
+
+        Returns dict mapping element_type to (name, relative_path, char_count).
+        """
+        largest: dict[str, tuple[str, str, int]] = {}
+        for pf in self.parsed_files:
+            for elem in pf.elements:
+                code_len = len(elem.raw_code or "")
+                current = largest.get(elem.element_type)
+                if current is None or code_len > current[2]:
+                    largest[elem.element_type] = (elem.name, elem.relative_path, code_len)
+        return largest
+
+    @property
     def context_sizes(self) -> dict[str, int]:
         """Get computed context sizes per element type.
 

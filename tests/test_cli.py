@@ -102,6 +102,10 @@ def mock_parsing_result():
     result.failed_files = []
     result.max_chars_by_type = {"function": 5000, "class": 8000}
     result.context_sizes = {"function": 4096, "class": 8192}
+    result.largest_elements_by_type = {
+        "function": ("my_func", "src/module.py", 5000),
+        "class": ("MyClass", "src/models.py", 8000),
+    }
     return result
 
 
@@ -550,6 +554,7 @@ class TestPrintFunctions:
         result.failed_files = ["error.py"]
         result.max_chars_by_type = {"function": 3000}
         result.context_sizes = {"function": 4096}
+        result.largest_elements_by_type = {"function": ("test_func", "test.py", 3000)}
 
         print_parsing_result(result)
 

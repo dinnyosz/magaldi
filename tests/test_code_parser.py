@@ -787,6 +787,42 @@ class TestParsingResult:
         assert context_sizes["function"] in CONTEXT_TIERS
         assert context_sizes["variable"] in CONTEXT_TIERS
 
+    def test_largest_elements_by_type_property(self):
+        """Should track the largest element for each type."""
+        elements = [
+            CodeElement(element_id="1", name="small_func", element_type="function", raw_code="x" * 1000, relative_path="a.py"),
+            CodeElement(element_id="2", name="big_func", element_type="function", raw_code="x" * 5000, relative_path="b.py"),
+            CodeElement(element_id="3", name="MyClass", element_type="class", raw_code="x" * 3000, relative_path="c.py"),
+        ]
+        file_info = FileInfo(
+            relative_path="file.py",
+            absolute_path=Path("/test/file.py"),
+            language="python",
+        )
+        parsed_file = ParsedFile(
+            file_info=file_info,
+            elements=elements,
+        )
+        result = ParsingResult(
+            scope="test",
+            repository="repo",
+            username="user",
+            parsed_files=[parsed_file],
+        )
+
+        largest = result.largest_elements_by_type
+
+        assert "function" in largest
+        assert "class" in largest
+        # Should identify the largest function
+        name, path, chars = largest["function"]
+        assert name == "big_func"
+        assert chars == 5000
+        # Should identify the class
+        name, path, chars = largest["class"]
+        assert name == "MyClass"
+        assert chars == 3000
+
 
 # =============================================================================
 # IMPORT EXTRACTION TESTS

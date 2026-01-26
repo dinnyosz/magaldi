@@ -1557,12 +1557,13 @@ def print_parsing_result(result: ParsingResult) -> None:
     # Context size analysis table
     max_chars = result.max_chars_by_type
     context_sizes = result.context_sizes
+    largest_elements = result.largest_elements_by_type
 
     if max_chars:
         console.print()
         console.print("  [dim]Context size analysis (for KV cache optimization):[/]")
-        console.print("  [dim]  Element Type   Max Chars   Est. Tokens   Context Size[/]")
-        console.print("  [dim]  ─────────────────────────────────────────────────────────[/]")
+        console.print("  [dim]  Element Type   Max Chars   Est. Tokens   Context Size   Largest Element[/]")
+        console.print("  [dim]  ────────────────────────────────────────────────────────────────────────────────────────────────[/]")
 
         # Sort by context size descending for readability
         sorted_types = sorted(max_chars.keys(), key=lambda t: context_sizes.get(t, 0), reverse=True)
@@ -1574,7 +1575,17 @@ def print_parsing_result(result: ParsingResult) -> None:
             overhead = PROMPT_OVERHEAD.get(element_type, DEFAULT_OVERHEAD)
             tokens = chars // 4 + overhead
             ctx_size = context_sizes.get(element_type, 0)
-            console.print(f"  [dim]  {element_type:<14} {chars:>9,}   {tokens:>11,}   {ctx_size:>12,}[/]")
+            # Get largest element info
+            largest = largest_elements.get(element_type)
+            if largest:
+                name, path, _ = largest
+                # Truncate path if too long
+                if len(path) > 30:
+                    path = "..." + path[-27:]
+                largest_info = f"{path}:{name}"
+            else:
+                largest_info = "-"
+            console.print(f"  [dim]  {element_type:<14} {chars:>9,}   {tokens:>11,}   {ctx_size:>12,}   {largest_info}[/]")
 
 
 def print_feature_result(result: dict) -> None:
