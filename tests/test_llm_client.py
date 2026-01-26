@@ -600,3 +600,71 @@ class TestFactoryFunctions:
         )
 
         assert client.dimensions == 1024
+
+
+# =============================================================================
+# NUM_CTX PARAMETER TESTS
+# =============================================================================
+
+
+class TestNumCtxParameter:
+    """Tests for num_ctx parameter support."""
+
+    def test_generate_passes_num_ctx_for_ollama(self):
+        """Should pass num_ctx to LiteLLM for Ollama provider."""
+        client = LLMClient(model="ollama/qwen3:4b", api_base="http://localhost:11434")
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "test response"
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response) as mock_comp:
+            client.generate("test prompt", num_ctx=4096)
+
+        call_kwargs = mock_comp.call_args.kwargs
+        assert call_kwargs.get("num_ctx") == 4096
+
+    def test_generate_passes_num_ctx_for_llamacpp(self):
+        """Should pass n_ctx via extra_body for llama.cpp provider."""
+        client = LLMClient(model="openai/qwen3:4b", api_base="http://localhost:8080/v1")
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "test response"
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response) as mock_comp:
+            client.generate("test prompt", num_ctx=4096)
+
+        call_kwargs = mock_comp.call_args.kwargs
+        assert call_kwargs.get("extra_body", {}).get("n_ctx") == 4096
+
+    def test_generate_from_messages_passes_num_ctx(self):
+        """Should pass num_ctx in generate_from_messages."""
+        client = LLMClient(model="ollama/qwen3:4b", api_base="http://localhost:11434")
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "test response"
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response) as mock_comp:
+            client.generate_from_messages(
+                [{"role": "user", "content": "test"}],
+                num_ctx=8192
+            )
+
+        call_kwargs = mock_comp.call_args.kwargs
+        assert call_kwargs.get("num_ctx") == 8192
+
+    def test_generate_without_num_ctx_does_not_include_it(self):
+        """Should not include num_ctx if not provided."""
+        client = LLMClient(model="ollama/qwen3:4b", api_base="http://localhost:11434")
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "test response"
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response) as mock_comp:
+            client.generate("test prompt")
+
+        call_kwargs = mock_comp.call_args.kwargs
+        assert "num_ctx" not in call_kwargs

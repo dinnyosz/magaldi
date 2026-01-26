@@ -458,6 +458,7 @@ class LLMClient:
         max_tokens: int = 512,
         timeout: int = 60,
         model: str | None = None,
+        num_ctx: int | None = None,
     ) -> str:
         """Generate text completion.
 
@@ -468,6 +469,8 @@ class LLMClient:
             max_tokens: Maximum tokens to generate.
             timeout: Request timeout in seconds.
             model: Optional model override.
+            num_ctx: Context window size for local providers (Ollama, llama.cpp).
+                     Used to optimize KV cache sizing for better performance.
 
         Returns:
             Generated text.
@@ -509,6 +512,15 @@ class LLMClient:
             if is_thinking_model and use_model.startswith("ollama/"):
                 kwargs["think"] = False
 
+            # Add num_ctx for local providers (KV cache optimization)
+            if num_ctx:
+                if use_model.startswith("ollama/"):
+                    kwargs["num_ctx"] = num_ctx
+                elif use_model.startswith("openai/") and self.api_base:
+                    # OpenAI-compatible local servers (llama.cpp, LM Studio, LocalAI)
+                    kwargs["extra_body"] = kwargs.get("extra_body", {})
+                    kwargs["extra_body"]["n_ctx"] = num_ctx
+
             response = completion(**kwargs)
 
             # Extract text from response
@@ -532,6 +544,7 @@ class LLMClient:
         max_tokens: int = 512,
         timeout: int = 60,
         model: str | None = None,
+        num_ctx: int | None = None,
     ) -> str:
         """Generate text completion from messages (system + user).
 
@@ -547,6 +560,8 @@ class LLMClient:
             max_tokens: Maximum tokens to generate.
             timeout: Request timeout in seconds.
             model: Optional model override.
+            num_ctx: Context window size for local providers (Ollama, llama.cpp).
+                     Used to optimize KV cache sizing for better performance.
 
         Returns:
             Generated text.
@@ -580,6 +595,15 @@ class LLMClient:
 
             if is_thinking_model and use_model.startswith("ollama/"):
                 kwargs["think"] = False
+
+            # Add num_ctx for local providers (KV cache optimization)
+            if num_ctx:
+                if use_model.startswith("ollama/"):
+                    kwargs["num_ctx"] = num_ctx
+                elif use_model.startswith("openai/") and self.api_base:
+                    # OpenAI-compatible local servers (llama.cpp, LM Studio, LocalAI)
+                    kwargs["extra_body"] = kwargs.get("extra_body", {})
+                    kwargs["extra_body"]["n_ctx"] = num_ctx
 
             response = completion(**kwargs)
 
