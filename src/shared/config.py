@@ -168,6 +168,10 @@ class LLMConfig:
     summarize_context_window: int = 8192
     embed_context_window: int = 8192
 
+    # Context size for aggregation tasks (features, glossary)
+    # Uses fixed large context since input size depends on cluster size
+    aggregation_context_size: int = 16384
+
     def get_model(self, model_ref: str) -> ModelConfig:
         """Get a model configuration by reference name."""
         if model_ref not in self.models:

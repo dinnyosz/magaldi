@@ -121,6 +121,11 @@ class TestLLMConfigDefaults:
         model = config.get_embed_model()
         assert model.dimensions == 1024
 
+    def test_aggregation_context_size_default(self):
+        """Should have default aggregation context size."""
+        config = LLMConfig()
+        assert config.aggregation_context_size == 16384
+
 
 class TestWorkerConfigDefaults:
     """Test WorkerConfig dataclass defaults."""
