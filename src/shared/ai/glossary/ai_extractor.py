@@ -321,6 +321,7 @@ async def call_llm_for_glossary(
             temperature=config.llm.summarize_temperature,
             top_p=config.llm.summarize_top_p,
             max_tokens=128,  # Just term names, not full descriptions
+            num_ctx=config.llm.aggregation_context_size,
         )
     except LLMError:
         return []
@@ -526,6 +527,7 @@ def generate_glossary_summary_sync(
             temperature=config.llm.summarize_temperature,
             top_p=config.llm.summarize_top_p,
             max_tokens=512,  # Allow for definition + details
+            num_ctx=config.llm.aggregation_context_size,
         )
         api_time = time.time() - start_time
         return response.strip(), api_time
@@ -614,6 +616,7 @@ def call_llm_for_glossary_sync(
             temperature=config.llm.summarize_temperature,
             top_p=config.llm.summarize_top_p,
             max_tokens=128,  # Just term names, not full descriptions
+            num_ctx=config.llm.aggregation_context_size,
         )
     except LLMError:
         return []
