@@ -1353,6 +1353,9 @@ def run_processing(
         num_workers=workers,
     )
 
+    # Pass context sizes from parsing to processing (for KV cache optimization)
+    proc_config.context_sizes = parsing_result.context_sizes
+
     # Build file hashes dict from manifest
     file_hashes: dict[str, str] = {}
     for fi in manifest.new_files:
