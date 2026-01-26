@@ -823,6 +823,61 @@ class TestParsingResult:
         assert name == "MyClass"
         assert chars == 3000
 
+    def test_elements_by_tier_property(self):
+        """Should group elements by their context tier."""
+        from shared.ai.context_size import CONTEXT_TIERS
+
+        # Create elements of varying sizes that will land in different tiers
+        # Small: 200 chars = 50 tokens + 700 overhead = 750 → 2048 tier
+        # Medium: 8000 chars = 2000 tokens + 700 overhead = 2700 → 4096 tier
+        # Large: 50000 chars = 12500 tokens + 300 overhead = 12800 → 16384 tier
+        elements = [
+            CodeElement(element_id="1", name="small1", element_type="function", raw_code="x" * 200, relative_path="a.py"),
+            CodeElement(element_id="2", name="small2", element_type="function", raw_code="x" * 300, relative_path="a.py"),
+            CodeElement(element_id="3", name="medium", element_type="function", raw_code="x" * 8000, relative_path="b.py"),
+            CodeElement(element_id="4", name="large_file", element_type="file", raw_code="x" * 50000, relative_path="c.py"),
+        ]
+        file_info = FileInfo(
+            relative_path="file.py",
+            absolute_path=Path("/test/file.py"),
+            language="python",
+        )
+        parsed_file = ParsedFile(
+            file_info=file_info,
+            elements=elements,
+        )
+        result = ParsingResult(
+            scope="test",
+            repository="repo",
+            username="user",
+            parsed_files=[parsed_file],
+        )
+
+        tiers = result.elements_by_tier
+
+        # All context tiers should be present
+        for tier in CONTEXT_TIERS:
+            assert tier in tiers
+
+        # Check 2048 tier (small functions)
+        assert tiers[2048]["count"] == 2
+        assert tiers[2048]["by_type"]["function"] == 2
+        assert tiers[2048]["largest"][0] == "small2"  # 300 > 200
+
+        # Check 4096 tier (medium function)
+        assert tiers[4096]["count"] == 1
+        assert tiers[4096]["by_type"]["function"] == 1
+        assert tiers[4096]["largest"][0] == "medium"
+
+        # Check 16384 tier (large file)
+        assert tiers[16384]["count"] == 1
+        assert tiers[16384]["by_type"]["file"] == 1
+        assert tiers[16384]["largest"][0] == "large_file"
+
+        # Empty tiers should have zero counts
+        assert tiers[8192]["count"] == 0
+        assert tiers[32768]["count"] == 0
+
 
 # =============================================================================
 # IMPORT EXTRACTION TESTS

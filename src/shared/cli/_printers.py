@@ -43,38 +43,44 @@ def print_parsing_result(result: "ParsingResult") -> None:
     failed = f" | [red]{len(result.failed_files)} failed[/]" if result.failed_files else ""
     console.print(f"  [green]{len(result.parsed_files)}[/] files → [green]{result.total_elements}[/] elements ({types}){failed}")
 
-    # Context size analysis table
-    max_chars = result.max_chars_by_type
-    context_sizes = result.context_sizes
-    largest_elements = result.largest_elements_by_type
+    # Per-tier context size analysis
+    tiers = result.elements_by_tier
+    non_empty_tiers = {tier: stats for tier, stats in tiers.items() if stats["count"] > 0}
 
-    if max_chars:
+    if non_empty_tiers:
         console.print()
-        console.print("  [dim]Context size analysis (for KV cache optimization):[/]")
-        console.print("  [dim]  Element Type   Max Chars   Est. Tokens   Context Size   Largest Element[/]")
-        console.print("  [dim]  ────────────────────────────────────────────────────────────────────────────────────────────────[/]")
+        console.print("  [dim]Context tiers (per-element KV cache optimization):[/]")
+        console.print("  [dim]  Context Tier   Count   Max Chars   Max Tokens   Types                           Largest Element[/]")
+        console.print("  [dim]  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────[/]")
 
-        # Sort by context size descending for readability
-        sorted_types = sorted(max_chars.keys(), key=lambda t: context_sizes.get(t, 0), reverse=True)
+        # Sort by tier size ascending
+        for tier in sorted(non_empty_tiers.keys()):
+            stats = non_empty_tiers[tier]
+            count = stats["count"]
+            max_chars = stats["max_chars"]
+            max_tokens = stats["max_tokens"]
 
-        from shared.ai.context_size import PROMPT_OVERHEAD, DEFAULT_OVERHEAD
+            # Format types breakdown (e.g., "function:45, method:23")
+            by_type = stats["by_type"]
+            type_strs = [f"{t}:{c}" for t, c in sorted(by_type.items(), key=lambda x: -x[1])]
+            types_str = ", ".join(type_strs[:3])  # Show top 3
+            if len(type_strs) > 3:
+                types_str += f" +{len(type_strs) - 3}"
 
-        for element_type in sorted_types:
-            chars = max_chars[element_type]
-            overhead = PROMPT_OVERHEAD.get(element_type, DEFAULT_OVERHEAD)
-            tokens = chars // 4 + overhead
-            ctx_size = context_sizes.get(element_type, 0)
-            # Get largest element info
-            largest = largest_elements.get(element_type)
+            # Format largest element
+            largest = stats["largest"]
             if largest:
-                name, path, _ = largest
+                name, path, chars, etype = largest
                 # Truncate path if too long
-                if len(path) > 30:
-                    path = "..." + path[-27:]
-                largest_info = f"{path}:{name}"
+                if len(path) > 25:
+                    path = "..." + path[-22:]
+                largest_info = f"{path}:{name} ({etype})"
+                if len(largest_info) > 45:
+                    largest_info = largest_info[:42] + "..."
             else:
                 largest_info = "-"
-            console.print(f"  [dim]  {element_type:<14} {chars:>9,}   {tokens:>11,}   {ctx_size:>12,}   {largest_info}[/]")
+
+            console.print(f"  [dim]  {tier:>12,}   {count:>5}   {max_chars:>9,}   {max_tokens:>10,}   {types_str:<30}  {largest_info}[/]")
 
 
 def print_feature_result(result: dict) -> None:

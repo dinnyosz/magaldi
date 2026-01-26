@@ -106,6 +106,32 @@ def mock_parsing_result():
         "function": ("my_func", "src/module.py", 5000),
         "class": ("MyClass", "src/models.py", 8000),
     }
+    # Per-tier statistics for new display format
+    result.elements_by_tier = {
+        2048: {
+            "count": 12,
+            "max_chars": 2000,
+            "max_tokens": 1200,
+            "largest": ("small_func", "src/utils.py", 2000, "function"),
+            "by_type": {"function": 10, "class": 2},
+        },
+        4096: {
+            "count": 5,
+            "max_chars": 5000,
+            "max_tokens": 1950,
+            "largest": ("my_func", "src/module.py", 5000, "function"),
+            "by_type": {"function": 5},
+        },
+        8192: {
+            "count": 3,
+            "max_chars": 8000,
+            "max_tokens": 2500,
+            "largest": ("MyClass", "src/models.py", 8000, "class"),
+            "by_type": {"class": 3},
+        },
+        16384: {"count": 0, "max_chars": 0, "max_tokens": 0, "largest": None, "by_type": {}},
+        32768: {"count": 0, "max_chars": 0, "max_tokens": 0, "largest": None, "by_type": {}},
+    }
     return result
 
 
@@ -535,15 +561,15 @@ class TestPrintFunctions:
         assert "20" in captured.out  # total_elements
         assert "function" in captured.out
         assert "class" in captured.out
-        # Context size analysis should be displayed
-        assert "Context size analysis" in captured.out
+        # Per-tier context analysis should be displayed
+        assert "Context tiers" in captured.out
         assert "Max Chars" in captured.out
-        assert "Est. Tokens" in captured.out
-        assert "Context Size" in captured.out
-        assert "5,000" in captured.out  # max chars for function
-        assert "8,000" in captured.out  # max chars for class
-        assert "4,096" in captured.out  # context size for function
-        assert "8,192" in captured.out  # context size for class
+        assert "Max Tokens" in captured.out
+        assert "2,048" in captured.out  # smallest tier with elements
+        assert "4,096" in captured.out  # mid tier
+        assert "8,192" in captured.out  # larger tier
+        assert "5,000" in captured.out  # max chars in 4096 tier
+        assert "8,000" in captured.out  # max chars in 8192 tier
 
     def test_print_parsing_result_with_failures(self, capsys):
         """Test print_parsing_result with failed files."""
@@ -555,6 +581,19 @@ class TestPrintFunctions:
         result.max_chars_by_type = {"function": 3000}
         result.context_sizes = {"function": 4096}
         result.largest_elements_by_type = {"function": ("test_func", "test.py", 3000)}
+        result.elements_by_tier = {
+            2048: {"count": 0, "max_chars": 0, "max_tokens": 0, "largest": None, "by_type": {}},
+            4096: {
+                "count": 10,
+                "max_chars": 3000,
+                "max_tokens": 1450,
+                "largest": ("test_func", "test.py", 3000, "function"),
+                "by_type": {"function": 10},
+            },
+            8192: {"count": 0, "max_chars": 0, "max_tokens": 0, "largest": None, "by_type": {}},
+            16384: {"count": 0, "max_chars": 0, "max_tokens": 0, "largest": None, "by_type": {}},
+            32768: {"count": 0, "max_chars": 0, "max_tokens": 0, "largest": None, "by_type": {}},
+        }
 
         print_parsing_result(result)
 

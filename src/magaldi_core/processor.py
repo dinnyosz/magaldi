@@ -39,6 +39,7 @@ from shared.ai.summarization import (
     build_prompt,
     clean_summary,
 )
+from shared.ai.context_size import compute_element_num_ctx
 
 
 # =============================================================================
@@ -695,7 +696,11 @@ def _summarize_element(
 
     # Generate summary (select model based on element type)
     model_config = config.get_model_for_element_type(element.element_type)
-    num_ctx = config.context_sizes.get(element.element_type)
+    # Compute per-element context size for optimal KV cache efficiency
+    num_ctx = compute_element_num_ctx(
+        element.element_type,
+        len(element.raw_code or ""),
+    )
     raw_summary = llm_client.generate(
         prompt=prompt,
         temperature=config.summarize_temperature,

@@ -945,18 +945,19 @@ class TestIndexElementImportsAndCalls:
 
 
 # =============================================================================
-# CONTEXT SIZE PASSTHROUGH TESTS
+# CONTEXT SIZE TESTS
 # =============================================================================
 
 
-class TestContextSizePassthrough:
-    """Tests for passing context sizes to summarization."""
+class TestPerElementContextSize:
+    """Tests for per-element context size computation."""
 
-    def test_summarize_element_uses_context_size(self):
-        """Should pass num_ctx from context_sizes dict."""
+    def test_small_element_uses_smallest_tier(self):
+        """Small elements should use 2048 context tier."""
         mock_llm = MagicMock()
         mock_llm.generate.return_value = "test summary"
 
+        # Small function: 15 chars = ~4 tokens + 700 overhead = 704 → 2048 tier
         element = CodeElement(
             element_id="test:repo:user:file.py:function:foo:1",
             element_type="function",
@@ -965,61 +966,89 @@ class TestContextSizePassthrough:
         )
 
         config = ProcessingConfig()
-        config.context_sizes = {"function": 4096, "file": 16384}
-
         cache = _SummaryCache()
         cache.add_element(element)
 
         _summarize_element(element, cache, mock_llm, config)
 
-        # Verify num_ctx was passed
+        call_kwargs = mock_llm.generate.call_args[1]
+        assert call_kwargs.get("num_ctx") == 2048
+
+    def test_medium_element_uses_appropriate_tier(self):
+        """Medium elements should use appropriate tier based on size."""
+        mock_llm = MagicMock()
+        mock_llm.generate.return_value = "test summary"
+
+        # 8000 chars = 2000 tokens + 700 overhead = 2700 → 4096 tier
+        element = CodeElement(
+            element_id="test:repo:user:file.py:function:big:1",
+            element_type="function",
+            name="big",
+            raw_code="x" * 8000,
+        )
+
+        config = ProcessingConfig()
+        cache = _SummaryCache()
+        cache.add_element(element)
+
+        _summarize_element(element, cache, mock_llm, config)
+
         call_kwargs = mock_llm.generate.call_args[1]
         assert call_kwargs.get("num_ctx") == 4096
 
-    def test_summarize_element_without_context_size(self):
-        """Should pass None when element type not in context_sizes."""
+    def test_large_file_uses_large_tier(self):
+        """Large files should use appropriately large context tier."""
         mock_llm = MagicMock()
         mock_llm.generate.return_value = "test summary"
 
+        # 50000 chars = 12500 tokens + 300 overhead = 12800 → 16384 tier
         element = CodeElement(
-            element_id="test:repo:user:file.py:class:MyClass:1",
-            element_type="class",
-            name="MyClass",
-            raw_code="class MyClass: pass",
+            element_id="test:repo:user:file.py:file:file.py:1",
+            element_type="file",
+            name="file.py",
+            raw_code="x" * 50000,
         )
 
         config = ProcessingConfig()
-        config.context_sizes = {"function": 4096}  # No "class" entry
-
         cache = _SummaryCache()
         cache.add_element(element)
 
         _summarize_element(element, cache, mock_llm, config)
 
-        # Verify num_ctx is None when type not in dict
         call_kwargs = mock_llm.generate.call_args[1]
-        assert call_kwargs.get("num_ctx") is None
+        assert call_kwargs.get("num_ctx") == 16384
 
-    def test_summarize_element_empty_context_sizes(self):
-        """Should pass None when context_sizes is empty."""
+    def test_element_type_affects_overhead(self):
+        """Different element types have different prompt overheads."""
         mock_llm = MagicMock()
         mock_llm.generate.return_value = "test summary"
 
-        element = CodeElement(
-            element_id="test:repo:user:file.py:function:bar:1",
+        # 6000 chars with different types:
+        # - function: 6000/4=1500 + 700 overhead = 2200 → 4096 tier
+        # - file: 6000/4=1500 + 300 overhead = 1800 → 2048 tier
+        func_element = CodeElement(
+            element_id="test:repo:user:file.py:function:func:1",
             element_type="function",
-            name="bar",
-            raw_code="def bar(): pass",
+            name="func",
+            raw_code="x" * 6000,
+        )
+        file_element = CodeElement(
+            element_id="test:repo:user:file.py:file:file.py:1",
+            element_type="file",
+            name="file.py",
+            raw_code="x" * 6000,
         )
 
         config = ProcessingConfig()
-        # context_sizes defaults to empty dict
-
         cache = _SummaryCache()
-        cache.add_element(element)
+        cache.add_element(func_element)
+        cache.add_element(file_element)
 
-        _summarize_element(element, cache, mock_llm, config)
+        _summarize_element(func_element, cache, mock_llm, config)
+        func_num_ctx = mock_llm.generate.call_args[1].get("num_ctx")
 
-        # Verify num_ctx is None when context_sizes is empty
-        call_kwargs = mock_llm.generate.call_args[1]
-        assert call_kwargs.get("num_ctx") is None
+        _summarize_element(file_element, cache, mock_llm, config)
+        file_num_ctx = mock_llm.generate.call_args[1].get("num_ctx")
+
+        assert func_num_ctx == 4096
+        assert file_num_ctx == 2048

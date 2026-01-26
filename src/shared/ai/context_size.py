@@ -1,8 +1,12 @@
 """Context size computation utilities for KV cache optimization.
 
-This module computes optimal context sizes (num_ctx) per element type
-based on observed maximum code sizes during parsing. Using type-specific
-context sizes improves KV cache efficiency for local LLM inference.
+This module computes optimal context sizes (num_ctx) for LLM inference.
+Using appropriate context sizes improves KV cache efficiency for local
+LLM providers like Ollama.
+
+Two approaches are supported:
+1. Per-element: Each element gets its own optimal tier based on its size
+2. Per-type (legacy): One tier per element type based on max observed size
 """
 
 from __future__ import annotations
@@ -29,18 +33,26 @@ PROMPT_OVERHEAD = {
 DEFAULT_OVERHEAD = 500
 
 
-def compute_num_ctx(element_type: str, max_chars: int) -> int:
-    """Compute optimal context size for an element type.
+def compute_element_num_ctx(element_type: str, char_count: int) -> int:
+    """Compute optimal context size for a specific element.
+
+    This is the preferred approach - each element gets assigned to the
+    smallest context tier that fits its actual size, maximizing KV cache
+    efficiency.
+
+    Example:
+        - 200 char function (50 tokens + 700 overhead) → 2048 tier
+        - 72000 char file (18000 tokens + 300 overhead) → 32768 tier
 
     Args:
         element_type: Type of code element (file, class, function, etc.)
-        max_chars: Maximum character count observed for this type.
+        char_count: Character count of this element's raw code.
 
     Returns:
         Optimal num_ctx value from CONTEXT_TIERS.
     """
     # Estimate tokens: ~4 chars per token for code
-    estimated_tokens = max_chars // 4
+    estimated_tokens = char_count // 4
     overhead = PROMPT_OVERHEAD.get(element_type, DEFAULT_OVERHEAD)
     total_tokens = estimated_tokens + overhead
 
@@ -53,8 +65,29 @@ def compute_num_ctx(element_type: str, max_chars: int) -> int:
     return CONTEXT_TIERS[-1]
 
 
+def compute_num_ctx(element_type: str, max_chars: int) -> int:
+    """Compute optimal context size for an element type (legacy).
+
+    This function computes a single context size for all elements of a type
+    based on the maximum observed size. Consider using compute_element_num_ctx()
+    for per-element sizing which is more efficient.
+
+    Args:
+        element_type: Type of code element (file, class, function, etc.)
+        max_chars: Maximum character count observed for this type.
+
+    Returns:
+        Optimal num_ctx value from CONTEXT_TIERS.
+    """
+    return compute_element_num_ctx(element_type, max_chars)
+
+
 def compute_context_sizes(max_chars_by_type: dict[str, int]) -> dict[str, int]:
-    """Compute context sizes for all element types.
+    """Compute context sizes for all element types (legacy).
+
+    This function computes one context size per element type based on max
+    observed sizes. Consider using compute_element_num_ctx() for per-element
+    sizing which is more efficient.
 
     Args:
         max_chars_by_type: Dict mapping element_type to max char count.
@@ -63,6 +96,6 @@ def compute_context_sizes(max_chars_by_type: dict[str, int]) -> dict[str, int]:
         Dict mapping element_type to optimal num_ctx.
     """
     return {
-        element_type: compute_num_ctx(element_type, max_chars)
+        element_type: compute_element_num_ctx(element_type, max_chars)
         for element_type, max_chars in max_chars_by_type.items()
     }

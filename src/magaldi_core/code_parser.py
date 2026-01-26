@@ -361,6 +361,57 @@ class ParsingResult:
 
         return compute_context_sizes(self.max_chars_by_type)  # type: ignore[no-any-return]
 
+    @property
+    def elements_by_tier(self) -> dict[int, dict]:
+        """Get element statistics grouped by context tier.
+
+        Returns dict mapping context tier to stats dict containing:
+        - count: number of elements in this tier
+        - max_chars: maximum char count in this tier
+        - max_tokens: estimated max tokens (chars/4 + overhead)
+        - largest: (name, path, chars, element_type) of largest element
+        - by_type: dict of element_type -> count in this tier
+
+        This shows the distribution of elements across tiers for
+        understanding KV cache utilization with per-element context sizing.
+        """
+        from shared.ai.context_size import (
+            CONTEXT_TIERS,
+            PROMPT_OVERHEAD,
+            DEFAULT_OVERHEAD,
+            compute_element_num_ctx,
+        )
+
+        # Initialize all tiers
+        tiers: dict[int, dict] = {
+            tier: {
+                "count": 0,
+                "max_chars": 0,
+                "max_tokens": 0,
+                "largest": None,  # (name, path, chars, element_type)
+                "by_type": {},
+            }
+            for tier in CONTEXT_TIERS
+        }
+
+        for pf in self.parsed_files:
+            for elem in pf.elements:
+                char_count = len(elem.raw_code or "")
+                tier = compute_element_num_ctx(elem.element_type, char_count)
+                overhead = PROMPT_OVERHEAD.get(elem.element_type, DEFAULT_OVERHEAD)
+                tokens = char_count // 4 + overhead
+
+                stats = tiers[tier]
+                stats["count"] += 1
+                stats["by_type"][elem.element_type] = stats["by_type"].get(elem.element_type, 0) + 1
+
+                if char_count > stats["max_chars"]:
+                    stats["max_chars"] = char_count
+                    stats["max_tokens"] = tokens
+                    stats["largest"] = (elem.name, elem.relative_path, char_count, elem.element_type)
+
+        return tiers
+
 
 # =============================================================================
 # ELEMENT ID GENERATION
