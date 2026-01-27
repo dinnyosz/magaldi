@@ -255,11 +255,7 @@ def run_processing(
         # Parallelism stats (compact, next to throughput)
         # Use fresh running count from workers_data (already fetched above)
         running_count = len(workers_data)
-        if state.parallelism:
-            p = state.parallelism
-            stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[cyan]{p.tier_limit}[/]"
-            if p.throttled > 0:
-                stats += f" [dim]([/][yellow]{p.throttled} throttled[/][dim])[/]"
+        stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[cyan]{num_workers}[/]"
 
         parts: list[RenderableType] = [bar_text, worker_table]
         if type_line:
