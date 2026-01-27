@@ -335,10 +335,18 @@ def _detect_singleton(class_info: dict[str, Any]) -> float:
 
 
 def _detect_builder(class_info: dict[str, Any]) -> float:
-    """Detect builder pattern."""
+    """Detect builder pattern.
+
+    Looks for:
+    - Multiple methods returning self (method chaining)
+    - build() method
+    - with_*/set_*/add_* method naming
+    - *Builder class name suffix
+    """
     score = 0.0
     methods = class_info.get("methods", [])
     returns_self = class_info.get("methods_return_self", [])
+    name = class_info.get("name", "")
 
     # Multiple methods that return self (method chaining)
     if len(returns_self) >= 2:
@@ -349,10 +357,25 @@ def _detect_builder(class_info: dict[str, Any]) -> float:
         score += 0.3
 
     # Name ends with Builder
-    if class_info.get("name", "").endswith("Builder"):
+    if name.endswith("Builder"):
         score += 0.3
 
-    return score
+    # Has with_* methods (fluent interface)
+    with_methods = [m for m in methods if m.startswith("with_")]
+    if len(with_methods) >= 2:
+        score += 0.3
+
+    # Has set_* methods (common builder pattern)
+    set_methods = [m for m in methods if m.startswith("set_")]
+    if len(set_methods) >= 2:
+        score += 0.2
+
+    # Has add_* methods (collection builders)
+    add_methods = [m for m in methods if m.startswith("add_")]
+    if len(add_methods) >= 2:
+        score += 0.2
+
+    return min(score, 1.0)  # Cap at 1.0
 
 
 def _detect_factory(class_info: dict[str, Any], calls: list[ExtractedCall]) -> float:

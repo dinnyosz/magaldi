@@ -440,3 +440,24 @@ class TestPatternDetection:
         }
         patterns, confidence = detect_patterns(class_info, [], "python")
         assert "singleton" in patterns
+
+    def test_detect_builder_with_fluent_methods(self):
+        """Detect builder with with_* methods."""
+        class_info = {
+            "name": "RequestBuilder",
+            "attributes": ["_url", "_headers", "_body"],
+            "methods": ["with_url", "with_header", "with_body", "send"],
+        }
+        patterns, confidence = detect_patterns(class_info, [], "python")
+        assert "builder" in patterns
+
+    def test_detect_builder_with_set_methods(self):
+        """Detect builder with set_* chained methods."""
+        class_info = {
+            "name": "ConfigBuilder",
+            "attributes": ["_config"],
+            "methods": ["set_timeout", "set_retries", "set_base_url", "build"],
+            "methods_return_self": ["set_timeout", "set_retries", "set_base_url"],
+        }
+        patterns, confidence = detect_patterns(class_info, [], "python")
+        assert "builder" in patterns
