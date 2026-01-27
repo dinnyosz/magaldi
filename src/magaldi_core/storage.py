@@ -548,25 +548,9 @@ def should_embed(element: CodeElement) -> bool:
     Returns:
         True if element should be embedded.
     """
-    # Always embed files, classes, functions, methods
-    if element.element_type in ("file", "class", "function", "method"):
+    # Embed all code elements
+    if element.element_type in ("file", "class", "function", "method", "constant", "variable"):
         return True
-
-    # For variables: only embed significant ones
-    if element.element_type == "variable":
-        name = element.name
-
-        # Embed uppercase constants (CONFIG, MAX_SIZE, etc.)
-        if name.isupper():
-            return True
-
-        # Embed if has docstring
-        if element.docstring:
-            return True
-
-        # Skip private variables
-        if name.startswith("_"):
-            return False
 
     return False
 
