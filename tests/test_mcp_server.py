@@ -1202,3 +1202,171 @@ class TestRunServer:
 
             # Server should have been created with 'main' as default
             mock_server_class.assert_called_once_with(default_username="main")
+
+
+# =============================================================================
+# PATTERN TOOLS INTEGRATION TESTS
+# =============================================================================
+
+
+@pytest.fixture(scope="function")
+def integration_config():
+    """Load config for ES connection in integration tests."""
+    import os
+
+    from shared.config import ElasticsearchConfig, MagaldiConfig, reset_config
+
+    # Reset config singleton
+    reset_config()
+
+    # Create config directly with known good values for integration tests
+    return MagaldiConfig(
+        elasticsearch=ElasticsearchConfig(
+            host=os.environ.get("MAGALDI_ELASTICSEARCH_HOST", "localhost"),
+            port=int(os.environ.get("MAGALDI_ELASTICSEARCH_PORT", "9200")),
+            scheme=os.environ.get("MAGALDI_ELASTICSEARCH_SCHEME", "http"),
+        ),
+    )
+
+
+@pytest.fixture
+def es_repo(integration_config):
+    """Create ES repository and clean up test data."""
+    from shared.db.elasticsearch import INDEX_NAME, ElasticsearchRepository
+
+    repo = ElasticsearchRepository(integration_config)
+
+    # Delete test documents before test
+    try:
+        client = repo._get_client()
+        client.delete_by_query(
+            index=INDEX_NAME,
+            body={"query": {"term": {"scope": "test-patterns"}}},
+            refresh=True,
+            ignore=[404],
+        )
+    except Exception:
+        pass
+
+    yield repo
+
+    # Delete test documents after test
+    try:
+        client = repo._get_client()
+        client.delete_by_query(
+            index=INDEX_NAME,
+            body={"query": {"term": {"scope": "test-patterns"}}},
+            refresh=True,
+            ignore=[404],
+        )
+    except Exception:
+        pass
+
+    repo.close()
+
+
+@pytest.mark.integration
+class TestPatternTools:
+    """Integration tests for pattern detection MCP tools."""
+
+    @pytest.fixture
+    def es_with_patterns(self, es_repo):
+        """Set up ES with classes having patterns."""
+        from magaldi_core.code_parser import CodeElement
+        from shared.db.elasticsearch import INDEX_NAME
+
+        # Index a repository class
+        elem = CodeElement(
+            scope="test-patterns",
+            repository="test-repo",
+            username="main",
+            relative_path="src/repos.py",
+            element_type="class",
+            name="UserRepository",
+            language="python",
+            line_start=1,
+            line_end=50,
+            raw_code="class UserRepository: ...",
+        )
+        elem.detected_patterns = ["repository"]
+        elem.pattern_confidence = {"repository": 0.8}
+        es_repo.index_element(elem)
+
+        # Index a singleton class
+        singleton_elem = CodeElement(
+            scope="test-patterns",
+            repository="test-repo",
+            username="main",
+            relative_path="src/singleton.py",
+            element_type="class",
+            name="DatabaseConnection",
+            language="python",
+            line_start=1,
+            line_end=30,
+            raw_code="class DatabaseConnection: ...",
+        )
+        singleton_elem.detected_patterns = ["singleton"]
+        singleton_elem.pattern_confidence = {"singleton": 0.9}
+        es_repo.index_element(singleton_elem)
+
+        # Refresh index
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+        return es_repo
+
+    def test_list_patterns_returns_all_patterns(self, es_with_patterns):
+        """Test list_patterns returns all pattern types found."""
+        from magaldi_mcp.tools import list_patterns
+
+        result = list_patterns(es_with_patterns, "test-patterns", "test-repo")
+
+        assert result["patterns"]
+        pattern_names = [p["pattern"] for p in result["patterns"]]
+        assert "repository" in pattern_names
+        assert "singleton" in pattern_names
+        assert result["total_classes_with_patterns"] == 2
+
+    def test_list_patterns_includes_examples(self, es_with_patterns):
+        """Test list_patterns includes example classes for each pattern."""
+        from magaldi_mcp.tools import list_patterns
+
+        result = list_patterns(es_with_patterns, "test-patterns", "test-repo")
+
+        repo_pattern = next(p for p in result["patterns"] if p["pattern"] == "repository")
+        assert repo_pattern["count"] == 1
+        assert len(repo_pattern["examples"]) == 1
+        assert repo_pattern["examples"][0]["name"] == "UserRepository"
+
+    def test_find_by_pattern_returns_matching_classes(self, es_with_patterns):
+        """Test find_by_pattern returns classes with specified pattern."""
+        from magaldi_mcp.tools import find_by_pattern
+
+        result = find_by_pattern(es_with_patterns, "repository", "test-patterns", "test-repo")
+
+        assert result["count"] == 1
+        assert result["classes"][0]["name"] == "UserRepository"
+        assert result["classes"][0]["confidence"] == 0.8
+
+    def test_find_by_pattern_filters_by_confidence(self, es_with_patterns):
+        """Test find_by_pattern respects min_confidence threshold."""
+        from magaldi_mcp.tools import find_by_pattern
+
+        # Should find singleton with confidence 0.9
+        result = find_by_pattern(
+            es_with_patterns, "singleton", "test-patterns", "test-repo", min_confidence=0.85
+        )
+        assert result["count"] == 1
+
+        # Should not find with higher threshold
+        result = find_by_pattern(
+            es_with_patterns, "singleton", "test-patterns", "test-repo", min_confidence=0.95
+        )
+        assert result["count"] == 0
+
+    def test_find_by_pattern_no_matches(self, es_with_patterns):
+        """Test find_by_pattern returns empty when no matches."""
+        from magaldi_mcp.tools import find_by_pattern
+
+        result = find_by_pattern(es_with_patterns, "builder", "test-patterns", "test-repo")
+
+        assert result["count"] == 0
+        assert result["classes"] == []

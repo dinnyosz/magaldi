@@ -3624,7 +3624,8 @@ def list_patterns(
             "aggs": {
                 "patterns": {
                     "terms": {
-                        "field": "detected_patterns",
+                        # Use .keyword subfield for aggregations on text fields
+                        "field": "detected_patterns.keyword",
                         "size": 100,
                     }
                 }
