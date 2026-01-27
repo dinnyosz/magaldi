@@ -1117,3 +1117,96 @@ class TestPerElementContextSize:
         # Small function should be 2K tier (shown in ctx_size field, index 3)
         ctx_sizes = [u[3] for u in summ_updates]
         assert "2K" in ctx_sizes
+
+
+class TestDynamicWorkerScaling:
+    """Tests for dynamic worker scaling based on context tier."""
+
+    def test_small_tier_allows_max_workers(self):
+        """Small context tier (2048) should allow 8 workers."""
+        elements = [
+            CodeElement(
+                element_id=f"test:repo:user:file.py:function:f{i}:1",
+                element_type="function",
+                name=f"f{i}",
+                raw_code="def f(): pass",
+            )
+            for i in range(10)
+        ]
+
+        # All small elements = 2048 tier
+        context_sizes = {e.element_id: 500 for e in elements}
+        tracker = DependencyTracker(elements, context_sizes)
+
+        # Should return up to 8 elements (TIER_MAX_WORKERS[2048] = 8)
+        ready = tracker.get_ready_elements(max_count=20)
+        assert len(ready) == 8
+
+    def test_large_tier_limits_workers(self):
+        """Large context tier (32768) should limit to 1 worker."""
+        elements = [
+            CodeElement(
+                element_id=f"test:repo:user:file.py:file:f{i}.py:1",
+                element_type="file",
+                name=f"f{i}.py",
+                raw_code="x" * 100000,  # Large file
+            )
+            for i in range(5)
+        ]
+
+        # All large elements = 32768 tier
+        context_sizes = {e.element_id: 30000 for e in elements}
+        tracker = DependencyTracker(elements, context_sizes)
+
+        # Should return only 1 element (TIER_MAX_WORKERS[32768] = 1)
+        ready = tracker.get_ready_elements(max_count=20)
+        assert len(ready) == 1
+
+    def test_medium_tier_limits_workers(self):
+        """Medium context tier (8192) should allow 4 workers."""
+        elements = [
+            CodeElement(
+                element_id=f"test:repo:user:file.py:function:f{i}:1",
+                element_type="function",
+                name=f"f{i}",
+                raw_code="x" * 20000,  # Medium function
+            )
+            for i in range(10)
+        ]
+
+        # 20000 chars ≈ 5000 tokens + overhead → 8192 tier
+        context_sizes = {e.element_id: 6000 for e in elements}
+        tracker = DependencyTracker(elements, context_sizes)
+
+        # Should return up to 4 elements (TIER_MAX_WORKERS[8192] = 4)
+        ready = tracker.get_ready_elements(max_count=20)
+        assert len(ready) == 4
+
+    def test_get_current_max_workers(self):
+        """get_current_max_workers should return tier-appropriate limit."""
+        small_element = CodeElement(
+            element_id="test:repo:user:file.py:function:small:1",
+            element_type="function",
+            name="small",
+            raw_code="def small(): pass",
+        )
+        large_element = CodeElement(
+            element_id="test:repo:user:file.py:file:big.py:1",
+            element_type="file",
+            name="big.py",
+            raw_code="x" * 100000,
+        )
+
+        # Small tier
+        tracker_small = DependencyTracker(
+            [small_element], {small_element.element_id: 500}
+        )
+        tracker_small.get_ready_elements(max_count=1)  # Set current tier
+        assert tracker_small.get_current_max_workers() == 8
+
+        # Large tier
+        tracker_large = DependencyTracker(
+            [large_element], {large_element.element_id: 30000}
+        )
+        tracker_large.get_ready_elements(max_count=1)  # Set current tier
+        assert tracker_large.get_current_max_workers() == 1

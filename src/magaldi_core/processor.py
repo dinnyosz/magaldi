@@ -394,10 +394,23 @@ class DependencyTracker:
 
     Tier batching: All workers process the same context tier together to minimize
     model reloads. Only moves to next tier when current tier has no ready elements.
+
+    Dynamic worker scaling: Smaller context tiers allow more parallel workers since
+    they use less GPU memory. Larger tiers are limited to prevent OOM/slowdowns.
     """
 
     # Standard context tiers (must match ollama_models.CONTEXT_TIERS)
     CONTEXT_TIERS = [2048, 4096, 8192, 16384, 32768]
+
+    # Max concurrent workers per tier (inversely proportional to context size)
+    # Smaller contexts = more parallelism, larger contexts = less to avoid GPU saturation
+    TIER_MAX_WORKERS = {
+        2048: 8,   # Small context - max parallelism
+        4096: 6,   # Medium-small
+        8192: 4,   # Medium
+        16384: 2,  # Large - limited parallelism
+        32768: 1,  # Very large - sequential to avoid OOM
+    }
 
     def __init__(
         self, elements: list[CodeElement], context_sizes: dict[str, int] | None = None
@@ -450,6 +463,9 @@ class DependencyTracker:
         Uses tier batching: all workers process the same context tier together.
         Only moves to next tier when current tier has no ready elements.
         This minimizes Ollama model reloads.
+
+        Dynamic worker scaling: Returns fewer elements for larger tiers to limit
+        concurrent GPU memory usage (see TIER_MAX_WORKERS).
         """
         with self._lock:
             ready = self._get_all_ready()
@@ -471,8 +487,12 @@ class DependencyTracker:
                 tier = min(by_tier.keys())
                 self._current_tier = tier
 
+            # Apply tier-specific worker limit (dynamic scaling)
+            tier_limit = self.TIER_MAX_WORKERS.get(tier, 4)
+            effective_limit = min(max_count, tier_limit)
+
             # Get elements from current tier only
-            tier_ready = by_tier[tier][:max_count]
+            tier_ready = by_tier[tier][:effective_limit]
 
             # Mark as in-progress
             for e in tier_ready:
@@ -506,6 +526,13 @@ class DependencyTracker:
         """Get the current context tier being processed."""
         with self._lock:
             return self._current_tier
+
+    def get_current_max_workers(self) -> int:
+        """Get max workers for the current tier (for status display)."""
+        with self._lock:
+            if self._current_tier is None:
+                return self.TIER_MAX_WORKERS.get(self.CONTEXT_TIERS[0], 8)
+            return self.TIER_MAX_WORKERS.get(self._current_tier, 4)
 
     def get_tier_stats(self) -> dict[int, tuple[int, int]]:
         """Get (ready, total) counts per tier for pending elements."""
@@ -1272,14 +1299,18 @@ def process_elements(
             release_worker_id(wid)
 
     # Process elements in parallel using ThreadPoolExecutor
-    executor = ThreadPoolExecutor(max_workers=config.num_workers)
+    # Use max possible workers - tier batching in DependencyTracker limits concurrency
+    # dynamically based on context size (smaller context = more workers)
+    max_workers = max(DependencyTracker.TIER_MAX_WORKERS.values())
+    executor = ThreadPoolExecutor(max_workers=max_workers)
     future_to_element: dict = {}
 
     try:
         while not dependency_tracker.is_complete():
             # Get elements that are ready (parents completed)
+            # DependencyTracker applies tier-specific limits internally
             ready_elements = dependency_tracker.get_ready_elements(
-                max_count=config.num_workers * 2
+                max_count=max_workers * 2
             )
 
             # Submit new tasks for ready elements
