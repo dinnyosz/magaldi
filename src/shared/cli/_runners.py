@@ -22,6 +22,7 @@ from rich.progress import (
 from rich.table import Table
 from rich.text import Text
 
+from shared.ai.context_size import TIER_MAX_WORKERS
 from shared.cli._shared import console, format_duration, get_model_column_width
 
 if TYPE_CHECKING:
@@ -255,7 +256,21 @@ def run_processing(
         # Parallelism stats (compact, next to throughput)
         # Use fresh running count from workers_data (already fetched above)
         running_count = len(workers_data)
-        stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[cyan]{num_workers}[/]"
+
+        # Check if all workers are on the same context tier
+        ctx_sizes = {data[3] for data in workers_data.values() if data[3]}  # data[3] is ctx_size
+        if len(ctx_sizes) == 1:
+            # All on same tier - show tier-specific stats with throttle info
+            ctx_str = ctx_sizes.pop()  # e.g., "2K", "4K"
+            ctx_int = int(ctx_str.rstrip("K")) * 1024  # "4K" -> 4096
+            tier_limit = TIER_MAX_WORKERS.get(ctx_int, num_workers)
+            throttled = num_workers - tier_limit
+            stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[cyan]{tier_limit}[/]"
+            if throttled > 0:
+                stats += f" [dim]([/][yellow]{throttled} throttled[/][dim])[/]"
+        else:
+            # Mixed tiers or no workers - just show running/max
+            stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[cyan]{num_workers}[/]"
 
         parts: list[RenderableType] = [bar_text, worker_table]
         if type_line:
