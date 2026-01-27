@@ -93,9 +93,10 @@ def print_parsing_result(result: "ParsingResult") -> None:
         if largest:
             console.print()
             console.print("  [dim]Largest elements:[/]")
+            console.print(f"    [dim]{'chars':>8}  {'type':<8}  {'file':<45}  name[/]")
             for name, path, chars, etype in largest:
-                display_path = path if len(path) <= 50 else "..." + path[-47:]
-                console.print(f"    [dim]{chars:>7,}[/] [cyan]{etype:<8}[/] [yellow]{display_path}[/] [green]{name}[/]")
+                display_path = path if len(path) <= 45 else "..." + path[-42:]
+                console.print(f"    {chars:>8,}  [cyan]{etype:<8}[/]  [yellow]{display_path:<45}[/]  [green]{name}[/]")
 
 
 def print_feature_result(result: dict) -> None:
