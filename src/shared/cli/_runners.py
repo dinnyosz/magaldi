@@ -34,12 +34,12 @@ if TYPE_CHECKING:
     from shared.db.elasticsearch import ElasticsearchRepository
 
 
-def run_discovery(repo_path: str, username: str) -> "DiscoveryResult":
+def run_discovery(repo_path: str, username: str, skip_tests: bool = False) -> "DiscoveryResult":
     """Run Phase 1: Discovery."""
     from magaldi_core.discovery import discover
 
     with console.status("[bold blue]Discovering repository...[/]"):
-        return discover(repo_path, username)
+        return discover(repo_path, username, skip_tests=skip_tests)
 
 
 def run_change_detection(
@@ -347,6 +347,22 @@ def run_processing(
     elapsed = current_state.timing.elapsed
     api_processed = result.elements_processed - result.elements_skipped
     avg_wall = elapsed / api_processed if api_processed > 0 else 0.0
+
+    # Phase 2 call resolution: resolve cross-file calls using imports
+    if result.indexed > 0:
+        from magaldi_core.call_resolution import resolve_cross_file_calls
+
+        try:
+            total_calls, resolved_calls = resolve_cross_file_calls(
+                es_repo,
+                manifest.scope,
+                manifest.repository,
+                manifest.username,
+            )
+            if resolved_calls > 0:
+                console.print(f"  [dim]Resolved {resolved_calls}/{total_calls} cross-file calls[/]")
+        except Exception as e:
+            console.print(f"  [yellow]Warning: Call resolution failed: {e}[/]")
 
     # Total deleted = from deleted files + stale elements from modified files
     total_deleted = deleted_from_files + result.elements_deleted

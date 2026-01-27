@@ -384,6 +384,7 @@ def _count_lines(file_path: Path) -> int:
 def discover(
     repo_path: str | Path,
     username: str | None = None,
+    skip_tests: bool = False,
 ) -> DiscoveryResult:
     """Run the discovery phase on a repository.
 
@@ -396,6 +397,7 @@ def discover(
     Args:
         repo_path: Path to repository root.
         username: Username from CLI (optional, can come from env/config).
+        skip_tests: If True, exclude test directories and files.
 
     Returns:
         DiscoveryResult with all discovery data.
@@ -408,6 +410,20 @@ def discover(
 
     # 1.2 Load config
     config = load_repo_config(validated_path)
+
+    # 1.2a If skip_tests, add test directories to exclusions
+    if skip_tests:
+        test_dirs = ["tests", "test", "__tests__", "spec", "specs"]
+        test_files = ["test_*.py", "*_test.py", "*.test.js", "*.spec.js", "*.test.ts", "*.spec.ts"]
+        config = RepoConfig(
+            scope=config.scope,
+            name=config.name,
+            description=config.description,
+            tags=config.tags,
+            user=config.user,
+            exclude_directories=_merge_unique(config.exclude_directories, test_dirs),
+            exclude_files=_merge_unique(config.exclude_files, test_files),
+        )
 
     # 1.3 Resolve username
     resolved_username = resolve_username(username, config)

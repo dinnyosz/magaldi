@@ -725,6 +725,9 @@ class PythonParser(TreeSitterParser):
         # Set parent IDs for elements without explicit parents
         self._set_hierarchy(elements, file_element)
 
+        # Resolve same-file and self-method calls (Phase 1)
+        self._resolve_calls_in_file(elements)
+
         # === EXTENDED CODE INTELLIGENCE EXTRACTION ===
 
         # Extract file-level documentation
@@ -1085,6 +1088,48 @@ class PythonParser(TreeSitterParser):
             if not elem.parent_id:
                 elem.parent_id = file_element.element_id
 
+    def _resolve_calls_in_file(self, elements: list[CodeElement]) -> None:
+        """Resolve calls that can be determined at parse time (Phase 1).
+
+        Resolves:
+        - Same-file bare function calls: func() -> file-level function
+        - Self-method calls: self.method() -> sibling method in same class
+        """
+        # Build lookup for file-level functions
+        file_functions: dict[str, str] = {
+            e.name: e.element_id
+            for e in elements
+            if e.element_type == "function"
+        }
+
+        # Build lookup for methods grouped by parent class
+        class_methods: dict[str, dict[str, str]] = {}
+        for e in elements:
+            if e.element_type == "method" and e.parent_id:
+                if e.parent_id not in class_methods:
+                    class_methods[e.parent_id] = {}
+                class_methods[e.parent_id][e.name] = e.element_id
+
+        # Resolve calls in each element
+        for elem in elements:
+            if not elem.calls:
+                continue
+
+            for call in elem.calls:
+                if call.resolved_id:
+                    continue
+
+                # Strategy 1: Same-file bare function call
+                if call.receiver is None and call.name in file_functions:
+                    call.resolved_id = file_functions[call.name]
+                    continue
+
+                # Strategy 2: Self-method call within class
+                if call.receiver == "self" and elem.parent_id:
+                    sibling_methods = class_methods.get(elem.parent_id, {})
+                    if call.name in sibling_methods:
+                        call.resolved_id = sibling_methods[call.name]
+
 
 class JavaScriptParser(TreeSitterParser):
     """Parse JavaScript/TypeScript files using tree-sitter."""
@@ -1168,6 +1213,9 @@ class JavaScriptParser(TreeSitterParser):
 
         # Set parent IDs
         self._set_hierarchy(elements, file_element)
+
+        # Resolve same-file and this-method calls (Phase 1)
+        self._resolve_calls_in_file(elements)
 
         return elements
 
@@ -1358,6 +1406,48 @@ class JavaScriptParser(TreeSitterParser):
             if not elem.parent_id:
                 elem.parent_id = file_element.element_id
 
+    def _resolve_calls_in_file(self, elements: list[CodeElement]) -> None:
+        """Resolve calls that can be determined at parse time (Phase 1).
+
+        Resolves:
+        - Same-file bare function calls: func() -> file-level function
+        - This-method calls: this.method() -> sibling method in same class
+        """
+        # Build lookup for file-level functions
+        file_functions: dict[str, str] = {
+            e.name: e.element_id
+            for e in elements
+            if e.element_type == "function"
+        }
+
+        # Build lookup for methods grouped by parent class
+        class_methods: dict[str, dict[str, str]] = {}
+        for e in elements:
+            if e.element_type == "method" and e.parent_id:
+                if e.parent_id not in class_methods:
+                    class_methods[e.parent_id] = {}
+                class_methods[e.parent_id][e.name] = e.element_id
+
+        # Resolve calls in each element
+        for elem in elements:
+            if not elem.calls:
+                continue
+
+            for call in elem.calls:
+                if call.resolved_id:
+                    continue
+
+                # Strategy 1: Same-file bare function call
+                if call.receiver is None and call.name in file_functions:
+                    call.resolved_id = file_functions[call.name]
+                    continue
+
+                # Strategy 2: This-method call within class (JavaScript uses 'this')
+                if call.receiver == "this" and elem.parent_id:
+                    sibling_methods = class_methods.get(elem.parent_id, {})
+                    if call.name in sibling_methods:
+                        call.resolved_id = sibling_methods[call.name]
+
 
 class PhpParser(TreeSitterParser):
     """Parse PHP files using tree-sitter."""
@@ -1436,6 +1526,9 @@ class PhpParser(TreeSitterParser):
 
         # Set parent IDs
         self._set_hierarchy(elements, file_element)
+
+        # Resolve same-file and $this->method() calls (Phase 1)
+        self._resolve_calls_in_file(elements)
 
         return elements
 
@@ -1617,6 +1710,48 @@ class PhpParser(TreeSitterParser):
             if not elem.parent_id:
                 elem.parent_id = file_element.element_id
 
+    def _resolve_calls_in_file(self, elements: list[CodeElement]) -> None:
+        """Resolve calls that can be determined at parse time (Phase 1).
+
+        Resolves:
+        - Same-file bare function calls: func() -> file-level function
+        - $this->method() calls: -> sibling method in same class
+        """
+        # Build lookup for file-level functions
+        file_functions: dict[str, str] = {
+            e.name: e.element_id
+            for e in elements
+            if e.element_type == "function"
+        }
+
+        # Build lookup for methods grouped by parent class
+        class_methods: dict[str, dict[str, str]] = {}
+        for e in elements:
+            if e.element_type == "method" and e.parent_id:
+                if e.parent_id not in class_methods:
+                    class_methods[e.parent_id] = {}
+                class_methods[e.parent_id][e.name] = e.element_id
+
+        # Resolve calls in each element
+        for elem in elements:
+            if not elem.calls:
+                continue
+
+            for call in elem.calls:
+                if call.resolved_id:
+                    continue
+
+                # Strategy 1: Same-file bare function call
+                if call.receiver is None and call.name in file_functions:
+                    call.resolved_id = file_functions[call.name]
+                    continue
+
+                # Strategy 2: $this->method() call within class (PHP uses '$this' or 'this')
+                if call.receiver in ("$this", "this") and elem.parent_id:
+                    sibling_methods = class_methods.get(elem.parent_id, {})
+                    if call.name in sibling_methods:
+                        call.resolved_id = sibling_methods[call.name]
+
 
 class RustParser(TreeSitterParser):
     """Parse Rust files using tree-sitter."""
@@ -1696,6 +1831,9 @@ class RustParser(TreeSitterParser):
 
         # Set parent IDs
         self._set_hierarchy(elements, file_element)
+
+        # Resolve same-file and self.method() calls (Phase 1)
+        self._resolve_calls_in_file(elements)
 
         return elements
 
@@ -1883,6 +2021,48 @@ class RustParser(TreeSitterParser):
                 continue
             if not elem.parent_id:
                 elem.parent_id = file_element.element_id
+
+    def _resolve_calls_in_file(self, elements: list[CodeElement]) -> None:
+        """Resolve calls that can be determined at parse time (Phase 1).
+
+        Resolves:
+        - Same-file bare function calls: func() -> file-level function
+        - self.method() calls: -> sibling method in same impl block
+        """
+        # Build lookup for file-level functions
+        file_functions: dict[str, str] = {
+            e.name: e.element_id
+            for e in elements
+            if e.element_type == "function"
+        }
+
+        # Build lookup for methods grouped by parent impl block
+        class_methods: dict[str, dict[str, str]] = {}
+        for e in elements:
+            if e.element_type == "method" and e.parent_id:
+                if e.parent_id not in class_methods:
+                    class_methods[e.parent_id] = {}
+                class_methods[e.parent_id][e.name] = e.element_id
+
+        # Resolve calls in each element
+        for elem in elements:
+            if not elem.calls:
+                continue
+
+            for call in elem.calls:
+                if call.resolved_id:
+                    continue
+
+                # Strategy 1: Same-file bare function call
+                if call.receiver is None and call.name in file_functions:
+                    call.resolved_id = file_functions[call.name]
+                    continue
+
+                # Strategy 2: self.method() call within impl block (Rust uses 'self')
+                if call.receiver == "self" and elem.parent_id:
+                    sibling_methods = class_methods.get(elem.parent_id, {})
+                    if call.name in sibling_methods:
+                        call.resolved_id = sibling_methods[call.name]
 
 
 # =============================================================================

@@ -37,12 +37,13 @@ if TYPE_CHECKING:
 @click.option("--user", "-u", required=True, help="Username/branch (use 'main' for primary parse)")
 @click.option("--skip-ai", is_flag=True, help="Skip AI processing (summarization and embedding)")
 @click.option("--skip-features", is_flag=True, help="Skip feature extraction after processing")
+@click.option("--skip-tests", is_flag=True, help="Skip test files and directories")
 @click.option("--dry-run", is_flag=True, help="Use in-memory storage (no database required)")
 @click.option("--llm-url", default=None, help="LLM API URL (default: from config)")
 @click.option("--workers", "-w", default=0, type=int, help="Max parallel workers (0=auto based on context tier)")
 @click.option("--force-clean", is_flag=True, help="Delete all indexed data for this repo/user before parsing")
 def parse(
-    repo_path: str, user: str, skip_ai: bool, skip_features: bool, dry_run: bool,
+    repo_path: str, user: str, skip_ai: bool, skip_features: bool, skip_tests: bool, dry_run: bool,
     llm_url: str | None, workers: int, force_clean: bool
 ) -> None:
     """Parse a repository and index its code elements.
@@ -67,7 +68,7 @@ def parse(
     try:
         # Phase 1: Discovery
         console.print("[bold blue]Phase 1:[/] Discovery")
-        discovery_result = run_discovery(repo_path, user)
+        discovery_result = run_discovery(repo_path, user, skip_tests=skip_tests)
         print_discovery_result(discovery_result)
 
         # Force clean: Delete existing index data before change detection

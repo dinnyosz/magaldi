@@ -191,6 +191,30 @@ class ElasticsearchRepository:
         """Get calls for a function/method element."""
         return self._metadata.get_calls(element_id)
 
+    def get_file_imports(
+        self,
+        relative_path: str,
+        scope: str,
+        repository: str,
+        username: str = "main",
+    ) -> list[dict]:
+        """Get imports for a file element by path."""
+        return self._metadata.get_file_imports(relative_path, scope, repository, username)
+
+    def get_document_by_name(
+        self,
+        name: str,
+        element_type: str,
+        relative_path: str,
+        scope: str,
+        repository: str,
+        username: str = "main",
+    ) -> dict[str, Any] | None:
+        """Get indexed document by name and path."""
+        return self._metadata.get_document_by_name(
+            name, element_type, relative_path, scope, repository, username
+        )
+
     def get_summaries_batch(self, element_ids: list[str]) -> dict[str, str]:
         """Get summaries for multiple elements in batch."""
         return self._metadata.get_summaries_batch(element_ids)
@@ -337,6 +361,18 @@ class ElasticsearchRepository:
         """Find elements that import the module."""
         return self._search.find_elements_importing(
             module, scope, repository, username, limit
+        )
+
+    def find_elements_with_unresolved_calls(
+        self,
+        scope: str,
+        repository: str,
+        username: str = "main",
+        limit: int = 1000,
+    ) -> list[dict]:
+        """Find elements that have calls without resolved_id."""
+        return self._search.find_elements_with_unresolved_calls(
+            scope, repository, username, limit
         )
 
     # =========================================================================

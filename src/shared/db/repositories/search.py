@@ -497,3 +497,56 @@ class SearchRepository:
         )
 
         return [hit["_source"] for hit in result.get("hits", {}).get("hits", [])]
+
+    def find_elements_with_unresolved_calls(
+        self,
+        scope: str,
+        repository: str,
+        username: str = "main",
+        limit: int = 1000,
+    ) -> list[dict]:
+        """Find elements that have calls without resolved_id.
+
+        Used for Phase 2 cross-file call resolution.
+
+        Args:
+            scope: Repository scope.
+            repository: Repository name.
+            username: Username branch.
+            limit: Maximum results to return.
+
+        Returns:
+            List of element documents with unresolved calls.
+        """
+        # Find elements that:
+        # 1. Match scope/repository/username
+        # 2. Have at least one call
+        # 3. Have at least one call where resolved_id is null/missing
+        query: dict[str, Any] = {
+            "bool": {
+                "must": [
+                    {"term": {"scope": scope}},
+                    {"term": {"repository": repository}},
+                    {"term": {"username": username}},
+                    {"exists": {"field": "calls"}},
+                ],
+                "filter": {
+                    "nested": {
+                        "path": "calls",
+                        "query": {
+                            "bool": {
+                                "must_not": {"exists": {"field": "calls.resolved_id"}}
+                            }
+                        },
+                    }
+                },
+            }
+        }
+
+        client = self._get_client()
+        result = client.search(
+            index=INDEX_NAME,
+            body={"query": query, "size": limit},
+        )
+
+        return [hit["_source"] for hit in result.get("hits", {}).get("hits", [])]

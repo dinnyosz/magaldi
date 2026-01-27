@@ -1,0 +1,377 @@
+"""Tests for call resolution (Phase 1 and Phase 2).
+
+Phase 1: Same-file and self-method resolution (at parse time)
+Phase 2: Cross-file resolution via imports (after indexing)
+"""
+
+import pytest
+
+from magaldi_core.code_parser import (
+    Call,
+    CodeElement,
+    PythonParser,
+    JavaScriptParser,
+    PhpParser,
+    RustParser,
+)
+from magaldi_core.change_detection import FileInfo
+from pathlib import Path
+
+
+# =============================================================================
+# FIXTURES
+# =============================================================================
+
+
+@pytest.fixture
+def python_parser():
+    return PythonParser()
+
+
+@pytest.fixture
+def javascript_parser():
+    return JavaScriptParser()
+
+
+@pytest.fixture
+def php_parser():
+    return PhpParser()
+
+
+@pytest.fixture
+def rust_parser():
+    return RustParser()
+
+
+def make_file_info(path: str, language: str) -> FileInfo:
+    """Create a FileInfo object for testing."""
+    return FileInfo(
+        relative_path=path,
+        absolute_path=Path("/tmp") / path,
+        language=language,
+        hash="abc123",
+    )
+
+
+# =============================================================================
+# PHASE 1: PYTHON RESOLUTION TESTS
+# =============================================================================
+
+
+class TestPythonPhase1Resolution:
+    """Test Phase 1 resolution for Python."""
+
+    def test_same_file_function_call_resolved(self, python_parser):
+        """Test that bare function calls to same-file functions are resolved."""
+        code = '''
+def helper():
+    pass
+
+def main():
+    helper()
+'''
+        file_info = make_file_info("test.py", "python")
+        elements = python_parser.parse(code, file_info, "test", "repo", "main")
+
+        # Find the main function
+        main_func = next(e for e in elements if e.name == "main" and e.element_type == "function")
+        helper_func = next(e for e in elements if e.name == "helper" and e.element_type == "function")
+
+        # Check that helper() call is resolved
+        assert len(main_func.calls) == 1
+        assert main_func.calls[0].name == "helper"
+        assert main_func.calls[0].resolved_id == helper_func.element_id
+
+    def test_self_method_call_resolved(self, python_parser):
+        """Test that self.method() calls are resolved to sibling methods."""
+        code = '''
+class MyClass:
+    def process(self):
+        self.validate()
+
+    def validate(self):
+        pass
+'''
+        file_info = make_file_info("test.py", "python")
+        elements = python_parser.parse(code, file_info, "test", "repo", "main")
+
+        # Find the methods
+        process_method = next(e for e in elements if e.name == "process" and e.element_type == "method")
+        validate_method = next(e for e in elements if e.name == "validate" and e.element_type == "method")
+
+        # Check that self.validate() call is resolved
+        assert len(process_method.calls) == 1
+        assert process_method.calls[0].name == "validate"
+        assert process_method.calls[0].receiver == "self"
+        assert process_method.calls[0].resolved_id == validate_method.element_id
+
+    def test_external_call_not_resolved(self, python_parser):
+        """Test that external calls (like os.path.join) are not resolved."""
+        code = '''
+import os
+
+def main():
+    os.path.join("a", "b")
+'''
+        file_info = make_file_info("test.py", "python")
+        elements = python_parser.parse(code, file_info, "test", "repo", "main")
+
+        main_func = next(e for e in elements if e.name == "main" and e.element_type == "function")
+
+        # External call should not be resolved
+        assert len(main_func.calls) >= 1
+        join_call = next((c for c in main_func.calls if c.name == "join"), None)
+        if join_call:
+            assert join_call.resolved_id is None
+
+    def test_builtin_call_not_resolved(self, python_parser):
+        """Test that builtin calls (like len, print) are not resolved."""
+        code = '''
+def main():
+    x = [1, 2, 3]
+    print(len(x))
+'''
+        file_info = make_file_info("test.py", "python")
+        elements = python_parser.parse(code, file_info, "test", "repo", "main")
+
+        main_func = next(e for e in elements if e.name == "main" and e.element_type == "function")
+
+        # Builtin calls should not be resolved
+        for call in main_func.calls:
+            assert call.resolved_id is None
+
+
+# =============================================================================
+# PHASE 1: JAVASCRIPT RESOLUTION TESTS
+# =============================================================================
+
+
+class TestJavaScriptPhase1Resolution:
+    """Test Phase 1 resolution for JavaScript."""
+
+    def test_same_file_function_call_resolved(self, javascript_parser):
+        """Test that bare function calls to same-file functions are resolved."""
+        code = '''
+function helper() {
+    return true;
+}
+
+function main() {
+    helper();
+}
+'''
+        file_info = make_file_info("test.js", "javascript")
+        elements = javascript_parser.parse(code, file_info, "test", "repo", "main")
+
+        main_func = next(e for e in elements if e.name == "main" and e.element_type == "function")
+        helper_func = next(e for e in elements if e.name == "helper" and e.element_type == "function")
+
+        assert len(main_func.calls) >= 1
+        helper_call = next((c for c in main_func.calls if c.name == "helper"), None)
+        assert helper_call is not None
+        assert helper_call.resolved_id == helper_func.element_id
+
+    def test_this_method_call_resolved(self, javascript_parser):
+        """Test that this.method() calls are resolved to sibling methods."""
+        code = '''
+class MyClass {
+    process() {
+        this.validate();
+    }
+
+    validate() {
+        return true;
+    }
+}
+'''
+        file_info = make_file_info("test.js", "javascript")
+        elements = javascript_parser.parse(code, file_info, "test", "repo", "main")
+
+        process_method = next(e for e in elements if e.name == "process" and e.element_type == "method")
+        validate_method = next(e for e in elements if e.name == "validate" and e.element_type == "method")
+
+        validate_call = next((c for c in process_method.calls if c.name == "validate"), None)
+        assert validate_call is not None
+        assert validate_call.receiver == "this"
+        assert validate_call.resolved_id == validate_method.element_id
+
+
+# =============================================================================
+# PHASE 1: PHP RESOLUTION TESTS
+# =============================================================================
+
+
+class TestPhpPhase1Resolution:
+    """Test Phase 1 resolution for PHP."""
+
+    def test_same_file_function_call_resolved(self, php_parser):
+        """Test that bare function calls to same-file functions are resolved."""
+        code = '''<?php
+function helper() {
+    return true;
+}
+
+function main() {
+    helper();
+}
+'''
+        file_info = make_file_info("test.php", "php")
+        elements = php_parser.parse(code, file_info, "test", "repo", "main")
+
+        main_func = next((e for e in elements if e.name == "main" and e.element_type == "function"), None)
+        helper_func = next((e for e in elements if e.name == "helper" and e.element_type == "function"), None)
+
+        if main_func and helper_func and main_func.calls:
+            helper_call = next((c for c in main_func.calls if c.name == "helper"), None)
+            if helper_call:
+                assert helper_call.resolved_id == helper_func.element_id
+
+    def test_this_method_call_resolved(self, php_parser):
+        """Test that $this->method() calls are resolved to sibling methods."""
+        code = '''<?php
+class MyClass {
+    public function process() {
+        $this->validate();
+    }
+
+    public function validate() {
+        return true;
+    }
+}
+'''
+        file_info = make_file_info("test.php", "php")
+        elements = php_parser.parse(code, file_info, "test", "repo", "main")
+
+        process_method = next((e for e in elements if e.name == "process" and e.element_type == "method"), None)
+        validate_method = next((e for e in elements if e.name == "validate" and e.element_type == "method"), None)
+
+        if process_method and validate_method and process_method.calls:
+            validate_call = next((c for c in process_method.calls if c.name == "validate"), None)
+            if validate_call:
+                # PHP extractor returns "this" (without the $)
+                assert validate_call.receiver in ("$this", "this")
+                assert validate_call.resolved_id == validate_method.element_id
+
+
+# =============================================================================
+# PHASE 1: RUST RESOLUTION TESTS
+# =============================================================================
+
+
+class TestRustPhase1Resolution:
+    """Test Phase 1 resolution for Rust."""
+
+    def test_same_file_function_call_resolved(self, rust_parser):
+        """Test that bare function calls to same-file functions are resolved."""
+        code = '''
+fn helper() -> bool {
+    true
+}
+
+fn main() {
+    helper();
+}
+'''
+        file_info = make_file_info("test.rs", "rust")
+        elements = rust_parser.parse(code, file_info, "test", "repo", "main")
+
+        main_func = next((e for e in elements if e.name == "main" and e.element_type == "function"), None)
+        helper_func = next((e for e in elements if e.name == "helper" and e.element_type == "function"), None)
+
+        if main_func and helper_func and main_func.calls:
+            helper_call = next((c for c in main_func.calls if c.name == "helper"), None)
+            if helper_call:
+                assert helper_call.resolved_id == helper_func.element_id
+
+
+# =============================================================================
+# PHASE 2: CROSS-FILE RESOLUTION TESTS
+# =============================================================================
+
+
+class TestPhase2Resolution:
+    """Test Phase 2 cross-file resolution."""
+
+    def test_build_import_map(self):
+        """Test building import map from imports list."""
+        from magaldi_core.call_resolution import _build_import_map
+
+        imports = [
+            {"name": "process", "module": "utils", "alias": None, "line": 1},
+            {"name": "pandas", "module": "pandas", "alias": "pd", "line": 2},
+        ]
+
+        import_map = _build_import_map(imports)
+
+        assert "process" in import_map
+        assert import_map["process"]["module"] == "utils"
+        assert "pd" in import_map
+        assert import_map["pd"]["module"] == "pandas"
+
+    def test_is_external_module(self):
+        """Test detection of external/stdlib modules."""
+        from magaldi_core.call_resolution import _is_external_module
+
+        # Standard library
+        assert _is_external_module("os") is True
+        assert _is_external_module("sys") is True
+        assert _is_external_module("json") is True
+        assert _is_external_module("pathlib") is True
+
+        # Third-party
+        assert _is_external_module("numpy") is True
+        assert _is_external_module("pandas") is True
+        assert _is_external_module("requests") is True
+
+        # Relative imports are internal
+        assert _is_external_module("./utils") is False
+        assert _is_external_module("../common") is False
+
+        # Project modules (not in stdlib/third-party lists)
+        assert _is_external_module("magaldi_core") is False
+        assert _is_external_module("myproject.utils") is False
+
+    def test_module_to_file_paths(self):
+        """Test converting module paths to file paths."""
+        from magaldi_core.call_resolution import _module_to_file_paths
+
+        paths = _module_to_file_paths("magaldi_core.storage")
+
+        assert "src/magaldi_core/storage.py" in paths
+        assert "magaldi_core/storage.py" in paths
+
+    def test_relative_import_skipped(self):
+        """Test that relative imports are skipped (hard to resolve)."""
+        from magaldi_core.call_resolution import _module_to_file_paths
+
+        paths = _module_to_file_paths("./utils")
+        assert len(paths) == 0
+
+
+# =============================================================================
+# INTEGRATION TESTS
+# =============================================================================
+
+
+class TestCallResolutionIntegration:
+    """Integration tests for the full call resolution pipeline."""
+
+    def test_call_object_has_resolved_id_field(self):
+        """Test that Call objects have resolved_id field."""
+        call = Call(name="test", receiver=None, line=1)
+        assert hasattr(call, "resolved_id")
+        assert call.resolved_id is None
+
+        call_with_id = Call(name="test", receiver=None, line=1, resolved_id="some:id")
+        assert call_with_id.resolved_id == "some:id"
+
+    def test_extracted_call_has_resolved_id_field(self):
+        """Test that ExtractedCall objects have resolved_id field."""
+        from magaldi_core.extractors.types import ExtractedCall
+
+        call = ExtractedCall(name="test", receiver=None, line=1)
+        assert hasattr(call, "resolved_id")
+        assert call.resolved_id is None
+
+        call_with_id = ExtractedCall(name="test", receiver=None, line=1, resolved_id="some:id")
+        assert call_with_id.resolved_id == "some:id"

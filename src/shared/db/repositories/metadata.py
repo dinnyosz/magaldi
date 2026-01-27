@@ -32,6 +32,54 @@ class MetadataRepository:
         except NotFoundError:
             return None
 
+    def get_document_by_name(
+        self,
+        name: str,
+        element_type: str,
+        relative_path: str,
+        scope: str,
+        repository: str,
+        username: str = "main",
+    ) -> dict[str, Any] | None:
+        """Get indexed document by name and path.
+
+        Used for cross-file call resolution when we don't know the line number.
+
+        Args:
+            name: Element name.
+            element_type: Element type (function, class, method).
+            relative_path: Relative file path.
+            scope: Repository scope.
+            repository: Repository name.
+            username: Username branch.
+
+        Returns:
+            Document if found, None otherwise.
+        """
+        client = self._get_client()
+        query = {
+            "bool": {
+                "must": [
+                    {"term": {"name": name}},
+                    {"term": {"element_type": element_type}},
+                    {"term": {"relative_path": relative_path}},
+                    {"term": {"scope": scope}},
+                    {"term": {"repository": repository}},
+                    {"term": {"username": username}},
+                ]
+            }
+        }
+
+        result = client.search(
+            index=INDEX_NAME,
+            body={"query": query, "size": 1},
+        )
+
+        hits = result.get("hits", {}).get("hits", [])
+        if hits:
+            return hits[0]["_source"]
+        return None
+
     def store_embedding(
         self,
         element_id: str,
@@ -191,6 +239,35 @@ class MetadataRepository:
         doc = self.get_document(element_id)
         if doc:
             return doc.get("calls", []) or []
+        return []
+
+    def get_file_imports(
+        self,
+        relative_path: str,
+        scope: str,
+        repository: str,
+        username: str = "main",
+    ) -> list[dict]:
+        """Get imports for a file element.
+
+        Args:
+            relative_path: Relative path of the file.
+            scope: Repository scope.
+            repository: Repository name.
+            username: Username branch.
+
+        Returns:
+            List of import dicts with keys: name, module, alias, line.
+        """
+        # Build the file element ID
+        from pathlib import Path
+
+        file_name = Path(relative_path).name
+        file_element_id = f"{scope}:{repository}:{username}:{relative_path}:file:{file_name}:1"
+
+        doc = self.get_document(file_element_id)
+        if doc:
+            return doc.get("imports", []) or []
         return []
 
     def get_summaries_batch(

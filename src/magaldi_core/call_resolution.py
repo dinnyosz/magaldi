@@ -1,0 +1,273 @@
+"""Cross-file call resolution (Phase 2).
+
+This module resolves function/method calls that reference elements in other files,
+using import information and Elasticsearch lookups.
+
+Phase 1 (at parse time) resolves:
+- Same-file bare function calls
+- Self-method calls (self.method(), this.method(), $this->method())
+
+Phase 2 (this module) resolves:
+- Import-based calls (from utils import process; process())
+- Module method calls (import utils; utils.process())
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from shared.db.repositories import ElasticsearchRepository
+
+logger = logging.getLogger(__name__)
+
+
+def resolve_cross_file_calls(
+    es: ElasticsearchRepository,
+    scope: str,
+    repository: str,
+    username: str = "main",
+) -> tuple[int, int]:
+    """Resolve calls using imports and indexed elements.
+
+    This is Phase 2 of call resolution, run after all files are parsed and stored.
+    It uses import information to resolve calls that reference other files.
+
+    Args:
+        es: Elasticsearch repository instance.
+        scope: Repository scope.
+        repository: Repository name.
+        username: Username branch.
+
+    Returns:
+        Tuple of (total_unresolved_calls_processed, calls_resolved).
+    """
+    total_processed = 0
+    total_resolved = 0
+
+    # Get all elements with unresolved calls
+    elements = es.find_elements_with_unresolved_calls(scope, repository, username)
+    logger.info(f"Found {len(elements)} elements with unresolved calls")
+
+    for elem in elements:
+        element_id = elem.get("element_id", "")
+        relative_path = elem.get("relative_path", "")
+
+        # Get file's imports
+        file_imports = es.get_file_imports(relative_path, scope, repository, username)
+        if not file_imports:
+            continue
+
+        import_map = _build_import_map(file_imports)
+        calls = elem.get("calls", [])
+        updated = False
+
+        for call in calls:
+            if call.get("resolved_id"):
+                continue
+
+            total_processed += 1
+            receiver = call.get("receiver")
+            name = call.get("name")
+
+            resolved_id = None
+
+            # Strategy 3: Bare call matching an import
+            # e.g., from utils import process; process()
+            if receiver is None and name in import_map:
+                import_info = import_map[name]
+                resolved_id = _lookup_element_by_import(
+                    es, import_info, name, scope, repository, username
+                )
+
+            # Strategy 4: Method call on imported module
+            # e.g., import utils; utils.process()
+            elif receiver and receiver in import_map:
+                import_info = import_map[receiver]
+                resolved_id = _lookup_element_by_import(
+                    es, import_info, name, scope, repository, username
+                )
+
+            if resolved_id:
+                call["resolved_id"] = resolved_id
+                total_resolved += 1
+                updated = True
+
+        if updated:
+            es.store_calls(element_id, calls)
+
+    logger.info(f"Resolved {total_resolved}/{total_processed} cross-file calls")
+    return total_processed, total_resolved
+
+
+def _build_import_map(imports: list[dict]) -> dict[str, dict]:
+    """Build a map from local name to import info.
+
+    Args:
+        imports: List of import dicts with keys: name, module, alias, line.
+
+    Returns:
+        Dict mapping local name (alias or name) to full import info.
+    """
+    result: dict[str, dict] = {}
+    for imp in imports:
+        # Use alias if available, otherwise use the imported name
+        local_name = imp.get("alias") or imp.get("name")
+        if local_name:
+            result[local_name] = imp
+    return result
+
+
+def _lookup_element_by_import(
+    es: ElasticsearchRepository,
+    import_info: dict,
+    element_name: str,
+    scope: str,
+    repository: str,
+    username: str,
+) -> str | None:
+    """Look up element ID for an imported name.
+
+    Args:
+        es: Elasticsearch repository.
+        import_info: Import dict with module info.
+        element_name: Name of the element to find.
+        scope: Repository scope.
+        repository: Repository name.
+        username: Username branch.
+
+    Returns:
+        Element ID if found, None otherwise.
+    """
+    module = import_info.get("module", "")
+    if not module:
+        return None
+
+    # Convert module path to possible file paths
+    # e.g., "magaldi_core.storage" -> "src/magaldi_core/storage.py"
+    # e.g., "./utils" -> relative import
+    # e.g., "os" -> external module (skip)
+
+    # Skip external/stdlib modules (no dots or starts with common stdlib names)
+    if _is_external_module(module):
+        return None
+
+    # Try to find the element
+    possible_paths = _module_to_file_paths(module)
+
+    for file_path in possible_paths:
+        # Look for function with this name in the file
+        element_id = _find_element_in_file(
+            es, file_path, element_name, scope, repository, username
+        )
+        if element_id:
+            return element_id
+
+    return None
+
+
+def _is_external_module(module: str) -> bool:
+    """Check if module is external (stdlib or third-party).
+
+    Returns True for modules that aren't part of the local codebase.
+    """
+    # Relative imports are always internal
+    if module.startswith("."):
+        return False
+
+    # Common stdlib modules
+    stdlib_prefixes = {
+        "os", "sys", "re", "json", "math", "time", "datetime", "collections",
+        "itertools", "functools", "pathlib", "typing", "logging", "unittest",
+        "dataclasses", "abc", "asyncio", "hashlib", "base64", "uuid", "copy",
+        "io", "tempfile", "shutil", "subprocess", "threading", "multiprocessing",
+    }
+
+    # Check if first component is stdlib
+    first_component = module.split(".")[0]
+    if first_component in stdlib_prefixes:
+        return True
+
+    # Common third-party modules
+    third_party_prefixes = {
+        "numpy", "pandas", "requests", "flask", "django", "fastapi", "pydantic",
+        "pytest", "elasticsearch", "redis", "sqlalchemy", "boto3", "torch",
+        "tensorflow", "sklearn", "scipy", "matplotlib", "pillow", "PIL",
+        "litellm", "openai", "anthropic", "tiktoken", "httpx", "aiohttp",
+        "tree_sitter", "mcp", "click", "typer", "rich", "tqdm",
+    }
+
+    if first_component in third_party_prefixes:
+        return True
+
+    return False
+
+
+def _module_to_file_paths(module: str) -> list[str]:
+    """Convert module path to possible file paths.
+
+    Args:
+        module: Module path like "magaldi_core.storage" or "./utils".
+
+    Returns:
+        List of possible file paths to try.
+    """
+    paths: list[str] = []
+
+    if module.startswith("."):
+        # Relative import - harder to resolve without context
+        # For now, skip relative imports
+        return paths
+
+    # Convert dots to path separators
+    # e.g., "magaldi_core.storage" -> "magaldi_core/storage"
+    path_base = module.replace(".", "/")
+
+    # Try common source directories
+    for src_prefix in ["src/", ""]:
+        # Try as Python file
+        paths.append(f"{src_prefix}{path_base}.py")
+        # Try as package __init__
+        paths.append(f"{src_prefix}{path_base}/__init__.py")
+
+    return paths
+
+
+def _find_element_in_file(
+    es: ElasticsearchRepository,
+    file_path: str,
+    element_name: str,
+    scope: str,
+    repository: str,
+    username: str,
+) -> str | None:
+    """Find an element by name in a specific file.
+
+    Args:
+        es: Elasticsearch repository.
+        file_path: Relative path to the file.
+        element_name: Name of the element to find.
+        scope: Repository scope.
+        repository: Repository name.
+        username: Username branch.
+
+    Returns:
+        Element ID if found, None otherwise.
+    """
+    # Build possible element IDs for function or class
+    for elem_type in ["function", "class"]:
+        # We don't know the exact line number, so we need to search
+        # Try to find by querying
+        doc = es.get_document_by_name(
+            name=element_name,
+            element_type=elem_type,
+            relative_path=file_path,
+            scope=scope,
+            repository=repository,
+            username=username,
+        )
+        if doc:
+            return doc.get("element_id")
+
+    return None

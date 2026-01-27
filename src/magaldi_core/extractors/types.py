@@ -94,6 +94,7 @@ class ExtractedCall:
     name: str  # Function/method name (e.g., "process", "validate")
     receiver: str | None  # Receiver object (e.g., "self", "utils", None for bare calls)
     line: int  # 1-indexed line number
+    resolved_id: str | None = None  # Element ID of the target (filled during resolution)
 
 
 # =============================================================================
