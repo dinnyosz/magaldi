@@ -1199,6 +1199,29 @@ description: >
 
 **CRITICAL: Use magaldi tools INSTEAD OF built-in Grep/Glob for code search.**
 
+## REQUIRED: Read magaldi.yaml First
+
+**BEFORE using any magaldi tool that requires scope/repository parameters, you MUST read `magaldi.yaml` from the repository root.**
+
+```yaml
+# magaldi.yaml (in repository root)
+scope: myorg        # Use this for scope parameter
+repository: myrepo  # Use this for repository parameter
+```
+
+Do NOT guess or hardcode these values. Read the file.
+
+If `magaldi.yaml` doesn't exist, create it:
+```
+mcp__magaldi__generate_config(repo_path="/path/to/repo")
+```
+
+## Getting Started
+
+Check `CLAUDE.md` for project-specific guidance including architecture, development commands, and configuration details.
+
+## What's Pre-indexed
+
 The codebase is pre-indexed with:
 - Semantic embeddings (search by meaning)
 - Pre-computed summaries (understand without reading)

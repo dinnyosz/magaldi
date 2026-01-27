@@ -108,6 +108,20 @@ Python, JavaScript, TypeScript, PHP, Rust (via Tree-sitter grammars)
 
 Repository config file: `magaldi.yaml` in repo root with required `scope` field.
 
+Example:
+```yaml
+scope: myorg
+repository: myrepo
+```
+
+Use `mcp__magaldi__generate_config(repo_path="/path/to/repo")` to auto-generate this file.
+
+## MCP Integration
+
+**See `.claude/skills/magaldi/SKILL.md` for detailed MCP tool usage guidance.**
+
+When using Magaldi MCP tools, **always read `magaldi.yaml` first** to get the correct `scope` and `repository` parameters.
+
 ## TODOs
 
 - [ ] **LiteLLM Pydantic warning**: Check if [issue #11759](https://github.com/BerriAI/litellm/issues/11759) (Pydantic serialization) is resolved, then remove warning suppression from `src/shared/ai/llm_client.py`
