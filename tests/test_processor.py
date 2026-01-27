@@ -1123,7 +1123,7 @@ class TestDynamicWorkerScaling:
     """Tests for dynamic worker scaling based on context tier."""
 
     def test_small_tier_allows_max_workers(self):
-        """Small context tier (2048) should allow 8 workers."""
+        """Small context tier (2048) should allow 12 workers."""
         elements = [
             CodeElement(
                 element_id=f"test:repo:user:file.py:function:f{i}:1",
@@ -1131,18 +1131,18 @@ class TestDynamicWorkerScaling:
                 name=f"f{i}",
                 raw_code="def f(): pass",
             )
-            for i in range(10)
+            for i in range(15)
         ]
 
         # All small elements = 2048 tier
         context_sizes = {e.element_id: 500 for e in elements}
         tracker = DependencyTracker(elements, context_sizes)
 
-        # Should return up to 8 elements (TIER_MAX_WORKERS[2048] = 8)
+        # Should return up to 12 elements (TIER_MAX_WORKERS[2048] = 12)
         ready = tracker.get_ready_elements(max_count=20)
-        assert len(ready) == 8
+        assert len(ready) == 12
 
-        # Calling again should return 0 (8 already in-progress, limit is 8)
+        # Calling again should return 0 (12 already in-progress, limit is 12)
         ready2 = tracker.get_ready_elements(max_count=20)
         assert len(ready2) == 0
 
@@ -1206,7 +1206,7 @@ class TestDynamicWorkerScaling:
             [small_element], {small_element.element_id: 500}
         )
         tracker_small.get_ready_elements(max_count=1)  # Set current tier
-        assert tracker_small.get_current_max_workers() == 8
+        assert tracker_small.get_current_max_workers() == 12
 
         # Large tier
         tracker_large = DependencyTracker(
