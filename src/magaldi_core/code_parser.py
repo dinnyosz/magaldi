@@ -412,6 +412,21 @@ class ParsingResult:
 
         return tiers
 
+    def largest_elements(self, n: int = 5) -> list[tuple[str, str, int, str]]:
+        """Get the N largest elements by character count.
+
+        Returns list of (name, path, chars, element_type) tuples sorted by chars descending.
+        """
+        all_elements: list[tuple[str, str, int, str]] = []
+        for pf in self.parsed_files:
+            for elem in pf.elements:
+                char_count = len(elem.raw_code or "")
+                all_elements.append((elem.name, elem.relative_path, char_count, elem.element_type))
+
+        # Sort by char count descending and return top N
+        all_elements.sort(key=lambda x: x[2], reverse=True)
+        return all_elements[:n]
+
 
 # =============================================================================
 # ELEMENT ID GENERATION

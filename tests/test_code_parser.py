@@ -823,6 +823,38 @@ class TestParsingResult:
         assert name == "MyClass"
         assert chars == 3000
 
+    def test_largest_elements_method(self):
+        """Should return top N largest elements sorted by char count."""
+        elements = [
+            CodeElement(element_id="1", name="tiny", element_type="function", raw_code="x" * 100, relative_path="a.py"),
+            CodeElement(element_id="2", name="huge", element_type="file", raw_code="x" * 10000, relative_path="b.py"),
+            CodeElement(element_id="3", name="medium", element_type="class", raw_code="x" * 3000, relative_path="c.py"),
+            CodeElement(element_id="4", name="large", element_type="function", raw_code="x" * 5000, relative_path="d.py"),
+            CodeElement(element_id="5", name="small", element_type="method", raw_code="x" * 500, relative_path="e.py"),
+        ]
+        file_info = FileInfo(
+            relative_path="file.py",
+            absolute_path=Path("/test/file.py"),
+            language="python",
+        )
+        parsed_file = ParsedFile(file_info=file_info, elements=elements)
+        result = ParsingResult(
+            scope="test", repository="repo", username="user", parsed_files=[parsed_file]
+        )
+
+        # Get top 3 largest
+        largest = result.largest_elements(3)
+        assert len(largest) == 3
+        # Should be sorted by char count descending
+        assert largest[0] == ("huge", "b.py", 10000, "file")
+        assert largest[1] == ("large", "d.py", 5000, "function")
+        assert largest[2] == ("medium", "c.py", 3000, "class")
+
+        # Get top 5 (all of them)
+        all_largest = result.largest_elements(5)
+        assert len(all_largest) == 5
+        assert all_largest[4] == ("tiny", "a.py", 100, "function")
+
     def test_elements_by_tier_property(self):
         """Should group elements by their context tier."""
         from shared.ai.context_size import CONTEXT_TIERS

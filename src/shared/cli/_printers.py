@@ -88,19 +88,14 @@ def print_parsing_result(result: "ParsingResult") -> None:
 
         console.print(tier_table)
 
-        # Largest elements per tier (separate section)
-        console.print()
-        console.print("  [dim]Largest elements per tier:[/]")
-        for tier in sorted(non_empty_tiers.keys()):
-            stats = non_empty_tiers[tier]
-            largest = stats["largest"]
-            if largest:
-                name, path, chars, etype = largest
-                tier_label = f"{tier // 1024}k"
-                # Show full path, truncate from start if too long
-                display_path = path if len(path) <= 60 else "..." + path[-57:]
-                console.print(f"    [cyan]{tier_label:>3}[/] [yellow]{display_path}[/]")
-                console.print(f"        [green]{name}[/] [dim]({etype}, {chars:,} chars)[/]")
+        # Top 5 largest elements overall
+        largest = result.largest_elements(5)
+        if largest:
+            console.print()
+            console.print("  [dim]Largest elements:[/]")
+            for name, path, chars, etype in largest:
+                display_path = path if len(path) <= 50 else "..." + path[-47:]
+                console.print(f"    [dim]{chars:>7,}[/] [cyan]{etype:<8}[/] [yellow]{display_path}[/] [green]{name}[/]")
 
 
 def print_feature_result(result: dict) -> None:
