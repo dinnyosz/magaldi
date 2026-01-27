@@ -480,6 +480,21 @@ class TestNormalizeTerm:
         assert normalize_term("process") == "process"
         assert normalize_term("access") == "access"
 
+    def test_preserves_latin_origin_words_ending_in_us(self):
+        """Test that Latin words ending in 'us' are not depluralized."""
+        assert normalize_term("status") == "status"
+        assert normalize_term("bonus") == "bonus"
+        assert normalize_term("cactus") == "cactus"
+        assert normalize_term("radius") == "radius"
+        assert normalize_term("corpus") == "corpus"
+
+    def test_preserves_latin_origin_words_ending_in_is(self):
+        """Test that Latin words ending in 'is' are not depluralized."""
+        assert normalize_term("analysis") == "analysis"
+        assert normalize_term("basis") == "basis"
+        assert normalize_term("thesis") == "thesis"
+        assert normalize_term("crisis") == "crisis"
+
 
 class TestMergeGlossaryItems:
     """Tests for merging glossary items from multiple features."""

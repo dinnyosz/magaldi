@@ -42,6 +42,24 @@ from shared.ai.summarization import (
 from shared.ai.context_size import compute_element_num_ctx
 
 
+def _get_model_display_name(model_config: ModelConfig, num_ctx: int) -> str:
+    """Get the display name for a model, including tier suffix for Ollama models.
+
+    Args:
+        model_config: Model configuration.
+        num_ctx: Context size being used.
+
+    Returns:
+        Model name with tier suffix for Ollama models (e.g., "qwen3:4b-instruct-4k"),
+        or the original name for other providers.
+    """
+    if model_config.provider == "ollama":
+        from shared.ai.ollama_models import get_tiered_model_name
+
+        return get_tiered_model_name(model_config.name, num_ctx)
+    return model_config.name
+
+
 # =============================================================================
 # DATA CLASSES
 # =============================================================================
@@ -322,17 +340,17 @@ class WorkerStatus:
     """Track what each worker is doing."""
 
     _lock: threading.Lock = field(default_factory=threading.Lock)
-    _status: dict[int, tuple[str, str, str]] = field(default_factory=dict)  # worker_id -> (element_name, stage, model)
+    _status: dict[int, tuple[str, str, str, str, float]] = field(default_factory=dict)  # worker_id -> (element_name, stage, model, ctx_size, start_time)
 
-    def set(self, worker_id: int, element_name: str, stage: str, model: str = "") -> None:
+    def set(self, worker_id: int, element_name: str, stage: str, model: str = "", ctx_size: str = "", start_time: float = 0.0) -> None:
         with self._lock:
-            self._status[worker_id] = (element_name, stage, model)
+            self._status[worker_id] = (element_name, stage, model, ctx_size, start_time)
 
     def clear(self, worker_id: int) -> None:
         with self._lock:
             self._status.pop(worker_id, None)
 
-    def get_all(self) -> dict[int, tuple[str, str, str]]:
+    def get_all(self) -> dict[int, tuple[str, str, str, str, float]]:
         with self._lock:
             return dict(self._status)
 
@@ -373,47 +391,94 @@ class DependencyTracker:
     - Level 1 (classes): Ready when parent file done
     - Level 2 (methods/functions): Ready when parent class done (or file if no class)
     - Level 3 (variables): Ready when parent done
+
+    Tier batching: All workers process the same context tier together to minimize
+    model reloads. Only moves to next tier when current tier has no ready elements.
     """
 
-    def __init__(self, elements: list[CodeElement]) -> None:
+    # Standard context tiers (must match ollama_models.CONTEXT_TIERS)
+    CONTEXT_TIERS = [2048, 4096, 8192, 16384, 32768]
+
+    def __init__(
+        self, elements: list[CodeElement], context_sizes: dict[str, int] | None = None
+    ) -> None:
         self._lock = threading.Lock()
         self._elements = {e.element_id: e for e in elements}
         self._completed: set[str] = set()
         self._in_progress: set[str] = set()
+        self._context_sizes = context_sizes or {}
+        self._current_tier: int | None = None  # Current tier all workers use
 
         # Build parent lookup: element_id -> parent_element_id
         self._parents: dict[str, str | None] = {}
         for e in elements:
             self._parents[e.element_id] = e.parent_id
 
-    def get_ready_elements(self, max_count: int = 10) -> list[CodeElement]:
-        """Get elements ready for processing (parent done, not started)."""
-        with self._lock:
-            ready = []
-            for eid, element in self._elements.items():
-                if eid in self._completed or eid in self._in_progress:
-                    continue
+    def _get_tier(self, element_id: str) -> int:
+        """Get the context tier for an element (snaps to standard tiers)."""
+        ctx = self._context_sizes.get(element_id, 2048)
+        # Find the tier this context size belongs to
+        for tier in self.CONTEXT_TIERS:
+            if ctx <= tier:
+                return tier
+        return self.CONTEXT_TIERS[-1]  # Max tier
 
-                parent_id = self._parents.get(eid)
-                # Element is ready if:
-                # - No parent (level 0)
-                # - Parent completed
-                # - Parent not in elements_to_process (was skipped/unchanged)
-                parent_ready = (
-                    parent_id is None
-                    or parent_id in self._completed
-                    or parent_id not in self._elements
-                )
-                if parent_ready:
-                    ready.append(element)
-                    if len(ready) >= max_count:
-                        break
+    def _get_all_ready(self) -> list[CodeElement]:
+        """Get all ready elements (parent done, not started). Must hold lock."""
+        ready = []
+        for eid, element in self._elements.items():
+            if eid in self._completed or eid in self._in_progress:
+                continue
+
+            parent_id = self._parents.get(eid)
+            # Element is ready if:
+            # - No parent (level 0)
+            # - Parent completed
+            # - Parent not in elements_to_process (was skipped/unchanged)
+            parent_ready = (
+                parent_id is None
+                or parent_id in self._completed
+                or parent_id not in self._elements
+            )
+            if parent_ready:
+                ready.append(element)
+        return ready
+
+    def get_ready_elements(self, max_count: int = 10) -> list[CodeElement]:
+        """Get elements ready for processing (parent done, not started).
+
+        Uses tier batching: all workers process the same context tier together.
+        Only moves to next tier when current tier has no ready elements.
+        This minimizes Ollama model reloads.
+        """
+        with self._lock:
+            ready = self._get_all_ready()
+            if not ready:
+                return []
+
+            # Group ready elements by tier
+            by_tier: dict[int, list[CodeElement]] = {}
+            for elem in ready:
+                tier = self._get_tier(elem.element_id)
+                by_tier.setdefault(tier, []).append(elem)
+
+            # Determine which tier to use
+            if self._current_tier is not None and self._current_tier in by_tier:
+                # Continue with current tier if it has ready elements
+                tier = self._current_tier
+            else:
+                # Move to smallest tier that has ready elements
+                tier = min(by_tier.keys())
+                self._current_tier = tier
+
+            # Get elements from current tier only
+            tier_ready = by_tier[tier][:max_count]
 
             # Mark as in-progress
-            for e in ready:
+            for e in tier_ready:
                 self._in_progress.add(e.element_id)
 
-            return ready
+            return tier_ready
 
     def mark_complete(self, element_id: str) -> None:
         """Mark element as completed."""
@@ -436,6 +501,27 @@ class DependencyTracker:
         """Count elements not yet completed."""
         with self._lock:
             return len(self._elements) - len(self._completed)
+
+    def get_current_tier(self) -> int | None:
+        """Get the current context tier being processed."""
+        with self._lock:
+            return self._current_tier
+
+    def get_tier_stats(self) -> dict[int, tuple[int, int]]:
+        """Get (ready, total) counts per tier for pending elements."""
+        with self._lock:
+            ready = self._get_all_ready()
+            ready_ids = {e.element_id for e in ready}
+
+            stats: dict[int, tuple[int, int]] = {}
+            for eid in self._elements:
+                if eid in self._completed:
+                    continue
+                tier = self._get_tier(eid)
+                r, t = stats.get(tier, (0, 0))
+                is_ready = 1 if eid in ready_ids else 0
+                stats[tier] = (r + is_ready, t + 1)
+            return stats
 
 
 # =============================================================================
@@ -887,8 +973,13 @@ def _process_single_element(
     # Get model for this element type
     element_model = config.get_model_for_element_type(element.element_type)
 
-    def update_status(stage: str, model: str = "") -> None:
-        worker_status.set(worker_id, display_name, stage, model)
+    # Track current stage start time for elapsed display
+    stage_start_time = time.time()
+
+    def update_status(stage: str, model: str = "", ctx_size: str = "") -> None:
+        nonlocal stage_start_time
+        stage_start_time = time.time()
+        worker_status.set(worker_id, display_name, stage, model, ctx_size, stage_start_time)
         if on_status_change:
             on_status_change()
 
@@ -901,7 +992,9 @@ def _process_single_element(
         )
         # Format tier compactly: 2048 -> "2K", 32768 -> "32K"
         ctx_display = f"{num_ctx // 1024}K" if num_ctx >= 1024 else str(num_ctx)
-        update_status(f"summ@{ctx_display}", element_model.name)
+        # Display tiered model name for Ollama (e.g., "qwen3:4b-instruct-4k")
+        model_display = _get_model_display_name(element_model, num_ctx)
+        update_status("summarizing", model_display, ctx_display)
         if config.skip_ai:
             summary = f"{element.element_type.title()}: {element.name}"
         else:
@@ -918,15 +1011,15 @@ def _process_single_element(
         if should_embed(element):
             if config.skip_ai:
                 # Generate dummy embeddings for testing
-                update_status("summ_embed", config.embed_model.name)
+                update_status("summ_embed", config.embed_model.name, "-")
                 summary_embedding = [0.0] * config.embed_dimensions
-                update_status("code_embed", config.embed_model.name)
+                update_status("code_embed", config.embed_model.name, "-")
                 code_embedding = [0.0] * config.embed_dimensions
             else:
                 # Generate both embeddings (returns tuple with timing)
                 # Pass callback to update status between embedding phases
                 def on_embed_stage(stage: str) -> None:
-                    update_status(stage, config.embed_model.name)
+                    update_status(stage, config.embed_model.name, "-")
                 summary_embedding, code_embedding, summary_embed_time, code_embed_time = _embed_element(
                     element, summary_cache, embed_client, config, on_embed_stage
                 )
@@ -1095,8 +1188,18 @@ def process_elements(
             api_key=embed_cfg.api_key,
         )
 
+    # Pre-compute context sizes for all elements (for tier batching)
+    # This enables DependencyTracker to group elements by context tier
+    element_context_sizes: dict[str, int] = {}
+    for elem in elements_to_process:
+        char_count = len(elem.raw_code or "")
+        element_context_sizes[elem.element_id] = compute_element_num_ctx(
+            elem.element_type, char_count
+        )
+
     # Initialize tracking structures (use provided or create new)
-    dependency_tracker = DependencyTracker(elements_to_process)
+    # Pass per-element context sizes for tier batching (minimizes model reloads)
+    dependency_tracker = DependencyTracker(elements_to_process, element_context_sizes)
     if timing_stats is None:
         timing_stats = TimingStats()
     timing_stats.phase_start = time.time()

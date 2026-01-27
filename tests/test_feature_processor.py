@@ -324,8 +324,18 @@ class TestFeatureWorkerStatus:
         all_status = status.get_all()
 
         assert len(all_status) == 2
-        assert all_status[0] == ("feature_1", "summarizing", "model_a", "2K")
-        assert all_status[1] == ("feature_2", "embedding", "model_b", "4K")
+        # 5-tuple: (feature_name, stage, model, ctx_size, start_time)
+        feature, stage, model, ctx_size, start_time = all_status[0]
+        assert feature == "feature_1"
+        assert stage == "summarizing"
+        assert model == "model_a"
+        assert ctx_size == "2K"
+
+        feature, stage, model, ctx_size, start_time = all_status[1]
+        assert feature == "feature_2"
+        assert stage == "embedding"
+        assert model == "model_b"
+        assert ctx_size == "4K"
 
     def test_clear(self):
         """Test clearing worker status."""
@@ -379,8 +389,18 @@ class TestSubfeatureWorkerStatus:
         all_status = status.get_all()
 
         assert len(all_status) == 2
-        assert all_status[0] == ("parent_feature", "summarize", "model", "sub1", "2K")
-        assert all_status[1] == ("parent_feature", "embed", "", "sub2", "")
+        # 6-tuple: (parent_feature, stage, model, subfeature, ctx_size, start_time)
+        parent, stage, model, subfeature, ctx_size, start_time = all_status[0]
+        assert parent == "parent_feature"
+        assert stage == "summarize"
+        assert model == "model"
+        assert subfeature == "sub1"
+        assert ctx_size == "2K"
+
+        parent, stage, model, subfeature, ctx_size, start_time = all_status[1]
+        assert parent == "parent_feature"
+        assert stage == "embed"
+        assert subfeature == "sub2"
 
 
 # =============================================================================

@@ -24,7 +24,7 @@ from rich.table import Table
 from rich.text import Text
 
 from shared.cli._printers import print_feature_result
-from shared.cli._shared import console, format_duration, main
+from shared.cli._shared import console, format_duration, get_model_column_width, main
 from shared.config import load_config
 
 if TYPE_CHECKING:
@@ -98,6 +98,7 @@ def run_feature_extraction(
             min_samples=min_samples,
             api_base=summarize_model.get_api_base(),
             labeling_model=summarize_model.name,
+            provider=summarize_model.provider,
         )
 
         clusterer = FeatureClusterer(cluster_config)
@@ -256,6 +257,7 @@ def run_feature_extraction(
 
         timing_stats = FeatureTimingStats()
         worker_status = FeatureWorkerStatus()
+        model_col_width = get_model_column_width(config)
 
         def build_feature_display(state: FeatureProgressState, num_workers: int) -> RenderableType:
             """Build Rich display for feature processing progress."""
@@ -286,20 +288,25 @@ def run_feature_extraction(
                 bar_text.append(" ETA", style="dim")
 
             # Worker table
+            import time as time_mod
             worker_table = Table(show_header=False, box=None, padding=0)
             worker_table.add_column("ID", style="dim", width=4)
             worker_table.add_column("Stage", style="cyan", width=12)
-            worker_table.add_column("Model", style="yellow", width=20)
+            worker_table.add_column("Model", style="yellow", width=model_col_width)
             worker_table.add_column("Ctx", style="magenta", width=4)
+            worker_table.add_column("Time", style="green", width=6)
             worker_table.add_column("Feature")
 
             workers_data = state.workers.get_all()
+            now = time_mod.time()
             for wid in range(num_workers):
                 if wid in workers_data:
-                    feature_name, stage, model, ctx_size = workers_data[wid]
-                    worker_table.add_row(f"[{wid}]", stage, model, ctx_size, feature_name)
+                    feature_name, stage, model, ctx_size, start_time = workers_data[wid]
+                    elapsed = now - start_time if start_time > 0 else 0
+                    elapsed_str = f"{elapsed:.1f}s" if elapsed > 0 else ""
+                    worker_table.add_row(f"[{wid}]", stage, model, ctx_size, elapsed_str, feature_name)
                 else:
-                    worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "", "")
+                    worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "", "", "")
 
             # Stats line - show both wall time and API time
             avg_api = state.timing.avg_summarize_time + state.timing.avg_embed_time
@@ -455,23 +462,28 @@ def run_feature_extraction(
                     bar_text.append(" ETA", style="dim")
 
                 # Worker table
+                import time as time_mod
                 worker_table = Table(show_header=False, box=None, padding=0)
                 worker_table.add_column("ID", style="dim", width=4)
                 worker_table.add_column("Stage", style="cyan", width=10)
-                worker_table.add_column("Model", style="yellow", width=20)
+                worker_table.add_column("Model", style="yellow", width=model_col_width)
                 worker_table.add_column("Ctx", style="blue", width=4)
-                worker_table.add_column("Parent", style="magenta", width=22)
+                worker_table.add_column("Time", style="green", width=6)
+                worker_table.add_column("Parent", style="magenta", width=20)
                 worker_table.add_column("Subfeature")
 
                 workers_data = state.workers.get_all()
+                now = time_mod.time()
                 for wid in range(num_workers):
                     if wid in workers_data:
-                        parent_feature, stage, model, subfeature, ctx_size = workers_data[wid]
-                        display_parent = parent_feature[:19] + "..." if len(parent_feature) > 22 else parent_feature
-                        display_sub = subfeature[:30] + "..." if len(subfeature) > 33 else subfeature
-                        worker_table.add_row(f"[{wid}]", stage, model, ctx_size, display_parent, display_sub)
+                        parent_feature, stage, model, subfeature, ctx_size, start_time = workers_data[wid]
+                        elapsed = now - start_time if start_time > 0 else 0
+                        elapsed_str = f"{elapsed:.1f}s" if elapsed > 0 else ""
+                        display_parent = parent_feature[:17] + "..." if len(parent_feature) > 20 else parent_feature
+                        display_sub = subfeature[:28] + "..." if len(subfeature) > 31 else subfeature
+                        worker_table.add_row(f"[{wid}]", stage, model, ctx_size, elapsed_str, display_parent, display_sub)
                     else:
-                        worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "", "", "")
+                        worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "", "", "", "")
 
                 # Stats line - show both wall time and API time
                 avg_api = state.timing.avg_summarize_time + state.timing.avg_embed_time
@@ -662,6 +674,7 @@ def run_glossary_extraction(
 
         # Track current phase
         current_phase = {"name": "Extracting terms from features"}
+        model_col_width = get_model_column_width(config)
 
         def build_glossary_display(state: GlossaryProgressState, num_workers: int, phase: str) -> RenderableType:
             """Build Rich display for glossary extraction progress."""
@@ -701,17 +714,18 @@ def run_glossary_extraction(
             worker_table = Table(show_header=False, box=None, padding=0)
             worker_table.add_column("ID", style="dim", width=4)
             worker_table.add_column("Stage", style="cyan", width=14)
-            worker_table.add_column("Model", style="yellow", width=26)
+            worker_table.add_column("Model", style="yellow", width=model_col_width)
+            worker_table.add_column("Ctx", style="magenta", width=4)
             worker_table.add_column("Item")
 
             workers_data = state.workers.get_all()
             for wid in range(num_workers):
                 if wid in workers_data:
-                    item_label, model = workers_data[wid]
-                    stage = "summarizing" if "summary" in phase.lower() else "extracting"
-                    worker_table.add_row(f"[{wid}]", stage, model, item_label)
+                    item_label, model, ctx_size = workers_data[wid]
+                    stage = "summarizing" if "summar" in phase.lower() else "extracting"
+                    worker_table.add_row(f"[{wid}]", stage, model, ctx_size, item_label)
                 else:
-                    worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "")
+                    worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "", "")
 
             # Stats line - different labels for each phase
             avg_api = state.timing.avg_api_time

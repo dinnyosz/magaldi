@@ -549,7 +549,11 @@ class TestWorkerStatus:
 
         all_status = status.get_all()
         assert 0 in all_status
-        assert all_status[0] == ("element1", "summarizing", "gpt-4")
+        # 5-tuple: (element_name, stage, model, ctx_size, start_time)
+        elem, stage, model, ctx_size, start_time = all_status[0]
+        assert elem == "element1"
+        assert stage == "summarizing"
+        assert model == "gpt-4"
 
     def test_set_multiple_workers(self):
         """Test setting multiple worker statuses."""
@@ -586,7 +590,11 @@ class TestWorkerStatus:
         status.set(0, "elem1", "embedding", "model")
 
         all_status = status.get_all()
-        assert all_status[0] == ("elem1", "embedding", "model")
+        # 5-tuple: (element_name, stage, model, ctx_size, start_time)
+        elem, stage, model, ctx_size, start_time = all_status[0]
+        assert elem == "elem1"
+        assert stage == "embedding"
+        assert model == "model"
 
 
 # =============================================================================
@@ -1100,9 +1108,12 @@ class TestPerElementContextSize:
         )
 
         # Check that at least one status update had the context tier
-        summ_stages = [
-            s[0][1] for s in status_updates
-            if 0 in s and s[0][1].startswith("summ@")
+        # Status is now 5-tuple: (element_name, stage, model, ctx_size, start_time)
+        summ_updates = [
+            s[0] for s in status_updates
+            if 0 in s and s[0][1] == "summarizing"
         ]
-        assert len(summ_stages) > 0
-        assert "summ@2K" in summ_stages  # Small function should be 2K tier
+        assert len(summ_updates) > 0
+        # Small function should be 2K tier (shown in ctx_size field, index 3)
+        ctx_sizes = [u[3] for u in summ_updates]
+        assert "2K" in ctx_sizes

@@ -69,8 +69,42 @@ def format_duration(seconds: float) -> str:
     return f"{minutes}:{secs:02d}"
 
 
+def get_model_column_width(config: "MagaldiConfig") -> int:
+    """Calculate the optimal width for model name columns in CLI displays.
+
+    Takes into account all configured models and their potential tiered names
+    (for Ollama models with context tier suffixes like -2k, -4k, -32k).
+
+    Args:
+        config: Magaldi configuration with model settings.
+
+    Returns:
+        Width in characters for the model column.
+    """
+    model_names = []
+
+    # Collect all model names
+    for model_cfg in [
+        config.llm.get_summarize_model(),
+        config.llm.get_summarize_model_small(),
+        config.llm.get_embed_model(),
+    ]:
+        name = model_cfg.name
+        if model_cfg.provider == "ollama":
+            # For Ollama, add longest tier suffix (-32k = 4 chars)
+            model_names.append(name + "-32k")
+        else:
+            model_names.append(name)
+
+    # Return max length + 2 for padding, minimum 20
+    return max(20, max(len(n) for n in model_names) + 2)
+
+
 def check_model_availability(config: "MagaldiConfig", skip_ai: bool) -> list[str]:
     """Check if required models are available from their configured providers.
+
+    For Ollama models, this also creates tiered model aliases (e.g., model-2k, model-4k)
+    to avoid reload overhead when context size changes between requests.
 
     Returns:
         List of error messages (empty if all models are available).
@@ -119,6 +153,9 @@ def check_model_availability(config: "MagaldiConfig", skip_ai: bool) -> list[str
                 return True
         return False
 
+    # Track Ollama models that need tier warmup
+    ollama_models_to_warmup: list[tuple[str, str]] = []  # (model_name, url)
+
     for purpose, model_cfg in models_to_check:
         if model_cfg.provider == "ollama":
             available = get_ollama_models(model_cfg.url)
@@ -126,6 +163,10 @@ def check_model_availability(config: "MagaldiConfig", skip_ai: bool) -> list[str
                 errors.append(f"Cannot connect to Ollama at {model_cfg.url} for {purpose} model")
             elif not model_in_ollama(model_cfg.name, available):
                 errors.append(f"Model '{model_cfg.name}' not found. Run: ollama pull {model_cfg.name}")
+            else:
+                # Model is available, add to warmup list (only LLM models, not embeddings)
+                if purpose != "embed":
+                    ollama_models_to_warmup.append((model_cfg.name, model_cfg.url))
         elif model_cfg.provider == "llamacpp":
             # Check if llama-server is running
             try:
@@ -139,7 +180,66 @@ def check_model_availability(config: "MagaldiConfig", skip_ai: bool) -> list[str
             except Exception:
                 pass  # Server is running but endpoint may not exist
 
+    # Warmup Ollama tiered models (create aliases if they don't exist)
+    if not errors and ollama_models_to_warmup:
+        _warmup_ollama_tiers(ollama_models_to_warmup)
+
     return errors
+
+
+def _warmup_ollama_tiers(models: list[tuple[str, str]]) -> None:
+    """Create tiered model aliases for Ollama models.
+
+    This creates aliases like qwen3:4b-instruct-2k, qwen3:4b-instruct-4k, etc.
+    to avoid model reload overhead when context size changes.
+
+    Args:
+        models: List of (model_name, url) tuples.
+    """
+    import os
+
+    from rich.console import Console
+
+    from shared.ai.ollama_models import CONTEXT_TIERS, warmup_ollama_tiers_verbose
+
+    console = Console()
+
+    # Check Ollama environment settings
+    # Need: 5 tiers × 2 summarization models + 1 embedding = 11 models
+    max_loaded = os.environ.get("OLLAMA_MAX_LOADED_MODELS", "")
+    num_unique_models = len(set(m[0] for m in models))
+    recommended = len(CONTEXT_TIERS) * num_unique_models + 1  # +1 for embedding model
+    if not max_loaded or int(max_loaded) < recommended:
+        console.print(f"  [yellow]⚠ Set OLLAMA_MAX_LOADED_MODELS={recommended} to keep all tiers in VRAM[/]")
+
+    # Deduplicate models
+    unique_models = list(set(models))
+
+    for model_name, url in unique_models:
+        litellm_model = f"ollama/{model_name}"
+        console.print(f"  [dim]Preparing tiered aliases for {model_name}...[/]")
+
+        try:
+            result = warmup_ollama_tiers_verbose(litellm_model, url)
+            if result is None:
+                console.print(f"    [yellow]→ skipped (already tiered)[/]")
+            elif result.created or result.existed:
+                # Show what was created
+                if result.created:
+                    created_str = ", ".join(f"{t//1024}k" for t in sorted(result.created))
+                    console.print(f"    [green]→ created:[/] {created_str}")
+                # Show what already existed
+                if result.existed:
+                    existed_str = ", ".join(f"{t//1024}k" for t in sorted(result.existed))
+                    console.print(f"    [dim]→ existed:[/] {existed_str}")
+                # Show failures
+                if result.failed:
+                    failed_str = ", ".join(f"{t//1024}k" for t in sorted(result.failed))
+                    console.print(f"    [red]→ failed:[/] {failed_str}")
+            else:
+                console.print(f"    [red]→ all tiers failed[/]")
+        except Exception as e:
+            console.print(f"    [red]→ error:[/] {e}")
 
 
 # =============================================================================

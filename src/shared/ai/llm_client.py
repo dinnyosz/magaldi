@@ -482,7 +482,8 @@ class LLMClient:
             timeout: Request timeout in seconds.
             model: Optional model override.
             num_ctx: Context window size for local providers (Ollama, llama.cpp).
-                     Used to optimize KV cache sizing for better performance.
+                     For Ollama, this triggers use of tiered model aliases to avoid
+                     reload overhead when context size changes.
 
         Returns:
             Generated text.
@@ -491,6 +492,11 @@ class LLMClient:
             LLMError: If generation fails after retries.
         """
         use_model = model or self.model
+
+        # For Ollama, resolve to tiered model alias based on num_ctx
+        if use_model.startswith("ollama/") and num_ctx:
+            from shared.ai.ollama_models import resolve_ollama_model
+            use_model, num_ctx = resolve_ollama_model(use_model, self.api_base, num_ctx)
 
         # Check if this is a thinking model that needs think=false
         model_name = use_model.split("/")[-1] if "/" in use_model else use_model
@@ -573,7 +579,8 @@ class LLMClient:
             timeout: Request timeout in seconds.
             model: Optional model override.
             num_ctx: Context window size for local providers (Ollama, llama.cpp).
-                     Used to optimize KV cache sizing for better performance.
+                     For Ollama, this triggers use of tiered model aliases to avoid
+                     reload overhead when context size changes.
 
         Returns:
             Generated text.
@@ -582,6 +589,11 @@ class LLMClient:
             LLMError: If generation fails after retries.
         """
         use_model = model or self.model
+
+        # For Ollama, resolve to tiered model alias based on num_ctx
+        if use_model.startswith("ollama/") and num_ctx:
+            from shared.ai.ollama_models import resolve_ollama_model
+            use_model, num_ctx = resolve_ollama_model(use_model, self.api_base, num_ctx)
 
         # Check if this is a thinking model that needs think=false
         model_name = use_model.split("/")[-1] if "/" in use_model else use_model

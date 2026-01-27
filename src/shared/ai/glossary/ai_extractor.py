@@ -64,13 +64,13 @@ class GlossaryWorkerStatus:
     """Thread-safe tracking of worker status."""
 
     def __init__(self) -> None:
-        self._status: dict[int, tuple[str, str]] = {}  # worker_id -> (feature_label, model)
+        self._status: dict[int, tuple[str, str, str]] = {}  # worker_id -> (feature_label, model, ctx_size)
         self._lock = threading.Lock()
 
-    def set_status(self, worker_id: int, feature_label: str, model: str) -> None:
+    def set_status(self, worker_id: int, feature_label: str, model: str, ctx_size: str = "") -> None:
         """Set worker status."""
         with self._lock:
-            self._status[worker_id] = (feature_label, model)
+            self._status[worker_id] = (feature_label, model, ctx_size)
 
     def clear_status(self, worker_id: int) -> None:
         """Clear worker status (worker is idle)."""
@@ -78,7 +78,7 @@ class GlossaryWorkerStatus:
             if worker_id in self._status:
                 del self._status[worker_id]
 
-    def get_all(self) -> dict[int, tuple[str, str]]:
+    def get_all(self) -> dict[int, tuple[str, str, str]]:
         """Get all worker statuses."""
         with self._lock:
             return dict(self._status)
@@ -104,50 +104,52 @@ class GlossaryProgressState:
 # User messages contain VARIABLE content (feature info, term context).
 
 # Phase 1: Extract term names
-GLOSSARY_EXTRACTION_SYSTEM_PROMPT = """Extract domain glossary terms from a code feature.
+GLOSSARY_EXTRACTION_SYSTEM_PROMPT = """Extract DOMAIN-SPECIFIC glossary terms from a code feature.
 
-Extract terms for:
-- Actors: entities that perform actions (user, admin, client, customer)
-- Objects: domain entities (order, invoice, product, account)
-- Processes: business operations (registration, authentication, checkout)
-- States: conditions or statuses (pending, active, expired)
+ONLY extract terms that are:
+- Specific to THIS codebase's domain (e.g., "call chain", "context tier", "dead code analysis")
+- Compound terms or phrases with clear meaning (e.g., "entry point", "feature clustering")
+- Named concepts unique to the system (e.g., "element extraction", "tiered model")
+
+NEVER extract:
+- Generic programming verbs: get, set, add, delete, update, check, clear, create, run, execute, process, handle, manage, load, save, fetch, store, retrieve, convert, parse, validate, render, format, filter, sort, merge, search, find, match, compare, count, list, read, write, send, receive, start, stop, reset, init, close, open, call, return, throw, catch
+- Generic nouns: data, element, result, value, error, item, object, entity, record, entry, node, instance, type, kind, state, status, action, event, task, job, request, response, input, output, parameter, argument, option, setting, config, property, attribute, field, key, id, name, label, path, file, line, index, offset, size, count, length, number, string, array, list, map, set, dict, queue, stack, buffer, cache, pool, batch, chunk, block, group, collection, container
+- Single-word terms that could appear in ANY codebase
+- Test-related terms: mock, stub, fixture, assert, test case
+- Implementation details: function, class, method, variable, loop, thread, callback
+
+Good examples: "call hierarchy", "dead code detection", "context window optimization", "feature embedding"
+Bad examples: "get", "process", "data", "element", "handle error", "load config"
 
 Rules:
-- Extract 2-5 terms per feature
-- Use lowercase, singular form (1-2 words)
-- Only domain/business terms, NOT programming terms (function, class, handler, service)
-- NOT technical terms (cache, queue, thread, buffer)
+- Extract 0-4 meaningful domain terms per feature
+- Use lowercase, 2-3 word phrases preferred
+- If no domain-specific terms exist, return []
 
-Return JSON array of term names only:
-["term1", "term2", "term3"]
-
-Return [] if no domain terms found."""
+Return JSON array: ["term1", "term2"] or []"""
 
 GLOSSARY_EXTRACTION_USER_PROMPT = """Feature: {label}
 Description: {summary}"""
 
 # Legacy single-prompt template (kept for backwards compatibility)
-GLOSSARY_EXTRACTION_PROMPT = """Extract domain glossary terms from this code feature.
+GLOSSARY_EXTRACTION_PROMPT = """Extract DOMAIN-SPECIFIC glossary terms from this code feature.
 
 Feature: {label}
 Description: {summary}
 
-Extract terms for:
-- Actors: entities that perform actions (user, admin, client, customer)
-- Objects: domain entities (order, invoice, product, account)
-- Processes: business operations (registration, authentication, checkout)
-- States: conditions or statuses (pending, active, expired)
+ONLY extract terms that are:
+- Specific to THIS codebase's domain (e.g., "call chain", "context tier", "dead code analysis")
+- Compound terms or phrases with clear meaning (e.g., "entry point", "feature clustering")
+- Named concepts unique to the system (e.g., "element extraction", "tiered model")
+
+NEVER extract generic programming terms like: get, set, add, delete, process, handle, data, element, result, error, config, state, action, task, job, request, response, etc.
 
 Rules:
-- Extract 2-5 terms per feature
-- Use lowercase, singular form (1-2 words)
-- Only domain/business terms, NOT programming terms (function, class, handler, service)
-- NOT technical terms (cache, queue, thread, buffer)
+- Extract 0-4 meaningful domain terms per feature
+- Use lowercase, 2-3 word phrases preferred
+- If no domain-specific terms exist, return []
 
-Return JSON array of term names only:
-["term1", "term2", "term3"]
-
-Return [] if no domain terms found.
+Return JSON array: ["term1", "term2"] or []
 
 JSON:"""
 
@@ -238,6 +240,77 @@ def build_glossary_messages(summary: str, label: str) -> list[dict[str, str]]:
     ]
 
 
+# Blocklist of generic terms that should never appear in the glossary
+# These are common programming terms that don't add domain-specific value
+GENERIC_TERM_BLOCKLIST = frozenset([
+    # Generic verbs
+    "get", "set", "add", "delete", "update", "check", "clear", "create", "run",
+    "execute", "process", "handle", "manage", "load", "save", "fetch", "store",
+    "retrieve", "convert", "parse", "validate", "render", "format", "filter",
+    "sort", "merge", "search", "find", "match", "compare", "count", "list",
+    "read", "write", "send", "receive", "start", "stop", "reset", "init",
+    "close", "open", "call", "return", "throw", "catch", "build", "make",
+    "remove", "insert", "append", "pop", "push", "pull", "extract", "detect",
+    "analyze", "generate", "compute", "calculate", "evaluate", "acquire",
+    "release", "register", "complete", "fail", "succeed", "finish", "begin",
+    # Generic nouns
+    "data", "element", "result", "value", "error", "item", "object", "entity",
+    "record", "entry", "node", "instance", "type", "kind", "state", "status",
+    "action", "event", "task", "job", "request", "response", "input", "output",
+    "parameter", "argument", "option", "setting", "config", "configuration",
+    "property", "attribute", "field", "key", "id", "name", "label", "path",
+    "file", "line", "index", "offset", "size", "count", "length", "number",
+    "string", "array", "list", "map", "set", "dict", "queue", "stack", "buffer",
+    "cache", "pool", "batch", "chunk", "block", "group", "collection", "container",
+    "client", "server", "handler", "manager", "factory", "builder", "helper",
+    "util", "utility", "service", "provider", "consumer", "producer", "worker",
+    "context", "scope", "session", "connection", "transaction", "operation",
+    "model", "schema", "format", "pattern", "rule", "policy", "strategy",
+    "method", "function", "class", "module", "package", "interface", "protocol",
+    # States
+    "pending", "running", "completed", "failed", "active", "inactive", "ready",
+    "waiting", "done", "success", "failure", "valid", "invalid", "enabled",
+    "disabled", "available", "unavailable",
+    # Test-related
+    "test", "mock", "stub", "fixture", "assert", "assertion", "expect",
+    # Other common terms
+    "info", "debug", "warning", "message", "content", "body", "header",
+    "metadata", "payload", "token", "hash", "digest", "signature", "version",
+    "timestamp", "duration", "timeout", "interval", "limit", "threshold",
+    "default", "fallback", "override", "extension", "plugin", "hook", "callback",
+    "listener", "observer", "subscriber", "publisher", "emitter", "dispatcher",
+])
+
+
+def _is_valid_glossary_term(term: str) -> bool:
+    """Check if a term is valid for the glossary (not in blocklist).
+
+    Args:
+        term: The term to check.
+
+    Returns:
+        True if the term should be included, False if it should be filtered out.
+    """
+    term_lower = term.lower().strip()
+
+    # Reject empty or very short terms
+    if len(term_lower) < 3:
+        return False
+
+    # Reject single-word terms that are in the blocklist
+    if term_lower in GENERIC_TERM_BLOCKLIST:
+        return False
+
+    # For multi-word terms, reject if ALL words are generic
+    words = term_lower.split()
+    if len(words) > 1:
+        non_generic_words = [w for w in words if w not in GENERIC_TERM_BLOCKLIST]
+        if not non_generic_words:
+            return False
+
+    return True
+
+
 def parse_llm_response(response: str) -> list[str]:
     """Parse LLM response to extract glossary term names.
 
@@ -245,6 +318,8 @@ def parse_llm_response(response: str) -> list[str]:
     - Plain JSON arrays of strings ["term1", "term2"]
     - JSON wrapped in markdown code blocks (```json ... ```)
     - Legacy format with objects [{"name": "term1", ...}]
+
+    Also filters out generic programming terms using a blocklist.
 
     Args:
         response: Raw response string from the LLM.
@@ -268,10 +343,12 @@ def parse_llm_response(response: str) -> list[str]:
             for item in data:
                 if isinstance(item, str):
                     # New format: ["term1", "term2"]
-                    terms.append(item)
+                    if _is_valid_glossary_term(item):
+                        terms.append(item)
                 elif isinstance(item, dict) and "name" in item:
                     # Legacy format: [{"name": "term1", ...}]
-                    terms.append(item["name"])
+                    if _is_valid_glossary_term(item["name"]):
+                        terms.append(item["name"])
             return terms
     except json.JSONDecodeError:
         pass
@@ -385,6 +462,14 @@ def normalize_term(name: str) -> str:
     """
     name = name.lower().strip()
 
+    # Words ending in "us" are Latin origin (status, bonus, cactus) - don't depluralize
+    if name.endswith("us"):
+        return name
+
+    # Words ending in "is" are also Latin origin (analysis, basis) - don't depluralize
+    if name.endswith("is"):
+        return name
+
     # Simple depluralization for common patterns
     if name.endswith("ies") and len(name) > 3:
         singular = name[:-3] + "y"
@@ -396,13 +481,9 @@ def normalize_term(name: str) -> str:
     elif name.endswith("xes") or name.endswith("ches") or name.endswith("shes"):
         # boxes -> box, matches -> match, flashes -> flash
         name = name[:-2]
-    elif name.endswith("es") and len(name) > 3 and not name.endswith("sses"):
-        # processes -> process (but not classes which is handled above)
-        if not name[:-2].endswith("s"):
-            name = name[:-1]  # processes -> processe -> process (actually need -2)
-            # Re-check: processes -> process requires removing 'es'
-            # But "ses" ending needs special handling
-            pass
+    elif name.endswith("ses") and len(name) > 4:
+        # processes -> process, analyses stays as "analyses" (handled by "is" check above for singular)
+        name = name[:-2]
     elif name.endswith("s") and len(name) > 3 and not name.endswith("ss"):
         name = name[:-1]
 
@@ -684,11 +765,39 @@ def extract_glossary_from_features_concurrent(
     progress_lock = threading.Lock()
     counters = {"completed": 0, "failed": 0, "terms_extracted": 0}
 
-    # Get model name for display
+    # Get model config for display
     if config is None:
         from shared.config import MagaldiConfig
         config = MagaldiConfig()
-    model_name = config.llm.get_summarize_model().name
+    model_config = config.llm.get_summarize_model()
+
+    def get_tiered_model_display(num_ctx: int) -> str:
+        """Get tiered model name for Ollama models."""
+        if model_config.provider == "ollama":
+            from shared.ai.ollama_models import get_tiered_model_name
+            return get_tiered_model_name(model_config.name, num_ctx)
+        return model_config.name
+
+    def format_ctx(num_ctx: int) -> str:
+        """Format context size for display."""
+        return f"{num_ctx // 1024}K" if num_ctx >= 1024 else str(num_ctx)
+
+    # Worker ID pool - reuse IDs 0 to num_workers-1
+    available_worker_ids: list[int] = list(range(num_workers))
+    worker_id_lock = threading.Lock()
+
+    def acquire_worker_id() -> int:
+        """Get an available worker ID from the pool."""
+        with worker_id_lock:
+            if available_worker_ids:
+                return available_worker_ids.pop(0)
+            return 0  # Fallback
+
+    def release_worker_id(wid: int) -> None:
+        """Return a worker ID to the pool."""
+        with worker_id_lock:
+            if wid not in available_worker_ids:
+                available_worker_ids.append(wid)
 
     # Build features lookup for summary generation
     features_by_id: dict[str, dict[str, Any]] = {}
@@ -704,33 +813,43 @@ def extract_glossary_from_features_concurrent(
         on_phase_change("Extracting terms from features")
 
     def process_feature(
-        worker_id: int,
         feature: dict[str, Any],
     ) -> tuple[list[GlossaryItem], float, bool]:
         """Process a single feature in a worker thread."""
-        label = feature.get("label", "")[:40]
-
-        worker_status.set_status(worker_id, label, model_name)
-        if on_status_change:
-            on_status_change()
-
+        worker_id = acquire_worker_id()
         try:
-            items, api_time = extract_glossary_from_feature_sync(feature, config)
-            return items, api_time, True
-        except Exception:
-            return [], 0.0, False
-        finally:
-            worker_status.clear_status(worker_id)
+            label = feature.get("label", "")[:40]
+            summary = feature.get("summary", "")
+
+            # Compute context size for display
+            from shared.ai.context_size import compute_aggregation_num_ctx
+            prompt_chars = len(GLOSSARY_EXTRACTION_SYSTEM_PROMPT) + len(
+                GLOSSARY_EXTRACTION_USER_PROMPT.format(label=label, summary=summary)
+            )
+            num_ctx = compute_aggregation_num_ctx(prompt_chars, task_type="glossary_extract")
+
+            worker_status.set_status(worker_id, label, get_tiered_model_display(num_ctx), format_ctx(num_ctx))
             if on_status_change:
                 on_status_change()
+
+            try:
+                items, api_time = extract_glossary_from_feature_sync(feature, config)
+                return items, api_time, True
+            except Exception:
+                return [], 0.0, False
+            finally:
+                worker_status.clear_status(worker_id)
+                if on_status_change:
+                    on_status_change()
+        finally:
+            release_worker_id(worker_id)
 
     total = len(features)
 
     with ThreadPoolExecutor(max_workers=num_workers) as executor:
         futures = {}
-        for i, feature in enumerate(features):
-            worker_id = i % num_workers
-            future = executor.submit(process_feature, worker_id, feature)
+        for feature in features:
+            future = executor.submit(process_feature, feature)
             futures[future] = feature
 
         for future in as_completed(futures):
@@ -789,40 +908,57 @@ def extract_glossary_from_features_concurrent(
     timing_stats.features_processed = 0
     total_terms = len(merged_items)
 
+    # Reset worker ID pool for phase 2
+    with worker_id_lock:
+        available_worker_ids.clear()
+        available_worker_ids.extend(range(num_workers))
+
     def generate_summary_for_term(
-        worker_id: int,
         item: GlossaryItem,
     ) -> tuple[GlossaryItem, float, bool]:
         """Generate summary for a merged glossary term."""
-        worker_status.set_status(worker_id, item.name, model_name)
-        if on_status_change:
-            on_status_change()
-
+        worker_id = acquire_worker_id()
         try:
-            summary, api_time = generate_glossary_summary_sync(
+            # Compute context size for display
+            from shared.ai.context_size import compute_aggregation_num_ctx
+            features_context = build_features_context(item.source_feature_ids, features_by_id)
+            user_content = GLOSSARY_SUMMARY_USER_PROMPT.format(
                 term=item.name,
-                feature_ids=item.source_feature_ids,
-                features_by_id=features_by_id,
-                config=config,
+                features_context=features_context,
             )
-            if summary:
-                item.description = summary
-            return item, api_time, True
-        except Exception:
-            return item, 0.0, False
-        finally:
-            worker_status.clear_status(worker_id)
+            prompt_chars = len(GLOSSARY_SUMMARY_SYSTEM_PROMPT) + len(user_content)
+            num_ctx = compute_aggregation_num_ctx(prompt_chars, task_type="glossary_summary")
+
+            worker_status.set_status(worker_id, item.name, get_tiered_model_display(num_ctx), format_ctx(num_ctx))
             if on_status_change:
                 on_status_change()
+
+            try:
+                summary, api_time = generate_glossary_summary_sync(
+                    term=item.name,
+                    feature_ids=item.source_feature_ids,
+                    features_by_id=features_by_id,
+                    config=config,
+                )
+                if summary:
+                    item.description = summary
+                return item, api_time, True
+            except Exception:
+                return item, 0.0, False
+            finally:
+                worker_status.clear_status(worker_id)
+                if on_status_change:
+                    on_status_change()
+        finally:
+            release_worker_id(worker_id)
 
     final_items: list[GlossaryItem] = []
     final_lock = threading.Lock()
 
     with ThreadPoolExecutor(max_workers=num_workers) as executor:
         futures = {}
-        for i, item in enumerate(merged_items):
-            worker_id = i % num_workers
-            future = executor.submit(generate_summary_for_term, worker_id, item)
+        for item in merged_items:
+            future = executor.submit(generate_summary_for_term, item)
             futures[future] = item
 
         for future in as_completed(futures):

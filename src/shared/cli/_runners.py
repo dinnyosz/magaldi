@@ -22,7 +22,7 @@ from rich.progress import (
 from rich.table import Table
 from rich.text import Text
 
-from shared.cli._shared import console, format_duration
+from shared.cli._shared import console, format_duration, get_model_column_width
 
 if TYPE_CHECKING:
     from magaldi_core.change_detection import ChangeManifest
@@ -154,6 +154,9 @@ def run_processing(
     # Pass context sizes from parsing to processing (for KV cache optimization)
     proc_config.context_sizes = parsing_result.context_sizes
 
+    # Calculate model column width for display
+    model_col_width = get_model_column_width(config)
+
     # Build file hashes dict from manifest
     file_hashes: dict[str, str] = {}
     for fi in manifest.new_files:
@@ -194,19 +197,25 @@ def run_processing(
             bar_text.append(" ETA", style="dim")
 
         # Worker table
+        import time as time_mod
         worker_table = Table(show_header=False, box=None, padding=0)
         worker_table.add_column("ID", style="dim", width=4)
-        worker_table.add_column("Stage", style="cyan", width=14)
-        worker_table.add_column("Model", style="yellow", width=26)
+        worker_table.add_column("Stage", style="cyan", width=12)
+        worker_table.add_column("Model", style="yellow", width=model_col_width)
+        worker_table.add_column("Ctx", style="magenta", width=4)
+        worker_table.add_column("Time", style="green", width=6)
         worker_table.add_column("Element")
 
         workers_data = state.workers.get_all()
+        now = time_mod.time()
         for wid in range(num_workers):
             if wid in workers_data:
-                elem, stage, model = workers_data[wid]
-                worker_table.add_row(f"[{wid}]", stage, model, elem)
+                elem, stage, model, ctx_size, start_time = workers_data[wid]
+                elapsed = now - start_time if start_time > 0 else 0
+                elapsed_str = f"{elapsed:.1f}s" if elapsed > 0 else ""
+                worker_table.add_row(f"[{wid}]", stage, model, ctx_size, elapsed_str, elem)
             else:
-                worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "")
+                worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "", "", "")
 
         # Per-type stats
         type_colors = {

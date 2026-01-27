@@ -45,6 +45,7 @@ class ClusterConfig:
     # LLM settings for labeling (based on arxiv.org/html/2507.03160v2)
     api_base: str = "http://localhost:11434"
     labeling_model: str = "qwen3:4b-instruct"
+    provider: str = "ollama"  # For tiered model name display
     label_temperature: float = 0.2
     label_top_p: float = 0.95
     label_max_tokens: int = 32
@@ -322,6 +323,13 @@ class FeatureClusterer:
         failed = 0
         labeling_model = self.config.labeling_model
 
+        # Helper to get tiered model display name for Ollama
+        def get_display_model(num_ctx: int) -> str:
+            if self.config.provider == "ollama":
+                from shared.ai.ollama_models import get_tiered_model_name
+                return get_tiered_model_name(labeling_model, num_ctx)
+            return labeling_model
+
         for cluster in result.clusters:
             # Mark as running in Redis (convert numpy int64 to Python int)
             if redis_repo and scope and repository and username:
@@ -374,7 +382,7 @@ class FeatureClusterer:
                     failed=failed,
                     timing=timing_stats,
                     current_cluster=current_name,
-                    model=labeling_model,
+                    model=get_display_model(num_ctx),
                     ctx_size=ctx_size_str,
                 ))
 
@@ -417,7 +425,7 @@ class FeatureClusterer:
                     failed=failed,
                     timing=timing_stats,
                     current_cluster="",
-                    model=labeling_model,
+                    model=get_display_model(num_ctx),
                 ))
 
         return result

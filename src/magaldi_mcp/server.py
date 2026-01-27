@@ -47,12 +47,12 @@ class MagaldiMCPServer:
     def _get_embed_client(self) -> CodeEmbeddingClient:
         """Get or create embedding client."""
         if self.embed_client is None:
-            llm_config = self.config.llm
+            embed_model = self.config.llm.get_embed_model()
             self.embed_client = CodeEmbeddingClient(
-                url=llm_config.url,
-                model=llm_config.embed_model,
-                provider=llm_config.embed_provider or llm_config.provider,
-                api_key=llm_config.embed_api_key or llm_config.api_key,
+                url=embed_model.url,
+                model=embed_model.name,
+                provider=embed_model.provider,
+                api_key=embed_model.api_key,
             )
         return self.embed_client
 

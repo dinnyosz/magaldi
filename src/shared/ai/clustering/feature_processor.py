@@ -28,6 +28,26 @@ from shared.ai.embedding import (
 )
 from shared.ai.summarization import SummarizationLLMClient
 
+
+def _get_model_display_name(model_name: str, provider: str, num_ctx: int) -> str:
+    """Get the display name for a model, including tier suffix for Ollama models.
+
+    Args:
+        model_name: Base model name.
+        provider: LLM provider (ollama, openai, etc.).
+        num_ctx: Context size being used.
+
+    Returns:
+        Model name with tier suffix for Ollama models (e.g., "qwen3:4b-instruct-4k"),
+        or the original name for other providers.
+    """
+    if provider == "ollama":
+        from shared.ai.ollama_models import get_tiered_model_name
+
+        return get_tiered_model_name(model_name, num_ctx)
+    return model_name
+
+
 # =============================================================================
 # DATA CLASSES
 # =============================================================================
@@ -132,17 +152,17 @@ class FeatureWorkerStatus:
     """Track what each worker is doing."""
 
     _lock: threading.Lock = field(default_factory=threading.Lock)
-    _status: dict[int, tuple[str, str, str, str]] = field(default_factory=dict)  # worker_id -> (feature_name, stage, model, ctx_size)
+    _status: dict[int, tuple[str, str, str, str, float]] = field(default_factory=dict)  # worker_id -> (feature_name, stage, model, ctx_size, start_time)
 
-    def set(self, worker_id: int, feature_name: str, stage: str, model: str = "", ctx_size: str = "") -> None:
+    def set(self, worker_id: int, feature_name: str, stage: str, model: str = "", ctx_size: str = "", start_time: float = 0.0) -> None:
         with self._lock:
-            self._status[worker_id] = (feature_name, stage, model, ctx_size)
+            self._status[worker_id] = (feature_name, stage, model, ctx_size, start_time)
 
     def clear(self, worker_id: int) -> None:
         with self._lock:
             self._status.pop(worker_id, None)
 
-    def get_all(self) -> dict[int, tuple[str, str, str, str]]:
+    def get_all(self) -> dict[int, tuple[str, str, str, str, float]]:
         with self._lock:
             return dict(self._status)
 
@@ -213,17 +233,17 @@ class SubfeatureWorkerStatus:
     """Track what each worker is doing for subfeature processing."""
 
     _lock: threading.Lock = field(default_factory=threading.Lock)
-    _status: dict[int, tuple[str, str, str, str, str]] = field(default_factory=dict)  # worker_id -> (parent_feature, stage, model, subfeature, ctx_size)
+    _status: dict[int, tuple[str, str, str, str, str, float]] = field(default_factory=dict)  # worker_id -> (parent_feature, stage, model, subfeature, ctx_size, start_time)
 
-    def set(self, worker_id: int, parent_feature: str, stage: str, model: str = "", subfeature: str = "", ctx_size: str = "") -> None:
+    def set(self, worker_id: int, parent_feature: str, stage: str, model: str = "", subfeature: str = "", ctx_size: str = "", start_time: float = 0.0) -> None:
         with self._lock:
-            self._status[worker_id] = (parent_feature, stage, model, subfeature, ctx_size)
+            self._status[worker_id] = (parent_feature, stage, model, subfeature, ctx_size, start_time)
 
     def clear(self, worker_id: int) -> None:
         with self._lock:
             self._status.pop(worker_id, None)
 
-    def get_all(self) -> dict[int, tuple[str, str, str, str, str]]:
+    def get_all(self) -> dict[int, tuple[str, str, str, str, str, float]]:
         with self._lock:
             return dict(self._status)
 
@@ -493,8 +513,13 @@ def _process_single_feature(
     label = cluster.label or f"cluster_{cluster.cluster_id}"
     display_name = f"{label} ({cluster.size} members)"
 
+    # Track stage start time for elapsed display
+    stage_start_time = 0.0
+
     def update_status(stage: str, model: str = "", ctx_size: str = "") -> None:
-        worker_status.set(worker_id, display_name, stage, model, ctx_size)
+        nonlocal stage_start_time
+        stage_start_time = time.time()
+        worker_status.set(worker_id, display_name, stage, model, ctx_size, stage_start_time)
         if on_status_change:
             on_status_change()
 
@@ -505,7 +530,9 @@ def _process_single_feature(
         # Step 1: Generate feature summary
         # Build prompt and compute context size FIRST so we can display it during LLM call
         messages, num_ctx = _build_feature_prompt(cluster, member_summaries, config)
-        update_status("summarizing", config.summarize_model, format_ctx(num_ctx))
+        # Display tiered model name for Ollama (e.g., "qwen3:4b-instruct-4k")
+        model_display = _get_model_display_name(config.summarize_model, config.provider, num_ctx)
+        update_status("summarizing", model_display, format_ctx(num_ctx))
         api_start = time.time()
         summary, _ = _generate_feature_summary(cluster, member_summaries, llm_client, config, messages, num_ctx)
         summarize_time = time.time() - api_start
@@ -936,8 +963,11 @@ def _process_single_subfeature(
             work_item.parent_label, work_item.parent_summary, config,
         )
 
-        # Update status: summarizing (with context size)
-        worker_status.set(worker_id, work_item.parent_label, "summarize", config.summarize_model, sub_label, format_ctx(num_ctx))
+        # Update status: summarizing (with context size and start time)
+        # Display tiered model name for Ollama (e.g., "qwen3:4b-instruct-4k")
+        model_display = _get_model_display_name(config.summarize_model, config.provider, num_ctx)
+        stage_start = time.time()
+        worker_status.set(worker_id, work_item.parent_label, "summarize", model_display, sub_label, format_ctx(num_ctx), stage_start)
         if on_status_change:
             on_status_change()
 
@@ -951,7 +981,8 @@ def _process_single_subfeature(
         summarize_time = time.time() - summ_start
 
         # Update status: embedding
-        worker_status.set(worker_id, work_item.parent_label, "embed", config.embed_model, sub_label)
+        stage_start = time.time()
+        worker_status.set(worker_id, work_item.parent_label, "embed", config.embed_model, sub_label, "", stage_start)
         if on_status_change:
             on_status_change()
 
@@ -965,7 +996,8 @@ def _process_single_subfeature(
         embed_time = time.time() - embed_start
 
         # Update status: indexing
-        worker_status.set(worker_id, work_item.parent_label, "index", "", sub_label)
+        stage_start = time.time()
+        worker_status.set(worker_id, work_item.parent_label, "index", "", sub_label, "", stage_start)
         if on_status_change:
             on_status_change()
 
@@ -1103,6 +1135,7 @@ def process_subfeatures(
         min_samples=subcluster_config.min_samples,
         api_base=config.api_base,
         labeling_model=config.summarize_model,
+        provider=config.provider,
     )
     sub_clusterer = FeatureClusterer(cluster_config)
 
