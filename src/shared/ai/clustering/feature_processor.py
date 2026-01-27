@@ -592,6 +592,7 @@ def process_features(
     worker_status: FeatureWorkerStatus | None = None,
     timing_stats: FeatureTimingStats | None = None,
     magaldi_config: MagaldiConfig | None = None,
+    on_tier_distribution: Callable[[dict[int, int]], None] | None = None,
 ) -> dict[str, Any]:
     """Process features: summarize -> embed -> index (parallel).
 
@@ -743,6 +744,11 @@ def process_features(
 
     # Group clusters by tier and process each tier with appropriate max_workers
     tier_groups = iter_by_tier(clusters, estimate_cluster_tier)
+
+    # Report tier distribution if callback provided
+    if on_tier_distribution:
+        tier_counts = {tier: len(items) for tier, _, items in tier_groups}
+        on_tier_distribution(tier_counts)
 
     # Handle workers=0 (auto) - will use tier-specific limits
     max_pool_workers = config.num_workers if config.num_workers > 0 else max(TIER_MAX_WORKERS.values())
@@ -1094,6 +1100,7 @@ def process_subfeatures(
     magaldi_config: MagaldiConfig | None = None,
     timing_stats: SubfeatureTimingStats | None = None,
     worker_status: SubfeatureWorkerStatus | None = None,
+    on_tier_distribution: Callable[[dict[int, int]], None] | None = None,
 ) -> dict[str, Any]:
     """Process subfeatures for large features (>20 members).
 
@@ -1390,6 +1397,11 @@ def process_subfeatures(
 
     # Group work items by tier and process each tier with appropriate max_workers
     tier_groups = iter_by_tier(work_queue, estimate_subfeature_tier)
+
+    # Report tier distribution if callback provided
+    if on_tier_distribution:
+        tier_counts = {tier: len(items) for tier, _, items in tier_groups}
+        on_tier_distribution(tier_counts)
 
     # Handle workers=0 (auto) - will use tier-specific limits
     max_pool_workers = config.num_workers if config.num_workers > 0 else max(TIER_MAX_WORKERS.values())

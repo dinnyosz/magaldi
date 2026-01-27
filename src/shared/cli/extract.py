@@ -33,6 +33,52 @@ if TYPE_CHECKING:
 
 
 # =============================================================================
+# TIER DISTRIBUTION DISPLAY
+# =============================================================================
+
+
+def display_tier_distribution(
+    items: list[Any],
+    tier_fn: callable,
+) -> None:
+    """Display tier distribution before processing.
+
+    Args:
+        items: List of items to process.
+        tier_fn: Function that takes an item and returns its context tier.
+    """
+    from collections import Counter
+
+    # Count items per tier
+    tier_counts: Counter[int] = Counter()
+    for item in items:
+        tier = tier_fn(item)
+        tier_counts[tier] += 1
+
+    _display_tier_counts(dict(tier_counts))
+
+
+def _display_tier_counts(tier_counts: dict[int, int]) -> None:
+    """Display tier counts dict.
+
+    Args:
+        tier_counts: Dict mapping tier (e.g., 2048, 4096) to count.
+    """
+    from shared.ai.context_size import TIER_MAX_WORKERS
+
+    # Build display string
+    parts = []
+    for tier in sorted(tier_counts.keys()):
+        count = tier_counts[tier]
+        tier_str = f"{tier // 1024}K"
+        max_workers = TIER_MAX_WORKERS.get(tier, 1)
+        parts.append(f"[cyan]{tier_str}[/]: {count} ({max_workers}w)")
+
+    distribution = " | ".join(parts)
+    console.print(f"  [dim]Context tiers:[/] {distribution}")
+
+
+# =============================================================================
 # FEATURE EXTRACTION RUNNER
 # =============================================================================
 
@@ -41,7 +87,7 @@ def run_feature_extraction(
     scope: str,
     repository: str,
     username: str,
-    config: "MagaldiConfig",
+    config: MagaldiConfig,
     min_cluster_size: int = 5,
     min_samples: int = 3,
     skip_labeling: bool = False,
@@ -247,6 +293,37 @@ def run_feature_extraction(
                 es_repo.update_cluster_assignments(assignments)
 
         # Process features: summarize -> embed -> index (with progress)
+        # Fetch member summaries for tier estimation
+        all_member_ids = []
+        for cluster in clustering_result.clusters:
+            all_member_ids.extend(cluster.element_ids)
+        member_summaries = es_repo.get_summaries_batch(all_member_ids)
+
+        # Display tier distribution before processing
+        from shared.ai.clustering.feature_processor import (
+            FEATURE_SYSTEM_PROMPT,
+            FEATURE_USER_PROMPT,
+        )
+        from shared.ai.context_size import compute_aggregation_num_ctx
+
+        def estimate_feature_tier(cluster: Any) -> int:
+            summaries_text = []
+            for i, element_id in enumerate(cluster.element_ids[:30]):
+                summary = member_summaries.get(element_id, "")
+                name = cluster.element_names[i] if i < len(cluster.element_names) else "unknown"
+                if summary:
+                    summaries_text.append(f"- {name}(): {summary}")
+            if not summaries_text:
+                summaries_text = [f"- {name}()" for name in cluster.element_names[:10]]
+            user_content = FEATURE_USER_PROMPT.format(
+                label=cluster.label or f"cluster_{cluster.cluster_id}",
+                member_count=cluster.size,
+                member_summaries="\n".join(summaries_text),
+            )
+            prompt_chars = len(FEATURE_SYSTEM_PROMPT) + len(user_content)
+            return compute_aggregation_num_ctx(prompt_chars, task_type="feature")
+
+        display_tier_distribution(clustering_result.clusters, estimate_feature_tier)
         console.print(f"  Processing {clustering_result.cluster_count} features with {workers} workers...")
 
         summarize_model = config.llm.get_summarize_model()
@@ -568,6 +645,11 @@ def run_feature_extraction(
                     current_sub_state = state
                     live.refresh()
 
+                def on_subfeature_tier_distribution(tier_counts: dict[int, int]) -> None:
+                    """Display subfeature tier distribution before processing."""
+                    live.console.print()
+                    _display_tier_counts(tier_counts)
+
                 subfeature_result = process_subfeatures(
                     clustering_result=clustering_result,
                     processed_features=processed_features,
@@ -582,6 +664,7 @@ def run_feature_extraction(
                     magaldi_config=config,
                     timing_stats=sub_timing_stats,
                     worker_status=sub_worker_status,
+                    on_tier_distribution=on_subfeature_tier_distribution,
                 )
 
             if subfeature_result.get("subfeatures_created", 0) > 0:
@@ -625,8 +708,8 @@ def run_glossary_extraction(
     scope: str,
     repository: str,
     username: str,
-    config: "MagaldiConfig",
-    es_repo: "ElasticsearchRepository | None" = None,
+    config: MagaldiConfig,
+    es_repo: ElasticsearchRepository | None = None,
     workers: int = 8,
 ) -> dict | None:
     """Run Glossary Extraction using AI-powered extraction from feature summaries.
@@ -784,9 +867,25 @@ def run_glossary_extraction(
             def __rich__(self) -> RenderableType:
                 return build_glossary_display(current_state, workers, current_phase["name"])
 
+        # Display tier distribution for glossary extraction (Phase 1)
+        from shared.ai.context_size import compute_aggregation_num_ctx
+        from shared.ai.glossary.ai_extractor import (
+            GLOSSARY_EXTRACTION_SYSTEM_PROMPT,
+            GLOSSARY_EXTRACTION_USER_PROMPT,
+        )
+
+        def estimate_glossary_tier(feature: dict) -> int:
+            label = feature.get("label", "")[:40]
+            summary = feature.get("summary", "")
+            user_content = GLOSSARY_EXTRACTION_USER_PROMPT.format(label=label, summary=summary)
+            prompt_chars = len(GLOSSARY_EXTRACTION_SYSTEM_PROMPT) + len(user_content)
+            return compute_aggregation_num_ctx(prompt_chars, task_type="glossary_extract")
+
+        display_tier_distribution(all_features, estimate_glossary_tier)
+
         # Print header before Live display
         console.print(f"  Processing {total} features with {workers} workers...")
-        console.print(f"  Phase 1: Extract terms | Phase 2: Generate summaries")
+        console.print("  Phase 1: Extract terms | Phase 2: Generate summaries")
         console.print()
 
         # Track Phase 1 final stats for display after completion
@@ -814,7 +913,7 @@ def run_glossary_extraction(
                     # Print Phase 1 completion summary above the live display
                     wall_time = phase1_stats["elapsed"] / phase1_stats["completed"] if phase1_stats["completed"] > 0 else 0
                     live.console.print()
-                    live.console.print(f"  [bold green]✓ Phase 1 complete[/]")
+                    live.console.print("  [bold green]✓ Phase 1 complete[/]")
                     live.console.print(f"    [green]{phase1_stats['completed']}[/] features processed in [cyan]{format_duration(phase1_stats['elapsed'])}[/]")
                     live.console.print(f"    [cyan]{phase1_stats['terms']}[/] terms extracted | Wall: [green]{wall_time:.2f}s[/]/feature | API: [green]{phase1_stats['avg_api']:.1f}s[/]/feature")
                     if phase1_stats["failed"] > 0:
