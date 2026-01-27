@@ -395,6 +395,24 @@ def run_feature_extraction(
             wall_time = state.timing.elapsed / state.completed if state.completed > 0 else 0
             stats = f"  [dim]Wall:[/] [green]{wall_time:.2f}s[/]/feature [dim]|[/] [dim]API:[/] [green]{avg_api:.1f}s[/]/feature [dim]([/][green]{state.timing.avg_summarize_time:.1f}s[/] summ + [green]{state.timing.avg_embed_time:.1f}s[/] embed[dim])[/]"
 
+            # Worker count with tier-based throttle info (like Phase 4)
+            from shared.ai.context_size import TIER_MAX_WORKERS
+            running_count = len(workers_data)
+            ctx_sizes = {data[3] for data in workers_data.values() if data[3] and data[3] != "-" and data[3].endswith("K")}
+            if len(ctx_sizes) == 1:
+                ctx_str = ctx_sizes.pop()
+                try:
+                    ctx_int = int(ctx_str.rstrip("K")) * 1024
+                    tier_limit = TIER_MAX_WORKERS.get(ctx_int, num_workers)
+                    throttled = num_workers - tier_limit
+                    stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[cyan]{tier_limit}[/]"
+                    if throttled > 0:
+                        stats += f" [dim]([/][yellow]{throttled} throttled[/][dim])[/]"
+                except ValueError:
+                    stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[cyan]{num_workers}[/]"
+            else:
+                stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[cyan]{num_workers}[/]"
+
             return Group(bar_text, worker_table, stats)
 
         current_state = FeatureProgressState(
@@ -586,6 +604,39 @@ def run_feature_extraction(
                     if state.failed > 0:
                         stats_text.append(" | ", style="dim")
                         stats_text.append(f"{state.failed} failed", style="red")
+
+                    # Worker count with tier-based throttle info
+                    from shared.ai.context_size import TIER_MAX_WORKERS
+                    running_count = len(workers_data)
+                    # ctx_size is at index 4 for subfeatures
+                    ctx_sizes = {data[4] for data in workers_data.values() if data[4] and data[4] != "-" and data[4].endswith("K")}
+                    if len(ctx_sizes) == 1:
+                        ctx_str = ctx_sizes.pop()
+                        try:
+                            ctx_int = int(ctx_str.rstrip("K")) * 1024
+                            tier_limit = TIER_MAX_WORKERS.get(ctx_int, num_workers)
+                            throttled = num_workers - tier_limit
+                            stats_text.append(" | ", style="dim")
+                            stats_text.append("Workers: ", style="dim")
+                            stats_text.append(f"{running_count}", style="green")
+                            stats_text.append("/", style="dim")
+                            stats_text.append(f"{tier_limit}", style="cyan")
+                            if throttled > 0:
+                                stats_text.append(" (", style="dim")
+                                stats_text.append(f"{throttled} throttled", style="yellow")
+                                stats_text.append(")", style="dim")
+                        except ValueError:
+                            stats_text.append(" | ", style="dim")
+                            stats_text.append("Workers: ", style="dim")
+                            stats_text.append(f"{running_count}", style="green")
+                            stats_text.append("/", style="dim")
+                            stats_text.append(f"{num_workers}", style="cyan")
+                    else:
+                        stats_text.append(" | ", style="dim")
+                        stats_text.append("Workers: ", style="dim")
+                        stats_text.append(f"{running_count}", style="green")
+                        stats_text.append("/", style="dim")
+                        stats_text.append(f"{num_workers}", style="cyan")
 
                 return Group(header_text, bar_text, worker_table, stats_text)
 
@@ -843,6 +894,39 @@ def run_glossary_extraction(
             if state.failed > 0:
                 stats.append(" | ", style="dim")
                 stats.append(f"{state.failed} failed", style="red")
+
+            # Worker count with tier-based throttle info
+            from shared.ai.context_size import TIER_MAX_WORKERS
+            running_count = len(workers_data)
+            # ctx_size is at index 2 for glossary
+            ctx_sizes = {data[2] for data in workers_data.values() if data[2] and data[2] != "-" and data[2].endswith("K")}
+            if len(ctx_sizes) == 1:
+                ctx_str = ctx_sizes.pop()
+                try:
+                    ctx_int = int(ctx_str.rstrip("K")) * 1024
+                    tier_limit = TIER_MAX_WORKERS.get(ctx_int, num_workers)
+                    throttled = num_workers - tier_limit
+                    stats.append(" | ", style="dim")
+                    stats.append("Workers: ", style="dim")
+                    stats.append(f"{running_count}", style="green")
+                    stats.append("/", style="dim")
+                    stats.append(f"{tier_limit}", style="cyan")
+                    if throttled > 0:
+                        stats.append(" (", style="dim")
+                        stats.append(f"{throttled} throttled", style="yellow")
+                        stats.append(")", style="dim")
+                except ValueError:
+                    stats.append(" | ", style="dim")
+                    stats.append("Workers: ", style="dim")
+                    stats.append(f"{running_count}", style="green")
+                    stats.append("/", style="dim")
+                    stats.append(f"{num_workers}", style="cyan")
+            else:
+                stats.append(" | ", style="dim")
+                stats.append("Workers: ", style="dim")
+                stats.append(f"{running_count}", style="green")
+                stats.append("/", style="dim")
+                stats.append(f"{num_workers}", style="cyan")
 
             return Group(phase_text, bar_text, worker_table, stats)
 
