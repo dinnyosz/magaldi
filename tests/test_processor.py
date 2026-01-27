@@ -1142,6 +1142,10 @@ class TestDynamicWorkerScaling:
         ready = tracker.get_ready_elements(max_count=20)
         assert len(ready) == 8
 
+        # Calling again should return 0 (8 already in-progress, limit is 8)
+        ready2 = tracker.get_ready_elements(max_count=20)
+        assert len(ready2) == 0
+
     def test_large_tier_limits_workers(self):
         """Large context tier (32768) should limit to 1 worker."""
         elements = [

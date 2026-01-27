@@ -488,8 +488,14 @@ class DependencyTracker:
                 self._current_tier = tier
 
             # Apply tier-specific worker limit (dynamic scaling)
+            # Count how many of this tier are already in progress
             tier_limit = self.TIER_MAX_WORKERS.get(tier, 4)
-            effective_limit = min(max_count, tier_limit)
+            tier_in_progress = sum(
+                1 for eid in self._in_progress if self._get_tier(eid) == tier
+            )
+            # Only return enough to reach tier limit, not add to it
+            slots_available = max(0, tier_limit - tier_in_progress)
+            effective_limit = min(max_count, slots_available)
 
             # Get elements from current tier only
             tier_ready = by_tier[tier][:effective_limit]
