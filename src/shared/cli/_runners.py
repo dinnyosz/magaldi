@@ -252,6 +252,13 @@ def run_processing(
         code_emb = state.timing.avg_code_embed_time
         stats = f"  [dim]Throughput:[/] [green]{effective_wall:.2f}s[/]/item [dim]|[/] [dim]API:[/] [green]{total_api:.1f}s[/]/item [dim]([/][green]{state.timing.avg_summarize_time:.1f}s[/] summ + [cyan]{summ_emb:.1f}s[/] summ_emb + [cyan]{code_emb:.1f}s[/] code_emb[dim])[/]"
 
+        # Parallelism stats (compact, next to throughput)
+        if state.parallelism:
+            p = state.parallelism
+            stats += f" [dim]|[/] [dim]Workers:[/] [green]{p.running}[/]/[cyan]{p.tier_limit}[/]"
+            if p.throttled > 0:
+                stats += f" [dim]([/][yellow]{p.throttled} throttled[/][dim])[/]"
+
         parts: list[RenderableType] = [bar_text, worker_table]
         if type_line:
             parts.append(type_line)

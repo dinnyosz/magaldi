@@ -356,6 +356,26 @@ class WorkerStatus:
 
 
 @dataclass
+class ParallelismStats:
+    """Statistics about worker parallelism."""
+
+    max_possible: int  # Total worker pool size
+    tier_limit: int    # Current tier's max workers
+    running: int       # Workers currently processing
+    current_tier: int | None = None  # Current context tier (e.g., 2048, 4096)
+
+    @property
+    def throttled(self) -> int:
+        """Workers held back due to tier limits."""
+        return self.max_possible - self.tier_limit
+
+    @property
+    def idle(self) -> int:
+        """Workers within tier limit but waiting for work."""
+        return max(0, self.tier_limit - self.running)
+
+
+@dataclass
 class ProgressState:
     """Combined state for display updates."""
 
@@ -367,6 +387,7 @@ class ProgressState:
     workers: WorkerStatus
     num_workers: int = 1
     recent_errors: list[tuple[str, str]] = field(default_factory=list)  # (element_name, error)
+    parallelism: ParallelismStats | None = None
 
 
 @dataclass
@@ -552,6 +573,18 @@ class DependencyTracker:
             if self._max_num_workers is not None:
                 return min(tier_limit, self._max_num_workers)
             return tier_limit
+
+    def get_parallelism_stats(self, max_possible: int) -> "ParallelismStats":
+        """Get current parallelism statistics for display."""
+        with self._lock:
+            tier_limit = self.get_current_max_workers()
+            running = len(self._in_progress)
+            return ParallelismStats(
+                max_possible=max_possible,
+                tier_limit=tier_limit,
+                running=running,
+                current_tier=self._current_tier,
+            )
 
     def get_tier_stats(self) -> dict[int, tuple[int, int]]:
         """Get (ready, total) counts per tier for pending elements."""
@@ -1411,6 +1444,7 @@ def process_elements(
                         workers=worker_status,
                         num_workers=max_workers,
                         recent_errors=list(recent_errors),
+                        parallelism=dependency_tracker.get_parallelism_stats(max_workers),
                     )
                     on_progress(progress_state)
 
