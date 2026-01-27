@@ -258,16 +258,21 @@ def run_processing(
         running_count = len(workers_data)
 
         # Check if all workers are on the same context tier
-        ctx_sizes = {data[3] for data in workers_data.values() if data[3]}  # data[3] is ctx_size
+        # Filter out "-" (used during embed stage) and empty strings
+        ctx_sizes = {data[3] for data in workers_data.values() if data[3] and data[3] != "-" and data[3].endswith("K")}
         if len(ctx_sizes) == 1:
             # All on same tier - show tier-specific stats with throttle info
             ctx_str = ctx_sizes.pop()  # e.g., "2K", "4K"
-            ctx_int = int(ctx_str.rstrip("K")) * 1024  # "4K" -> 4096
-            tier_limit = TIER_MAX_WORKERS.get(ctx_int, num_workers)
-            throttled = num_workers - tier_limit
-            stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[cyan]{tier_limit}[/]"
-            if throttled > 0:
-                stats += f" [dim]([/][yellow]{throttled} throttled[/][dim])[/]"
+            try:
+                ctx_int = int(ctx_str.rstrip("K")) * 1024  # "4K" -> 4096
+                tier_limit = TIER_MAX_WORKERS.get(ctx_int, num_workers)
+                throttled = num_workers - tier_limit
+                stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[cyan]{tier_limit}[/]"
+                if throttled > 0:
+                    stats += f" [dim]([/][yellow]{throttled} throttled[/][dim])[/]"
+            except ValueError:
+                # Fallback if parsing fails
+                stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[cyan]{num_workers}[/]"
         else:
             # Mixed tiers or no workers - just show running/max
             stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[cyan]{num_workers}[/]"
