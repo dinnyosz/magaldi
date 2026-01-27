@@ -143,6 +143,8 @@ def run_processing(
             )
             deleted_from_files += count
 
+    from magaldi_core.processor import DependencyTracker
+
     proc_config = ProcessingConfig(
         summarize_model=config.llm.get_summarize_model(),
         summarize_model_small=config.llm.get_summarize_model_small(),
@@ -150,6 +152,9 @@ def run_processing(
         skip_ai=skip_ai,
         num_workers=workers,
     )
+
+    # Calculate actual max workers for display (0 = auto from tier defaults)
+    display_workers = workers if workers > 0 else max(DependencyTracker.TIER_MAX_WORKERS.values())
 
     # Pass context sizes from parsing to processing (for KV cache optimization)
     proc_config.context_sizes = parsing_result.context_sizes
@@ -280,12 +285,12 @@ def run_processing(
         failed=0,
         timing=timing_stats,
         workers=worker_status,
-        num_workers=workers,
+        num_workers=display_workers,
     )
 
     class LiveDisplay:
         def __rich__(self) -> RenderableType:
-            return build_display(current_state, workers)
+            return build_display(current_state, display_workers)
 
     with Live(LiveDisplay(), console=console, refresh_per_second=10) as live:
         def on_progress(state: ProgressState) -> None:

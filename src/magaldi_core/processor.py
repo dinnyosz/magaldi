@@ -97,8 +97,8 @@ class ProcessingConfig:
     embed_max_context: int = 8192
     embed_timeout: int = 120  # 2 minutes for embedding batches
 
-    # Parallel processing
-    num_workers: int = 4
+    # Parallel processing (0 = use tier-based defaults from TIER_MAX_WORKERS)
+    num_workers: int = 0
 
     # Context sizes per element type (for LLM num_ctx parameter)
     context_sizes: dict[str, int] = field(default_factory=dict)
@@ -414,7 +414,10 @@ class DependencyTracker:
     }
 
     def __init__(
-        self, elements: list[CodeElement], context_sizes: dict[str, int] | None = None
+        self,
+        elements: list[CodeElement],
+        context_sizes: dict[str, int] | None = None,
+        max_num_workers: int | None = None,
     ) -> None:
         self._lock = threading.Lock()
         self._elements = {e.element_id: e for e in elements}
@@ -422,6 +425,7 @@ class DependencyTracker:
         self._in_progress: set[str] = set()
         self._context_sizes = context_sizes or {}
         self._current_tier: int | None = None  # Current tier all workers use
+        self._max_num_workers = max_num_workers  # User-configured upper limit (None = use tier defaults)
 
         # Build parent lookup: element_id -> parent_element_id
         self._parents: dict[str, str | None] = {}
@@ -491,6 +495,9 @@ class DependencyTracker:
             # Apply tier-specific worker limit (dynamic scaling)
             # Count how many of this tier are already in progress
             tier_limit = self.TIER_MAX_WORKERS.get(tier, 4)
+            # Apply user's max_num_workers cap if set
+            if self._max_num_workers is not None:
+                tier_limit = min(tier_limit, self._max_num_workers)
             tier_in_progress = sum(
                 1 for eid in self._in_progress if self._get_tier(eid) == tier
             )
@@ -538,8 +545,13 @@ class DependencyTracker:
         """Get max workers for the current tier (for status display)."""
         with self._lock:
             if self._current_tier is None:
-                return self.TIER_MAX_WORKERS.get(self.CONTEXT_TIERS[0], 8)
-            return self.TIER_MAX_WORKERS.get(self._current_tier, 4)
+                tier_limit = self.TIER_MAX_WORKERS.get(self.CONTEXT_TIERS[0], 8)
+            else:
+                tier_limit = self.TIER_MAX_WORKERS.get(self._current_tier, 4)
+            # Apply user's max_num_workers cap if set
+            if self._max_num_workers is not None:
+                return min(tier_limit, self._max_num_workers)
+            return tier_limit
 
     def get_tier_stats(self) -> dict[int, tuple[int, int]]:
         """Get (ready, total) counts per tier for pending elements."""
@@ -1233,7 +1245,11 @@ def process_elements(
 
     # Initialize tracking structures (use provided or create new)
     # Pass per-element context sizes for tier batching (minimizes model reloads)
-    dependency_tracker = DependencyTracker(elements_to_process, element_context_sizes)
+    # Pass num_workers as upper limit (0 or None = use tier defaults)
+    max_num_workers = config.num_workers if config.num_workers > 0 else None
+    dependency_tracker = DependencyTracker(
+        elements_to_process, element_context_sizes, max_num_workers=max_num_workers
+    )
     if timing_stats is None:
         timing_stats = TimingStats()
     timing_stats.phase_start = time.time()
@@ -1262,8 +1278,10 @@ def process_elements(
             # Redis unavailable - continue without tracking
             redis_tracker = None
 
-    # Worker ID pool - reuse IDs 0 to num_workers-1
-    available_worker_ids: list[int] = list(range(config.num_workers))
+    # Worker ID pool - use configured num_workers as upper bound
+    # Tier scaling will further limit based on context size
+    max_workers = config.num_workers if config.num_workers > 0 else max(DependencyTracker.TIER_MAX_WORKERS.values())
+    available_worker_ids: list[int] = list(range(max_workers))
     worker_id_lock = threading.Lock()
 
     def acquire_worker_id() -> int:
@@ -1306,9 +1324,8 @@ def process_elements(
             release_worker_id(wid)
 
     # Process elements in parallel using ThreadPoolExecutor
-    # Use max possible workers - tier batching in DependencyTracker limits concurrency
-    # dynamically based on context size (smaller context = more workers)
-    max_workers = max(DependencyTracker.TIER_MAX_WORKERS.values())
+    # max_workers set earlier from TIER_MAX_WORKERS - tier batching in DependencyTracker
+    # limits concurrency dynamically based on context size (smaller context = more workers)
     executor = ThreadPoolExecutor(max_workers=max_workers)
     future_to_element: dict = {}
 
@@ -1392,7 +1409,7 @@ def process_elements(
                         failed=failed_count,
                         timing=timing_stats,
                         workers=worker_status,
-                        num_workers=config.num_workers,
+                        num_workers=max_workers,
                         recent_errors=list(recent_errors),
                     )
                     on_progress(progress_state)
@@ -1403,7 +1420,7 @@ def process_elements(
             future.cancel()
         executor.shutdown(wait=False, cancel_futures=True)
         # Clear worker status display first (so Live display is clean)
-        for wid in range(config.num_workers):
+        for wid in range(max_workers):
             worker_status.clear(wid)
         # Clean up Redis tracker
         if redis_tracker:

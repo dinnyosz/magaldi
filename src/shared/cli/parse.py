@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 @click.option("--skip-features", is_flag=True, help="Skip feature extraction after processing")
 @click.option("--dry-run", is_flag=True, help="Use in-memory storage (no database required)")
 @click.option("--llm-url", default=None, help="LLM API URL (default: from config)")
-@click.option("--workers", "-w", default=4, type=int, help="Number of parallel workers (default: 4)")
+@click.option("--workers", "-w", default=0, type=int, help="Max parallel workers (0=auto based on context tier)")
 @click.option("--force-clean", is_flag=True, help="Delete all indexed data for this repo/user before parsing")
 def parse(
     repo_path: str, user: str, skip_ai: bool, skip_features: bool, dry_run: bool,

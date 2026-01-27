@@ -233,7 +233,7 @@ class TestProcessingConfig:
         assert config.embed_model.name == "snowflake-arctic-embed2"
         assert config.embed_model.provider == "ollama"
         assert config.skip_ai is False
-        assert config.num_workers == 4
+        assert config.num_workers == 0  # 0 = auto (use tier-based defaults)
 
     def test_custom_values(self):
         """Test custom configuration values."""

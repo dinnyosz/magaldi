@@ -913,7 +913,7 @@ def run_glossary_extraction(
 @click.option("--min-cluster-size", default=5, type=int, help="Minimum elements per feature (default: 5)")
 @click.option("--min-samples", default=3, type=int, help="HDBSCAN min_samples parameter (default: 3)")
 @click.option("--skip-labeling", is_flag=True, help="Skip Ollama feature labeling")
-@click.option("--workers", "-w", default=4, type=int, help="Number of parallel workers (default: 4)")
+@click.option("--workers", "-w", default=0, type=int, help="Max parallel workers (0=auto based on context tier)")
 def extract_features(
     repo_path: str,
     user: str,
@@ -979,7 +979,7 @@ def extract_features(
 @main.command("extract-glossary")
 @click.argument("repo_path", type=click.Path(exists=True, file_okay=False, dir_okay=True))
 @click.option("--user", "-u", required=True, help="Username/branch to extract glossary from")
-@click.option("--workers", "-w", default=8, type=int, help="Number of concurrent workers (default: 8)")
+@click.option("--workers", "-w", default=0, type=int, help="Max concurrent workers (0=auto based on context tier)")
 def extract_glossary(
     repo_path: str,
     user: str,
