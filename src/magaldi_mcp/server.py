@@ -99,7 +99,6 @@ class MagaldiMCPServer:
             get_file_structure,
             get_glossary_term,
             get_repo_stats,
-            grep_code,
             list_features,
             list_glossary,
             list_repos,
@@ -225,21 +224,8 @@ class MagaldiMCPServer:
                 repository=args.get("repository"),
                 limit=args.get("limit", 50),
             )
-        elif name == "grep_code":
-            # Uses ES raw_code field - no filesystem access needed
-            return await asyncio.to_thread(
-                grep_code,
-                es,
-                pattern=args["pattern"],
-                scope=args.get("scope"),
-                repository=args.get("repository"),
-                glob=args.get("glob"),
-                context_lines=args.get("context_lines", 0),
-                limit=args.get("limit", 50),
-                include_tests=args.get("include_tests", True),
-            )
         elif name == "pattern_search":
-            # ES-native pattern search - faster than grep_code
+            # ES-native pattern search
             return await asyncio.to_thread(
                 pattern_search,
                 es,

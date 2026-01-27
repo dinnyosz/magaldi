@@ -6,7 +6,6 @@ plus tool-specific parameters, and returns a dict or list result.
 
 from __future__ import annotations
 
-import warnings
 from typing import Any
 
 from shared.db.elasticsearch import ElasticsearchRepository
@@ -934,143 +933,8 @@ def _find_elements_in_file(
 
 
 # =============================================================================
-# CODE SEARCH TOOLS (regex/grep-based)
+# CODE SEARCH TOOLS (pattern-based)
 # =============================================================================
-
-
-def grep_code(
-    es: ElasticsearchRepository,
-    pattern: str,
-    scope: str | None = None,
-    repository: str | None = None,
-    username: str = "main",
-    glob: str | None = None,
-    context_lines: int = 0,
-    limit: int = 50,
-    include_tests: bool = True,
-) -> dict[str, Any]:
-    """Search indexed code with regex pattern.
-
-    .. deprecated::
-        Use `pattern_search` with mode='regexp' instead for better performance.
-        pattern_search runs queries server-side. grep_code will be removed in a
-        future release.
-
-    Searches the raw_code field in Elasticsearch - no filesystem access needed.
-
-    Args:
-        es: Elasticsearch repository.
-        pattern: Regex pattern to search.
-        scope: Filter by scope.
-        repository: Filter by repository.
-        username: User branch to search.
-        glob: File glob filter (e.g., '*.py', '*.ts').
-        context_lines: Lines of context before/after match.
-        limit: Maximum matches to return.
-        include_tests: Whether to include test results.
-
-    Returns:
-        Dict with code_results, test_results, and totals.
-    """
-    warnings.warn(
-        "grep_code is deprecated. Use pattern_search with mode='regexp' instead. "
-        "pattern_search runs queries server-side for better performance.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-
-    import fnmatch
-    import re
-
-    client = es._get_client()
-    code_results: list[dict[str, Any]] = []
-    test_results: list[dict[str, Any]] = []
-
-    # Build ES query - fetch elements with raw_code
-    filters = [
-        {"exists": {"field": "raw_code"}},
-        {"term": {"username": username}},
-    ]
-    if scope:
-        filters.append({"term": {"scope": scope}})
-    if repository:
-        filters.append({"term": {"repository": repository}})
-
-    # Fetch candidates from ES (get more than limit since we'll filter by regex)
-    es_result = client.search(
-        index="magaldi-code-elements",
-        body={
-            "query": {"bool": {"filter": filters}},
-            "_source": ["element_id", "name", "element_type", "relative_path", "line_start", "raw_code", "is_test"],
-            "size": min(limit * 10, 5000),  # Fetch extra to filter
-        },
-    )
-
-    hits = es_result.get("hits", {}).get("hits", [])
-    compiled = re.compile(pattern)
-    total_matches = 0
-
-    for hit in hits:
-        source = hit["_source"]
-        raw_code = source.get("raw_code", "")
-        rel_path = source.get("relative_path", "")
-        is_test = source.get("is_test", False)
-
-        # Skip tests if include_tests is False
-        if not include_tests and is_test:
-            continue
-
-        # Apply glob filter if specified
-        if glob and not fnmatch.fnmatch(rel_path, glob):
-            continue
-
-        # Search for pattern in raw_code
-        lines = raw_code.splitlines()
-        element_start_line = source.get("line_start", 1)
-
-        for i, line in enumerate(lines):
-            match = compiled.search(line)
-            if match:
-                actual_line = element_start_line + i
-
-                entry: dict[str, Any] = {
-                    "file": rel_path,
-                    "line": actual_line,
-                    "content": line,
-                    "match": match.group(0),
-                    "element_name": source.get("name"),
-                    "element_type": source.get("element_type"),
-                    "is_test": is_test,
-                }
-
-                # Add context if requested
-                if context_lines > 0:
-                    start = max(0, i - context_lines)
-                    end = min(len(lines), i + context_lines + 1)
-                    entry["context_before"] = lines[start:i]
-                    entry["context_after"] = lines[i + 1:end]
-
-                # Group by is_test
-                if is_test:
-                    test_results.append(entry)
-                else:
-                    code_results.append(entry)
-
-                total_matches += 1
-                if total_matches >= limit:
-                    return {
-                        "code_results": code_results,
-                        "test_results": test_results,
-                        "total_code": len(code_results),
-                        "total_tests": len(test_results),
-                    }
-
-    return {
-        "code_results": code_results,
-        "test_results": test_results,
-        "total_code": len(code_results),
-        "total_tests": len(test_results),
-    }
 
 
 def _escape_for_lucene_regexp(name: str) -> str:
@@ -1372,8 +1236,6 @@ mcp__magaldi__pattern_search(pattern="add_job.*\\\\(", mode="regexp", scope="...
 - ES-native - queries run server-side for better performance
 - Requires `scope` and `repository` parameters
 
-**Note:** `grep_code` is deprecated - use `pattern_search` with `mode="regexp"` instead.
-
 ### 3. USAGE TRACKING (For "where is X called")
 ```
 mcp__magaldi__find_usages(element_id="...")
@@ -1441,20 +1303,16 @@ mcp__magaldi__find_implementations(class_name="BaseClass")
    - Magaldi pattern_search runs queries server-side in Elasticsearch
    - Built-in Grep scans files one by one
 
-2. **Using deprecated grep_code**
-   - Use `pattern_search` with `mode="regexp"` instead
-   - grep_code is deprecated and will be removed
-
-3. **Using built-in Glob instead of magaldi__find_files**
+2. **Using built-in Glob instead of magaldi__find_files**
    - Magaldi knows which files are indexed
 
-4. **Grepping for function calls instead of find_usages**
+3. **Grepping for function calls instead of find_usages**
    - find_usages filters definitions, has context
 
-5. **Reading whole files to understand them**
+4. **Reading whole files to understand them**
    - Use search_code -> get_element with summaries
 
-6. **Skipping semantic search**
+5. **Skipping semantic search**
    - Summaries save tokens, embeddings find related code
 
 ## Available Tools Quick Reference
@@ -1464,7 +1322,6 @@ mcp__magaldi__find_implementations(class_name="BaseClass")
 | `search_code` | Semantic search by meaning |
 | `search_features` | Find high-level capabilities |
 | `pattern_search` | **ES-native pattern search** - regexp, wildcard, or proximity mode |
-| `grep_code` | ~~Deprecated~~ - use `pattern_search` with mode="regexp" |
 | `find_usages` | Where is this called/used (uses ES regexp internally) |
 | `find_implementations` | What implements this interface (uses ES regexp internally) |
 | `get_call_graph` | Callers and callees |
@@ -2294,7 +2151,7 @@ def pattern_search(
             include_tests=include_tests,
         )
 
-    # Format results (similar to grep_code output)
+    # Format results
     code_results: list[dict[str, Any]] = []
     test_results: list[dict[str, Any]] = []
 

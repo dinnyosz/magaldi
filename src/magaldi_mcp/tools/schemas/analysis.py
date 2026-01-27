@@ -1,35 +1,11 @@
-"""Analysis tool schemas: grep_code, pattern_search, find_usages, find_implementations, call graph tools."""
+"""Analysis tool schemas: pattern_search, find_usages, find_implementations, call graph tools."""
 
 from mcp.types import Tool
 
 ANALYSIS_TOOLS = [
     Tool(
-        name="grep_code",
-        description="[DEPRECATED: Use pattern_search instead] "
-        "GREP CODE: Search with regex pattern (like ripgrep). "
-        "USE pattern_search for better performance - queries run server-side.",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "pattern": {"type": "string", "description": "Regex pattern to search"},
-                "scope": {"type": "string", "description": "Filter by scope"},
-                "repository": {"type": "string", "description": "Filter by repo"},
-                "glob": {"type": "string", "description": "File filter (e.g., '*.py', 'src/**/*.ts')"},
-                "context_lines": {"type": "integer", "default": 0, "description": "Lines of context around match"},
-                "limit": {"type": "integer", "default": 50},
-                "include_tests": {
-                    "type": "boolean",
-                    "description": "Include test elements in results. Default: true.",
-                    "default": True,
-                },
-            },
-            "required": ["pattern"],
-        },
-    ),
-    Tool(
         name="pattern_search",
         description="PATTERN SEARCH: ES-native pattern matching on code. "
-        "Faster than grep_code - query runs server-side. "
         "Three modes: regexp (Lucene syntax), wildcard (* and ?), proximity (terms near each other).",
         inputSchema={
             "type": "object",
