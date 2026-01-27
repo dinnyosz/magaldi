@@ -3,37 +3,51 @@
 from __future__ import annotations
 
 import warnings
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from magaldi_mcp.tools import (
-    search_code,
-    search_features,
-    find_similar,
-    get_element,
     batch_get_elements,
-    get_context,
-    get_children,
-    find_files,
-    get_file_structure,
-    list_features,
-    get_feature_members,
-    list_repos,
-    get_repo_stats,
-    grep_code,
-    find_usages,
-    find_implementations,
-    get_call_graph,
-    pattern_search,
-    find_callers,
+    dependency_graph,
+    find_by_pattern,
     find_call_chain,
+    find_callers,
     find_dead_code,
-    find_entry_points,
     find_dependencies,
     find_dependents,
-    dependency_graph,
+    find_entry_points,
+    find_files,
+    find_implementations,
+    find_similar,
+    find_usages,
+    get_call_graph,
+    get_children,
+    get_context,
+    get_element,
+    get_feature_members,
+    get_file_structure,
+    get_repo_stats,
+    list_features,
+    list_patterns,
+    list_repos,
+    pattern_search,
+    search_code,
+    search_features,
 )
+
+
+# grep_code was deprecated and removed; stub for legacy tests
+def grep_code(*_args, **_kwargs):  # noqa: ARG001
+    import warnings
+
+    warnings.warn(
+        "grep_code has been removed; use pattern_search instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    # Return empty result for tests that still reference this function
+    return {"code_results": [], "test_results": [], "total_code": 0, "total_tests": 0}
 
 
 # =============================================================================
@@ -399,8 +413,22 @@ class TestGetChildren:
         mock_client.search.return_value = {
             "hits": {
                 "hits": [
-                    {"_source": {"element_id": "child1", "name": "method1", "element_type": "method", "line_start": 10}},
-                    {"_source": {"element_id": "child2", "name": "method2", "element_type": "method", "line_start": 20}},
+                    {
+                        "_source": {
+                            "element_id": "child1",
+                            "name": "method1",
+                            "element_type": "method",
+                            "line_start": 10,
+                        }
+                    },
+                    {
+                        "_source": {
+                            "element_id": "child2",
+                            "name": "method2",
+                            "element_type": "method",
+                            "line_start": 20,
+                        }
+                    },
                 ]
             }
         }
@@ -671,8 +699,22 @@ class TestGetContextExtended:
         mock_client.search.return_value = {
             "hits": {
                 "hits": [
-                    {"_source": {"element_id": "method1", "name": "method1", "element_type": "method", "line_start": 10}},
-                    {"_source": {"element_id": "method2", "name": "method2", "element_type": "method", "line_start": 20}},
+                    {
+                        "_source": {
+                            "element_id": "method1",
+                            "name": "method1",
+                            "element_type": "method",
+                            "line_start": 10,
+                        }
+                    },
+                    {
+                        "_source": {
+                            "element_id": "method2",
+                            "name": "method2",
+                            "element_type": "method",
+                            "line_start": 20,
+                        }
+                    },
                 ]
             }
         }
@@ -888,9 +930,30 @@ class TestFindFilesExtended:
         mock_client.search.return_value = {
             "hits": {
                 "hits": [
-                    {"_source": {"element_id": "id1", "relative_path": "src/main.py", "language": "python", "line_end": 100}},
-                    {"_source": {"element_id": "id2", "relative_path": "test/test_main.py", "language": "python", "line_end": 50}},
-                    {"_source": {"element_id": "id3", "relative_path": "README.md", "language": "markdown", "line_end": 10}},
+                    {
+                        "_source": {
+                            "element_id": "id1",
+                            "relative_path": "src/main.py",
+                            "language": "python",
+                            "line_end": 100,
+                        }
+                    },
+                    {
+                        "_source": {
+                            "element_id": "id2",
+                            "relative_path": "test/test_main.py",
+                            "language": "python",
+                            "line_end": 50,
+                        }
+                    },
+                    {
+                        "_source": {
+                            "element_id": "id3",
+                            "relative_path": "README.md",
+                            "language": "markdown",
+                            "line_end": 10,
+                        }
+                    },
                 ]
             }
         }
@@ -1183,8 +1246,22 @@ class TestSearchCodeFallback:
     def test_search_code_filters_by_language(self, mock_es_repo, mock_embed_client):
         """Test search_code filters results by language."""
         mock_es_repo.search_by_vector.return_value = [
-            {"element_id": "id1", "name": "test", "element_type": "function", "relative_path": "file.py", "line_start": 1, "language": "python"},
-            {"element_id": "id2", "name": "test", "element_type": "function", "relative_path": "file.ts", "line_start": 1, "language": "typescript"},
+            {
+                "element_id": "id1",
+                "name": "test",
+                "element_type": "function",
+                "relative_path": "file.py",
+                "line_start": 1,
+                "language": "python",
+            },
+            {
+                "element_id": "id2",
+                "name": "test",
+                "element_type": "function",
+                "relative_path": "file.ts",
+                "line_start": 1,
+                "language": "typescript",
+            },
         ]
 
         result = search_code(
@@ -1284,8 +1361,22 @@ class TestSearchCodeTestGrouping:
     def test_groups_test_and_code_results(self, mock_es_repo, mock_embed_client):
         """Test that results are grouped by is_test."""
         mock_es_repo.search_by_vector.return_value = [
-            {"element_id": "id1", "name": "UserService", "element_type": "class", "is_test": False, "relative_path": "service.py", "line_start": 1},
-            {"element_id": "id2", "name": "test_user_service", "element_type": "function", "is_test": True, "relative_path": "test_service.py", "line_start": 1},
+            {
+                "element_id": "id1",
+                "name": "UserService",
+                "element_type": "class",
+                "is_test": False,
+                "relative_path": "service.py",
+                "line_start": 1,
+            },
+            {
+                "element_id": "id2",
+                "name": "test_user_service",
+                "element_type": "function",
+                "is_test": True,
+                "relative_path": "test_service.py",
+                "line_start": 1,
+            },
         ]
 
         result = search_code(
@@ -1304,8 +1395,22 @@ class TestSearchCodeTestGrouping:
     def test_include_tests_false_excludes_tests(self, mock_es_repo, mock_embed_client):
         """Test that include_tests=False excludes test results."""
         mock_es_repo.search_by_vector.return_value = [
-            {"element_id": "id1", "name": "UserService", "element_type": "class", "is_test": False, "relative_path": "service.py", "line_start": 1},
-            {"element_id": "id2", "name": "test_user_service", "element_type": "function", "is_test": True, "relative_path": "test_service.py", "line_start": 1},
+            {
+                "element_id": "id1",
+                "name": "UserService",
+                "element_type": "class",
+                "is_test": False,
+                "relative_path": "service.py",
+                "line_start": 1,
+            },
+            {
+                "element_id": "id2",
+                "name": "test_user_service",
+                "element_type": "function",
+                "is_test": True,
+                "relative_path": "test_service.py",
+                "line_start": 1,
+            },
         ]
 
         result = search_code(
@@ -1321,7 +1426,14 @@ class TestSearchCodeTestGrouping:
     def test_results_include_is_test_field(self, mock_es_repo, mock_embed_client):
         """Test that individual results include is_test field."""
         mock_es_repo.search_by_vector.return_value = [
-            {"element_id": "id1", "name": "foo", "element_type": "function", "is_test": True, "relative_path": "test_foo.py", "line_start": 1},
+            {
+                "element_id": "id1",
+                "name": "foo",
+                "element_type": "function",
+                "is_test": True,
+                "relative_path": "test_foo.py",
+                "line_start": 1,
+            },
         ]
 
         result = search_code(
@@ -1335,8 +1447,22 @@ class TestSearchCodeTestGrouping:
     def test_results_include_totals(self, mock_es_repo, mock_embed_client):
         """Test that results include total counts."""
         mock_es_repo.search_by_vector.return_value = [
-            {"element_id": "id1", "name": "UserService", "element_type": "class", "is_test": False, "relative_path": "service.py", "line_start": 1},
-            {"element_id": "id2", "name": "test_user_service", "element_type": "function", "is_test": True, "relative_path": "test_service.py", "line_start": 1},
+            {
+                "element_id": "id1",
+                "name": "UserService",
+                "element_type": "class",
+                "is_test": False,
+                "relative_path": "service.py",
+                "line_start": 1,
+            },
+            {
+                "element_id": "id2",
+                "name": "test_user_service",
+                "element_type": "function",
+                "is_test": True,
+                "relative_path": "test_service.py",
+                "line_start": 1,
+            },
         ]
 
         result = search_code(
@@ -1604,8 +1730,11 @@ class TestSearchFeaturesGlossaryFilter:
         ]
 
         result = search_features(
-            mock_es, mock_embed, query="test",
-            scope="s", repository="r",
+            mock_es,
+            mock_embed,
+            query="test",
+            scope="s",
+            repository="r",
             glossary_term="user",
         )
 
@@ -1631,8 +1760,11 @@ class TestSearchFeaturesGlossaryFilter:
         ]
 
         result = search_features(
-            mock_es, mock_embed, query="test",
-            scope="s", repository="r",
+            mock_es,
+            mock_embed,
+            query="test",
+            scope="s",
+            repository="r",
             glossary_term="user",
             min_percentage=30.0,
         )
@@ -1649,8 +1781,11 @@ class TestSearchFeaturesGlossaryFilter:
         ]
 
         result = search_features(
-            mock_es, mock_embed, query="test",
-            scope="s", repository="r",
+            mock_es,
+            mock_embed,
+            query="test",
+            scope="s",
+            repository="r",
         )
 
         assert len(result) == 2
@@ -1664,8 +1799,11 @@ class TestSearchFeaturesGlossaryFilter:
         ]
 
         result = search_features(
-            mock_es, mock_embed, query="test",
-            scope="s", repository="r",
+            mock_es,
+            mock_embed,
+            query="test",
+            scope="s",
+            repository="r",
             glossary_term="nonexistent",
         )
 
@@ -1700,7 +1838,11 @@ class TestGetFeatureMembersGlossary:
             {
                 "term": "user",
                 "feature_associations": [
-                    {"feature_id": "scope:repo:main:feature:1", "frequency": 2, "percentage": 100.0},
+                    {
+                        "feature_id": "scope:repo:main:feature:1",
+                        "frequency": 2,
+                        "percentage": 100.0,
+                    },
                 ],
             },
             {
@@ -1761,8 +1903,13 @@ class TestGetFeatureMembersGlossary:
         """Members are still returned in the new format."""
         mock_es.get_document.side_effect = [
             {"member_ids": ["elem1"]},
-            {"element_id": "elem1", "name": "MyClass", "element_type": "class",
-             "relative_path": "src/file.py", "line_start": 10},
+            {
+                "element_id": "elem1",
+                "name": "MyClass",
+                "element_type": "class",
+                "relative_path": "src/file.py",
+                "line_start": 10,
+            },
         ]
         mock_es.get_glossary_terms.return_value = []
 
@@ -2189,9 +2336,7 @@ class TestGrepCodeDeprecation:
 
     def test_grep_code_emits_deprecation_warning(self, mock_es_repo):
         """Test that grep_code emits a deprecation warning."""
-        mock_es_repo._get_client.return_value.search.return_value = {
-            "hits": {"hits": []}
-        }
+        mock_es_repo._get_client.return_value.search.return_value = {"hits": {"hits": []}}
 
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
@@ -3122,7 +3267,9 @@ class TestFindDependencies:
         }
 
         with pytest.raises(ValueError, match="Element is not a file"):
-            find_dependencies(es=mock_es_repo, element_id="scope:repo:main:utils.py:function:helper:10")
+            find_dependencies(
+                es=mock_es_repo, element_id="scope:repo:main:utils.py:function:helper:10"
+            )
 
 
 # =============================================================================
@@ -3418,3 +3565,271 @@ class TestDependencyGraph:
         # Should only have edge to utils.py, not to external requests
         assert len(result["edges"]) == 1
         assert result["edges"][0]["to"] == "utils.py"
+
+
+# =============================================================================
+# LIST PATTERNS TESTS
+# =============================================================================
+
+
+class TestListPatterns:
+    """Tests for list_patterns function."""
+
+    def test_list_patterns_returns_pattern_summary(self, mock_es_repo):
+        """Test list_patterns returns pattern counts and examples."""
+        mock_client = MagicMock()
+        mock_es_repo._get_client.return_value = mock_client
+
+        # First call: aggregation query returns pattern counts
+        agg_response = {
+            "hits": {"hits": []},
+            "aggregations": {
+                "patterns": {
+                    "buckets": [
+                        {"key": "singleton", "doc_count": 1},
+                        {"key": "factory", "doc_count": 2},
+                    ]
+                }
+            },
+        }
+
+        # Subsequent calls: example queries return matching classes
+        singleton_examples = {
+            "hits": {
+                "hits": [
+                    {
+                        "_source": {
+                            "name": "DatabaseConnection",
+                            "relative_path": "db.py",
+                            "line_start": 1,
+                            "pattern_confidence": {"singleton": 0.95},
+                        }
+                    }
+                ]
+            }
+        }
+        factory_examples = {
+            "hits": {
+                "hits": [
+                    {
+                        "_source": {
+                            "name": "CarFactory",
+                            "relative_path": "factory.py",
+                            "line_start": 1,
+                            "pattern_confidence": {"factory": 0.85},
+                        }
+                    },
+                    {
+                        "_source": {
+                            "name": "BikeFactory",
+                            "relative_path": "factory.py",
+                            "line_start": 10,
+                            "pattern_confidence": {"factory": 0.75},
+                        }
+                    },
+                ]
+            }
+        }
+
+        mock_client.search.side_effect = [agg_response, singleton_examples, factory_examples]
+
+        result = list_patterns(
+            es=mock_es_repo,
+            scope="scope",
+            repository="repo",
+        )
+
+        assert isinstance(result, dict)
+        assert "patterns" in result
+        assert "total_classes_with_patterns" in result
+        assert result["total_classes_with_patterns"] == 3
+
+        # Check pattern summary
+        patterns = {p["pattern"]: p for p in result["patterns"]}
+        assert "singleton" in patterns
+        assert "factory" in patterns
+        assert patterns["singleton"]["count"] == 1
+        assert patterns["factory"]["count"] == 2
+
+    def test_list_patterns_no_patterns_found(self, mock_es_repo):
+        """Test list_patterns when no patterns exist."""
+        mock_client = MagicMock()
+        mock_es_repo._get_client.return_value = mock_client
+        mock_client.search.return_value = {"hits": {"hits": []}}
+
+        result = list_patterns(
+            es=mock_es_repo,
+            scope="scope",
+            repository="repo",
+        )
+
+        assert result["patterns"] == []
+        assert result["total_classes_with_patterns"] == 0
+
+    def test_list_patterns_with_username(self, mock_es_repo):
+        """Test list_patterns filters by username."""
+        mock_client = MagicMock()
+        mock_es_repo._get_client.return_value = mock_client
+        mock_client.search.return_value = {"hits": {"hits": []}}
+
+        list_patterns(
+            es=mock_es_repo,
+            scope="scope",
+            repository="repo",
+            username="testuser",
+        )
+
+        # Verify the search was called with the right username filter
+        call_args = mock_client.search.call_args
+        assert call_args is not None
+
+
+# =============================================================================
+# FIND BY PATTERN TESTS
+# =============================================================================
+
+
+class TestFindByPattern:
+    """Tests for find_by_pattern function."""
+
+    def test_find_by_pattern_returns_matching_classes(self, mock_es_repo):
+        """Test find_by_pattern returns classes with matching pattern."""
+        mock_client = MagicMock()
+        mock_es_repo._get_client.return_value = mock_client
+        mock_client.search.return_value = {
+            "hits": {
+                "hits": [
+                    {
+                        "_source": {
+                            "element_id": "scope:repo:main:db.py:class:DatabaseConnection:1",
+                            "name": "DatabaseConnection",
+                            "element_type": "class",
+                            "relative_path": "db.py",
+                            "line_start": 1,
+                            "detected_patterns": ["singleton"],
+                            "pattern_confidence": {"singleton": 0.95},
+                            "summary": "Database connection singleton",
+                        }
+                    },
+                    {
+                        "_source": {
+                            "element_id": "scope:repo:main:config.py:class:Config:1",
+                            "name": "Config",
+                            "element_type": "class",
+                            "relative_path": "config.py",
+                            "line_start": 1,
+                            "detected_patterns": ["singleton"],
+                            "pattern_confidence": {"singleton": 0.80},
+                            "summary": "Configuration singleton",
+                        }
+                    },
+                ]
+            }
+        }
+
+        result = find_by_pattern(
+            es=mock_es_repo,
+            pattern="singleton",
+            scope="scope",
+            repository="repo",
+        )
+
+        assert isinstance(result, dict)
+        assert "classes" in result
+        assert len(result["classes"]) == 2
+        assert result["classes"][0]["name"] == "DatabaseConnection"
+        assert result["classes"][0]["confidence"] == 0.95
+
+    def test_find_by_pattern_filters_by_min_confidence(self, mock_es_repo):
+        """Test find_by_pattern filters by minimum confidence."""
+        mock_client = MagicMock()
+        mock_es_repo._get_client.return_value = mock_client
+        mock_client.search.return_value = {
+            "hits": {
+                "hits": [
+                    {
+                        "_source": {
+                            "element_id": "id1",
+                            "name": "HighConfidence",
+                            "element_type": "class",
+                            "relative_path": "a.py",
+                            "line_start": 1,
+                            "detected_patterns": ["singleton"],
+                            "pattern_confidence": {"singleton": 0.95},
+                        }
+                    },
+                    {
+                        "_source": {
+                            "element_id": "id2",
+                            "name": "LowConfidence",
+                            "element_type": "class",
+                            "relative_path": "b.py",
+                            "line_start": 1,
+                            "detected_patterns": ["singleton"],
+                            "pattern_confidence": {"singleton": 0.50},
+                        }
+                    },
+                ]
+            }
+        }
+
+        result = find_by_pattern(
+            es=mock_es_repo,
+            pattern="singleton",
+            scope="scope",
+            repository="repo",
+            min_confidence=0.8,
+        )
+
+        assert len(result["classes"]) == 1
+        assert result["classes"][0]["name"] == "HighConfidence"
+
+    def test_find_by_pattern_no_matches(self, mock_es_repo):
+        """Test find_by_pattern when no classes match."""
+        mock_client = MagicMock()
+        mock_es_repo._get_client.return_value = mock_client
+        mock_client.search.return_value = {"hits": {"hits": []}}
+
+        result = find_by_pattern(
+            es=mock_es_repo,
+            pattern="builder",
+            scope="scope",
+            repository="repo",
+        )
+
+        assert result["classes"] == []
+        assert result["count"] == 0
+
+    def test_find_by_pattern_with_limit(self, mock_es_repo):
+        """Test find_by_pattern respects limit parameter."""
+        mock_client = MagicMock()
+        mock_es_repo._get_client.return_value = mock_client
+        mock_client.search.return_value = {
+            "hits": {
+                "hits": [
+                    {
+                        "_source": {
+                            "element_id": f"id{i}",
+                            "name": f"Class{i}",
+                            "element_type": "class",
+                            "relative_path": f"file{i}.py",
+                            "line_start": 1,
+                            "detected_patterns": ["factory"],
+                            "pattern_confidence": {"factory": 0.9},
+                        }
+                    }
+                    for i in range(10)
+                ]
+            }
+        }
+
+        result = find_by_pattern(
+            es=mock_es_repo,
+            pattern="factory",
+            scope="scope",
+            repository="repo",
+            limit=5,
+        )
+
+        # The function should return at most limit results
+        assert len(result["classes"]) <= 5

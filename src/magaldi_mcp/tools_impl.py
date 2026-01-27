@@ -8,9 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from shared.db.elasticsearch import ElasticsearchRepository
 from shared.ai.embedding import CodeEmbeddingClient
-
+from shared.db.elasticsearch import ElasticsearchRepository
 
 # =============================================================================
 # SEARCH TOOLS
@@ -692,15 +691,17 @@ def get_feature_members(
     for member_id in member_ids:
         doc = es.get_document(member_id)
         if doc:
-            members.append({
-                "element_id": doc.get("element_id"),
-                "name": doc.get("name"),
-                "type": doc.get("element_type"),
-                "file": doc.get("relative_path"),
-                "line": doc.get("line_start"),
-                "summary": doc.get("summary", ""),
-                "signature": doc.get("signature", ""),
-            })
+            members.append(
+                {
+                    "element_id": doc.get("element_id"),
+                    "name": doc.get("name"),
+                    "type": doc.get("element_type"),
+                    "file": doc.get("relative_path"),
+                    "line": doc.get("line_start"),
+                    "summary": doc.get("summary", ""),
+                    "signature": doc.get("signature", ""),
+                }
+            )
 
     # Parse feature_id to get scope, repository, username
     # Format: scope:repo:username:feature:N or scope:repo:username:subfeature:N
@@ -718,11 +719,13 @@ def get_feature_members(
         for term_entry in all_terms:
             for assoc in term_entry.get("feature_associations", []):
                 if assoc.get("feature_id") == feature_id:
-                    glossary_terms.append({
-                        "term": term_entry.get("term"),
-                        "frequency": assoc.get("frequency"),
-                        "percentage": assoc.get("percentage"),
-                    })
+                    glossary_terms.append(
+                        {
+                            "term": term_entry.get("term"),
+                            "frequency": assoc.get("frequency"),
+                            "percentage": assoc.get("percentage"),
+                        }
+                    )
                     break  # Found association for this feature
 
     return {
@@ -797,11 +800,13 @@ def find_files(
 
         # Apply glob pattern filter
         if fnmatch.fnmatch(rel_path, pattern):
-            matches.append({
-                "path": rel_path,
-                "language": source.get("language"),
-                "lines": source.get("line_end", 0),
-            })
+            matches.append(
+                {
+                    "path": rel_path,
+                    "language": source.get("language"),
+                    "lines": source.get("line_end", 0),
+                }
+            )
             if len(matches) >= limit:
                 break
 
@@ -888,9 +893,7 @@ def _find_children(
     result = client.search(
         index="magaldi-code-elements",
         body={
-            "query": {
-                "term": {"parent_id": parent_id}
-            },
+            "query": {"term": {"parent_id": parent_id}},
             "size": 100,
             "sort": [{"line_start": "asc"}],
         },
@@ -950,13 +953,13 @@ def _escape_for_lucene_regexp(name: str) -> str:
         Escaped string safe for Lucene regexp.
     """
     # Lucene regexp special chars that need escaping
-    special_chars = r'.\+*?^${}[]|()'
+    special_chars = r".\+*?^${}[]|()"
     result = []
     for char in name:
         if char in special_chars:
-            result.append('\\')
+            result.append("\\")
         result.append(char)
-    return ''.join(result)
+    return "".join(result)
 
 
 def find_usages(
@@ -1040,26 +1043,34 @@ def find_usages(
         content_stripped = content.strip()
         if element_type == "function":
             # Skip only if this is defining the SAME function
-            if content_stripped.startswith(f"def {name}(") or content_stripped.startswith(f"def {name} ("):
+            if content_stripped.startswith(f"def {name}(") or content_stripped.startswith(
+                f"def {name} ("
+            ):
                 continue
         elif element_type == "class":
-            if content_stripped.startswith(f"class {name}(") or content_stripped.startswith(f"class {name}:"):
+            if content_stripped.startswith(f"class {name}(") or content_stripped.startswith(
+                f"class {name}:"
+            ):
                 continue
         elif element_type == "method":
-            if content_stripped.startswith(f"def {name}(") or content_stripped.startswith(f"def {name} ("):
+            if content_stripped.startswith(f"def {name}(") or content_stripped.startswith(
+                f"def {name} ("
+            ):
                 continue
 
         # Build context from raw_code lines
         context_before = []  # Empty for now (we only have the element, not surrounding code)
         context_after = lines[1:2] if len(lines) > 1 else []  # Second line if exists
 
-        usages.append({
-            "file": result_file,
-            "line": result_line,
-            "content": content,
-            "context_before": context_before,
-            "context_after": context_after,
-        })
+        usages.append(
+            {
+                "file": result_file,
+                "line": result_line,
+                "content": content,
+                "context_before": context_before,
+                "context_after": context_after,
+            }
+        )
 
         if len(usages) >= limit:
             break
@@ -1145,13 +1156,15 @@ def find_implementations(
         # Get context (second line if exists)
         context_after = lines[1:3] if len(lines) > 1 else []
 
-        implementations.append({
-            "class_name": impl_name,
-            "file": result.get("relative_path"),
-            "line": result.get("line_start"),
-            "definition": first_line.strip(),
-            "context_after": context_after,
-        })
+        implementations.append(
+            {
+                "class_name": impl_name,
+                "file": result.get("relative_path"),
+                "line": result.get("line_start"),
+                "definition": first_line.strip(),
+                "context_after": context_after,
+            }
+        )
 
     return implementations
 
@@ -1173,7 +1186,7 @@ def generate_skill(
     """
     from pathlib import Path
 
-    skill_content = '''---
+    skill_content = """---
 name: magaldi
 description: >
   ALWAYS use for: grep, find usages, search patterns, find implementations,
@@ -1343,7 +1356,7 @@ The index has already done the hard work:
 - Call graphs are pre-computed
 
 **Use magaldi tools. Don't re-grep what's already indexed.**
-'''
+"""
 
     result = {
         "skill_name": skill_name,
@@ -1368,7 +1381,11 @@ The index has already done the hard work:
 
     # Check for existing skill in both locations to avoid duplication
     global_path = Path.home() / ".claude" / "skills" / skill_name / "SKILL.md"
-    project_path = Path(project_root) / ".claude" / "skills" / skill_name / "SKILL.md" if project_root else None
+    project_path = (
+        Path(project_root) / ".claude" / "skills" / skill_name / "SKILL.md"
+        if project_root
+        else None
+    )
 
     if skill_path.exists():
         result["skipped"] = True
@@ -1441,14 +1458,16 @@ def get_call_graph(
             limit=30,
         )
         for caller in callers:
-            result["callers"].append({
-                "element_id": caller.get("element_id"),
-                "name": caller.get("name"),
-                "type": caller.get("element_type"),
-                "file": caller.get("relative_path"),
-                "line": caller.get("line_start"),
-                "summary": caller.get("summary", ""),
-            })
+            result["callers"].append(
+                {
+                    "element_id": caller.get("element_id"),
+                    "name": caller.get("name"),
+                    "type": caller.get("element_type"),
+                    "file": caller.get("relative_path"),
+                    "line": caller.get("line_start"),
+                    "summary": caller.get("summary", ""),
+                }
+            )
 
     # Find callees (what this function calls) using indexed call data
     if direction in ("callees", "both"):
@@ -1636,15 +1655,17 @@ def find_call_chain(
             caller_id = caller.get("element_id")
             if caller_id in visited:
                 # Cycle detected, mark but don't recurse
-                children.append({
-                    "element_id": caller_id,
-                    "name": caller.get("name"),
-                    "type": caller.get("element_type"),
-                    "file": caller.get("relative_path"),
-                    "line": caller.get("line_start"),
-                    "depth": depth + 1,
-                    "cycle": True,
-                })
+                children.append(
+                    {
+                        "element_id": caller_id,
+                        "name": caller.get("name"),
+                        "type": caller.get("element_type"),
+                        "file": caller.get("relative_path"),
+                        "line": caller.get("line_start"),
+                        "depth": depth + 1,
+                        "cycle": True,
+                    }
+                )
                 continue
 
             visited.add(caller_id)
@@ -1673,24 +1694,28 @@ def find_call_chain(
             resolved_id = call.get("resolved_id")
             if not resolved_id:
                 # Unresolved call - just record the name
-                children.append({
-                    "name": call.get("name"),
-                    "receiver": call.get("receiver"),
-                    "line": call.get("line"),
-                    "depth": depth + 1,
-                    "unresolved": True,
-                })
+                children.append(
+                    {
+                        "name": call.get("name"),
+                        "receiver": call.get("receiver"),
+                        "line": call.get("line"),
+                        "depth": depth + 1,
+                        "unresolved": True,
+                    }
+                )
                 continue
 
             if resolved_id in visited:
                 # Cycle detected
-                children.append({
-                    "element_id": resolved_id,
-                    "name": call.get("name"),
-                    "line": call.get("line"),
-                    "depth": depth + 1,
-                    "cycle": True,
-                })
+                children.append(
+                    {
+                        "element_id": resolved_id,
+                        "name": call.get("name"),
+                        "line": call.get("line"),
+                        "depth": depth + 1,
+                        "cycle": True,
+                    }
+                )
                 continue
 
             visited.add(resolved_id)
@@ -1710,13 +1735,15 @@ def find_call_chain(
                 children.append(node)
             else:
                 # Resolved ID but no document found
-                children.append({
-                    "element_id": resolved_id,
-                    "name": call.get("name"),
-                    "line": call.get("line"),
-                    "depth": depth + 1,
-                    "missing": True,
-                })
+                children.append(
+                    {
+                        "element_id": resolved_id,
+                        "name": call.get("name"),
+                        "line": call.get("line"),
+                        "depth": depth + 1,
+                        "missing": True,
+                    }
+                )
 
         return children
 
@@ -1761,68 +1788,184 @@ def find_dead_code(
     # Entry point decorators to exclude (functions with these are likely called externally)
     entry_point_decorators = {
         # Web frameworks
-        "app.route", "route", "get", "post", "put", "delete", "patch", "head", "options",
-        "router.get", "router.post", "router.put", "router.delete", "router.patch",
-        "api_view", "action", "endpoint",
+        "app.route",
+        "route",
+        "get",
+        "post",
+        "put",
+        "delete",
+        "patch",
+        "head",
+        "options",
+        "router.get",
+        "router.post",
+        "router.put",
+        "router.delete",
+        "router.patch",
+        "api_view",
+        "action",
+        "endpoint",
         # FastAPI
-        "app.get", "app.post", "app.put", "app.delete", "app.patch",
-        "app.websocket", "websocket",
-        "depends", "Depends",
+        "app.get",
+        "app.post",
+        "app.put",
+        "app.delete",
+        "app.patch",
+        "app.websocket",
+        "websocket",
+        "depends",
+        "Depends",
         # CLI
-        "click.command", "command", "click.group", "group",
-        "typer.command", "typer.callback",
+        "click.command",
+        "command",
+        "click.group",
+        "group",
+        "typer.command",
+        "typer.callback",
         "argparse",
         # Testing
-        "pytest.fixture", "fixture", "pytest.mark", "mark.",
-        "parametrize", "pytest.parametrize",
+        "pytest.fixture",
+        "fixture",
+        "pytest.mark",
+        "mark.",
+        "parametrize",
+        "pytest.parametrize",
         # Class internals
-        "property", "staticmethod", "classmethod",
-        "abstractmethod", "abstractproperty",
-        "cached_property", "functools.cached_property",
+        "property",
+        "staticmethod",
+        "classmethod",
+        "abstractmethod",
+        "abstractproperty",
+        "cached_property",
+        "functools.cached_property",
         # Async/background
-        "celery.task", "task", "dramatiq.actor", "actor",
-        "asyncio", "async_generator",
+        "celery.task",
+        "task",
+        "dramatiq.actor",
+        "actor",
+        "asyncio",
+        "async_generator",
         # Event handlers
-        "on_event", "lifespan", "startup", "shutdown",
-        "event_handler", "listener", "subscriber",
+        "on_event",
+        "lifespan",
+        "startup",
+        "shutdown",
+        "event_handler",
+        "listener",
+        "subscriber",
         # Serialization/validation
-        "validator", "field_validator", "model_validator",
-        "serializer", "deserializer",
+        "validator",
+        "field_validator",
+        "model_validator",
+        "serializer",
+        "deserializer",
         # Registration patterns
-        "register", "registry", "handler",
-        "callback", "hook",
+        "register",
+        "registry",
+        "handler",
+        "callback",
+        "hook",
     }
 
     # Names to exclude (entry points, magic methods, common public API patterns)
     excluded_names = {
         # Entry points
-        "main", "__main__", "run", "start", "execute", "cli",
+        "main",
+        "__main__",
+        "run",
+        "start",
+        "execute",
+        "cli",
         # Magic methods
-        "__init__", "__new__", "__del__", "__post_init__",
-        "__str__", "__repr__", "__hash__", "__eq__", "__ne__",
-        "__lt__", "__le__", "__gt__", "__ge__", "__cmp__",
-        "__add__", "__sub__", "__mul__", "__truediv__", "__floordiv__",
-        "__mod__", "__pow__", "__and__", "__or__", "__xor__",
-        "__radd__", "__rsub__", "__rmul__", "__rtruediv__",
-        "__iadd__", "__isub__", "__imul__", "__itruediv__",
-        "__neg__", "__pos__", "__abs__", "__invert__",
-        "__iter__", "__next__", "__getitem__", "__setitem__", "__delitem__",
-        "__len__", "__call__", "__enter__", "__exit__",
-        "__contains__", "__bool__", "__index__", "__int__", "__float__",
-        "__getattr__", "__setattr__", "__delattr__", "__getattribute__",
-        "__get__", "__set__", "__delete__",  # Descriptors
-        "__class_getitem__", "__init_subclass__", "__set_name__",
-        "__reduce__", "__reduce_ex__", "__getstate__", "__setstate__",
-        "__copy__", "__deepcopy__",
-        "__format__", "__sizeof__", "__bytes__",
-        "__aiter__", "__anext__", "__await__",  # Async magic
-        "__aenter__", "__aexit__",
+        "__init__",
+        "__new__",
+        "__del__",
+        "__post_init__",
+        "__str__",
+        "__repr__",
+        "__hash__",
+        "__eq__",
+        "__ne__",
+        "__lt__",
+        "__le__",
+        "__gt__",
+        "__ge__",
+        "__cmp__",
+        "__add__",
+        "__sub__",
+        "__mul__",
+        "__truediv__",
+        "__floordiv__",
+        "__mod__",
+        "__pow__",
+        "__and__",
+        "__or__",
+        "__xor__",
+        "__radd__",
+        "__rsub__",
+        "__rmul__",
+        "__rtruediv__",
+        "__iadd__",
+        "__isub__",
+        "__imul__",
+        "__itruediv__",
+        "__neg__",
+        "__pos__",
+        "__abs__",
+        "__invert__",
+        "__iter__",
+        "__next__",
+        "__getitem__",
+        "__setitem__",
+        "__delitem__",
+        "__len__",
+        "__call__",
+        "__enter__",
+        "__exit__",
+        "__contains__",
+        "__bool__",
+        "__index__",
+        "__int__",
+        "__float__",
+        "__getattr__",
+        "__setattr__",
+        "__delattr__",
+        "__getattribute__",
+        "__get__",
+        "__set__",
+        "__delete__",  # Descriptors
+        "__class_getitem__",
+        "__init_subclass__",
+        "__set_name__",
+        "__reduce__",
+        "__reduce_ex__",
+        "__getstate__",
+        "__setstate__",
+        "__copy__",
+        "__deepcopy__",
+        "__format__",
+        "__sizeof__",
+        "__bytes__",
+        "__aiter__",
+        "__anext__",
+        "__await__",  # Async magic
+        "__aenter__",
+        "__aexit__",
         # Testing
-        "setUp", "tearDown", "setUpClass", "tearDownClass",
-        "setUpModule", "tearDownModule",
+        "setUp",
+        "tearDown",
+        "setUpClass",
+        "tearDownClass",
+        "setUpModule",
+        "tearDownModule",
         # Common callback/handler names
-        "on_start", "on_stop", "on_error", "on_success",
-        "handle", "process", "callback",
+        "on_start",
+        "on_stop",
+        "on_error",
+        "on_success",
+        "handle",
+        "process",
+        "callback",
     }
 
     client = es._get_client()
@@ -1842,8 +1985,19 @@ def find_dead_code(
         index="magaldi-code-elements",
         body={
             "query": {"bool": {"filter": filters}},
-            "_source": ["element_id", "hash_id", "name", "element_type", "relative_path",
-                        "line_start", "decorators", "is_test", "summary", "visibility", "level"],
+            "_source": [
+                "element_id",
+                "hash_id",
+                "name",
+                "element_type",
+                "relative_path",
+                "line_start",
+                "decorators",
+                "is_test",
+                "summary",
+                "visibility",
+                "level",
+            ],
             "size": 2000,
         },
     )
@@ -1901,16 +2055,18 @@ def find_dead_code(
         )
 
         if not callers:
-            potentially_dead.append({
-                "element_id": element_id,
-                "hash_id": source.get("hash_id"),
-                "name": name,
-                "type": source.get("element_type"),
-                "file": source.get("relative_path"),
-                "line": source.get("line_start"),
-                "summary": source.get("summary", ""),
-                "is_test": source.get("is_test", False),
-            })
+            potentially_dead.append(
+                {
+                    "element_id": element_id,
+                    "hash_id": source.get("hash_id"),
+                    "name": name,
+                    "type": source.get("element_type"),
+                    "file": source.get("relative_path"),
+                    "line": source.get("line_start"),
+                    "summary": source.get("summary", ""),
+                    "is_test": source.get("is_test", False),
+                }
+            )
         else:
             called_count += 1
 
@@ -1950,10 +2106,27 @@ def find_entry_points(
     username = username or "main"
 
     # Decorator categories
-    http_decorators = {"route", "app.route", "get", "post", "put", "delete", "patch",
-                       "api_view", "action", "api.route", "blueprint.route"}
-    cli_decorators = {"click.command", "command", "click.group", "group",
-                      "click.option", "argument"}
+    http_decorators = {
+        "route",
+        "app.route",
+        "get",
+        "post",
+        "put",
+        "delete",
+        "patch",
+        "api_view",
+        "action",
+        "api.route",
+        "blueprint.route",
+    }
+    cli_decorators = {
+        "click.command",
+        "command",
+        "click.group",
+        "group",
+        "click.option",
+        "argument",
+    }
     test_decorators = {"pytest.fixture", "fixture", "pytest.mark"}
     async_decorators = {"celery.task", "task", "dramatiq.actor", "actor"}
 
@@ -1971,8 +2144,17 @@ def find_entry_points(
         index="magaldi-code-elements",
         body={
             "query": {"bool": {"filter": filters}},
-            "_source": ["element_id", "hash_id", "name", "element_type", "relative_path",
-                        "line_start", "decorators", "is_test", "summary"],
+            "_source": [
+                "element_id",
+                "hash_id",
+                "name",
+                "element_type",
+                "relative_path",
+                "line_start",
+                "decorators",
+                "is_test",
+                "summary",
+            ],
             "size": 2000,
         },
     )
@@ -2066,8 +2248,11 @@ def find_entry_points(
             "total_test": len(test_fixtures),
             "total_main": len(main_functions),
             "total_async": len(async_tasks),
-            "total": len(http_handlers) + len(cli_commands) + len(test_fixtures) +
-                    len(main_functions) + len(async_tasks),
+            "total": len(http_handlers)
+            + len(cli_commands)
+            + len(test_fixtures)
+            + len(main_functions)
+            + len(async_tasks),
         },
     }
 
@@ -2407,17 +2592,14 @@ def find_dependencies(
         is_internal = False
 
         # Check if module starts with "." (relative import)
-        if module and module.startswith("."):
-            is_internal = True
-        # Check if module matches a file in the repo
-        elif module in repo_modules:
+        if module and module.startswith(".") or module in repo_modules:
             is_internal = True
         # Check common patterns for internal imports
         elif module:
             # Check if any part of the module path matches a repo module
             parts = module.split(".")
             for i in range(len(parts)):
-                partial = ".".join(parts[:i + 1])
+                partial = ".".join(parts[: i + 1])
                 if partial in repo_modules:
                     is_internal = True
                     break
@@ -2483,11 +2665,13 @@ def find_dependents(
 
     formatted_dependents = []
     for dep in dependents:
-        formatted_dependents.append({
-            "file": dep.get("relative_path"),
-            "element_id": dep.get("element_id"),
-            "language": dep.get("language"),
-        })
+        formatted_dependents.append(
+            {
+                "file": dep.get("relative_path"),
+                "element_id": dep.get("element_id"),
+                "language": dep.get("language"),
+            }
+        )
 
     return {
         "module": module,
@@ -2797,14 +2981,16 @@ def explain_element(
             limit=5,  # Top 5 callers
         )
         for caller in callers:
-            result["callers"].append({
-                "element_id": caller.get("element_id"),
-                "name": caller.get("name"),
-                "type": caller.get("element_type"),
-                "file": caller.get("relative_path"),
-                "line": caller.get("line_start"),
-                "summary": caller.get("summary", ""),
-            })
+            result["callers"].append(
+                {
+                    "element_id": caller.get("element_id"),
+                    "name": caller.get("name"),
+                    "type": caller.get("element_type"),
+                    "file": caller.get("relative_path"),
+                    "line": caller.get("line_start"),
+                    "summary": caller.get("summary", ""),
+                }
+            )
 
         # Get callees (what this function/method calls)
         calls = es.get_calls(element_id)
@@ -2845,15 +3031,17 @@ def explain_element(
         for sim in similar_results:
             if sim.get("element_id") == element_id:
                 continue  # Skip self
-            result["similar_code"].append({
-                "element_id": sim.get("element_id"),
-                "name": sim.get("name"),
-                "type": sim.get("element_type"),
-                "file": sim.get("relative_path"),
-                "line": sim.get("line_start"),
-                "summary": sim.get("summary", ""),
-                "similarity": sim.get("score", 0),
-            })
+            result["similar_code"].append(
+                {
+                    "element_id": sim.get("element_id"),
+                    "name": sim.get("name"),
+                    "type": sim.get("element_type"),
+                    "file": sim.get("relative_path"),
+                    "line": sim.get("line_start"),
+                    "summary": sim.get("summary", ""),
+                    "similarity": sim.get("score", 0),
+                }
+            )
             if len(result["similar_code"]) >= 3:
                 break
 
@@ -2916,14 +3104,18 @@ def find_todos(
     if assignee:
         nested_must.append({"term": {"todos.assignee": assignee}})
 
-    nested_query = {"bool": {"must": nested_must}} if nested_must else {"exists": {"field": "todos.kind"}}
+    nested_query = (
+        {"bool": {"must": nested_must}} if nested_must else {"exists": {"field": "todos.kind"}}
+    )
 
-    must_clauses.append({
-        "nested": {
-            "path": "todos",
-            "query": nested_query,
+    must_clauses.append(
+        {
+            "nested": {
+                "path": "todos",
+                "query": nested_query,
+            }
         }
-    })
+    )
 
     client = es._get_client()
     result = client.search(
@@ -2944,15 +3136,17 @@ def find_todos(
                 continue
             if assignee and todo.get("assignee") != assignee:
                 continue
-            todos.append({
-                "file": file_path,
-                "line": todo.get("line"),
-                "kind": todo.get("kind"),
-                "text": todo.get("text"),
-                "assignee": todo.get("assignee"),
-                "priority": todo.get("priority"),
-                "issue_ref": todo.get("issue_ref"),
-            })
+            todos.append(
+                {
+                    "file": file_path,
+                    "line": todo.get("line"),
+                    "kind": todo.get("kind"),
+                    "text": todo.get("text"),
+                    "assignee": todo.get("assignee"),
+                    "priority": todo.get("priority"),
+                    "issue_ref": todo.get("issue_ref"),
+                }
+            )
 
     return todos[:limit]
 
@@ -3068,12 +3262,14 @@ def find_side_effects(
     if effect_kind:
         nested_filter = {"term": {"side_effects.kind": effect_kind}}
 
-    must_clauses.append({
-        "nested": {
-            "path": "side_effects",
-            "query": nested_filter,
+    must_clauses.append(
+        {
+            "nested": {
+                "path": "side_effects",
+                "query": nested_filter,
+            }
         }
-    })
+    )
 
     client = es._get_client()
     result = client.search(
@@ -3124,12 +3320,14 @@ def trace_type(
     if repository:
         must_clauses.append({"term": {"repository": repository}})
 
-    must_clauses.append({
-        "nested": {
-            "path": "type_annotations",
-            "query": {"wildcard": {"type_annotations.name": f"*{type_name}*"}},
+    must_clauses.append(
+        {
+            "nested": {
+                "path": "type_annotations",
+                "query": {"wildcard": {"type_annotations.name": f"*{type_name}*"}},
+            }
         }
-    })
+    )
 
     client = es._get_client()
     result = client.search(
@@ -3237,12 +3435,14 @@ def find_http_routes(
     if path_pattern:
         nested_must.append({"wildcard": {"http_routes.path": f"*{path_pattern}*"}})
 
-    must_clauses.append({
-        "nested": {
-            "path": "http_routes",
-            "query": {"bool": {"must": nested_must}},
+    must_clauses.append(
+        {
+            "nested": {
+                "path": "http_routes",
+                "query": {"bool": {"must": nested_must}},
+            }
         }
-    })
+    )
 
     client = es._get_client()
     result = client.search(
@@ -3263,16 +3463,18 @@ def find_http_routes(
             if framework and route.get("framework") != framework:
                 continue
 
-            routes.append({
-                "element_id": source.get("element_id"),
-                "handler": source.get("name"),
-                "file": source.get("relative_path"),
-                "line": source.get("line_start"),
-                "method": route.get("method"),
-                "path": route.get("path"),
-                "path_params": route.get("path_params", []),
-                "framework": route.get("framework"),
-            })
+            routes.append(
+                {
+                    "element_id": source.get("element_id"),
+                    "handler": source.get("name"),
+                    "file": source.get("relative_path"),
+                    "line": source.get("line_start"),
+                    "method": route.get("method"),
+                    "path": route.get("path"),
+                    "path_params": route.get("path_params", []),
+                    "framework": route.get("framework"),
+                }
+            )
 
     return routes[:limit]
 
@@ -3312,12 +3514,14 @@ def find_cli_commands(
     if framework:
         nested_must.append({"term": {"cli_commands.framework": framework}})
 
-    must_clauses.append({
-        "nested": {
-            "path": "cli_commands",
-            "query": {"bool": {"must": nested_must}},
+    must_clauses.append(
+        {
+            "nested": {
+                "path": "cli_commands",
+                "query": {"bool": {"must": nested_must}},
+            }
         }
-    })
+    )
 
     client = es._get_client()
     result = client.search(
@@ -3333,15 +3537,17 @@ def find_cli_commands(
     for hit in result.get("hits", {}).get("hits", []):
         source = hit["_source"]
         for cmd in source.get("cli_commands", []):
-            commands.append({
-                "element_id": source.get("element_id"),
-                "handler": source.get("name"),
-                "file": source.get("relative_path"),
-                "line": source.get("line_start"),
-                "command": cmd.get("name"),
-                "options": cmd.get("options", []),
-                "framework": cmd.get("framework"),
-            })
+            commands.append(
+                {
+                    "element_id": source.get("element_id"),
+                    "handler": source.get("name"),
+                    "file": source.get("relative_path"),
+                    "line": source.get("line_start"),
+                    "command": cmd.get("name"),
+                    "options": cmd.get("options", []),
+                    "framework": cmd.get("framework"),
+                }
+            )
 
     return commands[:limit]
 
@@ -3366,102 +3572,52 @@ def get_public_api(
         Dict with http_routes and cli_commands.
     """
     return {
-        "http_routes": find_http_routes(es, scope=scope, repository=repository, username=username, limit=limit),
-        "cli_commands": find_cli_commands(es, scope=scope, repository=repository, username=username, limit=limit),
+        "http_routes": find_http_routes(
+            es, scope=scope, repository=repository, username=username, limit=limit
+        ),
+        "cli_commands": find_cli_commands(
+            es, scope=scope, repository=repository, username=username, limit=limit
+        ),
     }
-
-
-def find_patterns(
-    es: ElasticsearchRepository,
-    pattern: str | None = None,
-    min_confidence: float = 0.6,
-    scope: str | None = None,
-    repository: str | None = None,
-    username: str = "main",
-    limit: int = 50,
-) -> list[dict[str, Any]]:
-    """Find elements matching a design pattern.
-
-    Args:
-        es: Elasticsearch repository.
-        pattern: Pattern name (singleton, factory, builder, repository).
-        min_confidence: Minimum confidence score.
-        scope: Filter by scope.
-        repository: Filter by repository.
-        username: User branch.
-        limit: Maximum results.
-
-    Returns:
-        List of elements matching the pattern.
-    """
-    must_clauses = [{"term": {"username": username}}]
-    if scope:
-        must_clauses.append({"term": {"scope": scope}})
-    if repository:
-        must_clauses.append({"term": {"repository": repository}})
-    if pattern:
-        must_clauses.append({"term": {"detected_patterns": pattern}})
-    else:
-        must_clauses.append({"exists": {"field": "detected_patterns"}})
-
-    client = es._get_client()
-    result = client.search(
-        index="magaldi-code-elements",
-        body={
-            "query": {"bool": {"must": must_clauses}},
-            "size": limit,
-            "_source": ["element_id", "name", "relative_path", "line_start",
-                       "detected_patterns", "pattern_confidence"],
-        },
-    )
-
-    elements = []
-    for hit in result.get("hits", {}).get("hits", []):
-        source = hit["_source"]
-        confidence = source.get("pattern_confidence", {})
-
-        if pattern and confidence.get(pattern, 0) < min_confidence:
-            continue
-
-        elements.append({
-            "element_id": source.get("element_id"),
-            "name": source.get("name"),
-            "file": source.get("relative_path"),
-            "line": source.get("line_start"),
-            "patterns": source.get("detected_patterns", []),
-            "confidence": confidence,
-        })
-
-    return elements[:limit]
 
 
 def list_patterns(
     es: ElasticsearchRepository,
-    scope: str | None = None,
-    repository: str | None = None,
+    scope: str,
+    repository: str,
     username: str = "main",
-) -> dict[str, int]:
-    """List all detected patterns and their counts.
+) -> dict[str, Any]:
+    """List all detected design patterns in a repository.
+
+    Returns pattern types (singleton, builder, factory, repository) with
+    counts and example classes.
 
     Args:
         es: Elasticsearch repository.
-        scope: Filter by scope.
-        repository: Filter by repository.
+        scope: Repository scope (required).
+        repository: Repository name (required).
         username: User branch.
 
     Returns:
-        Dict mapping pattern names to counts.
+        Dict with:
+        - patterns: List of pattern summaries with count and examples
+        - total_classes_with_patterns: Total count of classes with patterns
     """
-    must_clauses = [{"term": {"username": username}}]
-    if scope:
-        must_clauses.append({"term": {"scope": scope}})
-    if repository:
-        must_clauses.append({"term": {"repository": repository}})
-    must_clauses.append({"exists": {"field": "detected_patterns"}})
+    from shared.db.repositories.base import INDEX_NAME
+
+    must_clauses = [
+        {"term": {"username": username}},
+        {"term": {"scope": scope}},
+        {"term": {"repository": repository}},
+        {"exists": {"field": "detected_patterns"}},
+        {"term": {"element_type": "class"}},
+    ]
 
     client = es._get_client()
-    result = client.search(
-        index="magaldi-code-elements",
+
+    # Get pattern counts via aggregation
+    agg_result = client.search(
+        index=INDEX_NAME,
         body={
             "query": {"bool": {"must": must_clauses}},
             "size": 0,
@@ -3476,7 +3632,144 @@ def list_patterns(
         },
     )
 
-    return {
+    pattern_counts = {
         bucket["key"]: bucket["doc_count"]
-        for bucket in result.get("aggregations", {}).get("patterns", {}).get("buckets", [])
+        for bucket in agg_result.get("aggregations", {}).get("patterns", {}).get("buckets", [])
+    }
+
+    # Get example classes for each pattern
+    patterns_summary = []
+    total_classes = 0
+
+    for pattern_name, count in pattern_counts.items():
+        total_classes += count
+
+        # Get a few example classes for this pattern
+        examples_result = client.search(
+            index=INDEX_NAME,
+            body={
+                "query": {
+                    "bool": {"must": must_clauses + [{"term": {"detected_patterns": pattern_name}}]}
+                },
+                "size": 3,
+                "_source": ["name", "relative_path", "line_start", "pattern_confidence"],
+            },
+        )
+
+        examples = []
+        for hit in examples_result.get("hits", {}).get("hits", []):
+            source = hit["_source"]
+            confidence = source.get("pattern_confidence", {}).get(pattern_name, 0)
+            examples.append(
+                {
+                    "name": source.get("name"),
+                    "file": source.get("relative_path"),
+                    "line": source.get("line_start"),
+                    "confidence": confidence,
+                }
+            )
+
+        patterns_summary.append(
+            {
+                "pattern": pattern_name,
+                "count": count,
+                "examples": examples,
+            }
+        )
+
+    return {
+        "patterns": patterns_summary,
+        "total_classes_with_patterns": total_classes,
+    }
+
+
+def find_by_pattern(
+    es: ElasticsearchRepository,
+    pattern: str,
+    scope: str,
+    repository: str,
+    username: str = "main",
+    min_confidence: float = 0.6,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """Find all classes implementing a specific design pattern.
+
+    Supports: singleton, builder, factory, repository.
+
+    Args:
+        es: Elasticsearch repository.
+        pattern: Pattern type to search for.
+        scope: Repository scope (required).
+        repository: Repository name (required).
+        username: User branch.
+        min_confidence: Minimum confidence score (0.0-1.0).
+        limit: Maximum results.
+
+    Returns:
+        Dict with:
+        - classes: List of matching classes with confidence scores
+        - count: Total number of matches
+        - pattern: The pattern searched for
+    """
+    from shared.db.repositories.base import INDEX_NAME
+
+    # Validate limit
+    limit = max(1, min(limit, 100))
+
+    must_clauses = [
+        {"term": {"username": username}},
+        {"term": {"scope": scope}},
+        {"term": {"repository": repository}},
+        {"term": {"detected_patterns": pattern}},
+        {"term": {"element_type": "class"}},
+    ]
+
+    client = es._get_client()
+    result = client.search(
+        index=INDEX_NAME,
+        body={
+            "query": {"bool": {"must": must_clauses}},
+            "size": limit * 2,  # Fetch extra for confidence filtering
+            "_source": [
+                "element_id",
+                "name",
+                "relative_path",
+                "line_start",
+                "detected_patterns",
+                "pattern_confidence",
+                "summary",
+            ],
+        },
+    )
+
+    classes = []
+    for hit in result.get("hits", {}).get("hits", []):
+        source = hit["_source"]
+        confidence = source.get("pattern_confidence", {}).get(pattern, 0)
+
+        # Filter by minimum confidence
+        if confidence < min_confidence:
+            continue
+
+        classes.append(
+            {
+                "element_id": source.get("element_id"),
+                "name": source.get("name"),
+                "file": source.get("relative_path"),
+                "line": source.get("line_start"),
+                "confidence": confidence,
+                "summary": source.get("summary"),
+            }
+        )
+
+        if len(classes) >= limit:
+            break
+
+    # Sort by confidence descending
+    classes.sort(key=lambda x: x["confidence"], reverse=True)
+
+    return {
+        "pattern": pattern,
+        "classes": classes,
+        "count": len(classes),
     }

@@ -80,6 +80,7 @@ class MagaldiMCPServer:
             batch_get_elements,
             dependency_graph,
             explain_element,
+            find_by_pattern,
             find_call_chain,
             find_callers,
             find_dead_code,
@@ -101,6 +102,7 @@ class MagaldiMCPServer:
             get_repo_stats,
             list_features,
             list_glossary,
+            list_patterns,
             list_repos,
             pattern_search,
             search_code,
@@ -373,6 +375,25 @@ class MagaldiMCPServer:
                 repository=args["repository"],
                 username=args.get("username"),
                 internal_only=args.get("internal_only", True),
+            )
+        elif name == "list_patterns":
+            return await asyncio.to_thread(
+                list_patterns,
+                es,
+                scope=args["scope"],
+                repository=args["repository"],
+                username=args.get("username", self.default_username),
+            )
+        elif name == "find_by_pattern":
+            return await asyncio.to_thread(
+                find_by_pattern,
+                es,
+                pattern=args["pattern"],
+                scope=args["scope"],
+                repository=args["repository"],
+                username=args.get("username", self.default_username),
+                min_confidence=args.get("min_confidence", 0.6),
+                limit=args.get("limit", 20),
             )
         else:
             raise ValueError(f"Unknown tool: {name}")
