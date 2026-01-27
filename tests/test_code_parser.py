@@ -1715,3 +1715,91 @@ class TestCodeElementCallsField:
         assert len(element.calls) == 2
         assert element.calls[0].name == "validate"
         assert element.calls[1].name == "process"
+
+
+# =============================================================================
+# PATTERN DETECTION TESTS
+# =============================================================================
+
+
+class TestPatternDetection:
+    """Tests for pattern detection during parsing."""
+
+    def test_extracts_class_variables_for_singleton_pattern(self):
+        """Test that class variables are detected for singleton pattern detection."""
+        code = '''
+class Singleton:
+    _instance = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def do_something(self):
+        pass
+'''
+        parser = PythonParser()
+        file_info = FileInfo(
+            relative_path="singleton.py",
+            absolute_path=Path("/fake/singleton.py"),
+            language="python",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        class_elem = next((e for e in elements if e.element_type == "class"), None)
+
+        assert class_elem is not None
+        assert class_elem.detected_patterns is not None
+        assert "singleton" in class_elem.detected_patterns
+
+    def test_singleton_pattern_with_get_instance_method(self):
+        """Test singleton pattern detection with get_instance method."""
+        code = '''
+class MySingleton:
+    _instance = None
+
+    @classmethod
+    def get_instance(cls):
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+'''
+        parser = PythonParser()
+        file_info = FileInfo(
+            relative_path="singleton.py",
+            absolute_path=Path("/fake/singleton.py"),
+            language="python",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        class_elem = next((e for e in elements if e.element_type == "class"), None)
+
+        assert class_elem is not None
+        assert class_elem.detected_patterns is not None
+        assert "singleton" in class_elem.detected_patterns
+
+    def test_class_without_class_variables_no_singleton(self):
+        """Test that a class without _instance class variable is not detected as singleton."""
+        code = '''
+class RegularClass:
+    def __init__(self):
+        self.value = 42
+
+    def do_something(self):
+        pass
+'''
+        parser = PythonParser()
+        file_info = FileInfo(
+            relative_path="regular.py",
+            absolute_path=Path("/fake/regular.py"),
+            language="python",
+        )
+
+        elements = parser.parse(code, file_info, "scope", "repo", "main")
+        class_elem = next((e for e in elements if e.element_type == "class"), None)
+
+        assert class_elem is not None
+        # Should not detect singleton pattern
+        if class_elem.detected_patterns:
+            assert "singleton" not in class_elem.detected_patterns

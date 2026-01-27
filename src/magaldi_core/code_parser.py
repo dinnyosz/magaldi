@@ -831,10 +831,20 @@ class PythonParser(TreeSitterParser):
                     e.name for e in elements
                     if e.parent_id == elem.element_id and e.element_type == "method"
                 ]
+
+                # Collect class-level variables (defined at class scope, not in methods)
+                # These are stored as separate variable elements with parent_id pointing to the class
+                class_variables = [
+                    e.name for e in elements
+                    if e.parent_id == elem.element_id and e.element_type == "variable"
+                ]
+
                 class_info = {
                     "name": elem.name,
                     "attributes": [a.get("name", "") for a in (elem.class_attributes or [])],
                     "methods": class_methods,
+                    "class_variables": class_variables,
+                    "decorators": elem.decorators or [],
                 }
                 patterns, confidence = detect_patterns(class_info, [], "python")
                 elem.detected_patterns = patterns
