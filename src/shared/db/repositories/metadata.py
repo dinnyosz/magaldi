@@ -307,6 +307,7 @@ class MetadataRepository:
         username: str,
         element_types: list[str] | None = None,
         embedding_type: str = "summary",
+        exclude_tests: bool = True,
     ) -> list[dict[str, Any]]:
         """Fetch all elements with embeddings for clustering.
 
@@ -316,6 +317,7 @@ class MetadataRepository:
             username: Username to filter by.
             element_types: Filter by element types (e.g., ["function", "method"]).
             embedding_type: Type of embedding to fetch - "summary" or "code".
+            exclude_tests: If True, exclude elements marked as tests (default: True).
 
         Returns:
             List of dicts with element_id, {embedding_type}_embedding, element_type, name, relative_path.
@@ -331,6 +333,11 @@ class MetadataRepository:
         if element_types:
             must_clauses.append({"terms": {"element_type": element_types}})
 
+        # Build query with optional test exclusion
+        query: dict[str, Any] = {"bool": {"must": must_clauses}}
+        if exclude_tests:
+            query["bool"]["must_not"] = [{"term": {"is_test": True}}]
+
         client = self._get_client()
 
         # Use scroll for large result sets
@@ -338,7 +345,7 @@ class MetadataRepository:
         response = client.search(
             index=INDEX_NAME,
             body={
-                "query": {"bool": {"must": must_clauses}},
+                "query": query,
                 "size": 1000,
                 "_source": ["element_id", field_name, "element_type", "name", "relative_path"],
             },

@@ -6,14 +6,10 @@ Run with: pytest -m integration tests/test_db_elasticsearch.py
 
 from __future__ import annotations
 
-import time
-
 import pytest
 
-from shared.config import load_config
-from shared.db.elasticsearch import INDEX_NAME
 from magaldi_core.code_parser import CodeElement
-
+from shared.db.elasticsearch import INDEX_NAME
 
 # Skip all tests if Elasticsearch is not available
 pytestmark = pytest.mark.integration
@@ -23,7 +19,8 @@ pytestmark = pytest.mark.integration
 def config():
     """Load config for ES connection."""
     import os
-    from shared.config import reset_config, MagaldiConfig, ElasticsearchConfig
+
+    from shared.config import ElasticsearchConfig, MagaldiConfig, reset_config
 
     # Reset config singleton
     reset_config()
@@ -682,6 +679,111 @@ class TestElasticsearchVectorSearch:
         # Results should have code_embedding field
         assert any("code_embedding" in r for r in results)
 
+    def test_get_all_embeddings_excludes_tests_by_default(self, es_repo):
+        """Test get_all_embeddings excludes test elements by default."""
+        # Create a regular element
+        regular_elem = CodeElement(
+            element_id="test-es:test-repo:main:src/utils.py:function:process:1",
+            scope="test-es",
+            repository="test-repo",
+            username="main",
+            relative_path="src/utils.py",
+            element_type="function",
+            name="process",
+            language="python",
+            line_start=1,
+            line_end=10,
+            raw_code="def process(): pass",
+            is_test=False,
+        )
+
+        # Create a test element
+        test_elem = CodeElement(
+            element_id="test-es:test-repo:main:tests/test_utils.py:function:test_process:1",
+            scope="test-es",
+            repository="test-repo",
+            username="main",
+            relative_path="tests/test_utils.py",
+            element_type="function",
+            name="test_process",
+            language="python",
+            line_start=1,
+            line_end=10,
+            raw_code="def test_process(): pass",
+            is_test=True,
+        )
+
+        es_repo.index_element(regular_elem)
+        es_repo.index_element(test_elem)
+        es_repo.store_embedding(regular_elem.element_id, [0.1] * 1024, embedding_type="summary")
+        es_repo.store_embedding(test_elem.element_id, [0.2] * 1024, embedding_type="summary")
+
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+
+        # Default: exclude tests
+        results = es_repo.get_all_embeddings(
+            scope="test-es",
+            repository="test-repo",
+            username="main",
+        )
+
+        element_ids = [r["element_id"] for r in results]
+        assert regular_elem.element_id in element_ids
+        assert test_elem.element_id not in element_ids
+
+    def test_get_all_embeddings_includes_tests_when_requested(self, es_repo):
+        """Test get_all_embeddings includes test elements when exclude_tests=False."""
+        # Create a regular element
+        regular_elem = CodeElement(
+            element_id="test-es:test-repo:main:src/utils2.py:function:process2:1",
+            scope="test-es",
+            repository="test-repo",
+            username="main",
+            relative_path="src/utils2.py",
+            element_type="function",
+            name="process2",
+            language="python",
+            line_start=1,
+            line_end=10,
+            raw_code="def process2(): pass",
+            is_test=False,
+        )
+
+        # Create a test element
+        test_elem = CodeElement(
+            element_id="test-es:test-repo:main:tests/test_utils2.py:function:test_process2:1",
+            scope="test-es",
+            repository="test-repo",
+            username="main",
+            relative_path="tests/test_utils2.py",
+            element_type="function",
+            name="test_process2",
+            language="python",
+            line_start=1,
+            line_end=10,
+            raw_code="def test_process2(): pass",
+            is_test=True,
+        )
+
+        es_repo.index_element(regular_elem)
+        es_repo.index_element(test_elem)
+        es_repo.store_embedding(regular_elem.element_id, [0.3] * 1024, embedding_type="summary")
+        es_repo.store_embedding(test_elem.element_id, [0.4] * 1024, embedding_type="summary")
+
+        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+
+        # Include tests
+        results = es_repo.get_all_embeddings(
+            scope="test-es",
+            repository="test-repo",
+            username="main",
+            exclude_tests=False,
+        )
+
+        element_ids = [r["element_id"] for r in results]
+        assert regular_elem.element_id in element_ids
+        assert test_elem.element_id in element_ids
+
 
 # =============================================================================
 # EMBEDDING STORE TESTS
@@ -735,8 +837,8 @@ class TestInterruptedRunDetection:
     def test_incomplete_file_detected_when_element_count_mismatch(self, config):
         """Test that files with mismatched element_count are detected as incomplete."""
         from shared.db.elasticsearch import (
-            ElasticsearchRepository,
             ElasticsearchFileStateRepository,
+            ElasticsearchRepository,
         )
 
         es_repo = ElasticsearchRepository(config)
@@ -815,8 +917,8 @@ class TestInterruptedRunDetection:
     def test_complete_file_has_valid_hash(self, config):
         """Test that files with matching element_count are detected as complete."""
         from shared.db.elasticsearch import (
-            ElasticsearchRepository,
             ElasticsearchFileStateRepository,
+            ElasticsearchRepository,
         )
 
         es_repo = ElasticsearchRepository(config)
@@ -1052,8 +1154,8 @@ class TestOldDataHandling:
     def test_old_data_without_element_count_treated_as_incomplete(self, config):
         """Test that files without element_count (old data) are treated as incomplete."""
         from shared.db.elasticsearch import (
-            ElasticsearchRepository,
             ElasticsearchFileStateRepository,
+            ElasticsearchRepository,
         )
 
         es_repo = ElasticsearchRepository(config)

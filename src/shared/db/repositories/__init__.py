@@ -212,10 +212,11 @@ class ElasticsearchRepository:
         username: str,
         element_types: list[str] | None = None,
         embedding_type: str = "summary",
+        exclude_tests: bool = True,
     ) -> list[dict[str, Any]]:
         """Fetch all elements with embeddings for clustering."""
         return self._metadata.get_all_embeddings(
-            scope, repository, username, element_types, embedding_type
+            scope, repository, username, element_types, embedding_type, exclude_tests
         )
 
     # =========================================================================
