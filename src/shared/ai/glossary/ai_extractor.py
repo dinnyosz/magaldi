@@ -846,37 +846,60 @@ def extract_glossary_from_features_concurrent(
 
     total = len(features)
 
-    with ThreadPoolExecutor(max_workers=num_workers) as executor:
-        futures = {}
-        for feature in features:
-            future = executor.submit(process_feature, feature)
-            futures[future] = feature
+    # Pre-compute context tier for each feature
+    from shared.ai.context_size import TIER_MAX_WORKERS, compute_aggregation_num_ctx, iter_by_tier
 
-        for future in as_completed(futures):
-            items, api_time, success = future.result()
+    def estimate_feature_tier(feature: dict[str, Any]) -> int:
+        """Estimate context tier for a feature based on prompt size."""
+        label = feature.get("label", "")[:40]
+        summary = feature.get("summary", "")
+        user_content = GLOSSARY_EXTRACTION_USER_PROMPT.format(label=label, summary=summary)
+        prompt_chars = len(GLOSSARY_EXTRACTION_SYSTEM_PROMPT) + len(user_content)
+        return compute_aggregation_num_ctx(prompt_chars, task_type="glossary_extract")
 
-            with progress_lock:
-                counters["completed"] += 1
-                if not success:
-                    counters["failed"] += 1
-                else:
-                    counters["terms_extracted"] += len(items)
-                    timing_stats.record_api_call(api_time)
+    # Group features by tier and process each tier with appropriate max_workers
+    tier_groups = iter_by_tier(features, estimate_feature_tier)
+    max_pool_workers = num_workers if num_workers > 0 else max(TIER_MAX_WORKERS.values())
 
-            with items_lock:
-                all_items.extend(items)
+    for _tier, tier_max_workers, tier_features in tier_groups:
+        effective_workers = min(max_pool_workers, tier_max_workers)
 
-            if on_progress:
-                state = GlossaryProgressState(
-                    total=total,
-                    completed=counters["completed"],
-                    failed=counters["failed"],
-                    terms_extracted=counters["terms_extracted"],
-                    timing=timing_stats,
-                    workers=worker_status,
-                    num_workers=num_workers,
-                )
-                on_progress(state)
+        # Reset worker ID pool for this tier
+        with worker_id_lock:
+            available_worker_ids.clear()
+            available_worker_ids.extend(range(effective_workers))
+
+        with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+            futures = {}
+            for feature in tier_features:
+                future = executor.submit(process_feature, feature)
+                futures[future] = feature
+
+            for future in as_completed(futures):
+                items, api_time, success = future.result()
+
+                with progress_lock:
+                    counters["completed"] += 1
+                    if not success:
+                        counters["failed"] += 1
+                    else:
+                        counters["terms_extracted"] += len(items)
+                        timing_stats.record_api_call(api_time)
+
+                with items_lock:
+                    all_items.extend(items)
+
+                if on_progress:
+                    state = GlossaryProgressState(
+                        total=total,
+                        completed=counters["completed"],
+                        failed=counters["failed"],
+                        terms_extracted=counters["terms_extracted"],
+                        timing=timing_stats,
+                        workers=worker_status,
+                        num_workers=effective_workers,
+                    )
+                    on_progress(state)
 
     # Merge items by term name
     merged_items = merge_glossary_items(all_items)
@@ -955,36 +978,58 @@ def extract_glossary_from_features_concurrent(
     final_items: list[GlossaryItem] = []
     final_lock = threading.Lock()
 
-    with ThreadPoolExecutor(max_workers=num_workers) as executor:
-        futures = {}
-        for item in merged_items:
-            future = executor.submit(generate_summary_for_term, item)
-            futures[future] = item
+    # Pre-compute context tier for each merged item
+    def estimate_term_tier(item: GlossaryItem) -> int:
+        """Estimate context tier for a glossary term based on prompt size."""
+        features_context = build_features_context(item.source_feature_ids, features_by_id)
+        user_content = GLOSSARY_SUMMARY_USER_PROMPT.format(
+            term=item.name,
+            features_context=features_context,
+        )
+        prompt_chars = len(GLOSSARY_SUMMARY_SYSTEM_PROMPT) + len(user_content)
+        return compute_aggregation_num_ctx(prompt_chars, task_type="glossary_summary")
 
-        for future in as_completed(futures):
-            item, api_time, success = future.result()
+    # Group items by tier and process each tier with appropriate max_workers
+    tier_groups = iter_by_tier(merged_items, estimate_term_tier)
 
-            with progress_lock:
-                counters["completed"] += 1
-                if not success:
-                    counters["failed"] += 1
-                else:
-                    timing_stats.record_api_call(api_time)
+    for _tier, tier_max_workers, tier_items in tier_groups:
+        effective_workers = min(max_pool_workers, tier_max_workers)
 
-            with final_lock:
-                final_items.append(item)
+        # Reset worker ID pool for this tier
+        with worker_id_lock:
+            available_worker_ids.clear()
+            available_worker_ids.extend(range(effective_workers))
 
-            if on_progress:
-                state = GlossaryProgressState(
-                    total=total_terms,
-                    completed=counters["completed"],
-                    failed=counters["failed"],
-                    terms_extracted=len(final_items),
-                    timing=timing_stats,
-                    workers=worker_status,
-                    num_workers=num_workers,
-                )
-                on_progress(state)
+        with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+            futures = {}
+            for item in tier_items:
+                future = executor.submit(generate_summary_for_term, item)
+                futures[future] = item
+
+            for future in as_completed(futures):
+                item, api_time, success = future.result()
+
+                with progress_lock:
+                    counters["completed"] += 1
+                    if not success:
+                        counters["failed"] += 1
+                    else:
+                        timing_stats.record_api_call(api_time)
+
+                with final_lock:
+                    final_items.append(item)
+
+                if on_progress:
+                    state = GlossaryProgressState(
+                        total=total_terms,
+                        completed=counters["completed"],
+                        failed=counters["failed"],
+                        terms_extracted=len(final_items),
+                        timing=timing_stats,
+                        workers=worker_status,
+                        num_workers=effective_workers,
+                    )
+                    on_progress(state)
 
     final_items.sort(key=lambda x: x.name)
     return final_items

@@ -11,6 +11,11 @@ Two approaches are supported:
 
 from __future__ import annotations
 
+from collections import defaultdict
+from typing import TypeVar
+
+T = TypeVar("T")
+
 # Context size tiers (powers of 2 for memory alignment)
 CONTEXT_TIERS = [2048, 4096, 8192, 16384, 32768]
 
@@ -159,3 +164,63 @@ def compute_aggregation_num_ctx(
 
     # Fallback to largest tier
     return CONTEXT_TIERS[-1]
+
+
+# =============================================================================
+# TIER-BASED BATCHING UTILITIES
+# =============================================================================
+
+
+def get_max_workers_for_tier(tier: int) -> int:
+    """Get max workers for a context tier.
+
+    Args:
+        tier: Context tier (e.g., 2048, 4096).
+
+    Returns:
+        Max workers for this tier.
+    """
+    return TIER_MAX_WORKERS.get(tier, 1)
+
+
+def group_by_tier(items: list[T], tier_fn: callable) -> dict[int, list[T]]:
+    """Group items by their context tier.
+
+    Args:
+        items: List of items to group.
+        tier_fn: Function that takes an item and returns its context tier.
+
+    Returns:
+        Dict mapping tier to list of items in that tier.
+    """
+    groups: dict[int, list[T]] = defaultdict(list)
+    for item in items:
+        tier = tier_fn(item)
+        groups[tier].append(item)
+    return dict(groups)
+
+
+def iter_by_tier(
+    items: list[T],
+    tier_fn: callable,
+) -> list[tuple[int, int, list[T]]]:
+    """Iterate items grouped by tier with max_workers.
+
+    Yields tiers in order from smallest to largest context (most parallelism first).
+
+    Args:
+        items: List of items to process.
+        tier_fn: Function that takes an item and returns its context tier.
+
+    Returns:
+        List of (tier, max_workers, items) tuples sorted by tier ascending.
+    """
+    groups = group_by_tier(items, tier_fn)
+
+    # Sort by tier ascending (smallest first = most parallelism)
+    result = []
+    for tier in sorted(groups.keys()):
+        max_workers = get_max_workers_for_tier(tier)
+        result.append((tier, max_workers, groups[tier]))
+
+    return result

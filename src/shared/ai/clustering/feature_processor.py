@@ -20,13 +20,13 @@ from shared.ai.clustering.clusterer import ClusteringResult, ClusterResult
 
 if TYPE_CHECKING:
     from shared.config import MagaldiConfig
-from shared.db.elasticsearch import ElasticsearchRepository
 from shared.ai.embedding import (
     CodeEmbeddingClient,
     normalize_vector,
     validate_vector,
 )
 from shared.ai.summarization import SummarizationLLMClient
+from shared.db.elasticsearch import ElasticsearchRepository
 
 
 def _get_model_display_name(model_name: str, provider: str, num_ctx: int) -> str:
@@ -591,7 +591,7 @@ def process_features(
     on_status_change: Callable[[], None] | None = None,
     worker_status: FeatureWorkerStatus | None = None,
     timing_stats: FeatureTimingStats | None = None,
-    magaldi_config: "MagaldiConfig | None" = None,
+    magaldi_config: MagaldiConfig | None = None,
 ) -> dict[str, Any]:
     """Process features: summarize -> embed -> index (parallel).
 
@@ -719,56 +719,88 @@ def process_features(
         finally:
             release_worker_id(wid)
 
-    # Process features in parallel
-    # Handle workers=0 (auto) by using tier-based default like Phase 4
-    from shared.ai.context_size import TIER_MAX_WORKERS
-    max_workers = config.num_workers if config.num_workers > 0 else max(TIER_MAX_WORKERS.values())
-    executor = ThreadPoolExecutor(max_workers=max_workers)
-    future_to_cluster: dict = {}
+    # Pre-compute context tier for each cluster based on prompt size
+    from shared.ai.context_size import TIER_MAX_WORKERS, compute_aggregation_num_ctx, iter_by_tier
+
+    def estimate_cluster_tier(cluster: ClusterResult) -> int:
+        """Estimate context tier for a cluster based on member summaries."""
+        summaries_text = []
+        for i, element_id in enumerate(cluster.element_ids[:config.max_member_summaries]):
+            summary = member_summaries.get(element_id, "")
+            name = cluster.element_names[i] if i < len(cluster.element_names) else "unknown"
+            if summary:
+                summaries_text.append(f"- {name}(): {summary}")
+        if not summaries_text:
+            summaries_text = [f"- {name}()" for name in cluster.element_names[:10]]
+
+        user_content = FEATURE_USER_PROMPT.format(
+            label=cluster.label or f"cluster_{cluster.cluster_id}",
+            member_count=cluster.size,
+            member_summaries="\n".join(summaries_text),
+        )
+        prompt_chars = len(FEATURE_SYSTEM_PROMPT) + len(user_content)
+        return compute_aggregation_num_ctx(prompt_chars, task_type="feature")
+
+    # Group clusters by tier and process each tier with appropriate max_workers
+    tier_groups = iter_by_tier(clusters, estimate_cluster_tier)
+
+    # Handle workers=0 (auto) - will use tier-specific limits
+    max_pool_workers = config.num_workers if config.num_workers > 0 else max(TIER_MAX_WORKERS.values())
 
     try:
-        # Submit all features for processing
-        for cluster in clusters:
-            future = executor.submit(process_wrapper, cluster)
-            future_to_cluster[future] = cluster
+        for _tier, tier_max_workers, tier_clusters in tier_groups:
+            # Use min of configured workers and tier limit
+            effective_workers = min(max_pool_workers, tier_max_workers)
 
-        while future_to_cluster:
-            done, _ = wait(future_to_cluster.keys(), return_when=FIRST_COMPLETED)
+            # Reset worker ID pool for this tier
+            available_worker_ids.clear()
+            available_worker_ids.extend(range(effective_workers))
 
-            for future in done:
-                cluster = future_to_cluster.pop(future)
-                processed = future.result()
+            executor = ThreadPoolExecutor(max_workers=effective_workers)
+            future_to_cluster: dict = {}
 
-                timing_stats.record(processed.summarize_time, processed.embed_time)
+            # Submit all clusters in this tier
+            for cluster in tier_clusters:
+                future = executor.submit(process_wrapper, cluster)
+                future_to_cluster[future] = cluster
 
-                if processed.success:
-                    completed_count += 1
-                    # Track processed feature data for sub-feature processing
-                    processed_features[processed.cluster_id] = (processed.label, processed.summary)
-                else:
-                    failed_count += 1
-                    errors.append(f"Feature {cluster.label}: {processed.error}")
+            while future_to_cluster:
+                done, _ = wait(future_to_cluster.keys(), return_when=FIRST_COMPLETED)
 
-                if on_progress:
-                    progress_state = FeatureProgressState(
-                        total=total,
-                        completed=completed_count,
-                        failed=failed_count,
-                        timing=timing_stats,
-                        workers=worker_status,
-                        num_workers=config.num_workers,
-                    )
-                    on_progress(progress_state)
+                for future in done:
+                    cluster = future_to_cluster.pop(future)
+                    processed = future.result()
+
+                    timing_stats.record(processed.summarize_time, processed.embed_time)
+
+                    if processed.success:
+                        completed_count += 1
+                        # Track processed feature data for sub-feature processing
+                        processed_features[processed.cluster_id] = (processed.label, processed.summary)
+                    else:
+                        failed_count += 1
+                        errors.append(f"Feature {cluster.label}: {processed.error}")
+
+                    if on_progress:
+                        progress_state = FeatureProgressState(
+                            total=total,
+                            completed=completed_count,
+                            failed=failed_count,
+                            timing=timing_stats,
+                            workers=worker_status,
+                            num_workers=effective_workers,
+                        )
+                        on_progress(progress_state)
+
+            # Shutdown executor for this tier before moving to next
+            executor.shutdown(wait=True)
 
     except KeyboardInterrupt:
-        for future in future_to_cluster:
-            future.cancel()
-        executor.shutdown(wait=False, cancel_futures=True)
-        for wid in range(config.num_workers):
+        if 'executor' in dir():
+            executor.shutdown(wait=False, cancel_futures=True)
+        for wid in range(max_pool_workers):
             worker_status.clear(wid)
         raise
-    else:
-        executor.shutdown(wait=True)
 
     return {
         "processed": completed_count,
@@ -829,7 +861,7 @@ Summary:"""
 
 
 def _build_subfeature_prompt(
-    cluster: "ClusterResult",
+    cluster: ClusterResult,
     member_summaries: dict[str, str],
     parent_label: str,
     parent_summary: str,
@@ -883,7 +915,7 @@ def _build_subfeature_prompt(
 
 
 def _generate_subfeature_summary(
-    cluster: "ClusterResult",
+    cluster: ClusterResult,
     member_summaries: dict[str, str],
     parent_label: str,
     parent_summary: str,
@@ -942,7 +974,7 @@ def _process_single_subfeature(
     scope: str,
     repository: str,
     username: str,
-    es_repo: "ElasticsearchRepository",
+    es_repo: ElasticsearchRepository,
     llm_client: SummarizationLLMClient,
     embed_client: CodeEmbeddingClient,
     config: FeatureProcessingConfig,
@@ -952,7 +984,6 @@ def _process_single_subfeature(
 ) -> ProcessedSubfeature:
     """Process a single subfeature: summarize -> embed -> index."""
     sub_label = work_item.sub_cluster.label or f"subcluster_{work_item.sub_cluster.cluster_id}"
-    start_time = time.time()
     summarize_time = 0.0
     embed_time = 0.0
 
@@ -1055,12 +1086,12 @@ def process_subfeatures(
     scope: str,
     repository: str,
     username: str,
-    es_repo: "ElasticsearchRepository",
+    es_repo: ElasticsearchRepository,
     config: FeatureProcessingConfig | None = None,
     subcluster_config: SubClusterConfig | None = None,
     on_progress: Callable[[SubfeatureProgressState], None] | None = None,
     on_labeling_progress: Callable[[SubfeatureLabelingState], None] | None = None,
-    magaldi_config: "MagaldiConfig | None" = None,
+    magaldi_config: MagaldiConfig | None = None,
     timing_stats: SubfeatureTimingStats | None = None,
     worker_status: SubfeatureWorkerStatus | None = None,
 ) -> dict[str, Any]:
@@ -1109,7 +1140,10 @@ def process_subfeatures(
     redis_repo = None
     labeling_redis_repo = None
     if magaldi_config:
-        from shared.db.redis import RedisSubfeatureJobRepository, RedisSubfeatureLabelingJobRepository
+        from shared.db.redis import (
+            RedisSubfeatureJobRepository,
+            RedisSubfeatureLabelingJobRepository,
+        )
         redis_repo = RedisSubfeatureJobRepository(magaldi_config)
         labeling_redis_repo = RedisSubfeatureLabelingJobRepository(magaldi_config)
         # Clear stale subfeature queue data
@@ -1330,39 +1364,80 @@ def process_subfeatures(
         finally:
             release_worker_id(wid)
 
-    # Process subfeatures in parallel
-    # Handle workers=0 (auto) by using tier-based default like Phase 4
-    from shared.ai.context_size import TIER_MAX_WORKERS
-    max_workers = config.num_workers if config.num_workers > 0 else max(TIER_MAX_WORKERS.values())
-    executor = ThreadPoolExecutor(max_workers=max_workers)
-    future_to_work: dict = {}
+    # Pre-compute context tier for each work item based on prompt size
+    from shared.ai.context_size import TIER_MAX_WORKERS, compute_aggregation_num_ctx, iter_by_tier
+
+    def estimate_subfeature_tier(work_item: SubfeatureWorkItem) -> int:
+        """Estimate context tier for a subfeature work item."""
+        summaries_text = []
+        cluster = work_item.sub_cluster
+        for i, element_id in enumerate(cluster.element_ids[:config.max_member_summaries]):
+            summary = work_item.member_summaries.get(element_id, "")
+            name = cluster.element_names[i] if i < len(cluster.element_names) else "unknown"
+            if summary:
+                summaries_text.append(f"- {name}(): {summary}")
+        if not summaries_text:
+            summaries_text = [f"- {name}()" for name in cluster.element_names[:10]]
+
+        user_content = SUBFEATURE_USER_PROMPT.format(
+            parent_label=work_item.parent_label,
+            parent_summary=work_item.parent_summary,
+            member_count=cluster.size,
+            member_summaries="\n".join(summaries_text),
+        )
+        prompt_chars = len(SUBFEATURE_SYSTEM_PROMPT) + len(user_content)
+        return compute_aggregation_num_ctx(prompt_chars, task_type="subfeature")
+
+    # Group work items by tier and process each tier with appropriate max_workers
+    tier_groups = iter_by_tier(work_queue, estimate_subfeature_tier)
+
+    # Handle workers=0 (auto) - will use tier-specific limits
+    max_pool_workers = config.num_workers if config.num_workers > 0 else max(TIER_MAX_WORKERS.values())
 
     try:
-        # Submit all work items
-        for work_item in work_queue:
-            future = executor.submit(process_wrapper, work_item)
-            future_to_work[future] = work_item
+        for _tier, tier_max_workers, tier_items in tier_groups:
+            # Use min of configured workers and tier limit
+            effective_workers = min(max_pool_workers, tier_max_workers)
 
-        while future_to_work:
-            done, _ = wait(future_to_work.keys(), return_when=FIRST_COMPLETED)
+            # Reset worker ID pool for this tier
+            available_worker_ids.clear()
+            available_worker_ids.extend(range(effective_workers))
 
-            for future in done:
-                work_item = future_to_work.pop(future)
-                processed = future.result()
+            executor = ThreadPoolExecutor(max_workers=effective_workers)
+            future_to_work: dict = {}
 
-                timing_stats.record(processed.summarize_time, processed.embed_time)
+            # Submit all work items in this tier
+            for work_item in tier_items:
+                future = executor.submit(process_wrapper, work_item)
+                future_to_work[future] = work_item
 
-                if processed.success:
-                    completed_count += 1
-                else:
-                    failed_count += 1
-                    if processed.error:
-                        errors.append(f"Subfeature {processed.sub_label} of {processed.parent_label}: {processed.error}")
+            while future_to_work:
+                done, _ = wait(future_to_work.keys(), return_when=FIRST_COMPLETED)
 
-                on_status_change()
+                for future in done:
+                    work_item = future_to_work.pop(future)
+                    processed = future.result()
 
-    finally:
-        executor.shutdown(wait=True)
+                    timing_stats.record(processed.summarize_time, processed.embed_time)
+
+                    if processed.success:
+                        completed_count += 1
+                    else:
+                        failed_count += 1
+                        if processed.error:
+                            errors.append(f"Subfeature {processed.sub_label} of {processed.parent_label}: {processed.error}")
+
+                    on_status_change()
+
+            # Shutdown executor for this tier before moving to next
+            executor.shutdown(wait=True)
+
+    except KeyboardInterrupt:
+        if 'executor' in dir():
+            executor.shutdown(wait=False, cancel_futures=True)
+        for wid in range(max_pool_workers):
+            worker_status.clear(wid)
+        raise
 
     return {
         "subfeatures_created": completed_count,
