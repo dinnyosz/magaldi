@@ -563,13 +563,13 @@ def run_feature_extraction(
 
                 # Worker table
                 import time as time_mod
-                worker_table = Table(show_header=False, box=None, padding=0)
+                worker_table = Table(show_header=False, box=None, padding=(0, 1))
                 worker_table.add_column("ID", style="dim", width=4)
                 worker_table.add_column("Stage", style="cyan", width=10)
                 worker_table.add_column("Model", style="yellow", width=model_col_width)
                 worker_table.add_column("Ctx", style="blue", width=4)
                 worker_table.add_column("Time", style="green", width=6)
-                worker_table.add_column("Parent", style="magenta", width=20)
+                worker_table.add_column("Parent", style="magenta", width=28)
                 worker_table.add_column("Subfeature")
 
                 workers_data = state.workers.get_all()
@@ -579,8 +579,8 @@ def run_feature_extraction(
                         parent_feature, stage, model, subfeature, ctx_size, start_time = workers_data[wid]
                         elapsed = now - start_time if start_time > 0 else 0
                         elapsed_str = f"{elapsed:.1f}s" if elapsed > 0 else ""
-                        display_parent = parent_feature[:17] + "..." if len(parent_feature) > 20 else parent_feature
-                        display_sub = subfeature[:28] + "..." if len(subfeature) > 31 else subfeature
+                        display_parent = parent_feature[:25] + "..." if len(parent_feature) > 28 else parent_feature
+                        display_sub = subfeature[:35] + "..." if len(subfeature) > 38 else subfeature
                         worker_table.add_row(f"[{wid}]", stage, model, ctx_size, elapsed_str, display_parent, display_sub)
                     else:
                         worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "", "", "", "")
