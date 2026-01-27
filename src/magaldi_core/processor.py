@@ -39,7 +39,7 @@ from shared.ai.summarization import (
     build_prompt,
     clean_summary,
 )
-from shared.ai.context_size import compute_element_num_ctx
+from shared.ai.context_size import compute_element_num_ctx, CONTEXT_TIERS, TIER_MAX_WORKERS
 
 
 def _get_model_display_name(model_config: ModelConfig, num_ctx: int) -> str:
@@ -418,21 +418,9 @@ class DependencyTracker:
 
     Dynamic worker scaling: Smaller context tiers allow more parallel workers since
     they use less GPU memory. Larger tiers are limited to prevent OOM/slowdowns.
+
+    Uses CONTEXT_TIERS and TIER_MAX_WORKERS from shared.ai.context_size.
     """
-
-    # Standard context tiers (must match ollama_models.CONTEXT_TIERS)
-    CONTEXT_TIERS = [2048, 4096, 8192, 16384, 32768]
-
-    # Max concurrent workers per tier (inversely proportional to context size)
-    # Smaller contexts = more parallelism, larger contexts = less to avoid GPU saturation
-    # Tuned for M4 Pro 48GB - adjust for different hardware
-    TIER_MAX_WORKERS = {
-        2048: 12,  # Small context - max parallelism
-        4096: 8,   # Medium-small
-        8192: 4,   # Medium
-        16384: 2,  # Large - limited parallelism
-        32768: 1,  # Very large - sequential to avoid OOM
-    }
 
     def __init__(
         self,
@@ -440,7 +428,8 @@ class DependencyTracker:
         context_sizes: dict[str, int] | None = None,
         max_num_workers: int | None = None,
     ) -> None:
-        self._lock = threading.Lock()
+        # RLock for reentrant calls (get_parallelism_stats -> get_current_max_workers)
+        self._lock = threading.RLock()
         self._elements = {e.element_id: e for e in elements}
         self._completed: set[str] = set()
         self._in_progress: set[str] = set()
@@ -457,10 +446,10 @@ class DependencyTracker:
         """Get the context tier for an element (snaps to standard tiers)."""
         ctx = self._context_sizes.get(element_id, 2048)
         # Find the tier this context size belongs to
-        for tier in self.CONTEXT_TIERS:
+        for tier in CONTEXT_TIERS:
             if ctx <= tier:
                 return tier
-        return self.CONTEXT_TIERS[-1]  # Max tier
+        return CONTEXT_TIERS[-1]  # Max tier
 
     def _get_all_ready(self) -> list[CodeElement]:
         """Get all ready elements (parent done, not started). Must hold lock."""
@@ -515,7 +504,7 @@ class DependencyTracker:
 
             # Apply tier-specific worker limit (dynamic scaling)
             # Count how many of this tier are already in progress
-            tier_limit = self.TIER_MAX_WORKERS.get(tier, 4)
+            tier_limit = TIER_MAX_WORKERS.get(tier, 4)
             # Apply user's max_num_workers cap if set
             if self._max_num_workers is not None:
                 tier_limit = min(tier_limit, self._max_num_workers)
@@ -566,9 +555,9 @@ class DependencyTracker:
         """Get max workers for the current tier (for status display)."""
         with self._lock:
             if self._current_tier is None:
-                tier_limit = self.TIER_MAX_WORKERS.get(self.CONTEXT_TIERS[0], 8)
+                tier_limit = TIER_MAX_WORKERS.get(CONTEXT_TIERS[0], 8)
             else:
-                tier_limit = self.TIER_MAX_WORKERS.get(self._current_tier, 4)
+                tier_limit = TIER_MAX_WORKERS.get(self._current_tier, 4)
             # Apply user's max_num_workers cap if set
             if self._max_num_workers is not None:
                 return min(tier_limit, self._max_num_workers)
@@ -1306,7 +1295,7 @@ def process_elements(
 
     # Worker ID pool - use configured num_workers as upper bound
     # Tier scaling will further limit based on context size
-    max_workers = config.num_workers if config.num_workers > 0 else max(DependencyTracker.TIER_MAX_WORKERS.values())
+    max_workers = config.num_workers if config.num_workers > 0 else max(TIER_MAX_WORKERS.values())
     available_worker_ids: list[int] = list(range(max_workers))
     worker_id_lock = threading.Lock()
 

@@ -14,6 +14,17 @@ from __future__ import annotations
 # Context size tiers (powers of 2 for memory alignment)
 CONTEXT_TIERS = [2048, 4096, 8192, 16384, 32768]
 
+# Max concurrent workers per tier (inversely proportional to context size)
+# Smaller contexts = more parallelism, larger contexts = less to avoid GPU saturation
+# Tuned for M4 Pro 48GB - adjust for different hardware
+TIER_MAX_WORKERS = {
+    2048: 12,  # Small context - max parallelism
+    4096: 8,   # Medium-small
+    8192: 4,   # Medium
+    16384: 2,  # Large - limited parallelism
+    32768: 1,  # Very large - sequential to avoid OOM
+}
+
 # Estimated prompt overhead per element type (tokens)
 # Accounts for system prompt, user template, and parent context
 # - file: system prompt (~162) + template (~50) + imports (~50) = ~262

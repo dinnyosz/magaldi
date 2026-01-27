@@ -52,6 +52,11 @@ def run_feature_extraction(
     Returns:
         Dict with feature extraction results or None if no elements to extract.
     """
+    # Handle workers=0 (auto) - use tier-based default like Phase 4
+    if workers <= 0:
+        from shared.ai.context_size import TIER_MAX_WORKERS
+        workers = max(TIER_MAX_WORKERS.values())
+
     from shared.ai.clustering.clusterer import (
         ClusterConfig,
         FeatureClusterer,
@@ -637,6 +642,11 @@ def run_glossary_extraction(
     Returns:
         Dict with glossary extraction results or None if no features.
     """
+    # Handle workers=0 (auto) - use tier-based default like Phase 4
+    if workers <= 0:
+        from shared.ai.context_size import TIER_MAX_WORKERS
+        workers = max(TIER_MAX_WORKERS.values())
+
     from shared.ai.glossary.ai_extractor import (
         GlossaryProgressState,
         GlossaryTimingStats,

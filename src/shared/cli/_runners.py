@@ -143,7 +143,7 @@ def run_processing(
             )
             deleted_from_files += count
 
-    from magaldi_core.processor import DependencyTracker
+    from shared.ai.context_size import TIER_MAX_WORKERS
 
     proc_config = ProcessingConfig(
         summarize_model=config.llm.get_summarize_model(),
@@ -154,7 +154,7 @@ def run_processing(
     )
 
     # Calculate actual max workers for display (0 = auto from tier defaults)
-    display_workers = workers if workers > 0 else max(DependencyTracker.TIER_MAX_WORKERS.values())
+    display_workers = workers if workers > 0 else max(TIER_MAX_WORKERS.values())
 
     # Pass context sizes from parsing to processing (for KV cache optimization)
     proc_config.context_sizes = parsing_result.context_sizes

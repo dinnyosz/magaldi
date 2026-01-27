@@ -720,7 +720,10 @@ def process_features(
             release_worker_id(wid)
 
     # Process features in parallel
-    executor = ThreadPoolExecutor(max_workers=config.num_workers)
+    # Handle workers=0 (auto) by using tier-based default like Phase 4
+    from shared.ai.context_size import TIER_MAX_WORKERS
+    max_workers = config.num_workers if config.num_workers > 0 else max(TIER_MAX_WORKERS.values())
+    executor = ThreadPoolExecutor(max_workers=max_workers)
     future_to_cluster: dict = {}
 
     try:
@@ -1328,7 +1331,10 @@ def process_subfeatures(
             release_worker_id(wid)
 
     # Process subfeatures in parallel
-    executor = ThreadPoolExecutor(max_workers=config.num_workers)
+    # Handle workers=0 (auto) by using tier-based default like Phase 4
+    from shared.ai.context_size import TIER_MAX_WORKERS
+    max_workers = config.num_workers if config.num_workers > 0 else max(TIER_MAX_WORKERS.values())
+    executor = ThreadPoolExecutor(max_workers=max_workers)
     future_to_work: dict = {}
 
     try:
