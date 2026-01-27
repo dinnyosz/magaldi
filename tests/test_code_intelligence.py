@@ -418,3 +418,25 @@ class TestPatternDetection:
         }
         patterns, confidence = detect_patterns(class_info, [], "python")
         assert len(patterns) == 0
+
+    def test_detect_singleton_with_class_variable(self):
+        """Detect singleton with class-level _instance variable."""
+        class_info = {
+            "name": "Logger",
+            "attributes": [],  # No instance attributes
+            "methods": ["__new__", "log", "error"],
+            "class_variables": ["_instance"],
+        }
+        patterns, confidence = detect_patterns(class_info, [], "python")
+        assert "singleton" in patterns
+
+    def test_detect_singleton_with_instance_method(self):
+        """Detect singleton with instance() class method."""
+        class_info = {
+            "name": "Configuration",
+            "attributes": ["_settings"],
+            "methods": ["instance", "get", "set"],
+            "decorators": ["classmethod"],
+        }
+        patterns, confidence = detect_patterns(class_info, [], "python")
+        assert "singleton" in patterns

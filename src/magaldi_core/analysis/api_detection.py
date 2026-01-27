@@ -293,28 +293,45 @@ def detect_patterns(
 
 
 def _detect_singleton(class_info: dict[str, Any]) -> float:
-    """Detect singleton pattern."""
+    """Detect singleton pattern.
+
+    Looks for:
+    - _instance attribute (instance or class level)
+    - get_instance/getInstance/instance methods
+    - __new__ method override
+    - @classmethod or @staticmethod on instance getter
+    """
     score = 0.0
     attributes = class_info.get("attributes", [])
     methods = class_info.get("methods", [])
+    class_variables = class_info.get("class_variables", [])
+    decorators = class_info.get("decorators", [])
 
-    # Has _instance attribute
-    if "_instance" in attributes or "instance" in attributes:
+    # Has _instance attribute (instance or class level)
+    instance_attrs = ["_instance", "instance", "_singleton", "_shared_instance"]
+    if any(attr in attributes for attr in instance_attrs):
         score += 0.3
+    if any(attr in class_variables for attr in instance_attrs):
+        score += 0.4
 
-    # Has get_instance method
-    if "get_instance" in methods or "getInstance" in methods:
-        score += 0.3
+    # Has get_instance/getInstance/instance method
+    instance_methods = ["get_instance", "getInstance", "instance", "shared", "default"]
+    if any(m in methods for m in instance_methods):
+        score += 0.4
 
     # Has __new__ method (Python singleton pattern)
     if "__new__" in methods:
+        score += 0.3
+
+    # Uses classmethod decorator (common for singletons)
+    if "classmethod" in decorators:
         score += 0.2
 
     # Returns self/instance from get_instance
     if class_info.get("method_returns_self"):
-        score += 0.2
+        score += 0.1
 
-    return score
+    return min(score, 1.0)  # Cap at 1.0
 
 
 def _detect_builder(class_info: dict[str, Any]) -> float:
