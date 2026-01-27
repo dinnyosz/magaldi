@@ -639,6 +639,68 @@ class TestGenerateSkillTool:
         assert result is not None
 
 
+class TestGenerateConfigTool:
+    """Tests for generate_config tool."""
+
+    @pytest.mark.asyncio
+    async def test_generate_config_creates_file(self, server, tmp_path):
+        """Test generate_config tool creates magaldi.yaml."""
+        # Create a fake repo directory structure: /tmp/xxx/code/my-repo
+        code_dir = tmp_path / "code"
+        repo_dir = code_dir / "my-repo"
+        repo_dir.mkdir(parents=True)
+
+        result = await server._handle_tool(
+            "generate_config",
+            {"repo_path": str(repo_dir)},
+        )
+
+        assert result is not None
+        assert "path" in result
+        assert result["repository"] == "my-repo"
+        assert result["scope"] == "code"  # Parent directory name
+        assert (repo_dir / "magaldi.yaml").exists()
+
+    @pytest.mark.asyncio
+    async def test_generate_config_with_overrides(self, server, tmp_path):
+        """Test generate_config respects scope and repository overrides."""
+        repo_dir = tmp_path / "some-dir"
+        repo_dir.mkdir()
+
+        result = await server._handle_tool(
+            "generate_config",
+            {"repo_path": str(repo_dir), "scope": "myorg", "repository": "myrepo"},
+        )
+
+        assert result["scope"] == "myorg"
+        assert result["repository"] == "myrepo"
+
+    @pytest.mark.asyncio
+    async def test_generate_config_skips_existing(self, server, tmp_path):
+        """Test generate_config skips if config already exists."""
+        repo_dir = tmp_path / "existing-repo"
+        repo_dir.mkdir()
+        (repo_dir / "magaldi.yaml").write_text("scope: test\n")
+
+        result = await server._handle_tool(
+            "generate_config",
+            {"repo_path": str(repo_dir)},
+        )
+
+        assert result.get("skipped") is True
+        assert "already exists" in result.get("reason", "")
+
+    @pytest.mark.asyncio
+    async def test_generate_config_invalid_path(self, server, tmp_path):
+        """Test generate_config handles invalid paths."""
+        result = await server._handle_tool(
+            "generate_config",
+            {"repo_path": str(tmp_path / "nonexistent")},
+        )
+
+        assert "error" in result
+
+
 class TestUnknownTool:
     """Tests for unknown tool handling."""
 

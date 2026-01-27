@@ -60,4 +60,29 @@ META_TOOLS = [
             "required": ["element_id"],
         },
     ),
+    Tool(
+        name="generate_config",
+        description="GENERATE CONFIG: Create a magaldi.yaml config file for a repository. "
+        "Auto-detects repository name from directory and scope from parent directory. "
+        "Creates the config at the repository root (not in .magaldi/). "
+        "Use this before indexing a new repository.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "repo_path": {
+                    "type": "string",
+                    "description": "Path to the repository root directory",
+                },
+                "scope": {
+                    "type": "string",
+                    "description": "Override auto-detected scope (optional)",
+                },
+                "repository": {
+                    "type": "string",
+                    "description": "Override auto-detected repository name (optional)",
+                },
+            },
+            "required": ["repo_path"],
+        },
+    ),
 ]

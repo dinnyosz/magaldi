@@ -1407,6 +1407,83 @@ The index has already done the hard work:
     return result
 
 
+def generate_config(
+    repo_path: str,
+    scope: str | None = None,
+    repository: str | None = None,
+) -> dict[str, Any]:
+    """Generate a magaldi.yaml config file for a repository.
+
+    Auto-detects repository name from directory and scope from parent directory.
+    Creates config at repo_path/magaldi.yaml.
+
+    Args:
+        repo_path: Path to the repository root directory.
+        scope: Override auto-detected scope (optional).
+        repository: Override auto-detected repository name (optional).
+
+    Returns:
+        Dict with config details and path.
+    """
+    from pathlib import Path
+
+    import yaml
+
+    repo_path_obj = Path(repo_path).resolve()
+
+    # Validate path
+    if not repo_path_obj.exists():
+        return {"error": f"Path does not exist: {repo_path}"}
+    if not repo_path_obj.is_dir():
+        return {"error": f"Path is not a directory: {repo_path}"}
+
+    # Auto-detect repository name from directory name
+    detected_repository = repo_path_obj.name
+
+    # Auto-detect scope from parent directory name
+    # Common patterns: /Users/username/code/repo -> scope=username
+    # or /home/username/projects/repo -> scope=username
+    parent = repo_path_obj.parent
+    detected_scope = parent.name
+
+    # Use overrides if provided
+    final_scope = scope or detected_scope
+    final_repository = repository or detected_repository
+
+    config_path = repo_path_obj / "magaldi.yaml"
+
+    # Check if config already exists
+    if config_path.exists():
+        return {
+            "skipped": True,
+            "reason": f"Config already exists at: {config_path}",
+            "path": str(config_path),
+        }
+
+    # Build config content
+    config_data = {
+        "scope": final_scope,
+        "repository": final_repository,
+    }
+
+    # Write config file
+    with open(config_path, "w", encoding="utf-8") as f:
+        f.write(f"# Magaldi configuration for {final_repository}\n")
+        f.write(f"# Scope groups related repositories (e.g., org name, username)\n\n")
+        yaml.dump(config_data, f, default_flow_style=False, sort_keys=False)
+
+    return {
+        "scope": final_scope,
+        "repository": final_repository,
+        "path": str(config_path),
+        "auto_detected": {
+            "scope": detected_scope,
+            "repository": detected_repository,
+        },
+        "message": f"Created magaldi.yaml at {config_path}",
+    }
+
+
 def get_call_graph(
     es: ElasticsearchRepository,
     element_id: str,

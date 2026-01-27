@@ -91,6 +91,7 @@ class MagaldiMCPServer:
             find_implementations,
             find_similar,
             find_usages,
+            generate_config,
             generate_skill,
             get_call_graph,
             get_children,
@@ -306,6 +307,13 @@ class MagaldiMCPServer:
                 scope=args["scope"],
                 repository=args["repository"],
                 username=args.get("username"),
+            )
+        elif name == "generate_config":
+            return await asyncio.to_thread(
+                generate_config,
+                repo_path=args["repo_path"],
+                scope=args.get("scope"),
+                repository=args.get("repository"),
             )
         elif name == "generate_skill":
             return await asyncio.to_thread(
