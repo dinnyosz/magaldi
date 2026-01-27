@@ -200,17 +200,9 @@ def _warmup_ollama_tiers(models: list[tuple[str, str]]) -> None:
 
     from rich.console import Console
 
-    from shared.ai.ollama_models import CONTEXT_TIERS, warmup_ollama_tiers_verbose
+    from shared.ai.ollama_models import warmup_ollama_tiers_verbose
 
     console = Console()
-
-    # Check Ollama environment settings
-    # Need: 5 tiers × 2 summarization models + 1 embedding = 11 models
-    max_loaded = os.environ.get("OLLAMA_MAX_LOADED_MODELS", "")
-    num_unique_models = len(set(m[0] for m in models))
-    recommended = len(CONTEXT_TIERS) * num_unique_models + 1  # +1 for embedding model
-    if not max_loaded or int(max_loaded) < recommended:
-        console.print(f"  [yellow]⚠ Set OLLAMA_MAX_LOADED_MODELS={recommended} to keep all tiers in VRAM[/]")
 
     # Deduplicate models
     unique_models = list(set(models))
