@@ -379,26 +379,49 @@ def _detect_builder(class_info: dict[str, Any]) -> float:
 
 
 def _detect_factory(class_info: dict[str, Any], calls: list[ExtractedCall]) -> float:
-    """Detect factory pattern."""
+    """Detect factory pattern.
+
+    Looks for:
+    - *Factory class name
+    - create_*/make_*/build_*/from_*/new_* methods
+    - Methods that instantiate other classes
+    - @classmethod/@staticmethod decorators
+    """
     score = 0.0
     methods = class_info.get("methods", [])
     name = class_info.get("name", "")
+    decorators = class_info.get("decorators", [])
 
     # Name contains Factory
     if "Factory" in name or "factory" in name.lower():
         score += 0.3
 
-    # Has create* methods
-    create_methods = [m for m in methods if m.startswith("create") or m.startswith("make")]
-    if create_methods:
+    # Has create*/make*/build*/from_*/new_* methods
+    factory_prefixes = ("create", "make", "build", "from_", "new_")
+    factory_methods = [
+        m
+        for m in methods
+        if any(m.startswith(p) or m.startswith(p.title()) for p in factory_prefixes)
+    ]
+    if factory_methods:
+        score += 0.3
+    if len(factory_methods) >= 2:
+        score += 0.3
+    if len(factory_methods) >= 3:
+        score += 0.1
+
+    # Methods instantiate other classes (uppercase call = class constructor)
+    instantiation_calls = [
+        c for c in calls if c.receiver is None and c.name and c.name[0].isupper()
+    ]
+    if instantiation_calls:
         score += 0.3
 
-    # Methods instantiate other classes
-    instantiation_calls = [c for c in calls if c.receiver is None and c.name[0].isupper()]
-    if instantiation_calls:
-        score += 0.4
+    # Uses classmethod/staticmethod (common for factories)
+    if "classmethod" in decorators or "staticmethod" in decorators:
+        score += 0.2
 
-    return score
+    return min(score, 1.0)
 
 
 def _detect_repository(class_info: dict[str, Any]) -> float:

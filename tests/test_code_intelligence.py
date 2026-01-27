@@ -461,3 +461,24 @@ class TestPatternDetection:
         }
         patterns, confidence = detect_patterns(class_info, [], "python")
         assert "builder" in patterns
+
+    def test_detect_factory_with_from_methods(self):
+        """Detect factory with from_* class methods."""
+        class_info = {
+            "name": "Parser",
+            "attributes": [],
+            "methods": ["from_string", "from_file", "from_dict", "parse"],
+            "decorators": ["classmethod"],
+        }
+        patterns, confidence = detect_patterns(class_info, [], "python")
+        assert "factory" in patterns
+
+    def test_detect_factory_with_build_methods(self):
+        """Detect factory with build_* methods."""
+        class_info = {
+            "name": "ConnectionManager",
+            "attributes": ["_pool"],
+            "methods": ["build_connection", "build_pool", "close"],
+        }
+        patterns, confidence = detect_patterns(class_info, [], "python")
+        assert "factory" in patterns
