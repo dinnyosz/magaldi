@@ -113,14 +113,14 @@ class TestRunGlossaryExtraction:
         assert "password" in result["terms"]
 
     @patch("shared.ai.glossary.ai_extractor.extract_glossary_from_features_concurrent")
-    def test_indexes_glossary_with_descriptions(
+    def test_passes_indexing_params_to_extractor(
         self,
         mock_extract,
         mock_config,
         mock_es_repo,
         sample_glossary_items,
     ):
-        """Test that glossary entries are indexed with descriptions."""
+        """Test that incremental indexing params are passed to the extractor."""
         from shared.cli import run_glossary_extraction
 
         mock_extract.return_value = sample_glossary_items
@@ -133,26 +133,15 @@ class TestRunGlossaryExtraction:
             es_repo=mock_es_repo,
         )
 
-        # Verify index_glossary was called for each item
-        assert mock_es_repo.index_glossary.call_count == 3
+        # Verify extractor was called with incremental indexing params
+        mock_extract.assert_called_once()
+        call_kwargs = mock_extract.call_args.kwargs
 
-        # Check one of the calls includes description
-        calls = mock_es_repo.index_glossary.call_args_list
-
-        # Find the 'user' term call
-        user_call = None
-        for call in calls:
-            if call.kwargs.get("term") == "user":
-                user_call = call
-                break
-
-        assert user_call is not None
-        assert user_call.kwargs["description"] == "A person who interacts with the system"
-        assert user_call.kwargs["scope"] == "test"
-        assert user_call.kwargs["repository"] == "repo"
-        assert user_call.kwargs["username"] == "main"
-        assert user_call.kwargs["total_count"] == 2  # 2 source feature ids
-        assert len(user_call.kwargs["element_ids"]) == 2
+        # Indexing now happens inside the extractor, so verify params are passed
+        assert call_kwargs["es_repo"] == mock_es_repo
+        assert call_kwargs["scope"] == "test"
+        assert call_kwargs["repository"] == "repo"
+        assert call_kwargs["username"] == "main"
 
     @patch("shared.ai.glossary.ai_extractor.extract_glossary_from_features_concurrent")
     def test_returns_none_when_no_features(

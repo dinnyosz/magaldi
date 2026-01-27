@@ -13,13 +13,6 @@ from typing import TYPE_CHECKING, Any
 import click
 from rich.console import Group, RenderableType
 from rich.live import Live
-from rich.progress import (
-    BarColumn,
-    Progress,
-    SpinnerColumn,
-    TaskProgressColumn,
-    TextColumn,
-)
 from rich.table import Table
 from rich.text import Text
 
@@ -1016,6 +1009,11 @@ def run_glossary_extraction(
                 worker_status=worker_status,
                 timing_stats=timing_stats,
                 on_phase_change=on_phase_change,
+                # Incremental indexing - items are indexed as they complete in Phase 2
+                es_repo=es_repo,
+                scope=scope,
+                repository=repository,
+                username=username,
             )
 
         if not glossary_items:
@@ -1028,62 +1026,8 @@ def run_glossary_extraction(
         features_processed = timing_stats.features_processed
         wall_time = elapsed / features_processed if features_processed > 0 else 0
         console.print()
-        console.print(f"  [green]{len(glossary_items)}[/] unique terms extracted in [cyan]{format_duration(elapsed)}[/]")
+        console.print(f"  [green]{len(glossary_items)}[/] unique terms extracted and indexed in [cyan]{format_duration(elapsed)}[/]")
         console.print(f"  Wall: [green]{wall_time:.2f}s[/]/feature | API: [green]{avg_api:.1f}s[/]/feature | Model: [yellow]{model_name}[/]")
-
-        # Build feature lookup for feature associations
-        feature_lookup: dict[str, dict] = {}
-        for feature in all_features:
-            fid = feature.get("feature_id") or feature.get("subfeature_id", "")
-            if fid:
-                feature_lookup[fid] = {
-                    "label": feature.get("label", ""),
-                    "member_count": feature.get("member_count", 0),
-                }
-
-        # Index new glossary entries with progress
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[bold blue]Indexing glossary[/]"),
-            BarColumn(),
-            TaskProgressColumn(),
-            TextColumn("({task.completed}/{task.total})"),
-            console=console,
-        ) as progress:
-            task = progress.add_task("Indexing", total=len(glossary_items))
-
-            for item in glossary_items:
-                glossary_id = f"{scope}:{repository}:{username}:glossary:{item.name}"
-
-                # Build feature associations (source features this term was extracted from)
-                feature_associations = []
-                for fid in item.source_feature_ids:
-                    if fid in feature_lookup:
-                        feature_data = feature_lookup[fid]
-                        feature_associations.append({
-                            "feature_id": fid,
-                            "feature_label": feature_data["label"],
-                            # Legacy fields kept for API compatibility
-                            "frequency": 1,
-                            "total_members": 0,
-                            "percentage": 0.0,
-                        })
-
-                es_repo.index_glossary(
-                    glossary_id=glossary_id,
-                    scope=scope,
-                    repository=repository,
-                    username=username,
-                    term=item.name,
-                    total_count=len(item.source_feature_ids),
-                    element_ids=item.source_feature_ids,
-                    file_paths=[],
-                    description=item.description,
-                    feature_associations=feature_associations,
-                )
-                progress.update(task, advance=1)
-
-        console.print(f"  Indexed [green]{len(glossary_items)}[/] glossary entries")
 
         return {
             "terms_count": len(glossary_items),

@@ -731,12 +731,18 @@ def extract_glossary_from_features_concurrent(
     worker_status: GlossaryWorkerStatus | None = None,
     timing_stats: GlossaryTimingStats | None = None,
     on_phase_change: Callable[[str], None] | None = None,
+    # Incremental indexing parameters
+    es_repo: Any | None = None,
+    scope: str | None = None,
+    repository: str | None = None,
+    username: str | None = None,
+    on_indexed: Callable[[str], None] | None = None,
 ) -> list[GlossaryItem]:
     """Extract and merge glossary items from multiple features using concurrent workers.
 
     Two-phase process:
     1. Extract term names from each feature (concurrent)
-    2. Generate holistic summaries for each merged term (concurrent)
+    2. Generate holistic summaries for each merged term (concurrent, with optional incremental indexing)
 
     Args:
         features: List of feature/subfeature dicts with feature_id, label, summary.
@@ -747,6 +753,11 @@ def extract_glossary_from_features_concurrent(
         worker_status: Shared worker status tracker.
         timing_stats: Shared timing statistics.
         on_phase_change: Callback when phase changes (phase name).
+        es_repo: Optional Elasticsearch repository for incremental indexing.
+        scope: Scope for indexing (required if es_repo provided).
+        repository: Repository name for indexing (required if es_repo provided).
+        username: Username for indexing (required if es_repo provided).
+        on_indexed: Optional callback when an item is indexed (receives term name).
 
     Returns:
         List of merged GlossaryItem with generated summaries.
@@ -1018,6 +1029,39 @@ def extract_glossary_from_features_concurrent(
 
                 with final_lock:
                     final_items.append(item)
+
+                # Incremental indexing: index each item as it completes
+                if success and es_repo is not None and scope and repository and username:
+                    glossary_id = f"{scope}:{repository}:{username}:glossary:{item.name}"
+
+                    # Build feature associations
+                    feature_associations = []
+                    for fid in item.source_feature_ids:
+                        if fid in features_by_id:
+                            feature_data = features_by_id[fid]
+                            feature_associations.append({
+                                "feature_id": fid,
+                                "feature_label": feature_data.get("label", ""),
+                                "frequency": 1,
+                                "total_members": 0,
+                                "percentage": 0.0,
+                            })
+
+                    es_repo.index_glossary(
+                        glossary_id=glossary_id,
+                        scope=scope,
+                        repository=repository,
+                        username=username,
+                        term=item.name,
+                        total_count=len(item.source_feature_ids),
+                        element_ids=item.source_feature_ids,
+                        file_paths=[],
+                        description=item.description,
+                        feature_associations=feature_associations,
+                    )
+
+                    if on_indexed:
+                        on_indexed(item.name)
 
                 if on_progress:
                     state = GlossaryProgressState(
