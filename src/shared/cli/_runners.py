@@ -253,9 +253,11 @@ def run_processing(
         stats = f"  [dim]Throughput:[/] [green]{effective_wall:.2f}s[/]/item [dim]|[/] [dim]API:[/] [green]{total_api:.1f}s[/]/item [dim]([/][green]{state.timing.avg_summarize_time:.1f}s[/] summ + [cyan]{summ_emb:.1f}s[/] summ_emb + [cyan]{code_emb:.1f}s[/] code_emb[dim])[/]"
 
         # Parallelism stats (compact, next to throughput)
+        # Use fresh running count from workers_data (already fetched above)
+        running_count = len(workers_data)
         if state.parallelism:
             p = state.parallelism
-            stats += f" [dim]|[/] [dim]Workers:[/] [green]{p.running}[/]/[cyan]{p.tier_limit}[/]"
+            stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[cyan]{p.tier_limit}[/]"
             if p.throttled > 0:
                 stats += f" [dim]([/][yellow]{p.throttled} throttled[/][dim])[/]"
 
