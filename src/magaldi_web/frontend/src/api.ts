@@ -239,6 +239,59 @@ export interface DecoratorDetailInfo {
   full: string | null  // e.g., 'router.get("/users/{id}")'
 }
 
+// Code metrics types
+export interface ComplexityInfo {
+  cyclomatic: number
+  nesting_depth: number
+  branch_count: number
+}
+
+export interface CodeMetricsInfo {
+  line_count: number
+  param_count: number
+  char_count: number
+}
+
+export interface DocstringQualityInfo {
+  has_docstring: boolean
+  has_params: boolean
+  has_return: boolean
+  coverage: number
+}
+
+export interface SecurityIssueInfo {
+  kind: string
+  pattern: string
+  line: number
+  severity: string
+  message: string | null
+}
+
+export interface EnvVarInfo {
+  name: string
+  line: number
+  access_type: string
+}
+
+export interface ConcurrencyInfo {
+  is_async: boolean
+  uses_locks: boolean
+  uses_threads: boolean
+  patterns: string[]
+}
+
+export interface MetricsSummaryInfo {
+  total_elements: number
+  total_functions: number
+  avg_complexity: number
+  max_complexity: number
+  total_lines: number
+  documented_pct: number
+  async_count: number
+  security_issue_count: number
+  security_by_severity: Record<string, number>
+}
+
 export interface ElementDetail {
   element_id: string
   hash_id: string | null
@@ -280,6 +333,15 @@ export interface ElementDetail {
   }
   feature_info: FeatureInfo | null
   glossary_info: GlossaryInfo | null
+  // Code metrics (for functions/methods)
+  complexity: ComplexityInfo | null
+  code_metrics: CodeMetricsInfo | null
+  docstring_quality: DocstringQualityInfo | null
+  security_issues: SecurityIssueInfo[]
+  env_vars: EnvVarInfo[]
+  concurrency: ConcurrencyInfo | null
+  // Aggregated metrics (for files/classes)
+  metrics_summary: MetricsSummaryInfo | null
 }
 
 export interface SimilarElement {
@@ -1032,4 +1094,181 @@ export async function getDependencyGraph(
 
 export async function explainElement(hashId: string): Promise<ExplainElementResponse> {
   return fetchJson(`${API_BASE}/analysis/explain/${encodeURIComponent(hashId)}`)
+}
+
+// =============================================================================
+// Code Metrics API Types
+// =============================================================================
+
+export interface ComplexFunctionItem {
+  element_id: string
+  hash_id: string | null
+  name: string
+  element_type: string
+  file_path: string
+  line: number
+  cyclomatic: number
+  nesting_depth: number
+  branch_count: number
+  line_count: number
+  summary: string | null
+  is_test: boolean
+}
+
+export interface ComplexFunctionsResponse {
+  functions: ComplexFunctionItem[]
+  count: number
+  min_complexity: number
+}
+
+export interface SecurityIssueDetailItem {
+  element_id: string
+  hash_id: string | null
+  function_name: string
+  element_type: string
+  file_path: string
+  function_line: number
+  issue_line: number
+  severity: string
+  kind: string
+  message: string | null
+}
+
+export interface SecurityIssuesResponse {
+  issues: SecurityIssueDetailItem[]
+  count: number
+  by_severity: Record<string, number>
+  by_kind: Record<string, number>
+}
+
+export interface UndocumentedItem {
+  element_id: string
+  hash_id: string | null
+  name: string
+  element_type: string
+  file_path: string
+  line: number
+  visibility: string | null
+  has_docstring: boolean
+  has_params: boolean
+  has_return: boolean
+  coverage: number
+  param_count: number
+  summary: string | null
+}
+
+export interface UndocumentedResponse {
+  functions: UndocumentedItem[]
+  count: number
+  max_coverage: number
+}
+
+export interface EnvUsageDetailItem {
+  element_id: string
+  hash_id: string | null
+  function_name: string
+  element_type: string
+  file_path: string
+  function_line: number
+  env_name: string
+  env_line: number
+  access_type: string
+}
+
+export interface EnvUsageResponse {
+  usages: EnvUsageDetailItem[]
+  count: number
+  unique_vars: number
+  by_var: Record<string, number>
+}
+
+export interface AsyncCodeDetailItem {
+  element_id: string
+  hash_id: string | null
+  name: string
+  element_type: string
+  file_path: string
+  line: number
+  is_async: boolean
+  uses_threads: boolean
+  uses_locks: boolean
+  patterns: string[]
+  summary: string | null
+}
+
+export interface AsyncCodeResponse {
+  functions: AsyncCodeDetailItem[]
+  count: number
+  pattern_filter: string
+  by_pattern: Record<string, number>
+}
+
+// =============================================================================
+// Code Metrics API Functions
+// =============================================================================
+
+export async function getComplexFunctions(
+  scope: string,
+  repository: string,
+  options?: { min_complexity?: number; limit?: number; include_tests?: boolean }
+): Promise<ComplexFunctionsResponse> {
+  const params = new URLSearchParams()
+  params.set('scope', scope)
+  params.set('repository', repository)
+  if (options?.min_complexity) params.set('min_complexity', String(options.min_complexity))
+  if (options?.limit) params.set('limit', String(options.limit))
+  if (options?.include_tests !== undefined) params.set('include_tests', String(options.include_tests))
+  return fetchJson(`${API_BASE}/analysis/complexity?${params.toString()}`)
+}
+
+export async function getSecurityIssues(
+  scope: string,
+  repository: string,
+  options?: { severity?: string; limit?: number }
+): Promise<SecurityIssuesResponse> {
+  const params = new URLSearchParams()
+  params.set('scope', scope)
+  params.set('repository', repository)
+  if (options?.severity) params.set('severity', options.severity)
+  if (options?.limit) params.set('limit', String(options.limit))
+  return fetchJson(`${API_BASE}/analysis/security-issues?${params.toString()}`)
+}
+
+export async function getUndocumentedFunctions(
+  scope: string,
+  repository: string,
+  options?: { max_coverage?: number; limit?: number; include_tests?: boolean }
+): Promise<UndocumentedResponse> {
+  const params = new URLSearchParams()
+  params.set('scope', scope)
+  params.set('repository', repository)
+  if (options?.max_coverage !== undefined) params.set('max_coverage', String(options.max_coverage))
+  if (options?.limit) params.set('limit', String(options.limit))
+  if (options?.include_tests !== undefined) params.set('include_tests', String(options.include_tests))
+  return fetchJson(`${API_BASE}/analysis/documentation-coverage?${params.toString()}`)
+}
+
+export async function getEnvUsage(
+  scope: string,
+  repository: string,
+  options?: { limit?: number }
+): Promise<EnvUsageResponse> {
+  const params = new URLSearchParams()
+  params.set('scope', scope)
+  params.set('repository', repository)
+  if (options?.limit) params.set('limit', String(options.limit))
+  return fetchJson(`${API_BASE}/analysis/env-usage?${params.toString()}`)
+}
+
+export async function getAsyncCode(
+  scope: string,
+  repository: string,
+  options?: { pattern?: string; limit?: number }
+): Promise<AsyncCodeResponse> {
+  const params = new URLSearchParams()
+  params.set('scope', scope)
+  params.set('repository', repository)
+  if (options?.pattern) params.set('pattern', options.pattern)
+  if (options?.limit) params.set('limit', String(options.limit))
+  return fetchJson(`${API_BASE}/analysis/concurrency?${params.toString()}`)
 }

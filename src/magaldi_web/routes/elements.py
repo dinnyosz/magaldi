@@ -9,19 +9,26 @@ from magaldi_web.models import (
     CallInfo,
     ChildInfo,
     ClassAttributeInfo,
+    CodeMetricsInfo,
+    ComplexityInfo,
+    ConcurrencyInfo,
     DecoratorDetailInfo,
+    DocstringQualityInfo,
     ElementContext,
     ElementDetailResponse,
+    EnvVarInfo,
     FeatureInfo,
     FeatureMember,
     FileContext,
     GlossaryFeatureAssociation,
     GlossaryInfo,
     ImportInfo,
+    MetricsSummaryInfo,
     ParameterInfo,
     ParentContext,
     ParentFeatureInfo,
     RepoRef,
+    SecurityIssueInfo,
     SiblingInfo,
     SubfeatureInfo,
 )
@@ -453,6 +460,96 @@ async def get_element_detail(
     if source["element_type"] == "glossary":
         summary = source.get("description", "")
 
+    # Parse code metrics for functions/methods
+    complexity = None
+    code_metrics_info = None
+    docstring_quality = None
+    concurrency = None
+    security_issues = []
+    env_vars = []
+
+    if source["element_type"] in ("function", "method"):
+        # Complexity
+        raw_complexity = source.get("complexity")
+        if raw_complexity:
+            complexity = ComplexityInfo(
+                cyclomatic=raw_complexity.get("cyclomatic", 0),
+                nesting_depth=raw_complexity.get("nesting_depth", 0),
+                branch_count=raw_complexity.get("branch_count", 0),
+            )
+
+        # Code metrics
+        raw_code_metrics = source.get("code_metrics")
+        if raw_code_metrics:
+            code_metrics_info = CodeMetricsInfo(
+                line_count=raw_code_metrics.get("line_count", 0),
+                param_count=raw_code_metrics.get("param_count", 0),
+                char_count=raw_code_metrics.get("char_count", 0),
+            )
+
+        # Docstring quality
+        raw_docstring_quality = source.get("docstring_quality")
+        if raw_docstring_quality:
+            docstring_quality = DocstringQualityInfo(
+                has_docstring=raw_docstring_quality.get("has_docstring", False),
+                has_params=raw_docstring_quality.get("has_params", False),
+                has_return=raw_docstring_quality.get("has_return", False),
+                coverage=raw_docstring_quality.get("coverage", 0.0),
+            )
+
+        # Concurrency
+        raw_concurrency = source.get("concurrency")
+        if raw_concurrency:
+            concurrency = ConcurrencyInfo(
+                is_async=raw_concurrency.get("is_async", False),
+                uses_locks=raw_concurrency.get("uses_locks", False),
+                uses_threads=raw_concurrency.get("uses_threads", False),
+                patterns=raw_concurrency.get("patterns", []),
+            )
+
+    # Security issues (for functions/methods/variables)
+    if source["element_type"] in ("function", "method", "variable", "constant"):
+        raw_security_issues = source.get("security_issues", [])
+        for issue in raw_security_issues:
+            security_issues.append(
+                SecurityIssueInfo(
+                    kind=issue.get("kind", ""),
+                    pattern=issue.get("pattern", ""),
+                    line=issue.get("line", 0),
+                    severity=issue.get("severity", "info"),
+                    message=issue.get("message"),
+                )
+            )
+
+    # Environment variables (for functions/methods)
+    if source["element_type"] in ("function", "method"):
+        raw_env_vars = source.get("env_vars", [])
+        for ev in raw_env_vars:
+            env_vars.append(
+                EnvVarInfo(
+                    name=ev.get("name", ""),
+                    line=ev.get("line", 0),
+                    access_type=ev.get("access_type", ""),
+                )
+            )
+
+    # Aggregated metrics summary (for files/classes)
+    metrics_summary = None
+    if source["element_type"] in ("file", "class"):
+        raw_metrics_summary = source.get("metrics_summary")
+        if raw_metrics_summary:
+            metrics_summary = MetricsSummaryInfo(
+                total_elements=raw_metrics_summary.get("total_elements", 0),
+                total_functions=raw_metrics_summary.get("total_functions", 0),
+                avg_complexity=raw_metrics_summary.get("avg_complexity", 0.0),
+                max_complexity=raw_metrics_summary.get("max_complexity", 0),
+                total_lines=raw_metrics_summary.get("total_lines", 0),
+                documented_pct=raw_metrics_summary.get("documented_pct", 0.0),
+                async_count=raw_metrics_summary.get("async_count", 0),
+                security_issue_count=raw_metrics_summary.get("security_issue_count", 0),
+                security_by_severity=raw_metrics_summary.get("security_by_severity", {}),
+            )
+
     return ElementDetailResponse(
         element_id=source["element_id"],
         hash_id=source.get("hash_id"),
@@ -497,4 +594,12 @@ async def get_element_detail(
         ),
         feature_info=feature_info,
         glossary_info=glossary_info,
+        # Code metrics
+        complexity=complexity,
+        code_metrics=code_metrics_info,
+        docstring_quality=docstring_quality,
+        security_issues=security_issues,
+        env_vars=env_vars,
+        concurrency=concurrency,
+        metrics_summary=metrics_summary,
     )

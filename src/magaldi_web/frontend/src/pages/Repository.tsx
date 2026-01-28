@@ -220,6 +220,22 @@ function Repository() {
         </Col>
       </Row>
 
+      {/* Second Row of Analysis Links */}
+      <Row className="mb-4">
+        <Col xs={6} md={3}>
+          <Card
+            as={Link}
+            to={`/repos/${scope}/${repository}/code-health`}
+            className="text-decoration-none h-100"
+          >
+            <Card.Body className="text-center py-3">
+              <i className="bi bi-heart-pulse text-danger fs-4 d-block mb-2"></i>
+              <small className="text-muted">Code Health</small>
+            </Card.Body>
+          </Card>
+        </Col>
+      </Row>
+
       <Row>
         {/* File Tree */}
         <Col md={4} lg={3}>

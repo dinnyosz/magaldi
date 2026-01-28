@@ -437,6 +437,77 @@ class CallInfo(BaseModel):
     resolved_id: str | None = None  # Resolved element ID if known
 
 
+# =============================================================================
+# CODE METRICS MODELS (for element detail)
+# =============================================================================
+
+
+class ComplexityInfo(BaseModel):
+    """Cyclomatic complexity information."""
+
+    cyclomatic: int = 0
+    nesting_depth: int = 0
+    branch_count: int = 0
+
+
+class CodeMetricsInfo(BaseModel):
+    """Basic code size metrics."""
+
+    line_count: int = 0
+    param_count: int = 0
+    char_count: int = 0
+
+
+class DocstringQualityInfo(BaseModel):
+    """Docstring quality metrics."""
+
+    has_docstring: bool = False
+    has_params: bool = False
+    has_return: bool = False
+    coverage: float = 0.0
+
+
+class SecurityIssueInfo(BaseModel):
+    """A security issue detected in the code."""
+
+    kind: str
+    pattern: str
+    line: int
+    severity: str
+    message: str | None = None
+
+
+class EnvVarInfo(BaseModel):
+    """An environment variable usage."""
+
+    name: str
+    line: int
+    access_type: str
+
+
+class ConcurrencyInfo(BaseModel):
+    """Concurrency pattern information."""
+
+    is_async: bool = False
+    uses_locks: bool = False
+    uses_threads: bool = False
+    patterns: list[str] = Field(default_factory=list)
+
+
+class MetricsSummaryInfo(BaseModel):
+    """Aggregated metrics summary for files and classes."""
+
+    total_elements: int = 0
+    total_functions: int = 0
+    avg_complexity: float = 0.0
+    max_complexity: int = 0
+    total_lines: int = 0
+    documented_pct: float = 0.0
+    async_count: int = 0
+    security_issue_count: int = 0
+    security_by_severity: dict[str, int] = Field(default_factory=dict)
+
+
 class ElementDetailResponse(BaseModel):
     """Response for element detail endpoint."""
 
@@ -475,6 +546,15 @@ class ElementDetailResponse(BaseModel):
     repository: RepoRef
     feature_info: FeatureInfo | None = None
     glossary_info: GlossaryInfo | None = None
+    # Code metrics (for functions/methods)
+    complexity: ComplexityInfo | None = None
+    code_metrics: CodeMetricsInfo | None = None
+    docstring_quality: DocstringQualityInfo | None = None
+    security_issues: list[SecurityIssueInfo] = Field(default_factory=list)
+    env_vars: list[EnvVarInfo] = Field(default_factory=list)
+    concurrency: ConcurrencyInfo | None = None
+    # Aggregated metrics (for files/classes)
+    metrics_summary: MetricsSummaryInfo | None = None
 
 
 # =============================================================================

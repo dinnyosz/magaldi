@@ -13,6 +13,7 @@ import DeadCode from './pages/DeadCode'
 import EntryPoints from './pages/EntryPoints'
 import CallExplorer from './pages/CallExplorer'
 import DependencyGraph from './pages/DependencyGraph'
+import CodeHealth from './pages/CodeHealth'
 
 function App() {
   const location = useLocation()
@@ -103,6 +104,7 @@ function App() {
           <Route path="/repos/:scope/:repo/entry-points" element={<EntryPoints />} />
           <Route path="/repos/:scope/:repo/call-explorer" element={<CallExplorer />} />
           <Route path="/repos/:scope/:repo/dependency-graph" element={<DependencyGraph />} />
+          <Route path="/repos/:scope/:repo/code-health" element={<CodeHealth />} />
           <Route path="/element/:elementId" element={<Element />} />
           <Route path="/vector-map" element={<VectorMap />} />
           <Route path="/vector-map/:scope/:repository" element={<VectorMap />} />
