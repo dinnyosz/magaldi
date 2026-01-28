@@ -65,13 +65,13 @@ async def browse_elements(
 
     # Sort by file path and line number for consistent ordering
     sort = [
-        {"relative_path": {"order": "asc"}},
+        {"relative_path.keyword": {"order": "asc"}},
         {"line_start": {"order": "asc"}},
     ]
 
     # For files, sort alphabetically by path
     if element_type == "file":
-        sort = [{"relative_path": {"order": "asc"}}]
+        sort = [{"relative_path.keyword": {"order": "asc"}}]
 
     # Execute search
     result = client.search(
