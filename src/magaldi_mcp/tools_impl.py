@@ -3119,14 +3119,13 @@ def explain_element(
     # Get similar code (top 3)
     summary_embedding = doc.get("summary_embedding")
     if summary_embedding:
-        similar_results = es.search_similar(
+        similar_results = es.search_by_vector(
             embedding=summary_embedding,
             embedding_type="summary",
             scope=scope,
             repository=repository,
             username=username,
             size=4,  # Get 4 to filter out self
-            include_tests=True,
         )
         for sim in similar_results:
             if sim.get("element_id") == element_id:
@@ -3139,7 +3138,7 @@ def explain_element(
                     "file": sim.get("relative_path"),
                     "line": sim.get("line_start"),
                     "summary": sim.get("summary", ""),
-                    "similarity": sim.get("score", 0),
+                    "similarity": sim.get("_score", 0),
                 }
             )
             if len(result["similar_code"]) >= 3:
