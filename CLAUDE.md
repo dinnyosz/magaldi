@@ -122,6 +122,16 @@ Use `mcp__magaldi__generate_config(repo_path="/path/to/repo")` to auto-generate 
 
 When using Magaldi MCP tools, **always read `magaldi.yaml` first** to get the correct `scope` and `repository` parameters.
 
+## CRITICAL: Data Safety
+
+**NEVER delete or drop data without explicit user permission.** This includes:
+- Elasticsearch indices (`DELETE /index-name`)
+- Database tables or records
+- Redis keys
+- Any persistent storage
+
+Always ask the user first before performing destructive operations.
+
 ## TODOs
 
 - [ ] **LiteLLM Pydantic warning**: Check if [issue #11759](https://github.com/BerriAI/litellm/issues/11759) (Pydantic serialization) is resolved, then remove warning suppression from `src/shared/ai/llm_client.py`
