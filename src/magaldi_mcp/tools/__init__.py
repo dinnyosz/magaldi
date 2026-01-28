@@ -40,6 +40,12 @@ from magaldi_mcp.tools_impl import (
     search_features,
     search_glossary,
 )
+from magaldi_mcp.tools.parser_lab import (
+    parser_lab_analyze,
+    parser_lab_create_test,
+    parser_lab_run_tests,
+    parser_lab_suggest_fix,
+)
 
 __all__ = [
     # Tool implementations
@@ -75,6 +81,11 @@ __all__ = [
     "search_code",
     "search_features",
     "search_glossary",
+    # Parser Lab tools
+    "parser_lab_analyze",
+    "parser_lab_create_test",
+    "parser_lab_run_tests",
+    "parser_lab_suggest_fix",
     # Tool schemas
     "ALL_TOOL_SCHEMAS",
 ]

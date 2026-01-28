@@ -106,6 +106,12 @@ from magaldi_core.extractors.types import (
     TreeSitterError,
     TypeAnnotation,
 )
+from magaldi_core.query_runner import (
+    QueryMatch,
+    QueryResult,
+    QueryRunner,
+    QueryRunnerManager,
+)
 
 # =============================================================================
 # TREE-SITTER MANAGER
@@ -135,6 +141,7 @@ class TreeSitterManager:
         self._languages: dict[str, Language] = {}
         self._parsers: dict[str, Parser] = {}
         self._extractors: dict[str, Any] = {}
+        self._query_manager = QueryRunnerManager()
 
     def _get_language(self, language: str) -> Language:
         """Get or create Language object for a language."""
@@ -219,6 +226,53 @@ class TreeSitterManager:
         lines = source.split("\n")
         return extractor.extract_elements(tree, lines)
 
+    def get_query_runner(self, language: str) -> QueryRunner:
+        """Get a query runner for executing SCM queries on a language.
+
+        Args:
+            language: Language name (python, javascript, etc.)
+
+        Returns:
+            QueryRunner instance for the specified language.
+
+        Raises:
+            TreeSitterError: If the language is not supported.
+        """
+        lang = self._get_language(language)
+        return self._query_manager.get_runner(lang, language)
+
+    def run_query(
+        self, source: str, language: str, query_name: str
+    ) -> QueryResult:
+        """Run a query on source code.
+
+        This is a convenience method that parses the source and
+        runs a query in one step.
+
+        Args:
+            source: Source code as string.
+            language: Language name.
+            query_name: Name of the query file (without .scm).
+
+        Returns:
+            QueryResult containing all matches.
+        """
+        tree = self.parse(source.encode("utf-8"), language)
+        runner = self.get_query_runner(language)
+        return runner.run(query_name, tree)
+
+    def list_queries(self, language: str) -> list[str]:
+        """List available query files for a language.
+
+        Args:
+            language: Language name.
+
+        Returns:
+            List of query names (without .scm extension).
+        """
+        runner = self.get_query_runner(language)
+        return runner.list_queries()
+
 
 # =============================================================================
 # GLOBAL SINGLETON
@@ -244,6 +298,10 @@ __all__ = [
     "TreeSitterManager",
     "TreeSitterError",
     "get_manager",
+    # Query runner
+    "QueryRunner",
+    "QueryMatch",
+    "QueryResult",
     # Tree utilities
     "walk_tree",
     "find_nodes",

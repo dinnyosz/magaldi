@@ -105,6 +105,10 @@ class MagaldiMCPServer:
             list_glossary,
             list_patterns,
             list_repos,
+            parser_lab_analyze,
+            parser_lab_create_test,
+            parser_lab_run_tests,
+            parser_lab_suggest_fix,
             pattern_search,
             search_code,
             search_features,
@@ -402,6 +406,37 @@ class MagaldiMCPServer:
                 username=args.get("username", self.default_username),
                 min_confidence=args.get("min_confidence", 0.6),
                 limit=args.get("limit", 20),
+            )
+        # Parser Lab tools (for Magaldi self-improvement)
+        elif name == "parser_lab_analyze":
+            return await asyncio.to_thread(
+                parser_lab_analyze,
+                file_path=args.get("file_path"),
+                code=args.get("code"),
+                context7_query=args.get("context7_query"),
+                language=args.get("language"),
+                debug=args.get("debug", False),
+            )
+        elif name == "parser_lab_create_test":
+            return await asyncio.to_thread(
+                parser_lab_create_test,
+                name=args["name"],
+                language=args["language"],
+                code=args["code"],
+                expected=args["expected"],
+            )
+        elif name == "parser_lab_run_tests":
+            return await asyncio.to_thread(
+                parser_lab_run_tests,
+                filter=args.get("filter"),
+                verbose=args.get("verbose", False),
+            )
+        elif name == "parser_lab_suggest_fix":
+            return await asyncio.to_thread(
+                parser_lab_suggest_fix,
+                gap_description=args["gap_description"],
+                language=args["language"],
+                failing_test=args.get("failing_test"),
             )
         else:
             raise ValueError(f"Unknown tool: {name}")
