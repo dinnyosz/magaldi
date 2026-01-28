@@ -80,8 +80,8 @@ function EntryPointList({ items, category }: { items: EntryPointItem[]; category
                 ))}
               </div>
             )}
-            {/* CLI Commands - show command name */}
-            {category === 'cli' && item.cli_commands && item.cli_commands.length > 0 && (
+            {/* CLI Commands - show command name (for both CLI and Main categories) */}
+            {(category === 'cli' || category === 'main') && item.cli_commands && item.cli_commands.length > 0 && (
               <div className="mt-1">
                 {item.cli_commands.map((cmd, i) => (
                   <span key={i} className="me-2">
@@ -99,9 +99,9 @@ function EntryPointList({ items, category }: { items: EntryPointItem[]; category
               </div>
             )}
             {/* Fallback to decorators for other categories or when routes/commands empty */}
-            {((category !== 'http' && category !== 'cli') ||
+            {((category !== 'http' && category !== 'cli' && category !== 'main') ||
               (category === 'http' && (!item.http_routes || item.http_routes.length === 0)) ||
-              (category === 'cli' && (!item.cli_commands || item.cli_commands.length === 0))) &&
+              ((category === 'cli' || category === 'main') && (!item.cli_commands || item.cli_commands.length === 0))) &&
               item.decorators && item.decorators.length > 0 && (
               <div className="mt-1">
                 {item.decorators.slice(0, 3).map((d, i) => (

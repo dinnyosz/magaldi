@@ -207,13 +207,16 @@ def detect_http_routes(
 # CLI COMMAND DETECTION
 # =============================================================================
 
-# CLI command decorator patterns
+# CLI command decorator patterns (exact matches)
 _CLI_COMMAND_PATTERNS: dict[str, str] = {
     "click.command": "click",
     "click.group": "click",
     "app.command": "typer",
     "typer.command": "typer",
 }
+
+# CLI decorator suffixes that indicate a command (for patterns like main.command, web.group)
+_CLI_COMMAND_SUFFIXES = {".command", ".group"}
 
 
 def detect_cli_commands(
@@ -234,18 +237,44 @@ def detect_cli_commands(
     commands = []
 
     for dec in decorators:
+        framework = None
+
+        # Check exact pattern match first
         if dec.name in _CLI_COMMAND_PATTERNS:
             framework = _CLI_COMMAND_PATTERNS[dec.name]
+        else:
+            # Check for suffix patterns like main.command, web.group, etc.
+            for suffix in _CLI_COMMAND_SUFFIXES:
+                if dec.name.endswith(suffix):
+                    framework = "click"  # Assume click for .command/.group patterns
+                    break
+
+        if framework:
+            # Extract command name from decorator args if available
+            # e.g., @web.command("serve") -> command_name = "serve"
+            command_name = function_name
+            if dec.args:
+                # Extract first string argument as command name
+                args_stripped = dec.args.strip().strip("()")
+                if args_stripped.startswith(("'", '"')):
+                    # Extract quoted string
+                    quote_char = args_stripped[0]
+                    end_quote = args_stripped.find(quote_char, 1)
+                    if end_quote > 0:
+                        command_name = args_stripped[1:end_quote]
 
             # Extract options from sibling decorators
             options = []
             for other_dec in decorators:
-                if other_dec.name in (
+                # Check for click/typer options - also handle suffix patterns
+                is_option = other_dec.name in (
                     "click.option",
                     "click.argument",
                     "typer.Option",
                     "typer.Argument",
-                ):
+                ) or other_dec.name.endswith((".option", ".argument"))
+
+                if is_option:
                     option_name = ""
                     if other_dec.args:
                         # Extract the first argument as the option name
@@ -263,7 +292,7 @@ def detect_cli_commands(
 
             commands.append(
                 CliCommand(
-                    name=function_name,
+                    name=command_name,
                     options=options,
                     framework=framework,
                 )
