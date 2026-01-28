@@ -50,9 +50,14 @@ def _generate_search_summary_sync(
         Tuple of (summary, error). One will be None.
     """
     try:
+        from shared.ai.context_size import compute_aggregation_num_ctx
         from shared.ai.llm_client import LLMClient
 
-        # Build context from results - group by theme rather than listing
+        # Get model config
+        summarize_model = config.llm.get_summarize_model()
+        max_tokens = config.llm.summarize_max_tokens
+
+        # Build context from results (limit to 30 for reasonable size)
         context_items = []
         for r in results[:30]:
             parts = [f"• {r.name} ({r.element_type})"]
@@ -61,6 +66,13 @@ def _generate_search_summary_sync(
             context_items.append("".join(parts))
 
         context = "\n".join(context_items)
+
+        # Compute optimal context size for this prompt
+        num_ctx = compute_aggregation_num_ctx(
+            prompt_chars=len(context) + 800,  # +800 for prompt template
+            task_type="feature",  # Similar aggregation task
+            safety_multiplier=1.5,
+        )
 
         prompt = f"""Question: "{query}"
 
@@ -83,18 +95,21 @@ Good example: "Summaries in this codebase are generated through a multi-step pip
 
 Answer:"""
 
-        # Use the configured model (prefer smaller/faster model for summary)
-        summarize_model = config.llm.get_summarize_model()
+        # Use configured model alias with tiered context (e.g., qwen3-4b -> qwen3:4b-instruct-4k)
+        model_name = summarize_model.get_litellm_model()
+        logger.info(f"Search summary: alias={config.llm.summarize_model} model={summarize_model.name} num_ctx={num_ctx}")
+
         llm = LLMClient(
-            model=summarize_model.get_litellm_model(),
+            model=model_name,
             api_base=summarize_model.get_api_base(),
             api_key=summarize_model.api_key,
         )
 
         summary = llm.generate(
             prompt=prompt,
-            temperature=0.2,
-            max_tokens=512,
+            temperature=config.llm.summarize_temperature,
+            max_tokens=max_tokens,
+            num_ctx=num_ctx,
             timeout=30,
         )
 
