@@ -261,6 +261,24 @@ class TreeSitterManager:
         runner = self.get_query_runner(language)
         return runner.run(query_name, tree)
 
+    def run_query_on_tree(
+        self, tree: Tree, language: str, query_name: str
+    ) -> QueryResult:
+        """Run a query on an already-parsed tree.
+
+        Use this when you already have a parsed tree to avoid re-parsing.
+
+        Args:
+            tree: Already-parsed tree-sitter Tree.
+            language: Language name.
+            query_name: Name of the query file (without .scm).
+
+        Returns:
+            QueryResult containing all matches.
+        """
+        runner = self.get_query_runner(language)
+        return runner.run(query_name, tree)
+
     def list_queries(self, language: str) -> list[str]:
         """List available query files for a language.
 

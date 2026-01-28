@@ -3,6 +3,8 @@
 This module provides the PythonExtractor class and standalone functions
 for extracting code elements, imports, references, call graph data,
 and enhanced context from Python source code.
+
+Uses SCM queries for pattern matching with Python post-processing.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from magaldi_core.extractors.types import (
     ExtractedReference,
     ParameterInfo,
 )
+from magaldi_core.query_runner import QUERIES_DIR
 
 # =============================================================================
 # PYTHON EXTRACTOR CLASS
@@ -124,7 +127,10 @@ def _extract_nested_functions(func_node: Node, lines: list[str]) -> list[Extract
 
 
 def extract_python_elements(tree: Tree, lines: list[str]) -> list[ExtractedElement]:
-    """Extract code elements from a Python AST.
+    """Extract code elements from a Python AST using SCM queries.
+
+    Uses declarative SCM patterns for matching, with Python post-processing
+    to build ExtractedElement objects.
 
     Args:
         tree: Parsed tree-sitter Tree.
@@ -132,6 +138,134 @@ def extract_python_elements(tree: Tree, lines: list[str]) -> list[ExtractedEleme
 
     Returns:
         List of extracted elements.
+    """
+    # Check if we have SCM queries available
+    query_dir = QUERIES_DIR / "python"
+    if not query_dir.exists() or not (query_dir / "elements.scm").exists():
+        # Fall back to imperative extraction
+        return _extract_python_elements_imperative(tree, lines)
+
+    return _extract_python_elements_scm(tree, lines)
+
+
+def _extract_python_elements_scm(tree: Tree, lines: list[str]) -> list[ExtractedElement]:
+    """Extract elements using SCM queries.
+
+    This is the query-based implementation that uses declarative patterns.
+    """
+    from magaldi_core.tree_sitter_manager import get_manager
+
+    elements: list[ExtractedElement] = []
+    seen_nodes: set[int] = set()  # Track by node id to avoid duplicates
+
+    manager = get_manager()
+    result = manager.run_query_on_tree(tree, "python", "elements")
+
+    # Process decorated definitions first (they include the definition inside)
+    for match in result.filter_by_capture("decorated.def"):
+        decorated_node = match.get("decorated.def")
+        if not decorated_node or id(decorated_node) in seen_nodes:
+            continue
+
+        func_node = match.get("decorated.function")
+        class_node = match.get("decorated.class")
+
+        if func_node:
+            seen_nodes.add(id(func_node))
+            seen_nodes.add(id(decorated_node))
+            deco_names, deco_details = _get_decorators(decorated_node)
+            elem = _extract_python_function(
+                func_node, lines,
+                decorators=deco_names,
+                decorator_details=deco_details,
+                decorated_node=decorated_node
+            )
+            elements.append(elem)
+            # Extract nested functions
+            elements.extend(_extract_nested_functions(func_node, lines))
+
+        elif class_node:
+            seen_nodes.add(id(class_node))
+            seen_nodes.add(id(decorated_node))
+            deco_names, deco_details = _get_decorators(decorated_node)
+            elements.append(_extract_python_class(
+                class_node, lines,
+                decorators=deco_names,
+                decorator_details=deco_details,
+                decorated_node=decorated_node
+            ))
+
+    # Process standalone functions (not already seen as decorated)
+    for match in result.filter_by_capture("function.def"):
+        func_node = match.get("function.def")
+        if not func_node or id(func_node) in seen_nodes:
+            continue
+
+        # Skip if this is inside a class (methods are handled separately)
+        if _is_inside_class(func_node):
+            continue
+
+        seen_nodes.add(id(func_node))
+        elem = _extract_python_function(func_node, lines)
+        elements.append(elem)
+        elements.extend(_extract_nested_functions(func_node, lines))
+
+    # Process async functions (not already seen)
+    for match in result.filter_by_capture("async_function.def"):
+        func_node = match.get("async_function.def")
+        if not func_node or id(func_node) in seen_nodes:
+            continue
+
+        if _is_inside_class(func_node):
+            continue
+
+        seen_nodes.add(id(func_node))
+        elem = _extract_python_function(func_node, lines)
+        elements.append(elem)
+        elements.extend(_extract_nested_functions(func_node, lines))
+
+    # Process standalone classes (not already seen as decorated)
+    for match in result.filter_by_capture("class.def"):
+        class_node = match.get("class.def")
+        if not class_node or id(class_node) in seen_nodes:
+            continue
+
+        seen_nodes.add(id(class_node))
+        elements.append(_extract_python_class(class_node, lines))
+
+    # Process module-level assignments
+    for match in result.filter_by_capture("assignment.module_level"):
+        name_node = match.get("assignment.name")
+        if not name_node:
+            continue
+
+        # Find the actual assignment node
+        assign_node = name_node.parent
+        if assign_node and assign_node.type == "assignment":
+            elem = _extract_python_assignment(assign_node, lines, is_module_level=True)
+            if elem:
+                elements.append(elem)
+
+    return elements
+
+
+def _is_inside_class(node: Node) -> bool:
+    """Check if a node is inside a class definition (i.e., it's a method)."""
+    current = node.parent
+    while current:
+        if current.type == "class_definition":
+            return True
+        if current.type == "function_definition":
+            # Nested inside a function, not a class
+            return False
+        current = current.parent
+    return False
+
+
+def _extract_python_elements_imperative(tree: Tree, lines: list[str]) -> list[ExtractedElement]:
+    """Extract elements using imperative tree-walking (fallback).
+
+    This is the original implementation kept for backwards compatibility.
     """
     elements: list[ExtractedElement] = []
     root = tree.root_node
