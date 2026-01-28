@@ -539,15 +539,15 @@ async def get_element_detail(
         raw_metrics_summary = source.get("metrics_summary")
         if raw_metrics_summary:
             metrics_summary = MetricsSummaryInfo(
-                total_elements=raw_metrics_summary.get("total_elements", 0),
-                total_functions=raw_metrics_summary.get("total_functions", 0),
-                avg_complexity=raw_metrics_summary.get("avg_complexity", 0.0),
-                max_complexity=raw_metrics_summary.get("max_complexity", 0),
-                total_lines=raw_metrics_summary.get("total_lines", 0),
-                documented_pct=raw_metrics_summary.get("documented_pct", 0.0),
-                async_count=raw_metrics_summary.get("async_count", 0),
-                security_issue_count=raw_metrics_summary.get("security_issue_count", 0),
-                security_by_severity=raw_metrics_summary.get("security_by_severity", {}),
+                total_elements=raw_metrics_summary.get("total_elements") or 0,
+                total_functions=raw_metrics_summary.get("total_functions") or 0,
+                avg_complexity=raw_metrics_summary.get("avg_complexity") or 0.0,
+                max_complexity=raw_metrics_summary.get("max_complexity") or 0,
+                total_lines=raw_metrics_summary.get("total_lines") or 0,
+                documented_pct=raw_metrics_summary.get("documented_pct") or 0.0,
+                async_count=raw_metrics_summary.get("async_count") or 0,
+                security_issue_count=raw_metrics_summary.get("security_issue_count") or 0,
+                security_by_severity=raw_metrics_summary.get("security_by_severity") or {},
             )
 
     return ElementDetailResponse(
