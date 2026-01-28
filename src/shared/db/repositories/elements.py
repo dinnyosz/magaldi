@@ -121,6 +121,22 @@ class ElementRepository:
         if element.mutated_state:
             doc["mutated_state"] = element.mutated_state
 
+        # Code metrics fields
+        if element.complexity:
+            doc["complexity"] = element.complexity
+        if element.code_metrics:
+            doc["code_metrics"] = element.code_metrics
+        if element.docstring_quality:
+            doc["docstring_quality"] = element.docstring_quality
+        if element.security_issues:
+            doc["security_issues"] = element.security_issues
+        if element.env_vars:
+            doc["env_vars"] = element.env_vars
+        if element.concurrency:
+            doc["concurrency"] = element.concurrency
+        if element.metrics_summary:
+            doc["metrics_summary"] = element.metrics_summary
+
         client = self._get_client()
         client.index(index=INDEX_NAME, id=element.element_id, document=doc)
         return True
