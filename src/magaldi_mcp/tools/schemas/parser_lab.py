@@ -33,7 +33,7 @@ PARSER_LAB_TOOLS = [
                 },
                 "language": {
                     "type": "string",
-                    "enum": ["python", "javascript", "typescript", "php", "rust"],
+                    "enum": ["python", "javascript", "typescript", "tsx", "php", "rust"],
                     "description": "Language of the code (auto-detected if file_path provided)",
                 },
                 "debug": {
@@ -63,7 +63,7 @@ PARSER_LAB_TOOLS = [
                 },
                 "language": {
                     "type": "string",
-                    "enum": ["python", "javascript", "typescript", "php", "rust"],
+                    "enum": ["python", "javascript", "typescript", "tsx", "php", "rust"],
                     "description": "Language of the code to test",
                 },
                 "code": {
@@ -169,7 +169,7 @@ PARSER_LAB_TOOLS = [
                 },
                 "language": {
                     "type": "string",
-                    "enum": ["python", "javascript", "typescript", "php", "rust"],
+                    "enum": ["python", "javascript", "typescript", "tsx", "php", "rust"],
                     "description": "Language of the code with the gap",
                 },
                 "failing_test": {

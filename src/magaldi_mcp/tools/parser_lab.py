@@ -146,6 +146,18 @@ def _find_uncaptured_nodes(
             "type_alias_declaration",
             "interface_declaration",
         },
+        "tsx": {
+            "function_declaration",
+            "class_declaration",
+            "arrow_function",
+            "call_expression",
+            "import_statement",
+            "variable_declaration",
+            "type_alias_declaration",
+            "interface_declaration",
+            "jsx_element",
+            "jsx_self_closing_element",
+        },
         "php": {
             "function_definition",
             "class_declaration",
@@ -437,6 +449,7 @@ def _get_extension(language: str) -> str:
         "python": "py",
         "javascript": "js",
         "typescript": "ts",
+        "tsx": "tsx",
         "php": "php",
         "rust": "rs",
     }.get(language, "txt")
