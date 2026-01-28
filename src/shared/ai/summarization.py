@@ -85,6 +85,112 @@ class SummarizationResult:
 
 
 # =============================================================================
+# DYNAMIC SENTENCE RANGES
+# =============================================================================
+# Sentence count scales with element size (line count) to avoid over-describing
+# simple elements and under-describing complex ones.
+
+LINE_THRESHOLDS: dict[str, dict[str, int]] = {
+    "file":     {"tiny": 20,  "small": 50,  "medium": 200},
+    "class":    {"tiny": 10,  "small": 30,  "medium": 100},
+    "function": {"tiny": 5,   "small": 15,  "medium": 50},
+    "method":   {"tiny": 5,   "small": 15,  "medium": 50},
+    "constant": {"tiny": 1,   "small": 3,   "medium": 5},
+    "variable": {"tiny": 1,   "small": 3,   "medium": 5},
+}
+
+SENTENCE_RANGES: dict[str, dict[str, tuple[int, int]]] = {
+    "file": {
+        "tiny":   (1, 2),
+        "small":  (2, 3),
+        "medium": (3, 4),
+        "large":  (5, 6),
+    },
+    "class": {
+        "tiny":   (1, 2),
+        "small":  (2, 3),
+        "medium": (3, 4),
+        "large":  (5, 6),
+    },
+    "function": {
+        "tiny":   (1, 2),
+        "small":  (2, 3),
+        "medium": (3, 4),
+        "large":  (5, 6),
+    },
+    "method": {
+        "tiny":   (1, 2),
+        "small":  (2, 3),
+        "medium": (3, 4),
+        "large":  (4, 5),
+    },
+    "constant": {
+        "tiny":   (1, 1),
+        "small":  (1, 2),
+        "medium": (2, 2),
+        "large":  (2, 3),
+    },
+    "variable": {
+        "tiny":   (1, 1),
+        "small":  (1, 2),
+        "medium": (2, 2),
+        "large":  (2, 3),
+    },
+}
+
+
+def get_size_tier(element_type: str, line_count: int) -> str:
+    """Determine size tier based on element type and line count.
+
+    Args:
+        element_type: Type of element (file, class, function, etc.)
+        line_count: Number of lines in the element.
+
+    Returns:
+        Size tier: "tiny", "small", "medium", or "large".
+    """
+    thresholds = LINE_THRESHOLDS.get(element_type, LINE_THRESHOLDS["function"])
+    if line_count <= thresholds["tiny"]:
+        return "tiny"
+    elif line_count <= thresholds["small"]:
+        return "small"
+    elif line_count <= thresholds["medium"]:
+        return "medium"
+    return "large"
+
+
+def get_sentence_range(element_type: str, line_count: int) -> tuple[int, int]:
+    """Get sentence range for an element based on its type and size.
+
+    Args:
+        element_type: Type of element (file, class, function, etc.)
+        line_count: Number of lines in the element.
+
+    Returns:
+        Tuple of (min_sentences, max_sentences).
+    """
+    tier = get_size_tier(element_type, line_count)
+    ranges = SENTENCE_RANGES.get(element_type, SENTENCE_RANGES["function"])
+    return ranges.get(tier, (3, 4))
+
+
+def format_sentence_range(element_type: str, line_count: int) -> str:
+    """Format sentence range as a string for prompts.
+
+    Args:
+        element_type: Type of element (file, class, function, etc.)
+        line_count: Number of lines in the element.
+
+    Returns:
+        Formatted string like "2-3" or "1" (if min==max).
+    """
+    min_s, max_s = get_sentence_range(element_type, line_count)
+    if min_s == max_s:
+        return str(min_s)
+    return f"{min_s}-{max_s}"
+
+
+# =============================================================================
 # LLM CLIENT FOR SUMMARIZATION
 # =============================================================================
 
@@ -520,7 +626,7 @@ def truncate_code(code: str, max_tokens: int = 4000) -> str:
 SYSTEM_PROMPTS = {
     "file": """You summarize code files for AI agents navigating codebases.
 
-For each file, provide a 4-6 sentence summary answering:
+For each file, provide a {sentence_range} sentence summary answering:
 1. PURPOSE: What is this module's primary job? What capability does it provide?
 2. DOMAIN: What problem space does this code address?
 3. ARCHITECTURE: What design patterns or abstractions does it use?
@@ -528,11 +634,11 @@ For each file, provide a 4-6 sentence summary answering:
 5. DEPENDENCIES: What external modules or systems does this integrate with?
 
 Do NOT list individual classes/functions - those are documented separately.
-Write ONLY the 4-6 sentence summary. No reasoning, explanations, or bullet points.""",
+Write ONLY the {sentence_range} sentence summary. No reasoning, explanations, or bullet points.""",
 
     "class": """You summarize classes for AI agents navigating codebases.
 
-For each class, provide a 4-6 sentence summary answering:
+For each class, provide a {sentence_range} sentence summary answering:
 1. IDENTITY: What real-world concept or data structure does this class model?
 2. RESPONSIBILITY: What problem does using this class solve?
 3. INSTANTIATION: How do you create an instance? What parameters are required?
@@ -540,47 +646,47 @@ For each class, provide a 4-6 sentence summary answering:
 5. COLLABORATORS: What other classes or modules does it work with?
 
 Do NOT list methods - those are documented separately.
-Write ONLY the 4-6 sentence summary. No reasoning, explanations, or bullet points.""",
+Write ONLY the {sentence_range} sentence summary. No reasoning, explanations, or bullet points.""",
 
     "function": """You describe functions for AI agents navigating codebases.
 
-For each function, provide a 4-6 sentence description answering:
+For each function, provide a {sentence_range} sentence description answering:
 1. OPERATION: What does calling this function accomplish?
 2. INTERFACE: What are the parameters and return value? What types?
 3. WHEN TO USE: In what scenario should an agent call this?
 4. SIDE EFFECTS: Does it modify external state, perform I/O, or raise exceptions?
 5. EDGE CASES: What happens with empty/None inputs? What preconditions must hold?
 
-Write ONLY the 4-6 sentence description. No reasoning, explanations, or bullet points.""",
+Write ONLY the {sentence_range} sentence description. No reasoning, explanations, or bullet points.""",
 
     "method": """You describe methods for AI agents navigating codebases.
 
-For each method, provide a 4-6 sentence description answering:
+For each method, provide a {sentence_range} sentence description answering:
 1. OPERATION: What does this method do to/for the object?
 2. INTERFACE: What parameters does it take? What does it return?
 3. STATE: Which instance attributes does it read or modify?
 4. LIFECYCLE: Is this setup/init, cleanup/teardown, or called repeatedly?
 5. ERRORS: What exceptions can it raise? What preconditions must hold?
 
-Write ONLY the 4-6 sentence description. No reasoning, explanations, or bullet points.""",
+Write ONLY the {sentence_range} sentence description. No reasoning, explanations, or bullet points.""",
 
     "constant": """You describe constants for AI agents navigating codebases.
 
-For each constant, provide a 2-3 sentence description answering:
+For each constant, provide a {sentence_range} sentence description answering:
 1. MEANING: What does this value represent or configure?
 2. USAGE: Where in the system is it used?
 3. CONSTRAINTS: What are valid values? Any min/max bounds?
 
-Write ONLY the 2-3 sentence description. No reasoning, explanations, or bullet points.""",
+Write ONLY the {sentence_range} sentence description. No reasoning, explanations, or bullet points.""",
 
     "variable": """You describe variables for AI agents navigating codebases.
 
-For each variable, provide a 2-3 sentence description answering:
+For each variable, provide a {sentence_range} sentence description answering:
 1. DATA: What information does this variable hold?
 2. LIFECYCLE: How is it initialized? When does it change?
 3. ROLE: How does this variable influence its containing scope?
 
-Write ONLY the 2-3 sentence description. No reasoning, explanations, or bullet points.""",
+Write ONLY the {sentence_range} sentence description. No reasoning, explanations, or bullet points.""",
 }
 
 # User message templates - contain variable content
@@ -653,7 +759,7 @@ Value:
 
 # Legacy single-prompt templates (kept for backwards compatibility)
 PROMPTS = {
-    "file": """Summarize this {language} file in 4-6 sentences for an AI agent navigating this codebase.
+    "file": """Summarize this {language} file in {sentence_range} sentences for an AI agent navigating this codebase.
 
 Answer these questions:
 1. PURPOSE: What is this module's primary job? What capability does it provide?
@@ -670,10 +776,10 @@ File: {file_path}
 Code:
 {code}
 
-Write ONLY the 4-6 sentence summary. No reasoning or bullet points.
+Write ONLY the {sentence_range} sentence summary. No reasoning or bullet points.
 
 Summary:""",
-    "class": """Summarize this {language} class in 4-6 sentences for an AI agent.
+    "class": """Summarize this {language} class in {sentence_range} sentences for an AI agent.
 
 FOCUS on the class itself. Use file context only to understand how it fits in.
 
@@ -696,10 +802,10 @@ Code:
 {code}
 {usages_section}
 
-Write ONLY the 4-6 sentence summary. No reasoning or bullet points.
+Write ONLY the {sentence_range} sentence summary. No reasoning or bullet points.
 
 Summary:""",
-    "function": """Describe this function in 4-6 sentences for an AI agent.
+    "function": """Describe this function in {sentence_range} sentences for an AI agent.
 
 FOCUS on the function itself. Use context only to understand its role.
 
@@ -720,10 +826,10 @@ Signature: {signature}
 Code:
 {code}
 
-Write ONLY the 4-6 sentence summary. No reasoning or bullet points.
+Write ONLY the {sentence_range} sentence summary. No reasoning or bullet points.
 
 Summary:""",
-    "method": """Describe this method in 4-6 sentences for an AI agent.
+    "method": """Describe this method in {sentence_range} sentences for an AI agent.
 
 FOCUS on the method itself. Use context only to understand its role.
 
@@ -745,10 +851,10 @@ Code:
 {code}
 {usages_section}
 
-Write ONLY the 4-6 sentence summary. No reasoning or bullet points.
+Write ONLY the {sentence_range} sentence summary. No reasoning or bullet points.
 
 Summary:""",
-    "constant": """Describe this constant in 2-3 sentences for an AI agent.
+    "constant": """Describe this constant in {sentence_range} sentences for an AI agent.
 
 FOCUS on the constant itself.
 
@@ -764,10 +870,10 @@ Name: {name}
 Value:
 {code}
 
-Write ONLY the 2-3 sentence description. No reasoning or bullet points.
+Write ONLY the {sentence_range} sentence description. No reasoning or bullet points.
 
 Description:""",
-    "variable": """Describe this variable in 2-3 sentences for an AI agent.
+    "variable": """Describe this variable in {sentence_range} sentences for an AI agent.
 
 FOCUS on the variable itself.
 
@@ -785,7 +891,7 @@ Value:
 {code}
 {usages_section}
 
-Write ONLY the 2-3 sentence description. No reasoning or bullet points.
+Write ONLY the {sentence_range} sentence description. No reasoning or bullet points.
 
 Description:""",
 }
@@ -929,13 +1035,25 @@ def build_prompt(
     """
     element_type = element.element_type
 
-    # Get template
+    # Get template key
     if element_type == "method":
-        template = PROMPTS["method"]
+        template_key = "method"
     elif element_type in PROMPTS:
-        template = PROMPTS[element_type]
+        template_key = element_type
     else:
-        template = PROMPTS["function"]
+        template_key = "function"
+
+    template = PROMPTS[template_key]
+
+    # Calculate line count for dynamic sentence range
+    line_count = 1
+    if element.line_end and element.line_start:
+        line_count = max(1, element.line_end - element.line_start + 1)
+    elif element.raw_code:
+        line_count = element.raw_code.count("\n") + 1
+
+    # Get sentence range based on element type and size
+    sentence_range = format_sentence_range(template_key, line_count)
 
     # Build parent context sections
     file_summary = parent_summaries.get("file", "No file context available.")
@@ -992,6 +1110,7 @@ def build_prompt(
         decorators=decorators,
         code=code,
         usages_section=usages_section,
+        sentence_range=sentence_range,
         # Enhanced context sections
         imports_section=imports_section,
         attributes_section=attributes_section,
@@ -1037,8 +1156,18 @@ def build_messages(
     else:
         template_key = "function"
 
-    # Get static system prompt (same for all elements of this type)
-    system_prompt = SYSTEM_PROMPTS[template_key]
+    # Calculate line count for dynamic sentence range
+    line_count = 1
+    if element.line_end and element.line_start:
+        line_count = max(1, element.line_end - element.line_start + 1)
+    elif element.raw_code:
+        line_count = element.raw_code.count("\n") + 1
+
+    # Get sentence range based on element type and size
+    sentence_range = format_sentence_range(template_key, line_count)
+
+    # Get system prompt and format with sentence range
+    system_prompt = SYSTEM_PROMPTS[template_key].format(sentence_range=sentence_range)
 
     # Build variable content for user message
     file_summary = parent_summaries.get("file", "No file context available.")
