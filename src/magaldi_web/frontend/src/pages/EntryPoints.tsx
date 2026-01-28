@@ -80,12 +80,12 @@ function EntryPointList({ items, category }: { items: EntryPointItem[]; category
                 ))}
               </div>
             )}
-            {/* CLI Commands - show command name (for both CLI and Main categories) */}
+            {/* CLI Commands - show full command path (for both CLI and Main categories) */}
             {(category === 'cli' || category === 'main') && item.cli_commands && item.cli_commands.length > 0 && (
               <div className="mt-1">
                 {item.cli_commands.map((cmd, i) => (
                   <span key={i} className="me-2">
-                    <code className="text-success">$ {cmd.name}</code>
+                    <code className="text-success">$ {cmd.full_command || cmd.name}</code>
                     {cmd.framework && (
                       <small className="text-muted ms-1">({cmd.framework})</small>
                     )}

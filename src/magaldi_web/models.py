@@ -819,6 +819,7 @@ class CliCommandInfo(BaseModel):
     """CLI command information."""
 
     name: str
+    full_command: str | None = None  # Full command path like "magaldi web serve"
     options: list[dict] = Field(default_factory=list)
     framework: str | None = None
 

@@ -213,7 +213,7 @@ async def get_entry_points(
     es_repo: ElasticsearchRepository = Depends(get_es_repository),
 ) -> EntryPointsResponse:
     """Find entry points (HTTP handlers, CLI commands, etc.)."""
-    from magaldi_mcp.tools import find_entry_points
+    from magaldi_mcp.tools import find_entry_points, get_command_tree
 
     result = find_entry_points(
         es=es_repo,
@@ -222,11 +222,32 @@ async def get_entry_points(
         username=username,
     )
 
-    def convert_entries(entries: list[dict]) -> list[EntryPointItem]:
+    # Get command tree to lookup full command paths
+    command_tree = get_command_tree(
+        es=es_repo,
+        scope=scope,
+        repository=repository,
+        username=username,
+    )
+
+    # Build lookup from hash_id -> full_command
+    hash_to_full_command: dict[str, str] = {}
+    for cmd in command_tree.get("commands", []):
+        hash_id = cmd.get("hash_id")
+        full_command = cmd.get("full_command")
+        if hash_id and full_command:
+            hash_to_full_command[hash_id] = full_command
+
+    def convert_entries(
+        entries: list[dict],
+        lookup: dict[str, str] | None = None,
+    ) -> list[EntryPointItem]:
         from magaldi_web.models import HttpRouteInfo, CliCommandInfo
 
         items = []
         for e in entries:
+            hash_id = e.get("hash_id")
+
             # Convert http_routes
             http_routes = []
             for route in e.get("http_routes") or []:
@@ -237,11 +258,13 @@ async def get_entry_points(
                     framework=route.get("framework"),
                 ))
 
-            # Convert cli_commands
+            # Convert cli_commands with full_command from lookup
             cli_commands = []
             for cmd in e.get("cli_commands") or []:
+                full_command = lookup.get(hash_id) if lookup and hash_id else None
                 cli_commands.append(CliCommandInfo(
                     name=cmd.get("name", ""),
+                    full_command=full_command,
                     options=cmd.get("options", []),
                     framework=cmd.get("framework"),
                 ))
@@ -262,9 +285,9 @@ async def get_entry_points(
 
     return EntryPointsResponse(
         http=convert_entries(result.get("http", [])),
-        cli=convert_entries(result.get("cli", [])),
+        cli=convert_entries(result.get("cli", []), hash_to_full_command),
         test=convert_entries(result.get("test", [])),
-        main=convert_entries(result.get("main", [])),
+        main=convert_entries(result.get("main", []), hash_to_full_command),
         async_tasks=convert_entries(result.get("async_tasks", [])),
         stats=result.get("stats", {}),
     )

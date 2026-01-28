@@ -905,6 +905,7 @@ export interface HttpRouteInfo {
 
 export interface CliCommandInfo {
   name: string
+  full_command: string | null  // Full command path like "magaldi web serve"
   options: Array<{ name: string; type: string | null; required: boolean }>
   framework: string | null
 }
