@@ -497,7 +497,7 @@ def _extract_python_assignment(
 
     line_start = node.start_point[0] + 1
     line_end = node.end_point[0] + 1
-    raw_code = lines[line_start - 1].strip() if line_start <= len(lines) else ""
+    raw_code = "\n".join(lines[line_start - 1 : line_end])
 
     # Determine element type: constant (UPPER_CASE) or variable
     if is_module_level and name.isupper() and "_" in name or (name.isupper() and len(name) > 1):
