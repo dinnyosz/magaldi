@@ -232,6 +232,75 @@ INDEX_MAPPING = {
                 },
             },
             "mutated_state": {"type": "keyword"},
+            # === CODE METRICS (Tier 1) ===
+            "complexity": {
+                "type": "object",
+                "properties": {
+                    "cyclomatic": {"type": "integer"},
+                    "nesting_depth": {"type": "integer"},
+                    "branch_count": {"type": "integer"},
+                },
+            },
+            "code_metrics": {
+                "type": "object",
+                "properties": {
+                    "line_count": {"type": "integer"},
+                    "param_count": {"type": "integer"},
+                    "char_count": {"type": "integer"},
+                },
+            },
+            "docstring_quality": {
+                "type": "object",
+                "properties": {
+                    "has_docstring": {"type": "boolean"},
+                    "has_params": {"type": "boolean"},
+                    "has_return": {"type": "boolean"},
+                    "coverage": {"type": "float"},
+                },
+            },
+            # Security
+            "security_issues": {
+                "type": "nested",
+                "properties": {
+                    "kind": {"type": "keyword"},
+                    "pattern": {"type": "keyword"},
+                    "line": {"type": "integer"},
+                    "severity": {"type": "keyword"},
+                    "message": {"type": "text"},
+                },
+            },
+            # Environment & Concurrency
+            "env_vars": {
+                "type": "nested",
+                "properties": {
+                    "name": {"type": "keyword"},
+                    "line": {"type": "integer"},
+                    "access_type": {"type": "keyword"},
+                },
+            },
+            "concurrency": {
+                "type": "object",
+                "properties": {
+                    "is_async": {"type": "boolean"},
+                    "uses_locks": {"type": "boolean"},
+                    "uses_threads": {"type": "boolean"},
+                    "patterns": {"type": "keyword"},
+                },
+            },
+            # Roll-up statistics (for file and class elements)
+            "metrics_summary": {
+                "type": "object",
+                "properties": {
+                    "security_issue_count": {"type": "integer"},
+                    "security_by_severity": {"type": "object"},
+                    "max_complexity": {"type": "integer"},
+                    "avg_complexity": {"type": "float"},
+                    "undocumented_count": {"type": "integer"},
+                    "function_count": {"type": "integer"},
+                    "async_count": {"type": "integer"},
+                    "env_var_count": {"type": "integer"},
+                },
+            },
         }
     },
     "settings": {

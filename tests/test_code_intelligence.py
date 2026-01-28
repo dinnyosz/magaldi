@@ -1,5 +1,12 @@
 """Tests for extended code intelligence extraction."""
 
+from magaldi_core.analysis.concurrency import detect_concurrency, detect_env_vars
+from magaldi_core.analysis.metrics import (
+    analyze_docstring,
+    compute_code_metrics,
+    compute_complexity,
+)
+from magaldi_core.analysis.security import detect_security_issues
 from magaldi_core.tree_sitter_manager import (
     Comment,
     DecoratorInfo,
@@ -482,3 +489,356 @@ class TestPatternDetection:
         }
         patterns, confidence = detect_patterns(class_info, [], "python")
         assert "factory" in patterns
+
+
+# =============================================================================
+# CODE METRICS TESTS
+# =============================================================================
+
+
+class TestComplexityAnalysis:
+    """Tests for cyclomatic complexity computation."""
+
+    def test_simple_function_complexity(self):
+        """Simple function with no branches has complexity 1."""
+        source = """def foo():
+    return 1
+"""
+        manager = TreeSitterManager()
+        tree = manager.parse(source.encode(), "python")
+        complexity = compute_complexity(tree.root_node, "python")
+        assert complexity["cyclomatic"] == 1
+        assert complexity["branch_count"] == 0
+
+    def test_if_statement_adds_complexity(self):
+        """If statement adds to complexity."""
+        source = """def foo(x):
+    if x > 0:
+        return 1
+    return 0
+"""
+        manager = TreeSitterManager()
+        tree = manager.parse(source.encode(), "python")
+        complexity = compute_complexity(tree.root_node, "python")
+        assert complexity["cyclomatic"] >= 2
+        assert complexity["branch_count"] >= 1
+
+    def test_multiple_branches(self):
+        """Multiple if/elif statements increase complexity."""
+        source = """def foo(x):
+    if x > 0:
+        return 1
+    elif x < 0:
+        return -1
+    else:
+        return 0
+"""
+        manager = TreeSitterManager()
+        tree = manager.parse(source.encode(), "python")
+        complexity = compute_complexity(tree.root_node, "python")
+        assert complexity["cyclomatic"] >= 3
+
+    def test_boolean_operators_add_complexity(self):
+        """Boolean operators (and, or) add to complexity."""
+        source = """def foo(x, y):
+    if x > 0 and y > 0:
+        return 1
+    return 0
+"""
+        manager = TreeSitterManager()
+        tree = manager.parse(source.encode(), "python")
+        complexity = compute_complexity(tree.root_node, "python")
+        # 1 (base) + 1 (if) + 1 (and) = 3
+        assert complexity["cyclomatic"] >= 3
+
+    def test_nesting_depth(self):
+        """Nested control structures increase nesting depth."""
+        source = """def foo(x, y):
+    if x > 0:
+        if y > 0:
+            return 1
+    return 0
+"""
+        manager = TreeSitterManager()
+        tree = manager.parse(source.encode(), "python")
+        complexity = compute_complexity(tree.root_node, "python")
+        assert complexity["nesting_depth"] >= 2
+
+
+class TestCodeMetrics:
+    """Tests for code size metrics computation."""
+
+    def test_basic_metrics(self):
+        """Test basic code metrics."""
+        code = """def foo(x, y):
+    return x + y
+"""
+        params = [{"name": "x"}, {"name": "y"}]
+        metrics = compute_code_metrics(code, params)
+        assert metrics["line_count"] == 2  # Non-empty lines
+        assert metrics["param_count"] == 2
+        assert metrics["char_count"] == len(code)
+
+    def test_empty_function(self):
+        """Test metrics for empty function."""
+        code = ""
+        params = []
+        metrics = compute_code_metrics(code, params)
+        assert metrics["line_count"] == 0
+        assert metrics["param_count"] == 0
+        assert metrics["char_count"] == 0
+
+    def test_metrics_with_no_params(self):
+        """Test metrics for function with no parameters."""
+        code = """def foo():
+    return 42
+"""
+        params = None
+        metrics = compute_code_metrics(code, params)
+        assert metrics["param_count"] == 0
+
+
+class TestDocstringQuality:
+    """Tests for docstring quality analysis."""
+
+    def test_no_docstring(self):
+        """Function without docstring."""
+        result = analyze_docstring(None, [], None)
+        assert result["has_docstring"] is False
+        assert result["coverage"] == 0.0
+
+    def test_empty_docstring(self):
+        """Empty docstring."""
+        result = analyze_docstring("", [], None)
+        assert result["has_docstring"] is False
+
+    def test_simple_docstring(self):
+        """Simple docstring without param docs."""
+        result = analyze_docstring("This function does something.", [], None)
+        assert result["has_docstring"] is True
+        assert result["has_params"] is False
+        assert result["coverage"] == 1.0  # No params or return to document
+
+    def test_docstring_with_params(self):
+        """Docstring with parameter documentation."""
+        docstring = """Process data.
+
+        Args:
+            x: The input value.
+            y: Another value.
+        """
+        params = [{"name": "x"}, {"name": "y"}]
+        result = analyze_docstring(docstring, params, None)
+        assert result["has_docstring"] is True
+        assert result["has_params"] is True
+
+    def test_docstring_with_return(self):
+        """Docstring with return documentation."""
+        docstring = """Process data.
+
+        Returns:
+            The processed result.
+        """
+        result = analyze_docstring(docstring, [], "str")
+        assert result["has_docstring"] is True
+        assert result["has_return"] is True
+
+    def test_sphinx_style_docstring(self):
+        """Sphinx-style docstring."""
+        docstring = """Process data.
+
+        :param x: The input.
+        :returns: The output.
+        """
+        result = analyze_docstring(docstring, [{"name": "x"}], "str")
+        assert result["has_params"] is True
+        assert result["has_return"] is True
+        assert result["coverage"] == 1.0
+
+
+# =============================================================================
+# SECURITY ANALYSIS TESTS
+# =============================================================================
+
+
+class TestSecurityDetection:
+    """Tests for security issue detection."""
+
+    def test_no_issues_in_safe_code(self):
+        """Safe code should have no security issues."""
+        code = """def add(x, y):
+    return x + y
+"""
+        issues = detect_security_issues(code, "python")
+        assert len(issues) == 0
+
+    def test_detect_hardcoded_password(self):
+        """Detect hardcoded password."""
+        code = 'password = "secret123"'
+        issues = detect_security_issues(code, "python")
+        assert len(issues) >= 1
+        assert any(i["kind"] == "hardcoded_secret" for i in issues)
+
+    def test_detect_hardcoded_api_key(self):
+        """Detect hardcoded API key."""
+        code = 'api_key = "sk_live_abc123def456"'
+        issues = detect_security_issues(code, "python")
+        assert len(issues) >= 1
+        assert any(i["kind"] == "hardcoded_secret" for i in issues)
+
+    def test_detect_sql_injection_fstring(self):
+        """Detect SQL injection with f-string."""
+        code = '''cursor.execute(f"SELECT * FROM users WHERE id = {user_id}")'''
+        issues = detect_security_issues(code, "python")
+        assert len(issues) >= 1
+        assert any(i["kind"] == "sql_injection" for i in issues)
+
+    def test_detect_command_injection(self):
+        """Detect command injection with os.system."""
+        code = '''os.system(f"rm -rf {path}")'''
+        issues = detect_security_issues(code, "python")
+        assert len(issues) >= 1
+        assert any(i["kind"] == "command_injection" for i in issues)
+
+    def test_detect_subprocess_shell_true(self):
+        """Detect subprocess with shell=True."""
+        code = 'subprocess.run(cmd, shell=True)'
+        issues = detect_security_issues(code, "python")
+        assert len(issues) >= 1
+        assert any(i["kind"] == "command_injection" for i in issues)
+
+    def test_detect_eval(self):
+        """Detect eval usage."""
+        code = "result = eval(user_input)"
+        issues = detect_security_issues(code, "python")
+        assert len(issues) >= 1
+        assert any(i["kind"] == "command_injection" for i in issues)
+
+    def test_detect_pickle_load(self):
+        """Detect pickle deserialization."""
+        code = "data = pickle.loads(untrusted_data)"
+        issues = detect_security_issues(code, "python")
+        assert len(issues) >= 1
+        assert any(i["kind"] == "deserialization" for i in issues)
+
+    def test_skip_env_var_lookup(self):
+        """Skip false positive for env var lookup."""
+        code = 'password = os.environ.get("PASSWORD")'
+        issues = detect_security_issues(code, "python")
+        # Should not flag this as hardcoded secret
+        hardcoded_issues = [i for i in issues if i["kind"] == "hardcoded_secret"]
+        assert len(hardcoded_issues) == 0
+
+    def test_skip_empty_string(self):
+        """Skip false positive for empty string."""
+        code = 'password = ""'
+        issues = detect_security_issues(code, "python")
+        hardcoded_issues = [i for i in issues if i["kind"] == "hardcoded_secret"]
+        assert len(hardcoded_issues) == 0
+
+
+# =============================================================================
+# CONCURRENCY AND ENV VAR TESTS
+# =============================================================================
+
+
+class TestEnvVarDetection:
+    """Tests for environment variable detection."""
+
+    def test_detect_os_environ_get(self):
+        """Detect os.environ.get()."""
+        code = 'db_host = os.environ.get("DATABASE_HOST")'
+        env_vars = detect_env_vars(None, code, "python")
+        assert len(env_vars) >= 1
+        assert any(e["name"] == "DATABASE_HOST" for e in env_vars)
+
+    def test_detect_os_getenv(self):
+        """Detect os.getenv()."""
+        code = 'port = os.getenv("PORT")'
+        env_vars = detect_env_vars(None, code, "python")
+        assert len(env_vars) >= 1
+        assert any(e["name"] == "PORT" for e in env_vars)
+
+    def test_detect_os_environ_bracket(self):
+        """Detect os.environ[] access."""
+        code = 'secret = os.environ["SECRET_KEY"]'
+        env_vars = detect_env_vars(None, code, "python")
+        assert len(env_vars) >= 1
+        assert any(e["name"] == "SECRET_KEY" for e in env_vars)
+
+    def test_detect_multiple_env_vars(self):
+        """Detect multiple env vars."""
+        code = """
+host = os.environ.get("HOST")
+port = os.getenv("PORT")
+"""
+        env_vars = detect_env_vars(None, code, "python")
+        assert len(env_vars) >= 2
+
+    def test_no_env_vars(self):
+        """No env vars in code."""
+        code = 'name = "hello"'
+        env_vars = detect_env_vars(None, code, "python")
+        assert len(env_vars) == 0
+
+
+class TestConcurrencyDetection:
+    """Tests for concurrency pattern detection."""
+
+    def test_detect_async_function(self):
+        """Detect async function."""
+        code = """async def fetch_data():
+    await something()
+"""
+        result = detect_concurrency(None, code, [], True, "python")
+        assert result["is_async"] is True
+        assert "async" in result["patterns"]
+
+    def test_detect_threading(self):
+        """Detect threading usage."""
+        code = """
+thread = threading.Thread(target=worker)
+thread.start()
+"""
+        result = detect_concurrency(None, code, [], False, "python")
+        assert result["uses_threads"] is True
+        assert "threading" in result["patterns"]
+
+    def test_detect_lock_usage(self):
+        """Detect lock usage."""
+        code = """
+lock = Lock()
+with lock:
+    shared_data += 1
+"""
+        result = detect_concurrency(None, code, [], False, "python")
+        assert result["uses_locks"] is True
+        assert "locking" in result["patterns"]
+
+    def test_detect_multiprocessing(self):
+        """Detect multiprocessing usage."""
+        code = """
+pool = multiprocessing.Pool(4)
+results = pool.map(worker, items)
+"""
+        result = detect_concurrency(None, code, [], False, "python")
+        assert result["uses_threads"] is True
+        assert "multiprocessing" in result["patterns"]
+
+    def test_no_concurrency(self):
+        """No concurrency patterns."""
+        code = """def add(x, y):
+    return x + y
+"""
+        result = detect_concurrency(None, code, [], False, "python")
+        assert result["is_async"] is False
+        assert result["uses_threads"] is False
+        assert result["uses_locks"] is False
+        assert len(result["patterns"]) == 0
+
+    def test_async_from_decorators(self):
+        """Detect async from decorators."""
+        code = "def handler(): pass"
+        decorators = ["asynccontextmanager"]
+        result = detect_concurrency(None, code, decorators, False, "python")
+        assert "async" in result["patterns"]

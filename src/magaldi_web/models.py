@@ -850,3 +850,131 @@ class ExplainElementResponse(BaseModel):
     similar_code: list[SimilarCodeItem]
     parent: dict | None = None
     embedding_status: dict
+
+
+# =============================================================================
+# METRICS MODELS
+# =============================================================================
+
+
+class ComplexFunctionItem(BaseModel):
+    """A function with high complexity."""
+
+    element_id: str
+    hash_id: str | None = None
+    name: str
+    element_type: str
+    file_path: str
+    line: int
+    cyclomatic: int
+    nesting_depth: int
+    branch_count: int
+    line_count: int
+    summary: str | None = None
+    is_test: bool = False
+
+
+class ComplexFunctionsResponse(BaseModel):
+    """Response for complex functions endpoint."""
+
+    functions: list[ComplexFunctionItem]
+    count: int
+    min_complexity: int
+
+
+class SecurityIssueItem(BaseModel):
+    """A security issue in code."""
+
+    element_id: str
+    hash_id: str | None = None
+    function_name: str
+    element_type: str
+    file_path: str
+    function_line: int
+    issue_line: int
+    severity: str
+    kind: str
+    message: str | None = None
+
+
+class SecurityIssuesResponse(BaseModel):
+    """Response for security issues endpoint."""
+
+    issues: list[SecurityIssueItem]
+    count: int
+    by_severity: dict[str, int]
+    by_kind: dict[str, int]
+
+
+class UndocumentedItem(BaseModel):
+    """An undocumented function."""
+
+    element_id: str
+    hash_id: str | None = None
+    name: str
+    element_type: str
+    file_path: str
+    line: int
+    visibility: str | None = None
+    has_docstring: bool
+    has_params: bool
+    has_return: bool
+    coverage: float
+    param_count: int
+    summary: str | None = None
+
+
+class UndocumentedResponse(BaseModel):
+    """Response for undocumented functions endpoint."""
+
+    functions: list[UndocumentedItem]
+    count: int
+    max_coverage: float
+
+
+class EnvUsageItem(BaseModel):
+    """An environment variable usage."""
+
+    element_id: str
+    hash_id: str | None = None
+    function_name: str
+    element_type: str
+    file_path: str
+    function_line: int
+    env_name: str
+    env_line: int
+    access_type: str
+
+
+class EnvUsageResponse(BaseModel):
+    """Response for environment variable usage endpoint."""
+
+    usages: list[EnvUsageItem]
+    count: int
+    unique_vars: int
+    by_var: dict[str, int]
+
+
+class AsyncCodeItem(BaseModel):
+    """An async/concurrent code element."""
+
+    element_id: str
+    hash_id: str | None = None
+    name: str
+    element_type: str
+    file_path: str
+    line: int
+    is_async: bool
+    uses_threads: bool
+    uses_locks: bool
+    patterns: list[str] = Field(default_factory=list)
+    summary: str | None = None
+
+
+class AsyncCodeResponse(BaseModel):
+    """Response for async code endpoint."""
+
+    functions: list[AsyncCodeItem]
+    count: int
+    pattern_filter: str
+    by_pattern: dict[str, int]

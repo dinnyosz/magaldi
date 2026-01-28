@@ -6,11 +6,15 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
 from magaldi_web.dependencies import get_es_repository
 from magaldi_web.models import (
+    AsyncCodeItem,
+    AsyncCodeResponse,
     CallerInfo,
     CalleeInfo,
     CallChainNode,
     CallChainResponse,
     CallGraphResponse,
+    ComplexFunctionItem,
+    ComplexFunctionsResponse,
     DeadCodeItem,
     DeadCodeResponse,
     DependenciesResponse,
@@ -19,9 +23,15 @@ from magaldi_web.models import (
     DependentsResponse,
     EntryPointItem,
     EntryPointsResponse,
+    EnvUsageItem,
+    EnvUsageResponse,
     ExplainElementResponse,
     ImportInfo,
+    SecurityIssueItem,
+    SecurityIssuesResponse,
     SimilarCodeItem,
+    UndocumentedItem,
+    UndocumentedResponse,
 )
 from shared.db.elasticsearch import ElasticsearchRepository
 
@@ -440,4 +450,247 @@ async def explain_element(
         similar_code=similar_code,
         parent=result.get("parent"),
         embedding_status=embedding_status,
+    )
+
+
+# =============================================================================
+# METRICS ROUTES
+# =============================================================================
+
+
+@router.get("/analysis/complexity", response_model=ComplexFunctionsResponse)
+async def get_complex_functions(
+    scope: str = Query(..., description="Repository scope"),
+    repository: str = Query(..., description="Repository name"),
+    username: str = Query(default="main"),
+    min_complexity: int = Query(default=10, ge=1),
+    limit: int = Query(default=20, ge=1, le=100),
+    include_tests: bool = Query(default=False),
+    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+) -> ComplexFunctionsResponse:
+    """Find functions with high cyclomatic complexity."""
+    from magaldi_mcp.tools import find_complex_functions
+
+    result = find_complex_functions(
+        es=es_repo,
+        scope=scope,
+        repository=repository,
+        username=username,
+        min_complexity=min_complexity,
+        limit=limit,
+        include_tests=include_tests,
+    )
+
+    items = [
+        ComplexFunctionItem(
+            element_id=f.get("element_id", ""),
+            hash_id=f.get("hash_id"),
+            name=f.get("name", ""),
+            element_type=f.get("type", ""),
+            file_path=f.get("file", ""),
+            line=f.get("line", 0),
+            cyclomatic=f.get("cyclomatic", 0),
+            nesting_depth=f.get("nesting_depth", 0),
+            branch_count=f.get("branch_count", 0),
+            line_count=f.get("line_count", 0),
+            summary=f.get("summary"),
+            is_test=f.get("is_test", False),
+        )
+        for f in result.get("functions", [])
+    ]
+
+    return ComplexFunctionsResponse(
+        functions=items,
+        count=result.get("count", len(items)),
+        min_complexity=result.get("min_complexity", min_complexity),
+    )
+
+
+@router.get("/analysis/security-issues", response_model=SecurityIssuesResponse)
+async def get_security_issues(
+    scope: str = Query(..., description="Repository scope"),
+    repository: str = Query(..., description="Repository name"),
+    username: str = Query(default="main"),
+    severity: str = Query(default="high"),
+    kind: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+) -> SecurityIssuesResponse:
+    """Find potential security issues in code."""
+    from magaldi_mcp.tools import find_security_issues
+
+    result = find_security_issues(
+        es=es_repo,
+        scope=scope,
+        repository=repository,
+        username=username,
+        severity=severity,
+        kind=kind,
+        limit=limit,
+    )
+
+    items = [
+        SecurityIssueItem(
+            element_id=i.get("element_id", ""),
+            hash_id=i.get("hash_id"),
+            function_name=i.get("function_name", ""),
+            element_type=i.get("element_type", ""),
+            file_path=i.get("file", ""),
+            function_line=i.get("function_line", 0),
+            issue_line=i.get("issue_line", 0),
+            severity=i.get("severity", ""),
+            kind=i.get("kind", ""),
+            message=i.get("message"),
+        )
+        for i in result.get("issues", [])
+    ]
+
+    return SecurityIssuesResponse(
+        issues=items,
+        count=result.get("count", len(items)),
+        by_severity=result.get("by_severity", {}),
+        by_kind=result.get("by_kind", {}),
+    )
+
+
+@router.get("/analysis/documentation-coverage", response_model=UndocumentedResponse)
+async def get_undocumented_functions(
+    scope: str = Query(..., description="Repository scope"),
+    repository: str = Query(..., description="Repository name"),
+    username: str = Query(default="main"),
+    max_coverage: float = Query(default=0.5, ge=0, le=1),
+    public_only: bool = Query(default=True),
+    limit: int = Query(default=30, ge=1, le=100),
+    include_tests: bool = Query(default=False),
+    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+) -> UndocumentedResponse:
+    """Find functions missing documentation."""
+    from magaldi_mcp.tools import find_undocumented
+
+    result = find_undocumented(
+        es=es_repo,
+        scope=scope,
+        repository=repository,
+        username=username,
+        max_coverage=max_coverage,
+        public_only=public_only,
+        limit=limit,
+        include_tests=include_tests,
+    )
+
+    items = [
+        UndocumentedItem(
+            element_id=f.get("element_id", ""),
+            hash_id=f.get("hash_id"),
+            name=f.get("name", ""),
+            element_type=f.get("type", ""),
+            file_path=f.get("file", ""),
+            line=f.get("line", 0),
+            visibility=f.get("visibility"),
+            has_docstring=f.get("has_docstring", False),
+            has_params=f.get("has_params", False),
+            has_return=f.get("has_return", False),
+            coverage=f.get("coverage", 0),
+            param_count=f.get("param_count", 0),
+            summary=f.get("summary"),
+        )
+        for f in result.get("functions", [])
+    ]
+
+    return UndocumentedResponse(
+        functions=items,
+        count=result.get("count", len(items)),
+        max_coverage=result.get("max_coverage", max_coverage),
+    )
+
+
+@router.get("/analysis/env-usage", response_model=EnvUsageResponse)
+async def get_env_usage(
+    scope: str = Query(..., description="Repository scope"),
+    repository: str = Query(..., description="Repository name"),
+    username: str = Query(default="main"),
+    env_name: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+) -> EnvUsageResponse:
+    """Find environment variable usage."""
+    from magaldi_mcp.tools import find_env_usage
+
+    result = find_env_usage(
+        es=es_repo,
+        scope=scope,
+        repository=repository,
+        username=username,
+        env_name=env_name,
+        limit=limit,
+    )
+
+    items = [
+        EnvUsageItem(
+            element_id=u.get("element_id", ""),
+            hash_id=u.get("hash_id"),
+            function_name=u.get("function_name", ""),
+            element_type=u.get("element_type", ""),
+            file_path=u.get("file", ""),
+            function_line=u.get("function_line", 0),
+            env_name=u.get("env_name", ""),
+            env_line=u.get("env_line", 0),
+            access_type=u.get("access_type", ""),
+        )
+        for u in result.get("usages", [])
+    ]
+
+    return EnvUsageResponse(
+        usages=items,
+        count=result.get("count", len(items)),
+        unique_vars=result.get("unique_vars", 0),
+        by_var=result.get("by_var", {}),
+    )
+
+
+@router.get("/analysis/concurrency", response_model=AsyncCodeResponse)
+async def get_async_code(
+    scope: str = Query(..., description="Repository scope"),
+    repository: str = Query(..., description="Repository name"),
+    username: str = Query(default="main"),
+    pattern: str = Query(default="all"),
+    limit: int = Query(default=30, ge=1, le=100),
+    include_tests: bool = Query(default=False),
+    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+) -> AsyncCodeResponse:
+    """Find async/concurrent code patterns."""
+    from magaldi_mcp.tools import find_async_code
+
+    result = find_async_code(
+        es=es_repo,
+        scope=scope,
+        repository=repository,
+        username=username,
+        pattern=pattern,
+        limit=limit,
+        include_tests=include_tests,
+    )
+
+    items = [
+        AsyncCodeItem(
+            element_id=f.get("element_id", ""),
+            hash_id=f.get("hash_id"),
+            name=f.get("name", ""),
+            element_type=f.get("type", ""),
+            file_path=f.get("file", ""),
+            line=f.get("line", 0),
+            is_async=f.get("is_async", False),
+            uses_threads=f.get("uses_threads", False),
+            uses_locks=f.get("uses_locks", False),
+            patterns=f.get("patterns", []),
+            summary=f.get("summary"),
+        )
+        for f in result.get("functions", [])
+    ]
+
+    return AsyncCodeResponse(
+        functions=items,
+        count=result.get("count", len(items)),
+        pattern_filter=result.get("pattern_filter", pattern),
+        by_pattern=result.get("by_pattern", {}),
     )

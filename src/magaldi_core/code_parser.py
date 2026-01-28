@@ -17,6 +17,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from magaldi_core.analysis.concurrency import detect_concurrency, detect_env_vars
+from magaldi_core.analysis.metrics import analyze_docstring, compute_code_metrics, compute_complexity
+from magaldi_core.analysis.security import detect_security_issues
 from magaldi_core.change_detection import ChangeManifest, FileInfo
 from magaldi_core.tree_sitter_manager import (
     DecoratorInfo,
@@ -274,6 +277,21 @@ class CodeElement:
     purity: dict[str, Any] | None = None
     side_effects: list[dict[str, Any]] = field(default_factory=list)
     mutated_state: list[str] = field(default_factory=list)
+
+    # Code Metrics (Tier 1)
+    complexity: dict[str, Any] | None = None  # {cyclomatic, nesting_depth, branch_count}
+    code_metrics: dict[str, Any] | None = None  # {line_count, param_count, char_count}
+    docstring_quality: dict[str, Any] | None = None  # {has_docstring, coverage, ...}
+
+    # Security
+    security_issues: list[dict[str, Any]] = field(default_factory=list)
+
+    # Environment & Concurrency
+    env_vars: list[dict[str, Any]] = field(default_factory=list)
+    concurrency: dict[str, Any] | None = None  # {is_async, uses_locks, patterns}
+
+    # Roll-up statistics (for file and class elements)
+    metrics_summary: dict[str, Any] | None = None  # Aggregated from child elements
 
     def compute_content_hash(self) -> str:
         """Compute SHA256 hash of the element's content for change detection.
@@ -803,6 +821,32 @@ class PythonParser(TreeSitterParser):
                 ]
                 elem.mutated_state = mutations
 
+                # Code metrics (Tier 1)
+                if elem.raw_code:
+                    try:
+                        elem_tree = self.manager.parse(elem.raw_code.encode("utf-8"), "python")
+                        elem.complexity = compute_complexity(elem_tree.root_node, "python")
+                    except Exception:
+                        pass
+
+                elem.code_metrics = compute_code_metrics(elem.raw_code or "", elem.parameters)
+                elem.docstring_quality = analyze_docstring(
+                    elem.docstring, elem.parameters, elem.return_type
+                )
+
+                # Security analysis
+                elem.security_issues = detect_security_issues(elem.raw_code or "", "python")
+
+                # Environment and concurrency detection
+                elem.env_vars = detect_env_vars(elem.calls, elem.raw_code or "", "python")
+                elem.concurrency = detect_concurrency(
+                    elem.calls, elem.raw_code or "", elem.decorators, elem.is_async, "python"
+                )
+
+            # Security analysis for variables/constants (check for hardcoded secrets)
+            if elem.element_type in ("variable", "constant"):
+                elem.security_issues = detect_security_issues(elem.raw_code or "", "python")
+
             # API surface detection
             if elem.decorator_details:
                 dec_infos = [
@@ -854,7 +898,99 @@ class PythonParser(TreeSitterParser):
                 elem.detected_patterns = patterns
                 elem.pattern_confidence = confidence
 
+        # Compute roll-up statistics for file and class elements
+        self._compute_rollup_stats(elements)
+
         return elements
+
+    def _compute_rollup_stats(self, elements: list[CodeElement]) -> None:
+        """Compute aggregated metrics for file and class elements from their children."""
+        # Build parent-child map
+        children_by_parent: dict[str, list[CodeElement]] = {}
+        for elem in elements:
+            if elem.parent_id:
+                if elem.parent_id not in children_by_parent:
+                    children_by_parent[elem.parent_id] = []
+                children_by_parent[elem.parent_id].append(elem)
+
+        # Compute stats for file and class elements
+        for elem in elements:
+            if elem.element_type not in ("file", "class"):
+                continue
+
+            children = children_by_parent.get(elem.element_id, [])
+            if not children:
+                continue
+
+            # Collect metrics from descendant functions/methods
+            all_descendants = self._get_all_descendants(elem.element_id, children_by_parent)
+
+            security_issue_count = 0
+            security_by_severity: dict[str, int] = {}
+            complexities: list[int] = []
+            undocumented_count = 0
+            function_count = 0
+            async_count = 0
+            env_var_count = 0
+
+            for child in all_descendants:
+                if child.element_type in ("function", "method"):
+                    function_count += 1
+
+                    # Security issues
+                    for issue in child.security_issues:
+                        security_issue_count += 1
+                        sev = issue.get("severity", "info")
+                        security_by_severity[sev] = security_by_severity.get(sev, 0) + 1
+
+                    # Complexity
+                    if child.complexity:
+                        complexities.append(child.complexity.get("cyclomatic", 1))
+
+                    # Documentation
+                    if child.docstring_quality:
+                        if not child.docstring_quality.get("has_docstring", True):
+                            undocumented_count += 1
+
+                    # Async
+                    if child.concurrency and child.concurrency.get("is_async"):
+                        async_count += 1
+
+                    # Env vars
+                    env_var_count += len(child.env_vars)
+
+                elif child.element_type in ("variable", "constant"):
+                    # Security issues on variables
+                    for issue in child.security_issues:
+                        security_issue_count += 1
+                        sev = issue.get("severity", "info")
+                        security_by_severity[sev] = security_by_severity.get(sev, 0) + 1
+
+            # Only set if there are meaningful stats
+            if function_count > 0 or security_issue_count > 0:
+                elem.metrics_summary = {
+                    "security_issue_count": security_issue_count,
+                    "security_by_severity": security_by_severity if security_by_severity else None,
+                    "max_complexity": max(complexities) if complexities else None,
+                    "avg_complexity": round(sum(complexities) / len(complexities), 1) if complexities else None,
+                    "undocumented_count": undocumented_count,
+                    "function_count": function_count,
+                    "async_count": async_count,
+                    "env_var_count": env_var_count,
+                }
+
+    def _get_all_descendants(
+        self,
+        parent_id: str,
+        children_by_parent: dict[str, list[CodeElement]],
+    ) -> list[CodeElement]:
+        """Get all descendants of an element (recursive)."""
+        result: list[CodeElement] = []
+        direct_children = children_by_parent.get(parent_id, [])
+        for child in direct_children:
+            result.append(child)
+            result.extend(self._get_all_descendants(child.element_id, children_by_parent))
+        return result
 
     def _convert_class(
         self,

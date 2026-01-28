@@ -6,6 +6,9 @@ This package provides analysis functions for:
 - Type annotation extraction (semantic.py)
 - API surface detection (api_detection.py)
 - Design pattern detection (api_detection.py)
+- Code metrics and complexity (metrics.py)
+- Security pattern detection (security.py)
+- Concurrency and env var detection (concurrency.py)
 """
 
 from __future__ import annotations
@@ -15,6 +18,21 @@ from magaldi_core.analysis.api_detection import (
     detect_http_routes,
     detect_patterns,
     detect_public_api,
+)
+from magaldi_core.analysis.concurrency import (
+    detect_concurrency,
+    detect_env_vars,
+    summarize_concurrency,
+)
+from magaldi_core.analysis.metrics import (
+    analyze_docstring,
+    compute_code_metrics,
+    compute_complexity,
+)
+from magaldi_core.analysis.security import (
+    detect_security_issues,
+    get_severity_score,
+    summarize_security_issues,
 )
 from magaldi_core.analysis.semantic import (
     IMPURE_CALLS,
@@ -42,4 +60,16 @@ __all__ = [
     "detect_cli_commands",
     "detect_public_api",
     "detect_patterns",
+    # Metrics
+    "compute_complexity",
+    "compute_code_metrics",
+    "analyze_docstring",
+    # Security
+    "detect_security_issues",
+    "summarize_security_issues",
+    "get_severity_score",
+    # Concurrency
+    "detect_env_vars",
+    "detect_concurrency",
+    "summarize_concurrency",
 ]

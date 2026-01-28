@@ -80,16 +80,21 @@ class MagaldiMCPServer:
             batch_get_elements,
             dependency_graph,
             explain_element,
+            find_async_code,
             find_by_pattern,
             find_call_chain,
             find_callers,
+            find_complex_functions,
             find_dead_code,
             find_dependencies,
             find_dependents,
             find_entry_points,
+            find_env_usage,
             find_files,
             find_implementations,
+            find_security_issues,
             find_similar,
+            find_undocumented,
             find_usages,
             generate_config,
             generate_skill,
@@ -437,6 +442,62 @@ class MagaldiMCPServer:
                 gap_description=args["gap_description"],
                 language=args["language"],
                 failing_test=args.get("failing_test"),
+            )
+        # Metrics tools
+        elif name == "find_complex_functions":
+            return await asyncio.to_thread(
+                find_complex_functions,
+                es,
+                scope=args["scope"],
+                repository=args["repository"],
+                username=args.get("username", self.default_username),
+                min_complexity=args.get("min_complexity", 10),
+                limit=args.get("limit", 20),
+                include_tests=args.get("include_tests", False),
+            )
+        elif name == "find_security_issues":
+            return await asyncio.to_thread(
+                find_security_issues,
+                es,
+                scope=args["scope"],
+                repository=args["repository"],
+                username=args.get("username", self.default_username),
+                severity=args.get("severity", "high"),
+                kind=args.get("kind"),
+                limit=args.get("limit", 50),
+            )
+        elif name == "find_undocumented":
+            return await asyncio.to_thread(
+                find_undocumented,
+                es,
+                scope=args["scope"],
+                repository=args["repository"],
+                username=args.get("username", self.default_username),
+                max_coverage=args.get("max_coverage", 0.5),
+                public_only=args.get("public_only", True),
+                limit=args.get("limit", 30),
+                include_tests=args.get("include_tests", False),
+            )
+        elif name == "find_env_usage":
+            return await asyncio.to_thread(
+                find_env_usage,
+                es,
+                scope=args["scope"],
+                repository=args["repository"],
+                username=args.get("username", self.default_username),
+                env_name=args.get("env_name"),
+                limit=args.get("limit", 50),
+            )
+        elif name == "find_async_code":
+            return await asyncio.to_thread(
+                find_async_code,
+                es,
+                scope=args["scope"],
+                repository=args["repository"],
+                username=args.get("username", self.default_username),
+                pattern=args.get("pattern", "all"),
+                limit=args.get("limit", 30),
+                include_tests=args.get("include_tests", False),
             )
         else:
             raise ValueError(f"Unknown tool: {name}")
