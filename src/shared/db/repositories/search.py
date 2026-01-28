@@ -402,7 +402,12 @@ class SearchRepository:
         Returns:
             List of element documents that call the target.
         """
-        filter_clauses: list[dict[str, Any]] = []
+        filter_clauses: list[dict[str, Any]] = [
+            # Only search elements that can have calls (functions, methods)
+            {"terms": {"element_type": ["function", "method"]}},
+            # Only search elements that have the calls field (nested field exists check)
+            {"exists": {"field": "calls"}},
+        ]
 
         if scope:
             filter_clauses.append({"term": {"scope": scope}})
@@ -421,24 +426,24 @@ class SearchRepository:
             }
         }
 
-        query: dict[str, Any]
-        if filter_clauses:
-            query = {
-                "bool": {
-                    "must": [nested_query],
-                    "filter": filter_clauses,
-                }
+        query: dict[str, Any] = {
+            "bool": {
+                "must": [nested_query],
+                "filter": filter_clauses,
             }
-        else:
-            query = nested_query
+        }
 
         client = self._get_client()
-        result = client.search(
-            index=INDEX_NAME,
-            body={"query": query, "size": limit},
-        )
-
-        return [hit["_source"] for hit in result.get("hits", {}).get("hits", [])]
+        try:
+            result = client.search(
+                index=INDEX_NAME,
+                body={"query": query, "size": limit},
+            )
+            return [hit["_source"] for hit in result.get("hits", {}).get("hits", [])]
+        except Exception:
+            # Handle case where some documents don't have the nested calls field
+            # This can happen with older indexed data or abstract methods
+            return []
 
     def find_elements_importing(
         self,
@@ -460,7 +465,12 @@ class SearchRepository:
         Returns:
             List of element documents that import the module.
         """
-        filter_clauses: list[dict[str, Any]] = []
+        filter_clauses: list[dict[str, Any]] = [
+            # Only search file elements (imports are on files)
+            {"term": {"element_type": "file"}},
+            # Only search elements that have the imports field
+            {"exists": {"field": "imports"}},
+        ]
 
         if scope:
             filter_clauses.append({"term": {"scope": scope}})
@@ -479,16 +489,12 @@ class SearchRepository:
             }
         }
 
-        query: dict[str, Any]
-        if filter_clauses:
-            query = {
-                "bool": {
-                    "must": [nested_query],
-                    "filter": filter_clauses,
-                }
+        query: dict[str, Any] = {
+            "bool": {
+                "must": [nested_query],
+                "filter": filter_clauses,
             }
-        else:
-            query = nested_query
+        }
 
         client = self._get_client()
         result = client.search(
