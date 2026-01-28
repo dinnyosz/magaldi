@@ -360,10 +360,10 @@ async def get_search_filters(
             "size": 0,
             "query": {"term": {"username": "main"}},
             "aggs": {
-                "scopes": {"terms": {"field": "scope", "size": 50}},
-                "repositories": {"terms": {"field": "repository", "size": 100}},
-                "element_types": {"terms": {"field": "element_type", "size": 10}},
-                "languages": {"terms": {"field": "language", "size": 20}},
+                "scopes": {"terms": {"field": "scope.keyword", "size": 50}},
+                "repositories": {"terms": {"field": "repository.keyword", "size": 100}},
+                "element_types": {"terms": {"field": "element_type.keyword", "size": 10}},
+                "languages": {"terms": {"field": "language.keyword", "size": 20}},
             },
         },
     )

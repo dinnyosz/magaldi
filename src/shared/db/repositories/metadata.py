@@ -62,7 +62,7 @@ class MetadataRepository:
                 "must": [
                     {"term": {"name.keyword": name}},
                     {"term": {"element_type": element_type}},
-                    {"term": {"relative_path": relative_path}},
+                    {"term": {"relative_path.keyword": relative_path}},
                     {"term": {"scope": scope}},
                     {"term": {"repository": repository}},
                     {"term": {"username": username}},

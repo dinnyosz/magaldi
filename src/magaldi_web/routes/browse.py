@@ -65,13 +65,13 @@ async def browse_elements(
 
     # Sort by file path and line number for consistent ordering
     sort = [
-        {"relative_path": {"order": "asc"}},
+        {"relative_path.keyword": {"order": "asc"}},
         {"line_start": {"order": "asc"}},
     ]
 
     # For files, sort alphabetically by path
     if element_type == "file":
-        sort = [{"relative_path": {"order": "asc"}}]
+        sort = [{"relative_path.keyword": {"order": "asc"}}]
 
     # Execute search
     result = client.search(
@@ -366,19 +366,19 @@ async def get_browse_filters(
         body={
             "size": 0,
             "aggs": {
-                "scopes": {"terms": {"field": "scope", "size": 50}},
+                "scopes": {"terms": {"field": "scope.keyword", "size": 50}},
                 "repositories": {
                     "composite": {
                         "size": 100,
                         "sources": [
-                            {"scope": {"terms": {"field": "scope"}}},
-                            {"repository": {"terms": {"field": "repository"}}},
+                            {"scope": {"terms": {"field": "scope.keyword"}}},
+                            {"repository": {"terms": {"field": "repository.keyword"}}},
                         ],
                     },
                 },
-                "element_types": {"terms": {"field": "element_type", "size": 20}},
-                "languages": {"terms": {"field": "language", "size": 30}},
-                "usernames": {"terms": {"field": "username", "size": 50}},
+                "element_types": {"terms": {"field": "element_type.keyword", "size": 20}},
+                "languages": {"terms": {"field": "language.keyword", "size": 30}},
+                "usernames": {"terms": {"field": "username.keyword", "size": 50}},
             },
         },
     )
@@ -439,8 +439,8 @@ async def get_browse_stats(
             "size": 0,
             "query": {"bool": {"filter": filters}},
             "aggs": {
-                "by_type": {"terms": {"field": "element_type", "size": 20}},
-                "by_language": {"terms": {"field": "language", "size": 20}},
+                "by_type": {"terms": {"field": "element_type.keyword", "size": 20}},
+                "by_language": {"terms": {"field": "language.keyword", "size": 20}},
             },
         },
     )
