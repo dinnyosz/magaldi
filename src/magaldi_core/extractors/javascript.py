@@ -17,6 +17,7 @@ from magaldi_core.extractors.base import (
     walk_tree,
 )
 from magaldi_core.extractors.types import (
+    DecoratorInfo,
     ExtractedCall,
     ExtractedElement,
     ExtractedImport,
@@ -102,7 +103,22 @@ def extract_javascript_elements(tree: Tree, lines: list[str]) -> list[ExtractedE
 
     for node in walk_tree(root):
         if node.type == "class_declaration":
-            elements.append(_extract_js_class(node, lines))
+            # Check for decorators in parent node (export_statement or similar)
+            decorators: list[str] | None = None
+            decorator_details: list[DecoratorInfo] | None = None
+            decorated_node: Node | None = None
+
+            parent = node.parent
+            if parent and parent.type == "export_statement":
+                # Look for decorator siblings
+                has_decorators = any(c.type == "decorator" for c in parent.children)
+                if has_decorators:
+                    decorators, decorator_details = _get_js_decorators(parent)
+                    decorated_node = parent
+
+            elements.append(_extract_js_class(
+                node, lines, decorators, decorator_details, decorated_node
+            ))
         elif node.type == "function_declaration":
             elements.append(_extract_js_function(node, lines))
         elif node.type == "lexical_declaration":
@@ -124,12 +140,80 @@ def extract_javascript_elements(tree: Tree, lines: list[str]) -> list[ExtractedE
     return elements
 
 
-def _extract_js_class(node: Node, lines: list[str]) -> ExtractedElement:
-    """Extract a JavaScript class."""
+def _get_js_decorators(parent_node: Node) -> tuple[list[str], list[DecoratorInfo]]:
+    """Extract decorator names and details from TypeScript/JavaScript decorators.
+
+    In TS/JS, decorators are siblings of the class/function inside an export_statement
+    or directly preceding the declaration.
+
+    Args:
+        parent_node: The parent node (typically export_statement) containing decorators.
+
+    Returns:
+        Tuple of (decorator_names, decorator_details).
+    """
+    decorators: list[str] = []
+    details: list[DecoratorInfo] = []
+
+    for child in parent_node.children:
+        if child.type == "decorator":
+            # Get the full decorator text (excluding @)
+            full_text = get_node_text(child)
+            if full_text.startswith("@"):
+                full_text = full_text[1:].strip()
+
+            # Find the decorator content (identifier or call_expression)
+            for deco_child in child.children:
+                if deco_child.type == "@":
+                    continue
+                elif deco_child.type == "identifier":
+                    # Simple decorator: @Injectable
+                    name = get_node_text(deco_child)
+                    decorators.append(name)
+                    details.append(DecoratorInfo(name=name, args=None, full=full_text))
+                    break
+                elif deco_child.type == "call_expression":
+                    # Call decorator: @Controller('cats') or @UseGuards(AuthGuard)
+                    func_node = get_child_by_field(deco_child, "function")
+                    args_node = get_child_by_field(deco_child, "arguments")
+                    if func_node:
+                        name = get_node_text(func_node)
+                        args = get_node_text(args_node) if args_node else None
+                        decorators.append(name)
+                        details.append(DecoratorInfo(name=name, args=args, full=full_text))
+                    break
+                elif deco_child.type == "member_expression":
+                    # Member decorator: @Module.forRoot()
+                    name = get_node_text(deco_child)
+                    decorators.append(name)
+                    details.append(DecoratorInfo(name=name, args=None, full=full_text))
+                    break
+
+    return decorators, details
+
+
+def _extract_js_class(
+    node: Node,
+    lines: list[str],
+    decorators: list[str] | None = None,
+    decorator_details: list[DecoratorInfo] | None = None,
+    decorated_node: Node | None = None,
+) -> ExtractedElement:
+    """Extract a JavaScript class.
+
+    Args:
+        node: The class_declaration node.
+        lines: Source code lines.
+        decorators: List of decorator names (if any).
+        decorator_details: Rich decorator info with args.
+        decorated_node: The parent node containing decorators (e.g., export_statement).
+    """
     name_node = get_child_by_field(node, "name")
     name = get_node_text(name_node) if name_node else "unknown"
 
-    line_start = node.start_point[0] + 1
+    # Use decorated_node's start if available (to include decorators in raw_code)
+    start_node = decorated_node if decorated_node else node
+    line_start = start_node.start_point[0] + 1
     line_end = node.end_point[0] + 1
     raw_code = "\n".join(lines[line_start - 1 : line_end])
 
@@ -140,6 +224,8 @@ def _extract_js_class(node: Node, lines: list[str]) -> ExtractedElement:
         line_end=line_end,
         raw_code=raw_code,
         node=node,
+        decorators=decorators,
+        decorator_details=decorator_details,
     )
 
 
