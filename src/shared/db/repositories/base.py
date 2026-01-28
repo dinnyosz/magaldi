@@ -33,6 +33,12 @@ def generate_hash_id(element_id: str) -> str:
 # Index name for code elements
 INDEX_NAME = "magaldi-code-elements"
 
+# Index name for relationships (knowledge graph edges)
+RELATIONSHIPS_INDEX_NAME = "magaldi-relationships"
+
+# Index name for external references (env vars, config keys, events, etc.)
+EXTERNAL_REFS_INDEX_NAME = "magaldi-external-refs"
+
 # Index mapping with dense_vector for embeddings
 INDEX_MAPPING = {
     "mappings": {
@@ -309,6 +315,73 @@ INDEX_MAPPING = {
     },
 }
 
+# Mapping for relationships index (knowledge graph edges)
+RELATIONSHIPS_INDEX_MAPPING = {
+    "mappings": {
+        "properties": {
+            # Unique identifier for this relationship
+            "relationship_id": {"type": "keyword"},
+            # Deduplication key (same across users for same logical relationship)
+            "relationship_key": {"type": "keyword"},
+            # Source and target (using hash_id for elements)
+            "source_hash": {"type": "keyword"},
+            "target_hash": {"type": "keyword"},
+            # Relationship type
+            "relationship_type": {"type": "keyword"},
+            # Scoping for multi-user support
+            "scope": {"type": "keyword"},
+            "repository": {"type": "keyword"},
+            "username": {"type": "keyword"},
+            # Priority for user vs main (user=1 shadows main=0)
+            "priority": {"type": "byte"},
+            # Metadata
+            "confidence": {"type": "float"},
+            "line": {"type": "integer"},
+            "indexed_at": {"type": "date"},
+            # Type-specific details (flexible structure)
+            # Examples:
+            # - BELONGS_TO_GROUP: {"command_name": "serve", "group_path": ["main", "web"], "full_command": "magaldi web serve"}
+            # - MOUNTS_ROUTER: {"prefix": "/api/v1", "tags": ["users"]}
+            # - READS_ENV: {"key": "DATABASE_URL", "default": null}
+            "details": {"type": "flattened"},
+        }
+    },
+    "settings": {
+        "number_of_shards": 1,
+        "number_of_replicas": 0,
+    },
+}
+
+# Mapping for external references index
+EXTERNAL_REFS_INDEX_MAPPING = {
+    "mappings": {
+        "properties": {
+            # Unique identifier (e.g., "env:DATABASE_URL", "event:user.created")
+            "ref_id": {"type": "keyword"},
+            # Type of reference
+            "ref_type": {"type": "keyword"},
+            # Human-readable name
+            "name": {"type": "keyword"},
+            # Searchable name
+            "name_text": {"type": "text"},
+            # Optional description
+            "description": {"type": "text"},
+            # Scoping
+            "scope": {"type": "keyword"},
+            "repository": {"type": "keyword"},
+            "username": {"type": "keyword"},
+            # Usage count (denormalized for quick lookups)
+            "usages_count": {"type": "integer"},
+            # Timestamp
+            "indexed_at": {"type": "date"},
+        }
+    },
+    "settings": {
+        "number_of_shards": 1,
+        "number_of_replicas": 0,
+    },
+}
+
 
 class ElasticsearchBase:
     """Base class providing Elasticsearch connection management.
@@ -338,10 +411,22 @@ class ElasticsearchBase:
         return self._client
 
     def _ensure_index(self) -> None:
-        """Create index if it doesn't exist."""
+        """Create indices if they don't exist."""
         client = self._client
-        if client and not client.indices.exists(index=INDEX_NAME):
-            client.indices.create(index=INDEX_NAME, body=INDEX_MAPPING)
+        if client:
+            # Main elements index
+            if not client.indices.exists(index=INDEX_NAME):
+                client.indices.create(index=INDEX_NAME, body=INDEX_MAPPING)
+            # Relationships index (knowledge graph edges)
+            if not client.indices.exists(index=RELATIONSHIPS_INDEX_NAME):
+                client.indices.create(
+                    index=RELATIONSHIPS_INDEX_NAME, body=RELATIONSHIPS_INDEX_MAPPING
+                )
+            # External references index (env vars, config keys, events, etc.)
+            if not client.indices.exists(index=EXTERNAL_REFS_INDEX_NAME):
+                client.indices.create(
+                    index=EXTERNAL_REFS_INDEX_NAME, body=EXTERNAL_REFS_INDEX_MAPPING
+                )
 
     def close(self) -> None:
         """Close Elasticsearch client."""
