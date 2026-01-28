@@ -180,7 +180,7 @@ async def get_file_tree(
                 },
             },
             "_source": ["relative_path", "language", "summary"],
-            "sort": [{"relative_path": "asc"}],
+            "sort": [{"relative_path.keyword": "asc"}],
         },
     )
 
@@ -264,7 +264,7 @@ async def get_file_detail(
                         {"term": {"scope": scope}},
                         {"term": {"repository": repository}},
                         {"term": {"username": username}},
-                        {"term": {"relative_path": file_path}},
+                        {"term": {"relative_path.keyword": file_path}},
                         {"term": {"element_type": "file"}},
                     ],
                 },
@@ -290,7 +290,7 @@ async def get_file_detail(
                         {"term": {"scope": scope}},
                         {"term": {"repository": repository}},
                         {"term": {"username": username}},
-                        {"term": {"relative_path": file_path}},
+                        {"term": {"relative_path.keyword": file_path}},
                     ],
                     "must_not": [{"term": {"element_type": "file"}}],
                 },
@@ -348,7 +348,7 @@ async def get_file_detail(
                     "filter": [
                         {"term": {"scope": scope}},
                         {"term": {"repository": repository}},
-                        {"term": {"relative_path": file_path}},
+                        {"term": {"relative_path.keyword": file_path}},
                         {"term": {"element_type": "file"}},
                     ],
                     "must_not": [{"term": {"username": "main"}}],

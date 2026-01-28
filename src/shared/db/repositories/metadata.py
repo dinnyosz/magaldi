@@ -60,9 +60,9 @@ class MetadataRepository:
         query = {
             "bool": {
                 "must": [
-                    {"term": {"name": name}},
+                    {"term": {"name.keyword": name}},
                     {"term": {"element_type": element_type}},
-                    {"term": {"relative_path": relative_path}},
+                    {"term": {"relative_path.keyword": relative_path}},
                     {"term": {"scope": scope}},
                     {"term": {"repository": repository}},
                     {"term": {"username": username}},
@@ -106,7 +106,7 @@ class MetadataRepository:
         query = {
             "bool": {
                 "must": [
-                    {"term": {"name": name}},
+                    {"term": {"name.keyword": name}},
                     {"term": {"element_type": element_type}},
                     {"term": {"scope": scope}},
                     {"term": {"repository": repository}},
@@ -149,7 +149,7 @@ class MetadataRepository:
         query = {
             "bool": {
                 "must": [
-                    {"term": {"name": method_name}},
+                    {"term": {"name.keyword": method_name}},
                     {"term": {"element_type": "method"}},
                     {"term": {"parent_id": class_id}},
                     {"term": {"scope": scope}},

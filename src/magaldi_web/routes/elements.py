@@ -155,7 +155,7 @@ async def get_element_detail(
                             {"term": {"scope": source["scope"]}},
                             {"term": {"repository": source["repository"]}},
                             {"term": {"username": source["username"]}},
-                            {"term": {"relative_path": source["relative_path"]}},
+                            {"term": {"relative_path.keyword": source["relative_path"]}},
                             {"term": {"element_type": "file"}},
                         ],
                     },
