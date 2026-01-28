@@ -280,7 +280,7 @@ class ElementRepository:
                             {"term": {"scope": scope}},
                             {"term": {"repository": repository}},
                             {"term": {"username": username}},
-                            {"term": {"relative_path.keyword": relative_path}},
+                            {"term": {"relative_path": relative_path}},
                         ]
                     }
                 },
@@ -327,7 +327,7 @@ class ElementRepository:
                             {"term": {"scope": scope}},
                             {"term": {"repository": repository}},
                             {"term": {"username": username}},
-                            {"term": {"relative_path.keyword": relative_path}},
+                            {"term": {"relative_path": relative_path}},
                         ]
                     }
                 }
