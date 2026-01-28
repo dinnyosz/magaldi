@@ -47,8 +47,8 @@ async def get_dashboard(
                     "composite": {
                         "size": 100,
                         "sources": [
-                            {"scope": {"terms": {"field": "scope"}}},
-                            {"repository": {"terms": {"field": "repository"}}},
+                            {"scope": {"terms": {"field": "scope.keyword"}}},
+                            {"repository": {"terms": {"field": "repository.keyword"}}},
                         ],
                     },
                     "aggs": {
@@ -59,10 +59,10 @@ async def get_dashboard(
                         "variable_count": {"filter": {"term": {"element_type": "variable"}}},
                         "constant_count": {"filter": {"term": {"element_type": "constant"}}},
                         "feature_count": {"filter": {"term": {"element_type": "feature"}}},
-                        "languages": {"terms": {"field": "language", "size": 10}},
+                        "languages": {"terms": {"field": "language.keyword", "size": 10}},
                     },
                 },
-                "total_repos": {"cardinality": {"field": "repository"}},
+                "total_repos": {"cardinality": {"field": "repository.keyword"}},
             },
         },
     )
@@ -102,7 +102,7 @@ async def get_dashboard(
             "query": {"term": {"username": "main"}},
             "aggs": {
                 "by_type": {
-                    "terms": {"field": "element_type", "size": 20},
+                    "terms": {"field": "element_type.keyword", "size": 20},
                 },
             },
         },

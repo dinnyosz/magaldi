@@ -40,13 +40,13 @@ async def list_repos(
                     "composite": {
                         "size": 1000,
                         "sources": [
-                            {"scope": {"terms": {"field": "scope"}}},
-                            {"repository": {"terms": {"field": "repository"}}},
+                            {"scope": {"terms": {"field": "scope.keyword"}}},
+                            {"repository": {"terms": {"field": "repository.keyword"}}},
                         ],
                     },
                     "aggs": {
                         "file_count": {"filter": {"term": {"element_type": "file"}}},
-                        "languages": {"terms": {"field": "language", "size": 10}},
+                        "languages": {"terms": {"field": "language.keyword", "size": 10}},
                     },
                 },
             },
@@ -97,7 +97,7 @@ async def get_repo_detail(
             },
             "aggs": {
                 "file_count": {"filter": {"term": {"element_type": "file"}}},
-                "languages": {"terms": {"field": "language", "size": 20}},
+                "languages": {"terms": {"field": "language.keyword", "size": 20}},
             },
         },
     )
@@ -126,7 +126,7 @@ async def get_repo_detail(
             },
             "aggs": {
                 "users": {
-                    "terms": {"field": "username", "size": 50},
+                    "terms": {"field": "username.keyword", "size": 50},
                     "aggs": {
                         "file_count": {"filter": {"term": {"element_type": "file"}}},
                     },
@@ -355,7 +355,7 @@ async def get_file_detail(
                 },
             },
             "aggs": {
-                "users": {"terms": {"field": "username", "size": 50}},
+                "users": {"terms": {"field": "username.keyword", "size": 50}},
             },
         },
     )
