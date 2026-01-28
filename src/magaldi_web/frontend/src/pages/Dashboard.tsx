@@ -182,7 +182,11 @@ function Dashboard() {
           </Card>
         </Col>
         <Col>
-          <Card className="text-center h-100">
+          <Card
+            className="text-center h-100"
+            style={{ cursor: 'pointer' }}
+            onClick={() => navigate('/explorer?type=feature')}
+          >
             <Card.Body className="py-3">
               <h3 className="mb-0" style={{ color: '#20c997' }}>
                 {dashboard?.stats?.feature_count?.toLocaleString() ?? 0}
@@ -192,7 +196,11 @@ function Dashboard() {
           </Card>
         </Col>
         <Col>
-          <Card className="text-center h-100">
+          <Card
+            className="text-center h-100"
+            style={{ cursor: 'pointer' }}
+            onClick={() => navigate('/explorer?type=subfeature')}
+          >
             <Card.Body className="py-3">
               <h3 className="mb-0" style={{ color: '#17a2b8' }}>
                 {dashboard?.stats?.subfeature_count?.toLocaleString() ?? 0}
