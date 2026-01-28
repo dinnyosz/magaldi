@@ -266,6 +266,7 @@ class RelationshipsRepository(ElasticsearchBase):
             "repository": ref.repository,
             "username": ref.username,
             "usages_count": ref.usages_count,
+            "metadata": ref.metadata,
             "indexed_at": datetime.now(UTC).isoformat(),
         }
         client.index(
@@ -299,6 +300,7 @@ class RelationshipsRepository(ElasticsearchBase):
                 "repository": ref.repository,
                 "username": ref.username,
                 "usages_count": ref.usages_count,
+                "metadata": ref.metadata,
                 "indexed_at": now,
             })
 

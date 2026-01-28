@@ -100,12 +100,14 @@ class MagaldiMCPServer:
             generate_skill,
             get_call_graph,
             get_children,
+            get_command_tree,
             get_context,
             get_element,
             get_feature_members,
             get_file_structure,
             get_glossary_term,
             get_repo_stats,
+            get_route_tree,
             list_features,
             list_glossary,
             list_patterns,
@@ -498,6 +500,22 @@ class MagaldiMCPServer:
                 pattern=args.get("pattern", "all"),
                 limit=args.get("limit", 30),
                 include_tests=args.get("include_tests", False),
+            )
+        elif name == "get_command_tree":
+            return await asyncio.to_thread(
+                get_command_tree,
+                es,
+                scope=args["scope"],
+                repository=args["repository"],
+                username=args.get("username", self.default_username),
+            )
+        elif name == "get_route_tree":
+            return await asyncio.to_thread(
+                get_route_tree,
+                es,
+                scope=args["scope"],
+                repository=args["repository"],
+                username=args.get("username", self.default_username),
             )
         else:
             raise ValueError(f"Unknown tool: {name}")
