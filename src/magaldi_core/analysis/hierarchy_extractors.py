@@ -357,42 +357,258 @@ class CliHierarchyExtractor:
 # =============================================================================
 
 
+@dataclass
+class RouteElementInfo:
+    """Element info enriched with HTTP route data."""
+
+    hash_id: str
+    element_id: str
+    name: str
+    file_path: str
+    line: int
+    http_routes: list[dict[str, Any]]
+    summary: str | None = None
+
+
 class RouteHierarchyExtractor:
     """Extract FastAPI/Flask route hierarchies.
 
-    Builds MOUNTS_ROUTER relationships and tracks full URL paths.
+    Builds BELONGS_TO_ROUTER relationships and tracks full URL paths.
+    Groups routes by their source file (router module).
     """
+
+    # Common API prefixes to detect
+    COMMON_PREFIXES = ["/api/v1", "/api/v2", "/api"]
 
     def __init__(
         self,
         scope: str,
         repository: str,
         username: str,
-        base_url: str = "",
+        api_prefix: str = "/api/v1",
     ):
+        """Initialize extractor.
+
+        Args:
+            scope: Repository scope
+            repository: Repository name
+            username: Username for the branch
+            api_prefix: API prefix (e.g., "/api/v1")
+        """
         self.scope = scope
         self.repository = repository
         self.username = username
-        self.base_url = base_url
+        self.api_prefix = api_prefix
         self.priority = get_priority_for_username(username)
 
-    def extract(self, elements: list[ElementInfo]) -> tuple[
+    def extract(self, elements: list[RouteElementInfo]) -> tuple[
         list[CodeRelationship],
         list[ExternalReference],
     ]:
-        """Extract route hierarchy relationships.
+        """Extract route hierarchy relationships from elements.
 
-        This requires analyzing:
-        1. Router/Blueprint definitions
-        2. app.include_router() / app.register_blueprint() calls
-        3. Route decorators with their paths
+        Groups routes by their source file (which typically corresponds to a router).
+        Creates external references for each router module.
 
-        For now, returns empty - will be implemented in Phase 1b.
+        Args:
+            elements: List of elements with HTTP route data
+
+        Returns:
+            Tuple of (relationships, external_references)
         """
-        # TODO: Implement route hierarchy extraction
-        # This requires analyzing function bodies for include_router calls
-        # which is more complex than CLI hierarchy
-        return [], []
+        relationships: list[CodeRelationship] = []
+        external_refs: list[ExternalReference] = []
+
+        # Group elements by file (router module)
+        routes_by_file: dict[str, list[RouteElementInfo]] = {}
+        for element in elements:
+            if element.http_routes:
+                if element.file_path not in routes_by_file:
+                    routes_by_file[element.file_path] = []
+                routes_by_file[element.file_path].append(element)
+
+        # Create external refs for each router and relationships for routes
+        for file_path, routes in routes_by_file.items():
+            router_name = self._extract_router_name(file_path)
+            router_ref_id = f"router:{self.scope}:{self.repository}:{router_name}"
+
+            # Detect common prefix for routes in this file
+            common_prefix = self._detect_common_prefix(routes)
+
+            # Create external reference for the router
+            router_ref = ExternalReference(
+                ref_id=router_ref_id,
+                ref_type=ExternalRefType.HTTP_ROUTER,
+                name=router_name,
+                description=f"HTTP router from {file_path}",
+                scope=self.scope,
+                repository=self.repository,
+                username=self.username,
+                metadata={
+                    "file_path": file_path,
+                    "route_count": len(routes),
+                    "common_prefix": common_prefix,
+                    "api_prefix": self.api_prefix,
+                },
+            )
+            external_refs.append(router_ref)
+
+            # Create relationships for each route to its router
+            for element in routes:
+                for route in element.http_routes:
+                    route_path = route.get("path", "")
+                    method = route.get("method", "GET")
+                    full_url = self._build_full_url(route_path)
+
+                    relationship = CodeRelationship(
+                        relationship_id=generate_relationship_id(
+                            element.hash_id,
+                            router_ref_id,  # Target is the router external ref
+                            RelationshipType.BELONGS_TO_ROUTER,
+                            self.scope,
+                            self.repository,
+                            self.username,
+                        ),
+                        relationship_key=generate_relationship_key(
+                            element.hash_id,
+                            router_ref_id,
+                            RelationshipType.BELONGS_TO_ROUTER,
+                            self.scope,
+                            self.repository,
+                        ),
+                        source_hash=element.hash_id,
+                        target_hash=router_ref_id,
+                        relationship_type=RelationshipType.BELONGS_TO_ROUTER,
+                        scope=self.scope,
+                        repository=self.repository,
+                        username=self.username,
+                        priority=self.priority,
+                        confidence=1.0,
+                        line=element.line,
+                        details={
+                            "method": method,
+                            "path": route_path,
+                            "full_url": full_url,
+                            "router_name": router_name,
+                            "framework": route.get("framework"),
+                            "path_params": route.get("path_params", []),
+                        },
+                    )
+                    relationships.append(relationship)
+
+        return relationships, external_refs
+
+    def _extract_router_name(self, file_path: str) -> str:
+        """Extract router name from file path.
+
+        Examples:
+            "src/magaldi_web/routes/repos.py" -> "repos"
+            "routes/admin.py" -> "admin"
+            "api/v1/users.py" -> "users"
+        """
+        # Get filename without extension
+        from pathlib import Path
+        name = Path(file_path).stem
+
+        # Skip common non-descriptive names
+        if name in ("__init__", "main", "app", "routes", "views"):
+            # Use parent directory name
+            parent = Path(file_path).parent.name
+            if parent and parent not in (".", "src"):
+                return parent
+        return name
+
+    def _detect_common_prefix(self, routes: list[RouteElementInfo]) -> str:
+        """Detect common URL prefix for routes in a file.
+
+        Returns the longest common prefix path.
+        """
+        if not routes:
+            return ""
+
+        # Collect all route paths
+        all_paths = []
+        for element in routes:
+            for route in element.http_routes:
+                path = route.get("path", "")
+                if path:
+                    all_paths.append(path)
+
+        if not all_paths:
+            return ""
+
+        # Find common prefix
+        if len(all_paths) == 1:
+            # Single route - use its first path segment
+            parts = all_paths[0].strip("/").split("/")
+            return "/" + parts[0] if parts and parts[0] else ""
+
+        # Find longest common prefix
+        prefix_parts = all_paths[0].strip("/").split("/")
+        for path in all_paths[1:]:
+            path_parts = path.strip("/").split("/")
+            # Compare parts
+            common_len = 0
+            for i, (a, b) in enumerate(zip(prefix_parts, path_parts)):
+                # Stop at path parameters
+                if "{" in a or "{" in b:
+                    break
+                if a == b:
+                    common_len = i + 1
+                else:
+                    break
+            prefix_parts = prefix_parts[:common_len]
+
+        if prefix_parts:
+            return "/" + "/".join(prefix_parts)
+        return ""
+
+    def _build_full_url(self, route_path: str) -> str:
+        """Build full URL including API prefix.
+
+        Examples:
+            "/repos" -> "/api/v1/repos"
+            "/admin/health" -> "/api/v1/admin/health"
+        """
+        # Ensure route_path starts with /
+        if route_path and not route_path.startswith("/"):
+            route_path = "/" + route_path
+
+        # Combine with API prefix
+        if self.api_prefix:
+            prefix = self.api_prefix.rstrip("/")
+            return prefix + route_path
+        return route_path
+
+
+# =============================================================================
+# HELPER: Load route elements from ES
+# =============================================================================
+
+
+def elements_to_route_info(es_docs: list[dict[str, Any]]) -> list[RouteElementInfo]:
+    """Convert Elasticsearch documents to RouteElementInfo objects."""
+    result = []
+    for doc in es_docs:
+        # Handle both _source wrapper and direct doc
+        source = doc.get("_source", doc)
+
+        # Skip if no http_routes
+        http_routes = source.get("http_routes") or []
+        if not http_routes:
+            continue
+
+        result.append(RouteElementInfo(
+            hash_id=source.get("hash_id", ""),
+            element_id=source.get("element_id", ""),
+            name=source.get("name", ""),
+            file_path=source.get("relative_path", ""),
+            line=source.get("line_start", 0),
+            http_routes=http_routes,
+            summary=source.get("summary"),
+        ))
+
+    return result
 
 
 # =============================================================================

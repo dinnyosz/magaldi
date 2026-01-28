@@ -377,6 +377,7 @@ def run_hierarchy_extraction(
     username: str,
     es_repo: "ElasticsearchRepository",
     cli_entry_point: str | None = None,
+    api_prefix: str = "/api/v1",
 ) -> tuple[int, int]:
     """Run hierarchy extraction: CLI commands and HTTP routes.
 
@@ -386,19 +387,29 @@ def run_hierarchy_extraction(
         username: Username/branch
         es_repo: Elasticsearch repository instance
         cli_entry_point: CLI entry point name (e.g., "magaldi")
+        api_prefix: API URL prefix for route hierarchy (e.g., "/api/v1")
 
     Returns:
         Tuple of (relationships_indexed, external_refs_indexed)
     """
     from magaldi_core.analysis.hierarchy_extractors import (
         CliHierarchyExtractor,
+        RouteHierarchyExtractor,
         elements_to_element_info,
+        elements_to_route_info,
     )
     from shared.db.repositories.relationships import RelationshipsRepository
 
-    # Query all elements with decorators
     client = es_repo._get_client()
-    result = client.search(
+    all_relationships = []
+    all_external_refs = []
+
+    # =========================================================================
+    # CLI Hierarchy Extraction
+    # =========================================================================
+
+    # Query elements with decorators (for CLI commands)
+    decorator_result = client.search(
         index="magaldi-code-elements",
         body={
             "size": 10000,
@@ -425,23 +436,73 @@ def run_hierarchy_extraction(
         },
     )
 
-    es_docs = [hit["_source"] for hit in result.get("hits", {}).get("hits", [])]
-    if not es_docs:
-        return (0, 0)
+    decorator_docs = [hit["_source"] for hit in decorator_result.get("hits", {}).get("hits", [])]
 
-    # Convert to ElementInfo objects
-    elements = elements_to_element_info(es_docs)
-    if not elements:
-        return (0, 0)
+    if decorator_docs:
+        elements = elements_to_element_info(decorator_docs)
+        if elements:
+            cli_extractor = CliHierarchyExtractor(
+                scope=scope,
+                repository=repository,
+                username=username,
+                cli_entry_point=cli_entry_point,
+            )
+            cli_rels, cli_refs = cli_extractor.extract(elements)
+            all_relationships.extend(cli_rels)
+            all_external_refs.extend(cli_refs)
 
-    # Extract CLI hierarchies
-    cli_extractor = CliHierarchyExtractor(
-        scope=scope,
-        repository=repository,
-        username=username,
-        cli_entry_point=cli_entry_point,
+    # =========================================================================
+    # HTTP Route Hierarchy Extraction
+    # =========================================================================
+
+    # Query elements with http_routes
+    route_result = client.search(
+        index="magaldi-code-elements",
+        body={
+            "size": 10000,
+            "query": {
+                "bool": {
+                    "filter": [
+                        {"term": {"scope": scope}},
+                        {"term": {"repository": repository}},
+                        {"term": {"username": username}},
+                        {"exists": {"field": "http_routes"}},
+                    ],
+                },
+            },
+            "_source": [
+                "hash_id",
+                "element_id",
+                "name",
+                "relative_path",
+                "line_start",
+                "http_routes",
+                "summary",
+            ],
+        },
     )
-    relationships, external_refs = cli_extractor.extract(elements)
+
+    route_docs = [hit["_source"] for hit in route_result.get("hits", {}).get("hits", [])]
+
+    if route_docs:
+        route_elements = elements_to_route_info(route_docs)
+        if route_elements:
+            route_extractor = RouteHierarchyExtractor(
+                scope=scope,
+                repository=repository,
+                username=username,
+                api_prefix=api_prefix,
+            )
+            route_rels, route_refs = route_extractor.extract(route_elements)
+            all_relationships.extend(route_rels)
+            all_external_refs.extend(route_refs)
+
+    # =========================================================================
+    # Store Results
+    # =========================================================================
+
+    if not all_relationships and not all_external_refs:
+        return (0, 0)
 
     # Store in relationships index (use same config as es_repo)
     rel_repo = RelationshipsRepository(es_repo.config)
@@ -450,8 +511,8 @@ def run_hierarchy_extraction(
     rel_repo.delete_relationships_for_user(scope, repository, username)
     rel_repo.delete_external_refs_for_user(scope, repository, username)
 
-    # Index new relationships
-    rel_result = rel_repo.bulk_index_relationships(relationships)
-    ref_result = rel_repo.bulk_index_external_refs(external_refs)
+    # Index new relationships and external refs
+    rel_result = rel_repo.bulk_index_relationships(all_relationships)
+    ref_result = rel_repo.bulk_index_external_refs(all_external_refs)
 
     return (rel_result["indexed"], ref_result["indexed"])

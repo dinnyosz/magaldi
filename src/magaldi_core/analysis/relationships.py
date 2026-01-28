@@ -28,6 +28,7 @@ class RelationshipType(str, Enum):
     # HTTP route hierarchies (FastAPI, Flask, Express)
     MOUNTS_ROUTER = "mounts_router"  # app.include_router(router, prefix="/api")
     REGISTERS_ROUTE = "registers_route"  # @router.get("/users")
+    BELONGS_TO_ROUTER = "belongs_to_router"  # route handler -> router
 
     # Event handlers
     HANDLES_EVENT = "handles_event"  # @emitter.on("user.created")
@@ -94,6 +95,7 @@ class ExternalRefType(str, Enum):
     TABLE = "table"  # Database tables
     URL = "url"  # External URLs
     CLI_ENTRY_POINT = "cli_entry_point"  # Entry point from pyproject.toml
+    HTTP_ROUTER = "http_router"  # HTTP router module (FastAPI, Flask, etc.)
 
 
 @dataclass
@@ -165,6 +167,9 @@ class ExternalReference:
 
     # Usage count (denormalized for quick lookups)
     usages_count: int = 0
+
+    # Type-specific metadata
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
