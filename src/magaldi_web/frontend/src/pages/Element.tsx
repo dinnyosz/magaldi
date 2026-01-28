@@ -109,6 +109,21 @@ function Element() {
   const isFeature = ['feature', 'subfeature'].includes(element.element_type)
   const isGlossary = element.element_type === 'glossary'
 
+  // Helper to extract clean value from decorator args like ("serve") -> serve
+  const extractCleanArg = (args: string): string => {
+    // Strip whitespace and outer parentheses
+    let cleaned = args.trim()
+    if (cleaned.startsWith('(') && cleaned.endsWith(')')) {
+      cleaned = cleaned.slice(1, -1).trim()
+    }
+    // Extract first quoted string
+    const match = cleaned.match(/^["']([^"']+)["']/)
+    if (match) {
+      return match[1]
+    }
+    return cleaned
+  }
+
   // Detect entry point type from decorators (multi-language support)
   const entryPointPatterns: Record<string, { decorators: string[], label: string, icon: string, color: string }> = {
     http: {
@@ -212,7 +227,7 @@ function Element() {
               dd => dd.name && decorator.toLowerCase().includes(dd.name.toLowerCase())
             )
             if (matchingDetail?.args) {
-              args = matchingDetail.args
+              args = extractCleanArg(matchingDetail.args)
             }
           }
           entryPointType = { label: epConfig.label, icon: epConfig.icon, color: epConfig.color, args }
