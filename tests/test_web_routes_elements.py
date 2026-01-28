@@ -66,7 +66,7 @@ def sample_element():
         "signature": "def test_func():",
         "docstring": "Test docstring",
         "raw_code": "def test_func():\n    pass",
-        "embedding": [0.1] * 1024,
+        "summary_embedding": [0.1] * 1024,
         "decorators": '["@pytest.fixture"]',
         "visibility": "public",
         "is_async": False,
@@ -139,11 +139,11 @@ class TestGetSimilarElements:
         assert response.status_code == 404
         assert "Element not found" in response.json()["detail"]
 
-    def test_returns_400_when_no_embedding(self, client, mock_es_repo, sample_element):
-        """Test returns 400 when element has no embedding."""
-        element_without_embedding = sample_element.copy()
-        del element_without_embedding["embedding"]
-        mock_es_repo.get_document_by_hash_id.return_value = element_without_embedding
+    def test_returns_400_when_no_summary_embedding(self, client, mock_es_repo, sample_element):
+        """Test returns 400 when element has no summary_embedding."""
+        element_without_summary_embedding = sample_element.copy()
+        del element_without_summary_embedding["summary_embedding"]
+        mock_es_repo.get_document_by_hash_id.return_value = element_without_summary_embedding
 
         response = client.get(f"/elements/similar/{'a' * 64}")
 

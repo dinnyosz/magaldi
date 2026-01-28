@@ -22,6 +22,7 @@ from shared.cli._printers import (
 from shared.cli._runners import (
     run_change_detection,
     run_discovery,
+    run_hierarchy_extraction,
     run_parsing,
     run_processing,
 )
@@ -121,6 +122,28 @@ def parse(
                 console.print(f"    [dim]{':'.join(short_id)}[/] → [red]{error}[/]")
             if len(failed_elements) > 10:
                 console.print(f"    [dim]... and {len(failed_elements) - 10} more errors[/]")
+
+        # Hierarchy Extraction (CLI commands, routes)
+        if not dry_run and indexed > 0:
+            from shared.db.elasticsearch import ElasticsearchRepository
+            es_repo = ElasticsearchRepository(config)
+            console.print("\n  [bold]Hierarchy Extraction[/]")
+            try:
+                # Use repository name as CLI entry point fallback
+                cli_entry_point = discovery_result.repository
+                rel_indexed, ref_indexed = run_hierarchy_extraction(
+                    discovery_result.scope,
+                    discovery_result.repository,
+                    user,
+                    es_repo,
+                    cli_entry_point=cli_entry_point,
+                )
+                if rel_indexed > 0 or ref_indexed > 0:
+                    console.print(f"  Indexed {rel_indexed} relationships, {ref_indexed} external refs")
+                else:
+                    console.print("  [dim]No CLI/route hierarchies found[/]")
+            except Exception as e:
+                console.print(f"  [yellow]Warning: Hierarchy extraction failed: {e}[/]")
 
         # Phase 5: Feature Extraction (optional)
         if not skip_features and not skip_ai and not dry_run and processed > 0:

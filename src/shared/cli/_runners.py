@@ -369,3 +369,89 @@ def run_processing(
     # Total deleted = from deleted files + stale elements from modified files
     total_deleted = deleted_from_files + result.elements_deleted
     return (result.elements_processed, result.elements_skipped, result.indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, result.failed_elements, total_deleted)
+
+
+def run_hierarchy_extraction(
+    scope: str,
+    repository: str,
+    username: str,
+    es_repo: "ElasticsearchRepository",
+    cli_entry_point: str | None = None,
+) -> tuple[int, int]:
+    """Run hierarchy extraction: CLI commands and HTTP routes.
+
+    Args:
+        scope: Repository scope
+        repository: Repository name
+        username: Username/branch
+        es_repo: Elasticsearch repository instance
+        cli_entry_point: CLI entry point name (e.g., "magaldi")
+
+    Returns:
+        Tuple of (relationships_indexed, external_refs_indexed)
+    """
+    from magaldi_core.analysis.hierarchy_extractors import (
+        CliHierarchyExtractor,
+        elements_to_element_info,
+    )
+    from shared.db.repositories.relationships import RelationshipsRepository
+
+    # Query all elements with decorators
+    client = es_repo._get_client()
+    result = client.search(
+        index="magaldi-code-elements",
+        body={
+            "size": 10000,
+            "query": {
+                "bool": {
+                    "filter": [
+                        {"term": {"scope": scope}},
+                        {"term": {"repository": repository}},
+                        {"term": {"username": username}},
+                        {"exists": {"field": "decorator_details"}},
+                    ],
+                },
+            },
+            "_source": [
+                "hash_id",
+                "element_id",
+                "name",
+                "relative_path",
+                "line_start",
+                "decorators",
+                "decorator_details",
+                "summary",
+            ],
+        },
+    )
+
+    es_docs = [hit["_source"] for hit in result.get("hits", {}).get("hits", [])]
+    if not es_docs:
+        return (0, 0)
+
+    # Convert to ElementInfo objects
+    elements = elements_to_element_info(es_docs)
+    if not elements:
+        return (0, 0)
+
+    # Extract CLI hierarchies
+    cli_extractor = CliHierarchyExtractor(
+        scope=scope,
+        repository=repository,
+        username=username,
+        cli_entry_point=cli_entry_point,
+    )
+    relationships, external_refs = cli_extractor.extract(elements)
+
+    # Store in relationships index (use same config as es_repo)
+    rel_repo = RelationshipsRepository(es_repo.config)
+
+    # Delete existing relationships for this user before re-indexing
+    rel_repo.delete_relationships_for_user(scope, repository, username)
+    rel_repo.delete_external_refs_for_user(scope, repository, username)
+
+    # Index new relationships
+    rel_result = rel_repo.bulk_index_relationships(relationships)
+    ref_result = rel_repo.bulk_index_external_refs(external_refs)
+
+    return (rel_result["indexed"], ref_result["indexed"])
