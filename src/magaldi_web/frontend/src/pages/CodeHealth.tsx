@@ -35,7 +35,7 @@ function getTypeConfig(type: string) {
 }
 
 function CodeHealth() {
-  const { scope, repository } = useParams<{ scope: string; repository: string }>()
+  const { scope, repo } = useParams<{ scope: string; repo: string }>()
   const [activeTab, setActiveTab] = useState('complexity')
   const [minComplexity, setMinComplexity] = useState(5)
   const [maxCoverage, setMaxCoverage] = useState(0.5)
@@ -43,49 +43,49 @@ function CodeHealth() {
 
   // Fetch complexity data
   const { data: complexFunctions, isLoading: complexLoading } = useQuery({
-    queryKey: ['complexFunctions', scope, repository, minComplexity, includeTests],
-    queryFn: () => getComplexFunctions(scope!, repository!, {
+    queryKey: ['complexFunctions', scope, repo, minComplexity, includeTests],
+    queryFn: () => getComplexFunctions(scope!, repo!, {
       min_complexity: minComplexity,
       limit: 100,
       include_tests: includeTests
     }),
-    enabled: !!scope && !!repository && activeTab === 'complexity',
+    enabled: !!scope && !!repo && activeTab === 'complexity',
   })
 
   // Fetch security issues
   const { data: securityIssues, isLoading: securityLoading } = useQuery({
-    queryKey: ['securityIssues', scope, repository],
-    queryFn: () => getSecurityIssues(scope!, repository!, { limit: 100 }),
-    enabled: !!scope && !!repository && activeTab === 'security',
+    queryKey: ['securityIssues', scope, repo],
+    queryFn: () => getSecurityIssues(scope!, repo!, { limit: 100 }),
+    enabled: !!scope && !!repo && activeTab === 'security',
   })
 
   // Fetch undocumented functions
   const { data: undocumented, isLoading: undocLoading } = useQuery({
-    queryKey: ['undocumented', scope, repository, maxCoverage, includeTests],
-    queryFn: () => getUndocumentedFunctions(scope!, repository!, {
+    queryKey: ['undocumented', scope, repo, maxCoverage, includeTests],
+    queryFn: () => getUndocumentedFunctions(scope!, repo!, {
       max_coverage: maxCoverage,
       limit: 100,
       include_tests: includeTests
     }),
-    enabled: !!scope && !!repository && activeTab === 'documentation',
+    enabled: !!scope && !!repo && activeTab === 'documentation',
   })
 
   // Fetch environment variable usage
   const { data: envUsage, isLoading: envLoading } = useQuery({
-    queryKey: ['envUsage', scope, repository],
-    queryFn: () => getEnvUsage(scope!, repository!, { limit: 200 }),
-    enabled: !!scope && !!repository && activeTab === 'env',
+    queryKey: ['envUsage', scope, repo],
+    queryFn: () => getEnvUsage(scope!, repo!, { limit: 200 }),
+    enabled: !!scope && !!repo && activeTab === 'env',
   })
 
   // Fetch async code
   const { data: asyncCode, isLoading: asyncLoading } = useQuery({
-    queryKey: ['asyncCode', scope, repository],
-    queryFn: () => getAsyncCode(scope!, repository!, { limit: 100 }),
-    enabled: !!scope && !!repository && activeTab === 'async',
+    queryKey: ['asyncCode', scope, repo],
+    queryFn: () => getAsyncCode(scope!, repo!, { limit: 100 }),
+    enabled: !!scope && !!repo && activeTab === 'async',
   })
 
-  if (!scope || !repository) {
-    return <Alert variant="warning">No repository selected</Alert>
+  if (!scope || !repo) {
+    return <Alert variant="warning">No repo selected</Alert>
   }
 
   return (
@@ -96,9 +96,9 @@ function CodeHealth() {
         </Breadcrumb.Item>
         <Breadcrumb.Item
           linkAs={Link}
-          linkProps={{ to: `/repos/${scope}/${repository}` }}
+          linkProps={{ to: `/repos/${scope}/${repo}` }}
         >
-          {scope}/{repository}
+          {scope}/{repo}
         </Breadcrumb.Item>
         <Breadcrumb.Item active>Code Health</Breadcrumb.Item>
       </Breadcrumb>
