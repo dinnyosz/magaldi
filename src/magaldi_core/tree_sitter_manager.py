@@ -191,7 +191,7 @@ class TreeSitterManager:
         extractor = None
         if language == "python":
             extractor = PythonExtractor()
-        elif language in ("javascript", "typescript"):
+        elif language in ("javascript", "typescript", "tsx"):
             extractor = JavaScriptExtractor(language=language)
         elif language == "php":
             extractor = PHPExtractor()

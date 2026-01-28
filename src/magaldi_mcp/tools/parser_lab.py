@@ -40,7 +40,7 @@ EXTENSION_TO_LANGUAGE = {
     ".py": "python",
     ".js": "javascript",
     ".ts": "typescript",
-    ".tsx": "typescript",
+    ".tsx": "tsx",
     ".jsx": "javascript",
     ".php": "php",
     ".rs": "rust",

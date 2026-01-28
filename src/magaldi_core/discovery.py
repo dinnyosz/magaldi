@@ -35,7 +35,7 @@ SUPPORTED_EXTENSIONS: dict[str, str] = {
     ".mjs": "javascript",
     ".cjs": "javascript",
     ".ts": "typescript",
-    ".tsx": "typescript",
+    ".tsx": "tsx",
     ".php": "php",
     ".rs": "rust",
 }

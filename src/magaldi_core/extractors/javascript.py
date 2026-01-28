@@ -113,6 +113,13 @@ def extract_javascript_elements(tree: Tree, lines: list[str]) -> list[ExtractedE
                 if value_node and value_node.type == "arrow_function":
                     name = get_node_text(name_node) if name_node else "unknown"
                     elements.append(_extract_js_arrow_function(decl, name, lines))
+        # TypeScript-specific declarations
+        elif node.type == "interface_declaration":
+            elements.append(_extract_ts_interface(node, lines))
+        elif node.type == "type_alias_declaration":
+            elements.append(_extract_ts_type_alias(node, lines))
+        elif node.type == "enum_declaration":
+            elements.append(_extract_ts_enum(node, lines))
 
     return elements
 
@@ -284,6 +291,117 @@ def _extract_js_arrow_function(node: Node, name: str, lines: list[str]) -> Extra
         line_end=line_end,
         raw_code=raw_code,
         node=arrow_func_node,
+    )
+
+
+# =============================================================================
+# TYPESCRIPT-SPECIFIC ELEMENT EXTRACTION
+# =============================================================================
+
+
+def _extract_ts_interface(node: Node, lines: list[str]) -> ExtractedElement:
+    """Extract a TypeScript interface declaration.
+
+    Args:
+        node: An interface_declaration node from tree-sitter.
+        lines: Source code lines.
+
+    Returns:
+        ExtractedElement with element_type="class" (interfaces are class-like).
+    """
+    name_node = get_child_by_field(node, "name")
+    name = get_node_text(name_node) if name_node else "unknown"
+
+    line_start = node.start_point[0] + 1
+    line_end = node.end_point[0] + 1
+    raw_code = "\n".join(lines[line_start - 1 : line_end])
+
+    # Build signature with extends clause if present
+    signature = f"interface {name}"
+    for child in node.children:
+        if child.type == "extends_type_clause":
+            extends_text = get_node_text(child)
+            signature += f" {extends_text}"
+            break
+
+    return ExtractedElement(
+        element_type="class",  # Treat interfaces as class-like for indexing
+        name=name,
+        line_start=line_start,
+        line_end=line_end,
+        raw_code=raw_code,
+        signature=signature,
+        node=node,
+    )
+
+
+def _extract_ts_type_alias(node: Node, lines: list[str]) -> ExtractedElement:
+    """Extract a TypeScript type alias declaration.
+
+    Args:
+        node: A type_alias_declaration node from tree-sitter.
+        lines: Source code lines.
+
+    Returns:
+        ExtractedElement with element_type="class" (type aliases define types).
+    """
+    name_node = get_child_by_field(node, "name")
+    name = get_node_text(name_node) if name_node else "unknown"
+
+    line_start = node.start_point[0] + 1
+    line_end = node.end_point[0] + 1
+    raw_code = "\n".join(lines[line_start - 1 : line_end])
+
+    # Get the type value for signature
+    value_node = get_child_by_field(node, "value")
+    value_text = get_node_text(value_node) if value_node else ""
+
+    # Truncate long type definitions in signature
+    if len(value_text) > 100:
+        value_text = value_text[:97] + "..."
+
+    signature = f"type {name} = {value_text}"
+
+    return ExtractedElement(
+        element_type="class",  # Treat type aliases as class-like
+        name=name,
+        line_start=line_start,
+        line_end=line_end,
+        raw_code=raw_code,
+        signature=signature,
+        node=node,
+    )
+
+
+def _extract_ts_enum(node: Node, lines: list[str]) -> ExtractedElement:
+    """Extract a TypeScript enum declaration.
+
+    Args:
+        node: An enum_declaration node from tree-sitter.
+        lines: Source code lines.
+
+    Returns:
+        ExtractedElement with element_type="class" (enums are class-like).
+    """
+    name_node = get_child_by_field(node, "name")
+    name = get_node_text(name_node) if name_node else "unknown"
+
+    line_start = node.start_point[0] + 1
+    line_end = node.end_point[0] + 1
+    raw_code = "\n".join(lines[line_start - 1 : line_end])
+
+    # Check for const enum
+    is_const = any(child.type == "const" for child in node.children)
+    signature = f"{'const ' if is_const else ''}enum {name}"
+
+    return ExtractedElement(
+        element_type="class",  # Treat enums as class-like
+        name=name,
+        line_start=line_start,
+        line_end=line_end,
+        raw_code=raw_code,
+        signature=signature,
+        node=node,
     )
 
 
