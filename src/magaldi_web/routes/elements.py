@@ -56,7 +56,7 @@ async def get_similar_elements(
         raise HTTPException(status_code=404, detail="Element not found")
 
     element_id = source["element_id"]
-    embedding = source.get("embedding")
+    embedding = source.get("summary_embedding")
 
     if not embedding:
         raise HTTPException(status_code=400, detail="Element has no embedding")
@@ -73,13 +73,13 @@ async def get_similar_elements(
                         {"term": {"scope": source["scope"]}},
                         {"term": {"repository": source["repository"]}},
                         {"term": {"username": source["username"]}},
-                        {"exists": {"field": "embedding"}},
+                        {"exists": {"field": "summary_embedding"}},
                     ],
                     "must": {
                         "script_score": {
                             "query": {"match_all": {}},
                             "script": {
-                                "source": "cosineSimilarity(params.qv, 'embedding') + 1.0",
+                                "source": "cosineSimilarity(params.qv, 'summary_embedding') + 1.0",
                                 "params": {"qv": embedding},
                             },
                         },
