@@ -12,7 +12,21 @@ This module provides utilities to categorize calls as:
 
 from __future__ import annotations
 
-from .types import CallCategory, ExtractedCall, ParameterInfo
+from typing import TYPE_CHECKING, Any, Protocol
+
+from .types import CallCategory
+
+if TYPE_CHECKING:
+    from .types import ExtractedCall
+
+
+class CallLike(Protocol):
+    """Protocol for call objects (works with both Call and ExtractedCall)."""
+
+    name: str
+    receiver: str | None
+    resolved_id: str | None
+    category: str
 
 
 # Python built-in functions
@@ -134,7 +148,7 @@ SELF_REFERENCES: dict[str, set[str]] = {
 
 
 def categorize_call(
-    call: ExtractedCall,
+    call: CallLike,
     language: str,
     param_types: dict[str, str] | None = None,
 ) -> str:
@@ -189,24 +203,24 @@ def categorize_call(
 
 
 def categorize_calls(
-    calls: list[ExtractedCall],
+    calls: list[CallLike],
     language: str,
-    parameters: list[ParameterInfo] | None = None,
+    parameters: list[dict[str, Any]] | None = None,
 ) -> None:
     """Categorize all calls in a list, modifying them in place.
 
     Args:
-        calls: List of calls to categorize.
+        calls: List of calls to categorize (Call or ExtractedCall objects).
         language: Programming language.
-        parameters: Optional list of function parameters for type checking.
+        parameters: Optional list of function parameters (as dicts with 'name' and 'type' keys).
     """
     # Build param_types dict from parameters
     param_types: dict[str, str] | None = None
     if parameters:
         param_types = {
-            p.name: p.type for p in parameters if p.type
+            p["name"]: p["type"] for p in parameters if p.get("type")
         }
 
     for call in calls:
-        if call.category == CallCategory.UNKNOWN:
+        if call.category == CallCategory.UNKNOWN or call.category == "unknown":
             call.category = categorize_call(call, language, param_types)

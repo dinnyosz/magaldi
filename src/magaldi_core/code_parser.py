@@ -184,6 +184,7 @@ class Call:
     receiver: str | None  # Receiver object (e.g., "self", "utils", None for bare calls)
     line: int  # Line number
     resolved_id: str | None = None  # Filled in resolution phase (not at parse time)
+    category: str = "unknown"  # Call category (builtin, stdlib, external, type_resolvable, etc.)
 
 
 @dataclass
@@ -1460,7 +1461,7 @@ class JavaScriptParser(TreeSitterParser):
                         call.resolved_id = sibling_methods[call.name]
 
             # Categorize all calls (resolved and unresolved)
-            categorize_calls(elem.calls, self._language, elem.parameters)
+            categorize_calls(elem.calls, self.language, elem.parameters)
 
 
 class PhpParser(TreeSitterParser):
