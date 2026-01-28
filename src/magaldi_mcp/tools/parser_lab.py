@@ -281,6 +281,10 @@ def parser_lab_analyze(
                 "line_start": e.line_start,
                 "line_end": e.line_end,
                 "decorators": e.decorators or [],
+                "decorator_details": [
+                    {"name": d.name, "args": d.args, "full": d.full}
+                    for d in (e.decorator_details or [])
+                ],
                 "is_async": getattr(e, "is_async", False),
             }
             for e in elements
