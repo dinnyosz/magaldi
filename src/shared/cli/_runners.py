@@ -352,6 +352,7 @@ def run_processing(
     if result.indexed > 0:
         from magaldi_core.call_resolution import resolve_cross_file_calls
 
+        console.print("\n  [bold]Call Resolution[/]")
         try:
             total_calls, resolved_calls = resolve_cross_file_calls(
                 es_repo,
@@ -359,8 +360,7 @@ def run_processing(
                 manifest.repository,
                 manifest.username,
             )
-            if resolved_calls > 0:
-                console.print(f"  [dim]Resolved {resolved_calls}/{total_calls} cross-file calls[/]")
+            console.print(f"  Cross-file: {resolved_calls}/{total_calls} resolved via imports")
         except Exception as e:
             console.print(f"  [yellow]Warning: Call resolution failed: {e}[/]")
 

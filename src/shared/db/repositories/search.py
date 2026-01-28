@@ -520,26 +520,25 @@ class SearchRepository:
         """
         # Find elements that:
         # 1. Match scope/repository/username
-        # 2. Have at least one call
-        # 3. Have at least one call where resolved_id is null/missing
+        # 2. Have at least one call with name but no resolved_id
         query: dict[str, Any] = {
             "bool": {
                 "must": [
                     {"term": {"scope": scope}},
                     {"term": {"repository": repository}},
                     {"term": {"username": username}},
-                    {"exists": {"field": "calls"}},
+                    {
+                        "nested": {
+                            "path": "calls",
+                            "query": {
+                                "bool": {
+                                    "must": [{"exists": {"field": "calls.name"}}],
+                                    "must_not": [{"exists": {"field": "calls.resolved_id"}}],
+                                }
+                            },
+                        }
+                    },
                 ],
-                "filter": {
-                    "nested": {
-                        "path": "calls",
-                        "query": {
-                            "bool": {
-                                "must_not": {"exists": {"field": "calls.resolved_id"}}
-                            }
-                        },
-                    }
-                },
             }
         }
 
