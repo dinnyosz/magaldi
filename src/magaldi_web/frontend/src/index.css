@@ -1,15 +1,5 @@
+/* Dark mode only - custom CSS variables */
 :root {
-  --bs-body-bg: #f8f9fa;
-  --scrollbar-track: #f1f1f1;
-  --scrollbar-thumb: #c1c1c1;
-  --scrollbar-thumb-hover: #a8a8a8;
-  --code-bg: #f8f9fa;
-  --code-border: #dee2e6;
-  --file-tree-hover: #e9ecef;
-  --vector-map-bg: #ffffff;
-}
-
-[data-bs-theme="dark"] {
   --bs-body-bg: #212529;
   --scrollbar-track: #2b2b2b;
   --scrollbar-thumb: #555555;
@@ -107,18 +97,18 @@ mark {
   overflow: hidden;
 }
 
-/* Dark mode table fixes */
-[data-bs-theme="dark"] .table {
+/* Table styling */
+.table {
   --bs-table-color: var(--bs-body-color);
   --bs-table-bg: transparent;
 }
 
-[data-bs-theme="dark"] .table th,
-[data-bs-theme="dark"] .table td {
+.table th,
+.table td {
   color: var(--bs-body-color);
 }
 
-[data-bs-theme="dark"] .card-header {
+.card-header {
   color: var(--bs-body-color);
 }
 

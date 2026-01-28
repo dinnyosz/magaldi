@@ -736,7 +736,7 @@ function Element() {
                 )}
               </Card.Header>
               {element.feature_info.parent_feature && (
-                <Card.Body className="bg-light border-bottom py-2">
+                <Card.Body className="bg-body-secondary border-bottom py-2">
                   <small className="text-uppercase text-muted fw-bold d-block mb-1">Parent Feature</small>
                   <div>
                     <i className="bi bi-collection me-2 text-info"></i>
@@ -747,7 +747,7 @@ function Element() {
                   </div>
                 </Card.Body>
               )}
-              <Card.Body className="p-0">
+              <Card.Body className="p-0 bg-body-secondary">
                 {element.feature_info.members.length > 0 ? (
                   <Tabs defaultActiveKey="all" className="px-3 pt-2">
                     <Tab eventKey="all" title="All">

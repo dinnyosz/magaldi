@@ -1,5 +1,5 @@
 import { Routes, Route, Link, useLocation } from 'react-router-dom'
-import { Container, Nav, Navbar, Button } from 'react-bootstrap'
+import { Container, Nav, Navbar } from 'react-bootstrap'
 import { useDarkMode } from './hooks/useDarkMode'
 import Dashboard from './pages/Dashboard'
 import Search from './pages/Search'
@@ -17,7 +17,7 @@ import CodeHealth from './pages/CodeHealth'
 
 function App() {
   const location = useLocation()
-  const [theme, toggleTheme] = useDarkMode()
+  useDarkMode() // Initialize dark mode
 
   return (
     <div className="d-flex flex-column min-vh-100">
@@ -80,15 +80,6 @@ function App() {
                 Admin
               </Nav.Link>
             </Nav>
-            <Button
-              variant="outline-light"
-              size="sm"
-              onClick={toggleTheme}
-              className="ms-2"
-              aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
-            >
-              <i className={`bi ${theme === 'light' ? 'bi-moon-fill' : 'bi-sun-fill'}`}></i>
-            </Button>
           </Navbar.Collapse>
         </Container>
       </Navbar>
