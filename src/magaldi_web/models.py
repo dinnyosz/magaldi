@@ -806,6 +806,23 @@ class DeadCodeResponse(BaseModel):
     stats: dict
 
 
+class HttpRouteInfo(BaseModel):
+    """HTTP route information."""
+
+    method: str
+    path: str
+    path_params: list[str] = Field(default_factory=list)
+    framework: str | None = None
+
+
+class CliCommandInfo(BaseModel):
+    """CLI command information."""
+
+    name: str
+    options: list[dict] = Field(default_factory=list)
+    framework: str | None = None
+
+
 class EntryPointItem(BaseModel):
     """An entry point item."""
 
@@ -817,6 +834,8 @@ class EntryPointItem(BaseModel):
     line: int
     summary: str | None = None
     decorators: list[str] = Field(default_factory=list)
+    http_routes: list[HttpRouteInfo] = Field(default_factory=list)
+    cli_commands: list[CliCommandInfo] = Field(default_factory=list)
 
 
 class EntryPointsResponse(BaseModel):

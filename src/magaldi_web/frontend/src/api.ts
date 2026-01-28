@@ -896,6 +896,19 @@ export interface DeadCodeResponse {
   }
 }
 
+export interface HttpRouteInfo {
+  method: string
+  path: string
+  path_params: string[]
+  framework: string | null
+}
+
+export interface CliCommandInfo {
+  name: string
+  options: Array<{ name: string; type: string | null; required: boolean }>
+  framework: string | null
+}
+
 export interface EntryPointItem {
   element_id: string
   hash_id: string | null
@@ -905,6 +918,8 @@ export interface EntryPointItem {
   line: number
   summary: string | null
   decorators: string[]
+  http_routes: HttpRouteInfo[]
+  cli_commands: CliCommandInfo[]
 }
 
 export interface EntryPointsResponse {

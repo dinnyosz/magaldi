@@ -2258,6 +2258,8 @@ def find_entry_points(
                 "decorators",
                 "is_test",
                 "summary",
+                "http_routes",
+                "cli_commands",
             ],
             "size": 2000,
         },
@@ -2287,6 +2289,8 @@ def find_entry_points(
             "line": source.get("line_start"),
             "summary": source.get("summary", ""),
             "decorators": decorators,
+            "http_routes": source.get("http_routes", []),
+            "cli_commands": source.get("cli_commands", []),
         }
 
         # Check for main function

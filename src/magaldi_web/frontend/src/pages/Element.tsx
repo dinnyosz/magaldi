@@ -531,14 +531,14 @@ function Element() {
                     <i className="bi bi-box-arrow-in-down me-1"></i>
                     Imports ({element.imports.length})
                   </small>
-                  <div className="bg-light p-2 rounded" style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                  <div className="bg-body-tertiary border rounded p-2" style={{ maxHeight: '200px', overflowY: 'auto' }}>
                     {element.imports.map((imp, i) => (
                       <div key={i} className="d-flex align-items-center py-1">
-                        <code className="me-2">
+                        <code className="text-primary me-2">
                           {imp.alias ? `${imp.name} as ${imp.alias}` : imp.name}
                         </code>
-                        <small className="text-muted">from {imp.module}</small>
-                        {imp.line && <small className="text-muted ms-auto">L{imp.line}</small>}
+                        <small className="text-body-secondary">from {imp.module}</small>
+                        {imp.line && <small className="text-body-secondary ms-auto">L{imp.line}</small>}
                       </div>
                     ))}
                   </div>

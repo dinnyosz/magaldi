@@ -66,7 +66,43 @@ function EntryPointList({ items, category }: { items: EntryPointItem[]; category
                 <small className="text-muted ms-2">{item.file_path}:{item.line}</small>
               </div>
             </div>
-            {item.decorators && item.decorators.length > 0 && (
+            {/* HTTP Routes - show method and path */}
+            {category === 'http' && item.http_routes && item.http_routes.length > 0 && (
+              <div className="mt-1">
+                {item.http_routes.map((route, i) => (
+                  <span key={i} className="me-2">
+                    <Badge bg="primary" className="me-1">{route.method}</Badge>
+                    <code className="text-success">{route.path}</code>
+                    {route.framework && (
+                      <small className="text-muted ms-1">({route.framework})</small>
+                    )}
+                  </span>
+                ))}
+              </div>
+            )}
+            {/* CLI Commands - show command name */}
+            {category === 'cli' && item.cli_commands && item.cli_commands.length > 0 && (
+              <div className="mt-1">
+                {item.cli_commands.map((cmd, i) => (
+                  <span key={i} className="me-2">
+                    <code className="text-success">$ {cmd.name}</code>
+                    {cmd.framework && (
+                      <small className="text-muted ms-1">({cmd.framework})</small>
+                    )}
+                    {cmd.options && cmd.options.length > 0 && (
+                      <small className="text-muted ms-1">
+                        [{cmd.options.length} options]
+                      </small>
+                    )}
+                  </span>
+                ))}
+              </div>
+            )}
+            {/* Fallback to decorators for other categories or when routes/commands empty */}
+            {((category !== 'http' && category !== 'cli') ||
+              (category === 'http' && (!item.http_routes || item.http_routes.length === 0)) ||
+              (category === 'cli' && (!item.cli_commands || item.cli_commands.length === 0))) &&
+              item.decorators && item.decorators.length > 0 && (
               <div className="mt-1">
                 {item.decorators.slice(0, 3).map((d, i) => (
                   <code key={i} className="me-2 text-info small">@{d}</code>
@@ -76,8 +112,14 @@ function EntryPointList({ items, category }: { items: EntryPointItem[]; category
                 )}
               </div>
             )}
+            {/* Summary - allow multi-line */}
             {item.summary && (
-              <small className="d-block text-muted text-truncate mt-1">{item.summary}</small>
+              <small
+                className="d-block text-muted mt-1"
+                style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+              >
+                {item.summary}
+              </small>
             )}
           </ListGroup.Item>
         )

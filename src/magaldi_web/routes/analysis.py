@@ -223,8 +223,30 @@ async def get_entry_points(
     )
 
     def convert_entries(entries: list[dict]) -> list[EntryPointItem]:
-        return [
-            EntryPointItem(
+        from magaldi_web.models import HttpRouteInfo, CliCommandInfo
+
+        items = []
+        for e in entries:
+            # Convert http_routes
+            http_routes = []
+            for route in e.get("http_routes") or []:
+                http_routes.append(HttpRouteInfo(
+                    method=route.get("method", "GET"),
+                    path=route.get("path", ""),
+                    path_params=route.get("path_params", []),
+                    framework=route.get("framework"),
+                ))
+
+            # Convert cli_commands
+            cli_commands = []
+            for cmd in e.get("cli_commands") or []:
+                cli_commands.append(CliCommandInfo(
+                    name=cmd.get("name", ""),
+                    options=cmd.get("options", []),
+                    framework=cmd.get("framework"),
+                ))
+
+            items.append(EntryPointItem(
                 element_id=e.get("element_id"),
                 hash_id=e.get("hash_id"),
                 name=e.get("name"),
@@ -233,9 +255,10 @@ async def get_entry_points(
                 line=e.get("line", 0),
                 summary=e.get("summary"),
                 decorators=e.get("decorators", []),
-            )
-            for e in entries
-        ]
+                http_routes=http_routes,
+                cli_commands=cli_commands,
+            ))
+        return items
 
     return EntryPointsResponse(
         http=convert_entries(result.get("http", [])),
