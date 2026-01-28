@@ -3105,6 +3105,7 @@ def explain_element(
                 callee_entry["element_id"] = resolved_id
                 resolved_doc = es.get_document(resolved_id)
                 if resolved_doc:
+                    callee_entry["hash_id"] = resolved_doc.get("hash_id")
                     callee_entry["type"] = resolved_doc.get("element_type")
                     callee_entry["file"] = resolved_doc.get("relative_path")
                     callee_entry["target_line"] = resolved_doc.get("line_start")
