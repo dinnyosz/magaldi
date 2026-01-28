@@ -687,42 +687,6 @@ function Element() {
             </Card>
           )}
 
-          {/* Glossary Terms - shown for features and subfeatures */}
-          {isFeature && glossaryTerms && glossaryTerms.terms.length > 0 && (
-            <Card className="mb-4">
-              <Card.Header>
-                <i className="bi bi-book me-2"></i>
-                Domain Terms ({glossaryTerms.terms.length})
-              </Card.Header>
-              <ListGroup variant="flush">
-                {glossaryTerms.terms.map((term) => (
-                  <ListGroup.Item
-                    key={term.term}
-                    action
-                    as={Link}
-                    to={term.hash_id ? `/element/${term.hash_id}` : `/glossary/${element.repository.scope}/${element.repository.name}?term=${encodeURIComponent(term.term)}`}
-                    className="d-flex justify-content-between align-items-start py-2"
-                  >
-                    <div>
-                      <Badge bg="primary" className="me-2">
-                        <i className="bi bi-book me-1"></i>
-                        {term.term}
-                      </Badge>
-                      {term.description && (
-                        <small className="text-muted d-block mt-1 glossary-description"><ReactMarkdown>{term.description}</ReactMarkdown></small>
-                      )}
-                    </div>
-                    {term.feature_count > 1 && (
-                      <Badge bg="secondary" pill>
-                        {term.feature_count} features
-                      </Badge>
-                    )}
-                  </ListGroup.Item>
-                ))}
-              </ListGroup>
-            </Card>
-          )}
-
           {/* Members - shown for features and subfeatures */}
           {isFeature && element.feature_info && (
             <Card className="mb-4">
@@ -921,6 +885,42 @@ function Element() {
                     )}
                   </ListGroup.Item>
                 )}
+              </ListGroup>
+            </Card>
+          )}
+
+          {/* Glossary Terms - shown for features and subfeatures */}
+          {isFeature && glossaryTerms && glossaryTerms.terms.length > 0 && (
+            <Card className="mb-4">
+              <Card.Header>
+                <i className="bi bi-book me-2"></i>
+                Domain Terms
+                <Badge bg="secondary" className="ms-2">{glossaryTerms.terms.length}</Badge>
+              </Card.Header>
+              <ListGroup variant="flush">
+                {glossaryTerms.terms.map((term) => (
+                  <ListGroup.Item
+                    key={term.term}
+                    action
+                    as={Link}
+                    to={term.hash_id ? `/element/${term.hash_id}` : `/glossary/${element.repository.scope}/${element.repository.name}?term=${encodeURIComponent(term.term)}`}
+                    className="py-2"
+                  >
+                    <div className="d-flex justify-content-between align-items-start">
+                      <span className="fw-medium">{term.term}</span>
+                      {term.feature_count > 1 && (
+                        <Badge bg="secondary" pill className="ms-2">
+                          {term.feature_count}
+                        </Badge>
+                      )}
+                    </div>
+                    {term.description && (
+                      <small className="text-muted d-block mt-1 text-truncate glossary-description">
+                        <ReactMarkdown>{term.description.split('\n')[0]}</ReactMarkdown>
+                      </small>
+                    )}
+                  </ListGroup.Item>
+                ))}
               </ListGroup>
             </Card>
           )}
