@@ -1077,11 +1077,11 @@ def _process_single_element(
         code_embedding: list[float] | None = None
         if should_embed(element):
             if config.skip_ai:
-                # Generate dummy embeddings for testing
+                # Skip embeddings entirely - don't generate zero vectors
+                # (ES rejects dense_vectors with zero magnitude)
                 update_status("summ_embed", config.embed_model.name, "-")
-                summary_embedding = [0.0] * config.embed_dimensions
                 update_status("code_embed", config.embed_model.name, "-")
-                code_embedding = [0.0] * config.embed_dimensions
+                # Leave embeddings as None
             else:
                 # Generate both embeddings (returns tuple with timing)
                 # Pass callback to update status between embedding phases

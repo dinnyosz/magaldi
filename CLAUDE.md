@@ -12,6 +12,7 @@ Magaldi is an open-source code discovery engine that helps AI agents and develop
 # Setup
 make setup                  # Create venv and install dependencies
 source .venv/bin/activate   # Activate virtual environment
+pip install -e .            # Install magaldi CLI (required after code changes)
 
 # Start services (Elasticsearch, Redis, Kibana)
 make services               # Core services only
