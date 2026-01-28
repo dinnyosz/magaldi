@@ -13,8 +13,6 @@ import {
   Pagination,
   Button,
   Collapse,
-  OverlayTrigger,
-  Tooltip,
 } from 'react-bootstrap'
 import {
   getBrowseFilters,
@@ -198,21 +196,8 @@ function ElementRow({ element, username }: { element: BrowseElement; username: s
             </>
           )}
         </td>
-        <td className="small text-muted">
-          {element.summary ? (
-            <OverlayTrigger
-              placement="top"
-              overlay={<Tooltip>{element.summary}</Tooltip>}
-            >
-              <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                {element.summary.length > 100
-                  ? element.summary.slice(0, 100) + '...'
-                  : element.summary}
-              </span>
-            </OverlayTrigger>
-          ) : (
-            <span className="text-muted fst-italic">No summary</span>
-          )}
+        <td className="small text-muted" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          {element.summary || <span className="fst-italic">No summary</span>}
         </td>
       </tr>
 
