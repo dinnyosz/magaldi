@@ -84,6 +84,19 @@ class ExtractedReference:
     context_snippet: str = ""  # brief code context for rich descriptions
 
 
+class CallCategory:
+    """Categories for unresolved calls."""
+
+    RESOLVED = "resolved"  # Successfully resolved to an element
+    BUILTIN = "builtin"  # Python built-in (len, str, print, etc.)
+    STDLIB = "stdlib"  # Standard library (os.path, json.dumps, etc.)
+    EXTERNAL = "external"  # Third-party library (logger.info, requests.get, etc.)
+    TYPE_RESOLVABLE = "type_resolvable"  # Could be resolved via type annotation
+    UNTYPED = "untyped"  # Method call on object without type info
+    DYNAMIC = "dynamic"  # Dynamically determined (getattr, etc.)
+    UNKNOWN = "unknown"  # Default/fallback
+
+
 @dataclass
 class ExtractedCall:
     """A function/method call extracted from within a function body.
@@ -95,6 +108,7 @@ class ExtractedCall:
     receiver: str | None  # Receiver object (e.g., "self", "utils", None for bare calls)
     line: int  # 1-indexed line number
     resolved_id: str | None = None  # Element ID of the target (filled during resolution)
+    category: str = CallCategory.UNKNOWN  # Category explaining resolution status
 
 
 # =============================================================================

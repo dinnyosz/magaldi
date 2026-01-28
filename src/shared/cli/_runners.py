@@ -348,19 +348,21 @@ def run_processing(
     api_processed = result.elements_processed - result.elements_skipped
     avg_wall = elapsed / api_processed if api_processed > 0 else 0.0
 
-    # Phase 2 call resolution: resolve cross-file calls using imports
+    # Phase 2 call resolution: resolve cross-file calls using imports and type annotations
     if result.indexed > 0:
         from magaldi_core.call_resolution import resolve_cross_file_calls
 
         console.print("\n  [bold]Call Resolution[/]")
         try:
-            total_calls, resolved_calls = resolve_cross_file_calls(
+            total_calls, import_resolved, type_resolved = resolve_cross_file_calls(
                 es_repo,
                 manifest.scope,
                 manifest.repository,
                 manifest.username,
             )
-            console.print(f"  Cross-file: {resolved_calls}/{total_calls} resolved via imports")
+            total_resolved = import_resolved + type_resolved
+            console.print(f"  Cross-file: {total_resolved}/{total_calls} resolved")
+            console.print(f"    via imports: {import_resolved}, via type annotations: {type_resolved}")
         except Exception as e:
             console.print(f"  [yellow]Warning: Call resolution failed: {e}[/]")
 

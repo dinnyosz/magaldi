@@ -964,10 +964,19 @@ function Element() {
           {/* Callees - what this function calls */}
           {explanation && explanation.callees && explanation.callees.length > 0 && (
             <Card className="mb-4">
-              <Card.Header>
-                <i className="bi bi-arrow-up-right me-2"></i>
-                Calls
-                <Badge bg="secondary" className="ms-2">{explanation.callees.length}</Badge>
+              <Card.Header className="d-flex justify-content-between align-items-center">
+                <span>
+                  <i className="bi bi-arrow-up-right me-2"></i>
+                  Calls
+                  <Badge bg="secondary" className="ms-2">{explanation.callees.length}</Badge>
+                </span>
+                <Link
+                  to={`/repos/${element.repository.scope}/${element.repository.name}/call-explorer?element=${encodeURIComponent(decodedId)}`}
+                  className="btn btn-sm btn-outline-primary"
+                >
+                  <i className="bi bi-diagram-3 me-1"></i>
+                  Explorer
+                </Link>
               </Card.Header>
               <ListGroup variant="flush">
                 {explanation.callees.slice(0, 10).map((callee, idx) => {

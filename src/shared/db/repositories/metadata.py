@@ -80,6 +80,95 @@ class MetadataRepository:
             return hits[0]["_source"]
         return None
 
+    def get_document_by_name_only(
+        self,
+        name: str,
+        element_type: str,
+        scope: str,
+        repository: str,
+        username: str = "main",
+    ) -> dict[str, Any] | None:
+        """Get indexed document by name only (without path).
+
+        Used for type-based resolution when we need to find a class by name.
+
+        Args:
+            name: Element name.
+            element_type: Element type (function, class, method).
+            scope: Repository scope.
+            repository: Repository name.
+            username: Username branch.
+
+        Returns:
+            Document if found, None otherwise.
+        """
+        client = self._get_client()
+        query = {
+            "bool": {
+                "must": [
+                    {"term": {"name": name}},
+                    {"term": {"element_type": element_type}},
+                    {"term": {"scope": scope}},
+                    {"term": {"repository": repository}},
+                    {"term": {"username": username}},
+                ]
+            }
+        }
+
+        result = client.search(
+            index=INDEX_NAME,
+            body={"query": query, "size": 1},
+        )
+
+        hits = result.get("hits", {}).get("hits", [])
+        if hits:
+            return hits[0]["_source"]
+        return None
+
+    def get_method_by_class(
+        self,
+        class_id: str,
+        method_name: str,
+        scope: str,
+        repository: str,
+        username: str = "main",
+    ) -> dict[str, Any] | None:
+        """Get method document by class parent ID and method name.
+
+        Args:
+            class_id: Element ID of the parent class.
+            method_name: Name of the method.
+            scope: Repository scope.
+            repository: Repository name.
+            username: Username branch.
+
+        Returns:
+            Method document if found, None otherwise.
+        """
+        client = self._get_client()
+        query = {
+            "bool": {
+                "must": [
+                    {"term": {"name": method_name}},
+                    {"term": {"element_type": "method"}},
+                    {"term": {"parent_id": class_id}},
+                    {"term": {"scope": scope}},
+                    {"term": {"repository": repository}},
+                    {"term": {"username": username}},
+                ]
+            }
+        }
+
+        result = client.search(
+            index=INDEX_NAME,
+            body={"query": query, "size": 1},
+        )
+
+        hits = result.get("hits", {}).get("hits", [])
+        if hits:
+            return hits[0]["_source"]
+        return None
+
     def store_embedding(
         self,
         element_id: str,

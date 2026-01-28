@@ -28,11 +28,11 @@ def resolve_cross_file_calls(
     scope: str,
     repository: str,
     username: str = "main",
-) -> tuple[int, int]:
+) -> tuple[int, int, int]:
     """Resolve calls using imports and indexed elements.
 
     This is Phase 2 of call resolution, run after all files are parsed and stored.
-    It uses import information to resolve calls that reference other files.
+    It uses import information and type annotations to resolve calls.
 
     Args:
         es: Elasticsearch repository instance.
@@ -41,10 +41,11 @@ def resolve_cross_file_calls(
         username: Username branch.
 
     Returns:
-        Tuple of (total_unresolved_calls_processed, calls_resolved).
+        Tuple of (total_unresolved_calls_processed, import_resolved, type_resolved).
     """
     total_processed = 0
-    total_resolved = 0
+    import_resolved = 0
+    type_resolved = 0
 
     # Get all elements with unresolved calls
     elements = es.find_elements_with_unresolved_calls(scope, repository, username)
@@ -53,13 +54,19 @@ def resolve_cross_file_calls(
     for elem in elements:
         element_id = elem.get("element_id", "")
         relative_path = elem.get("relative_path", "")
+        parameters = elem.get("parameters", [])
+
+        # Build param type map for type-based resolution
+        param_types: dict[str, str] = {}
+        if parameters:
+            for p in parameters:
+                if p.get("type"):
+                    param_types[p["name"]] = p["type"]
 
         # Get file's imports
         file_imports = es.get_file_imports(relative_path, scope, repository, username)
-        if not file_imports:
-            continue
+        import_map = _build_import_map(file_imports) if file_imports else {}
 
-        import_map = _build_import_map(file_imports)
         calls = elem.get("calls", [])
         updated = False
 
@@ -70,6 +77,7 @@ def resolve_cross_file_calls(
             total_processed += 1
             receiver = call.get("receiver")
             name = call.get("name")
+            category = call.get("category", "unknown")
 
             resolved_id = None
 
@@ -80,6 +88,8 @@ def resolve_cross_file_calls(
                 resolved_id = _lookup_element_by_import(
                     es, import_info, name, scope, repository, username
                 )
+                if resolved_id:
+                    import_resolved += 1
 
             # Strategy 4: Method call on imported module
             # e.g., import utils; utils.process()
@@ -88,17 +98,33 @@ def resolve_cross_file_calls(
                 resolved_id = _lookup_element_by_import(
                     es, import_info, name, scope, repository, username
                 )
+                if resolved_id:
+                    import_resolved += 1
+
+            # Strategy 5: Type-annotated method call
+            # e.g., def foo(es: ElasticsearchRepository): es.get_document()
+            elif receiver and category == "type_resolvable" and receiver in param_types:
+                type_name = param_types[receiver]
+                resolved_id = _lookup_method_by_type(
+                    es, type_name, name, scope, repository, username
+                )
+                if resolved_id:
+                    type_resolved += 1
+                    call["category"] = "resolved"
 
             if resolved_id:
                 call["resolved_id"] = resolved_id
-                total_resolved += 1
                 updated = True
 
         if updated:
             es.store_calls(element_id, calls)
 
-    logger.info(f"Resolved {total_resolved}/{total_processed} cross-file calls")
-    return total_processed, total_resolved
+    total_resolved = import_resolved + type_resolved
+    logger.info(
+        f"Resolved {total_resolved}/{total_processed} cross-file calls "
+        f"({import_resolved} via imports, {type_resolved} via type annotations)"
+    )
+    return total_processed, import_resolved, type_resolved
 
 
 def _build_import_map(imports: list[dict]) -> dict[str, dict]:
@@ -232,6 +258,67 @@ def _module_to_file_paths(module: str) -> list[str]:
         paths.append(f"{src_prefix}{path_base}/__init__.py")
 
     return paths
+
+
+def _lookup_method_by_type(
+    es: ElasticsearchRepository,
+    type_name: str,
+    method_name: str,
+    scope: str,
+    repository: str,
+    username: str,
+) -> str | None:
+    """Look up a method by the type of its receiver.
+
+    Resolves calls like `es.get_document()` when `es: ElasticsearchRepository`.
+
+    Args:
+        es: Elasticsearch repository.
+        type_name: Type annotation of the receiver (e.g., "ElasticsearchRepository").
+        method_name: Name of the method to find.
+        scope: Repository scope.
+        repository: Repository name.
+        username: Username branch.
+
+    Returns:
+        Element ID of the method if found, None otherwise.
+    """
+    # Strip generic parameters (e.g., "list[str]" -> "list")
+    base_type = type_name.split("[")[0].strip()
+
+    # Handle qualified names (e.g., "db.ElasticsearchRepository" -> "ElasticsearchRepository")
+    if "." in base_type:
+        base_type = base_type.split(".")[-1]
+
+    # Look up the class by name (without path since we only have the type name)
+    class_doc = es.get_document_by_name_only(
+        name=base_type,
+        element_type="class",
+        scope=scope,
+        repository=repository,
+        username=username,
+    )
+
+    if not class_doc:
+        return None
+
+    class_id = class_doc.get("element_id")
+    if not class_id:
+        return None
+
+    # Look up the method on this class
+    method_doc = es.get_method_by_class(
+        class_id=class_id,
+        method_name=method_name,
+        scope=scope,
+        repository=repository,
+        username=username,
+    )
+
+    if method_doc:
+        return method_doc.get("element_id")
+
+    return None
 
 
 def _find_element_in_file(

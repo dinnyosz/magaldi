@@ -1094,7 +1094,11 @@ class PythonParser(TreeSitterParser):
         Resolves:
         - Same-file bare function calls: func() -> file-level function
         - Self-method calls: self.method() -> sibling method in same class
+
+        Also categorizes unresolved calls.
         """
+        from magaldi_core.extractors.call_categorizer import categorize_calls
+
         # Build lookup for file-level functions
         file_functions: dict[str, str] = {
             e.name: e.element_id
@@ -1129,6 +1133,9 @@ class PythonParser(TreeSitterParser):
                     sibling_methods = class_methods.get(elem.parent_id, {})
                     if call.name in sibling_methods:
                         call.resolved_id = sibling_methods[call.name]
+
+            # Categorize all calls (resolved and unresolved)
+            categorize_calls(elem.calls, "python", elem.parameters)
 
 
 class JavaScriptParser(TreeSitterParser):
@@ -1412,7 +1419,11 @@ class JavaScriptParser(TreeSitterParser):
         Resolves:
         - Same-file bare function calls: func() -> file-level function
         - This-method calls: this.method() -> sibling method in same class
+
+        Also categorizes unresolved calls.
         """
+        from magaldi_core.extractors.call_categorizer import categorize_calls
+
         # Build lookup for file-level functions
         file_functions: dict[str, str] = {
             e.name: e.element_id
@@ -1447,6 +1458,9 @@ class JavaScriptParser(TreeSitterParser):
                     sibling_methods = class_methods.get(elem.parent_id, {})
                     if call.name in sibling_methods:
                         call.resolved_id = sibling_methods[call.name]
+
+            # Categorize all calls (resolved and unresolved)
+            categorize_calls(elem.calls, self._language, elem.parameters)
 
 
 class PhpParser(TreeSitterParser):
@@ -1716,7 +1730,11 @@ class PhpParser(TreeSitterParser):
         Resolves:
         - Same-file bare function calls: func() -> file-level function
         - $this->method() calls: -> sibling method in same class
+
+        Also categorizes unresolved calls.
         """
+        from magaldi_core.extractors.call_categorizer import categorize_calls
+
         # Build lookup for file-level functions
         file_functions: dict[str, str] = {
             e.name: e.element_id
@@ -1751,6 +1769,9 @@ class PhpParser(TreeSitterParser):
                     sibling_methods = class_methods.get(elem.parent_id, {})
                     if call.name in sibling_methods:
                         call.resolved_id = sibling_methods[call.name]
+
+            # Categorize all calls (resolved and unresolved)
+            categorize_calls(elem.calls, "php", elem.parameters)
 
 
 class RustParser(TreeSitterParser):
@@ -2028,7 +2049,11 @@ class RustParser(TreeSitterParser):
         Resolves:
         - Same-file bare function calls: func() -> file-level function
         - self.method() calls: -> sibling method in same impl block
+
+        Also categorizes unresolved calls.
         """
+        from magaldi_core.extractors.call_categorizer import categorize_calls
+
         # Build lookup for file-level functions
         file_functions: dict[str, str] = {
             e.name: e.element_id
@@ -2063,6 +2088,9 @@ class RustParser(TreeSitterParser):
                     sibling_methods = class_methods.get(elem.parent_id, {})
                     if call.name in sibling_methods:
                         call.resolved_id = sibling_methods[call.name]
+
+            # Categorize all calls (resolved and unresolved)
+            categorize_calls(elem.calls, "rust", elem.parameters)
 
 
 # =============================================================================

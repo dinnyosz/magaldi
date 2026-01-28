@@ -1722,6 +1722,7 @@ def find_call_chain(
 
     root_node = {
         "element_id": element_id,
+        "hash_id": doc.get("hash_id"),
         "name": doc.get("name"),
         "type": doc.get("element_type"),
         "file": doc.get("relative_path"),
@@ -1758,6 +1759,7 @@ def find_call_chain(
                 children.append(
                     {
                         "element_id": caller_id,
+                        "hash_id": caller.get("hash_id"),
                         "name": caller.get("name"),
                         "type": caller.get("element_type"),
                         "file": caller.get("relative_path"),
@@ -1771,6 +1773,7 @@ def find_call_chain(
             visited.add(caller_id)
             node = {
                 "element_id": caller_id,
+                "hash_id": caller.get("hash_id"),
                 "name": caller.get("name"),
                 "type": caller.get("element_type"),
                 "file": caller.get("relative_path"),
@@ -1825,6 +1828,7 @@ def find_call_chain(
             if resolved_doc:
                 node = {
                     "element_id": resolved_id,
+                    "hash_id": resolved_doc.get("hash_id"),
                     "name": resolved_doc.get("name"),
                     "type": resolved_doc.get("element_type"),
                     "file": resolved_doc.get("relative_path"),

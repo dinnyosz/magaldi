@@ -215,6 +215,32 @@ class ElasticsearchRepository:
             name, element_type, relative_path, scope, repository, username
         )
 
+    def get_document_by_name_only(
+        self,
+        name: str,
+        element_type: str,
+        scope: str,
+        repository: str,
+        username: str = "main",
+    ) -> dict[str, Any] | None:
+        """Get indexed document by name only (without path)."""
+        return self._metadata.get_document_by_name_only(
+            name, element_type, scope, repository, username
+        )
+
+    def get_method_by_class(
+        self,
+        class_id: str,
+        method_name: str,
+        scope: str,
+        repository: str,
+        username: str = "main",
+    ) -> dict[str, Any] | None:
+        """Get method document by class parent ID and method name."""
+        return self._metadata.get_method_by_class(
+            class_id, method_name, scope, repository, username
+        )
+
     def get_summaries_batch(self, element_ids: list[str]) -> dict[str, str]:
         """Get summaries for multiple elements in batch."""
         return self._metadata.get_summaries_batch(element_ids)

@@ -966,7 +966,13 @@ def _index_element(
     # Store calls for function/method elements
     if element.element_type in ("function", "method") and element.calls:
         calls_data = [
-            {"name": call.name, "receiver": call.receiver, "line": call.line, "resolved_id": call.resolved_id}
+            {
+                "name": call.name,
+                "receiver": call.receiver,
+                "line": call.line,
+                "resolved_id": call.resolved_id,
+                "category": call.category,
+            }
             for call in element.calls
         ]
         es_repo.store_calls(element.element_id, calls_data)
