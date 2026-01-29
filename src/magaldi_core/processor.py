@@ -1392,9 +1392,27 @@ def process_elements(
         f.write(f"DEBUG: elements_to_process={len(elements_to_process)}, total={total}, skipped={result.elements_skipped}\n")
 
     if not elements_to_process:
-        # All elements unchanged - nothing to do
+        # All elements unchanged - fire progress callback showing 100% complete
         with open("/tmp/magaldi_debug.log", "a") as f:
             f.write(f"DEBUG: Early return - all elements unchanged\n")
+        if on_progress:
+            # Show as complete with all skipped
+            if timing_stats is None:
+                timing_stats = TimingStats()
+            if worker_status is None:
+                worker_status = WorkerStatus()
+            progress_state = ProgressState(
+                total=total,
+                completed=total,  # All done (skipped counts as done)
+                skipped=result.elements_skipped,
+                failed=0,
+                timing=timing_stats,
+                workers=worker_status,
+                num_workers=config.num_workers if config.num_workers > 0 else 8,
+                recent_errors=[],
+                parallelism=None,
+            )
+            on_progress(progress_state)
         return result
 
     # Summary cache for hierarchical context
