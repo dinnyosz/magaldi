@@ -11,9 +11,11 @@ from collections import deque
 from dataclasses import dataclass, field
 from threading import Lock
 
-# Safety margin for throttling - use 70% of timeout to leave headroom
-# for variance in task runtimes when running concurrently
-THROTTLE_SAFETY_MARGIN = 0.7
+# Safety margin for throttling - use 65% of timeout to leave 35% headroom
+# for variance in task runtimes when running concurrently.
+# Example: if base_time=1s and timeout=10s, theoretical max is 10 workers,
+# but we limit to 10 * 0.65 = 6 workers for safety.
+THROTTLE_SAFETY_MARGIN = 0.65
 
 
 @dataclass
