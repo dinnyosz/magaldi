@@ -794,16 +794,18 @@ class DependencyTracker:
                 tier = self._get_tier(elem.element_id)
                 by_model_tier.setdefault((model_key, tier), []).append(elem)
 
-            # Sort each batch by context size (smallest first)
+            # Sort each batch by context size (largest first - finish big ones first)
             for key in by_model_tier:
                 by_model_tier[key].sort(
-                    key=lambda e: self._context_sizes.get(e.element_id, 0)
+                    key=lambda e: self._context_sizes.get(e.element_id, 0),
+                    reverse=True
                 )
 
             # Determine which (model, tier) to use with priority:
             # 1. Current model + current tier (if available at this level)
-            # 2. Current model + smallest available tier (at this level)
-            # 3. Different model + smallest available tier (at this level)
+            # 2. Current model + largest available tier (at this level)
+            # 3. Different model + largest available tier (at this level)
+            # Rationale: finish big tasks first to avoid long tail at the end
             selected_model = None
             selected_tier = None
 
@@ -813,28 +815,28 @@ class DependencyTracker:
                 selected_model = self._current_model
                 selected_tier = self._current_tier
             elif self._current_model is not None:
-                # Priority 2: same model + different tier (smallest first)
+                # Priority 2: same model + different tier (largest first)
                 same_model_tiers = [
                     tier for (model, tier) in by_model_tier.keys()
                     if model == self._current_model
                 ]
                 if same_model_tiers:
                     selected_model = self._current_model
-                    selected_tier = min(same_model_tiers)
+                    selected_tier = max(same_model_tiers)
 
             if selected_model is None:
-                # Priority 3: different model, pick smallest tier overall
-                # Group by model first, then pick model with smallest min tier
-                models_with_min_tier = {}
+                # Priority 3: different model, pick largest tier overall
+                # Group by model first, then pick model with largest max tier
+                models_with_max_tier = {}
                 for (model, tier) in by_model_tier.keys():
-                    if model not in models_with_min_tier:
-                        models_with_min_tier[model] = tier
+                    if model not in models_with_max_tier:
+                        models_with_max_tier[model] = tier
                     else:
-                        models_with_min_tier[model] = min(models_with_min_tier[model], tier)
+                        models_with_max_tier[model] = max(models_with_max_tier[model], tier)
 
-                # Pick model with smallest minimum tier (start small)
-                selected_model = min(models_with_min_tier.keys(), key=lambda m: models_with_min_tier[m])
-                selected_tier = models_with_min_tier[selected_model]
+                # Pick model with largest maximum tier (start big)
+                selected_model = max(models_with_max_tier.keys(), key=lambda m: models_with_max_tier[m])
+                selected_tier = models_with_max_tier[selected_model]
 
             # Check if model or tier is changing
             model_changing = self._current_model is not None and selected_model != self._current_model
