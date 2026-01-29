@@ -571,8 +571,6 @@ class DependencyTracker:
 
             ready = self._get_all_ready()
             if not ready:
-                with open("/tmp/magaldi_debug.log", "a") as f:
-                    f.write(f"DEBUG get_ready: no ready elements, elements={len(self._elements)}, completed={len(self._completed)}, in_progress={len(self._in_progress)}\n")
                 return []
 
             # Group ready elements by hierarchy level first (to batch by model),
@@ -1332,10 +1330,6 @@ def process_elements(
     Returns:
         ProcessingResult with counts and errors.
     """
-    # DEBUG: Log at function entry
-    with open("/tmp/magaldi_debug.log", "a") as f:
-        f.write(f"DEBUG: process_elements called, parsed_files={len(parsed_files)}\n")
-
     if config is None:
         config = ProcessingConfig()
 
@@ -1409,14 +1403,8 @@ def process_elements(
         if files_to_update:
             es_repo.update_file_hashes(scope, repository, username, files_to_update)
 
-    # DEBUG: Log before early return check
-    with open("/tmp/magaldi_debug.log", "a") as f:
-        f.write(f"DEBUG: elements_to_process={len(elements_to_process)}, total={total}, skipped={result.elements_skipped}\n")
-
     if not elements_to_process:
         # All elements unchanged - fire progress callback showing 100% complete
-        with open("/tmp/magaldi_debug.log", "a") as f:
-            f.write(f"DEBUG: Early return - all elements unchanged\n")
         if on_progress:
             # Show as complete with all skipped
             if timing_stats is None:
@@ -1567,8 +1555,6 @@ def process_elements(
     HISTORY_RECORD_INTERVAL = 10.0  # Record to history every 10 seconds
 
     try:
-        with open("/tmp/magaldi_debug.log", "a") as f:
-            f.write(f"DEBUG: Starting loop, is_complete={dependency_tracker.is_complete()}, pending={dependency_tracker.pending_count()}\n")
         while not dependency_tracker.is_complete():
             # Compute throttle decision based on current and historical runtimes
             current_max_runtime = worker_status.get_max_active_runtime()
@@ -1606,8 +1592,6 @@ def process_elements(
             if not future_to_element:
                 # No futures pending and not complete - shouldn't happen
                 # Store diagnostic info in result for the CLI to display
-                with open("/tmp/magaldi_debug.log", "a") as f:
-                    f.write(f"DEBUG STALL: pending={dependency_tracker.pending_count()}, tier_changing={dependency_tracker.is_tier_changing()}, ready={len(ready_elements)}\n")
                 result.errors.append(
                     f"Processing stalled: no ready elements. "
                     f"pending={dependency_tracker.pending_count()}, "
