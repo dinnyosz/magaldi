@@ -430,20 +430,27 @@ class MetadataRepository:
         )
 
         states = {}
+        total_hits = len(result["hits"]["hits"])
+        null_hash_count = 0
         _logged = 0
         for hit in result["hits"]["hits"]:
             source = hit["_source"]
+            fh = source.get("file_hash")
+            if fh is None:
+                null_hash_count += 1
             states[source["relative_path"]] = {
-                "file_hash": source.get("file_hash"),
+                "file_hash": fh,
                 "is_deleted": False,
                 "element_count": source.get("element_count"),
             }
             # Log first few to see what we're reading
-            if _logged < 3:
+            if _logged < 5:
                 with open("/tmp/magaldi_file_hash.log", "a") as f:
-                    fh = source.get("file_hash")
-                    f.write(f"[GET_FILE_STATES] {source['relative_path']}: file_hash={fh[:16] if fh else 'None'}... _id={hit.get('_id', '?')[:20]}...\n")
+                    f.write(f"[GET_FILE_STATES] {source['relative_path']}: file_hash={fh[:16] if fh else 'None'}...\n")
                 _logged += 1
+
+        with open("/tmp/magaldi_file_hash.log", "a") as f:
+            f.write(f"[GET_FILE_STATES SUMMARY] Found {total_hits} FILE elements, {null_hash_count} with null file_hash\n")
 
         return states
 

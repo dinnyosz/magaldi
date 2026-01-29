@@ -442,6 +442,49 @@ class ElementRepository:
         # Update by query for each file path
         _logged = 0
         for relative_path, new_file_hash in file_updates.items():
+            # Debug: Check what exists BEFORE update
+            if _logged < 3:
+                with open("/tmp/magaldi_file_hash.log", "a") as f:
+                    f.write(f"\n[BEFORE UPDATE] {relative_path}\n")
+                    f.write(f"  Target: scope={scope} repo={repository} user={username}\n")
+                    f.write(f"  New hash: {new_file_hash[:16]}...\n")
+
+                # Check how many elements exist for this exact scope/repo/user/path
+                pre_count = client.count(
+                    index=INDEX_NAME,
+                    body={
+                        "query": {
+                            "bool": {
+                                "must": [
+                                    {"term": {"scope": scope}},
+                                    {"term": {"repository": repository}},
+                                    {"term": {"username": username}},
+                                    {"term": {"relative_path": relative_path}},
+                                ]
+                            }
+                        }
+                    },
+                )
+                # Check specifically FILE elements
+                pre_file_count = client.count(
+                    index=INDEX_NAME,
+                    body={
+                        "query": {
+                            "bool": {
+                                "must": [
+                                    {"term": {"scope": scope}},
+                                    {"term": {"repository": repository}},
+                                    {"term": {"username": username}},
+                                    {"term": {"relative_path": relative_path}},
+                                    {"term": {"element_type": "file"}},
+                                ]
+                            }
+                        }
+                    },
+                )
+                with open("/tmp/magaldi_file_hash.log", "a") as f:
+                    f.write(f"  Elements matching: {pre_count.get('count', 0)} total, {pre_file_count.get('count', 0)} FILE elements\n")
+
             result = client.update_by_query(
                 index=INDEX_NAME,
                 body={
@@ -468,17 +511,20 @@ class ElementRepository:
             # Log first few files with details
             if _logged < 3:
                 with open("/tmp/magaldi_file_hash.log", "a") as f:
-                    f.write(f"[ES UPDATE] {relative_path}: updated={updated}, total={result.get('total', 0)}, "
+                    f.write(f"[ES UPDATE] updated={updated}, total={result.get('total', 0)}, "
                             f"noops={result.get('noops', 0)}, version_conflicts={result.get('version_conflicts', 0)}, "
                             f"failures={len(result.get('failures', []))}\n")
 
-                # Verify FILE element was updated - check ALL FILE elements for this path
+                # Verify FILE element - check with SAME scope/repo/user filter
                 verify = client.search(
                     index=INDEX_NAME,
                     body={
                         "query": {
                             "bool": {
                                 "must": [
+                                    {"term": {"scope": scope}},
+                                    {"term": {"repository": repository}},
+                                    {"term": {"username": username}},
                                     {"term": {"relative_path": relative_path}},
                                     {"term": {"element_type": "file"}},
                                 ]
@@ -490,12 +536,12 @@ class ElementRepository:
                 )
                 hits = verify.get("hits", {}).get("hits", [])
                 with open("/tmp/magaldi_file_hash.log", "a") as f:
-                    f.write(f"[VERIFY] Found {len(hits)} FILE elements for {relative_path}\n")
+                    f.write(f"[VERIFY] Found {len(hits)} FILE elements for exact scope/repo/user\n")
                     for hit in hits:
                         src = hit.get("_source", {})
                         doc_id = hit.get("_id", "?")
                         fh = src.get("file_hash")
-                        f.write(f"  _id={doc_id[:20]}... scope={src.get('scope')} repo={src.get('repository')} user={src.get('username')} file_hash={fh[:16] if fh else 'None'}...\n")
+                        f.write(f"  _id={doc_id[:40]}... file_hash={fh[:16] if fh else 'None'}...\n")
 
                 _logged += 1
 
