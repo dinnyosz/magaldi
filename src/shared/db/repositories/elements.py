@@ -440,6 +440,7 @@ class ElementRepository:
         total_updated = 0
 
         # Update by query for each file path
+        _logged = 0
         for relative_path, new_file_hash in file_updates.items():
             result = client.update_by_query(
                 index=INDEX_NAME,
@@ -461,7 +462,43 @@ class ElementRepository:
                 },
                 refresh=True,
             )
-            total_updated += result.get("updated", 0)
+            updated = result.get("updated", 0)
+            total_updated += updated
+
+            # Log first few files with details
+            if _logged < 3:
+                with open("/tmp/magaldi_file_hash.log", "a") as f:
+                    f.write(f"[ES UPDATE] {relative_path}: updated={updated}, total={result.get('total', 0)}, failures={result.get('failures', [])}\n")
+
+                # Verify FILE element was updated
+                verify = client.search(
+                    index=INDEX_NAME,
+                    body={
+                        "query": {
+                            "bool": {
+                                "must": [
+                                    {"term": {"scope": scope}},
+                                    {"term": {"repository": repository}},
+                                    {"term": {"username": username}},
+                                    {"term": {"relative_path": relative_path}},
+                                    {"term": {"element_type": "file"}},
+                                ]
+                            }
+                        },
+                        "_source": ["file_hash", "element_type"],
+                        "size": 1,
+                    },
+                )
+                hits = verify.get("hits", {}).get("hits", [])
+                if hits:
+                    src = hits[0].get("_source", {})
+                    with open("/tmp/magaldi_file_hash.log", "a") as f:
+                        f.write(f"[VERIFY] FILE element file_hash={src.get('file_hash', 'MISSING')[:16] if src.get('file_hash') else 'None'}...\n")
+                else:
+                    with open("/tmp/magaldi_file_hash.log", "a") as f:
+                        f.write(f"[VERIFY] FILE element NOT FOUND for {relative_path}\n")
+
+                _logged += 1
 
         return total_updated
 
