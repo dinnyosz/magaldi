@@ -559,3 +559,44 @@ class TestClearClusterAssignments:
         result = mock_repo.clear_cluster_assignments("scope", "repo", "user")
 
         assert result == 50
+
+
+# =============================================================================
+# UPDATE FILE HASHES TESTS
+# =============================================================================
+
+
+class TestUpdateFileHashes:
+    """Tests for update_file_hashes method."""
+
+    def test_update_file_hashes_empty(self, mock_repo):
+        """Test with empty file_updates dict returns 0."""
+        result = mock_repo.update_file_hashes("scope", "repo", "user", {})
+        assert result == 0
+
+    def test_update_file_hashes_single_file(self, mock_repo, mock_es_client):
+        """Test updating file hash for a single file."""
+        mock_es_client.update_by_query.return_value = {"updated": 5}
+
+        result = mock_repo.update_file_hashes(
+            "scope", "repo", "user",
+            {"src/main.py": "newhash123"}
+        )
+
+        assert result == 5
+        mock_es_client.update_by_query.assert_called_once()
+        call_args = mock_es_client.update_by_query.call_args
+        assert call_args[1]["body"]["script"]["params"]["file_hash"] == "newhash123"
+
+    def test_update_file_hashes_multiple_files(self, mock_repo, mock_es_client):
+        """Test updating file hashes for multiple files."""
+        mock_es_client.update_by_query.return_value = {"updated": 3}
+
+        result = mock_repo.update_file_hashes(
+            "scope", "repo", "user",
+            {"src/main.py": "hash1", "src/utils.py": "hash2"}
+        )
+
+        # 3 updated per file * 2 files = 6
+        assert result == 6
+        assert mock_es_client.update_by_query.call_count == 2

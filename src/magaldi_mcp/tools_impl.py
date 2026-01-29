@@ -787,7 +787,7 @@ def find_files(
             "query": {"bool": {"filter": filters}},
             "_source": ["element_id", "relative_path", "language", "line_end"],
             "size": min(limit * 5, 2000),  # Get extra to filter by pattern
-            "sort": [{"relative_path.keyword": "asc"}],
+            "sort": [{"relative_path": "asc"}],
         },
     )
 
@@ -871,7 +871,7 @@ def _find_file_element(
                         {"term": {"scope": scope}},
                         {"term": {"repository": repository}},
                         {"term": {"username": username}},
-                        {"term": {"relative_path.keyword": relative_path}},
+                        {"term": {"relative_path": relative_path}},
                         {"term": {"element_type": "file"}},
                     ]
                 }
@@ -920,7 +920,7 @@ def _find_elements_in_file(
                         {"term": {"scope": scope}},
                         {"term": {"repository": repository}},
                         {"term": {"username": username}},
-                        {"term": {"relative_path.keyword": relative_path}},
+                        {"term": {"relative_path": relative_path}},
                     ],
                     "must_not": [
                         {"term": {"element_type": "file"}},

@@ -280,7 +280,7 @@ class ElementRepository:
                             {"term": {"scope": scope}},
                             {"term": {"repository": repository}},
                             {"term": {"username": username}},
-                            {"term": {"relative_path.keyword": relative_path}},
+                            {"term": {"relative_path": relative_path}},
                         ]
                     }
                 },
@@ -327,7 +327,7 @@ class ElementRepository:
                             {"term": {"scope": scope}},
                             {"term": {"repository": repository}},
                             {"term": {"username": username}},
-                            {"term": {"relative_path.keyword": relative_path}},
+                            {"term": {"relative_path": relative_path}},
                         ]
                     }
                 }
@@ -410,6 +410,60 @@ class ElementRepository:
             refresh=True,
         )
         return response.get("deleted", 0)
+
+    def update_file_hashes(
+        self,
+        scope: str,
+        repository: str,
+        username: str,
+        file_updates: dict[str, str],
+    ) -> int:
+        """Bulk update file_hash for elements by relative_path.
+
+        Used when elements are unchanged (content_hash match) but file_hash
+        changed. Without this update, files would appear as "modified" on
+        every subsequent run.
+
+        Args:
+            scope: Scope to filter by.
+            repository: Repository to filter by.
+            username: Username to filter by.
+            file_updates: Dict mapping relative_path -> new file_hash.
+
+        Returns:
+            Number of elements updated.
+        """
+        if not file_updates:
+            return 0
+
+        client = self._get_client()
+        total_updated = 0
+
+        # Update by query for each file path
+        for relative_path, new_file_hash in file_updates.items():
+            result = client.update_by_query(
+                index=INDEX_NAME,
+                body={
+                    "query": {
+                        "bool": {
+                            "must": [
+                                {"term": {"scope": scope}},
+                                {"term": {"repository": repository}},
+                                {"term": {"username": username}},
+                                {"term": {"relative_path": relative_path}},
+                            ]
+                        }
+                    },
+                    "script": {
+                        "source": "ctx._source.file_hash = params.file_hash",
+                        "params": {"file_hash": new_file_hash},
+                    },
+                },
+                refresh=True,
+            )
+            total_updated += result.get("updated", 0)
+
+        return total_updated
 
     def get_documents_batch(
         self,

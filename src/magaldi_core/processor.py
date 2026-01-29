@@ -1375,17 +1375,39 @@ def process_elements(
     existing_hashes = es_repo.get_element_content_hashes(all_element_ids)
 
     # Filter: only process elements that are new or have changed content
+    # Also track which files had skipped elements (need file_hash update)
     elements_to_process = []
+    skipped_by_file: dict[str, int] = {}  # relative_path -> count of skipped elements
     for elem in all_elements:
         existing_hash = existing_hashes.get(elem.element_id)
         if existing_hash is not None and existing_hash == elem.content_hash:
             # Element exists in ES with same content - skip entirely
             result.elements_skipped += 1
+            skipped_by_file[elem.relative_path] = skipped_by_file.get(elem.relative_path, 0) + 1
         else:
             # Element is new OR content changed - needs processing
             elements_to_process.append(elem)
 
     total = len(all_elements)
+
+    # Count elements per file to identify files where ALL elements were skipped
+    elements_per_file: dict[str, int] = {}
+    for elem in all_elements:
+        elements_per_file[elem.relative_path] = elements_per_file.get(elem.relative_path, 0) + 1
+
+    # Find files where ALL elements were skipped and update their file_hash in ES
+    # This prevents files from appearing "modified" on every run when only
+    # file metadata changed but element content stayed the same
+    if file_hashes and skipped_by_file:
+        files_to_update: dict[str, str] = {}
+        for rel_path, skipped_count in skipped_by_file.items():
+            if skipped_count == elements_per_file.get(rel_path, 0):
+                # All elements in this file were skipped - update file_hash
+                if rel_path in file_hashes:
+                    files_to_update[rel_path] = file_hashes[rel_path]
+
+        if files_to_update:
+            es_repo.update_file_hashes(scope, repository, username, files_to_update)
 
     # DEBUG: Log before early return check
     with open("/tmp/magaldi_debug.log", "a") as f:

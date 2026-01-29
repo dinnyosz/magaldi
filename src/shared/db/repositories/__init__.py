@@ -140,6 +140,16 @@ class ElasticsearchRepository:
         """Delete all elements for a repository/user combination."""
         return self._elements.delete_by_repository(scope, repository, username)
 
+    def update_file_hashes(
+        self,
+        scope: str,
+        repository: str,
+        username: str,
+        file_updates: dict[str, str],
+    ) -> int:
+        """Bulk update file_hash for elements by relative_path."""
+        return self._elements.update_file_hashes(scope, repository, username, file_updates)
+
     def get_documents_batch(self, element_ids: list[str]) -> dict[str, dict[str, Any]]:
         """Get full documents for multiple elements in batch."""
         return self._elements.get_documents_batch(element_ids)
