@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from shared.ai.clustering.clusterer import ClusteringResult, ClusterResult
+from shared.throttling import ThroughputTracker
 
 if TYPE_CHECKING:
     from shared.config import MagaldiConfig
@@ -107,7 +108,20 @@ class FeatureTimingStats:
     summarize_count: int = 0
     embed_count: int = 0
 
-    def record(self, summarize_time: float, embed_time: float) -> None:
+    # Per-tier tracking for accurate ETA
+    total_time_by_tier: dict[int, float] = field(default_factory=dict)
+    count_by_tier: dict[int, int] = field(default_factory=dict)
+    totals_by_tier: dict[int, int] = field(default_factory=dict)
+
+    # Throughput tracker for throttling
+    throughput_tracker: "ThroughputTracker" = field(default_factory=lambda: ThroughputTracker())
+
+    def set_totals_by_tier(self, totals: dict[int, int]) -> None:
+        """Set total counts by tier for ETA calculation."""
+        with self._lock:
+            self.totals_by_tier = dict(totals)
+
+    def record(self, summarize_time: float, embed_time: float, tier: int = 0) -> None:
         """Record timing for a completed feature."""
         with self._lock:
             self.total_summarize_time += summarize_time
@@ -115,6 +129,20 @@ class FeatureTimingStats:
             self.summarize_count += 1
             if embed_time > 0:
                 self.embed_count += 1
+
+            # Track per-tier timing
+            if tier > 0:
+                total_time = summarize_time + embed_time
+                self.total_time_by_tier[tier] = self.total_time_by_tier.get(tier, 0.0) + total_time
+                self.count_by_tier[tier] = self.count_by_tier.get(tier, 0) + 1
+
+    def record_task_runtime(self, runtime: float) -> None:
+        """Record task wall-clock runtime for throttling."""
+        self.throughput_tracker.record_completion(runtime)
+
+    def get_throughput_stats(self) -> tuple[float, float, int]:
+        """Get throughput statistics for throttling."""
+        return self.throughput_tracker.get_stats()
 
     @property
     def avg_summarize_time(self) -> float:
@@ -132,19 +160,70 @@ class FeatureTimingStats:
     def elapsed(self) -> float:
         return time.time() - self.phase_start
 
+    def _get_avg_for_tier(self, tier: int, global_avg: float) -> float:
+        """Get average time for a tier with fallback."""
+        # Exact tier match
+        if tier in self.count_by_tier and self.count_by_tier[tier] > 0:
+            return self.total_time_by_tier[tier] / self.count_by_tier[tier]
+
+        # Find closest tier with data
+        tiers_with_data = [t for t in self.count_by_tier if self.count_by_tier[t] > 0]
+        if tiers_with_data:
+            closest = min(tiers_with_data, key=lambda t: abs(t - tier))
+            base_avg = self.total_time_by_tier[closest] / self.count_by_tier[closest]
+            # Scale by tier ratio
+            tier_ratio = tier / closest if closest > 0 else 1.0
+            return base_avg * tier_ratio
+
+        return global_avg
+
     def eta_seconds(self, completed: int, total: int, num_workers: int = 1) -> float | None:
-        """Calculate ETA based on average times."""
+        """Calculate ETA based on per-tier average times."""
         with self._lock:
             if self.summarize_count == 0:
                 return None
 
-            avg_time = (self.total_summarize_time + self.total_embed_time) / self.summarize_count
+            global_avg = (self.total_summarize_time + self.total_embed_time) / self.summarize_count
+
+            # Use tier-aware calculation if available
+            if self.totals_by_tier:
+                total_work_time = 0.0
+                for tier, tot in self.totals_by_tier.items():
+                    done = self.count_by_tier.get(tier, 0)
+                    remaining = tot - done
+                    if remaining > 0:
+                        avg = self._get_avg_for_tier(tier, global_avg)
+                        total_work_time += remaining * avg
+                if total_work_time > 0:
+                    return total_work_time / max(num_workers, 1)
+
+            # Fallback to simple calculation
             remaining = total - completed
             if remaining <= 0:
                 return 0.0
+            return (remaining * global_avg) / max(num_workers, 1)
 
-            # Divide by workers for parallel processing
-            return (remaining * avg_time) / max(num_workers, 1)
+    def get_eta_breakdown_with_avg(self, num_workers: int = 1) -> list[tuple[int, float]]:
+        """Get average time per tier for display.
+
+        Returns:
+            List of (tier, avg_seconds) tuples, sorted by tier descending.
+        """
+        with self._lock:
+            if not self.totals_by_tier:
+                return []
+
+            global_avg = (self.total_summarize_time + self.total_embed_time) / self.summarize_count if self.summarize_count > 0 else 0.0
+
+            breakdown = []
+            for tier in self.totals_by_tier:
+                avg = self._get_avg_for_tier(tier, global_avg)
+                if avg > 0:
+                    breakdown.append((tier, avg))
+
+            # Sort by tier descending (largest first)
+            breakdown.sort(key=lambda x: -x[0])
+            return breakdown
 
 
 @dataclass
@@ -191,7 +270,20 @@ class SubfeatureTimingStats:
     summarize_count: int = 0
     embed_count: int = 0
 
-    def record(self, summarize_time: float, embed_time: float) -> None:
+    # Per-tier tracking for accurate ETA
+    total_time_by_tier: dict[int, float] = field(default_factory=dict)
+    count_by_tier: dict[int, int] = field(default_factory=dict)
+    totals_by_tier: dict[int, int] = field(default_factory=dict)
+
+    # Throughput tracker for throttling
+    throughput_tracker: ThroughputTracker = field(default_factory=ThroughputTracker)
+
+    def set_totals_by_tier(self, totals: dict[int, int]) -> None:
+        """Set total counts by tier for ETA calculation."""
+        with self._lock:
+            self.totals_by_tier = dict(totals)
+
+    def record(self, summarize_time: float, embed_time: float, tier: int = 0) -> None:
         """Record timing for a completed subfeature."""
         with self._lock:
             self.total_summarize_time += summarize_time
@@ -199,6 +291,20 @@ class SubfeatureTimingStats:
             self.summarize_count += 1
             if embed_time > 0:
                 self.embed_count += 1
+
+            # Track per-tier timing
+            if tier > 0:
+                total_time = summarize_time + embed_time
+                self.total_time_by_tier[tier] = self.total_time_by_tier.get(tier, 0.0) + total_time
+                self.count_by_tier[tier] = self.count_by_tier.get(tier, 0) + 1
+
+    def record_task_runtime(self, runtime: float) -> None:
+        """Record task wall-clock runtime for throttling."""
+        self.throughput_tracker.record_completion(runtime)
+
+    def get_throughput_stats(self) -> tuple[float, float, int]:
+        """Get throughput statistics for throttling."""
+        return self.throughput_tracker.get_stats()
 
     @property
     def avg_summarize_time(self) -> float:
@@ -214,18 +320,70 @@ class SubfeatureTimingStats:
     def elapsed(self) -> float:
         return time.time() - self.phase_start
 
+    def _get_avg_for_tier(self, tier: int, global_avg: float) -> float:
+        """Get average time for a tier with fallback."""
+        # Exact tier match
+        if tier in self.count_by_tier and self.count_by_tier[tier] > 0:
+            return self.total_time_by_tier[tier] / self.count_by_tier[tier]
+
+        # Find closest tier with data
+        tiers_with_data = [t for t in self.count_by_tier if self.count_by_tier[t] > 0]
+        if tiers_with_data:
+            closest = min(tiers_with_data, key=lambda t: abs(t - tier))
+            base_avg = self.total_time_by_tier[closest] / self.count_by_tier[closest]
+            # Scale by tier ratio
+            tier_ratio = tier / closest if closest > 0 else 1.0
+            return base_avg * tier_ratio
+
+        return global_avg
+
     def eta_seconds(self, completed: int, total: int, num_workers: int = 1) -> float | None:
-        """Calculate ETA based on average times."""
+        """Calculate ETA based on per-tier average times."""
         with self._lock:
             if self.summarize_count == 0:
                 return None
 
-            avg_time = (self.total_summarize_time + self.total_embed_time) / self.summarize_count
+            global_avg = (self.total_summarize_time + self.total_embed_time) / self.summarize_count
+
+            # Use tier-aware calculation if available
+            if self.totals_by_tier:
+                total_work_time = 0.0
+                for tier, tot in self.totals_by_tier.items():
+                    done = self.count_by_tier.get(tier, 0)
+                    remaining = tot - done
+                    if remaining > 0:
+                        avg = self._get_avg_for_tier(tier, global_avg)
+                        total_work_time += remaining * avg
+                if total_work_time > 0:
+                    return total_work_time / max(num_workers, 1)
+
+            # Fallback to simple calculation
             remaining = total - completed
             if remaining <= 0:
                 return 0.0
+            return (remaining * global_avg) / max(num_workers, 1)
 
-            return (remaining * avg_time) / max(num_workers, 1)
+    def get_eta_breakdown_with_avg(self, num_workers: int = 1) -> list[tuple[int, float]]:
+        """Get average time per tier for display.
+
+        Returns:
+            List of (tier, avg_seconds) tuples, sorted by tier descending.
+        """
+        with self._lock:
+            if not self.totals_by_tier:
+                return []
+
+            global_avg = (self.total_summarize_time + self.total_embed_time) / self.summarize_count if self.summarize_count > 0 else 0.0
+
+            breakdown = []
+            for tier in self.totals_by_tier:
+                avg = self._get_avg_for_tier(tier, global_avg)
+                if avg > 0:
+                    breakdown.append((tier, avg))
+
+            # Sort by tier descending (largest first)
+            breakdown.sort(key=lambda x: -x[0])
+            return breakdown
 
 
 @dataclass
@@ -745,9 +903,19 @@ def process_features(
     # Group clusters by tier and process each tier with appropriate max_workers
     tier_groups = iter_by_tier(clusters, estimate_cluster_tier)
 
+    # Build cluster_id -> tier mapping for tracking
+    cluster_to_tier: dict[int, int] = {}
+    tier_counts: dict[int, int] = {}
+    for tier, _, tier_clusters in tier_groups:
+        tier_counts[tier] = len(tier_clusters)
+        for cluster in tier_clusters:
+            cluster_to_tier[cluster.cluster_id] = tier
+
+    # Set tier totals for ETA calculation
+    timing_stats.set_totals_by_tier(tier_counts)
+
     # Report tier distribution if callback provided
     if on_tier_distribution:
-        tier_counts = {tier: len(items) for tier, _, items in tier_groups}
         on_tier_distribution(tier_counts)
 
     # Handle workers=0 (auto) - will use tier-specific limits
@@ -776,8 +944,9 @@ def process_features(
                 for future in done:
                     cluster = future_to_cluster.pop(future)
                     processed = future.result()
+                    tier = cluster_to_tier.get(processed.cluster_id, _tier)
 
-                    timing_stats.record(processed.summarize_time, processed.embed_time)
+                    timing_stats.record(processed.summarize_time, processed.embed_time, tier=tier)
 
                     if processed.success:
                         completed_count += 1
@@ -1398,9 +1567,20 @@ def process_subfeatures(
     # Group work items by tier and process each tier with appropriate max_workers
     tier_groups = iter_by_tier(work_queue, estimate_subfeature_tier)
 
+    # Build work_item index -> tier mapping for tracking
+    # Use (parent_label, sub_cluster.cluster_id) as key
+    work_item_to_tier: dict[tuple[str, int], int] = {}
+    tier_counts: dict[int, int] = {}
+    for tier, _, tier_items in tier_groups:
+        tier_counts[tier] = len(tier_items)
+        for item in tier_items:
+            work_item_to_tier[(item.parent_label, item.sub_cluster.cluster_id)] = tier
+
+    # Set tier totals for ETA calculation
+    timing_stats.set_totals_by_tier(tier_counts)
+
     # Report tier distribution if callback provided
     if on_tier_distribution:
-        tier_counts = {tier: len(items) for tier, _, items in tier_groups}
         on_tier_distribution(tier_counts)
 
     # Handle workers=0 (auto) - will use tier-specific limits
@@ -1429,8 +1609,11 @@ def process_subfeatures(
                 for future in done:
                     work_item = future_to_work.pop(future)
                     processed = future.result()
+                    tier = work_item_to_tier.get(
+                        (work_item.parent_label, work_item.sub_cluster.cluster_id), _tier
+                    )
 
-                    timing_stats.record(processed.summarize_time, processed.embed_time)
+                    timing_stats.record(processed.summarize_time, processed.embed_time, tier=tier)
 
                     if processed.success:
                         completed_count += 1

@@ -362,6 +362,19 @@ def run_feature_extraction(
                 bar_text.append(format_duration(eta), style="yellow")
                 bar_text.append(" ETA", style="dim")
 
+            # ETA breakdown per tier - show avg time per item
+            eta_breakdown = state.timing.get_eta_breakdown_with_avg(state.num_workers)
+            if eta_breakdown:
+                breakdown_parts = []
+                tier_abbrev = {2048: "2k", 4096: "4k", 8192: "8k", 16384: "16k", 32768: "32k"}
+                for tier, avg_time in eta_breakdown:
+                    tier_str = tier_abbrev.get(tier, f"{tier//1024}k")
+                    breakdown_parts.append(f"{tier_str}:{avg_time:.1f}s")
+                if breakdown_parts:
+                    bar_text.append(" [", style="dim")
+                    bar_text.append(" ".join(breakdown_parts), style="dim yellow")
+                    bar_text.append("]", style="dim")
+
             # Worker table
             import time as time_mod
             worker_table = Table(show_header=False, box=None, padding=0)
@@ -539,6 +552,19 @@ def run_feature_extraction(
                     bar_text.append(" | ~", style="dim")
                     bar_text.append(format_duration(eta), style="yellow")
                     bar_text.append(" ETA", style="dim")
+
+                # ETA breakdown per tier - show avg time per item
+                eta_breakdown = state.timing.get_eta_breakdown_with_avg(state.num_workers)
+                if eta_breakdown:
+                    breakdown_parts = []
+                    tier_abbrev = {2048: "2k", 4096: "4k", 8192: "8k", 16384: "16k", 32768: "32k"}
+                    for tier, avg_time in eta_breakdown:
+                        tier_str = tier_abbrev.get(tier, f"{tier//1024}k")
+                        breakdown_parts.append(f"{tier_str}:{avg_time:.1f}s")
+                    if breakdown_parts:
+                        bar_text.append(" [", style="dim")
+                        bar_text.append(" ".join(breakdown_parts), style="dim yellow")
+                        bar_text.append("]", style="dim")
 
                 # Worker table
                 import time as time_mod
