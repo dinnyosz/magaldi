@@ -1963,10 +1963,9 @@ def process_elements(
                 avg_concurrency, high_load_avg
             )
 
-            # Get throttle limit if throttling is active
-            throttle_limit = None
-            if current_throttle.should_throttle:
-                throttle_limit = current_throttle.recommended_workers
+            # Always use recommended_workers as the limit (includes ramp-up logic)
+            # Even when not throttling, we ramp up gradually to avoid overwhelming
+            throttle_limit = current_throttle.recommended_workers
 
             # Get elements that are ready (parents completed)
             # DependencyTracker applies tier-specific limits internally
