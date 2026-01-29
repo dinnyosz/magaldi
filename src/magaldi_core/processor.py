@@ -582,10 +582,10 @@ class DependencyTracker:
     ) -> list[CodeElement]:
         """Get elements ready for processing (parent done, not started).
 
-        Uses model+tier batching to minimize Ollama reloads:
-        1. Prefer same model + same tier (no reload at all)
-        2. Then same model + different tier (only KV cache reload)
-        3. Then different model (full model reload, start with smallest tier)
+        Ordering priority:
+        1. By hierarchy level (files → classes → methods) to respect parent deps
+        2. Within level, by model+tier to minimize Ollama reloads
+        3. Prefer current model+tier, then same model different tier, then switch
 
         Throttling:
         - Runtime-based throttle_limit reduces workers when approaching timeout
@@ -600,24 +600,33 @@ class DependencyTracker:
             if not ready:
                 return []
 
-            # Group ready elements by (model, tier) for optimal batching
-            # model: "large" (files/classes) or "small" (functions/methods/variables)
-            by_model_tier: dict[tuple[str, int], list[CodeElement]] = {}
+            # First, group by hierarchy level to ensure parents processed before children
+            by_level: dict[int, list[CodeElement]] = {}
             for elem in ready:
+                level = self._get_level(elem)
+                by_level.setdefault(level, []).append(elem)
+
+            # Pick the lowest level with ready elements (files before classes before methods)
+            target_level = min(by_level.keys())
+            level_ready = by_level[target_level]
+
+            # Within the level, group by (model, tier) for optimal batching
+            by_model_tier: dict[tuple[str, int], list[CodeElement]] = {}
+            for elem in level_ready:
                 model_key = self._get_model_key(elem)
                 tier = self._get_tier(elem.element_id)
                 by_model_tier.setdefault((model_key, tier), []).append(elem)
 
-            # Sort each batch by level (parents first) then context size (smallest first)
+            # Sort each batch by context size (smallest first)
             for key in by_model_tier:
                 by_model_tier[key].sort(
-                    key=lambda e: (self._get_level(e), self._context_sizes.get(e.element_id, 0))
+                    key=lambda e: self._context_sizes.get(e.element_id, 0)
                 )
 
             # Determine which (model, tier) to use with priority:
-            # 1. Current model + current tier (if available)
-            # 2. Current model + smallest available tier
-            # 3. Different model + smallest available tier
+            # 1. Current model + current tier (if available at this level)
+            # 2. Current model + smallest available tier (at this level)
+            # 3. Different model + smallest available tier (at this level)
             selected_model = None
             selected_tier = None
 
