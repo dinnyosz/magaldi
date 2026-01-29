@@ -266,16 +266,42 @@ def run_processing(
             try:
                 ctx_int = int(ctx_str.rstrip("K")) * 1024  # "4K" -> 4096
                 tier_limit = TIER_MAX_WORKERS.get(ctx_int, num_workers)
-                throttled = num_workers - tier_limit
-                stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[cyan]{tier_limit}[/]"
-                if throttled > 0:
-                    stats += f" [dim]([/][yellow]{throttled} throttled[/][dim])[/]"
+
+                # Check for runtime-based throttling
+                parallelism = state.parallelism
+                if parallelism and parallelism.throttle_decision and parallelism.throttle_decision.should_throttle:
+                    # Show throttled state with effective limit
+                    effective = parallelism.throttle_decision.recommended_workers
+                    stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[red]{effective}[/]"
+                    stats += f" [dim]([/][red]throttled: {parallelism.throttle_decision.reason}[/][dim])[/]"
+                elif parallelism and parallelism.tier_changing:
+                    # Waiting for tier change
+                    stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[yellow]0[/]"
+                    stats += f" [dim]([/][yellow]tier changing...[/][dim])[/]"
+                else:
+                    throttled = num_workers - tier_limit
+                    stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[cyan]{tier_limit}[/]"
+                    if throttled > 0:
+                        stats += f" [dim]([/][yellow]{throttled} throttled[/][dim])[/]"
             except ValueError:
                 # Fallback if parsing fails
                 stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[cyan]{num_workers}[/]"
         else:
             # Mixed tiers or no workers - just show running/max
-            stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[cyan]{num_workers}[/]"
+            parallelism = state.parallelism
+            if parallelism and parallelism.tier_changing:
+                stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[yellow]0[/] [dim]([/][yellow]tier changing...[/][dim])[/]"
+            else:
+                stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[cyan]{num_workers}[/]"
+
+        # Show max runtime info if available
+        parallelism = state.parallelism
+        if parallelism and parallelism.throttle_decision:
+            td = parallelism.throttle_decision
+            if td.current_max > 0 or td.historical_max > 0:
+                stats += f" [dim]|[/] [dim]Max:[/] [cyan]{td.current_max:.1f}s[/]"
+                if td.historical_max > 0:
+                    stats += f" [dim](hist:[/] [yellow]{td.historical_max:.1f}s[/][dim])[/]"
 
         parts: list[RenderableType] = [bar_text, worker_table]
         if type_line:

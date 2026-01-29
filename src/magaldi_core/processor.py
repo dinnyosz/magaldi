@@ -40,6 +40,7 @@ from shared.ai.summarization import (
     clean_summary,
 )
 from shared.ai.context_size import compute_element_num_ctx, CONTEXT_TIERS, TIER_MAX_WORKERS
+from shared.throttling import RuntimeHistory, compute_throttle_decision, ThrottleDecision
 
 
 def _get_model_display_name(model_config: ModelConfig, num_ctx: int) -> str:
@@ -157,6 +158,9 @@ class TimingStats:
     summary_embed_counts_by_type: dict[str, int] = field(default_factory=dict)  # count of summary embeds
     code_embed_counts_by_type: dict[str, int] = field(default_factory=dict)  # count of code embeds
     totals_by_type: dict[str, int] = field(default_factory=dict)  # total element counts
+
+    # Runtime history for throttling
+    runtime_history: RuntimeHistory = field(default_factory=RuntimeHistory)
 
     def set_totals_by_type(self, totals: dict[str, int]) -> None:
         """Set total element counts by type."""
@@ -292,6 +296,18 @@ class TimingStats:
                 result[t] = (completed, total, avg_api, avg_summ, avg_embed)
             return result
 
+    def record_task_runtime(self, runtime: float) -> None:
+        """Record a completed task's runtime for throttling decisions.
+
+        Args:
+            runtime: Task wall-clock runtime in seconds.
+        """
+        self.runtime_history.record_runtime(runtime)
+
+    def get_historical_max_runtime(self) -> float:
+        """Get the max runtime from historical windows for throttling."""
+        return self.runtime_history.get_historical_max()
+
     def eta_seconds(self, completed: int, total: int, num_workers: int = 1) -> float | None:
         """Calculate ETA based on per-type API time averages.
 
@@ -354,6 +370,26 @@ class WorkerStatus:
         with self._lock:
             return dict(self._status)
 
+    def get_max_active_runtime(self) -> float:
+        """Get the max runtime of currently running workers.
+
+        Returns:
+            Maximum runtime in seconds of any active worker, or 0.0 if no workers active.
+        """
+        now = time.time()
+        max_runtime = 0.0
+        with self._lock:
+            for _, (_, _, _, _, start_time) in self._status.items():
+                if start_time > 0:
+                    runtime = now - start_time
+                    max_runtime = max(max_runtime, runtime)
+        return max_runtime
+
+    def active_count(self) -> int:
+        """Get the number of currently active workers."""
+        with self._lock:
+            return len(self._status)
+
 
 @dataclass
 class ParallelismStats:
@@ -364,6 +400,10 @@ class ParallelismStats:
     running: int       # Workers currently processing
     current_tier: int | None = None  # Current context tier (e.g., 2048, 4096)
 
+    # Throttling info
+    throttle_decision: ThrottleDecision | None = None  # Current throttle decision
+    tier_changing: bool = False  # True if waiting for tier change
+
     @property
     def throttled(self) -> int:
         """Workers held back due to tier limits."""
@@ -373,6 +413,13 @@ class ParallelismStats:
     def idle(self) -> int:
         """Workers within tier limit but waiting for work."""
         return max(0, self.tier_limit - self.running)
+
+    @property
+    def effective_limit(self) -> int:
+        """Effective worker limit after throttling."""
+        if self.throttle_decision and self.throttle_decision.should_throttle:
+            return self.throttle_decision.recommended_workers
+        return self.tier_limit
 
 
 @dataclass
@@ -427,6 +474,7 @@ class DependencyTracker:
         elements: list[CodeElement],
         context_sizes: dict[str, int] | None = None,
         max_num_workers: int | None = None,
+        timeout: float = 180.0,  # Default timeout for throttle calculations
     ) -> None:
         # RLock for reentrant calls (get_parallelism_stats -> get_current_max_workers)
         self._lock = threading.RLock()
@@ -435,7 +483,10 @@ class DependencyTracker:
         self._in_progress: set[str] = set()
         self._context_sizes = context_sizes or {}
         self._current_tier: int | None = None  # Current tier all workers use
+        self._previous_tier: int | None = None  # Previous tier (to detect changes)
+        self._tier_changing: bool = False  # True when waiting for tier change
         self._max_num_workers = max_num_workers  # User-configured upper limit (None = use tier defaults)
+        self._timeout = timeout  # Timeout for throttle calculations
 
         # Build parent lookup: element_id -> parent_element_id
         self._parents: dict[str, str | None] = {}
@@ -472,7 +523,11 @@ class DependencyTracker:
                 ready.append(element)
         return ready
 
-    def get_ready_elements(self, max_count: int = 10) -> list[CodeElement]:
+    def get_ready_elements(
+        self,
+        max_count: int = 10,
+        throttle_limit: int | None = None,
+    ) -> list[CodeElement]:
         """Get elements ready for processing (parent done, not started).
 
         Uses tier batching: all workers process the same context tier together.
@@ -481,8 +536,21 @@ class DependencyTracker:
 
         Dynamic worker scaling: Returns fewer elements for larger tiers to limit
         concurrent GPU memory usage (see TIER_MAX_WORKERS).
+
+        Args:
+            max_count: Maximum elements to return.
+            throttle_limit: If set, overrides tier limit for throttling.
         """
         with self._lock:
+            # If tier is changing, wait for all in-progress to complete
+            if self._tier_changing:
+                if len(self._in_progress) == 0:
+                    # All done, tier change complete
+                    self._tier_changing = False
+                else:
+                    # Still waiting for current tasks to finish
+                    return []
+
             ready = self._get_all_ready()
             if not ready:
                 return []
@@ -499,8 +567,19 @@ class DependencyTracker:
                 tier = self._current_tier
             else:
                 # Move to smallest tier that has ready elements
-                tier = min(by_tier.keys())
-                self._current_tier = tier
+                new_tier = min(by_tier.keys())
+
+                # Detect tier change - if moving to different tier, pause new submissions
+                if self._current_tier is not None and new_tier != self._current_tier:
+                    # Tier is changing - don't start new tasks until current ones complete
+                    if len(self._in_progress) > 0:
+                        self._tier_changing = True
+                        self._previous_tier = self._current_tier
+                        return []
+
+                self._previous_tier = self._current_tier
+                self._current_tier = new_tier
+                tier = new_tier
 
             # Apply tier-specific worker limit (dynamic scaling)
             # Count how many of this tier are already in progress
@@ -508,6 +587,11 @@ class DependencyTracker:
             # Apply user's max_num_workers cap if set
             if self._max_num_workers is not None:
                 tier_limit = min(tier_limit, self._max_num_workers)
+
+            # Apply throttle limit if set (overrides tier limit)
+            if throttle_limit is not None:
+                tier_limit = min(tier_limit, throttle_limit)
+
             tier_in_progress = sum(
                 1 for eid in self._in_progress if self._get_tier(eid) == tier
             )
@@ -523,6 +607,11 @@ class DependencyTracker:
                 self._in_progress.add(e.element_id)
 
             return tier_ready
+
+    def is_tier_changing(self) -> bool:
+        """Check if we're waiting for tier change to complete."""
+        with self._lock:
+            return self._tier_changing
 
     def mark_complete(self, element_id: str) -> None:
         """Mark element as completed."""
@@ -563,7 +652,11 @@ class DependencyTracker:
                 return min(tier_limit, self._max_num_workers)
             return tier_limit
 
-    def get_parallelism_stats(self, max_possible: int) -> "ParallelismStats":
+    def get_parallelism_stats(
+        self,
+        max_possible: int,
+        throttle_decision: ThrottleDecision | None = None,
+    ) -> "ParallelismStats":
         """Get current parallelism statistics for display."""
         with self._lock:
             tier_limit = self.get_current_max_workers()
@@ -573,6 +666,31 @@ class DependencyTracker:
                 tier_limit=tier_limit,
                 running=running,
                 current_tier=self._current_tier,
+                throttle_decision=throttle_decision,
+                tier_changing=self._tier_changing,
+            )
+
+    def compute_throttle_decision(
+        self,
+        current_max_runtime: float,
+        historical_max_runtime: float,
+    ) -> ThrottleDecision:
+        """Compute throttle decision based on runtimes.
+
+        Args:
+            current_max_runtime: Max runtime of currently active workers.
+            historical_max_runtime: Max from historical 10s windows.
+
+        Returns:
+            ThrottleDecision with recommended action.
+        """
+        with self._lock:
+            tier_limit = self.get_current_max_workers()
+            return compute_throttle_decision(
+                current_max_runtime=current_max_runtime,
+                historical_max_runtime=historical_max_runtime,
+                tier_timeout=self._timeout,
+                base_workers=tier_limit,
             )
 
     def get_tier_stats(self) -> dict[int, tuple[int, int]]:
@@ -1269,7 +1387,10 @@ def process_elements(
     # Pass num_workers as upper limit (0 or None = use tier defaults)
     max_num_workers = config.num_workers if config.num_workers > 0 else None
     dependency_tracker = DependencyTracker(
-        elements_to_process, element_context_sizes, max_num_workers=max_num_workers
+        elements_to_process,
+        element_context_sizes,
+        max_num_workers=max_num_workers,
+        timeout=config.summarize_timeout,  # For throttle calculations
     )
     if timing_stats is None:
         timing_stats = TimingStats()
@@ -1350,12 +1471,29 @@ def process_elements(
     executor = ThreadPoolExecutor(max_workers=max_workers)
     future_to_element: dict = {}
 
+    # Track current throttle decision for display
+    current_throttle: ThrottleDecision | None = None
+
     try:
         while not dependency_tracker.is_complete():
+            # Compute throttle decision based on current and historical runtimes
+            current_max_runtime = worker_status.get_max_active_runtime()
+            historical_max_runtime = timing_stats.get_historical_max_runtime()
+            current_throttle = dependency_tracker.compute_throttle_decision(
+                current_max_runtime, historical_max_runtime
+            )
+
+            # Get throttle limit if throttling is active
+            throttle_limit = None
+            if current_throttle.should_throttle:
+                throttle_limit = current_throttle.recommended_workers
+
             # Get elements that are ready (parents completed)
             # DependencyTracker applies tier-specific limits internally
+            # Pass throttle_limit to further reduce concurrency if needed
             ready_elements = dependency_tracker.get_ready_elements(
-                max_count=max_workers * 2
+                max_count=max_workers * 2,
+                throttle_limit=throttle_limit,
             )
 
             # Submit new tasks for ready elements
@@ -1385,6 +1523,9 @@ def process_elements(
                     summary_embed_time=processed.summary_embed_time,
                     code_embed_time=processed.code_embed_time,
                 )
+
+                # Record wall time for throttling history
+                timing_stats.record_task_runtime(processed.wall_time)
 
                 was_embedded = should_embed(element)
                 if processed.success:
@@ -1421,7 +1562,7 @@ def process_elements(
                         except Exception:
                             pass
 
-                # Report progress
+                # Report progress with throttle info
                 if on_progress:
                     progress_state = ProgressState(
                         total=total,
@@ -1432,7 +1573,9 @@ def process_elements(
                         workers=worker_status,
                         num_workers=max_workers,
                         recent_errors=list(recent_errors),
-                        parallelism=dependency_tracker.get_parallelism_stats(max_workers),
+                        parallelism=dependency_tracker.get_parallelism_stats(
+                            max_workers, current_throttle
+                        ),
                     )
                     on_progress(progress_state)
 
