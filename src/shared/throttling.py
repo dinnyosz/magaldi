@@ -29,11 +29,14 @@ class ThrottleDecision:
 
 
 class ThroughputTracker:
-    """Tracks completion throughput for throttling decisions.
+    """Tracks completion throughput with concurrency context for throttling.
 
-    Measures actual completions per second over a sliding window
-    to detect when the system is saturated (more workers doesn't
-    increase throughput).
+    Records (runtime, concurrent_workers) for each completion to understand
+    how task duration relates to system load. This allows smarter throttling:
+    - If tasks are slow at high concurrency but fast at low → GPU contention
+    - If tasks are slow regardless of concurrency → inherently slow tasks
+
+    The key insight: a 50s task with 8 workers is different from 50s with 1 worker.
     """
 
     def __init__(self, window_seconds: float = 10.0):
@@ -43,26 +46,27 @@ class ThroughputTracker:
             window_seconds: Time window for measuring throughput (default 10s)
         """
         self.window_seconds = window_seconds
-        # Store (timestamp, runtime) for each completion
-        self.completions: deque[tuple[float, float]] = deque()
+        # Store (timestamp, runtime, concurrent_workers) for each completion
+        self.completions: deque[tuple[float, float, int]] = deque()
         self._lock = Lock()
 
-    def record_completion(self, runtime: float) -> None:
-        """Record a completed task.
+    def record_completion(self, runtime: float, concurrent_workers: int = 1) -> None:
+        """Record a completed task with concurrency context.
 
         Args:
             runtime: Task runtime in seconds
+            concurrent_workers: Number of workers active when task completed
         """
         now = time.time()
         with self._lock:
-            self.completions.append((now, runtime))
+            self.completions.append((now, runtime, concurrent_workers))
             # Prune old entries outside window
             cutoff = now - self.window_seconds
             while self.completions and self.completions[0][0] < cutoff:
                 self.completions.popleft()
 
     def get_stats(self) -> tuple[float, float, int]:
-        """Get throughput statistics.
+        """Get throughput statistics (backwards compatible).
 
         Returns:
             Tuple of (throughput_per_sec, avg_runtime, completion_count)
@@ -78,7 +82,7 @@ class ThroughputTracker:
                 return 0.0, 0.0, 0
 
             count = len(self.completions)
-            total_runtime = sum(r for _, r in self.completions)
+            total_runtime = sum(r for _, r, _ in self.completions)
             avg_runtime = total_runtime / count
 
             # Calculate actual time span of completions
@@ -89,6 +93,46 @@ class ThroughputTracker:
 
             throughput = count / time_span
             return throughput, avg_runtime, count
+
+    def get_stats_with_concurrency(self) -> tuple[float, float, int, float, float]:
+        """Get throughput statistics with concurrency context.
+
+        Returns:
+            Tuple of (throughput, avg_runtime, count, avg_concurrency, high_load_avg_runtime)
+            - avg_concurrency: average workers active at completion time
+            - high_load_avg_runtime: avg runtime of tasks that completed under high load
+              (>= 50% of max observed concurrency). Returns 0 if no high-load data.
+        """
+        now = time.time()
+        with self._lock:
+            # Prune old entries
+            cutoff = now - self.window_seconds
+            while self.completions and self.completions[0][0] < cutoff:
+                self.completions.popleft()
+
+            if not self.completions:
+                return 0.0, 0.0, 0, 0.0, 0.0
+
+            count = len(self.completions)
+            total_runtime = sum(r for _, r, _ in self.completions)
+            total_concurrency = sum(c for _, _, c in self.completions)
+            avg_runtime = total_runtime / count
+            avg_concurrency = total_concurrency / count
+
+            # Calculate actual time span of completions
+            oldest = self.completions[0][0]
+            time_span = now - oldest
+            if time_span < 1.0:
+                time_span = 1.0
+            throughput = count / time_span
+
+            # Calculate avg runtime under high load (>= 50% of max concurrency)
+            max_concurrency = max(c for _, _, c in self.completions)
+            high_load_threshold = max(1, max_concurrency // 2)
+            high_load_runtimes = [r for _, r, c in self.completions if c >= high_load_threshold]
+            high_load_avg = sum(high_load_runtimes) / len(high_load_runtimes) if high_load_runtimes else 0.0
+
+            return throughput, avg_runtime, count, avg_concurrency, high_load_avg
 
     def reset(self) -> None:
         """Clear all history."""
@@ -131,11 +175,18 @@ def compute_throttle_decision(
     throughput: float = 0.0,
     avg_runtime: float = 0.0,
     completion_count: int = 0,
+    avg_concurrency: float = 0.0,
+    high_load_avg_runtime: float = 0.0,
 ) -> ThrottleDecision:
     """Determine if throttling should be applied.
 
     Uses the formula: max_workers = timeout / avg_runtime
     This ensures all concurrent tasks can complete before timeout.
+
+    IMPORTANT: Uses high_load_avg_runtime (avg runtime when many workers were active)
+    instead of overall avg_runtime. This matters because:
+    - A 50s task with 8 workers indicates GPU contention → throttle
+    - A 50s task with 1 worker indicates slow task → don't throttle
 
     Also uses emergency throttling if any active task is near timeout.
 
@@ -145,8 +196,10 @@ def compute_throttle_decision(
         base_workers: Original max workers
         active_workers: Currently active worker count
         throughput: Actual completions per second (for display)
-        avg_runtime: Average completion time
+        avg_runtime: Average completion time (all conditions)
         completion_count: Number of completions in window
+        avg_concurrency: Average workers active at completion time
+        high_load_avg_runtime: Avg runtime of tasks completed under high load
 
     Returns:
         ThrottleDecision with recommended action
@@ -174,11 +227,15 @@ def compute_throttle_decision(
             reason="Emergency (>80% timeout)",
         )
 
-    # Calculate optimal workers: (timeout * safety_margin) / avg_runtime
+    # Use high-load avg runtime for throttling if available, otherwise fall back to overall avg
+    # This ensures we throttle based on what happens under load, not during ramp-up
+    effective_avg = high_load_avg_runtime if high_load_avg_runtime > 0 else avg_runtime
+
+    # Calculate optimal workers: (timeout * safety_margin) / effective_avg
     # Safety margin accounts for variance in task runtimes under concurrency
-    if avg_runtime > 0:
+    if effective_avg > 0:
         effective_timeout = tier_timeout * THROTTLE_SAFETY_MARGIN
-        optimal = int(effective_timeout / avg_runtime)
+        optimal = int(effective_timeout / effective_avg)
         optimal = max(1, min(optimal, base_workers))  # Clamp to [1, base_workers]
 
         if optimal < base_workers:
@@ -186,9 +243,9 @@ def compute_throttle_decision(
                 should_throttle=True,
                 current_max=current_max_runtime,
                 historical_max=0,
-                completed_avg=avg_runtime,
+                completed_avg=effective_avg,
                 recommended_workers=optimal,
-                reason=f"Throttle ({optimal}={int(effective_timeout)}s/{avg_runtime:.0f}s)",
+                reason=f"Throttle ({optimal}={int(effective_timeout)}s/{effective_avg:.0f}s)",
             )
 
     # Normal operation - avg is low enough to allow full workers

@@ -136,13 +136,17 @@ class FeatureTimingStats:
                 self.total_time_by_tier[tier] = self.total_time_by_tier.get(tier, 0.0) + total_time
                 self.count_by_tier[tier] = self.count_by_tier.get(tier, 0) + 1
 
-    def record_task_runtime(self, runtime: float) -> None:
-        """Record task wall-clock runtime for throttling."""
-        self.throughput_tracker.record_completion(runtime)
+    def record_task_runtime(self, runtime: float, concurrent_workers: int = 1) -> None:
+        """Record task wall-clock runtime for throttling with concurrency context."""
+        self.throughput_tracker.record_completion(runtime, concurrent_workers)
 
     def get_throughput_stats(self) -> tuple[float, float, int]:
         """Get throughput statistics for throttling."""
         return self.throughput_tracker.get_stats()
+
+    def get_throughput_stats_with_concurrency(self) -> tuple[float, float, int, float, float]:
+        """Get throughput statistics with concurrency context."""
+        return self.throughput_tracker.get_stats_with_concurrency()
 
     @property
     def avg_summarize_time(self) -> float:
@@ -298,13 +302,17 @@ class SubfeatureTimingStats:
                 self.total_time_by_tier[tier] = self.total_time_by_tier.get(tier, 0.0) + total_time
                 self.count_by_tier[tier] = self.count_by_tier.get(tier, 0) + 1
 
-    def record_task_runtime(self, runtime: float) -> None:
-        """Record task wall-clock runtime for throttling."""
-        self.throughput_tracker.record_completion(runtime)
+    def record_task_runtime(self, runtime: float, concurrent_workers: int = 1) -> None:
+        """Record task wall-clock runtime for throttling with concurrency context."""
+        self.throughput_tracker.record_completion(runtime, concurrent_workers)
 
     def get_throughput_stats(self) -> tuple[float, float, int]:
         """Get throughput statistics for throttling."""
         return self.throughput_tracker.get_stats()
+
+    def get_throughput_stats_with_concurrency(self) -> tuple[float, float, int, float, float]:
+        """Get throughput statistics with concurrency context."""
+        return self.throughput_tracker.get_stats_with_concurrency()
 
     @property
     def avg_summarize_time(self) -> float:

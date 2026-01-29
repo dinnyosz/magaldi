@@ -324,21 +324,30 @@ class TimingStats:
                 result[t] = (completed, total, avg_api, avg_summ, avg_embed)
             return result
 
-    def record_task_runtime(self, runtime: float) -> None:
+    def record_task_runtime(self, runtime: float, concurrent_workers: int = 1) -> None:
         """Record a completed task's runtime for throttling decisions.
 
         Args:
             runtime: Task wall-clock runtime in seconds.
+            concurrent_workers: Number of workers active when task completed.
         """
-        self.throughput_tracker.record_completion(runtime)
+        self.throughput_tracker.record_completion(runtime, concurrent_workers)
 
     def get_throughput_stats(self) -> tuple[float, float, int]:
-        """Get throughput statistics for throttling.
+        """Get throughput statistics for throttling (backwards compatible).
 
         Returns:
             Tuple of (throughput_per_sec, avg_runtime, completion_count).
         """
         return self.throughput_tracker.get_stats()
+
+    def get_throughput_stats_with_concurrency(self) -> tuple[float, float, int, float, float]:
+        """Get throughput statistics with concurrency context.
+
+        Returns:
+            Tuple of (throughput, avg_runtime, count, avg_concurrency, high_load_avg_runtime).
+        """
+        return self.throughput_tracker.get_stats_with_concurrency()
 
     def _get_avg_for_type_tier(
         self,
@@ -990,8 +999,10 @@ class DependencyTracker:
         throughput: float = 0.0,
         avg_runtime: float = 0.0,
         completion_count: int = 0,
+        avg_concurrency: float = 0.0,
+        high_load_avg_runtime: float = 0.0,
     ) -> ThrottleDecision:
-        """Compute throttle decision based on throughput.
+        """Compute throttle decision based on throughput with concurrency context.
 
         Args:
             current_max_runtime: Max runtime of currently active workers.
@@ -999,6 +1010,8 @@ class DependencyTracker:
             throughput: Actual completions per second.
             avg_runtime: Average completion time from recent completions.
             completion_count: Number of completions in tracking window.
+            avg_concurrency: Average workers active at completion time.
+            high_load_avg_runtime: Avg runtime of tasks completed under high load.
 
         Returns:
             ThrottleDecision with recommended action.
@@ -1012,6 +1025,8 @@ class DependencyTracker:
                 throughput=throughput,
                 avg_runtime=avg_runtime,
                 completion_count=completion_count,
+                avg_concurrency=avg_concurrency,
+                high_load_avg_runtime=high_load_avg_runtime,
             )
 
     def get_tier_stats(self) -> dict[int, tuple[int, int]]:
@@ -1901,6 +1916,11 @@ def process_elements(
     # DependencyTracker manages concurrency with tier batching and runtime-based throttling
     executor = ThreadPoolExecutor(max_workers=max_workers)
     future_to_element: dict = {}
+    # Track worker count at task START for concurrency-aware throttling
+    # Using start time matters more than completion time because:
+    # - Contention happens when task starts competing for GPU
+    # - Completion time can be misleading (other tasks may have just finished)
+    future_to_workers_at_start: dict = {}
 
     # Track current throttle decision for display
     current_throttle: ThrottleDecision | None = None
@@ -1916,15 +1936,18 @@ def process_elements(
             # Periodically record current max to history (every 10s)
             # This captures slow-running tasks that haven't completed yet
             now = time.time()
+            active_workers = worker_status.active_count()
             if current_max_runtime > 0 and (now - last_history_record_time) >= HISTORY_RECORD_INTERVAL:
-                timing_stats.record_task_runtime(current_max_runtime)
+                timing_stats.record_task_runtime(current_max_runtime, active_workers)
                 last_history_record_time = now
 
-            # Get throughput-based stats for adaptive throttling
-            throughput, avg_runtime, completion_count = timing_stats.get_throughput_stats()
-            active_workers = worker_status.active_count()
+            # Get throughput-based stats for adaptive throttling (with concurrency context)
+            throughput, avg_runtime, completion_count, avg_concurrency, high_load_avg = (
+                timing_stats.get_throughput_stats_with_concurrency()
+            )
             current_throttle = dependency_tracker.compute_throttle_decision(
-                current_max_runtime, active_workers, throughput, avg_runtime, completion_count
+                current_max_runtime, active_workers, throughput, avg_runtime, completion_count,
+                avg_concurrency, high_load_avg
             )
 
             # Get throttle limit if throttling is active
@@ -1941,9 +1964,12 @@ def process_elements(
             )
 
             # Submit new tasks for ready elements
+            # Record worker count at start time for throttling (captures contention level)
+            workers_at_start = worker_status.active_count()
             for element in ready_elements:
                 future = executor.submit(process_wrapper, element)
                 future_to_element[future] = element
+                future_to_workers_at_start[future] = workers_at_start
 
             if not future_to_element:
                 # No futures pending and not complete - shouldn't happen
@@ -1962,15 +1988,18 @@ def process_elements(
             if not done:
                 # Record current max to history on timeout
                 fresh_current_max = worker_status.get_max_active_runtime()
+                fresh_active = worker_status.active_count()
                 if fresh_current_max > 0:
-                    timing_stats.record_task_runtime(fresh_current_max)
+                    timing_stats.record_task_runtime(fresh_current_max, fresh_active)
                     last_history_record_time = time.time()
 
                 if on_progress:
-                    fresh_throughput, fresh_avg, fresh_count = timing_stats.get_throughput_stats()
-                    fresh_active = worker_status.active_count()
+                    fresh_throughput, fresh_avg, fresh_count, fresh_avg_conc, fresh_high_load = (
+                        timing_stats.get_throughput_stats_with_concurrency()
+                    )
                     fresh_throttle = dependency_tracker.compute_throttle_decision(
-                        fresh_current_max, fresh_active, fresh_throughput, fresh_avg, fresh_count
+                        fresh_current_max, fresh_active, fresh_throughput, fresh_avg, fresh_count,
+                        fresh_avg_conc, fresh_high_load
                     )
                     progress_state = ProgressState(
                         total=total,
@@ -2007,8 +2036,11 @@ def process_elements(
                     tier=element_tier,
                 )
 
-                # Record wall time for throttling history
-                timing_stats.record_task_runtime(processed.wall_time)
+                # Record wall time for throttling history with concurrency at START time
+                # Using start time matters because that's when GPU contention began
+                # Completion-time count can be misleading (other tasks may have just finished)
+                workers_at_start = future_to_workers_at_start.pop(future, 1)
+                timing_stats.record_task_runtime(processed.wall_time, workers_at_start)
 
                 was_embedded = should_embed(element)
                 if processed.success:
