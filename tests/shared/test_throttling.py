@@ -125,9 +125,9 @@ class TestComputeThrottleDecision:
         assert decision.reason == "No data"
 
     def test_emergency_near_timeout(self):
-        """Runtime >= 70% of timeout triggers emergency throttling."""
+        """Runtime >= 80% of timeout triggers emergency throttling."""
         decision = compute_throttle_decision(
-            current_max_runtime=130.0,  # ~72% of 180
+            current_max_runtime=150.0,  # ~83% of 180
             tier_timeout=180.0,
             base_workers=8,
             active_workers=4,
@@ -139,82 +139,77 @@ class TestComputeThrottleDecision:
         assert decision.recommended_workers == 1
         assert "Emergency" in decision.reason
 
-    def test_critical_above_50_percent(self):
-        """Runtime >= 50% of timeout triggers critical throttling."""
+    def test_throttle_based_on_avg_runtime(self):
+        """Throttling based on formula: workers = timeout / avg_runtime."""
+        # timeout=180s, avg=20s → max 9 workers
         decision = compute_throttle_decision(
-            current_max_runtime=100.0,  # ~56% of 180
+            current_max_runtime=10.0,
             tier_timeout=180.0,
-            base_workers=8,
-            active_workers=4,
-            throughput=0.5,
-            avg_runtime=5.0,
+            base_workers=32,
+            active_workers=20,
+            throughput=1.0,
+            avg_runtime=20.0,  # 180/20 = 9 workers max
             completion_count=10,
         )
         assert decision.should_throttle
-        assert decision.recommended_workers <= 2
-        assert "Critical" in decision.reason
+        assert decision.recommended_workers == 9
+        assert "Throttle" in decision.reason
 
-    def test_saturation_detection(self):
-        """Low actual vs expected throughput should trigger saturation throttling."""
-        # 10 workers with 5s avg runtime = expected throughput of 2/sec
-        # But actual throughput is 0.5/sec = 25% efficiency = saturated
+    def test_low_avg_allows_full_workers(self):
+        """Low avg runtime allows full workers."""
+        # timeout=180s, avg=5s → max 36 workers, but base is 8
         decision = compute_throttle_decision(
-            current_max_runtime=10.0,  # Not near timeout
-            tier_timeout=180.0,
-            base_workers=8,
-            active_workers=10,
-            throughput=0.5,  # Low actual throughput
-            avg_runtime=5.0,  # Expected = 10/5 = 2/sec
-            completion_count=10,
-        )
-        assert decision.should_throttle
-        assert decision.recommended_workers < 10
-        assert "Saturated" in decision.reason
-
-    def test_normal_throughput(self):
-        """Good throughput (>70% efficiency) should not throttle."""
-        # 8 workers with 4s avg runtime = expected throughput of 2/sec
-        # Actual throughput is 1.6/sec = 80% efficiency = OK
-        decision = compute_throttle_decision(
-            current_max_runtime=5.0,  # Not near timeout
+            current_max_runtime=5.0,
             tier_timeout=180.0,
             base_workers=8,
             active_workers=8,
-            throughput=1.6,  # Good throughput
-            avg_runtime=4.0,  # Expected = 8/4 = 2/sec
+            throughput=1.6,
+            avg_runtime=5.0,  # 180/5 = 36 workers max, capped at base
             completion_count=10,
         )
         assert not decision.should_throttle
         assert decision.recommended_workers == 8
         assert decision.reason == "Normal"
 
-    def test_optimal_workers_calculation(self):
-        """Optimal workers should be based on actual throughput."""
-        # Actual throughput of 1/sec with 10s avg = optimal ~1.2 workers
-        # (throughput * avg_runtime * 1.2 = 1 * 10 * 1.2 = 12)
-        # But should be capped at base_workers
+    def test_high_avg_limits_workers(self):
+        """High avg runtime limits workers significantly."""
+        # timeout=180s, avg=60s → max 3 workers
         decision = compute_throttle_decision(
-            current_max_runtime=5.0,
+            current_max_runtime=30.0,
             tier_timeout=180.0,
-            base_workers=8,
-            active_workers=20,
-            throughput=1.0,
-            avg_runtime=10.0,
+            base_workers=32,
+            active_workers=10,
+            throughput=0.1,
+            avg_runtime=60.0,  # 180/60 = 3 workers max
             completion_count=10,
         )
         assert decision.should_throttle
-        # optimal = 1.0 * 10.0 * 1.2 = 12, but capped at base_workers=8
-        assert decision.recommended_workers == 8
+        assert decision.recommended_workers == 3
+
+    def test_very_high_avg_limits_to_one(self):
+        """Very high avg runtime (> timeout) limits to 1 worker."""
+        # timeout=180s, avg=200s → max 0.9 → clamped to 1
+        decision = compute_throttle_decision(
+            current_max_runtime=100.0,
+            tier_timeout=180.0,
+            base_workers=8,
+            active_workers=2,
+            throughput=0.01,
+            avg_runtime=200.0,  # 180/200 = 0.9 → 1 worker
+            completion_count=10,
+        )
+        assert decision.should_throttle
+        assert decision.recommended_workers == 1
 
     def test_minimum_one_worker(self):
         """Should always recommend at least 1 worker."""
         decision = compute_throttle_decision(
             current_max_runtime=170.0,  # Very near timeout
             tier_timeout=180.0,
-            base_workers=1,  # Small base
+            base_workers=1,
             active_workers=1,
             throughput=0.0,
-            avg_runtime=0.0,
+            avg_runtime=500.0,  # Would give 0.36 workers
             completion_count=10,
         )
         assert decision.recommended_workers >= 1

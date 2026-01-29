@@ -350,14 +350,15 @@ def run_processing(
         def __rich__(self) -> RenderableType:
             return build_display(current_state, display_workers)
 
-    with Live(LiveDisplay(), console=console, refresh_per_second=10) as live:
+    with Live(LiveDisplay(), console=console, refresh_per_second=4) as live:
         def on_progress(state: ProgressState) -> None:
             nonlocal current_state
             current_state = state
-            live.refresh()
+            # Let Rich handle refresh at configured rate (4/sec)
 
         def on_status_change() -> None:
-            live.refresh()
+            # Let Rich handle refresh at configured rate
+            pass
 
         result = process_elements(
             parsing_result.parsed_files,

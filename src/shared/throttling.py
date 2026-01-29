@@ -105,23 +105,19 @@ def compute_throttle_decision(
     avg_runtime: float = 0.0,
     completion_count: int = 0,
 ) -> ThrottleDecision:
-    """Determine if throttling should be applied based on throughput.
+    """Determine if throttling should be applied.
 
-    Compares actual throughput vs expected throughput:
-        expected = active_workers / avg_runtime
-        actual = completions / time_window
+    Uses the formula: max_workers = timeout / avg_runtime
+    This ensures all concurrent tasks can complete before timeout.
 
-    If actual < expected * 0.7, system is saturated - reduce workers.
-    Optimal workers ≈ actual_throughput * avg_runtime
-
-    Also uses emergency throttling if any task approaches timeout.
+    Also uses emergency throttling if any active task is near timeout.
 
     Args:
         current_max_runtime: Max runtime of currently active workers
         tier_timeout: Timeout for this tier (e.g., 180s for summarize)
         base_workers: Original max workers
         active_workers: Currently active worker count
-        throughput: Actual completions per second
+        throughput: Actual completions per second (for display)
         avg_runtime: Average completion time
         completion_count: Number of completions in window
 
@@ -139,50 +135,35 @@ def compute_throttle_decision(
             reason="No data",
         )
 
-    # Emergency check - if any task is near timeout, throttle hard
-    max_ratio = current_max_runtime / tier_timeout if current_max_runtime > 0 else 0.0
-    if max_ratio >= 0.70:
+    # Emergency check - if any active task is near timeout, throttle hard
+    max_ratio = current_max_runtime / tier_timeout if tier_timeout > 0 else 0.0
+    if max_ratio >= 0.80:
         return ThrottleDecision(
             should_throttle=True,
             current_max=current_max_runtime,
             historical_max=0,
             completed_avg=avg_runtime,
             recommended_workers=1,
-            reason="Emergency (near timeout)",
-        )
-    elif max_ratio >= 0.50:
-        return ThrottleDecision(
-            should_throttle=True,
-            current_max=current_max_runtime,
-            historical_max=0,
-            completed_avg=avg_runtime,
-            recommended_workers=min(2, base_workers),
-            reason="Critical (>50% timeout)",
+            reason="Emergency (>80% timeout)",
         )
 
-    # Throughput-based throttling
-    if avg_runtime > 0 and active_workers > 0:
-        # Expected throughput if system scales linearly
-        expected_throughput = active_workers / avg_runtime
+    # Calculate optimal workers: timeout / avg_runtime
+    # This ensures avg * workers <= timeout
+    if avg_runtime > 0:
+        optimal = int(tier_timeout / avg_runtime)
+        optimal = max(1, min(optimal, base_workers))  # Clamp to [1, base_workers]
 
-        # If actual throughput is much lower than expected, system is saturated
-        if expected_throughput > 0 and throughput < expected_throughput * 0.7:
-            # Optimal workers = throughput * avg_runtime
-            # This is roughly how many workers the system can actually handle
-            optimal = max(1, int(throughput * avg_runtime * 1.2))  # 20% headroom
-            optimal = min(optimal, base_workers)  # Don't exceed base
-
-            efficiency = (throughput / expected_throughput) * 100
+        if optimal < base_workers:
             return ThrottleDecision(
                 should_throttle=True,
                 current_max=current_max_runtime,
                 historical_max=0,
                 completed_avg=avg_runtime,
                 recommended_workers=optimal,
-                reason=f"Saturated ({efficiency:.0f}% eff)",
+                reason=f"Throttle ({optimal}={int(tier_timeout)}s/{avg_runtime:.0f}s)",
             )
 
-    # Normal operation
+    # Normal operation - avg is low enough to allow full workers
     return ThrottleDecision(
         should_throttle=False,
         current_max=current_max_runtime,
