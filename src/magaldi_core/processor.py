@@ -499,6 +499,32 @@ class TimingStats:
             breakdown.sort(key=lambda x: x[4], reverse=True)
             return breakdown
 
+    def get_eta_breakdown_with_avg(self, num_workers: int = 1) -> list[tuple[str, int, float]]:
+        """Get average time per item for each (type, tier) combination.
+
+        Returns:
+            List of (type, tier, avg_seconds) tuples, sorted by tier then type.
+        """
+        with self._lock:
+            if not self.totals_by_type_tier:
+                return []
+
+            # Global average as fallback
+            total_api_time = sum(self.total_summarize_by_type.values()) + sum(self.total_embed_by_type.values())
+            total_count = sum(self.summarize_counts_by_type.values())
+            global_avg = total_api_time / total_count if total_count > 0 else 0.0
+
+            breakdown = []
+            for (element_type, tier), tot in self.totals_by_type_tier.items():
+                avg = self._get_avg_for_type_tier(element_type, tier, global_avg)
+                if avg > 0:
+                    breakdown.append((element_type, tier, avg))
+
+            # Sort by tier ascending, then type
+            type_order = {"file": 0, "class": 1, "function": 2, "method": 3, "variable": 4, "constant": 5}
+            breakdown.sort(key=lambda x: (x[1], type_order.get(x[0], 99)))
+            return breakdown
+
 
 @dataclass
 class WorkerStatus:
