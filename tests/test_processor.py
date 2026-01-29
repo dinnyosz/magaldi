@@ -602,6 +602,68 @@ class TestTimingStats:
         assert eta is not None
         assert abs(eta - 4.0) < 0.1
 
+    def test_eta_seconds_with_tier_data(self):
+        """Test tier-aware ETA calculation."""
+        stats = TimingStats()
+
+        # Set up totals by (type, tier)
+        stats.set_totals_by_type_tier({
+            ("function", 2048): 5,
+            ("function", 8192): 5,
+        })
+
+        # Record timing for 2k tier (fast) and 8k tier (slow)
+        stats.record(0.5, 0.3, 0.2, "function", True, tier=2048)
+        stats.record(0.5, 0.3, 0.2, "function", True, tier=2048)
+        stats.record(2.0, 1.5, 0.5, "function", True, tier=8192)
+
+        eta = stats.eta_seconds(3, 10, num_workers=1)
+        # Remaining: 3 @ 2k (0.3s avg) + 4 @ 8k (1.5s avg)
+        # = 3 * 0.3 + 4 * 1.5 = 0.9 + 6.0 = 6.9s
+        assert eta is not None
+        assert abs(eta - 6.9) < 0.2
+
+    def test_eta_seconds_tier_fallback_to_same_type(self):
+        """Test ETA fallback to same type when tier not found."""
+        stats = TimingStats()
+
+        # Set up totals with a tier we don't have data for
+        stats.set_totals_by_type_tier({
+            ("function", 2048): 3,
+            ("function", 4096): 3,  # No data for this tier
+        })
+
+        # Only record data for 2k tier
+        stats.record(1.0, 0.6, 0.4, "function", True, tier=2048)
+        stats.record(1.0, 0.6, 0.4, "function", True, tier=2048)
+
+        eta = stats.eta_seconds(2, 6, num_workers=1)
+        # Remaining: 1 @ 2k (0.6s avg) + 3 @ 4k (scaled from 2k: 0.6 * 4096/2048 = 1.2s)
+        # = 1 * 0.6 + 3 * 1.2 = 0.6 + 3.6 = 4.2s
+        assert eta is not None
+        assert abs(eta - 4.2) < 0.3
+
+    def test_eta_seconds_tier_fallback_to_same_model(self):
+        """Test ETA fallback to same model group when type not found."""
+        stats = TimingStats()
+
+        # Set up totals: method and function (both "small" model)
+        stats.set_totals_by_type_tier({
+            ("method", 2048): 3,
+            ("function", 2048): 3,
+        })
+
+        # Only record data for function
+        stats.record(1.0, 0.6, 0.4, "function", True, tier=2048)
+        stats.record(1.0, 0.6, 0.4, "function", True, tier=2048)
+
+        eta = stats.eta_seconds(2, 6, num_workers=1)
+        # Remaining: 1 @ function 2k + 3 @ method 2k
+        # Method should fall back to function's avg (same model group)
+        # = 1 * 0.6 + 3 * 0.6 = 2.4s
+        assert eta is not None
+        assert abs(eta - 2.4) < 0.2
+
 
 # =============================================================================
 # WORKER STATUS TESTS

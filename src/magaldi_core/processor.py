@@ -159,6 +159,11 @@ class TimingStats:
     code_embed_counts_by_type: dict[str, int] = field(default_factory=dict)  # count of code embeds
     totals_by_type: dict[str, int] = field(default_factory=dict)  # total element counts
 
+    # Per-(type, tier) tracking for more accurate ETA
+    total_summarize_by_type_tier: dict[tuple[str, int], float] = field(default_factory=dict)
+    summarize_counts_by_type_tier: dict[tuple[str, int], int] = field(default_factory=dict)
+    totals_by_type_tier: dict[tuple[str, int], int] = field(default_factory=dict)
+
     # Throughput tracker for throttling
     throughput_tracker: ThroughputTracker = field(default_factory=ThroughputTracker)
 
@@ -185,6 +190,17 @@ class TimingStats:
                 if t not in self.total_code_embed_by_type:
                     self.total_code_embed_by_type[t] = 0.0
 
+    def set_totals_by_type_tier(self, totals: dict[tuple[str, int], int]) -> None:
+        """Set total element counts by (type, tier) for accurate ETA."""
+        with self._lock:
+            self.totals_by_type_tier = dict(totals)
+            # Initialize per-(type, tier) tracking
+            for key in totals:
+                if key not in self.summarize_counts_by_type_tier:
+                    self.summarize_counts_by_type_tier[key] = 0
+                if key not in self.total_summarize_by_type_tier:
+                    self.total_summarize_by_type_tier[key] = 0.0
+
     def record(
         self,
         wall_time: float,
@@ -194,6 +210,7 @@ class TimingStats:
         was_embedded: bool = True,
         summary_embed_time: float = 0.0,
         code_embed_time: float = 0.0,
+        tier: int = 0,
     ) -> None:
         """Record timing for a completed element.
 
@@ -205,6 +222,7 @@ class TimingStats:
             was_embedded: Whether the element was embedded.
             summary_embed_time: Time spent on summary embedding.
             code_embed_time: Time spent on code embedding.
+            tier: Context tier (2048, 4096, etc) for per-tier ETA tracking.
         """
         with self._lock:
             if element_type:
@@ -230,6 +248,16 @@ class TimingStats:
                     if code_embed_time > 0:
                         self.total_code_embed_by_type[element_type] += code_embed_time
                         self.code_embed_counts_by_type[element_type] = self.code_embed_counts_by_type.get(element_type, 0) + 1
+
+                # Track per-(type, tier) timing for accurate ETA
+                if tier > 0:
+                    type_tier_key = (element_type, tier)
+                    if type_tier_key not in self.total_summarize_by_type_tier:
+                        self.total_summarize_by_type_tier[type_tier_key] = 0.0
+                    self.total_summarize_by_type_tier[type_tier_key] += summarize_time
+                    self.summarize_counts_by_type_tier[type_tier_key] = (
+                        self.summarize_counts_by_type_tier.get(type_tier_key, 0) + 1
+                    )
 
     @property
     def total_summarize_count(self) -> int:
@@ -312,8 +340,84 @@ class TimingStats:
         """
         return self.throughput_tracker.get_stats()
 
+    def _get_avg_for_type_tier(
+        self,
+        element_type: str,
+        tier: int,
+        global_avg: float,
+    ) -> float:
+        """Get average processing time for (type, tier) with smart fallback.
+
+        Fallback order:
+        1. Exact (type, tier) match
+        2. Same type, closest tier with data
+        3. Same model group (large/small), closest tier with data
+        4. Global average
+
+        Must hold _lock when calling.
+        """
+        type_tier_key = (element_type, tier)
+
+        # 1. Exact match
+        if type_tier_key in self.summarize_counts_by_type_tier:
+            count = self.summarize_counts_by_type_tier[type_tier_key]
+            if count > 0:
+                total_time = self.total_summarize_by_type_tier.get(type_tier_key, 0.0)
+                return total_time / count
+
+        # 2. Same type, find closest tier
+        same_type_tiers = [
+            (t, tr) for (t, tr) in self.summarize_counts_by_type_tier
+            if t == element_type and self.summarize_counts_by_type_tier[(t, tr)] > 0
+        ]
+        if same_type_tiers:
+            # Find closest tier
+            closest = min(same_type_tiers, key=lambda x: abs(x[1] - tier))
+            count = self.summarize_counts_by_type_tier[closest]
+            total_time = self.total_summarize_by_type_tier.get(closest, 0.0)
+            # Scale by tier ratio (larger tier = proportionally longer)
+            base_avg = total_time / count
+            tier_ratio = tier / closest[1] if closest[1] > 0 else 1.0
+            return base_avg * tier_ratio
+
+        # 3. Same model group (large: file/class, small: function/method/variable)
+        large_types = {"file", "class"}
+        small_types = {"function", "method", "variable", "constant"}
+        if element_type in large_types:
+            model_types = large_types
+        elif element_type in small_types:
+            model_types = small_types
+        else:
+            model_types = set()
+
+        same_model_tiers = [
+            (t, tr) for (t, tr) in self.summarize_counts_by_type_tier
+            if t in model_types and self.summarize_counts_by_type_tier[(t, tr)] > 0
+        ]
+        if same_model_tiers:
+            # Find closest tier in same model group
+            closest = min(same_model_tiers, key=lambda x: abs(x[1] - tier))
+            count = self.summarize_counts_by_type_tier[closest]
+            total_time = self.total_summarize_by_type_tier.get(closest, 0.0)
+            base_avg = total_time / count
+            tier_ratio = tier / closest[1] if closest[1] > 0 else 1.0
+            return base_avg * tier_ratio
+
+        # 4. Fall back to per-type average (ignoring tier)
+        if element_type in self.summarize_counts_by_type:
+            count = self.summarize_counts_by_type[element_type]
+            if count > 0:
+                type_total = self.total_summarize_by_type.get(element_type, 0.0)
+                return type_total / count
+
+        # 5. Global fallback
+        return global_avg
+
     def eta_seconds(self, completed: int, total: int, num_workers: int = 1) -> float | None:
-        """Calculate ETA based on per-type API time averages.
+        """Calculate ETA based on per-(type, tier) API time averages.
+
+        Uses tier-aware averages for more accurate estimates, with smart
+        fallback to similar tiers/types when exact data isn't available.
 
         Args:
             completed: Number of elements completed.
@@ -327,24 +431,35 @@ class TimingStats:
             if completed == 0:
                 return None
 
-            # Global average API time as fallback
+            # Global average API time as ultimate fallback
             total_api_time = sum(self.total_summarize_by_type.values()) + sum(self.total_embed_by_type.values())
             total_count = sum(self.summarize_counts_by_type.values())
             global_avg = total_api_time / total_count if total_count > 0 else 0.0
 
-            # Calculate total remaining work time using per-type averages
             total_work_time = 0.0
-            for t in self.totals_by_type:
-                done = self.summarize_counts_by_type.get(t, 0)
-                tot = self.totals_by_type.get(t, 0)
-                if done > 0:
-                    type_total = self.total_summarize_by_type.get(t, 0.0) + self.total_embed_by_type.get(t, 0.0)
-                    avg = type_total / done
-                else:
-                    avg = global_avg
-                remaining = tot - done
-                if remaining > 0 and avg > 0:
-                    total_work_time += remaining * avg
+
+            # If we have tier-level tracking, use it for more accurate ETA
+            if self.totals_by_type_tier:
+                for (element_type, tier), tot in self.totals_by_type_tier.items():
+                    done = self.summarize_counts_by_type_tier.get((element_type, tier), 0)
+                    remaining = tot - done
+                    if remaining > 0:
+                        avg = self._get_avg_for_type_tier(element_type, tier, global_avg)
+                        if avg > 0:
+                            total_work_time += remaining * avg
+            else:
+                # Fall back to type-only tracking (backwards compatibility)
+                for t in self.totals_by_type:
+                    done = self.summarize_counts_by_type.get(t, 0)
+                    tot = self.totals_by_type.get(t, 0)
+                    if done > 0:
+                        type_total = self.total_summarize_by_type.get(t, 0.0) + self.total_embed_by_type.get(t, 0.0)
+                        avg = type_total / done
+                    else:
+                        avg = global_avg
+                    remaining = tot - done
+                    if remaining > 0 and avg > 0:
+                        total_work_time += remaining * avg
 
             if total_work_time <= 0:
                 return None
@@ -1648,6 +1763,22 @@ def process_elements(
         totals_by_type[elem.element_type] = totals_by_type.get(elem.element_type, 0) + 1
     timing_stats.set_totals_by_type(totals_by_type)
 
+    # Count elements by (type, tier) for tier-aware ETA
+    totals_by_type_tier: dict[tuple[str, int], int] = {}
+    for elem in elements_to_process:
+        ctx_size = element_context_sizes.get(elem.element_id, 2048)
+        # Snap to standard tier
+        tier = 2048
+        for t in CONTEXT_TIERS:
+            if ctx_size <= t:
+                tier = t
+                break
+        else:
+            tier = CONTEXT_TIERS[-1]
+        key = (elem.element_type, tier)
+        totals_by_type_tier[key] = totals_by_type_tier.get(key, 0) + 1
+    timing_stats.set_totals_by_type_tier(totals_by_type_tier)
+
     # Track completed/failed counts for progress
     completed_count = result.elements_skipped  # Start with skipped count
     failed_count = 0
@@ -1803,7 +1934,10 @@ def process_elements(
                 element = future_to_element.pop(future)
                 processed = future.result()
 
-                # Record timing with element type (including dual embedding times)
+                # Get element's tier for accurate ETA tracking
+                element_tier = dependency_tracker._get_tier(element.element_id)
+
+                # Record timing with element type and tier (including dual embedding times)
                 timing_stats.record(
                     processed.wall_time,
                     processed.summarize_time,
@@ -1812,6 +1946,7 @@ def process_elements(
                     was_embedded=should_embed(element),
                     summary_embed_time=processed.summary_embed_time,
                     code_embed_time=processed.code_embed_time,
+                    tier=element_tier,
                 )
 
                 # Record wall time for throttling history
