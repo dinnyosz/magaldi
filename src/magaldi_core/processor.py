@@ -486,7 +486,8 @@ class DependencyTracker:
         self._current_tier: int | None = None  # Current tier all workers use
         self._current_level: int | None = None  # Current hierarchy level
         self._previous_tier: int | None = None  # Previous tier (to detect changes)
-        self._tier_changing: bool = False  # True during startup warmup
+        self._tier_changing: bool = False  # True when switching tiers (warmup period)
+        self._warmup_task_id: str | None = None  # ID of warmup task (first task of new tier)
         # Use provided workers or default
         self._max_num_workers = max_num_workers if max_num_workers else self.DEFAULT_WORKERS
         self._timeout = timeout  # Timeout for throttle calculations
@@ -564,11 +565,6 @@ class DependencyTracker:
             throttle_limit: If set, reduces worker limit for runtime throttling.
         """
         with self._lock:
-            # Clear warmup flag once we have tasks running
-            # Warmup is only for the very first task to load the model
-            if self._tier_changing and len(self._in_progress) == 0 and len(self._completed) > 0:
-                self._tier_changing = False
-
             ready = self._get_all_ready()
             if not ready:
                 return []
@@ -652,6 +648,9 @@ class DependencyTracker:
             # Mark as in-progress
             for e in tier_ready:
                 self._in_progress.add(e.element_id)
+                # Track warmup task (first task dispatched when tier_changing)
+                if self._tier_changing and self._warmup_task_id is None:
+                    self._warmup_task_id = e.element_id
 
             return tier_ready
 
@@ -670,16 +669,21 @@ class DependencyTracker:
         with self._lock:
             self._in_progress.discard(element_id)
             self._completed.add(element_id)
-            # Clear warmup flag once first task completes and nothing else running
-            # This ensures flag is cleared immediately, not waiting for get_ready_elements
-            if self._tier_changing and len(self._in_progress) == 0 and len(self._completed) > 0:
+            # Clear warmup flag only when the warmup task itself completes
+            # This ensures the model is fully loaded before ramping up
+            if self._tier_changing and element_id == self._warmup_task_id:
                 self._tier_changing = False
+                self._warmup_task_id = None
 
     def mark_failed(self, element_id: str) -> None:
         """Mark element as failed (won't block children)."""
         with self._lock:
             self._in_progress.discard(element_id)
             self._completed.add(element_id)  # Treat as done so children can proceed
+            # Clear warmup flag if warmup task failed (so processing can continue)
+            if self._tier_changing and element_id == self._warmup_task_id:
+                self._tier_changing = False
+                self._warmup_task_id = None
 
     def is_complete(self) -> bool:
         """Check if all elements are processed."""
