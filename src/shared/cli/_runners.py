@@ -250,8 +250,8 @@ def run_processing(
         type_line = f"  [dim]Progress:[/] {' [dim]|[/] '.join(type_parts)}" if type_parts else ""
 
         # Stats line
-        api_processed = state.completed - state.skipped
-        effective_wall = state.timing.elapsed / api_processed if api_processed > 0 else 0.0
+        # Use completed (not completed - skipped) for throughput since skipped still take time to check
+        effective_wall = state.timing.elapsed / state.completed if state.completed > 0 else 0.0
         total_api = state.timing.avg_summarize_time + state.timing.avg_embed_time
         summ_emb = state.timing.avg_summary_embed_time
         code_emb = state.timing.avg_code_embed_time
@@ -292,14 +292,22 @@ def run_processing(
         else:
             stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[cyan]{baseline}[/]"
 
-        # Show max runtime info if available
+        # Show runtime info for throttling decisions
         parallelism = state.parallelism
         if parallelism and parallelism.throttle_decision:
             td = parallelism.throttle_decision
-            if td.current_max > 0 or td.historical_max > 0:
-                stats += f" [dim]|[/] [dim]Max:[/] [cyan]{td.current_max:.1f}s[/]"
-                if td.historical_max > 0:
-                    stats += f" [dim](hist:[/] [yellow]{td.historical_max:.1f}s[/][dim])[/]"
+            # Show avg (drives adaptive throttling) and max (drives emergency throttling)
+            if td.completed_avg > 0 or td.current_max > 0:
+                effective_max = max(td.current_max, td.historical_max)
+                # Show whichever is more relevant: avg for normal, max for emergency
+                if effective_max > td.completed_avg:
+                    stats += f" [dim]|[/] [dim]Max:[/] [yellow]{effective_max:.1f}s[/]"
+                    if td.completed_avg > 0:
+                        stats += f" [dim](avg:[/] [cyan]{td.completed_avg:.1f}s[/][dim])[/]"
+                else:
+                    stats += f" [dim]|[/] [dim]Avg:[/] [cyan]{td.completed_avg:.1f}s[/]"
+                    if effective_max > 0:
+                        stats += f" [dim](max:[/] [yellow]{effective_max:.1f}s[/][dim])[/]"
 
         parts: list[RenderableType] = [bar_text, worker_table]
         if type_line:

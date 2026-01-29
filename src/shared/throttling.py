@@ -29,6 +29,7 @@ class ThrottleDecision:
     should_throttle: bool
     current_max: float  # Max runtime of active workers
     historical_max: float  # Max from historical windows
+    completed_avg: float  # Average runtime from completions (used for throttling)
     recommended_workers: int  # Suggested worker count
     reason: str
 
@@ -190,6 +191,7 @@ def compute_throttle_decision(
             should_throttle=False,
             current_max=0,
             historical_max=0,
+            completed_avg=0,
             recommended_workers=max(1, base_workers),
             reason="No data",
         )
@@ -206,6 +208,7 @@ def compute_throttle_decision(
             should_throttle=True,
             current_max=current_max_runtime,
             historical_max=historical_max_runtime,
+            completed_avg=completed_avg_runtime,
             recommended_workers=1,
             reason="Emergency (near timeout)",
         )
@@ -215,6 +218,7 @@ def compute_throttle_decision(
             should_throttle=True,
             current_max=current_max_runtime,
             historical_max=historical_max_runtime,
+            completed_avg=completed_avg_runtime,
             recommended_workers=min(2, base_workers),
             reason="Critical (>50% timeout)",
         )
@@ -242,6 +246,7 @@ def compute_throttle_decision(
                 should_throttle=True,
                 current_max=current_max_runtime,
                 historical_max=historical_max_runtime,
+                completed_avg=completed_avg_runtime,
                 recommended_workers=workers,
                 reason=reason,
             )
@@ -251,6 +256,7 @@ def compute_throttle_decision(
         should_throttle=False,
         current_max=current_max_runtime,
         historical_max=historical_max_runtime,
+        completed_avg=completed_avg_runtime,
         recommended_workers=max(1, base_workers),
         reason="Normal",
     )
