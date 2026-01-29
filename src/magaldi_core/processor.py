@@ -480,11 +480,11 @@ class DependencyTracker:
     - Level 2 (methods/functions): Ready when parent class done (or file if no class)
     - Level 3 (variables): Ready when parent done
 
-    Batching strategy:
-    - First by hierarchy level (files → classes → methods) to minimize model swaps
-    - Then by context tier within each level to optimize KV cache
-    - Drains current tasks when level changes (different models)
-    - Startup warmup limits to 1 task for initial model load
+    Batching strategy (model+tier based):
+    - Batch by (model, context_tier) to minimize Ollama reloads
+    - Priority: same model+tier > same model+different tier > different model
+    - Drains current tasks when model changes
+    - Warmup limits to 1 task for model/tier transitions
     """
 
     # Default worker count when not specified by user
@@ -503,10 +503,10 @@ class DependencyTracker:
         self._completed: set[str] = set()
         self._in_progress: set[str] = set()
         self._context_sizes = context_sizes or {}
-        self._current_tier: int | None = None  # Current tier all workers use
-        self._current_level: int | None = None  # Current hierarchy level
+        self._current_model: str | None = None  # Current model key ("large" or "small")
+        self._current_tier: int | None = None  # Current context tier all workers use
         self._previous_tier: int | None = None  # Previous tier (to detect changes)
-        self._tier_changing: bool = False  # True when switching tiers (warmup period)
+        self._tier_changing: bool = False  # True when switching model/tier (warmup period)
         self._warmup_task_id: str | None = None  # ID of warmup task (first task of new tier)
         # Use provided workers or default
         self._max_num_workers = max_num_workers if max_num_workers else self.DEFAULT_WORKERS
@@ -534,6 +534,16 @@ class DependencyTracker:
             "constant": 3,
         }
         return level_map.get(element.element_type, 2)
+
+    def _get_model_key(self, element: CodeElement) -> str:
+        """Get model key for an element (for batching by model).
+
+        Returns 'large' for files/classes, 'small' for functions/methods/variables.
+        This matches ProcessingConfig.get_model_for_element_type().
+        """
+        if element.element_type in ("function", "method", "variable", "constant"):
+            return "small"
+        return "large"
 
     def _get_tier(self, element_id: str) -> int:
         """Get the context tier for an element (snaps to standard tiers)."""
@@ -572,13 +582,14 @@ class DependencyTracker:
     ) -> list[CodeElement]:
         """Get elements ready for processing (parent done, not started).
 
-        Uses tier batching: all workers process the same context tier together.
-        Only moves to next tier when current tier has no ready elements.
-        This minimizes Ollama model reloads.
+        Uses model+tier batching to minimize Ollama reloads:
+        1. Prefer same model + same tier (no reload at all)
+        2. Then same model + different tier (only KV cache reload)
+        3. Then different model (full model reload, start with smallest tier)
 
         Throttling:
         - Runtime-based throttle_limit reduces workers when approaching timeout
-        - Tier warmup limits to 1 task during model transitions
+        - Tier warmup limits to 1 task during model/tier transitions
 
         Args:
             max_count: Maximum elements to return.
@@ -589,51 +600,69 @@ class DependencyTracker:
             if not ready:
                 return []
 
-            # Group ready elements by hierarchy level first (to batch by model),
-            # then by context tier within each level
-            # Level 0 = files, Level 1 = classes, Level 2 = functions/methods
-            # Files/classes typically use large model, methods use small model
-            by_level: dict[int, list[CodeElement]] = {}
+            # Group ready elements by (model, tier) for optimal batching
+            # model: "large" (files/classes) or "small" (functions/methods/variables)
+            by_model_tier: dict[tuple[str, int], list[CodeElement]] = {}
             for elem in ready:
-                level = self._get_level(elem)
-                by_level.setdefault(level, []).append(elem)
-
-            # Pick lowest level that has ready elements (files before classes before methods)
-            new_level = min(by_level.keys())
-
-            # Drain on level change: different levels often use different models
-            # Wait for current tasks to finish before switching levels
-            if self._current_level is not None and new_level != self._current_level:
-                if len(self._in_progress) > 0:
-                    return []  # Drain: wait for current tasks to finish
-
-            self._current_level = new_level
-            level_ready = by_level[new_level]
-
-            # Within the level, group by tier
-            by_tier: dict[int, list[CodeElement]] = {}
-            for elem in level_ready:
+                model_key = self._get_model_key(elem)
                 tier = self._get_tier(elem.element_id)
-                by_tier.setdefault(tier, []).append(elem)
+                by_model_tier.setdefault((model_key, tier), []).append(elem)
 
-            # Determine which tier to use - prefer current tier if it has ready elements
-            if self._current_tier is not None and self._current_tier in by_tier:
-                tier = self._current_tier
-            else:
-                # Move to smallest tier that has ready elements
-                new_tier = min(by_tier.keys())
+            # Determine which (model, tier) to use with priority:
+            # 1. Current model + current tier (if available)
+            # 2. Current model + smallest available tier
+            # 3. Different model + smallest available tier
+            selected_model = None
+            selected_tier = None
 
-                # Set tier_changing when switching to a NEW tier (including startup)
-                # This limits to 1 task until model loads
-                if self._current_tier is None or new_tier != self._current_tier:
-                    self._tier_changing = True
-                    with open("/tmp/magaldi_warmup.log", "a") as f:
-                        f.write(f"[TIER SWITCH] {self._current_tier} -> {new_tier}, "
-                                f"in_progress={len(self._in_progress)}\n")
+            current_key = (self._current_model, self._current_tier)
+            if self._current_model is not None and current_key in by_model_tier:
+                # Priority 1: same model + same tier
+                selected_model = self._current_model
+                selected_tier = self._current_tier
+            elif self._current_model is not None:
+                # Priority 2: same model + different tier (smallest first)
+                same_model_tiers = [
+                    tier for (model, tier) in by_model_tier.keys()
+                    if model == self._current_model
+                ]
+                if same_model_tiers:
+                    selected_model = self._current_model
+                    selected_tier = min(same_model_tiers)
 
-                self._previous_tier = self._current_tier
-                self._current_tier = new_tier
-                tier = new_tier
+            if selected_model is None:
+                # Priority 3: different model, pick smallest tier overall
+                # Group by model first, then pick model with smallest min tier
+                models_with_min_tier = {}
+                for (model, tier) in by_model_tier.keys():
+                    if model not in models_with_min_tier:
+                        models_with_min_tier[model] = tier
+                    else:
+                        models_with_min_tier[model] = min(models_with_min_tier[model], tier)
+
+                # Pick model with smallest minimum tier (start small)
+                selected_model = min(models_with_min_tier.keys(), key=lambda m: models_with_min_tier[m])
+                selected_tier = models_with_min_tier[selected_model]
+
+            # Check if model or tier is changing
+            model_changing = self._current_model is not None and selected_model != self._current_model
+            tier_changing = self._current_tier is not None and selected_tier != self._current_tier
+
+            # Drain on model change: wait for current tasks to finish before switching models
+            if model_changing and len(self._in_progress) > 0:
+                return []  # Drain: wait for current tasks to finish
+
+            # Set tier_changing flag for warmup (model change or tier change)
+            if model_changing or tier_changing or self._current_model is None:
+                self._tier_changing = True
+                with open("/tmp/magaldi_warmup.log", "a") as f:
+                    f.write(f"[TIER SWITCH] model={self._current_model}->{selected_model}, "
+                            f"tier={self._current_tier}->{selected_tier}, "
+                            f"in_progress={len(self._in_progress)}\n")
+
+            self._current_model = selected_model
+            self._previous_tier = self._current_tier
+            self._current_tier = selected_tier
 
             # Worker limit: start with configured max, apply throttling
             worker_limit = self._max_num_workers
@@ -654,15 +683,17 @@ class DependencyTracker:
             worker_limit = max(1, worker_limit)
 
             # When throttling, count ALL in-progress to limit total concurrency
-            # Otherwise, count only current tier for normal tier-batched operation
+            # Otherwise, count only current (model, tier) for normal batched operation
             if throttle_limit is not None:
                 total_in_progress = len(self._in_progress)
                 slots_available = max(0, worker_limit - total_in_progress)
             else:
-                tier_in_progress = sum(
-                    1 for eid in self._in_progress if self._get_tier(eid) == tier
+                batch_in_progress = sum(
+                    1 for eid in self._in_progress
+                    if self._get_tier(eid) == selected_tier
+                    and self._get_model_key(self._elements[eid]) == selected_model
                 )
-                slots_available = max(0, worker_limit - tier_in_progress)
+                slots_available = max(0, worker_limit - batch_in_progress)
             effective_limit = min(max_count, slots_available)
 
             # During warmup, only return 1 element maximum
@@ -672,11 +703,12 @@ class DependencyTracker:
                     f.write(f"[WARMUP] tier_changing=True, in_progress={len(self._in_progress)}, "
                             f"warmup_task={self._warmup_task_id}, effective_limit={effective_limit}\n")
 
-            # Get elements from current tier only
-            tier_ready = by_tier[tier][:effective_limit]
+            # Get elements from current (model, tier) batch
+            batch_key = (selected_model, selected_tier)
+            batch_ready = by_model_tier[batch_key][:effective_limit]
 
             # Mark as in-progress
-            for e in tier_ready:
+            for e in batch_ready:
                 self._in_progress.add(e.element_id)
                 # Track warmup task (first task dispatched when tier_changing)
                 if self._tier_changing and self._warmup_task_id is None:
@@ -684,17 +716,17 @@ class DependencyTracker:
                     with open("/tmp/magaldi_warmup.log", "a") as f:
                         f.write(f"[WARMUP] Set warmup_task_id={e.element_id[:50]}\n")
 
-            return tier_ready
+            return batch_ready
 
     def is_tier_changing(self) -> bool:
         """Check if we're in startup warmup (first task loading model)."""
         with self._lock:
             return self._tier_changing
 
-    def get_current_level(self) -> int | None:
-        """Get the current hierarchy level being processed."""
+    def get_current_model(self) -> str | None:
+        """Get the current model key being used ('large' or 'small')."""
         with self._lock:
-            return self._current_level
+            return self._current_model
 
     def mark_complete(self, element_id: str) -> None:
         """Mark element as completed."""

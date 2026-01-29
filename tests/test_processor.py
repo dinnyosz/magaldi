@@ -135,16 +135,18 @@ class TestDependencyTracker:
     def test_mixed_ready_and_waiting(self):
         """Mix of elements with present and absent parents.
 
-        Due to level-based batching, only elements at the lowest level are returned
-        first. Classes (level 1) are processed before methods (level 2).
+        Due to model+tier batching:
+        - Classes use 'large' model, methods use 'small' model
+        - Different models require drain and warmup
         """
-        # Parent in tracker
+        # Parent in tracker (class = large model)
         present_parent = make_element(
             "scope:repo:user:file.py:class:PresentClass:1",
             "class",
             None,
             1,
         )
+        # Methods = small model
         child_of_present = make_element(
             "scope:repo:user:file.py:method:child1:5",
             "method",
@@ -163,26 +165,25 @@ class TestDependencyTracker:
 
         tracker = DependencyTracker([present_parent, child_of_present, child_of_absent])
 
-        # Due to level-based batching, only class (level 1) is returned first
+        # First call: class uses large model, warmup returns 1
         ready = tracker.get_ready_elements(max_count=10)
-        ready_ids = {e.element_id for e in ready}
-
-        # Only level 1 (class) returned first
-        assert present_parent.element_id in ready_ids
-        assert child_of_absent.element_id not in ready_ids  # Level 2, wait for level drain
-        assert child_of_present.element_id not in ready_ids  # Level 2, wait for parent
+        assert len(ready) == 1
+        assert ready[0].element_id == present_parent.element_id
 
         # Mark parent complete
         tracker.mark_complete(present_parent.element_id)
 
-        # Now level 2 elements are processed
-        # child_of_absent should be ready (parent skipped)
-        # child_of_present should be ready (parent completed)
+        # Second call: switching to small model (methods), warmup returns 1
         ready = tracker.get_ready_elements(max_count=10)
-        ready_ids = {e.element_id for e in ready}
+        assert len(ready) == 1  # Warmup for model switch
+        first_method = ready[0]
+        tracker.mark_complete(first_method.element_id)
 
-        assert child_of_absent.element_id in ready_ids
-        assert child_of_present.element_id in ready_ids
+        # Third call: same model, returns remaining method
+        ready = tracker.get_ready_elements(max_count=10)
+        assert len(ready) == 1
+        # The other method should be returned
+        assert ready[0].element_id != first_method.element_id
 
     def test_is_complete(self):
         """is_complete should return True when all elements processed."""
