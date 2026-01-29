@@ -86,6 +86,10 @@ class ThroughputTracker:
             concurrent_workers: Number of workers active when task completed
         """
         now = time.time()
+        base_time = runtime / max(concurrent_workers, 1)
+        _log_throttle(
+            f"RECORD: wall={runtime:.1f}s workers={concurrent_workers} → base={base_time:.1f}s"
+        )
         with self._lock:
             self.completions.append((now, runtime, concurrent_workers))
             # Prune old entries outside window
@@ -252,31 +256,44 @@ def compute_throttle_decision(
             reason="Emergency (>80% timeout)",
         )
 
-    # Calculate base_time from current running tasks (normalized by concurrency)
-    # base_time = runtime / workers - this is the per-worker cost
-    current_base_time = 0.0
-    if current_max_runtime > 0 and active_workers > 0:
-        current_base_time = current_max_runtime / active_workers
-
-    # Use the worst case: max of current base_time and historical avg_base_time
-    # This ensures we react to slow tasks immediately (proactive) while also
-    # learning from historical data
-    if current_base_time > 0 and avg_base_time > 0:
-        effective_base_time = max(current_base_time, avg_base_time)
-    elif current_base_time > 0:
-        effective_base_time = current_base_time
-    elif completion_count >= 3 and avg_base_time > 0:
+    # Use ONLY historical avg_base_time from actual completions.
+    # We can't calculate base_time from current running tasks because we don't
+    # know how many workers were active when each task STARTED (only current count).
+    # Dividing current_max_runtime by active_workers gives wrong results when
+    # workers have ramped up since the task started.
+    # Need >= 3 completions for reliable avg_base_time.
+    if completion_count >= 3 and avg_base_time > 0:
         effective_base_time = avg_base_time
     else:
-        # No running tasks, no completion history - can't throttle yet
-        return ThrottleDecision(
-            should_throttle=False,
-            current_max=current_max_runtime,
-            historical_max=0,
-            completed_avg=avg_runtime,
-            recommended_workers=base_workers,
-            reason="No data",
-        )
+        # No completion history yet - still apply ramp-up to avoid jumping to max
+        # Target is base_workers but we ramp up gradually
+        if active_workers > 0:
+            delta = base_workers - active_workers
+            increment = min(max(1, int(delta * RAMP_UP_FACTOR)), MAX_RAMP_INCREMENT)
+            ramped = active_workers + increment
+            ramped = min(ramped, base_workers)
+            _log_throttle(
+                f"NO DATA RAMP: active={active_workers} → ramped to {ramped} (+{increment}, max {MAX_RAMP_INCREMENT})"
+            )
+            return ThrottleDecision(
+                should_throttle=False,
+                current_max=current_max_runtime,
+                historical_max=0,
+                completed_avg=avg_runtime,
+                recommended_workers=ramped,
+                reason=f"No data, ramped from {active_workers}",
+            )
+        else:
+            # Fresh start with no data - start with 1 worker for warmup
+            _log_throttle(f"NO DATA FRESH: starting at 1 worker")
+            return ThrottleDecision(
+                should_throttle=False,
+                current_max=current_max_runtime,
+                historical_max=0,
+                completed_avg=avg_runtime,
+                recommended_workers=1,
+                reason="No data (fresh)",
+            )
 
     # Calculate optimal workers: (timeout * safety_margin) / base_time
     # Safety margin accounts for variance in task runtimes

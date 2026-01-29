@@ -127,8 +127,8 @@ class TestComputeThrottleDecision:
     If timeout = 7s → max_workers = 7/1 = 7
     """
 
-    def test_no_data_returns_normal(self):
-        """With no running tasks and no completion data, returns 'No data'."""
+    def test_no_data_returns_fresh_start(self):
+        """With no running tasks and no completion data, starts with 1 worker."""
         decision = compute_throttle_decision(
             current_max_runtime=0.0,
             tier_timeout=180.0,
@@ -139,15 +139,14 @@ class TestComputeThrottleDecision:
             completion_count=0,
         )
         assert not decision.should_throttle
-        assert decision.recommended_workers == 8
-        assert decision.reason == "No data"
+        assert decision.recommended_workers == 1  # Fresh start
+        assert "No data" in decision.reason
 
-    def test_proactive_throttle_with_running_tasks(self):
-        """With running tasks, computes base_time from current data.
+    def test_no_data_with_running_tasks_ramps(self):
+        """With running tasks but no completion history, ramps up gradually.
 
-        base_time = current_max / active_workers = 10 / 4 = 2.5s
-        optimal = 117 / 2.5 = 46.8 → capped at 8 → Normal (no throttle)
-        But ramp-up still applies: 4 + max(1, int(4*0.25)) = 5
+        Even without enough data, we ramp up instead of jumping to max.
+        active=4, base=8 → ramp: 4 + min(max(1, 1), 3) = 5
         """
         decision = compute_throttle_decision(
             current_max_runtime=10.0,
@@ -156,14 +155,14 @@ class TestComputeThrottleDecision:
             active_workers=4,
             throughput=1.0,
             avg_runtime=5.0,
-            completion_count=2,
+            completion_count=2,  # < 3, so no throttling but still ramps
         )
         assert not decision.should_throttle
-        assert decision.recommended_workers == 5  # Ramped from 4 toward 8
+        assert decision.recommended_workers == 5  # Ramped from 4
         assert "ramped from 4" in decision.reason
 
-    def test_no_data_without_running_tasks(self):
-        """With no running tasks AND few completions, returns 'No data'."""
+    def test_no_data_without_running_tasks_fresh(self):
+        """With no running tasks AND few completions, starts fresh with 1."""
         decision = compute_throttle_decision(
             current_max_runtime=0.0,
             tier_timeout=180.0,
@@ -175,8 +174,8 @@ class TestComputeThrottleDecision:
             avg_base_time=0.0,  # No base_time data either
         )
         assert not decision.should_throttle
-        assert decision.recommended_workers == 8
-        assert decision.reason == "No data"
+        assert decision.recommended_workers == 1  # Fresh start
+        assert "No data" in decision.reason
 
     def test_emergency_near_timeout(self):
         """Runtime >= 80% of timeout triggers emergency throttling."""
@@ -214,9 +213,9 @@ class TestComputeThrottleDecision:
         assert "Throttle" in decision.reason
 
     def test_low_base_time_allows_full_workers(self):
-        """Low base_time allows full workers.
+        """Low base_time from history allows full workers.
 
-        base_time = current_max / workers = 5 / 8 = 0.625s
+        avg_base_time = 0.625s (from completion history)
         max_workers = 117 / 0.625 = 187.2 → capped at 8 → Normal
         """
         decision = compute_throttle_decision(
@@ -227,6 +226,7 @@ class TestComputeThrottleDecision:
             throughput=1.6,
             avg_runtime=5.0,
             completion_count=10,
+            avg_base_time=0.625,  # From completion history
         )
         assert not decision.should_throttle
         assert decision.recommended_workers == 8
@@ -283,35 +283,35 @@ class TestComputeThrottleDecision:
         )
         assert decision.recommended_workers >= 1
 
-    def test_base_time_from_current_tasks(self):
-        """When running tasks exist, computes base_time from current data.
+    def test_base_time_from_history_only(self):
+        """Only uses historical avg_base_time, ignores current running tasks.
 
-        current_max=80s with 8 workers → base_time = 80/8 = 10s
-        optimal = 117 / 10 = 11.7 → 11 workers
-        But ramp-up applies: 8 + max(1, int(3*0.25)) = 8 + 1 = 9 workers
+        We no longer calculate base_time from current running tasks because
+        we don't know how many workers were active when each task started.
+        avg_base_time=5.0s → optimal = 117/5 = 23 workers
+        Ramp-up applies: 8 + min(max(1, int(15*0.25)), 3) = 8 + 3 = 11 workers
         """
         decision = compute_throttle_decision(
-            current_max_runtime=80.0,
+            current_max_runtime=80.0,  # Ignored for base_time calculation
             tier_timeout=180.0,
             base_workers=32,
             active_workers=8,
             throughput=1.5,
             avg_runtime=40.0,
             completion_count=10,
-            avg_base_time=5.0,  # Historical says 5s, but current shows 10s
+            avg_base_time=5.0,  # 117/5 = 23.4 → 23 optimal
         )
         assert decision.should_throttle
-        assert decision.recommended_workers == 9  # Ramped from 8 toward 11
+        # Optimal is 23, ramp from 8: 8 + min(max(1, 3), 3) = 11
+        assert decision.recommended_workers == 11
         assert "Throttle" in decision.reason
         assert "ramped" in decision.reason
 
-    def test_uses_max_of_current_and_historical_base_time(self):
-        """Should use the higher of current and historical base_time for safety.
+    def test_uses_historical_base_time(self):
+        """Uses historical avg_base_time for throttle decisions.
 
-        current_max=40s with 8 workers → current_base = 5s
-        historical avg_base_time = 10s (higher)
-        optimal = 117 / 10 = 11.7 → 11 workers
-        But ramp-up applies: 8 + max(1, int(3*0.25)) = 8 + 1 = 9 workers
+        avg_base_time = 10s → optimal = 117/10 = 11.7 → 11 workers
+        Ramp-up applies: 8 + min(max(1, int(3*0.25)), 3) = 8 + 1 = 9 workers
         """
         decision = compute_throttle_decision(
             current_max_runtime=40.0,

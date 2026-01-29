@@ -164,8 +164,10 @@ class TimingStats:
     summarize_counts_by_type_tier: dict[tuple[str, int], int] = field(default_factory=dict)
     totals_by_type_tier: dict[tuple[str, int], int] = field(default_factory=dict)
 
-    # Throughput tracker for throttling
-    throughput_tracker: ThroughputTracker = field(default_factory=ThroughputTracker)
+    # Throughput tracker for throttling (5 min window for slow AI tasks)
+    throughput_tracker: ThroughputTracker = field(
+        default_factory=lambda: ThroughputTracker(window_seconds=300.0)
+    )
 
     def set_totals_by_type(self, totals: dict[str, int]) -> None:
         """Set total element counts by type."""
@@ -1938,22 +1940,20 @@ def process_elements(
 
     # Track current throttle decision for display
     current_throttle: ThrottleDecision | None = None
-    # Track when we last recorded runtime to history (for periodic updates)
-    last_history_record_time = time.time()
-    HISTORY_RECORD_INTERVAL = 10.0  # Record to history every 10 seconds
+    # Interval for wait() timeout - allows periodic display updates
+    HISTORY_RECORD_INTERVAL = 10.0
 
     try:
         while not dependency_tracker.is_complete():
             # Get current max from active workers (for emergency throttling)
             current_max_runtime = worker_status.get_max_active_runtime()
 
-            # Periodically record current max to history (every 10s)
-            # This captures slow-running tasks that haven't completed yet
+            # Get current time and active worker count for throttle decisions
+            # NOTE: We no longer record periodic history here because it used
+            # active_workers (current count) which gives wrong base_time.
+            # Actual task completions at line ~2056 use workers_at_start (correct).
             now = time.time()
             active_workers = worker_status.active_count()
-            if current_max_runtime > 0 and (now - last_history_record_time) >= HISTORY_RECORD_INTERVAL:
-                timing_stats.record_task_runtime(current_max_runtime, active_workers)
-                last_history_record_time = now
 
             # Get throughput-based stats for adaptive throttling (with concurrency context)
             throughput, avg_runtime, completion_count, avg_concurrency, high_load_avg = (
@@ -1997,14 +1997,12 @@ def process_elements(
             # Wait for at least one to complete, or timeout for periodic updates
             done, _ = wait(future_to_element.keys(), timeout=HISTORY_RECORD_INTERVAL, return_when=FIRST_COMPLETED)
 
-            # If timeout with no completions, record to history and update display
+            # If timeout with no completions, just update display
+            # NOTE: We no longer record to history here because fresh_active
+            # (current count) gives wrong base_time for tasks that started earlier.
             if not done:
-                # Record current max to history on timeout
                 fresh_current_max = worker_status.get_max_active_runtime()
                 fresh_active = worker_status.active_count()
-                if fresh_current_max > 0:
-                    timing_stats.record_task_runtime(fresh_current_max, fresh_active)
-                    last_history_record_time = time.time()
 
                 if on_progress:
                     fresh_throughput, fresh_avg, fresh_count, fresh_avg_conc, fresh_high_load = (
