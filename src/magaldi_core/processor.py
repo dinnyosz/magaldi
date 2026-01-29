@@ -540,11 +540,21 @@ class WorkerStatus:
     """Track what each worker is doing."""
 
     _lock: threading.Lock = field(default_factory=threading.Lock)
-    _status: dict[int, tuple[str, str, str, str, float]] = field(default_factory=dict)  # worker_id -> (element_name, stage, model, ctx_size, start_time)
+    # worker_id -> (element_name, stage, model, ctx_size, element_start_time)
+    # element_start_time is set once when element starts and never reset
+    _status: dict[int, tuple[str, str, str, str, float]] = field(default_factory=dict)
 
     def set(self, worker_id: int, element_name: str, stage: str, model: str = "", ctx_size: str = "", start_time: float = 0.0) -> None:
+        """Set worker status. If worker already has an entry, keeps original start_time."""
         with self._lock:
-            self._status[worker_id] = (element_name, stage, model, ctx_size, start_time)
+            existing = self._status.get(worker_id)
+            if existing is not None:
+                # Keep original element start time - don't reset on stage change
+                # This is critical for throttling: we want total element time, not stage time
+                _, _, _, _, original_start = existing
+                self._status[worker_id] = (element_name, stage, model, ctx_size, original_start)
+            else:
+                self._status[worker_id] = (element_name, stage, model, ctx_size, start_time)
 
     def clear(self, worker_id: int) -> None:
         with self._lock:

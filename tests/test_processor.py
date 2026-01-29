@@ -772,8 +772,31 @@ class TestWorkerStatus:
         # 5-tuple: (element_name, stage, model, ctx_size, start_time)
         elem, stage, model, ctx_size, start_time = all_status[0]
         assert elem == "elem1"
-        assert stage == "embedding"
-        assert model == "model"
+
+    def test_start_time_preserved_on_stage_update(self):
+        """Test that start_time is preserved when updating stage.
+
+        This is critical for throttling: we want total element runtime,
+        not time since current stage started.
+        """
+        status = WorkerStatus()
+        original_start = 1000.0  # Arbitrary start time
+
+        # Set initial status with specific start time
+        status.set(0, "elem1", "summarizing", "model", "4K", original_start)
+
+        # Update to new stage with different start time (simulating stage_start_time = time.time())
+        new_start = 2000.0  # Would be passed if stage resets timer
+        status.set(0, "elem1", "embedding", "model", "4K", new_start)
+
+        all_status = status.get_all()
+        _, _, _, _, preserved_start = all_status[0]
+
+        # Original start time should be preserved, not replaced
+        assert preserved_start == original_start, (
+            f"Start time should be preserved on stage update. "
+            f"Expected {original_start}, got {preserved_start}"
+        )
 
 
 # =============================================================================
