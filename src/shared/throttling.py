@@ -24,63 +24,67 @@ class ThrottleDecision:
     reason: str
 
 
-class RuntimeHistory:
-    """Tracks last N completion times for throttling decisions.
+class ThroughputTracker:
+    """Tracks completion throughput for throttling decisions.
 
-    Simple ring buffer of recent completion times. Average of last N
-    completions is used for adaptive throttling.
+    Measures actual completions per second over a sliding window
+    to detect when the system is saturated (more workers doesn't
+    increase throughput).
     """
 
-    def __init__(self, max_completions: int = 10):
-        """Initialize runtime history tracker.
+    def __init__(self, window_seconds: float = 10.0):
+        """Initialize throughput tracker.
 
         Args:
-            max_completions: Number of recent completions to track (default 10)
+            window_seconds: Time window for measuring throughput (default 10s)
         """
-        self.completions: deque[float] = deque(maxlen=max_completions)
+        self.window_seconds = window_seconds
+        # Store (timestamp, runtime) for each completion
+        self.completions: deque[tuple[float, float]] = deque()
         self._lock = Lock()
 
-    def record_runtime(self, runtime: float) -> None:
-        """Record a completed task's runtime.
+    def record_completion(self, runtime: float) -> None:
+        """Record a completed task.
 
         Args:
             runtime: Task runtime in seconds
         """
+        now = time.time()
         with self._lock:
-            self.completions.append(runtime)
+            self.completions.append((now, runtime))
+            # Prune old entries outside window
+            cutoff = now - self.window_seconds
+            while self.completions and self.completions[0][0] < cutoff:
+                self.completions.popleft()
 
-    def get_historical_max(self) -> float:
-        """Get the max runtime from recent completions.
+    def get_stats(self) -> tuple[float, float, int]:
+        """Get throughput statistics.
 
         Returns:
-            Maximum runtime from recent completions, or 0.0 if no data
+            Tuple of (throughput_per_sec, avg_runtime, completion_count)
         """
+        now = time.time()
         with self._lock:
-            if not self.completions:
-                return 0.0
-            return max(self.completions)
+            # Prune old entries
+            cutoff = now - self.window_seconds
+            while self.completions and self.completions[0][0] < cutoff:
+                self.completions.popleft()
 
-    def get_historical_avg(self) -> float:
-        """Get the average runtime from recent completions.
-
-        Returns:
-            Average runtime from recent completions, or 0.0 if no data
-        """
-        with self._lock:
-            if not self.completions:
-                return 0.0
-            return sum(self.completions) / len(self.completions)
-
-    def get_historical_stats(self) -> tuple[float, float, int]:
-        """Get max, average, and count from recent completions.
-
-        Returns:
-            Tuple of (max_runtime, avg_runtime, count)
-        """
-        with self._lock:
             if not self.completions:
                 return 0.0, 0.0, 0
-            return max(self.completions), sum(self.completions) / len(self.completions), len(self.completions)
+
+            count = len(self.completions)
+            total_runtime = sum(r for _, r in self.completions)
+            avg_runtime = total_runtime / count
+
+            # Calculate actual time span of completions
+            oldest = self.completions[0][0]
+            time_span = now - oldest
+            if time_span < 1.0:
+                time_span = 1.0  # Avoid division issues for very short spans
+
+            throughput = count / time_span
+            return throughput, avg_runtime, count
 
     def reset(self) -> None:
         """Clear all history."""
@@ -88,110 +92,102 @@ class RuntimeHistory:
             self.completions.clear()
 
 
+# Keep old name as alias for compatibility
+RuntimeHistory = ThroughputTracker
+
+
 def compute_throttle_decision(
     current_max_runtime: float,
-    historical_max_runtime: float,
     tier_timeout: float,
     base_workers: int,
-    completed_avg_runtime: float = 0.0,
-    completed_count: int = 0,
+    active_workers: int,
+    throughput: float = 0.0,
+    avg_runtime: float = 0.0,
+    completion_count: int = 0,
 ) -> ThrottleDecision:
-    """Determine if throttling should be applied based on completion times.
+    """Determine if throttling should be applied based on throughput.
 
-    Uses a simple adaptive formula:
-        safe_workers = base_workers * (target_ratio / avg_ratio)
+    Compares actual throughput vs expected throughput:
+        expected = active_workers / avg_runtime
+        actual = completions / time_window
 
-    Where target_ratio is the desired safety margin (30% of timeout).
-    This naturally scales workers based on how fast/slow tasks complete.
+    If actual < expected * 0.7, system is saturated - reduce workers.
+    Optimal workers ≈ actual_throughput * avg_runtime
 
-    Also considers max runtime for emergency throttling when individual
-    tasks approach timeout.
+    Also uses emergency throttling if any task approaches timeout.
 
     Args:
         current_max_runtime: Max runtime of currently active workers
-        historical_max_runtime: Max from historical 10s windows
         tier_timeout: Timeout for this tier (e.g., 180s for summarize)
         base_workers: Original max workers
-        completed_avg_runtime: Average runtime from recent completions
-        completed_count: Number of recent completions
+        active_workers: Currently active worker count
+        throughput: Actual completions per second
+        avg_runtime: Average completion time
+        completion_count: Number of completions in window
 
     Returns:
         ThrottleDecision with recommended action
     """
-    effective_max = max(current_max_runtime, historical_max_runtime)
-
     # No data yet - normal operation
-    if effective_max == 0 and completed_avg_runtime == 0:
+    if completion_count < 3:
         return ThrottleDecision(
             should_throttle=False,
-            current_max=0,
+            current_max=current_max_runtime,
             historical_max=0,
-            completed_avg=0,
-            recommended_workers=max(1, base_workers),
+            completed_avg=avg_runtime,
+            recommended_workers=base_workers,
             reason="No data",
         )
 
-    # Target: keep average completion time at 30% of timeout
-    # This leaves 70% headroom for spikes
-    TARGET_RATIO = 0.30
-
-    # Emergency max check - if any task is near timeout, throttle hard
-    max_ratio = effective_max / tier_timeout if effective_max > 0 else 0.0
+    # Emergency check - if any task is near timeout, throttle hard
+    max_ratio = current_max_runtime / tier_timeout if current_max_runtime > 0 else 0.0
     if max_ratio >= 0.70:
-        # Very close to timeout - absolute minimum
         return ThrottleDecision(
             should_throttle=True,
             current_max=current_max_runtime,
-            historical_max=historical_max_runtime,
-            completed_avg=completed_avg_runtime,
+            historical_max=0,
+            completed_avg=avg_runtime,
             recommended_workers=1,
             reason="Emergency (near timeout)",
         )
     elif max_ratio >= 0.50:
-        # Getting dangerous - cap at 2
         return ThrottleDecision(
             should_throttle=True,
             current_max=current_max_runtime,
-            historical_max=historical_max_runtime,
-            completed_avg=completed_avg_runtime,
+            historical_max=0,
+            completed_avg=avg_runtime,
             recommended_workers=min(2, base_workers),
             reason="Critical (>50% timeout)",
         )
 
-    # Adaptive throttling based on completion average
-    if completed_avg_runtime > 0 and completed_count >= 3:
-        avg_ratio = completed_avg_runtime / tier_timeout
+    # Throughput-based throttling
+    if avg_runtime > 0 and active_workers > 0:
+        # Expected throughput if system scales linearly
+        expected_throughput = active_workers / avg_runtime
 
-        # Formula: safe_workers = base * (target / actual)
-        # If avg is 60% of timeout and target is 30%, we get 0.5x workers
-        # If avg is 15% of timeout and target is 30%, we get 2x workers (capped)
-        if avg_ratio > TARGET_RATIO:
-            scale = TARGET_RATIO / avg_ratio
-            workers = max(1, int(base_workers * scale))
+        # If actual throughput is much lower than expected, system is saturated
+        if expected_throughput > 0 and throughput < expected_throughput * 0.7:
+            # Optimal workers = throughput * avg_runtime
+            # This is roughly how many workers the system can actually handle
+            optimal = max(1, int(throughput * avg_runtime * 1.2))  # 20% headroom
+            optimal = min(optimal, base_workers)  # Don't exceed base
 
-            # Determine severity for display
-            if avg_ratio >= 0.50:
-                reason = "High (avg >50%)"
-            elif avg_ratio >= 0.40:
-                reason = "Elevated (avg >40%)"
-            else:
-                reason = "Moderate (avg >30%)"
-
+            efficiency = (throughput / expected_throughput) * 100
             return ThrottleDecision(
                 should_throttle=True,
                 current_max=current_max_runtime,
-                historical_max=historical_max_runtime,
-                completed_avg=completed_avg_runtime,
-                recommended_workers=workers,
-                reason=reason,
+                historical_max=0,
+                completed_avg=avg_runtime,
+                recommended_workers=optimal,
+                reason=f"Saturated ({efficiency:.0f}% eff)",
             )
 
     # Normal operation
     return ThrottleDecision(
         should_throttle=False,
         current_max=current_max_runtime,
-        historical_max=historical_max_runtime,
-        completed_avg=completed_avg_runtime,
-        recommended_workers=max(1, base_workers),
+        historical_max=0,
+        completed_avg=avg_runtime,
+        recommended_workers=base_workers,
         reason="Normal",
     )

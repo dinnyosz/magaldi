@@ -40,7 +40,7 @@ from shared.ai.summarization import (
     clean_summary,
 )
 from shared.ai.context_size import compute_element_num_ctx, CONTEXT_TIERS
-from shared.throttling import RuntimeHistory, compute_throttle_decision, ThrottleDecision
+from shared.throttling import ThroughputTracker, compute_throttle_decision, ThrottleDecision
 
 
 def _get_model_display_name(model_config: ModelConfig, num_ctx: int) -> str:
@@ -159,8 +159,8 @@ class TimingStats:
     code_embed_counts_by_type: dict[str, int] = field(default_factory=dict)  # count of code embeds
     totals_by_type: dict[str, int] = field(default_factory=dict)  # total element counts
 
-    # Runtime history for throttling
-    runtime_history: RuntimeHistory = field(default_factory=RuntimeHistory)
+    # Throughput tracker for throttling
+    throughput_tracker: ThroughputTracker = field(default_factory=ThroughputTracker)
 
     def set_totals_by_type(self, totals: dict[str, int]) -> None:
         """Set total element counts by type."""
@@ -302,15 +302,15 @@ class TimingStats:
         Args:
             runtime: Task wall-clock runtime in seconds.
         """
-        self.runtime_history.record_runtime(runtime)
+        self.throughput_tracker.record_completion(runtime)
 
-    def get_historical_max_runtime(self) -> float:
-        """Get the max runtime from historical windows for throttling."""
-        return self.runtime_history.get_historical_max()
+    def get_throughput_stats(self) -> tuple[float, float, int]:
+        """Get throughput statistics for throttling.
 
-    def get_historical_stats(self) -> tuple[float, float, int]:
-        """Get max, average, and count from historical windows for throttling."""
-        return self.runtime_history.get_historical_stats()
+        Returns:
+            Tuple of (throughput_per_sec, avg_runtime, completion_count).
+        """
+        return self.throughput_tracker.get_stats()
 
     def eta_seconds(self, completed: int, total: int, num_workers: int = 1) -> float | None:
         """Calculate ETA based on per-type API time averages.
@@ -760,17 +760,19 @@ class DependencyTracker:
     def compute_throttle_decision(
         self,
         current_max_runtime: float,
-        historical_max_runtime: float,
-        completed_avg_runtime: float = 0.0,
-        completed_count: int = 0,
+        active_workers: int,
+        throughput: float = 0.0,
+        avg_runtime: float = 0.0,
+        completion_count: int = 0,
     ) -> ThrottleDecision:
-        """Compute throttle decision based on runtimes.
+        """Compute throttle decision based on throughput.
 
         Args:
             current_max_runtime: Max runtime of currently active workers.
-            historical_max_runtime: Max from historical 10s windows.
-            completed_avg_runtime: Average runtime from recent completions.
-            completed_count: Number of recent completions.
+            active_workers: Number of currently active workers.
+            throughput: Actual completions per second.
+            avg_runtime: Average completion time from recent completions.
+            completion_count: Number of completions in tracking window.
 
         Returns:
             ThrottleDecision with recommended action.
@@ -778,11 +780,12 @@ class DependencyTracker:
         with self._lock:
             return compute_throttle_decision(
                 current_max_runtime=current_max_runtime,
-                historical_max_runtime=historical_max_runtime,
                 tier_timeout=self._timeout,
-                completed_avg_runtime=completed_avg_runtime,
-                completed_count=completed_count,
                 base_workers=self._max_num_workers,
+                active_workers=active_workers,
+                throughput=throughput,
+                avg_runtime=avg_runtime,
+                completion_count=completion_count,
             )
 
     def get_tier_stats(self) -> dict[int, tuple[int, int]]:
@@ -1675,10 +1678,11 @@ def process_elements(
                 timing_stats.record_task_runtime(current_max_runtime)
                 last_history_record_time = now
 
-            # Get completion-based stats for adaptive throttling
-            historical_max, completed_avg, completed_count = timing_stats.get_historical_stats()
+            # Get throughput-based stats for adaptive throttling
+            throughput, avg_runtime, completion_count = timing_stats.get_throughput_stats()
+            active_workers = worker_status.active_count()
             current_throttle = dependency_tracker.compute_throttle_decision(
-                current_max_runtime, historical_max, completed_avg, completed_count
+                current_max_runtime, active_workers, throughput, avg_runtime, completion_count
             )
 
             # Get throttle limit if throttling is active
@@ -1721,9 +1725,10 @@ def process_elements(
                     last_history_record_time = time.time()
 
                 if on_progress:
-                    fresh_hist_max, fresh_avg, fresh_count = timing_stats.get_historical_stats()
+                    fresh_throughput, fresh_avg, fresh_count = timing_stats.get_throughput_stats()
+                    fresh_active = worker_status.active_count()
                     fresh_throttle = dependency_tracker.compute_throttle_decision(
-                        fresh_current_max, fresh_hist_max, fresh_avg, fresh_count
+                        fresh_current_max, fresh_active, fresh_throughput, fresh_avg, fresh_count
                     )
                     progress_state = ProgressState(
                         total=total,
@@ -1796,11 +1801,12 @@ def process_elements(
 
                 # Report progress with throttle info
                 if on_progress:
-                    # Refresh throttle decision with current max values for accurate display
+                    # Refresh throttle decision with current throughput values for accurate display
                     fresh_current_max = worker_status.get_max_active_runtime()
-                    fresh_hist_max, fresh_avg, fresh_count = timing_stats.get_historical_stats()
+                    fresh_throughput, fresh_avg, fresh_count = timing_stats.get_throughput_stats()
+                    fresh_active = worker_status.active_count()
                     fresh_throttle = dependency_tracker.compute_throttle_decision(
-                        fresh_current_max, fresh_hist_max, fresh_avg, fresh_count
+                        fresh_current_max, fresh_active, fresh_throughput, fresh_avg, fresh_count
                     )
                     progress_state = ProgressState(
                         total=total,

@@ -99,7 +99,11 @@ class TestDependencyTracker:
         assert ready[0].element_id == child.element_id
 
     def test_multiple_children_of_skipped_parent(self):
-        """Multiple children should all be ready when parent was skipped."""
+        """Multiple children should all be ready when parent was skipped.
+
+        Note: Due to tier-based batching with warmup, the first call returns 1 element
+        (warmup task). After warmup completes, subsequent calls return all ready elements.
+        """
         parent_id = "scope:repo:user:file.py:class:SkippedClass:1"
 
         child1 = make_element(
@@ -117,11 +121,23 @@ class TestDependencyTracker:
 
         tracker = DependencyTracker([child1, child2])
 
+        # First call during tier warmup returns 1 element
         ready = tracker.get_ready_elements(max_count=10)
-        assert len(ready) == 2
+        assert len(ready) == 1
+
+        # Mark warmup task complete
+        tracker.mark_complete(ready[0].element_id)
+
+        # Second call returns the remaining element
+        ready = tracker.get_ready_elements(max_count=10)
+        assert len(ready) == 1
 
     def test_mixed_ready_and_waiting(self):
-        """Mix of elements with present and absent parents."""
+        """Mix of elements with present and absent parents.
+
+        Due to level-based batching, only elements at the lowest level are returned
+        first. Classes (level 1) are processed before methods (level 2).
+        """
         # Parent in tracker
         present_parent = make_element(
             "scope:repo:user:file.py:class:PresentClass:1",
@@ -147,13 +163,26 @@ class TestDependencyTracker:
 
         tracker = DependencyTracker([present_parent, child_of_present, child_of_absent])
 
-        # Initially: present_parent ready, child_of_absent ready (parent skipped)
+        # Due to level-based batching, only class (level 1) is returned first
         ready = tracker.get_ready_elements(max_count=10)
         ready_ids = {e.element_id for e in ready}
 
+        # Only level 1 (class) returned first
         assert present_parent.element_id in ready_ids
+        assert child_of_absent.element_id not in ready_ids  # Level 2, wait for level drain
+        assert child_of_present.element_id not in ready_ids  # Level 2, wait for parent
+
+        # Mark parent complete
+        tracker.mark_complete(present_parent.element_id)
+
+        # Now level 2 elements are processed
+        # child_of_absent should be ready (parent skipped)
+        # child_of_present should be ready (parent completed)
+        ready = tracker.get_ready_elements(max_count=10)
+        ready_ids = {e.element_id for e in ready}
+
         assert child_of_absent.element_id in ready_ids
-        assert child_of_present.element_id not in ready_ids  # Must wait for parent
+        assert child_of_present.element_id in ready_ids
 
     def test_is_complete(self):
         """is_complete should return True when all elements processed."""
@@ -780,12 +809,13 @@ class TestIndexElementImportsAndCalls:
         assert call_args[0][0] == func_elem.element_id
         calls_data = call_args[0][1]
         assert len(calls_data) == 2
-        assert calls_data[0] == {"name": "helper", "receiver": None, "line": 11, "resolved_id": None}
+        assert calls_data[0] == {"name": "helper", "receiver": None, "line": 11, "resolved_id": None, "category": "unknown"}
         assert calls_data[1] == {
             "name": "process",
             "receiver": "utils",
             "line": 12,
             "resolved_id": "scope:repo:user:utils.py:function:process:5",
+            "category": "unknown",
         }
 
     def test_method_element_with_calls_stores_calls(self):
@@ -1120,10 +1150,10 @@ class TestPerElementContextSize:
 
 
 class TestDynamicWorkerScaling:
-    """Tests for dynamic worker scaling based on context tier."""
+    """Tests for dynamic worker scaling with tier-based batching and warmup."""
 
-    def test_small_tier_allows_max_workers(self):
-        """Small context tier (2048) should allow 12 workers."""
+    def test_warmup_returns_one_element(self):
+        """First call during tier warmup should return only 1 element."""
         elements = [
             CodeElement(
                 element_id=f"test:repo:user:file.py:function:f{i}:1",
@@ -1134,83 +1164,97 @@ class TestDynamicWorkerScaling:
             for i in range(15)
         ]
 
-        # All small elements = 2048 tier
+        # All small elements = same tier
         context_sizes = {e.element_id: 500 for e in elements}
-        tracker = DependencyTracker(elements, context_sizes)
+        tracker = DependencyTracker(elements, context_sizes, max_num_workers=8)
 
-        # Should return up to 12 elements (TIER_MAX_WORKERS[2048] = 12)
-        ready = tracker.get_ready_elements(max_count=20)
-        assert len(ready) == 12
-
-        # Calling again should return 0 (12 already in-progress, limit is 12)
-        ready2 = tracker.get_ready_elements(max_count=20)
-        assert len(ready2) == 0
-
-    def test_large_tier_limits_workers(self):
-        """Large context tier (32768) should limit to 1 worker."""
-        elements = [
-            CodeElement(
-                element_id=f"test:repo:user:file.py:file:f{i}.py:1",
-                element_type="file",
-                name=f"f{i}.py",
-                raw_code="x" * 100000,  # Large file
-            )
-            for i in range(5)
-        ]
-
-        # All large elements = 32768 tier
-        context_sizes = {e.element_id: 30000 for e in elements}
-        tracker = DependencyTracker(elements, context_sizes)
-
-        # Should return only 1 element (TIER_MAX_WORKERS[32768] = 1)
+        # First call: warmup, returns 1 element
         ready = tracker.get_ready_elements(max_count=20)
         assert len(ready) == 1
+        assert tracker.is_tier_changing()  # Still in warmup
 
-    def test_medium_tier_limits_workers(self):
-        """Medium context tier (8192) should allow 4 workers."""
+    def test_after_warmup_allows_max_workers(self):
+        """After warmup completes, max_workers elements can be returned."""
         elements = [
             CodeElement(
                 element_id=f"test:repo:user:file.py:function:f{i}:1",
                 element_type="function",
                 name=f"f{i}",
-                raw_code="x" * 20000,  # Medium function
+                raw_code="def f(): pass",
             )
-            for i in range(10)
+            for i in range(15)
         ]
 
-        # 20000 chars ≈ 5000 tokens + overhead → 8192 tier
-        context_sizes = {e.element_id: 6000 for e in elements}
-        tracker = DependencyTracker(elements, context_sizes)
+        context_sizes = {e.element_id: 500 for e in elements}
+        tracker = DependencyTracker(elements, context_sizes, max_num_workers=8)
 
-        # Should return up to 4 elements (TIER_MAX_WORKERS[8192] = 4)
-        ready = tracker.get_ready_elements(max_count=20)
-        assert len(ready) == 4
+        # First call: warmup
+        ready1 = tracker.get_ready_elements(max_count=20)
+        assert len(ready1) == 1
+
+        # Mark warmup task complete
+        tracker.mark_complete(ready1[0].element_id)
+
+        # Now should return up to max_workers (8) elements
+        ready2 = tracker.get_ready_elements(max_count=20)
+        assert len(ready2) == 8
+
+    def test_tier_change_triggers_warmup(self):
+        """Changing tiers should trigger new warmup."""
+        # Mix of elements at different tiers but same level
+        small_elements = [
+            CodeElement(
+                element_id=f"test:repo:user:file.py:function:small{i}:1",
+                element_type="function",
+                name=f"small{i}",
+                raw_code="def f(): pass",
+            )
+            for i in range(3)
+        ]
+        large_elements = [
+            CodeElement(
+                element_id=f"test:repo:user:file.py:function:large{i}:10",
+                element_type="function",
+                name=f"large{i}",
+                raw_code="x" * 100000,
+            )
+            for i in range(3)
+        ]
+
+        all_elements = small_elements + large_elements
+        context_sizes = {e.element_id: 500 for e in small_elements}
+        context_sizes.update({e.element_id: 30000 for e in large_elements})
+
+        tracker = DependencyTracker(all_elements, context_sizes, max_num_workers=8)
+
+        # First tier (small) - warmup
+        ready1 = tracker.get_ready_elements(max_count=20)
+        assert len(ready1) == 1
+        tracker.mark_complete(ready1[0].element_id)
+
+        # Small tier - can now get more
+        ready2 = tracker.get_ready_elements(max_count=20)
+        for e in ready2:
+            tracker.mark_complete(e.element_id)
+
+        # Now switching to large tier - should warmup again
+        ready3 = tracker.get_ready_elements(max_count=20)
+        assert len(ready3) == 1  # Warmup for new tier
+        assert tracker.is_tier_changing()
 
     def test_get_current_max_workers(self):
-        """get_current_max_workers should return tier-appropriate limit."""
-        small_element = CodeElement(
-            element_id="test:repo:user:file.py:function:small:1",
+        """get_current_max_workers should return configured max."""
+        element = CodeElement(
+            element_id="test:repo:user:file.py:function:f:1",
             element_type="function",
-            name="small",
-            raw_code="def small(): pass",
-        )
-        large_element = CodeElement(
-            element_id="test:repo:user:file.py:file:big.py:1",
-            element_type="file",
-            name="big.py",
-            raw_code="x" * 100000,
+            name="f",
+            raw_code="def f(): pass",
         )
 
-        # Small tier
-        tracker_small = DependencyTracker(
-            [small_element], {small_element.element_id: 500}
-        )
-        tracker_small.get_ready_elements(max_count=1)  # Set current tier
-        assert tracker_small.get_current_max_workers() == 12
+        # Custom max workers
+        tracker = DependencyTracker([element], {element.element_id: 500}, max_num_workers=16)
+        assert tracker.get_current_max_workers() == 16
 
-        # Large tier
-        tracker_large = DependencyTracker(
-            [large_element], {large_element.element_id: 30000}
-        )
-        tracker_large.get_ready_elements(max_count=1)  # Set current tier
-        assert tracker_large.get_current_max_workers() == 1
+        # Default max workers
+        tracker_default = DependencyTracker([element], {element.element_id: 500})
+        assert tracker_default.get_current_max_workers() == 8  # DEFAULT_WORKERS
