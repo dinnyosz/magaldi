@@ -432,6 +432,16 @@ class MetadataRepository:
             },
         )
 
+        # Debug: check total hits vs returned
+        total_hits = result.get("hits", {}).get("total", {})
+        if isinstance(total_hits, dict):
+            total_count = total_hits.get("value", 0)
+        else:
+            total_count = total_hits
+        returned_count = len(result.get("hits", {}).get("hits", []))
+        with open("/tmp/magaldi_file_hash.log", "a") as f:
+            f.write(f"[ES QUERY] Total FILE elements in ES: {total_count}, returned: {returned_count}\n")
+
         # Also find orphan files: paths with elements but no FILE element
         # This handles interrupted runs where FILE element wasn't created
         orphan_agg = client.search(
@@ -504,6 +514,31 @@ class MetadataRepository:
                 f.write(f"[ORPHAN PATHS] First few orphans (have elements but no FILE element):\n")
                 for op in list(orphan_paths)[:5]:
                     f.write(f"  {op}\n")
+
+            # Debug: check if problematic paths exist with ANY scope/repo/user
+            test_path = "frontend/popscript/license/m_s.js"
+            if test_path not in states:
+                any_scope_check = client.search(
+                    index=INDEX_NAME,
+                    body={
+                        "query": {
+                            "bool": {
+                                "must": [
+                                    {"term": {"relative_path": test_path}},
+                                    {"term": {"element_type": "file"}},
+                                ]
+                            }
+                        },
+                        "_source": ["scope", "repository", "username", "file_hash"],
+                        "size": 10,
+                    },
+                )
+                any_hits = any_scope_check.get("hits", {}).get("hits", [])
+                f.write(f"[SCOPE CHECK] {test_path} not in states. Found {len(any_hits)} FILE elements with ANY scope/repo/user:\n")
+                for h in any_hits:
+                    s = h.get("_source", {})
+                    fh = s.get("file_hash")
+                    f.write(f"  scope={s.get('scope')} repo={s.get('repository')} user={s.get('username')} hash={fh[:16] if fh else 'None'}...\n")
 
         return states
 
