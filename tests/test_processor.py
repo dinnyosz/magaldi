@@ -73,6 +73,51 @@ class TestDependencyTracker:
         assert len(ready) == 1
         assert ready[0].element_id == child.element_id
 
+    def test_three_level_hierarchy_file_class_method(self):
+        """Method must wait for class, class must wait for file.
+
+        Hierarchy: file → class → method
+        Method cannot be ready until class is done.
+        Class cannot be ready until file is done.
+        """
+        file_elem = make_element(
+            "scope:repo:user:file.py:file:file.py:1",
+            "file",
+            None,
+            0,
+        )
+        class_elem = make_element(
+            "scope:repo:user:file.py:class:MyClass:10",
+            "class",
+            file_elem.element_id,  # parent is file
+            1,
+        )
+        method_elem = make_element(
+            "scope:repo:user:file.py:method:my_method:20",
+            "method",
+            class_elem.element_id,  # parent is class
+            2,
+        )
+
+        tracker = DependencyTracker([file_elem, class_elem, method_elem])
+
+        # Step 1: Only file should be ready (no parent)
+        ready = tracker.get_ready_elements(max_count=10)
+        assert len(ready) == 1
+        assert ready[0].element_id == file_elem.element_id
+        tracker.mark_complete(file_elem.element_id)
+
+        # Step 2: Now class should be ready (file done), but not method
+        ready = tracker.get_ready_elements(max_count=10)
+        assert len(ready) == 1
+        assert ready[0].element_id == class_elem.element_id
+        tracker.mark_complete(class_elem.element_id)
+
+        # Step 3: Now method should be ready (class done)
+        ready = tracker.get_ready_elements(max_count=10)
+        assert len(ready) == 1
+        assert ready[0].element_id == method_elem.element_id
+
     def test_child_ready_when_parent_not_in_tracker(self):
         """Child should be ready if parent was skipped (not in elements_to_process).
 
