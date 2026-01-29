@@ -51,15 +51,21 @@ class ElasticsearchFileStateRepository:
             element_count = state.get("element_count")
 
             # Verify completeness when we have a file_hash
-            # NOTE: Disabled count verification because files with identical content
-            # have the same file_hash, causing count_elements_by_file_hash to count
-            # elements from ALL files with that hash, not just this file.
-            # TODO: Use a per-file count query instead of by-hash if verification needed.
             if file_hash:
                 if element_count is None:
                     # Old data without element_count - treat as incomplete
                     # This forces reindexing of data from before completeness tracking
                     file_hash = None
+                else:
+                    # Check that actual element count matches expected
+                    # Use count_elements_by_path (not by_hash) because multiple files
+                    # can have identical content (same hash)
+                    actual_count = self._es.count_elements_by_path(
+                        scope, repository, username, path
+                    )
+                    if actual_count != element_count:
+                        # Incomplete - set file_hash to None so it's treated as modified
+                        file_hash = None
 
             result[path] = DBFileState(
                 relative_path=path,

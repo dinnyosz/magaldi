@@ -136,6 +136,12 @@ class ElasticsearchRepository:
         """Count elements with a specific file hash."""
         return self._elements.count_elements_by_file_hash(scope, repository, username, file_hash)
 
+    def count_elements_by_path(
+        self, scope: str, repository: str, username: str, relative_path: str
+    ) -> int:
+        """Count elements for a specific file path."""
+        return self._elements.count_elements_by_path(scope, repository, username, relative_path)
+
     def delete_by_file_hash(
         self, scope: str, repository: str, username: str, file_hash: str
     ) -> int:

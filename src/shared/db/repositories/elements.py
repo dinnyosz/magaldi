@@ -378,7 +378,9 @@ class ElementRepository:
     ) -> int:
         """Count elements with a specific file hash.
 
-        Used for completeness verification - compare to expected element_count.
+        NOTE: This counts across ALL files with the same hash, which may not be
+        what you want for completeness verification. Use count_elements_by_path
+        for per-file counts.
         """
         client = self._get_client()
         result = client.count(
@@ -391,6 +393,32 @@ class ElementRepository:
                             {"term": {"repository": repository}},
                             {"term": {"username": username}},
                             {"term": {"file_hash": file_hash}},
+                        ]
+                    }
+                }
+            },
+        )
+        return result.get("count", 0)
+
+    def count_elements_by_path(
+        self, scope: str, repository: str, username: str, relative_path: str
+    ) -> int:
+        """Count elements for a specific file path.
+
+        Used for completeness verification - compare to expected element_count.
+        This is accurate even when multiple files have identical content.
+        """
+        client = self._get_client()
+        result = client.count(
+            index=INDEX_NAME,
+            body={
+                "query": {
+                    "bool": {
+                        "must": [
+                            {"term": {"scope": scope}},
+                            {"term": {"repository": repository}},
+                            {"term": {"username": username}},
+                            {"term": {"relative_path": relative_path}},
                         ]
                     }
                 }
