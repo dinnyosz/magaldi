@@ -250,8 +250,9 @@ def run_processing(
         type_line = f"  [dim]Progress:[/] {' [dim]|[/] '.join(type_parts)}" if type_parts else ""
 
         # Stats line
-        # Use completed (not completed - skipped) for throughput since skipped still take time to check
-        effective_wall = state.timing.elapsed / state.completed if state.completed > 0 else 0.0
+        # Only count actually processed elements for throughput (exclude unchanged/skipped)
+        processed_count = state.completed - state.skipped
+        effective_wall = state.timing.elapsed / processed_count if processed_count > 0 else 0.0
         total_api = state.timing.avg_summarize_time + state.timing.avg_embed_time
         summ_emb = state.timing.avg_summary_embed_time
         code_emb = state.timing.avg_code_embed_time
