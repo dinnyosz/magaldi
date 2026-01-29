@@ -630,11 +630,16 @@ class DependencyTracker:
             # Ensure at least 1 worker always
             worker_limit = max(1, worker_limit)
 
-            tier_in_progress = sum(
-                1 for eid in self._in_progress if self._get_tier(eid) == tier
-            )
-            # Only return enough to reach worker limit, not add to it
-            slots_available = max(0, worker_limit - tier_in_progress)
+            # When throttling, count ALL in-progress to limit total concurrency
+            # Otherwise, count only current tier for normal tier-batched operation
+            if throttle_limit is not None:
+                total_in_progress = len(self._in_progress)
+                slots_available = max(0, worker_limit - total_in_progress)
+            else:
+                tier_in_progress = sum(
+                    1 for eid in self._in_progress if self._get_tier(eid) == tier
+                )
+                slots_available = max(0, worker_limit - tier_in_progress)
             effective_limit = min(max_count, slots_available)
 
             # Get elements from current tier only
