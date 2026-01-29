@@ -38,6 +38,11 @@ THROTTLE_SAFETY_MARGIN = 0.65
 # Note: scaling DOWN is always instant (we're seeing slowness, react fast).
 RAMP_UP_FACTOR = 0.25
 
+# Maximum workers to add per ramp-up. Even if 25% of gap is larger,
+# cap the increment to avoid overwhelming the system when base_time
+# estimates are too optimistic (e.g., first few tasks were easy/small).
+MAX_RAMP_INCREMENT = 3
+
 
 @dataclass
 class ThrottleDecision:
@@ -288,14 +293,16 @@ def compute_throttle_decision(
     # Only ramp if we have active workers (not starting fresh)
     if target_workers > active_workers and active_workers > 0:
         # Scaling UP - ramp gradually to avoid overwhelming during warmup
+        # Cap increment to MAX_RAMP_INCREMENT to handle optimistic base_time estimates
         delta = target_workers - active_workers
-        ramped = active_workers + max(1, int(delta * RAMP_UP_FACTOR))
+        increment = min(max(1, int(delta * RAMP_UP_FACTOR)), MAX_RAMP_INCREMENT)
+        ramped = active_workers + increment
         ramped = min(ramped, target_workers)  # Don't exceed target
         effective_workers = ramped
         reason_suffix = f", ramped from {active_workers}"
         _log_throttle(
             f"RAMP UP: base_time={effective_base_time:.1f}s target={target_workers} "
-            f"active={active_workers} → ramped to {effective_workers} (25% of {delta} gap)"
+            f"active={active_workers} → ramped to {effective_workers} (+{increment}, max {MAX_RAMP_INCREMENT})"
         )
     else:
         # Scaling DOWN, steady, or starting fresh - apply immediately

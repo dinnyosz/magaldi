@@ -331,7 +331,9 @@ class TestComputeThrottleDecision:
         """During warmup, ramp up gradually instead of jumping to optimal.
 
         With 2 active workers and base_time suggesting 23 optimal:
-        delta = 23 - 2 = 21, ramped = 2 + max(1, int(21*0.25)) = 2 + 5 = 7
+        delta = 23 - 2 = 21
+        increment = min(max(1, int(21*0.25)), 3) = min(5, 3) = 3
+        ramped = 2 + 3 = 5
         """
         decision = compute_throttle_decision(
             current_max_runtime=10.0,  # 10s with 2 workers = 5s base_time
@@ -344,8 +346,8 @@ class TestComputeThrottleDecision:
             avg_base_time=5.0,  # 117/5 = 23.4 → 23 optimal
         )
         assert decision.should_throttle
-        # Optimal is 23, but we ramp: 2 + max(1, int(21*0.25)) = 2 + 5 = 7
-        assert decision.recommended_workers == 7
+        # Optimal is 23, but we ramp with max increment of 3: 2 + 3 = 5
+        assert decision.recommended_workers == 5
         assert "ramped from 2" in decision.reason
 
     def test_scale_down_immediate(self):
