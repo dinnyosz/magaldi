@@ -7,6 +7,7 @@ import pytest
 from shared.throttling import (
     ThroughputTracker,
     ThrottleDecision,
+    TimeoutEvent,
     compute_throttle_decision,
 )
 
@@ -140,31 +141,31 @@ class TestComputeThrottleDecision:
         assert "Emergency" in decision.reason
 
     def test_throttle_based_on_avg_runtime(self):
-        """Throttling based on formula: workers = timeout / avg_runtime."""
-        # timeout=180s, avg=20s → max 9 workers
+        """Throttling based on formula: workers = (timeout * 0.7) / avg_runtime."""
+        # timeout=180s * 0.7 = 126s effective, avg=20s → max 6 workers
         decision = compute_throttle_decision(
             current_max_runtime=10.0,
             tier_timeout=180.0,
             base_workers=32,
             active_workers=20,
             throughput=1.0,
-            avg_runtime=20.0,  # 180/20 = 9 workers max
+            avg_runtime=20.0,  # 126/20 = 6.3 → 6 workers max
             completion_count=10,
         )
         assert decision.should_throttle
-        assert decision.recommended_workers == 9
+        assert decision.recommended_workers == 6
         assert "Throttle" in decision.reason
 
     def test_low_avg_allows_full_workers(self):
         """Low avg runtime allows full workers."""
-        # timeout=180s, avg=5s → max 36 workers, but base is 8
+        # timeout=180s * 0.7 = 126s effective, avg=5s → max 25 workers, but base is 8
         decision = compute_throttle_decision(
             current_max_runtime=5.0,
             tier_timeout=180.0,
             base_workers=8,
             active_workers=8,
             throughput=1.6,
-            avg_runtime=5.0,  # 180/5 = 36 workers max, capped at base
+            avg_runtime=5.0,  # 126/5 = 25.2 workers max, capped at base
             completion_count=10,
         )
         assert not decision.should_throttle
@@ -173,29 +174,29 @@ class TestComputeThrottleDecision:
 
     def test_high_avg_limits_workers(self):
         """High avg runtime limits workers significantly."""
-        # timeout=180s, avg=60s → max 3 workers
+        # timeout=180s * 0.7 = 126s effective, avg=60s → max 2 workers
         decision = compute_throttle_decision(
             current_max_runtime=30.0,
             tier_timeout=180.0,
             base_workers=32,
             active_workers=10,
             throughput=0.1,
-            avg_runtime=60.0,  # 180/60 = 3 workers max
+            avg_runtime=60.0,  # 126/60 = 2.1 → 2 workers max
             completion_count=10,
         )
         assert decision.should_throttle
-        assert decision.recommended_workers == 3
+        assert decision.recommended_workers == 2
 
     def test_very_high_avg_limits_to_one(self):
-        """Very high avg runtime (> timeout) limits to 1 worker."""
-        # timeout=180s, avg=200s → max 0.9 → clamped to 1
+        """Very high avg runtime (> effective timeout) limits to 1 worker."""
+        # timeout=180s * 0.7 = 126s effective, avg=200s → max 0.63 → clamped to 1
         decision = compute_throttle_decision(
             current_max_runtime=100.0,
             tier_timeout=180.0,
             base_workers=8,
             active_workers=2,
             throughput=0.01,
-            avg_runtime=200.0,  # 180/200 = 0.9 → 1 worker
+            avg_runtime=200.0,  # 126/200 = 0.63 → 1 worker
             completion_count=10,
         )
         assert decision.should_throttle
@@ -248,3 +249,47 @@ class TestThrottleDecisionDataclass:
         assert decision.completed_avg == 5.0
         assert decision.recommended_workers == 4
         assert decision.reason == "Test reason"
+
+
+class TestTimeoutEvent:
+    """Tests for TimeoutEvent dataclass."""
+
+    def test_timeout_event_fields(self):
+        """TimeoutEvent should have all expected fields."""
+        event = TimeoutEvent(
+            element_id="scope:repo:user:path/file.py:function:my_func:10",
+            element_type="function",
+            tier=8192,
+            workers_active=5,
+            avg_runtime=25.0,
+            max_runtime=45.0,
+            timeout_limit=180.0,
+        )
+        assert event.element_id == "scope:repo:user:path/file.py:function:my_func:10"
+        assert event.element_type == "function"
+        assert event.tier == 8192
+        assert event.workers_active == 5
+        assert event.avg_runtime == 25.0
+        assert event.max_runtime == 45.0
+        assert event.timeout_limit == 180.0
+        assert event.timestamp > 0
+
+    def test_to_log_line_format(self):
+        """to_log_line should return properly formatted string."""
+        event = TimeoutEvent(
+            element_id="scope:repo:user:path/file.py:function:my_func:10",
+            element_type="function",
+            tier=8192,
+            workers_active=5,
+            avg_runtime=25.3,
+            max_runtime=45.7,
+            timeout_limit=180.0,
+        )
+        log_line = event.to_log_line()
+        assert "[TIMEOUT]" in log_line
+        assert "element=function:my_func" in log_line
+        assert "tier=8192" in log_line
+        assert "workers=5" in log_line
+        assert "avg=25.3s" in log_line
+        assert "max=45.7s" in log_line
+        assert "limit=180s" in log_line

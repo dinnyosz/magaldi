@@ -40,7 +40,7 @@ from shared.ai.summarization import (
     clean_summary,
 )
 from shared.ai.context_size import compute_element_num_ctx, CONTEXT_TIERS
-from shared.throttling import ThroughputTracker, compute_throttle_decision, ThrottleDecision
+from shared.throttling import ThroughputTracker, compute_throttle_decision, ThrottleDecision, TimeoutEvent
 
 
 def _get_model_display_name(model_config: ModelConfig, num_ctx: int) -> str:
@@ -1845,6 +1845,26 @@ def process_elements(
                     recent_errors.append((short_name, processed.error or "Unknown error"))
                     if len(recent_errors) > 3:
                         recent_errors.pop(0)
+
+                    # Log timeout events with detailed worker info
+                    error_lower = (processed.error or "").lower()
+                    if "timeout" in error_lower or "timed out" in error_lower:
+                        current_throughput, current_avg, current_count = timing_stats.get_throughput_stats()
+                        current_max = worker_status.get_max_active_runtime()
+                        active_count = worker_status.active_count()
+                        tier = dependency_tracker._get_tier(element.element_id)
+                        timeout_event = TimeoutEvent(
+                            element_id=element.element_id,
+                            element_type=element.element_type,
+                            tier=tier,
+                            workers_active=active_count,
+                            avg_runtime=current_avg,
+                            max_runtime=current_max,
+                            timeout_limit=config.summarize_timeout,
+                        )
+                        with open("/tmp/magaldi_warmup.log", "a") as f:
+                            f.write(timeout_event.to_log_line() + "\n")
+
                     # Update Redis job status
                     if redis_tracker:
                         try:

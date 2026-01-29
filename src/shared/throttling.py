@@ -11,6 +11,10 @@ from collections import deque
 from dataclasses import dataclass, field
 from threading import Lock
 
+# Safety margin for throttling - use 70% of timeout to leave headroom
+# for variance in task runtimes when running concurrently
+THROTTLE_SAFETY_MARGIN = 0.7
+
 
 @dataclass
 class ThrottleDecision:
@@ -96,6 +100,29 @@ class ThroughputTracker:
 RuntimeHistory = ThroughputTracker
 
 
+@dataclass
+class TimeoutEvent:
+    """Record of a timeout event for debugging."""
+
+    element_id: str
+    element_type: str
+    tier: int
+    workers_active: int
+    avg_runtime: float
+    max_runtime: float
+    timeout_limit: float
+    timestamp: float = field(default_factory=time.time)
+
+    def to_log_line(self) -> str:
+        """Format as a log line for /tmp/magaldi_warmup.log."""
+        return (
+            f"[TIMEOUT] element={self.element_type}:{self.element_id.split(':')[-2]}, "
+            f"tier={self.tier}, workers={self.workers_active}, "
+            f"avg={self.avg_runtime:.1f}s, max={self.max_runtime:.1f}s, "
+            f"limit={self.timeout_limit:.0f}s"
+        )
+
+
 def compute_throttle_decision(
     current_max_runtime: float,
     tier_timeout: float,
@@ -147,10 +174,11 @@ def compute_throttle_decision(
             reason="Emergency (>80% timeout)",
         )
 
-    # Calculate optimal workers: timeout / avg_runtime
-    # This ensures avg * workers <= timeout
+    # Calculate optimal workers: (timeout * safety_margin) / avg_runtime
+    # Safety margin accounts for variance in task runtimes under concurrency
     if avg_runtime > 0:
-        optimal = int(tier_timeout / avg_runtime)
+        effective_timeout = tier_timeout * THROTTLE_SAFETY_MARGIN
+        optimal = int(effective_timeout / avg_runtime)
         optimal = max(1, min(optimal, base_workers))  # Clamp to [1, base_workers]
 
         if optimal < base_workers:
@@ -160,7 +188,7 @@ def compute_throttle_decision(
                 historical_max=0,
                 completed_avg=avg_runtime,
                 recommended_workers=optimal,
-                reason=f"Throttle ({optimal}={int(tier_timeout)}s/{avg_runtime:.0f}s)",
+                reason=f"Throttle ({optimal}={int(effective_timeout)}s/{avg_runtime:.0f}s)",
             )
 
     # Normal operation - avg is low enough to allow full workers
