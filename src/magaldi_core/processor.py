@@ -308,6 +308,10 @@ class TimingStats:
         """Get the max runtime from historical windows for throttling."""
         return self.runtime_history.get_historical_max()
 
+    def get_historical_stats(self) -> tuple[float, float, int]:
+        """Get max, average, and count from historical windows for throttling."""
+        return self.runtime_history.get_historical_stats()
+
     def eta_seconds(self, completed: int, total: int, num_workers: int = 1) -> float | None:
         """Calculate ETA based on per-type API time averages.
 
