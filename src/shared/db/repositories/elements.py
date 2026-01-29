@@ -256,6 +256,43 @@ class ElementRepository:
 
         return result
 
+    def get_element_processing_state(
+        self, element_ids: list[str]
+    ) -> dict[str, dict[str, Any]]:
+        """Get content hash and summary state for existing elements.
+
+        Used for smart skip logic - only skip if content unchanged AND summary exists.
+        This handles interrupted runs where elements were indexed but not summarized.
+
+        Args:
+            element_ids: List of element IDs to check.
+
+        Returns:
+            Dict mapping element_id to {content_hash, has_summary}.
+        """
+        if not element_ids:
+            return {}
+
+        client = self._get_client()
+
+        # Fetch content_hash and summary in one call
+        response = client.mget(
+            index=INDEX_NAME,
+            ids=element_ids,
+            _source=["content_hash", "summary"],
+        )
+
+        result = {}
+        for doc in response["docs"]:
+            if doc.get("found", False):
+                source = doc.get("_source", {})
+                result[doc["_id"]] = {
+                    "content_hash": source.get("content_hash"),
+                    "has_summary": bool(source.get("summary")),
+                }
+
+        return result
+
     def get_element_ids_by_file(
         self, scope: str, repository: str, username: str, relative_path: str
     ) -> set[str]:

@@ -1363,24 +1363,27 @@ def process_elements(
         es_repo.delete_elements(stale_element_ids)
         result.elements_deleted = len(stale_element_ids)
 
-    # Get content hashes for change detection
-    # Unchanged elements stay in ES - no need to re-process or re-index
+    # Get content hashes and summary state for change detection
+    # Only skip if content unchanged AND summary exists (handles interrupted runs)
     all_element_ids = list(new_element_ids)
-    existing_hashes = es_repo.get_element_content_hashes(all_element_ids)
+    existing_states = es_repo.get_element_processing_state(all_element_ids)
 
-    # Filter: only process elements that are new or have changed content
+    # Filter: only process elements that are new, changed, or missing summary
     # Also track which files had skipped elements (need file_hash update)
     elements_to_process = []
     skipped_by_file: dict[str, int] = {}  # relative_path -> count of skipped elements
     for elem in all_elements:
-        existing_hash = existing_hashes.get(elem.element_id)
-        if existing_hash is not None and existing_hash == elem.content_hash:
-            # Element exists in ES with same content - skip entirely
-            result.elements_skipped += 1
-            skipped_by_file[elem.relative_path] = skipped_by_file.get(elem.relative_path, 0) + 1
-        else:
-            # Element is new OR content changed - needs processing
-            elements_to_process.append(elem)
+        state = existing_states.get(elem.element_id)
+        if state is not None:
+            content_unchanged = state.get("content_hash") == elem.content_hash
+            has_summary = state.get("has_summary", False)
+            if content_unchanged and has_summary:
+                # Element exists with same content AND has summary - skip entirely
+                result.elements_skipped += 1
+                skipped_by_file[elem.relative_path] = skipped_by_file.get(elem.relative_path, 0) + 1
+                continue
+        # Element is new OR content changed OR missing summary - needs processing
+        elements_to_process.append(elem)
 
     total = len(all_elements)
 
