@@ -110,8 +110,12 @@ def run_processing(
     dry_run: bool,
     skip_ai: bool,
     workers: int,
+    skip_resolve: bool = False,
 ) -> tuple[int, int, int, float, float, float, float, "TimingStats | None", list[tuple[str, str]], int]:
     """Run unified processing: summarize -> embed -> index.
+
+    Args:
+        skip_resolve: If True, skip the call resolution phase.
 
     Returns:
         Tuple of (processed, skipped, indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, failed_elements, deleted).
@@ -367,6 +371,12 @@ def run_processing(
             magaldi_config=config if not dry_run else None,
         )
 
+    # Check for processing errors (including stalls)
+    if result.errors:
+        for error in result.errors:
+            if "Processing stalled" in error:
+                console.print(f"\n  [red]Warning:[/] {error}")
+
     # Get timing stats from current state
     avg_summ = current_state.timing.avg_summarize_time
     avg_embed = current_state.timing.avg_embed_time
@@ -376,21 +386,24 @@ def run_processing(
 
     # Full call resolution: resolve ALL calls using imports and type annotations
     # This runs even for partial parsing to ensure call graphs are complete
-    from magaldi_core.call_resolution import resolve_all_calls
+    if not skip_resolve:
+        from magaldi_core.call_resolution import resolve_all_calls
 
-    console.print("\n  [bold]Call Resolution[/]")
-    try:
-        total_calls, import_resolved, type_resolved = resolve_all_calls(
-            es_repo,
-            manifest.scope,
-            manifest.repository,
-            manifest.username,
-        )
-        total_resolved = import_resolved + type_resolved
-        console.print(f"  Full pass: {total_resolved}/{total_calls} resolved")
-        console.print(f"    via imports: {import_resolved}, via type annotations: {type_resolved}")
-    except Exception as e:
-        console.print(f"  [yellow]Warning: Call resolution failed: {e}[/]")
+        console.print("\n  [bold]Call Resolution[/]")
+        try:
+            total_calls, import_resolved, type_resolved = resolve_all_calls(
+                es_repo,
+                manifest.scope,
+                manifest.repository,
+                manifest.username,
+            )
+            total_resolved = import_resolved + type_resolved
+            console.print(f"  Full pass: {total_resolved}/{total_calls} resolved")
+            console.print(f"    via imports: {import_resolved}, via type annotations: {type_resolved}")
+        except Exception as e:
+            console.print(f"  [yellow]Warning: Call resolution failed: {e}[/]")
+    else:
+        console.print("\n  [dim]Call resolution skipped (--skip-resolve)[/]")
 
     # Total deleted = from deleted files + stale elements from modified files
     total_deleted = deleted_from_files + result.elements_deleted

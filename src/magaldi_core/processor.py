@@ -1513,7 +1513,12 @@ def process_elements(
 
             if not future_to_element:
                 # No futures pending and not complete - shouldn't happen
-                # but break to avoid infinite loop
+                # Store diagnostic info in result for the CLI to display
+                result.errors.append(
+                    f"Processing stalled: no ready elements. "
+                    f"pending={dependency_tracker.pending_count()}, "
+                    f"tier_changing={dependency_tracker.is_tier_changing()}"
+                )
                 break
 
             # Wait for at least one to complete

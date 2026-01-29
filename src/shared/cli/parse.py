@@ -39,13 +39,14 @@ if TYPE_CHECKING:
 @click.option("--skip-ai", is_flag=True, help="Skip AI processing (summarization and embedding)")
 @click.option("--skip-features", is_flag=True, help="Skip feature extraction after processing")
 @click.option("--skip-tests", is_flag=True, help="Skip test files and directories")
+@click.option("--skip-resolve", is_flag=True, help="Skip call resolution phase (faster for large repos)")
 @click.option("--dry-run", is_flag=True, help="Use in-memory storage (no database required)")
 @click.option("--llm-url", default=None, help="LLM API URL (default: from config)")
 @click.option("--workers", "-w", default=0, type=int, help="Max parallel workers (0=auto based on context tier)")
 @click.option("--force-clean", is_flag=True, help="Delete all indexed data for this repo/user before parsing")
 def parse(
-    repo_path: str, user: str, skip_ai: bool, skip_features: bool, skip_tests: bool, dry_run: bool,
-    llm_url: str | None, workers: int, force_clean: bool
+    repo_path: str, user: str, skip_ai: bool, skip_features: bool, skip_tests: bool, skip_resolve: bool,
+    dry_run: bool, llm_url: str | None, workers: int, force_clean: bool
 ) -> None:
     """Parse a repository and index its code elements.
 
@@ -110,7 +111,7 @@ def parse(
         # Phase 4: Processing (summarize -> embed -> index)
         console.print("\n[bold blue]Phase 4:[/] Processing")
         processed, skipped, indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, failed_elements, deleted = run_processing(
-            parsing_result, manifest, config, dry_run, skip_ai, workers
+            parsing_result, manifest, config, dry_run, skip_ai, workers, skip_resolve
         )
         print_processing_result(processed, skipped, indexed, skip_ai, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, workers, deleted)
         # Display errors if any
