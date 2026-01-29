@@ -23,6 +23,108 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def resolve_all_calls(
+    es: ElasticsearchRepository,
+    scope: str,
+    repository: str,
+    username: str = "main",
+) -> tuple[int, int, int]:
+    """Full call resolution pass - re-resolves ALL calls in the repository.
+
+    Used during partial parsing to ensure call graphs are complete even when
+    only some files were re-parsed. Clears existing resolved_ids and re-resolves
+    to handle renamed/moved functions.
+
+    Args:
+        es: Elasticsearch repository instance.
+        scope: Repository scope.
+        repository: Repository name.
+        username: Username branch.
+
+    Returns:
+        Tuple of (total_calls_processed, import_resolved, type_resolved).
+    """
+    total_processed = 0
+    import_resolved = 0
+    type_resolved = 0
+
+    # Get ALL elements with calls (not just unresolved)
+    elements = es.find_all_elements_with_calls(scope, repository, username)
+    logger.info(f"Full resolution: found {len(elements)} elements with calls")
+
+    for elem in elements:
+        element_id = elem.get("element_id", "")
+        relative_path = elem.get("relative_path", "")
+        parameters = elem.get("parameters", [])
+
+        # Build param type map for type-based resolution
+        param_types: dict[str, str] = {}
+        if parameters:
+            for p in parameters:
+                if p.get("type"):
+                    param_types[p["name"]] = p["type"]
+
+        # Get file's imports
+        file_imports = es.get_file_imports(relative_path, scope, repository, username)
+        import_map = _build_import_map(file_imports) if file_imports else {}
+
+        calls = elem.get("calls", [])
+        updated = False
+
+        for call in calls:
+            total_processed += 1
+            receiver = call.get("receiver")
+            name = call.get("name")
+            category = call.get("category", "unknown")
+
+            # Clear existing resolved_id to re-resolve
+            old_resolved_id = call.get("resolved_id")
+            resolved_id = None
+
+            # Strategy 3: Bare call matching an import
+            if receiver is None and name in import_map:
+                import_info = import_map[name]
+                resolved_id = _lookup_element_by_import(
+                    es, import_info, name, scope, repository, username
+                )
+                if resolved_id:
+                    import_resolved += 1
+
+            # Strategy 4: Method call on imported module
+            elif receiver and receiver in import_map:
+                import_info = import_map[receiver]
+                resolved_id = _lookup_element_by_import(
+                    es, import_info, name, scope, repository, username
+                )
+                if resolved_id:
+                    import_resolved += 1
+
+            # Strategy 5: Type-annotated method call
+            elif receiver and category == "type_resolvable" and receiver in param_types:
+                type_name = param_types[receiver]
+                resolved_id = _lookup_method_by_type(
+                    es, type_name, name, scope, repository, username
+                )
+                if resolved_id:
+                    type_resolved += 1
+                    call["category"] = "resolved"
+
+            # Update if changed
+            if resolved_id != old_resolved_id:
+                call["resolved_id"] = resolved_id
+                updated = True
+
+        if updated:
+            es.store_calls(element_id, calls)
+
+    total_resolved = import_resolved + type_resolved
+    logger.info(
+        f"Full resolution: resolved {total_resolved}/{total_processed} calls "
+        f"({import_resolved} via imports, {type_resolved} via type annotations)"
+    )
+    return total_processed, import_resolved, type_resolved
+
+
 def resolve_cross_file_calls(
     es: ElasticsearchRepository,
     scope: str,
@@ -33,6 +135,9 @@ def resolve_cross_file_calls(
 
     This is Phase 2 of call resolution, run after all files are parsed and stored.
     It uses import information and type annotations to resolve calls.
+
+    NOTE: For partial parsing (only changed files), use resolve_all_calls() instead
+    to ensure call graphs are complete.
 
     Args:
         es: Elasticsearch repository instance.

@@ -374,23 +374,23 @@ def run_processing(
     api_processed = result.elements_processed - result.elements_skipped
     avg_wall = elapsed / api_processed if api_processed > 0 else 0.0
 
-    # Phase 2 call resolution: resolve cross-file calls using imports and type annotations
-    if result.indexed > 0:
-        from magaldi_core.call_resolution import resolve_cross_file_calls
+    # Full call resolution: resolve ALL calls using imports and type annotations
+    # This runs even for partial parsing to ensure call graphs are complete
+    from magaldi_core.call_resolution import resolve_all_calls
 
-        console.print("\n  [bold]Call Resolution[/]")
-        try:
-            total_calls, import_resolved, type_resolved = resolve_cross_file_calls(
-                es_repo,
-                manifest.scope,
-                manifest.repository,
-                manifest.username,
-            )
-            total_resolved = import_resolved + type_resolved
-            console.print(f"  Cross-file: {total_resolved}/{total_calls} resolved")
-            console.print(f"    via imports: {import_resolved}, via type annotations: {type_resolved}")
-        except Exception as e:
-            console.print(f"  [yellow]Warning: Call resolution failed: {e}[/]")
+    console.print("\n  [bold]Call Resolution[/]")
+    try:
+        total_calls, import_resolved, type_resolved = resolve_all_calls(
+            es_repo,
+            manifest.scope,
+            manifest.repository,
+            manifest.username,
+        )
+        total_resolved = import_resolved + type_resolved
+        console.print(f"  Full pass: {total_resolved}/{total_calls} resolved")
+        console.print(f"    via imports: {import_resolved}, via type annotations: {type_resolved}")
+    except Exception as e:
+        console.print(f"  [yellow]Warning: Call resolution failed: {e}[/]")
 
     # Total deleted = from deleted files + stale elements from modified files
     total_deleted = deleted_from_files + result.elements_deleted

@@ -389,6 +389,18 @@ class ElasticsearchRepository:
             module, scope, repository, username, limit
         )
 
+    def find_all_elements_with_calls(
+        self,
+        scope: str,
+        repository: str,
+        username: str = "main",
+        limit: int = 10000,
+    ) -> list[dict]:
+        """Find all elements that have any calls (resolved or unresolved)."""
+        return self._search.find_all_elements_with_calls(
+            scope, repository, username, limit
+        )
+
     def find_elements_with_unresolved_calls(
         self,
         scope: str,

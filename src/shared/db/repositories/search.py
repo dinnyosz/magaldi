@@ -504,6 +504,54 @@ class SearchRepository:
 
         return [hit["_source"] for hit in result.get("hits", {}).get("hits", [])]
 
+    def find_all_elements_with_calls(
+        self,
+        scope: str,
+        repository: str,
+        username: str = "main",
+        limit: int = 10000,
+    ) -> list[dict]:
+        """Find all elements that have any calls (resolved or unresolved).
+
+        Used for full call resolution pass during partial parsing.
+
+        Args:
+            scope: Repository scope.
+            repository: Repository name.
+            username: Username branch.
+            limit: Maximum results to return.
+
+        Returns:
+            List of element documents with calls.
+        """
+        query: dict[str, Any] = {
+            "bool": {
+                "must": [
+                    {"term": {"scope": scope}},
+                    {"term": {"repository": repository}},
+                    {"term": {"username": username}},
+                    {"exists": {"field": "calls"}},
+                ],
+            }
+        }
+
+        client = self._get_client()
+        result = client.search(
+            index=INDEX_NAME,
+            body={
+                "query": query,
+                "size": limit,
+                "_source": [
+                    "element_id",
+                    "relative_path",
+                    "parameters",
+                    "calls",
+                ],
+            },
+        )
+
+        return [hit["_source"] for hit in result.get("hits", {}).get("hits", [])]
+
     def find_elements_with_unresolved_calls(
         self,
         scope: str,
