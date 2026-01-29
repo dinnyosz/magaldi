@@ -204,8 +204,31 @@ def compute_throttle_decision(
     Returns:
         ThrottleDecision with recommended action
     """
-    # No data yet - normal operation
-    if completion_count < 3:
+    # Emergency check FIRST - if any active task is near timeout, throttle hard
+    # This applies even without completion history
+    max_ratio = current_max_runtime / tier_timeout if tier_timeout > 0 else 0.0
+    if max_ratio >= 0.80:
+        return ThrottleDecision(
+            should_throttle=True,
+            current_max=current_max_runtime,
+            historical_max=0,
+            completed_avg=current_max_runtime,
+            recommended_workers=1,
+            reason="Emergency (>80% timeout)",
+        )
+
+    # Use high-load avg runtime if we have completion data
+    historical_avg = high_load_avg_runtime if high_load_avg_runtime > 0 else avg_runtime
+
+    # CRITICAL: Proactive throttling based on current running times
+    # If tasks are running slow NOW, throttle immediately - don't wait for completions
+    # Use the MAX of: historical avg (from completions) and current_max_runtime (from running tasks)
+    if current_max_runtime > 0:
+        effective_avg = max(historical_avg, current_max_runtime)
+    elif completion_count >= 3:
+        effective_avg = historical_avg
+    else:
+        # No running tasks, no completion history - can't throttle yet
         return ThrottleDecision(
             should_throttle=False,
             current_max=current_max_runtime,
@@ -214,22 +237,6 @@ def compute_throttle_decision(
             recommended_workers=base_workers,
             reason="No data",
         )
-
-    # Emergency check - if any active task is near timeout, throttle hard
-    max_ratio = current_max_runtime / tier_timeout if tier_timeout > 0 else 0.0
-    if max_ratio >= 0.80:
-        return ThrottleDecision(
-            should_throttle=True,
-            current_max=current_max_runtime,
-            historical_max=0,
-            completed_avg=avg_runtime,
-            recommended_workers=1,
-            reason="Emergency (>80% timeout)",
-        )
-
-    # Use high-load avg runtime for throttling if available, otherwise fall back to overall avg
-    # This ensures we throttle based on what happens under load, not during ramp-up
-    effective_avg = high_load_avg_runtime if high_load_avg_runtime > 0 else avg_runtime
 
     # Calculate optimal workers: (timeout * safety_margin) / effective_avg
     # Safety margin accounts for variance in task runtimes under concurrency

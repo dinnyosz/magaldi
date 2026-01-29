@@ -110,8 +110,13 @@ class TestComputeThrottleDecision:
         assert decision.recommended_workers == 8
         assert decision.reason == "No data"
 
-    def test_few_completions_returns_normal(self):
-        """With fewer than 3 completions, should return normal."""
+    def test_proactive_throttle_with_running_tasks(self):
+        """With current_max_runtime > 0, uses running task data for decision.
+
+        This is proactive throttling: we don't wait for completions if we
+        can see that running tasks are taking time.
+        """
+        # current_max=10s, effective_timeout=126s → optimal=12 workers (capped at 8)
         decision = compute_throttle_decision(
             current_max_runtime=10.0,
             tier_timeout=180.0,
@@ -119,7 +124,22 @@ class TestComputeThrottleDecision:
             active_workers=4,
             throughput=1.0,
             avg_runtime=5.0,
-            completion_count=2,
+            completion_count=2,  # Few completions, but we have running task data
+        )
+        assert not decision.should_throttle
+        assert decision.recommended_workers == 8
+        assert decision.reason == "Normal"  # Not "No data" - we have running task info
+
+    def test_no_data_without_running_tasks(self):
+        """With no running tasks AND few completions, returns 'No data'."""
+        decision = compute_throttle_decision(
+            current_max_runtime=0.0,  # No running tasks
+            tier_timeout=180.0,
+            base_workers=8,
+            active_workers=0,
+            throughput=0.0,
+            avg_runtime=5.0,
+            completion_count=2,  # Few completions
         )
         assert not decision.should_throttle
         assert decision.recommended_workers == 8
@@ -227,7 +247,9 @@ class TestComputeThrottleDecision:
             completion_count=10,
         )
         assert decision.current_max == 45.2
-        assert decision.completed_avg == 3.5
+        # completed_avg is now max(historical_avg, current_max) for proactive throttling
+        # With current_max=45.2 and avg_runtime=3.5, effective_avg=45.2
+        assert decision.completed_avg == 45.2
 
 
 class TestThrottleDecisionDataclass:
