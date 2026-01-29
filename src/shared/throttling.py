@@ -107,16 +107,25 @@ def compute_throttle_decision(
     historical_max_runtime: float,
     tier_timeout: float,
     base_workers: int,
+    avg_runtime: float = 0.0,
+    active_count: int = 0,
 ) -> ThrottleDecision:
     """Determine if throttling should be applied based on runtimes.
 
-    Uses a graduated approach with more granular levels:
-    - >= 80% of timeout: Critical, reduce to 25% workers
-    - >= 65% of timeout: High, reduce to 40% workers
-    - >= 50% of timeout: Elevated, reduce to 55% workers
-    - >= 35% of timeout: Moderate, reduce to 70% workers
-    - >= 20% of timeout: Light, reduce to 85% workers
-    - < 20%: Normal operation
+    Uses a graduated approach considering both max and average runtimes.
+    When multiple workers are running hot (high average), throttling is
+    more aggressive.
+
+    Thresholds (based on effective ratio = max_ratio + pressure_boost):
+    - >= 60% of timeout: Critical, reduce to 20% workers
+    - >= 45% of timeout: High, reduce to 35% workers
+    - >= 30% of timeout: Elevated, reduce to 50% workers
+    - >= 20% of timeout: Moderate, reduce to 65% workers
+    - >= 10% of timeout: Light, reduce to 80% workers
+    - < 10%: Normal operation
+
+    Pressure boost: When avg_ratio > 15% and multiple workers active,
+    adds up to 20% to effective ratio (more aggressive throttling).
 
     Always ensures at least 1 worker.
 
@@ -125,6 +134,8 @@ def compute_throttle_decision(
         historical_max_runtime: Max from historical 10s windows
         tier_timeout: Timeout for this tier (e.g., 180s for summarize)
         base_workers: Original max workers
+        avg_runtime: Average runtime of active workers (optional)
+        active_count: Number of active workers (optional)
 
     Returns:
         ThrottleDecision with recommended action
@@ -142,11 +153,33 @@ def compute_throttle_decision(
             reason="No data",
         )
 
-    ratio = effective_max / tier_timeout
+    max_ratio = effective_max / tier_timeout
+    avg_ratio = avg_runtime / tier_timeout if avg_runtime > 0 else 0.0
 
-    if ratio >= 0.8:  # >= 80% of timeout
-        # Critical: reduce to 25% workers
-        workers = max(1, int(base_workers * 0.25))
+    # Calculate pressure boost based on average and worker count
+    # If many workers are running hot (avg > 15% of timeout), increase effective ratio
+    pressure_boost = 0.0
+    if avg_ratio > 0.15 and active_count >= 3:
+        # Scale boost by how hot the average is and how many workers
+        # Max boost is 0.20 (20% added to ratio)
+        avg_factor = min(1.0, (avg_ratio - 0.15) / 0.35)  # 0 at 15%, 1 at 50%
+        count_factor = min(1.0, active_count / 10)  # 0 at 0, 1 at 10+ workers
+        pressure_boost = 0.20 * avg_factor * count_factor
+
+    effective_ratio = max_ratio + pressure_boost
+
+    if effective_ratio >= 0.70:  # >= 70% of timeout
+        # Extreme: absolute minimum of 1 worker
+        return ThrottleDecision(
+            should_throttle=True,
+            current_max=current_max_runtime,
+            historical_max=historical_max_runtime,
+            recommended_workers=1,
+            reason="Extreme throttling",
+        )
+    elif effective_ratio >= 0.55:  # >= 55% of timeout
+        # Critical: max 2 workers
+        workers = min(2, max(1, int(base_workers * 0.10)))
         return ThrottleDecision(
             should_throttle=True,
             current_max=current_max_runtime,
@@ -154,9 +187,9 @@ def compute_throttle_decision(
             recommended_workers=workers,
             reason="Critical throttling",
         )
-    elif ratio >= 0.65:  # >= 65% of timeout
-        # High: reduce to 40% workers
-        workers = max(1, int(base_workers * 0.40))
+    elif effective_ratio >= 0.40:  # >= 40% of timeout
+        # High: max 4 workers or 15%
+        workers = min(4, max(1, int(base_workers * 0.15)))
         return ThrottleDecision(
             should_throttle=True,
             current_max=current_max_runtime,
@@ -164,9 +197,9 @@ def compute_throttle_decision(
             recommended_workers=workers,
             reason="High throttling",
         )
-    elif ratio >= 0.50:  # >= 50% of timeout
-        # Elevated: reduce to 55% workers
-        workers = max(1, int(base_workers * 0.55))
+    elif effective_ratio >= 0.30:  # >= 30% of timeout
+        # Elevated: max 8 workers or 25%
+        workers = min(8, max(1, int(base_workers * 0.25)))
         return ThrottleDecision(
             should_throttle=True,
             current_max=current_max_runtime,
@@ -174,9 +207,9 @@ def compute_throttle_decision(
             recommended_workers=workers,
             reason="Elevated throttling",
         )
-    elif ratio >= 0.35:  # >= 35% of timeout
-        # Moderate: reduce to 70% workers
-        workers = max(1, int(base_workers * 0.70))
+    elif effective_ratio >= 0.20:  # >= 20% of timeout
+        # Moderate: 40% workers
+        workers = max(1, int(base_workers * 0.40))
         return ThrottleDecision(
             should_throttle=True,
             current_max=current_max_runtime,
@@ -184,9 +217,9 @@ def compute_throttle_decision(
             recommended_workers=workers,
             reason="Moderate throttling",
         )
-    elif ratio >= 0.20:  # >= 20% of timeout
-        # Light: reduce to 85% workers
-        workers = max(1, int(base_workers * 0.85))
+    elif effective_ratio >= 0.10:  # >= 10% of timeout
+        # Light: 60% workers
+        workers = max(1, int(base_workers * 0.60))
         return ThrottleDecision(
             should_throttle=True,
             current_max=current_max_runtime,
