@@ -110,17 +110,21 @@ def compute_throttle_decision(
 ) -> ThrottleDecision:
     """Determine if throttling should be applied based on runtimes.
 
-    Uses a tiered approach:
+    Uses a graduated approach with more granular levels:
     - >= 80% of timeout: Critical, reduce to 25% workers
-    - >= 50% of timeout: Warning, reduce to 50% workers
-    - >= 30% of timeout: Caution, reduce to 75% workers
-    - < 30%: Normal operation
+    - >= 65% of timeout: High, reduce to 40% workers
+    - >= 50% of timeout: Elevated, reduce to 55% workers
+    - >= 35% of timeout: Moderate, reduce to 70% workers
+    - >= 20% of timeout: Light, reduce to 85% workers
+    - < 20%: Normal operation
+
+    Always ensures at least 1 worker.
 
     Args:
         current_max_runtime: Max runtime of currently active workers
         historical_max_runtime: Max from historical 10s windows
         tier_timeout: Timeout for this tier (e.g., 180s for summarize)
-        base_workers: Original max workers for this tier
+        base_workers: Original max workers
 
     Returns:
         ThrottleDecision with recommended action
@@ -134,47 +138,67 @@ def compute_throttle_decision(
             should_throttle=False,
             current_max=0,
             historical_max=0,
-            recommended_workers=base_workers,
+            recommended_workers=max(1, base_workers),
             reason="No data",
         )
 
     ratio = effective_max / tier_timeout
 
     if ratio >= 0.8:  # >= 80% of timeout
-        # Critical: reduce to 25% workers (minimum 1)
-        workers = max(1, base_workers // 4)
+        # Critical: reduce to 25% workers
+        workers = max(1, int(base_workers * 0.25))
         return ThrottleDecision(
             should_throttle=True,
             current_max=current_max_runtime,
             historical_max=historical_max_runtime,
             recommended_workers=workers,
-            reason=f"Critical: {ratio:.0%} of timeout",
+            reason="Critical throttling",
         )
-    elif ratio >= 0.5:  # >= 50% of timeout
-        # Warning: reduce to 50% workers
-        workers = max(1, base_workers // 2)
+    elif ratio >= 0.65:  # >= 65% of timeout
+        # High: reduce to 40% workers
+        workers = max(1, int(base_workers * 0.40))
         return ThrottleDecision(
             should_throttle=True,
             current_max=current_max_runtime,
             historical_max=historical_max_runtime,
             recommended_workers=workers,
-            reason=f"Warning: {ratio:.0%} of timeout",
+            reason="High throttling",
         )
-    elif ratio >= 0.3:  # >= 30% of timeout
-        # Caution: reduce to 75% workers
-        workers = max(1, int(base_workers * 0.75))
+    elif ratio >= 0.50:  # >= 50% of timeout
+        # Elevated: reduce to 55% workers
+        workers = max(1, int(base_workers * 0.55))
         return ThrottleDecision(
             should_throttle=True,
             current_max=current_max_runtime,
             historical_max=historical_max_runtime,
             recommended_workers=workers,
-            reason=f"Caution: {ratio:.0%} of timeout",
+            reason="Elevated throttling",
+        )
+    elif ratio >= 0.35:  # >= 35% of timeout
+        # Moderate: reduce to 70% workers
+        workers = max(1, int(base_workers * 0.70))
+        return ThrottleDecision(
+            should_throttle=True,
+            current_max=current_max_runtime,
+            historical_max=historical_max_runtime,
+            recommended_workers=workers,
+            reason="Moderate throttling",
+        )
+    elif ratio >= 0.20:  # >= 20% of timeout
+        # Light: reduce to 85% workers
+        workers = max(1, int(base_workers * 0.85))
+        return ThrottleDecision(
+            should_throttle=True,
+            current_max=current_max_runtime,
+            historical_max=historical_max_runtime,
+            recommended_workers=workers,
+            reason="Light throttling",
         )
     else:
         return ThrottleDecision(
             should_throttle=False,
             current_max=current_max_runtime,
             historical_max=historical_max_runtime,
-            recommended_workers=base_workers,
+            recommended_workers=max(1, base_workers),
             reason="Normal",
         )

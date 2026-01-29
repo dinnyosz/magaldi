@@ -22,7 +22,6 @@ from rich.progress import (
 from rich.table import Table
 from rich.text import Text
 
-from shared.ai.context_size import TIER_MAX_WORKERS
 from shared.cli._shared import console, format_duration, get_model_column_width
 
 if TYPE_CHECKING:
@@ -148,7 +147,8 @@ def run_processing(
             )
             deleted_from_files += count
 
-    from shared.ai.context_size import TIER_MAX_WORKERS
+    # Default worker count (matches DependencyTracker.DEFAULT_WORKERS)
+    DEFAULT_WORKERS = 8
 
     proc_config = ProcessingConfig(
         summarize_model=config.llm.get_summarize_model(),
@@ -158,8 +158,8 @@ def run_processing(
         num_workers=workers,
     )
 
-    # Calculate actual max workers for display (0 = auto from tier defaults)
-    display_workers = workers if workers > 0 else max(TIER_MAX_WORKERS.values())
+    # Calculate actual max workers for display (0 = use default)
+    display_workers = workers if workers > 0 else DEFAULT_WORKERS
 
     # Pass context sizes from parsing to processing (for KV cache optimization)
     proc_config.context_sizes = parsing_result.context_sizes
@@ -257,46 +257,35 @@ def run_processing(
         code_emb = state.timing.avg_code_embed_time
         stats = f"  [dim]Throughput:[/] [green]{effective_wall:.2f}s[/]/item [dim]|[/] [dim]API:[/] [green]{total_api:.1f}s[/]/item [dim]([/][green]{state.timing.avg_summarize_time:.1f}s[/] summ + [cyan]{summ_emb:.1f}s[/] summ_emb + [cyan]{code_emb:.1f}s[/] code_emb[dim])[/]"
 
-        # Parallelism stats (compact, next to throughput)
-        # Use fresh running count from workers_data (already fetched above)
+        # Parallelism stats: running/allowed/baseline (info)
+        # - running: current non-idle threads
+        # - allowed: current max (may be reduced by throttling or warmup)
+        # - baseline: configured max workers
         running_count = len(workers_data)
+        parallelism = state.parallelism
+        baseline = num_workers
 
-        # Check if all workers are on the same context tier
-        # Filter out "-" (used during embed stage) and empty strings
-        ctx_sizes = {data[3] for data in workers_data.values() if data[3] and data[3] != "-" and data[3].endswith("K")}
-        if len(ctx_sizes) == 1:
-            # All on same tier - show tier-specific stats with throttle info
-            ctx_str = ctx_sizes.pop()  # e.g., "2K", "4K"
-            try:
-                ctx_int = int(ctx_str.rstrip("K")) * 1024  # "4K" -> 4096
-                tier_limit = TIER_MAX_WORKERS.get(ctx_int, num_workers)
-
-                # Check for runtime-based throttling
-                parallelism = state.parallelism
-                if parallelism and parallelism.throttle_decision and parallelism.throttle_decision.should_throttle:
-                    # Show throttled state with effective limit
-                    effective = parallelism.throttle_decision.recommended_workers
-                    stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[red]{effective}[/]"
-                    stats += f" [dim]([/][red]throttled: {parallelism.throttle_decision.reason}[/][dim])[/]"
-                elif parallelism and parallelism.tier_changing:
-                    # Waiting for tier change
-                    stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[yellow]0[/]"
-                    stats += f" [dim]([/][yellow]tier changing...[/][dim])[/]"
-                else:
-                    throttled = num_workers - tier_limit
-                    stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[cyan]{tier_limit}[/]"
-                    if throttled > 0:
-                        stats += f" [dim]([/][yellow]{throttled} throttled[/][dim])[/]"
-            except ValueError:
-                # Fallback if parsing fails
-                stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[cyan]{num_workers}[/]"
+        # Determine allowed workers and status info
+        if parallelism and parallelism.tier_changing:
+            # Startup warmup: first task loading model
+            allowed = 1
+            info = "[yellow]model loading...[/]"
+        elif parallelism and parallelism.throttle_decision and parallelism.throttle_decision.should_throttle:
+            # Runtime-based throttling
+            allowed = parallelism.throttle_decision.recommended_workers
+            info = f"[yellow]{parallelism.throttle_decision.reason}[/]"
         else:
-            # Mixed tiers or no workers - just show running/max
-            parallelism = state.parallelism
-            if parallelism and parallelism.tier_changing:
-                stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[yellow]0[/] [dim]([/][yellow]tier changing...[/][dim])[/]"
-            else:
-                stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[cyan]{num_workers}[/]"
+            # Normal operation
+            allowed = baseline
+            info = None
+
+        # Format: running/allowed/baseline (info) - or just running/baseline if normal
+        if allowed < baseline:
+            stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[yellow]{allowed}[/]/[cyan]{baseline}[/]"
+            if info:
+                stats += f" [dim]([/]{info}[dim])[/]"
+        else:
+            stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[cyan]{baseline}[/]"
 
         # Show max runtime info if available
         parallelism = state.parallelism

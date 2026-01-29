@@ -39,7 +39,7 @@ from shared.ai.summarization import (
     build_prompt,
     clean_summary,
 )
-from shared.ai.context_size import compute_element_num_ctx, CONTEXT_TIERS, TIER_MAX_WORKERS
+from shared.ai.context_size import compute_element_num_ctx, CONTEXT_TIERS
 from shared.throttling import RuntimeHistory, compute_throttle_decision, ThrottleDecision
 
 
@@ -98,7 +98,7 @@ class ProcessingConfig:
     embed_max_context: int = 8192
     embed_timeout: int = 120  # 2 minutes for embedding batches
 
-    # Parallel processing (0 = use tier-based defaults from TIER_MAX_WORKERS)
+    # Parallel processing (0 = use default of 8 workers)
     num_workers: int = 0
 
     # Context sizes per element type (for LLM num_ctx parameter)
@@ -460,14 +460,15 @@ class DependencyTracker:
     - Level 2 (methods/functions): Ready when parent class done (or file if no class)
     - Level 3 (variables): Ready when parent done
 
-    Tier batching: All workers process the same context tier together to minimize
-    model reloads. Only moves to next tier when current tier has no ready elements.
-
-    Dynamic worker scaling: Smaller context tiers allow more parallel workers since
-    they use less GPU memory. Larger tiers are limited to prevent OOM/slowdowns.
-
-    Uses CONTEXT_TIERS and TIER_MAX_WORKERS from shared.ai.context_size.
+    Batching strategy:
+    - First by hierarchy level (files → classes → methods) to minimize model swaps
+    - Then by context tier within each level to optimize KV cache
+    - Drains current tasks when level changes (different models)
+    - Startup warmup limits to 1 task for initial model load
     """
+
+    # Default worker count when not specified by user
+    DEFAULT_WORKERS = 8
 
     def __init__(
         self,
@@ -483,15 +484,35 @@ class DependencyTracker:
         self._in_progress: set[str] = set()
         self._context_sizes = context_sizes or {}
         self._current_tier: int | None = None  # Current tier all workers use
+        self._current_level: int | None = None  # Current hierarchy level
         self._previous_tier: int | None = None  # Previous tier (to detect changes)
-        self._tier_changing: bool = False  # True when waiting for tier change
-        self._max_num_workers = max_num_workers  # User-configured upper limit (None = use tier defaults)
+        self._tier_changing: bool = False  # True during startup warmup
+        # Use provided workers or default
+        self._max_num_workers = max_num_workers if max_num_workers else self.DEFAULT_WORKERS
         self._timeout = timeout  # Timeout for throttle calculations
 
         # Build parent lookup: element_id -> parent_element_id
         self._parents: dict[str, str | None] = {}
         for e in elements:
             self._parents[e.element_id] = e.parent_id
+
+    def _get_level(self, element: CodeElement) -> int:
+        """Get hierarchy level from element type.
+
+        Level 0: files
+        Level 1: classes
+        Level 2: functions, methods
+        Level 3: variables, constants
+        """
+        level_map = {
+            "file": 0,
+            "class": 1,
+            "function": 2,
+            "method": 2,
+            "variable": 3,
+            "constant": 3,
+        }
+        return level_map.get(element.element_type, 2)
 
     def _get_tier(self, element_id: str) -> int:
         """Get the context tier for an element (snaps to standard tiers)."""
@@ -534,79 +555,88 @@ class DependencyTracker:
         Only moves to next tier when current tier has no ready elements.
         This minimizes Ollama model reloads.
 
-        Dynamic worker scaling: Returns fewer elements for larger tiers to limit
-        concurrent GPU memory usage (see TIER_MAX_WORKERS).
+        Throttling:
+        - Runtime-based throttle_limit reduces workers when approaching timeout
+        - Tier warmup limits to 1 task during model transitions
 
         Args:
             max_count: Maximum elements to return.
-            throttle_limit: If set, overrides tier limit for throttling.
+            throttle_limit: If set, reduces worker limit for runtime throttling.
         """
         with self._lock:
-            # If tier is changing, wait for all in-progress to complete
-            if self._tier_changing:
-                if len(self._in_progress) == 0:
-                    # All done, tier change complete
-                    self._tier_changing = False
-                else:
-                    # Still waiting for current tasks to finish
-                    return []
+            # Clear warmup flag once we have tasks running
+            # Warmup is only for the very first task to load the model
+            if self._tier_changing and len(self._in_progress) == 0 and len(self._completed) > 0:
+                self._tier_changing = False
 
             ready = self._get_all_ready()
             if not ready:
+                with open("/tmp/magaldi_debug.log", "a") as f:
+                    f.write(f"DEBUG get_ready: no ready elements, elements={len(self._elements)}, completed={len(self._completed)}, in_progress={len(self._in_progress)}\n")
                 return []
 
-            # Group ready elements by tier
-            by_tier: dict[int, list[CodeElement]] = {}
+            # Group ready elements by hierarchy level first (to batch by model),
+            # then by context tier within each level
+            # Level 0 = files, Level 1 = classes, Level 2 = functions/methods
+            # Files/classes typically use large model, methods use small model
+            by_level: dict[int, list[CodeElement]] = {}
             for elem in ready:
+                level = self._get_level(elem)
+                by_level.setdefault(level, []).append(elem)
+
+            # Pick lowest level that has ready elements (files before classes before methods)
+            new_level = min(by_level.keys())
+
+            # Drain on level change: different levels often use different models
+            # Wait for current tasks to finish before switching levels
+            if self._current_level is not None and new_level != self._current_level:
+                if len(self._in_progress) > 0:
+                    return []  # Drain: wait for current tasks to finish
+
+            self._current_level = new_level
+            level_ready = by_level[new_level]
+
+            # Within the level, group by tier
+            by_tier: dict[int, list[CodeElement]] = {}
+            for elem in level_ready:
                 tier = self._get_tier(elem.element_id)
                 by_tier.setdefault(tier, []).append(elem)
 
-            # Determine which tier to use
+            # Determine which tier to use - prefer current tier if it has ready elements
             if self._current_tier is not None and self._current_tier in by_tier:
-                # Continue with current tier if it has ready elements
                 tier = self._current_tier
             else:
                 # Move to smallest tier that has ready elements
                 new_tier = min(by_tier.keys())
 
-                # Detect tier change - includes starting from nothing (None -> tier)
-                # This allows the model to load before starting multiple concurrent tasks
-                if new_tier != self._current_tier:
-                    # Tier is changing - don't start new tasks until current ones complete
-                    if len(self._in_progress) > 0:
-                        self._tier_changing = True
-                        self._previous_tier = self._current_tier
-                        return []
-                    # Starting fresh or all previous tasks done - limit to 1 task
-                    # to let model load before ramping up concurrency
-                    if self._current_tier is None or len(self._in_progress) == 0:
-                        self._tier_changing = True  # Will clear after first task completes
+                # Startup warmup only: limit to 1 task on very first batch
+                if self._current_tier is None:
+                    self._tier_changing = True
 
                 self._previous_tier = self._current_tier
                 self._current_tier = new_tier
                 tier = new_tier
 
-            # Apply tier-specific worker limit (dynamic scaling)
-            # Count how many of this tier are already in progress
-            tier_limit = TIER_MAX_WORKERS.get(tier, 4)
-            # Apply user's max_num_workers cap if set
-            if self._max_num_workers is not None:
-                tier_limit = min(tier_limit, self._max_num_workers)
+            # Worker limit: start with configured max, apply throttling
+            worker_limit = self._max_num_workers
 
-            # Apply throttle limit if set (overrides tier limit)
+            # Apply runtime-based throttle limit if set
             if throttle_limit is not None:
-                tier_limit = min(tier_limit, throttle_limit)
+                worker_limit = min(worker_limit, throttle_limit)
 
             # When tier is changing (including startup), limit to 1 task
             # to let model load before ramping up concurrency
             if self._tier_changing:
-                tier_limit = 1
+                worker_limit = 1
+
+            # Ensure at least 1 worker always
+            worker_limit = max(1, worker_limit)
 
             tier_in_progress = sum(
                 1 for eid in self._in_progress if self._get_tier(eid) == tier
             )
-            # Only return enough to reach tier limit, not add to it
-            slots_available = max(0, tier_limit - tier_in_progress)
+            # Only return enough to reach worker limit, not add to it
+            slots_available = max(0, worker_limit - tier_in_progress)
             effective_limit = min(max_count, slots_available)
 
             # Get elements from current tier only
@@ -619,15 +649,24 @@ class DependencyTracker:
             return tier_ready
 
     def is_tier_changing(self) -> bool:
-        """Check if we're waiting for tier change to complete."""
+        """Check if we're in startup warmup (first task loading model)."""
         with self._lock:
             return self._tier_changing
+
+    def get_current_level(self) -> int | None:
+        """Get the current hierarchy level being processed."""
+        with self._lock:
+            return self._current_level
 
     def mark_complete(self, element_id: str) -> None:
         """Mark element as completed."""
         with self._lock:
             self._in_progress.discard(element_id)
             self._completed.add(element_id)
+            # Clear warmup flag once first task completes and nothing else running
+            # This ensures flag is cleared immediately, not waiting for get_ready_elements
+            if self._tier_changing and len(self._in_progress) == 0 and len(self._completed) > 0:
+                self._tier_changing = False
 
     def mark_failed(self, element_id: str) -> None:
         """Mark element as failed (won't block children)."""
@@ -651,16 +690,9 @@ class DependencyTracker:
             return self._current_tier
 
     def get_current_max_workers(self) -> int:
-        """Get max workers for the current tier (for status display)."""
+        """Get max workers (for status display)."""
         with self._lock:
-            if self._current_tier is None:
-                tier_limit = TIER_MAX_WORKERS.get(CONTEXT_TIERS[0], 8)
-            else:
-                tier_limit = TIER_MAX_WORKERS.get(self._current_tier, 4)
-            # Apply user's max_num_workers cap if set
-            if self._max_num_workers is not None:
-                return min(tier_limit, self._max_num_workers)
-            return tier_limit
+            return self._max_num_workers
 
     def get_parallelism_stats(
         self,
@@ -695,12 +727,11 @@ class DependencyTracker:
             ThrottleDecision with recommended action.
         """
         with self._lock:
-            tier_limit = self.get_current_max_workers()
             return compute_throttle_decision(
                 current_max_runtime=current_max_runtime,
                 historical_max_runtime=historical_max_runtime,
                 tier_timeout=self._timeout,
-                base_workers=tier_limit,
+                base_workers=self._max_num_workers,
             )
 
     def get_tier_stats(self) -> dict[int, tuple[int, int]]:
@@ -1356,6 +1387,10 @@ def process_elements(
         # All elements unchanged - nothing to do
         return result
 
+    # DEBUG: Show how many elements will be processed
+    with open("/tmp/magaldi_debug.log", "a") as f:
+        f.write(f"DEBUG: elements_to_process={len(elements_to_process)}, total={len(all_elements)}\n")
+
     # Summary cache for hierarchical context
     summary_cache = _SummaryCache()
 
@@ -1430,9 +1465,8 @@ def process_elements(
             # Redis unavailable - continue without tracking
             redis_tracker = None
 
-    # Worker ID pool - use configured num_workers as upper bound
-    # Tier scaling will further limit based on context size
-    max_workers = config.num_workers if config.num_workers > 0 else max(TIER_MAX_WORKERS.values())
+    # Worker ID pool - use configured num_workers or default
+    max_workers = config.num_workers if config.num_workers > 0 else DependencyTracker.DEFAULT_WORKERS
     available_worker_ids: list[int] = list(range(max_workers))
     worker_id_lock = threading.Lock()
 
@@ -1476,18 +1510,30 @@ def process_elements(
             release_worker_id(wid)
 
     # Process elements in parallel using ThreadPoolExecutor
-    # max_workers set earlier from TIER_MAX_WORKERS - tier batching in DependencyTracker
-    # limits concurrency dynamically based on context size (smaller context = more workers)
+    # DependencyTracker manages concurrency with tier batching and runtime-based throttling
     executor = ThreadPoolExecutor(max_workers=max_workers)
     future_to_element: dict = {}
 
     # Track current throttle decision for display
     current_throttle: ThrottleDecision | None = None
+    # Track when we last recorded runtime to history (for periodic updates)
+    last_history_record_time = time.time()
+    HISTORY_RECORD_INTERVAL = 10.0  # Record to history every 10 seconds
 
     try:
+        with open("/tmp/magaldi_debug.log", "a") as f:
+            f.write(f"DEBUG: Starting loop, is_complete={dependency_tracker.is_complete()}, pending={dependency_tracker.pending_count()}\n")
         while not dependency_tracker.is_complete():
             # Compute throttle decision based on current and historical runtimes
             current_max_runtime = worker_status.get_max_active_runtime()
+
+            # Periodically record current max to history (every 10s)
+            # This captures slow-running tasks that haven't completed yet
+            now = time.time()
+            if current_max_runtime > 0 and (now - last_history_record_time) >= HISTORY_RECORD_INTERVAL:
+                timing_stats.record_task_runtime(current_max_runtime)
+                last_history_record_time = now
+
             historical_max_runtime = timing_stats.get_historical_max_runtime()
             current_throttle = dependency_tracker.compute_throttle_decision(
                 current_max_runtime, historical_max_runtime
@@ -1514,6 +1560,8 @@ def process_elements(
             if not future_to_element:
                 # No futures pending and not complete - shouldn't happen
                 # Store diagnostic info in result for the CLI to display
+                with open("/tmp/magaldi_debug.log", "a") as f:
+                    f.write(f"DEBUG STALL: pending={dependency_tracker.pending_count()}, tier_changing={dependency_tracker.is_tier_changing()}, ready={len(ready_elements)}\n")
                 result.errors.append(
                     f"Processing stalled: no ready elements. "
                     f"pending={dependency_tracker.pending_count()}, "
@@ -1521,8 +1569,37 @@ def process_elements(
                 )
                 break
 
-            # Wait for at least one to complete
-            done, _ = wait(future_to_element.keys(), return_when=FIRST_COMPLETED)
+            # Wait for at least one to complete, or timeout for periodic updates
+            done, _ = wait(future_to_element.keys(), timeout=HISTORY_RECORD_INTERVAL, return_when=FIRST_COMPLETED)
+
+            # If timeout with no completions, record to history and update display
+            if not done:
+                # Record current max to history on timeout
+                fresh_current_max = worker_status.get_max_active_runtime()
+                if fresh_current_max > 0:
+                    timing_stats.record_task_runtime(fresh_current_max)
+                    last_history_record_time = time.time()
+
+                if on_progress:
+                    fresh_historical_max = timing_stats.get_historical_max_runtime()
+                    fresh_throttle = dependency_tracker.compute_throttle_decision(
+                        fresh_current_max, fresh_historical_max
+                    )
+                    progress_state = ProgressState(
+                        total=total,
+                        completed=completed_count,
+                        skipped=result.elements_skipped,
+                        failed=failed_count,
+                        timing=timing_stats,
+                        workers=worker_status,
+                        num_workers=max_workers,
+                        recent_errors=list(recent_errors),
+                        parallelism=dependency_tracker.get_parallelism_stats(
+                            max_workers, fresh_throttle
+                        ),
+                    )
+                    on_progress(progress_state)
+                continue
 
             for future in done:
                 element = future_to_element.pop(future)
@@ -1579,6 +1656,12 @@ def process_elements(
 
                 # Report progress with throttle info
                 if on_progress:
+                    # Refresh throttle decision with current max values for accurate display
+                    fresh_current_max = worker_status.get_max_active_runtime()
+                    fresh_historical_max = timing_stats.get_historical_max_runtime()
+                    fresh_throttle = dependency_tracker.compute_throttle_decision(
+                        fresh_current_max, fresh_historical_max
+                    )
                     progress_state = ProgressState(
                         total=total,
                         completed=completed_count,
@@ -1589,7 +1672,7 @@ def process_elements(
                         num_workers=max_workers,
                         recent_errors=list(recent_errors),
                         parallelism=dependency_tracker.get_parallelism_stats(
-                            max_workers, current_throttle
+                            max_workers, fresh_throttle
                         ),
                     )
                     on_progress(progress_state)
