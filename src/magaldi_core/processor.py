@@ -861,8 +861,9 @@ class DependencyTracker:
             model_changing = self._current_model is not None and selected_model != self._current_model
             tier_changing = self._current_tier is not None and selected_tier != self._current_tier
 
-            # Drain on model change: wait for current tasks to finish before switching models
-            if model_changing and len(self._in_progress) > 0:
+            # Drain on model OR tier change: wait for current tasks to finish before switching
+            # This ensures proper warmup and ramp-up for each new tier
+            if (model_changing or tier_changing) and len(self._in_progress) > 0:
                 return []  # Drain: wait for current tasks to finish
 
             # Set tier_changing flag for warmup (model change or tier change)
