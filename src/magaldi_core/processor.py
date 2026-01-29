@@ -1335,15 +1335,40 @@ def process_elements(
 
     result = ProcessingResult(scope=scope, repository=repository, username=username)
 
+    # Check for duplicate files in parsed_files
+    seen_paths: set[str] = set()
+    duplicate_paths: list[str] = []
+    for pf in parsed_files:
+        if pf.file_info.relative_path in seen_paths:
+            duplicate_paths.append(pf.file_info.relative_path)
+        seen_paths.add(pf.file_info.relative_path)
+    if duplicate_paths:
+        with open("/tmp/magaldi_file_hash.log", "a") as f:
+            f.write(f"[DUPLICATE FILES] Found {len(duplicate_paths)} duplicate file paths in parsed_files!\n")
+            for dp in duplicate_paths[:5]:
+                f.write(f"  {dp}\n")
+
     # Collect all elements and compute element counts per file
-    all_elements: list[CodeElement] = []
+    all_elements_raw: list[CodeElement] = []
     element_counts: dict[str, int] = {}
     for pf in parsed_files:
-        all_elements.extend(pf.elements)
+        all_elements_raw.extend(pf.elements)
         element_counts[pf.file_info.relative_path] = len(pf.elements)
 
-    if not all_elements:
+    if not all_elements_raw:
         return result
+
+    # Deduplicate elements by element_id (handles case where same file parsed multiple times)
+    seen_ids: set[str] = set()
+    all_elements: list[CodeElement] = []
+    for elem in all_elements_raw:
+        if elem.element_id not in seen_ids:
+            seen_ids.add(elem.element_id)
+            all_elements.append(elem)
+
+    if len(all_elements) != len(all_elements_raw):
+        with open("/tmp/magaldi_file_hash.log", "a") as f:
+            f.write(f"[DEDUP] Removed {len(all_elements_raw) - len(all_elements)} duplicate elements (had {len(all_elements_raw)}, now {len(all_elements)})\n")
 
     # Smart delete: only remove stale elements (those no longer in code)
     # For each file, compare existing ES elements with newly parsed elements
