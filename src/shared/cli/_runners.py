@@ -291,12 +291,20 @@ def run_processing(
             else:
                 # Warmup task loading model
                 info = "[yellow]model loading...[/]"
-        elif parallelism and parallelism.throttle_decision and parallelism.throttle_decision.should_throttle:
-            # Runtime-based throttling
+        elif parallelism and parallelism.throttle_decision:
+            # Always use recommended_workers - covers both throttling AND ramp-up
             allowed = parallelism.throttle_decision.recommended_workers
-            info = f"[yellow]{parallelism.throttle_decision.reason}[/]"
+            if parallelism.throttle_decision.should_throttle:
+                # Active throttling (limited by base_time)
+                info = f"[yellow]{parallelism.throttle_decision.reason}[/]"
+            elif allowed < baseline:
+                # Ramp-up in progress (not at full capacity yet)
+                info = f"[cyan]{parallelism.throttle_decision.reason}[/]"
+            else:
+                # Normal operation at full capacity
+                info = None
         else:
-            # Normal operation
+            # No throttle decision available
             allowed = baseline
             info = None
 
