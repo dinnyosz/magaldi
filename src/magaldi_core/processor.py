@@ -1368,10 +1368,18 @@ def process_elements(
     all_element_ids = list(new_element_ids)
     existing_states = es_repo.get_element_processing_state(all_element_ids)
 
+    # Debug: log state of first few elements
+    _state_logged = 0
+    with open("/tmp/magaldi_file_hash.log", "a") as f:
+        f.write(f"\n[SKIP CHECK] Total elements: {len(all_elements)}, existing states: {len(existing_states)}\n")
+
     # Filter: only process elements that are new, changed, or missing summary
     # Also track which files had skipped elements (need file_hash update)
     elements_to_process = []
     skipped_by_file: dict[str, int] = {}  # relative_path -> count of skipped elements
+    skipped_with_summary = 0
+    skipped_no_summary = 0
+    new_elements = 0
     for elem in all_elements:
         state = existing_states.get(elem.element_id)
         if state is not None:
@@ -1381,9 +1389,25 @@ def process_elements(
                 # Element exists with same content AND has summary - skip entirely
                 result.elements_skipped += 1
                 skipped_by_file[elem.relative_path] = skipped_by_file.get(elem.relative_path, 0) + 1
+                skipped_with_summary += 1
                 continue
+            elif content_unchanged and not has_summary:
+                skipped_no_summary += 1
+                if _state_logged < 3:
+                    with open("/tmp/magaldi_file_hash.log", "a") as f:
+                        f.write(f"[NEEDS SUMMARY] {elem.element_id[:60]}... (content unchanged but no summary)\n")
+                    _state_logged += 1
+        else:
+            new_elements += 1
+            if _state_logged < 3:
+                with open("/tmp/magaldi_file_hash.log", "a") as f:
+                    f.write(f"[NEW ELEMENT] {elem.element_id[:60]}... (not in ES)\n")
+                _state_logged += 1
         # Element is new OR content changed OR missing summary - needs processing
         elements_to_process.append(elem)
+
+    with open("/tmp/magaldi_file_hash.log", "a") as f:
+        f.write(f"[SKIP SUMMARY] skipped_with_summary={skipped_with_summary}, needs_summary={skipped_no_summary}, new={new_elements}, to_process={len(elements_to_process)}\n")
 
     total = len(all_elements)
 
