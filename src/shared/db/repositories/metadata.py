@@ -396,6 +396,9 @@ class MetadataRepository:
         """Get file states for change detection.
 
         Retrieves all file-level elements and their hashes.
+        Also detects orphan files (files with elements but no FILE element)
+        from interrupted runs, returning them with file_hash=None so they
+        get re-parsed.
 
         Args:
             scope: Scope to filter by.
@@ -429,6 +432,40 @@ class MetadataRepository:
             },
         )
 
+        # Also find orphan files: paths with elements but no FILE element
+        # This handles interrupted runs where FILE element wasn't created
+        orphan_agg = client.search(
+            index=INDEX_NAME,
+            body={
+                "query": {
+                    "bool": {
+                        "must": [
+                            {"term": {"scope": scope}},
+                            {"term": {"repository": repository}},
+                            {"term": {"username": username}},
+                        ],
+                        "must_not": [
+                            {"term": {"element_type": "file"}},
+                        ],
+                    }
+                },
+                "size": 0,
+                "aggs": {
+                    "paths": {
+                        "terms": {
+                            "field": "relative_path",  # keyword field
+                            "size": 10000,
+                        }
+                    }
+                },
+            },
+        )
+        # Get all paths that have non-FILE elements
+        all_element_paths = {
+            bucket["key"]
+            for bucket in orphan_agg.get("aggregations", {}).get("paths", {}).get("buckets", [])
+        }
+
         states = {}
         total_hits = len(result["hits"]["hits"])
         null_hash_count = 0
@@ -449,40 +486,24 @@ class MetadataRepository:
                     f.write(f"[GET_FILE_STATES] {source['relative_path']}: file_hash={fh[:16] if fh else 'None'}...\n")
                 _logged += 1
 
+        # Detect orphan paths: have elements but no FILE element (from interrupted runs)
+        # Add them to states with file_hash=None so they get re-parsed
+        orphan_paths = all_element_paths - set(states.keys())
+        orphan_count = len(orphan_paths)
+        for orphan_path in orphan_paths:
+            states[orphan_path] = {
+                "file_hash": None,  # Will trigger re-parse
+                "is_deleted": False,
+                "element_count": None,
+                "is_orphan": True,  # Mark as orphan for logging
+            }
+
         with open("/tmp/magaldi_file_hash.log", "a") as f:
-            f.write(f"[GET_FILE_STATES SUMMARY] Found {total_hits} FILE elements, {null_hash_count} with null file_hash\n")
-            # Check if problematic paths are in results
-            for check_path in ["frontend/popscript/license/m_s.js", "frontend/popscript/license/js_mm.js"]:
-                if check_path in states:
-                    fh = states[check_path].get("file_hash")
-                    f.write(f"[CHECK] {check_path} IS in states, file_hash={fh[:16] if fh else 'None'}...\n")
-                else:
-                    f.write(f"[CHECK] {check_path} NOT in states dict!\n")
-                    # Query ES directly for this specific path
-                    direct_check = client.search(
-                        index=INDEX_NAME,
-                        body={
-                            "query": {
-                                "bool": {
-                                    "must": [
-                                        {"term": {"scope": scope}},
-                                        {"term": {"repository": repository}},
-                                        {"term": {"username": username}},
-                                        {"term": {"element_type": "file"}},
-                                        {"term": {"relative_path": check_path}},
-                                    ]
-                                }
-                            },
-                            "_source": ["relative_path", "file_hash", "element_type"],
-                            "size": 5,
-                        },
-                    )
-                    direct_hits = direct_check.get("hits", {}).get("hits", [])
-                    f.write(f"[DIRECT ES QUERY] Found {len(direct_hits)} FILE elements for {check_path}\n")
-                    for dh in direct_hits:
-                        ds = dh.get("_source", {})
-                        dfh = ds.get("file_hash")
-                        f.write(f"  relative_path={ds.get('relative_path')} file_hash={dfh[:16] if dfh else 'None'}...\n")
+            f.write(f"[GET_FILE_STATES SUMMARY] Found {total_hits} FILE elements, {null_hash_count} with null file_hash, {orphan_count} orphan paths\n")
+            if orphan_count > 0:
+                f.write(f"[ORPHAN PATHS] First few orphans (have elements but no FILE element):\n")
+                for op in list(orphan_paths)[:5]:
+                    f.write(f"  {op}\n")
 
         return states
 
