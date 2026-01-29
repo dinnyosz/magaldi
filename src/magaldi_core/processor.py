@@ -520,9 +520,9 @@ class TimingStats:
                 if avg > 0:
                     breakdown.append((element_type, tier, avg))
 
-            # Sort by hierarchy (file → class → function → method → variable), then tier
+            # Sort by hierarchy (file → class → function → method → variable), then tier descending
             type_order = {"file": 0, "class": 1, "function": 2, "method": 3, "variable": 4, "constant": 5}
-            breakdown.sort(key=lambda x: (type_order.get(x[0], 99), x[1]))
+            breakdown.sort(key=lambda x: (type_order.get(x[0], 99), -x[1]))
             return breakdown
 
 

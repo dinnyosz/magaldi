@@ -206,20 +206,21 @@ def iter_by_tier(
 ) -> list[tuple[int, int, list[T]]]:
     """Iterate items grouped by tier with max_workers.
 
-    Yields tiers in order from smallest to largest context (most parallelism first).
+    Yields tiers in order from largest to smallest context (finish big ones first
+    to avoid long tail at the end).
 
     Args:
         items: List of items to process.
         tier_fn: Function that takes an item and returns its context tier.
 
     Returns:
-        List of (tier, max_workers, items) tuples sorted by tier ascending.
+        List of (tier, max_workers, items) tuples sorted by tier descending.
     """
     groups = group_by_tier(items, tier_fn)
 
-    # Sort by tier ascending (smallest first = most parallelism)
+    # Sort by tier descending (largest first = finish big ones first)
     result = []
-    for tier in sorted(groups.keys()):
+    for tier in sorted(groups.keys(), reverse=True):
         max_workers = get_max_workers_for_tier(tier)
         result.append((tier, max_workers, groups[tier]))
 
