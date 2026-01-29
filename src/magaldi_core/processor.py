@@ -1371,7 +1371,11 @@ def process_elements(
     # Debug: log state of first few elements
     _state_logged = 0
     with open("/tmp/magaldi_file_hash.log", "a") as f:
-        f.write(f"\n[SKIP CHECK] Total elements: {len(all_elements)}, existing states: {len(existing_states)}\n")
+        f.write(f"\n[SKIP CHECK] Total elements: {len(all_elements)}, unique IDs: {len(all_element_ids)}, existing states: {len(existing_states)}\n")
+        # Log first few element IDs
+        for eid in all_element_ids[:3]:
+            in_states = eid in existing_states
+            f.write(f"  Sample ID: {eid[:70]}... in_states={in_states}\n")
 
     # Filter: only process elements that are new, changed, or missing summary
     # Also track which files had skipped elements (need file_hash update)
@@ -1380,9 +1384,12 @@ def process_elements(
     skipped_with_summary = 0
     skipped_no_summary = 0
     new_elements = 0
+    state_none_count = 0
+    state_found_count = 0
     for elem in all_elements:
         state = existing_states.get(elem.element_id)
         if state is not None:
+            state_found_count += 1
             content_unchanged = state.get("content_hash") == elem.content_hash
             has_summary = state.get("has_summary", False)
             if content_unchanged and has_summary:
@@ -1398,6 +1405,7 @@ def process_elements(
                         f.write(f"[NEEDS SUMMARY] {elem.element_id[:60]}... (content unchanged but no summary)\n")
                     _state_logged += 1
         else:
+            state_none_count += 1
             new_elements += 1
             if _state_logged < 3:
                 with open("/tmp/magaldi_file_hash.log", "a") as f:
@@ -1407,7 +1415,7 @@ def process_elements(
         elements_to_process.append(elem)
 
     with open("/tmp/magaldi_file_hash.log", "a") as f:
-        f.write(f"[SKIP SUMMARY] skipped_with_summary={skipped_with_summary}, needs_summary={skipped_no_summary}, new={new_elements}, to_process={len(elements_to_process)}\n")
+        f.write(f"[SKIP SUMMARY] state_found={state_found_count}, state_none={state_none_count}, skipped={skipped_with_summary}, needs_summary={skipped_no_summary}, new={new_elements}, to_process={len(elements_to_process)}\n")
 
     total = len(all_elements)
 
