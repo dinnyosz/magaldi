@@ -9,7 +9,21 @@ from __future__ import annotations
 import time
 from collections import deque
 from dataclasses import dataclass, field
+from pathlib import Path
 from threading import Lock
+
+# Throttle log file for debugging
+THROTTLE_LOG_PATH = Path("/tmp/magaldi_throttle.log")
+
+
+def _log_throttle(message: str) -> None:
+    """Append a timestamped message to the throttle log."""
+    try:
+        timestamp = time.strftime("%H:%M:%S")
+        with open(THROTTLE_LOG_PATH, "a") as f:
+            f.write(f"[{timestamp}] {message}\n")
+    except Exception:
+        pass  # Don't let logging failures affect throttling
 
 # Safety margin for throttling - use 65% of timeout to leave 35% headroom
 # for variance in task runtimes when running concurrently.
@@ -220,6 +234,10 @@ def compute_throttle_decision(
     # This applies even without completion history
     max_ratio = current_max_runtime / tier_timeout if tier_timeout > 0 else 0.0
     if max_ratio >= 0.80:
+        _log_throttle(
+            f"EMERGENCY: max_runtime={current_max_runtime:.1f}s ({max_ratio:.0%} of {tier_timeout}s timeout) "
+            f"active={active_workers} → forcing 1 worker"
+        )
         return ThrottleDecision(
             should_throttle=True,
             current_max=current_max_runtime,
@@ -283,10 +301,23 @@ def compute_throttle_decision(
         ramped = min(ramped, optimal)  # Don't exceed optimal
         effective_workers = ramped
         reason_suffix = f", ramped from {active_workers}"
+        _log_throttle(
+            f"RAMP UP: base_time={effective_base_time:.1f}s optimal={optimal} "
+            f"active={active_workers} → ramped to {effective_workers} (25% of {delta} gap)"
+        )
     else:
         # Scaling DOWN, steady, or starting fresh - apply immediately
         effective_workers = optimal
         reason_suffix = ""
+        if optimal < active_workers:
+            _log_throttle(
+                f"SCALE DOWN: base_time={effective_base_time:.1f}s optimal={optimal} "
+                f"active={active_workers} → immediate drop to {effective_workers}"
+            )
+        elif active_workers == 0:
+            _log_throttle(
+                f"FRESH START: base_time={effective_base_time:.1f}s → starting at {effective_workers} workers"
+            )
 
     return ThrottleDecision(
         should_throttle=True,
