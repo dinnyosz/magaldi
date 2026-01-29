@@ -569,13 +569,18 @@ class DependencyTracker:
                 # Move to smallest tier that has ready elements
                 new_tier = min(by_tier.keys())
 
-                # Detect tier change - if moving to different tier, pause new submissions
-                if self._current_tier is not None and new_tier != self._current_tier:
+                # Detect tier change - includes starting from nothing (None -> tier)
+                # This allows the model to load before starting multiple concurrent tasks
+                if new_tier != self._current_tier:
                     # Tier is changing - don't start new tasks until current ones complete
                     if len(self._in_progress) > 0:
                         self._tier_changing = True
                         self._previous_tier = self._current_tier
                         return []
+                    # Starting fresh or all previous tasks done - limit to 1 task
+                    # to let model load before ramping up concurrency
+                    if self._current_tier is None or len(self._in_progress) == 0:
+                        self._tier_changing = True  # Will clear after first task completes
 
                 self._previous_tier = self._current_tier
                 self._current_tier = new_tier
@@ -591,6 +596,11 @@ class DependencyTracker:
             # Apply throttle limit if set (overrides tier limit)
             if throttle_limit is not None:
                 tier_limit = min(tier_limit, throttle_limit)
+
+            # When tier is changing (including startup), limit to 1 task
+            # to let model load before ramping up concurrency
+            if self._tier_changing:
+                tier_limit = 1
 
             tier_in_progress = sum(
                 1 for eid in self._in_progress if self._get_tier(eid) == tier
