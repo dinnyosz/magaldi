@@ -607,8 +607,9 @@ class DependencyTracker:
                 # Move to smallest tier that has ready elements
                 new_tier = min(by_tier.keys())
 
-                # Startup warmup only: limit to 1 task on very first batch
-                if self._current_tier is None:
+                # Set tier_changing when switching to a NEW tier (including startup)
+                # This limits to 1 task until model loads
+                if self._current_tier is None or new_tier != self._current_tier:
                     self._tier_changing = True
 
                 self._previous_tier = self._current_tier
@@ -622,9 +623,12 @@ class DependencyTracker:
             if throttle_limit is not None:
                 worker_limit = min(worker_limit, throttle_limit)
 
-            # When tier is changing (including startup), limit to 1 task
-            # to let model load before ramping up concurrency
+            # When tier is changing, wait for old tasks to complete first
+            # then start 1 task to load new model before ramping up
             if self._tier_changing:
+                # If any tasks still running, wait for them to finish
+                if len(self._in_progress) > 0:
+                    return []  # Don't start new tier until old tier drains
                 worker_limit = 1
 
             # Ensure at least 1 worker always
