@@ -517,6 +517,10 @@ class MetadataRepository:
 
             # Debug: check if problematic paths exist with ANY scope/repo/user
             test_path = "frontend/popscript/license/m_s.js"
+            f.write(f"[PATH CHECK] test_path={test_path} in_states={test_path in states}\n")
+            if test_path in states:
+                st = states[test_path]
+                f.write(f"[PATH CHECK] file_hash={st.get('file_hash')}, is_orphan={st.get('is_orphan')}\n")
             if test_path not in states:
                 any_scope_check = client.search(
                     index=INDEX_NAME,
