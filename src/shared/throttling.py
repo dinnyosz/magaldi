@@ -95,13 +95,19 @@ class ThroughputTracker:
             return throughput, avg_runtime, count
 
     def get_stats_with_concurrency(self) -> tuple[float, float, int, float, float]:
-        """Get throughput statistics with concurrency context.
+        """Get throughput statistics with concurrency-normalized base time.
+
+        The key insight: runtime scales linearly with concurrent workers (GPU contention).
+        So we normalize: base_time = runtime / workers
+
+        Example: 10 workers each taking 10s means base_time = 1s per task.
+        If timeout is 7s, max_workers = 7/1 = 7.
 
         Returns:
-            Tuple of (throughput, avg_runtime, count, avg_concurrency, high_load_avg_runtime)
-            - avg_concurrency: average workers active at completion time
-            - high_load_avg_runtime: avg runtime of tasks that completed under high load
-              (>= 50% of max observed concurrency). Returns 0 if no high-load data.
+            Tuple of (throughput, avg_runtime, count, avg_concurrency, avg_base_time)
+            - avg_concurrency: average workers active at task start
+            - avg_base_time: average of (runtime / workers) for each completion.
+              This is the normalized per-worker cost. Returns 0 if no data.
         """
         now = time.time()
         with self._lock:
@@ -126,13 +132,12 @@ class ThroughputTracker:
                 time_span = 1.0
             throughput = count / time_span
 
-            # Calculate avg runtime under high load (>= 50% of max concurrency)
-            max_concurrency = max(c for _, _, c in self.completions)
-            high_load_threshold = max(1, max_concurrency // 2)
-            high_load_runtimes = [r for _, r, c in self.completions if c >= high_load_threshold]
-            high_load_avg = sum(high_load_runtimes) / len(high_load_runtimes) if high_load_runtimes else 0.0
+            # Calculate avg base_time = runtime / workers for each completion
+            # This normalizes for concurrency: a 50s task with 8 workers = 6.25s base
+            base_times = [r / max(c, 1) for _, r, c in self.completions]
+            avg_base_time = sum(base_times) / len(base_times) if base_times else 0.0
 
-            return throughput, avg_runtime, count, avg_concurrency, high_load_avg
+            return throughput, avg_runtime, count, avg_concurrency, avg_base_time
 
     def reset(self) -> None:
         """Clear all history."""
@@ -176,19 +181,17 @@ def compute_throttle_decision(
     avg_runtime: float = 0.0,
     completion_count: int = 0,
     avg_concurrency: float = 0.0,
-    high_load_avg_runtime: float = 0.0,
+    avg_base_time: float = 0.0,
 ) -> ThrottleDecision:
     """Determine if throttling should be applied.
 
-    Uses the formula: max_workers = timeout / avg_runtime
-    This ensures all concurrent tasks can complete before timeout.
+    KEY INSIGHT: Runtime scales linearly with concurrent workers (GPU contention).
+    So we use base_time = runtime / workers for throttling decisions.
 
-    IMPORTANT: Uses high_load_avg_runtime (avg runtime when many workers were active)
-    instead of overall avg_runtime. This matters because:
-    - A 50s task with 8 workers indicates GPU contention → throttle
-    - A 50s task with 1 worker indicates slow task → don't throttle
+    Example: 10 workers each taking 10s → base_time = 1s
+    If timeout = 7s → max_workers = 7/1 = 7
 
-    Also uses emergency throttling if any active task is near timeout.
+    Formula: max_workers = (timeout * safety_margin) / base_time
 
     Args:
         current_max_runtime: Max runtime of currently active workers
@@ -198,8 +201,8 @@ def compute_throttle_decision(
         throughput: Actual completions per second (for display)
         avg_runtime: Average completion time (all conditions)
         completion_count: Number of completions in window
-        avg_concurrency: Average workers active at completion time
-        high_load_avg_runtime: Avg runtime of tasks completed under high load
+        avg_concurrency: Average workers active at task start
+        avg_base_time: Average of (runtime/workers) from completions - normalized cost
 
     Returns:
         ThrottleDecision with recommended action
@@ -217,16 +220,21 @@ def compute_throttle_decision(
             reason="Emergency (>80% timeout)",
         )
 
-    # Use high-load avg runtime if we have completion data
-    historical_avg = high_load_avg_runtime if high_load_avg_runtime > 0 else avg_runtime
+    # Calculate base_time from current running tasks (normalized by concurrency)
+    # base_time = runtime / workers - this is the per-worker cost
+    current_base_time = 0.0
+    if current_max_runtime > 0 and active_workers > 0:
+        current_base_time = current_max_runtime / active_workers
 
-    # CRITICAL: Proactive throttling based on current running times
-    # If tasks are running slow NOW, throttle immediately - don't wait for completions
-    # Use the MAX of: historical avg (from completions) and current_max_runtime (from running tasks)
-    if current_max_runtime > 0:
-        effective_avg = max(historical_avg, current_max_runtime)
-    elif completion_count >= 3:
-        effective_avg = historical_avg
+    # Use the worst case: max of current base_time and historical avg_base_time
+    # This ensures we react to slow tasks immediately (proactive) while also
+    # learning from historical data
+    if current_base_time > 0 and avg_base_time > 0:
+        effective_base_time = max(current_base_time, avg_base_time)
+    elif current_base_time > 0:
+        effective_base_time = current_base_time
+    elif completion_count >= 3 and avg_base_time > 0:
+        effective_base_time = avg_base_time
     else:
         # No running tasks, no completion history - can't throttle yet
         return ThrottleDecision(
@@ -238,29 +246,28 @@ def compute_throttle_decision(
             reason="No data",
         )
 
-    # Calculate optimal workers: (timeout * safety_margin) / effective_avg
-    # Safety margin accounts for variance in task runtimes under concurrency
-    if effective_avg > 0:
-        effective_timeout = tier_timeout * THROTTLE_SAFETY_MARGIN
-        optimal = int(effective_timeout / effective_avg)
-        optimal = max(1, min(optimal, base_workers))  # Clamp to [1, base_workers]
+    # Calculate optimal workers: (timeout * safety_margin) / base_time
+    # Safety margin accounts for variance in task runtimes
+    effective_timeout = tier_timeout * THROTTLE_SAFETY_MARGIN
+    optimal = int(effective_timeout / effective_base_time)
+    optimal = max(1, min(optimal, base_workers))  # Clamp to [1, base_workers]
 
-        if optimal < base_workers:
-            return ThrottleDecision(
-                should_throttle=True,
-                current_max=current_max_runtime,
-                historical_max=0,
-                completed_avg=effective_avg,
-                recommended_workers=optimal,
-                reason=f"Throttle ({optimal}={int(effective_timeout)}s/{effective_avg:.0f}s)",
-            )
+    if optimal < base_workers:
+        return ThrottleDecision(
+            should_throttle=True,
+            current_max=current_max_runtime,
+            historical_max=0,
+            completed_avg=effective_base_time,  # Now stores base_time for display
+            recommended_workers=optimal,
+            reason=f"Throttle ({optimal}={int(effective_timeout)}s/{effective_base_time:.1f}s base)",
+        )
 
-    # Normal operation - avg is low enough to allow full workers
+    # Normal operation - base_time is low enough to allow full workers
     return ThrottleDecision(
         should_throttle=False,
         current_max=current_max_runtime,
         historical_max=0,
-        completed_avg=avg_runtime,
+        completed_avg=effective_base_time if effective_base_time > 0 else avg_runtime,
         recommended_workers=base_workers,
         reason="Normal",
     )

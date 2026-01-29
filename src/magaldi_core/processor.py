@@ -345,7 +345,7 @@ class TimingStats:
         """Get throughput statistics with concurrency context.
 
         Returns:
-            Tuple of (throughput, avg_runtime, count, avg_concurrency, high_load_avg_runtime).
+            Tuple of (throughput, avg_runtime, count, avg_concurrency, avg_base_time).
         """
         return self.throughput_tracker.get_stats_with_concurrency()
 
@@ -1010,9 +1010,12 @@ class DependencyTracker:
         avg_runtime: float = 0.0,
         completion_count: int = 0,
         avg_concurrency: float = 0.0,
-        high_load_avg_runtime: float = 0.0,
+        avg_base_time: float = 0.0,
     ) -> ThrottleDecision:
-        """Compute throttle decision based on throughput with concurrency context.
+        """Compute throttle decision based on base_time (normalized by concurrency).
+
+        Key insight: runtime scales linearly with concurrent workers (GPU contention).
+        base_time = runtime / workers is the normalized per-worker cost.
 
         Args:
             current_max_runtime: Max runtime of currently active workers.
@@ -1020,8 +1023,8 @@ class DependencyTracker:
             throughput: Actual completions per second.
             avg_runtime: Average completion time from recent completions.
             completion_count: Number of completions in tracking window.
-            avg_concurrency: Average workers active at completion time.
-            high_load_avg_runtime: Avg runtime of tasks completed under high load.
+            avg_concurrency: Average workers active at task start.
+            avg_base_time: Average of (runtime/workers) from completions.
 
         Returns:
             ThrottleDecision with recommended action.
@@ -1036,7 +1039,7 @@ class DependencyTracker:
                 avg_runtime=avg_runtime,
                 completion_count=completion_count,
                 avg_concurrency=avg_concurrency,
-                high_load_avg_runtime=high_load_avg_runtime,
+                avg_base_time=avg_base_time,
             )
 
     def get_tier_stats(self) -> dict[int, tuple[int, int]]:

@@ -91,17 +91,49 @@ class TestThroughputTracker:
         # Since all completions are nearly instant, time_span is ~1s minimum
         assert throughput >= 1.0
 
+    def test_base_time_calculation(self):
+        """Base time should be runtime / workers (normalized per-worker cost).
+
+        Example: 10 workers each taking 10s → base_time = 1s
+        This tells us that with 1 worker, a task would take ~1s.
+        """
+        tracker = ThroughputTracker(window_seconds=10.0)
+
+        # 10 workers, 10s each → base_time = 1s
+        tracker.record_completion(10.0, concurrent_workers=10)
+        # 8 workers, 16s each → base_time = 2s
+        tracker.record_completion(16.0, concurrent_workers=8)
+        # 4 workers, 12s each → base_time = 3s
+        tracker.record_completion(12.0, concurrent_workers=4)
+
+        throughput, avg_runtime, count, avg_conc, avg_base_time = (
+            tracker.get_stats_with_concurrency()
+        )
+        assert count == 3
+        assert avg_runtime == pytest.approx((10 + 16 + 12) / 3)  # ~12.67
+        assert avg_conc == pytest.approx((10 + 8 + 4) / 3)  # ~7.33
+        # avg_base_time = (1 + 2 + 3) / 3 = 2s
+        assert avg_base_time == pytest.approx(2.0)
+
 
 class TestComputeThrottleDecision:
-    """Tests for compute_throttle_decision function."""
+    """Tests for compute_throttle_decision function.
+
+    KEY INSIGHT: Runtime scales linearly with concurrent workers (GPU contention).
+    base_time = runtime / workers  (normalized per-worker cost)
+    max_workers = (timeout * 0.7) / base_time
+
+    Example: 10 workers each taking 10s → base_time = 1s
+    If timeout = 7s → max_workers = 7/1 = 7
+    """
 
     def test_no_data_returns_normal(self):
-        """With no completion data, should return normal operation."""
+        """With no running tasks and no completion data, returns 'No data'."""
         decision = compute_throttle_decision(
             current_max_runtime=0.0,
             tier_timeout=180.0,
             base_workers=8,
-            active_workers=4,
+            active_workers=0,
             throughput=0.0,
             avg_runtime=0.0,
             completion_count=0,
@@ -111,12 +143,11 @@ class TestComputeThrottleDecision:
         assert decision.reason == "No data"
 
     def test_proactive_throttle_with_running_tasks(self):
-        """With current_max_runtime > 0, uses running task data for decision.
+        """With running tasks, computes base_time from current data.
 
-        This is proactive throttling: we don't wait for completions if we
-        can see that running tasks are taking time.
+        base_time = current_max / active_workers = 10 / 4 = 2.5s
+        max_workers = 126 / 2.5 = 50.4 → capped at 8 → Normal
         """
-        # current_max=10s, effective_timeout=126s → optimal=12 workers (capped at 8)
         decision = compute_throttle_decision(
             current_max_runtime=10.0,
             tier_timeout=180.0,
@@ -124,22 +155,23 @@ class TestComputeThrottleDecision:
             active_workers=4,
             throughput=1.0,
             avg_runtime=5.0,
-            completion_count=2,  # Few completions, but we have running task data
+            completion_count=2,
         )
         assert not decision.should_throttle
         assert decision.recommended_workers == 8
-        assert decision.reason == "Normal"  # Not "No data" - we have running task info
+        assert decision.reason == "Normal"
 
     def test_no_data_without_running_tasks(self):
         """With no running tasks AND few completions, returns 'No data'."""
         decision = compute_throttle_decision(
-            current_max_runtime=0.0,  # No running tasks
+            current_max_runtime=0.0,
             tier_timeout=180.0,
             base_workers=8,
             active_workers=0,
             throughput=0.0,
             avg_runtime=5.0,
-            completion_count=2,  # Few completions
+            completion_count=2,
+            avg_base_time=0.0,  # No base_time data either
         )
         assert not decision.should_throttle
         assert decision.recommended_workers == 8
@@ -160,64 +192,78 @@ class TestComputeThrottleDecision:
         assert decision.recommended_workers == 1
         assert "Emergency" in decision.reason
 
-    def test_throttle_based_on_avg_runtime(self):
-        """Throttling based on formula: workers = (timeout * 0.7) / avg_runtime."""
-        # timeout=180s * 0.7 = 126s effective, avg=20s → max 6 workers
+    def test_throttle_based_on_base_time(self):
+        """Throttling based on formula: workers = (timeout * 0.7) / base_time.
+
+        base_time from history = 20s
+        max_workers = 126 / 20 = 6.3 → 6 workers
+        """
         decision = compute_throttle_decision(
-            current_max_runtime=10.0,
+            current_max_runtime=0.0,  # No running tasks
             tier_timeout=180.0,
             base_workers=32,
-            active_workers=20,
+            active_workers=0,
             throughput=1.0,
-            avg_runtime=20.0,  # 126/20 = 6.3 → 6 workers max
+            avg_runtime=100.0,
             completion_count=10,
+            avg_base_time=20.0,  # 126/20 = 6.3 → 6 workers max
         )
         assert decision.should_throttle
         assert decision.recommended_workers == 6
         assert "Throttle" in decision.reason
 
-    def test_low_avg_allows_full_workers(self):
-        """Low avg runtime allows full workers."""
-        # timeout=180s * 0.7 = 126s effective, avg=5s → max 25 workers, but base is 8
+    def test_low_base_time_allows_full_workers(self):
+        """Low base_time allows full workers.
+
+        base_time = current_max / workers = 5 / 8 = 0.625s
+        max_workers = 126 / 0.625 = 201.6 → capped at 8 → Normal
+        """
         decision = compute_throttle_decision(
             current_max_runtime=5.0,
             tier_timeout=180.0,
             base_workers=8,
             active_workers=8,
             throughput=1.6,
-            avg_runtime=5.0,  # 126/5 = 25.2 workers max, capped at base
+            avg_runtime=5.0,
             completion_count=10,
         )
         assert not decision.should_throttle
         assert decision.recommended_workers == 8
         assert decision.reason == "Normal"
 
-    def test_high_avg_limits_workers(self):
-        """High avg runtime limits workers significantly."""
-        # timeout=180s * 0.7 = 126s effective, avg=60s → max 2 workers
+    def test_high_base_time_limits_workers(self):
+        """High base_time limits workers significantly.
+
+        base_time from history = 60s
+        max_workers = 126 / 60 = 2.1 → 2 workers
+        """
         decision = compute_throttle_decision(
-            current_max_runtime=30.0,
+            current_max_runtime=0.0,  # No running tasks
             tier_timeout=180.0,
             base_workers=32,
-            active_workers=10,
+            active_workers=0,
             throughput=0.1,
-            avg_runtime=60.0,  # 126/60 = 2.1 → 2 workers max
+            avg_runtime=300.0,
             completion_count=10,
+            avg_base_time=60.0,  # 126/60 = 2.1 → 2 workers max
         )
         assert decision.should_throttle
         assert decision.recommended_workers == 2
 
-    def test_very_high_avg_limits_to_one(self):
-        """Very high avg runtime (> effective timeout) limits to 1 worker."""
-        # timeout=180s * 0.7 = 126s effective, avg=200s → max 0.63 → clamped to 1
+    def test_very_high_base_time_limits_to_one(self):
+        """Very high base_time (> effective timeout) limits to 1 worker.
+
+        base_time = 200s → max_workers = 126/200 = 0.63 → clamped to 1
+        """
         decision = compute_throttle_decision(
-            current_max_runtime=100.0,
+            current_max_runtime=0.0,
             tier_timeout=180.0,
             base_workers=8,
-            active_workers=2,
+            active_workers=0,
             throughput=0.01,
-            avg_runtime=200.0,  # 126/200 = 0.63 → 1 worker
+            avg_runtime=1000.0,
             completion_count=10,
+            avg_base_time=200.0,  # 126/200 = 0.63 → 1 worker
         )
         assert decision.should_throttle
         assert decision.recommended_workers == 1
@@ -225,31 +271,57 @@ class TestComputeThrottleDecision:
     def test_minimum_one_worker(self):
         """Should always recommend at least 1 worker."""
         decision = compute_throttle_decision(
-            current_max_runtime=170.0,  # Very near timeout
+            current_max_runtime=170.0,  # Very near timeout but not emergency
             tier_timeout=180.0,
             base_workers=1,
             active_workers=1,
             throughput=0.0,
-            avg_runtime=500.0,  # Would give 0.36 workers
+            avg_runtime=500.0,
             completion_count=10,
+            avg_base_time=500.0,  # Would give 0.25 workers
         )
         assert decision.recommended_workers >= 1
 
-    def test_decision_includes_values(self):
-        """Decision should include current max and avg values."""
+    def test_base_time_from_current_tasks(self):
+        """When running tasks exist, computes base_time from current data.
+
+        current_max=80s with 8 workers → base_time = 80/8 = 10s
+        max_workers = 126 / 10 = 12.6 → 12 workers (< 32 base)
+        """
         decision = compute_throttle_decision(
-            current_max_runtime=45.2,
+            current_max_runtime=80.0,
             tier_timeout=180.0,
-            base_workers=8,
-            active_workers=4,
+            base_workers=32,
+            active_workers=8,
             throughput=1.5,
-            avg_runtime=3.5,
+            avg_runtime=40.0,
             completion_count=10,
+            avg_base_time=5.0,  # Historical says 5s, but current shows 10s
         )
-        assert decision.current_max == 45.2
-        # completed_avg is now max(historical_avg, current_max) for proactive throttling
-        # With current_max=45.2 and avg_runtime=3.5, effective_avg=45.2
-        assert decision.completed_avg == 45.2
+        assert decision.should_throttle
+        assert decision.recommended_workers == 12  # Uses max(10, 5) = 10s base_time
+        assert "Throttle" in decision.reason
+
+    def test_uses_max_of_current_and_historical_base_time(self):
+        """Should use the higher of current and historical base_time for safety.
+
+        current_max=40s with 8 workers → current_base = 5s
+        historical avg_base_time = 10s (higher)
+        max_workers = 126 / 10 = 12.6 → 12 workers
+        """
+        decision = compute_throttle_decision(
+            current_max_runtime=40.0,
+            tier_timeout=180.0,
+            base_workers=32,
+            active_workers=8,
+            throughput=1.0,
+            avg_runtime=50.0,
+            completion_count=10,
+            avg_base_time=10.0,  # Historical is worse than current
+        )
+        assert decision.should_throttle
+        assert decision.recommended_workers == 12  # Uses max(5, 10) = 10s base_time
+        assert "Throttle" in decision.reason
 
 
 class TestThrottleDecisionDataclass:
