@@ -1392,8 +1392,8 @@ def process_elements(
     # Find files where ALL elements were skipped and update their file_hash in ES
     # This prevents files from appearing "modified" on every run when only
     # file metadata changed but element content stayed the same
+    files_to_update: dict[str, str] = {}
     if file_hashes and skipped_by_file:
-        files_to_update: dict[str, str] = {}
         for rel_path, skipped_count in skipped_by_file.items():
             if skipped_count == elements_per_file.get(rel_path, 0):
                 # All elements in this file were skipped - update file_hash
@@ -1401,7 +1401,18 @@ def process_elements(
                     files_to_update[rel_path] = file_hashes[rel_path]
 
         if files_to_update:
-            es_repo.update_file_hashes(scope, repository, username, files_to_update)
+            updated_count = es_repo.update_file_hashes(scope, repository, username, files_to_update)
+            # Log for debugging
+            import sys
+            print(f"[file_hash update] {len(files_to_update)} files identified, {updated_count} elements updated in ES", file=sys.stderr)
+
+    # Also check for files in file_hashes that have NO elements (weren't parsed or produced 0 elements)
+    # These need their file_hash updated too if they exist in ES
+    if file_hashes:
+        files_with_no_elements = set(file_hashes.keys()) - set(elements_per_file.keys())
+        if files_with_no_elements:
+            import sys
+            print(f"[file_hash update] WARNING: {len(files_with_no_elements)} files in manifest but no elements parsed", file=sys.stderr)
 
     if not elements_to_process:
         # All elements unchanged - fire progress callback showing 100% complete
