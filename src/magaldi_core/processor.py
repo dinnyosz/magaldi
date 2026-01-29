@@ -607,6 +607,9 @@ class DependencyTracker:
                 # This limits to 1 task until model loads
                 if self._current_tier is None or new_tier != self._current_tier:
                     self._tier_changing = True
+                    with open("/tmp/magaldi_warmup.log", "a") as f:
+                        f.write(f"[TIER SWITCH] {self._current_tier} -> {new_tier}, "
+                                f"in_progress={len(self._in_progress)}\n")
 
                 self._previous_tier = self._current_tier
                 self._current_tier = new_tier
@@ -645,6 +648,9 @@ class DependencyTracker:
             # During warmup, only return 1 element maximum
             if self._tier_changing:
                 effective_limit = 1
+                with open("/tmp/magaldi_warmup.log", "a") as f:
+                    f.write(f"[WARMUP] tier_changing=True, in_progress={len(self._in_progress)}, "
+                            f"warmup_task={self._warmup_task_id}, effective_limit={effective_limit}\n")
 
             # Get elements from current tier only
             tier_ready = by_tier[tier][:effective_limit]
@@ -655,6 +661,8 @@ class DependencyTracker:
                 # Track warmup task (first task dispatched when tier_changing)
                 if self._tier_changing and self._warmup_task_id is None:
                     self._warmup_task_id = e.element_id
+                    with open("/tmp/magaldi_warmup.log", "a") as f:
+                        f.write(f"[WARMUP] Set warmup_task_id={e.element_id[:50]}\n")
 
             return tier_ready
 
@@ -676,6 +684,8 @@ class DependencyTracker:
             # Clear warmup flag only when the warmup task itself completes
             # This ensures the model is fully loaded before ramping up
             if self._tier_changing and element_id == self._warmup_task_id:
+                with open("/tmp/magaldi_warmup.log", "a") as f:
+                    f.write(f"[WARMUP] Cleared! warmup_task completed: {element_id[:50]}\n")
                 self._tier_changing = False
                 self._warmup_task_id = None
 
