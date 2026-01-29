@@ -1401,17 +1401,15 @@ def process_elements(
                     files_to_update[rel_path] = file_hashes[rel_path]
 
         if files_to_update:
-            updated_count = es_repo.update_file_hashes(scope, repository, username, files_to_update)
             with open("/tmp/magaldi_file_hash.log", "a") as f:
-                f.write(f"[file_hash update] {len(files_to_update)} files identified, {updated_count} elements updated in ES\n")
+                f.write(f"[BEFORE UPDATE] {len(files_to_update)} files to update\n")
+                for path, new_hash in list(files_to_update.items())[:3]:
+                    f.write(f"  {path}: new_hash={new_hash[:16]}...\n")
 
-    # Also check for files in file_hashes that have NO elements (weren't parsed or produced 0 elements)
-    # These need their file_hash updated too if they exist in ES
-    if file_hashes:
-        files_with_no_elements = set(file_hashes.keys()) - set(elements_per_file.keys())
-        if files_with_no_elements:
+            updated_count = es_repo.update_file_hashes(scope, repository, username, files_to_update)
+
             with open("/tmp/magaldi_file_hash.log", "a") as f:
-                f.write(f"[file_hash update] WARNING: {len(files_with_no_elements)} files in manifest but no elements parsed\n")
+                f.write(f"[AFTER UPDATE] {updated_count} elements updated in ES\n")
 
     if not elements_to_process:
         # All elements unchanged - fire progress callback showing 100% complete
