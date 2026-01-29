@@ -757,16 +757,16 @@ class DependencyTracker:
         self,
         current_max_runtime: float,
         historical_max_runtime: float,
-        avg_runtime: float = 0.0,
-        active_count: int = 0,
+        completed_avg_runtime: float = 0.0,
+        completed_count: int = 0,
     ) -> ThrottleDecision:
         """Compute throttle decision based on runtimes.
 
         Args:
             current_max_runtime: Max runtime of currently active workers.
             historical_max_runtime: Max from historical 10s windows.
-            avg_runtime: Average runtime of active workers.
-            active_count: Number of active workers.
+            completed_avg_runtime: Average runtime from recent completions.
+            completed_count: Number of recent completions.
 
         Returns:
             ThrottleDecision with recommended action.
@@ -776,8 +776,8 @@ class DependencyTracker:
                 current_max_runtime=current_max_runtime,
                 historical_max_runtime=historical_max_runtime,
                 tier_timeout=self._timeout,
-                avg_runtime=avg_runtime,
-                active_count=active_count,
+                completed_avg_runtime=completed_avg_runtime,
+                completed_count=completed_count,
                 base_workers=self._max_num_workers,
             )
 
@@ -1661,8 +1661,8 @@ def process_elements(
 
     try:
         while not dependency_tracker.is_complete():
-            # Compute throttle decision based on current and historical runtimes
-            current_max_runtime, avg_runtime, active_count = worker_status.get_runtime_stats()
+            # Get current max from active workers (for emergency throttling)
+            current_max_runtime = worker_status.get_max_active_runtime()
 
             # Periodically record current max to history (every 10s)
             # This captures slow-running tasks that haven't completed yet
@@ -1671,9 +1671,10 @@ def process_elements(
                 timing_stats.record_task_runtime(current_max_runtime)
                 last_history_record_time = now
 
-            historical_max_runtime = timing_stats.get_historical_max_runtime()
+            # Get completion-based stats for adaptive throttling
+            historical_max, completed_avg, completed_count = timing_stats.get_historical_stats()
             current_throttle = dependency_tracker.compute_throttle_decision(
-                current_max_runtime, historical_max_runtime, avg_runtime, active_count
+                current_max_runtime, historical_max, completed_avg, completed_count
             )
 
             # Get throttle limit if throttling is active
@@ -1710,15 +1711,15 @@ def process_elements(
             # If timeout with no completions, record to history and update display
             if not done:
                 # Record current max to history on timeout
-                fresh_max, fresh_avg, fresh_count = worker_status.get_runtime_stats()
-                if fresh_max > 0:
-                    timing_stats.record_task_runtime(fresh_max)
+                fresh_current_max = worker_status.get_max_active_runtime()
+                if fresh_current_max > 0:
+                    timing_stats.record_task_runtime(fresh_current_max)
                     last_history_record_time = time.time()
 
                 if on_progress:
-                    fresh_historical_max = timing_stats.get_historical_max_runtime()
+                    fresh_hist_max, fresh_avg, fresh_count = timing_stats.get_historical_stats()
                     fresh_throttle = dependency_tracker.compute_throttle_decision(
-                        fresh_max, fresh_historical_max, fresh_avg, fresh_count
+                        fresh_current_max, fresh_hist_max, fresh_avg, fresh_count
                     )
                     progress_state = ProgressState(
                         total=total,
@@ -1792,10 +1793,10 @@ def process_elements(
                 # Report progress with throttle info
                 if on_progress:
                     # Refresh throttle decision with current max values for accurate display
-                    fresh_max, fresh_avg, fresh_count = worker_status.get_runtime_stats()
-                    fresh_historical_max = timing_stats.get_historical_max_runtime()
+                    fresh_current_max = worker_status.get_max_active_runtime()
+                    fresh_hist_max, fresh_avg, fresh_count = timing_stats.get_historical_stats()
                     fresh_throttle = dependency_tracker.compute_throttle_decision(
-                        fresh_max, fresh_historical_max, fresh_avg, fresh_count
+                        fresh_current_max, fresh_hist_max, fresh_avg, fresh_count
                     )
                     progress_state = ProgressState(
                         total=total,
