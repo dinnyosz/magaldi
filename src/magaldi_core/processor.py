@@ -610,6 +610,12 @@ class DependencyTracker:
             target_level = min(by_level.keys())
             level_ready = by_level[target_level]
 
+            # Debug: log level selection
+            with open("/tmp/magaldi_warmup.log", "a") as f:
+                level_counts = {lvl: len(elems) for lvl, elems in by_level.items()}
+                f.write(f"[LEVEL SELECT] levels={level_counts}, picked={target_level}, "
+                        f"count={len(level_ready)}\n")
+
             # Within the level, group by (model, tier) for optimal batching
             by_model_tier: dict[tuple[str, int], list[CodeElement]] = {}
             for elem in level_ready:
