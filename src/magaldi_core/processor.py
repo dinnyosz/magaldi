@@ -642,6 +642,10 @@ class DependencyTracker:
                 slots_available = max(0, worker_limit - tier_in_progress)
             effective_limit = min(max_count, slots_available)
 
+            # During warmup, only return 1 element maximum
+            if self._tier_changing:
+                effective_limit = 1
+
             # Get elements from current tier only
             tier_ready = by_tier[tier][:effective_limit]
 
