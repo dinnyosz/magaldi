@@ -279,39 +279,31 @@ def compute_throttle_decision(
     optimal = int(effective_timeout / effective_base_time)
     optimal = max(1, min(optimal, base_workers))  # Clamp to [1, base_workers]
 
-    # If optimal allows full workers, no throttling needed
-    if optimal >= base_workers:
-        return ThrottleDecision(
-            should_throttle=False,
-            current_max=current_max_runtime,
-            historical_max=0,
-            completed_avg=effective_base_time if effective_base_time > 0 else avg_runtime,
-            recommended_workers=base_workers,
-            reason="Normal",
-        )
+    # Determine target: either optimal (if throttling) or base_workers (if not)
+    target_workers = optimal if optimal < base_workers else base_workers
+    should_throttle = optimal < base_workers
 
-    # We need to throttle (optimal < base_workers)
     # Apply ramp-up logic: when INCREASING workers, move gradually (25% of gap)
     # When DECREASING, apply immediately (we're seeing slowness, react fast)
     # Only ramp if we have active workers (not starting fresh)
-    if optimal > active_workers and active_workers > 0:
+    if target_workers > active_workers and active_workers > 0:
         # Scaling UP - ramp gradually to avoid overwhelming during warmup
-        delta = optimal - active_workers
+        delta = target_workers - active_workers
         ramped = active_workers + max(1, int(delta * RAMP_UP_FACTOR))
-        ramped = min(ramped, optimal)  # Don't exceed optimal
+        ramped = min(ramped, target_workers)  # Don't exceed target
         effective_workers = ramped
         reason_suffix = f", ramped from {active_workers}"
         _log_throttle(
-            f"RAMP UP: base_time={effective_base_time:.1f}s optimal={optimal} "
+            f"RAMP UP: base_time={effective_base_time:.1f}s target={target_workers} "
             f"active={active_workers} → ramped to {effective_workers} (25% of {delta} gap)"
         )
     else:
         # Scaling DOWN, steady, or starting fresh - apply immediately
-        effective_workers = optimal
+        effective_workers = target_workers
         reason_suffix = ""
-        if optimal < active_workers:
+        if target_workers < active_workers:
             _log_throttle(
-                f"SCALE DOWN: base_time={effective_base_time:.1f}s optimal={optimal} "
+                f"SCALE DOWN: base_time={effective_base_time:.1f}s target={target_workers} "
                 f"active={active_workers} → immediate drop to {effective_workers}"
             )
         elif active_workers == 0:
@@ -319,11 +311,21 @@ def compute_throttle_decision(
                 f"FRESH START: base_time={effective_base_time:.1f}s → starting at {effective_workers} workers"
             )
 
-    return ThrottleDecision(
-        should_throttle=True,
-        current_max=current_max_runtime,
-        historical_max=0,
-        completed_avg=effective_base_time,  # Now stores base_time for display
-        recommended_workers=effective_workers,
-        reason=f"Throttle ({effective_workers}={int(effective_timeout)}s/{effective_base_time:.1f}s base{reason_suffix})",
-    )
+    if should_throttle:
+        return ThrottleDecision(
+            should_throttle=True,
+            current_max=current_max_runtime,
+            historical_max=0,
+            completed_avg=effective_base_time,
+            recommended_workers=effective_workers,
+            reason=f"Throttle ({effective_workers}={int(effective_timeout)}s/{effective_base_time:.1f}s base{reason_suffix})",
+        )
+    else:
+        return ThrottleDecision(
+            should_throttle=False,
+            current_max=current_max_runtime,
+            historical_max=0,
+            completed_avg=effective_base_time if effective_base_time > 0 else avg_runtime,
+            recommended_workers=effective_workers,
+            reason=f"Normal{reason_suffix}" if reason_suffix else "Normal",
+        )

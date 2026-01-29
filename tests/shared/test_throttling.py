@@ -146,7 +146,8 @@ class TestComputeThrottleDecision:
         """With running tasks, computes base_time from current data.
 
         base_time = current_max / active_workers = 10 / 4 = 2.5s
-        max_workers = 117 / 2.5 = 46.8 → capped at 8 → Normal
+        optimal = 117 / 2.5 = 46.8 → capped at 8 → Normal (no throttle)
+        But ramp-up still applies: 4 + max(1, int(4*0.25)) = 5
         """
         decision = compute_throttle_decision(
             current_max_runtime=10.0,
@@ -158,8 +159,8 @@ class TestComputeThrottleDecision:
             completion_count=2,
         )
         assert not decision.should_throttle
-        assert decision.recommended_workers == 8
-        assert decision.reason == "Normal"
+        assert decision.recommended_workers == 5  # Ramped from 4 toward 8
+        assert "ramped from 4" in decision.reason
 
     def test_no_data_without_running_tasks(self):
         """With no running tasks AND few completions, returns 'No data'."""
