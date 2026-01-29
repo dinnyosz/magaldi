@@ -65,6 +65,8 @@ class ElasticsearchFileStateRepository:
                     )
                     if actual_count != element_count:
                         # Incomplete - set file_hash to None so it's treated as modified
+                        with open("/tmp/magaldi_file_hash.log", "a") as f:
+                            f.write(f"[COUNT MISMATCH] {path}: expected={element_count}, actual={actual_count}\n")
                         file_hash = None
 
             result[path] = DBFileState(
