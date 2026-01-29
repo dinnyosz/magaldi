@@ -405,6 +405,9 @@ class MetadataRepository:
         Returns:
             Dict mapping relative_path to {file_hash, is_deleted, element_count}.
         """
+        with open("/tmp/magaldi_file_hash.log", "a") as f:
+            f.write(f"[GET_FILE_STATES PARAMS] scope={scope} repository={repository} username={username}\n")
+
         client = self._get_client()
 
         # Search for all file-level elements
