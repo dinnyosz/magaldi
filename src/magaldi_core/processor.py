@@ -1332,6 +1332,10 @@ def process_elements(
     Returns:
         ProcessingResult with counts and errors.
     """
+    # DEBUG: Log at function entry
+    with open("/tmp/magaldi_debug.log", "a") as f:
+        f.write(f"DEBUG: process_elements called, parsed_files={len(parsed_files)}\n")
+
     if config is None:
         config = ProcessingConfig()
 
@@ -1383,13 +1387,15 @@ def process_elements(
 
     total = len(all_elements)
 
+    # DEBUG: Log before early return check
+    with open("/tmp/magaldi_debug.log", "a") as f:
+        f.write(f"DEBUG: elements_to_process={len(elements_to_process)}, total={total}, skipped={result.elements_skipped}\n")
+
     if not elements_to_process:
         # All elements unchanged - nothing to do
+        with open("/tmp/magaldi_debug.log", "a") as f:
+            f.write(f"DEBUG: Early return - all elements unchanged\n")
         return result
-
-    # DEBUG: Show how many elements will be processed
-    with open("/tmp/magaldi_debug.log", "a") as f:
-        f.write(f"DEBUG: elements_to_process={len(elements_to_process)}, total={len(all_elements)}\n")
 
     # Summary cache for hierarchical context
     summary_cache = _SummaryCache()
