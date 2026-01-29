@@ -451,6 +451,38 @@ class MetadataRepository:
 
         with open("/tmp/magaldi_file_hash.log", "a") as f:
             f.write(f"[GET_FILE_STATES SUMMARY] Found {total_hits} FILE elements, {null_hash_count} with null file_hash\n")
+            # Check if problematic paths are in results
+            for check_path in ["frontend/popscript/license/m_s.js", "frontend/popscript/license/js_mm.js"]:
+                if check_path in states:
+                    fh = states[check_path].get("file_hash")
+                    f.write(f"[CHECK] {check_path} IS in states, file_hash={fh[:16] if fh else 'None'}...\n")
+                else:
+                    f.write(f"[CHECK] {check_path} NOT in states dict!\n")
+                    # Query ES directly for this specific path
+                    direct_check = client.search(
+                        index=INDEX_NAME,
+                        body={
+                            "query": {
+                                "bool": {
+                                    "must": [
+                                        {"term": {"scope": scope}},
+                                        {"term": {"repository": repository}},
+                                        {"term": {"username": username}},
+                                        {"term": {"element_type": "file"}},
+                                        {"term": {"relative_path": check_path}},
+                                    ]
+                                }
+                            },
+                            "_source": ["relative_path", "file_hash", "element_type"],
+                            "size": 5,
+                        },
+                    )
+                    direct_hits = direct_check.get("hits", {}).get("hits", [])
+                    f.write(f"[DIRECT ES QUERY] Found {len(direct_hits)} FILE elements for {check_path}\n")
+                    for dh in direct_hits:
+                        ds = dh.get("_source", {})
+                        dfh = ds.get("file_hash")
+                        f.write(f"  relative_path={ds.get('relative_path')} file_hash={dfh[:16] if dfh else 'None'}...\n")
 
         return states
 
