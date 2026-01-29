@@ -286,7 +286,8 @@ class TestComputeThrottleDecision:
         """When running tasks exist, computes base_time from current data.
 
         current_max=80s with 8 workers → base_time = 80/8 = 10s
-        max_workers = 117 / 10 = 11.7 → 11 workers (< 32 base)
+        optimal = 117 / 10 = 11.7 → 11 workers
+        But ramp-up applies: 8 + max(1, int(3*0.25)) = 8 + 1 = 9 workers
         """
         decision = compute_throttle_decision(
             current_max_runtime=80.0,
@@ -299,15 +300,17 @@ class TestComputeThrottleDecision:
             avg_base_time=5.0,  # Historical says 5s, but current shows 10s
         )
         assert decision.should_throttle
-        assert decision.recommended_workers == 11  # Uses max(10, 5) = 10s base_time
+        assert decision.recommended_workers == 9  # Ramped from 8 toward 11
         assert "Throttle" in decision.reason
+        assert "ramped" in decision.reason
 
     def test_uses_max_of_current_and_historical_base_time(self):
         """Should use the higher of current and historical base_time for safety.
 
         current_max=40s with 8 workers → current_base = 5s
         historical avg_base_time = 10s (higher)
-        max_workers = 117 / 10 = 11.7 → 11 workers
+        optimal = 117 / 10 = 11.7 → 11 workers
+        But ramp-up applies: 8 + max(1, int(3*0.25)) = 8 + 1 = 9 workers
         """
         decision = compute_throttle_decision(
             current_max_runtime=40.0,
@@ -320,8 +323,49 @@ class TestComputeThrottleDecision:
             avg_base_time=10.0,  # Historical is worse than current
         )
         assert decision.should_throttle
-        assert decision.recommended_workers == 11  # Uses max(5, 10) = 10s base_time
+        assert decision.recommended_workers == 9  # Ramped from 8 toward 11
         assert "Throttle" in decision.reason
+
+    def test_ramp_up_during_warmup(self):
+        """During warmup, ramp up gradually instead of jumping to optimal.
+
+        With 2 active workers and base_time suggesting 23 optimal:
+        delta = 23 - 2 = 21, ramped = 2 + max(1, int(21*0.25)) = 2 + 5 = 7
+        """
+        decision = compute_throttle_decision(
+            current_max_runtime=10.0,  # 10s with 2 workers = 5s base_time
+            tier_timeout=180.0,
+            base_workers=32,
+            active_workers=2,
+            throughput=0.5,
+            avg_runtime=10.0,
+            completion_count=5,
+            avg_base_time=5.0,  # 117/5 = 23.4 → 23 optimal
+        )
+        assert decision.should_throttle
+        # Optimal is 23, but we ramp: 2 + max(1, int(21*0.25)) = 2 + 5 = 7
+        assert decision.recommended_workers == 7
+        assert "ramped from 2" in decision.reason
+
+    def test_scale_down_immediate(self):
+        """When scaling down, apply immediately without ramping.
+
+        If optimal is less than active, we're seeing slowness - react fast.
+        """
+        decision = compute_throttle_decision(
+            current_max_runtime=100.0,  # 100s with 20 workers = 5s base_time
+            tier_timeout=180.0,
+            base_workers=32,
+            active_workers=20,
+            throughput=0.1,
+            avg_runtime=100.0,
+            completion_count=10,
+            avg_base_time=30.0,  # Historical shows 30s base → 117/30 = 3.9 → 3 optimal
+        )
+        assert decision.should_throttle
+        # Optimal is 3, active is 20 - scale down immediately, no ramp
+        assert decision.recommended_workers == 3
+        assert "ramped" not in decision.reason
 
 
 class TestThrottleDecisionDataclass:
