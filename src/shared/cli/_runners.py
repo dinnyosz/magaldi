@@ -267,9 +267,14 @@ def run_processing(
 
         # Determine allowed workers and status info
         if parallelism and parallelism.tier_changing:
-            # Startup warmup: first task loading model
+            # Tier change in progress
             allowed = 1
-            info = "[yellow]model loading...[/]"
+            if parallelism.running > 1:
+                # Old tier tasks still draining
+                info = "[yellow]tier draining...[/]"
+            else:
+                # Warmup task loading model
+                info = "[yellow]model loading...[/]"
         elif parallelism and parallelism.throttle_decision and parallelism.throttle_decision.should_throttle:
             # Runtime-based throttling
             allowed = parallelism.throttle_decision.recommended_workers
