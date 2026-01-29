@@ -608,6 +608,12 @@ class DependencyTracker:
                 tier = self._get_tier(elem.element_id)
                 by_model_tier.setdefault((model_key, tier), []).append(elem)
 
+            # Sort each batch by level (parents first) then context size (smallest first)
+            for key in by_model_tier:
+                by_model_tier[key].sort(
+                    key=lambda e: (self._get_level(e), self._context_sizes.get(e.element_id, 0))
+                )
+
             # Determine which (model, tier) to use with priority:
             # 1. Current model + current tier (if available)
             # 2. Current model + smallest available tier
