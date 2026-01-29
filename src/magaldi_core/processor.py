@@ -469,6 +469,36 @@ class TimingStats:
             eta = total_work_time / max(num_workers, 1)
             return eta
 
+    def get_eta_breakdown(self, num_workers: int = 1) -> list[tuple[str, int, int, int, float]]:
+        """Get ETA breakdown per (type, tier) for display.
+
+        Returns:
+            List of (type, tier, remaining, total, eta_seconds) tuples,
+            sorted by remaining ETA descending.
+        """
+        with self._lock:
+            if not self.totals_by_type_tier:
+                return []
+
+            # Global average as fallback
+            total_api_time = sum(self.total_summarize_by_type.values()) + sum(self.total_embed_by_type.values())
+            total_count = sum(self.summarize_counts_by_type.values())
+            global_avg = total_api_time / total_count if total_count > 0 else 0.0
+
+            breakdown = []
+            for (element_type, tier), tot in self.totals_by_type_tier.items():
+                done = self.summarize_counts_by_type_tier.get((element_type, tier), 0)
+                remaining = tot - done
+                if remaining > 0:
+                    avg = self._get_avg_for_type_tier(element_type, tier, global_avg)
+                    work_time = remaining * avg if avg > 0 else 0.0
+                    eta = work_time / max(num_workers, 1)
+                    breakdown.append((element_type, tier, remaining, tot, eta))
+
+            # Sort by ETA descending (largest remaining time first)
+            breakdown.sort(key=lambda x: x[4], reverse=True)
+            return breakdown
+
 
 @dataclass
 class WorkerStatus:

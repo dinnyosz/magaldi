@@ -206,6 +206,23 @@ def run_processing(
             bar_text.append(format_duration(eta), style="yellow")
             bar_text.append(" ETA", style="dim")
 
+        # ETA breakdown per (type, tier) - compact format
+        eta_breakdown = state.timing.get_eta_breakdown(state.num_workers)
+        if eta_breakdown:
+            # Show top contributors (up to 4 items with remaining > 0)
+            breakdown_parts = []
+            tier_abbrev = {2048: "2k", 4096: "4k", 8192: "8k", 16384: "16k", 32768: "32k"}
+            type_abbrev = {"function": "fn", "method": "mth", "class": "cls", "file": "file", "variable": "var", "constant": "const"}
+            for elem_type, tier, remaining, total, item_eta in eta_breakdown[:4]:
+                if item_eta > 0.5:  # Only show items with >0.5s remaining
+                    t_abbr = type_abbrev.get(elem_type, elem_type[:3])
+                    tier_str = tier_abbrev.get(tier, f"{tier//1024}k")
+                    breakdown_parts.append(f"{t_abbr}@{tier_str}:{remaining}={format_duration(item_eta)}")
+            if breakdown_parts:
+                bar_text.append(" [", style="dim")
+                bar_text.append(" ".join(breakdown_parts), style="dim yellow")
+                bar_text.append("]", style="dim")
+
         # Worker table
         import time as time_mod
         worker_table = Table(show_header=False, box=None, padding=0)

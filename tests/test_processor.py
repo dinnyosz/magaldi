@@ -664,6 +664,48 @@ class TestTimingStats:
         assert eta is not None
         assert abs(eta - 2.4) < 0.2
 
+    def test_get_eta_breakdown(self):
+        """Test ETA breakdown returns per-(type, tier) estimates."""
+        stats = TimingStats()
+
+        # Set up totals by (type, tier)
+        stats.set_totals_by_type_tier({
+            ("function", 2048): 10,
+            ("function", 8192): 5,
+            ("class", 4096): 3,
+        })
+
+        # Record some completions
+        stats.record(0.5, 0.3, 0.2, "function", True, tier=2048)
+        stats.record(0.5, 0.3, 0.2, "function", True, tier=2048)
+        stats.record(2.0, 1.5, 0.5, "function", True, tier=8192)
+        stats.record(1.0, 0.7, 0.3, "class", True, tier=4096)
+
+        breakdown = stats.get_eta_breakdown(num_workers=1)
+
+        # Should have 3 entries (one for each type/tier combo with remaining > 0)
+        assert len(breakdown) == 3
+
+        # Check structure: (type, tier, remaining, total, eta_seconds)
+        for elem_type, tier, remaining, total, eta in breakdown:
+            assert elem_type in ("function", "class")
+            assert tier in (2048, 4096, 8192)
+            assert remaining > 0
+            assert remaining <= total
+            assert eta > 0
+
+        # Should be sorted by ETA descending
+        etas = [x[4] for x in breakdown]
+        assert etas == sorted(etas, reverse=True)
+
+    def test_get_eta_breakdown_empty_when_no_tier_data(self):
+        """Test ETA breakdown returns empty list when no tier data."""
+        stats = TimingStats()
+        stats.set_totals_by_type({"function": 10})  # Only type-level totals
+
+        breakdown = stats.get_eta_breakdown()
+        assert breakdown == []
+
 
 # =============================================================================
 # WORKER STATUS TESTS
