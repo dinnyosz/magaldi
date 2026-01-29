@@ -115,6 +115,56 @@ class TestThroughputTracker:
         # avg_base_time = (1 + 2 + 3) / 3 = 2s
         assert avg_base_time == pytest.approx(2.0)
 
+    def test_warmup_tasks_excluded_from_base_time(self):
+        """Warmup tasks (workers=0) should be excluded from avg_base_time.
+
+        Warmup tasks run alone and don't reflect contention behavior.
+        Including them would artificially inflate avg_base_time.
+
+        Example: If we have:
+        - warmup: 50s with 0 workers → should be EXCLUDED
+        - warmup: 60s with 0 workers → should be EXCLUDED
+        - normal: 40s with 2 workers → base_time = 20s
+        avg_base_time should be 20s, not (50+60+20)/3 = 43.3s
+        """
+        tracker = ThroughputTracker(window_seconds=10.0)
+
+        # Warmup tasks (workers=0) - should be excluded
+        tracker.record_completion(50.0, concurrent_workers=0)
+        tracker.record_completion(60.0, concurrent_workers=0)
+
+        # Normal task with contention data
+        tracker.record_completion(40.0, concurrent_workers=2)
+
+        throughput, avg_runtime, count, avg_conc, avg_base_time = (
+            tracker.get_stats_with_concurrency()
+        )
+
+        # Count includes all completions
+        assert count == 3
+
+        # avg_base_time should only include workers > 0
+        # 40s / 2 workers = 20s base_time
+        assert avg_base_time == pytest.approx(20.0)
+
+    def test_only_warmup_tasks_gives_zero_base_time(self):
+        """If only warmup tasks exist, avg_base_time should be 0.
+
+        This triggers the 'No data' ramp-up path in compute_throttle_decision.
+        """
+        tracker = ThroughputTracker(window_seconds=10.0)
+
+        # Only warmup tasks
+        tracker.record_completion(50.0, concurrent_workers=0)
+        tracker.record_completion(60.0, concurrent_workers=0)
+
+        throughput, avg_runtime, count, avg_conc, avg_base_time = (
+            tracker.get_stats_with_concurrency()
+        )
+
+        assert count == 2  # Both recorded
+        assert avg_base_time == 0.0  # But excluded from base_time
+
 
 class TestComputeThrottleDecision:
     """Tests for compute_throttle_decision function.
