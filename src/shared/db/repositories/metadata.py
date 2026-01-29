@@ -427,6 +427,7 @@ class MetadataRepository:
         )
 
         states = {}
+        _logged = 0
         for hit in result["hits"]["hits"]:
             source = hit["_source"]
             states[source["relative_path"]] = {
@@ -434,6 +435,12 @@ class MetadataRepository:
                 "is_deleted": False,
                 "element_count": source.get("element_count"),
             }
+            # Log first few to see what we're reading
+            if _logged < 3:
+                with open("/tmp/magaldi_file_hash.log", "a") as f:
+                    fh = source.get("file_hash")
+                    f.write(f"[GET_FILE_STATES] {source['relative_path']}: file_hash={fh[:16] if fh else 'None'}... _id={hit.get('_id', '?')[:20]}...\n")
+                _logged += 1
 
         return states
 

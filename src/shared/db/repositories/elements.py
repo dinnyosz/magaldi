@@ -468,7 +468,9 @@ class ElementRepository:
             # Log first few files with details
             if _logged < 3:
                 with open("/tmp/magaldi_file_hash.log", "a") as f:
-                    f.write(f"[ES UPDATE] {relative_path}: updated={updated}, total={result.get('total', 0)}, failures={result.get('failures', [])}\n")
+                    f.write(f"[ES UPDATE] {relative_path}: updated={updated}, total={result.get('total', 0)}, "
+                            f"noops={result.get('noops', 0)}, version_conflicts={result.get('version_conflicts', 0)}, "
+                            f"failures={len(result.get('failures', []))}\n")
 
                 # Verify FILE element was updated - check ALL FILE elements for this path
                 verify = client.search(
