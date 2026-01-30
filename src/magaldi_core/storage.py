@@ -549,7 +549,7 @@ def should_embed(element: CodeElement) -> bool:
         True if element should be embedded.
     """
     # Embed all code elements
-    if element.element_type in ("file", "class", "function", "method", "constant", "variable"):
+    if element.element_type in ("file", "class", "interface", "type_alias", "function", "method", "constant", "variable"):
         return True
 
     return False

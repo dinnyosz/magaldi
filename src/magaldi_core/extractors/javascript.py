@@ -397,7 +397,7 @@ def _extract_ts_interface(node: Node, lines: list[str]) -> ExtractedElement:
         lines: Source code lines.
 
     Returns:
-        ExtractedElement with element_type="class" (interfaces are class-like).
+        ExtractedElement with element_type="interface".
     """
     name_node = get_child_by_field(node, "name")
     name = get_node_text(name_node) if name_node else "unknown"
@@ -415,7 +415,7 @@ def _extract_ts_interface(node: Node, lines: list[str]) -> ExtractedElement:
             break
 
     return ExtractedElement(
-        element_type="class",  # Treat interfaces as class-like for indexing
+        element_type="interface",
         name=name,
         line_start=line_start,
         line_end=line_end,
@@ -434,7 +434,7 @@ def _extract_ts_type_alias(node: Node, lines: list[str]) -> ExtractedElement:
         lines: Source code lines.
 
     Returns:
-        ExtractedElement with element_type="class" (type aliases define types).
+        ExtractedElement with element_type="type_alias".
     """
     name_node = get_child_by_field(node, "name")
     name = get_node_text(name_node) if name_node else "unknown"
@@ -454,7 +454,7 @@ def _extract_ts_type_alias(node: Node, lines: list[str]) -> ExtractedElement:
     signature = f"type {name} = {value_text}"
 
     return ExtractedElement(
-        element_type="class",  # Treat type aliases as class-like
+        element_type="type_alias",
         name=name,
         line_start=line_start,
         line_end=line_end,

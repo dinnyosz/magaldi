@@ -430,8 +430,8 @@ class TimingStats:
             tier_ratio = tier / closest_tier if closest_tier > 0 else 1.0
             return base_avg * tier_ratio, True
 
-        # 3. Same model group (large: file/class, small: function/method/variable)
-        large_types = {"file", "class"}
+        # 3. Same model group (large: file/class/interface/type_alias, small: function/method/variable)
+        large_types = {"file", "class", "interface", "type_alias"}
         small_types = {"function", "method", "variable", "constant"}
         if element_type in large_types:
             model_types = large_types
@@ -625,8 +625,8 @@ class TimingStats:
                 # Include all items, even those with no timing data yet (avg=0)
                 breakdown.append((element_type, tier, avg, is_fallback, done, tot))
 
-            # Sort by hierarchy (file → class → function → method → variable), then tier descending
-            type_order = {"file": 0, "class": 1, "function": 2, "method": 3, "variable": 4, "constant": 5}
+            # Sort by hierarchy (file → class/interface/type_alias → function → method → variable), then tier descending
+            type_order = {"file": 0, "class": 1, "interface": 1, "type_alias": 1, "function": 2, "method": 3, "variable": 4, "constant": 5}
             breakdown.sort(key=lambda x: (type_order.get(x[0], 99), -x[1]))
             return breakdown
 
@@ -824,7 +824,7 @@ class DependencyTracker:
     def _get_model_key(self, element: CodeElement) -> str:
         """Get model key for an element (for batching by model).
 
-        Returns 'large' for files/classes, 'small' for functions/methods/variables.
+        Returns 'large' for files/classes/interfaces/type_aliases, 'small' for functions/methods/variables.
         This matches ProcessingConfig.get_model_for_element_type().
         """
         if element.element_type in ("function", "method", "variable", "constant"):

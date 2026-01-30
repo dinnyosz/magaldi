@@ -192,7 +192,7 @@ class Call:
 
 @dataclass
 class CodeElement:
-    """A parsed code element (class, function, method, variable)."""
+    """A parsed code element (class, interface, type_alias, function, method, variable)."""
 
     # Identity
     element_id: str = ""
@@ -204,7 +204,7 @@ class CodeElement:
     relative_path: str = ""
 
     # Element info
-    element_type: str = ""  # 'file', 'class', 'function', 'method', 'constant', 'variable'
+    element_type: str = ""  # 'file', 'class', 'interface', 'type_alias', 'function', 'method', 'constant', 'variable'
     name: str = ""
     language: str = ""
 
@@ -1359,6 +1359,11 @@ class JavaScriptParser(TreeSitterParser):
                 func_elem = self._convert_function(ext, file_info, scope, repository, username, lines)
                 elements.append(func_elem)
 
+            elif ext.element_type in ("interface", "type_alias"):
+                # TypeScript interfaces and type aliases are type-level constructs
+                type_elem = self._convert_type_definition(ext, file_info, scope, repository, username)
+                elements.append(type_elem)
+
         # Set parent IDs
         self._set_hierarchy(elements, file_element)
 
@@ -1366,6 +1371,35 @@ class JavaScriptParser(TreeSitterParser):
         self._resolve_calls_in_file(elements)
 
         return elements
+
+    def _convert_type_definition(
+        self,
+        ext: ExtractedElement,
+        file_info: FileInfo,
+        scope: str,
+        repository: str,
+        username: str,
+    ) -> CodeElement:
+        """Convert TypeScript interface or type alias to CodeElement."""
+        elem = CodeElement(
+            scope=scope,
+            repository=repository,
+            username=username,
+            relative_path=file_info.relative_path,
+            element_type=ext.element_type,  # 'interface' or 'type_alias'
+            name=ext.name,
+            language=file_info.language,
+            line_start=ext.line_start,
+            line_end=ext.line_end,
+            raw_code=ext.raw_code,
+            signature=ext.signature,
+            level=1,  # Same level as classes
+        )
+        elem.element_id = generate_element_id(
+            scope, repository, username, file_info.relative_path,
+            ext.element_type, ext.name, ext.get_byte_offset()
+        )
+        return elem
 
     def _convert_class(
         self,
