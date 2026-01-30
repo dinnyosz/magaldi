@@ -234,8 +234,26 @@ def parser_lab_analyze(
             return {"error": f"File not found: {file_path}"}
         code = path.read_text(encoding="utf-8")
     elif context7_query:
-        # TODO: Integrate with Context7 MCP
-        return {"error": "Context7 integration not yet implemented"}
+        # Context7 MCP is available but MCP tools can't call other MCP tools directly.
+        # Return a delegation response for the AI agent to handle.
+        return {
+            "delegation": "context7",
+            "instructions": (
+                "To use Context7 for code examples, follow these steps:\n"
+                "1. Call mcp__plugin_context7_context7__resolve-library-id with:\n"
+                f"   - libraryName: extract the library/framework name from '{context7_query}'\n"
+                f"   - query: '{context7_query}'\n"
+                "2. Call mcp__plugin_context7_context7__query-docs with:\n"
+                "   - libraryId: use the ID from step 1\n"
+                f"   - query: '{context7_query}'\n"
+                "3. Extract code snippets from the response\n"
+                "4. Call parser_lab_analyze again with:\n"
+                "   - code: the extracted code snippet\n"
+                f"   - language: '{language or 'auto-detect'}'"
+            ),
+            "context7_query": context7_query,
+            "language": language,
+        }
     elif not code:
         return {"error": "Must provide file_path, code, or context7_query"}
 
@@ -282,6 +300,32 @@ def parser_lab_analyze(
 
     gaps = _find_uncaptured_nodes(tree.root_node, captured_ranges, language)
 
+    # Extract framework-specific patterns
+    framework_patterns: dict[str, Any] = {}
+    if language == "php":
+        from magaldi_core.extractors.patterns.slim import extract_slim_routes, extract_slim_route_groups
+        slim_routes = extract_slim_routes(tree, lines)
+        slim_groups = extract_slim_route_groups(tree, lines)
+        if slim_routes or slim_groups:
+            framework_patterns["slim"] = {
+                "routes": [
+                    {"method": r.method, "path": r.path, "path_params": r.path_params}
+                    for r in slim_routes
+                ],
+                "route_groups": [
+                    {
+                        "prefix": g.prefix,
+                        "routes": [
+                            {"method": r.method, "path": r.path, "path_params": r.path_params}
+                            for r in g.routes
+                        ],
+                        "line_start": g.line_start,
+                        "line_end": g.line_end,
+                    }
+                    for g in slim_groups
+                ],
+            }
+
     # Build response
     result: dict[str, Any] = {
         "language": language,
@@ -320,6 +364,10 @@ def parser_lab_analyze(
         ],
         "gap_count": len(gaps),
     }
+
+    # Add framework patterns if any were detected
+    if framework_patterns:
+        result["framework_patterns"] = framework_patterns
 
     if debug:
         # Include AST tree representation
