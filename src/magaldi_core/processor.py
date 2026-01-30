@@ -39,7 +39,7 @@ from shared.ai.summarization import (
     build_prompt,
     clean_summary,
 )
-from shared.ai.context_size import compute_element_num_ctx, CONTEXT_TIERS, TIER_TIMEOUTS, TIER_MAX_WORKERS
+from shared.ai.context_size import compute_element_num_ctx, CONTEXT_TIERS, TIER_TIMEOUTS
 from shared.throttling import ThroughputTracker, compute_throttle_decision, ThrottleDecision, TimeoutEvent
 
 
@@ -880,10 +880,8 @@ class DependencyTracker:
             self._previous_tier = self._current_tier
             self._current_tier = selected_tier
 
-            # Worker limit: start with tier-specific max, then apply throttling
-            # Smaller tiers can use more workers (more fit in GPU memory)
-            tier_max = TIER_MAX_WORKERS.get(selected_tier, self._max_num_workers)
-            worker_limit = min(self._max_num_workers, tier_max)
+            # Worker limit: start with configured max, apply throttling
+            worker_limit = self._max_num_workers
 
             # Apply runtime-based throttle limit if set
             if throttle_limit is not None:
@@ -1042,13 +1040,10 @@ class DependencyTracker:
             ThrottleDecision with recommended action.
         """
         with self._lock:
-            # Use tier-specific base_workers for throttle calculation
-            tier_max = TIER_MAX_WORKERS.get(self._current_tier, self._max_num_workers)
-            base_workers = min(self._max_num_workers, tier_max)
             return compute_throttle_decision(
                 current_max_runtime=current_max_runtime,
                 tier_timeout=self.get_current_tier_timeout(),
-                base_workers=base_workers,
+                base_workers=self._max_num_workers,
                 active_workers=active_workers,
                 throughput=throughput,
                 avg_runtime=avg_runtime,
