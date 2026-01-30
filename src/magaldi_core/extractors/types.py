@@ -179,6 +179,7 @@ class HttpRoute:
     path: str  # "/users/{id}"
     path_params: list[str]  # ["id"]
     framework: str  # "fastapi", "flask", "express"
+    line: int | None = None  # Line number in source file
 
 
 @dataclass
