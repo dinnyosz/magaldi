@@ -2052,11 +2052,9 @@ def process_elements(
     # DependencyTracker manages concurrency with tier batching and runtime-based throttling
     executor = ThreadPoolExecutor(max_workers=max_workers)
     future_to_element: dict = {}
-    # Track worker count at task START for concurrency-aware throttling
-    # Using start time matters more than completion time because:
-    # - Contention happens when task starts competing for GPU
-    # - Completion time can be misleading (other tasks may have just finished)
-    future_to_workers_at_start: dict = {}
+
+    # Track allowed workers at task start for averaging with end value
+    future_to_allowed_at_start: dict[Any, int] = {}
 
     # Track current throttle decision for display
     current_throttle: ThrottleDecision | None = None
@@ -2069,9 +2067,6 @@ def process_elements(
             current_max_runtime = worker_status.get_max_active_runtime()
 
             # Get current time and active worker count for throttle decisions
-            # NOTE: We no longer record periodic history here because it used
-            # active_workers (current count) which gives wrong base_time.
-            # Actual task completions at line ~2056 use workers_at_start (correct).
             now = time.time()
             active_workers = worker_status.active_count()
 
@@ -2097,12 +2092,11 @@ def process_elements(
             )
 
             # Submit new tasks for ready elements
-            # Record worker count at start time for throttling (captures contention level)
-            workers_at_start = worker_status.active_count()
+            # Track allowed workers at start for throughput calculation
             for element in ready_elements:
                 future = executor.submit(process_wrapper, element)
                 future_to_element[future] = element
-                future_to_workers_at_start[future] = workers_at_start
+                future_to_allowed_at_start[future] = throttle_limit
 
             if not future_to_element:
                 # No futures pending and not complete - shouldn't happen
@@ -2155,11 +2149,11 @@ def process_elements(
                 # Get element's tier for accurate ETA tracking
                 element_tier = dependency_tracker._get_tier(element.element_id)
 
-                # Calculate average workers during this task (for throughput)
-                # Average of start and end counts gives better estimate of actual contention
-                workers_at_start = future_to_workers_at_start.pop(future, 1)
-                workers_at_end = worker_status.active_count()
-                avg_workers = (workers_at_start + workers_at_end) / 2
+                # Use allowed workers for throughput calculation (average of start and end)
+                # This is more stable than actual counts which fluctuate during ramp-up
+                allowed_at_start = future_to_allowed_at_start.pop(future, throttle_limit)
+                allowed_at_end = throttle_limit
+                avg_workers = (allowed_at_start + allowed_at_end) / 2
 
                 # Record timing with element type, tier, and avg_workers (for throughput)
                 timing_stats.record(

@@ -276,7 +276,7 @@ class ThrottledParallelProcessor(Generic[T, R]):
 
                 executor = ThreadPoolExecutor(max_workers=effective_workers)
                 futures: dict = {}
-                future_to_workers_at_start: dict = {}
+                future_to_allowed_at_start: dict = {}
                 pending_items = list(tier_items)
 
                 try:
@@ -303,10 +303,9 @@ class ThrottledParallelProcessor(Generic[T, R]):
                         # Submit new tasks up to allowed limit
                         while pending_items and len(futures) < allowed_workers:
                             item = pending_items.pop(0)
-                            workers_at_start = len(futures)
                             future = executor.submit(process_wrapper, item)
                             futures[future] = item
-                            future_to_workers_at_start[future] = workers_at_start
+                            future_to_allowed_at_start[future] = allowed_workers
 
                         if not futures:
                             break
@@ -319,9 +318,10 @@ class ThrottledParallelProcessor(Generic[T, R]):
                         # Handle completed tasks
                         for future in done:
                             item = futures.pop(future)
-                            workers_at_start = future_to_workers_at_start.pop(future, 1)
-                            workers_at_end = len(futures)
-                            avg_workers = (workers_at_start + workers_at_end) / 2
+                            # Use allowed workers (average of start and end)
+                            allowed_at_start = future_to_allowed_at_start.pop(future, allowed_workers)
+                            allowed_at_end = allowed_workers
+                            avg_workers = (allowed_at_start + allowed_at_end) / 2
 
                             item, result, worker_id = future.result()
 
@@ -443,7 +443,7 @@ def run_throttled_tier(
 
     executor = ThreadPoolExecutor(max_workers=effective_workers)
     futures: dict = {}
-    future_to_workers_at_start: dict = {}
+    future_to_allowed_at_start: dict = {}
     pending_items = list(items)
 
     try:
@@ -458,10 +458,9 @@ def run_throttled_tier(
             # Submit new tasks up to allowed limit
             while pending_items and len(futures) < allowed_workers:
                 item = pending_items.pop(0)
-                workers_at_start = len(futures)
                 future = executor.submit(process_fn, item)
                 futures[future] = item
-                future_to_workers_at_start[future] = workers_at_start
+                future_to_allowed_at_start[future] = allowed_workers
 
             if not futures:
                 break
@@ -472,9 +471,10 @@ def run_throttled_tier(
             # Handle completed tasks
             for future in done:
                 item = futures.pop(future)
-                workers_at_start = future_to_workers_at_start.pop(future, 1)
-                workers_at_end = len(futures)
-                avg_workers = (workers_at_start + workers_at_end) / 2
+                # Use allowed workers (average of start and end)
+                allowed_at_start = future_to_allowed_at_start.pop(future, allowed_workers)
+                allowed_at_end = allowed_workers
+                avg_workers = (allowed_at_start + allowed_at_end) / 2
 
                 result = future.result()
                 on_complete(item, result, avg_workers)
