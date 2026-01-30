@@ -37,8 +37,8 @@ TIER_TIMEOUTS = {
     2048: 120,   # 2 minutes
     4096: 120,   # 2 minutes
     8192: 180,   # 3 minutes
-    16384: 360,  # 6 minutes
-    32768: 600,  # 10 minutes
+    16384: 240,  # 4 minutes
+    32768: 240,  # 4 minutes
 }
 
 # Estimated prompt overhead per element type (tokens)
