@@ -268,11 +268,10 @@ def compute_throttle_decision(
     normalized_max = current_max_runtime / max(active_workers, 1)
     max_ratio = normalized_max / tier_timeout if tier_timeout > 0 else 0.0
 
-    # Check if per-worker cost is too high - if so, hold at current level
-    # Use max of normalized_max and historical to be conservative
+    # Check if any task is taking too long - if so, hold at current level
+    # Uses raw max (like emergency) but with lower threshold
     hold_threshold = tier_timeout * RAMP_HOLD_THRESHOLD
-    effective_for_hold = max(normalized_max, avg_base_time) if avg_base_time > 0 else normalized_max
-    should_hold = effective_for_hold > hold_threshold and active_workers > 0
+    should_hold = current_max_runtime > hold_threshold and active_workers > 0
 
     # Use the larger of historical avg_base_time or normalized_max for worker calculation.
     # - Historical: average from completed tasks
@@ -289,8 +288,8 @@ def compute_throttle_decision(
         if should_hold:
             # Tasks running long, hold at current level until we get feedback
             _log_throttle(
-                f"NO DATA HOLD: max={current_max_runtime:.1f}s / {active_workers}w = {normalized_max:.1f}s "
-                f"({max_ratio:.0%} of {tier_timeout}s) > {RAMP_HOLD_THRESHOLD:.0%} threshold, holding at {active_workers}"
+                f"NO DATA HOLD: max={current_max_runtime:.1f}s ({current_max_runtime/tier_timeout:.0%} of {tier_timeout}s) "
+                f"> {RAMP_HOLD_THRESHOLD:.0%} threshold, holding at {active_workers}"
             )
             return ThrottleDecision(
                 should_throttle=False,
@@ -350,8 +349,8 @@ def compute_throttle_decision(
             effective_workers = active_workers
             reason_suffix = f", holding (>{RAMP_HOLD_THRESHOLD:.0%} timeout)"
             _log_throttle(
-                f"RAMP HOLD: max={current_max_runtime:.1f}s / {active_workers}w = {normalized_max:.1f}s "
-                f"({max_ratio:.0%}) > {RAMP_HOLD_THRESHOLD:.0%} threshold, holding at {active_workers} (target={target_workers})"
+                f"RAMP HOLD: max={current_max_runtime:.1f}s ({current_max_runtime/tier_timeout:.0%} of {tier_timeout}s) "
+                f"> {RAMP_HOLD_THRESHOLD:.0%} threshold, holding at {active_workers} (target={target_workers})"
             )
         else:
             # Scaling UP - ramp gradually to avoid overwhelming during warmup
