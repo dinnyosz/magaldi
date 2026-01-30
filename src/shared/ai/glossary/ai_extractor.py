@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 import json
 import re
 import threading
@@ -889,10 +890,11 @@ def extract_glossary_from_features_concurrent(
             return 0  # Fallback
 
     def release_worker_id(wid: int) -> None:
-        """Return a worker ID to the pool."""
+        """Return a worker ID to the pool (maintains sorted order)."""
         with worker_id_lock:
             if wid not in available_worker_ids:
-                available_worker_ids.append(wid)
+                # Insert in sorted position to keep lower IDs at front
+                bisect.insort(available_worker_ids, wid)
 
     # Build features lookup for summary generation
     features_by_id: dict[str, dict[str, Any]] = {}

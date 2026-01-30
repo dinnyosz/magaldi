@@ -15,6 +15,7 @@ Two APIs are provided:
 
 from __future__ import annotations
 
+import bisect
 import threading
 import time
 from collections.abc import Callable
@@ -208,17 +209,19 @@ class ThrottledParallelProcessor(Generic[T, R]):
         self._available_worker_ids: list[int] = []
 
     def _acquire_worker_id(self) -> int:
-        """Get an available worker ID."""
+        """Get an available worker ID (lowest first)."""
         with self._worker_id_lock:
             if self._available_worker_ids:
-                return self._available_worker_ids.pop()
+                # Pop from front to prefer lower IDs
+                return self._available_worker_ids.pop(0)
             return 0
 
     def _release_worker_id(self, worker_id: int) -> None:
-        """Return a worker ID to the pool."""
+        """Return a worker ID to the pool (maintains sorted order)."""
         with self._worker_id_lock:
             if worker_id not in self._available_worker_ids:
-                self._available_worker_ids.append(worker_id)
+                # Insert in sorted position to keep lower IDs at front
+                bisect.insort(self._available_worker_ids, worker_id)
 
     def process(self, items: list[T]) -> ProcessingResult[R]:
         """Process items with throttled parallelism.

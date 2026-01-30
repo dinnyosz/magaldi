@@ -9,6 +9,7 @@ Processes feature clusters:
 
 from __future__ import annotations
 
+import bisect
 import threading
 import time
 from collections.abc import Callable
@@ -884,7 +885,8 @@ def process_features(
     def release_worker_id(wid: int) -> None:
         with worker_id_lock:
             if wid not in available_worker_ids:
-                available_worker_ids.append(wid)
+                # Insert in sorted position to keep lower IDs at front
+                bisect.insort(available_worker_ids, wid)
 
     def process_wrapper(cluster: ClusterResult) -> ProcessedFeature:
         wid = acquire_worker_id()
@@ -1554,7 +1556,8 @@ def process_subfeatures(
     def release_worker_id(wid: int) -> None:
         with worker_id_lock:
             if wid not in available_worker_ids:
-                available_worker_ids.append(wid)
+                # Insert in sorted position to keep lower IDs at front
+                bisect.insort(available_worker_ids, wid)
 
     # Mutable state for throttle info
     subfeature_state: dict = {
