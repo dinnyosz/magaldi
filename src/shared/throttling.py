@@ -246,13 +246,12 @@ def compute_throttle_decision(
     Returns:
         ThrottleDecision with recommended action
     """
-    # Emergency check FIRST - if any active task is near timeout, throttle hard
-    # This applies even without completion history
+    # Emergency check uses RAW max_runtime - is any task about to timeout?
     # Use 60% threshold - more aggressive than safety margin (65%) to react before it's too late
-    max_ratio = current_max_runtime / tier_timeout if tier_timeout > 0 else 0.0
-    if max_ratio >= 0.60:
+    raw_ratio = current_max_runtime / tier_timeout if tier_timeout > 0 else 0.0
+    if raw_ratio >= 0.60:
         _log_throttle(
-            f"EMERGENCY: max_runtime={current_max_runtime:.1f}s ({max_ratio:.0%} of {tier_timeout}s timeout) "
+            f"EMERGENCY: max_runtime={current_max_runtime:.1f}s ({raw_ratio:.0%} of {tier_timeout}s timeout) "
             f"active={active_workers} → forcing 1 worker"
         )
         return ThrottleDecision(
@@ -264,10 +263,15 @@ def compute_throttle_decision(
             reason="Emergency (>60% timeout)",
         )
 
-    # Check if running tasks are taking too long - if so, hold at current level
+    # Normalize max_runtime by current workers for hold threshold comparison
+    # This puts it on the same scale as base_time (per-worker cost)
+    normalized_max = current_max_runtime / max(active_workers, 1)
+    max_ratio = normalized_max / tier_timeout if tier_timeout > 0 else 0.0
+
+    # Check if normalized per-worker cost is too high - if so, hold at current level
     # This prevents ramping blindly when we don't have fresh completion feedback
     hold_threshold = tier_timeout * RAMP_HOLD_THRESHOLD
-    should_hold = current_max_runtime > hold_threshold and active_workers > 0
+    should_hold = normalized_max > hold_threshold and active_workers > 0
 
     # Use ONLY historical avg_base_time from actual completions.
     # We can't calculate base_time from current running tasks because we don't
@@ -282,8 +286,8 @@ def compute_throttle_decision(
         if should_hold:
             # Tasks running long, hold at current level until we get feedback
             _log_throttle(
-                f"NO DATA HOLD: max_runtime={current_max_runtime:.1f}s ({current_max_runtime/tier_timeout:.0%} of {tier_timeout}s) "
-                f"> {RAMP_HOLD_THRESHOLD:.0%} threshold, holding at {active_workers}"
+                f"NO DATA HOLD: max={current_max_runtime:.1f}s / {active_workers}w = {normalized_max:.1f}s "
+                f"({max_ratio:.0%} of {tier_timeout}s) > {RAMP_HOLD_THRESHOLD:.0%} threshold, holding at {active_workers}"
             )
             return ThrottleDecision(
                 should_throttle=False,
@@ -300,7 +304,7 @@ def compute_throttle_decision(
             ramped = active_workers + increment
             ramped = min(ramped, base_workers)
             _log_throttle(
-                f"NO DATA RAMP: active={active_workers} max_runtime={current_max_runtime:.1f}s "
+                f"NO DATA RAMP: active={active_workers} normalized_max={normalized_max:.1f}s "
                 f"< {hold_threshold:.0f}s threshold → ramped to {ramped} (+{increment})"
             )
             return ThrottleDecision(
@@ -343,8 +347,8 @@ def compute_throttle_decision(
             effective_workers = active_workers
             reason_suffix = f", holding (>{RAMP_HOLD_THRESHOLD:.0%} timeout)"
             _log_throttle(
-                f"RAMP HOLD: max_runtime={current_max_runtime:.1f}s ({current_max_runtime/tier_timeout:.0%}) "
-                f"> {RAMP_HOLD_THRESHOLD:.0%} threshold, holding at {active_workers} (target={target_workers})"
+                f"RAMP HOLD: max={current_max_runtime:.1f}s / {active_workers}w = {normalized_max:.1f}s "
+                f"({max_ratio:.0%}) > {RAMP_HOLD_THRESHOLD:.0%} threshold, holding at {active_workers} (target={target_workers})"
             )
         else:
             # Scaling UP - ramp gradually to avoid overwhelming during warmup
@@ -357,7 +361,7 @@ def compute_throttle_decision(
             reason_suffix = f", ramped from {active_workers}"
             _log_throttle(
                 f"RAMP UP: base_time={effective_base_time:.1f}s target={target_workers} "
-                f"active={active_workers} max_runtime={current_max_runtime:.1f}s < {hold_threshold:.0f}s → ramped to {effective_workers} (+{increment})"
+                f"active={active_workers} normalized_max={normalized_max:.1f}s < {hold_threshold:.0f}s → ramped to {effective_workers} (+{increment})"
             )
     else:
         # Scaling DOWN, steady, or starting fresh - apply immediately
