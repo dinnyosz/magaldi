@@ -420,7 +420,7 @@ def run_throttled_tier(
     throttle_ctx: ThrottleContext,
     get_max_runtime: Callable[[], float],
     on_complete: Callable[[T, R, float], None],
-    on_tick: Callable[[], None] | None = None,
+    on_tick: Callable[[int], None] | None = None,
 ) -> None:
     """Run throttled processing for a single tier.
 
@@ -435,7 +435,7 @@ def run_throttled_tier(
         throttle_ctx: Context with throughput tracker and config
         get_max_runtime: Function to get current max active runtime
         on_complete: Called when item completes with (item, result, avg_workers)
-        on_tick: Called on each loop iteration (for progress refresh)
+        on_tick: Called on each loop iteration with allowed_workers (for progress refresh)
     """
     tier_timeout = TIER_TIMEOUTS.get(tier, 180)
     throttle_ctx.tier_timeout = tier_timeout
@@ -481,7 +481,7 @@ def run_throttled_tier(
 
             # Tick for progress refresh
             if on_tick:
-                on_tick()
+                on_tick(allowed_workers)
 
     finally:
         executor.shutdown(wait=True)

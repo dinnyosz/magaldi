@@ -275,6 +275,7 @@ class FeatureProgressState:
     timing: FeatureTimingStats
     workers: FeatureWorkerStatus
     num_workers: int = 1
+    allowed_workers: int = 0  # Current throttle-allowed workers (0 = use num_workers)
 
 
 @dataclass
@@ -452,6 +453,7 @@ class SubfeatureProgressState:
     timing: SubfeatureTimingStats
     workers: SubfeatureWorkerStatus
     num_workers: int = 1
+    allowed_workers: int = 0  # Current throttle-allowed workers (0 = use num_workers)
 
 
 @dataclass
@@ -977,7 +979,7 @@ def process_features(
             state["failed"] += 1
             errors.append(f"Feature {cluster.label}: {processed.error}")
 
-    def on_tick() -> None:
+    def on_tick(allowed_workers: int) -> None:
         """Update progress display."""
         if on_progress:
             progress_state = FeatureProgressState(
@@ -987,6 +989,7 @@ def process_features(
                 timing=timing_stats,
                 workers=worker_status,
                 num_workers=state["current_workers"],
+                allowed_workers=allowed_workers,
             )
             on_progress(progress_state)
 
@@ -1547,7 +1550,12 @@ def process_subfeatures(
             if wid not in available_worker_ids:
                 available_worker_ids.append(wid)
 
-    def on_status_change() -> None:
+    # Mutable state for allowed workers
+    subfeature_state = {"allowed_workers": config.num_workers}
+
+    def on_status_change(allowed_workers: int | None = None) -> None:
+        if allowed_workers is not None:
+            subfeature_state["allowed_workers"] = allowed_workers
         if on_progress:
             on_progress(SubfeatureProgressState(
                 total=total,
@@ -1556,6 +1564,7 @@ def process_subfeatures(
                 timing=timing_stats,
                 workers=worker_status,
                 num_workers=config.num_workers,
+                allowed_workers=subfeature_state["allowed_workers"],
             ))
 
     def process_wrapper(work_item: SubfeatureWorkItem) -> ProcessedSubfeature:

@@ -429,9 +429,8 @@ def run_feature_extraction(
             workers_data = state.workers.get_all()
             now = time_mod.time()
 
-            # TODO: Get throttle decision for allowed workers
-            # For now, all non-busy workers show as idle
-            allowed_workers = num_workers
+            # Use allowed_workers from throttle decision (0 = use num_workers)
+            allowed_workers = state.allowed_workers if state.allowed_workers > 0 else num_workers
 
             for wid in range(num_workers):
                 if wid in workers_data:
@@ -674,8 +673,8 @@ def run_feature_extraction(
                 workers_data = state.workers.get_all()
                 now = time_mod.time()
 
-                # TODO: Get throttle decision for allowed workers
-                allowed_workers = num_workers
+                # Use allowed_workers from throttle decision (0 = use num_workers)
+                allowed_workers = state.allowed_workers if state.allowed_workers > 0 else num_workers
 
                 for wid in range(num_workers):
                     if wid in workers_data:
@@ -1003,8 +1002,8 @@ def run_glossary_extraction(
 
             workers_data = state.workers.get_all()
 
-            # TODO: Get throttle decision for allowed workers
-            allowed_workers = num_workers
+            # Use allowed_workers from throttle decision (0 = use num_workers)
+            allowed_workers = state.allowed_workers if state.allowed_workers > 0 else num_workers
 
             for wid in range(num_workers):
                 if wid in workers_data:
