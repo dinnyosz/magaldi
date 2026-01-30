@@ -161,6 +161,7 @@ class TimingStats:
 
     # Per-(type, tier) tracking for more accurate ETA
     total_summarize_by_type_tier: dict[tuple[str, int], float] = field(default_factory=dict)
+    total_base_by_type_tier: dict[tuple[str, int], float] = field(default_factory=dict)  # base time (throughput) for ETA
     summarize_counts_by_type_tier: dict[tuple[str, int], int] = field(default_factory=dict)
     totals_by_type_tier: dict[tuple[str, int], int] = field(default_factory=dict)
 
@@ -202,6 +203,8 @@ class TimingStats:
                     self.summarize_counts_by_type_tier[key] = 0
                 if key not in self.total_summarize_by_type_tier:
                     self.total_summarize_by_type_tier[key] = 0.0
+                if key not in self.total_base_by_type_tier:
+                    self.total_base_by_type_tier[key] = 0.0
 
     def record(
         self,
@@ -213,6 +216,7 @@ class TimingStats:
         summary_embed_time: float = 0.0,
         code_embed_time: float = 0.0,
         tier: int = 0,
+        avg_workers: float = 1.0,
     ) -> None:
         """Record timing for a completed element.
 
@@ -225,6 +229,7 @@ class TimingStats:
             summary_embed_time: Time spent on summary embedding.
             code_embed_time: Time spent on code embedding.
             tier: Context tier (2048, 4096, etc) for per-tier ETA tracking.
+            avg_workers: Average workers during this task (for throughput calculation).
         """
         with self._lock:
             if element_type:
@@ -256,7 +261,12 @@ class TimingStats:
                     type_tier_key = (element_type, tier)
                     if type_tier_key not in self.total_summarize_by_type_tier:
                         self.total_summarize_by_type_tier[type_tier_key] = 0.0
+                    if type_tier_key not in self.total_base_by_type_tier:
+                        self.total_base_by_type_tier[type_tier_key] = 0.0
                     self.total_summarize_by_type_tier[type_tier_key] += summarize_time
+                    # Track base_time (throughput) = wall_time / workers for ETA
+                    base_time = wall_time / max(avg_workers, 1.0)
+                    self.total_base_by_type_tier[type_tier_key] += base_time
                     self.summarize_counts_by_type_tier[type_tier_key] = (
                         self.summarize_counts_by_type_tier.get(type_tier_key, 0) + 1
                     )
@@ -310,7 +320,7 @@ class TimingStats:
         return time.time() - self.phase_start
 
     def get_type_stats(self) -> dict[str, tuple[int, int, float, float, float]]:
-        """Get per-type stats: type -> (completed, total, avg_api, avg_summ, avg_embed)."""
+        """Get per-type stats: type -> (completed, total, avg_base, avg_summ, avg_embed)."""
         with self._lock:
             result = {}
             for t in self.totals_by_type:
@@ -322,8 +332,17 @@ class TimingStats:
                 embed_count = self.embed_counts_by_type.get(t, 0)
                 avg_summ = total_summ / summ_count if summ_count > 0 else 0.0
                 avg_embed = total_embed / embed_count if embed_count > 0 else 0.0
-                avg_api = avg_summ + avg_embed  # Use API time as "wall" for ETA
-                result[t] = (completed, total, avg_api, avg_summ, avg_embed)
+                # Calculate avg wall time from type_tier data
+                type_wall_total = sum(
+                    self.total_base_by_type_tier.get((t, tr), 0.0)
+                    for tr in set(tr for (typ, tr) in self.total_base_by_type_tier if typ == t)
+                )
+                type_count = sum(
+                    self.summarize_counts_by_type_tier.get((t, tr), 0)
+                    for tr in set(tr for (typ, tr) in self.summarize_counts_by_type_tier if typ == t)
+                )
+                avg_wall = type_wall_total / type_count if type_count > 0 else 0.0
+                result[t] = (completed, total, avg_wall, avg_summ, avg_embed)
             return result
 
     def record_task_runtime(self, runtime: float, concurrent_workers: int = 1) -> None:
@@ -386,26 +405,29 @@ class TimingStats:
         """
         type_tier_key = (element_type, tier)
 
-        # 1. Exact match
+        # 1. Exact match - use wall_time for accurate throughput-based ETA
         if type_tier_key in self.summarize_counts_by_type_tier:
             count = self.summarize_counts_by_type_tier[type_tier_key]
             if count > 0:
-                total_time = self.total_summarize_by_type_tier.get(type_tier_key, 0.0)
+                total_time = self.total_base_by_type_tier.get(type_tier_key, 0.0)
                 return total_time / count, False
 
-        # 2. Same type, find closest tier
+        # 2. Same type, find closest tier(s) and average
         same_type_tiers = [
             (t, tr) for (t, tr) in self.summarize_counts_by_type_tier
             if t == element_type and self.summarize_counts_by_type_tier[(t, tr)] > 0
         ]
         if same_type_tiers:
-            # Find closest tier
-            closest = min(same_type_tiers, key=lambda x: abs(x[1] - tier))
-            count = self.summarize_counts_by_type_tier[closest]
-            total_time = self.total_summarize_by_type_tier.get(closest, 0.0)
-            # Scale by tier ratio (larger tier = proportionally longer)
-            base_avg = total_time / count
-            tier_ratio = tier / closest[1] if closest[1] > 0 else 1.0
+            # Find the minimum tier distance
+            min_distance = min(abs(tr - tier) for (t, tr) in same_type_tiers)
+            # Get all items at that closest distance and average them
+            closest_items = [(t, tr) for (t, tr) in same_type_tiers if abs(tr - tier) == min_distance]
+            total_time = sum(self.total_base_by_type_tier.get(key, 0.0) for key in closest_items)
+            total_count = sum(self.summarize_counts_by_type_tier[key] for key in closest_items)
+            base_avg = total_time / total_count
+            # Scale by tier ratio (use first closest tier for ratio)
+            closest_tier = closest_items[0][1]
+            tier_ratio = tier / closest_tier if closest_tier > 0 else 1.0
             return base_avg * tier_ratio, True
 
         # 3. Same model group (large: file/class, small: function/method/variable)
@@ -423,23 +445,76 @@ class TimingStats:
             if t in model_types and self.summarize_counts_by_type_tier[(t, tr)] > 0
         ]
         if same_model_tiers:
-            # Find closest tier in same model group
-            closest = min(same_model_tiers, key=lambda x: abs(x[1] - tier))
-            count = self.summarize_counts_by_type_tier[closest]
-            total_time = self.total_summarize_by_type_tier.get(closest, 0.0)
-            base_avg = total_time / count
-            tier_ratio = tier / closest[1] if closest[1] > 0 else 1.0
+            # Find the minimum tier distance
+            min_distance = min(abs(tr - tier) for (t, tr) in same_model_tiers)
+            # Get all items at that closest distance and average them
+            closest_items = [(t, tr) for (t, tr) in same_model_tiers if abs(tr - tier) == min_distance]
+            total_time = sum(self.total_base_by_type_tier.get(key, 0.0) for key in closest_items)
+            total_count = sum(self.summarize_counts_by_type_tier[key] for key in closest_items)
+            base_avg = total_time / total_count
+            # Scale by tier ratio (use first closest tier for ratio)
+            closest_tier = closest_items[0][1]
+            tier_ratio = tier / closest_tier if closest_tier > 0 else 1.0
             return base_avg * tier_ratio, True
 
-        # 4. Fall back to per-type average (ignoring tier)
-        if element_type in self.summarize_counts_by_type:
-            count = self.summarize_counts_by_type[element_type]
-            if count > 0:
-                type_total = self.total_summarize_by_type.get(element_type, 0.0)
-                return type_total / count, True
+        # 4. Fall back to per-type average (ignoring tier) - use wall_time from type_tier
+        # Sum all wall_time for this type across all tiers
+        type_wall_total = sum(
+            self.total_base_by_type_tier.get((element_type, tr), 0.0)
+            for tr in set(tr for (t, tr) in self.total_base_by_type_tier if t == element_type)
+        )
+        type_count = sum(
+            self.summarize_counts_by_type_tier.get((element_type, tr), 0)
+            for tr in set(tr for (t, tr) in self.summarize_counts_by_type_tier if t == element_type)
+        )
+        if type_count > 0:
+            return type_wall_total / type_count, True
 
-        # 5. Global fallback
-        return global_avg, True
+        # 5. Fall back to same model group average (any type, any tier in same group)
+        # This is better than global average which mixes large/small models
+        model_wall_total = sum(
+            self.total_base_by_type_tier.get((t, tr), 0.0)
+            for (t, tr) in self.total_base_by_type_tier if t in model_types
+        )
+        model_count = sum(
+            self.summarize_counts_by_type_tier.get((t, tr), 0)
+            for (t, tr) in self.total_base_by_type_tier if t in model_types
+        )
+        if model_count > 0:
+            base_avg = model_wall_total / model_count
+            # Scale by tier ratio vs average tier in model group
+            avg_tier = sum(
+                tr * self.summarize_counts_by_type_tier.get((t, tr), 0)
+                for (t, tr) in self.summarize_counts_by_type_tier if t in model_types
+            ) / model_count if model_count > 0 else tier
+            tier_ratio = tier / avg_tier if avg_tier > 0 else 1.0
+            return base_avg * tier_ratio, True
+
+        # 6. Cross-model fallback - use OTHER model group with scaling
+        # Small model (~1.7B) is roughly 2x faster than large model (~4B) for same context
+        other_model_types = small_types if element_type in large_types else large_types
+        other_wall_total = sum(
+            self.total_base_by_type_tier.get((t, tr), 0.0)
+            for (t, tr) in self.total_base_by_type_tier if t in other_model_types
+        )
+        other_count = sum(
+            self.summarize_counts_by_type_tier.get((t, tr), 0)
+            for (t, tr) in self.total_base_by_type_tier if t in other_model_types
+        )
+        if other_count > 0:
+            base_avg = other_wall_total / other_count
+            # Scale by tier ratio
+            avg_tier = sum(
+                tr * self.summarize_counts_by_type_tier.get((t, tr), 0)
+                for (t, tr) in self.summarize_counts_by_type_tier if t in other_model_types
+            ) / other_count if other_count > 0 else tier
+            tier_ratio = tier / avg_tier if avg_tier > 0 else 1.0
+            # Apply model scaling: small model ~2x faster than large
+            model_scale = 0.5 if element_type in small_types else 2.0
+            return base_avg * tier_ratio * model_scale, True
+
+        # 7. No data at all - return 0 (display will show "-")
+        return 0.0, True
 
     def eta_seconds(self, completed: int, total: int, num_workers: int = 1) -> float | None:
         """Calculate ETA based on per-(type, tier) API time averages.
@@ -459,10 +534,10 @@ class TimingStats:
             if completed == 0:
                 return None
 
-            # Global average API time as ultimate fallback
-            total_api_time = sum(self.total_summarize_by_type.values()) + sum(self.total_embed_by_type.values())
-            total_count = sum(self.summarize_counts_by_type.values())
-            global_avg = total_api_time / total_count if total_count > 0 else 0.0
+            # Global average wall time as ultimate fallback
+            total_wall_time = sum(self.total_base_by_type_tier.values())
+            total_count = sum(self.summarize_counts_by_type_tier.values())
+            global_avg = total_wall_time / total_count if total_count > 0 else 0.0
 
             total_work_time = 0.0
 
@@ -508,10 +583,10 @@ class TimingStats:
             if not self.totals_by_type_tier:
                 return []
 
-            # Global average as fallback
-            total_api_time = sum(self.total_summarize_by_type.values()) + sum(self.total_embed_by_type.values())
-            total_count = sum(self.summarize_counts_by_type.values())
-            global_avg = total_api_time / total_count if total_count > 0 else 0.0
+            # Global average wall time as fallback
+            total_wall_time = sum(self.total_base_by_type_tier.values())
+            total_count = sum(self.summarize_counts_by_type_tier.values())
+            global_avg = total_wall_time / total_count if total_count > 0 else 0.0
 
             breakdown = []
             for (element_type, tier), tot in self.totals_by_type_tier.items():
@@ -527,27 +602,29 @@ class TimingStats:
             breakdown.sort(key=lambda x: x[4], reverse=True)
             return breakdown
 
-    def get_eta_breakdown_with_avg(self, num_workers: int = 1) -> list[tuple[str, int, float, bool]]:
+    def get_eta_breakdown_with_avg(self, num_workers: int = 1) -> list[tuple[str, int, float, bool, int, int]]:
         """Get average time per item for each (type, tier) combination.
 
         Returns:
-            List of (type, tier, avg_seconds, is_fallback) tuples, sorted by tier then type.
+            List of (type, tier, avg_seconds, is_fallback, done, total) tuples,
+            sorted by hierarchy then tier descending.
             is_fallback is True if the avg was estimated from a different (type, tier).
         """
         with self._lock:
             if not self.totals_by_type_tier:
                 return []
 
-            # Global average as fallback
-            total_api_time = sum(self.total_summarize_by_type.values()) + sum(self.total_embed_by_type.values())
-            total_count = sum(self.summarize_counts_by_type.values())
-            global_avg = total_api_time / total_count if total_count > 0 else 0.0
+            # Global average wall time as fallback
+            total_wall_time = sum(self.total_base_by_type_tier.values())
+            total_count = sum(self.summarize_counts_by_type_tier.values())
+            global_avg = total_wall_time / total_count if total_count > 0 else 0.0
 
             breakdown = []
             for (element_type, tier), tot in self.totals_by_type_tier.items():
                 avg, is_fallback = self._get_avg_for_type_tier_with_fallback(element_type, tier, global_avg)
+                done = self.summarize_counts_by_type_tier.get((element_type, tier), 0)
                 # Include all items, even those with no timing data yet (avg=0)
-                breakdown.append((element_type, tier, avg, is_fallback))
+                breakdown.append((element_type, tier, avg, is_fallback, done, tot))
 
             # Sort by hierarchy (file → class → function → method → variable), then tier descending
             type_order = {"file": 0, "class": 1, "function": 2, "method": 3, "variable": 4, "constant": 5}
@@ -1743,17 +1820,35 @@ def process_elements(
             state_found_count += 1
             content_unchanged = state.get("content_hash") == elem.content_hash
             has_summary = state.get("has_summary", False)
-            if content_unchanged and has_summary:
-                # Element exists with same content AND has summary - skip entirely
+            has_summary_embedding = state.get("has_summary_embedding", False)
+            has_code_embedding = state.get("has_code_embedding", False)
+
+            # Check if element is fully processed
+            # For embeddable elements, require both embeddings
+            is_embeddable = should_embed(elem)
+            is_fully_processed = has_summary and (
+                not is_embeddable or (has_summary_embedding and has_code_embedding)
+            )
+
+            if content_unchanged and is_fully_processed:
+                # Element exists with same content AND fully processed - skip entirely
                 result.elements_skipped += 1
                 skipped_by_file[elem.relative_path] = skipped_by_file.get(elem.relative_path, 0) + 1
                 skipped_with_summary += 1
                 continue
-            elif content_unchanged and not has_summary:
+            elif content_unchanged and not is_fully_processed:
                 skipped_no_summary += 1
                 if _state_logged < 3:
+                    missing = []
+                    if not has_summary:
+                        missing.append("summary")
+                    if is_embeddable:
+                        if not has_summary_embedding:
+                            missing.append("summary_embedding")
+                        if not has_code_embedding:
+                            missing.append("code_embedding")
                     with open("/tmp/magaldi_file_hash.log", "a") as f:
-                        f.write(f"[NEEDS SUMMARY] {elem.element_id[:60]}... (content unchanged but no summary)\n")
+                        f.write(f"[NEEDS PROCESSING] {elem.element_id[:60]}... (missing: {', '.join(missing)})\n")
                     _state_logged += 1
         else:
             state_none_count += 1
@@ -1762,7 +1857,7 @@ def process_elements(
                 with open("/tmp/magaldi_file_hash.log", "a") as f:
                     f.write(f"[NEW ELEMENT] {elem.element_id[:60]}... (not in ES)\n")
                 _state_logged += 1
-        # Element is new OR content changed OR missing summary - needs processing
+        # Element is new OR content changed OR missing summary/embeddings - needs processing
         elements_to_process.append(elem)
 
     with open("/tmp/magaldi_file_hash.log", "a") as f:
@@ -2061,7 +2156,13 @@ def process_elements(
                 # Get element's tier for accurate ETA tracking
                 element_tier = dependency_tracker._get_tier(element.element_id)
 
-                # Record timing with element type and tier (including dual embedding times)
+                # Calculate average workers during this task (for throughput)
+                # Average of start and end counts gives better estimate of actual contention
+                workers_at_start = future_to_workers_at_start.pop(future, 1)
+                workers_at_end = worker_status.active_count()
+                avg_workers = (workers_at_start + workers_at_end) / 2
+
+                # Record timing with element type, tier, and avg_workers (for throughput)
                 timing_stats.record(
                     processed.wall_time,
                     processed.summarize_time,
@@ -2071,13 +2172,8 @@ def process_elements(
                     summary_embed_time=processed.summary_embed_time,
                     code_embed_time=processed.code_embed_time,
                     tier=element_tier,
+                    avg_workers=avg_workers,
                 )
-
-                # Record wall time for throttling history with average concurrency
-                # Average of start and end counts gives better estimate of actual contention
-                workers_at_start = future_to_workers_at_start.pop(future, 1)
-                workers_at_end = worker_status.active_count()
-                avg_workers = (workers_at_start + workers_at_end) / 2
                 timing_stats.record_task_runtime(processed.wall_time, avg_workers)
 
                 was_embedded = should_embed(element)

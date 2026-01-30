@@ -259,36 +259,45 @@ class ElementRepository:
     def get_element_processing_state(
         self, element_ids: list[str]
     ) -> dict[str, dict[str, Any]]:
-        """Get content hash and summary state for existing elements.
+        """Get content hash and processing state for existing elements.
 
-        Used for smart skip logic - only skip if content unchanged AND summary exists.
-        This handles interrupted runs where elements were indexed but not summarized.
+        Used for smart skip logic - only skip if content unchanged AND fully processed.
+        This handles interrupted runs where elements were indexed but not fully processed
+        (e.g., missing summary or embeddings due to timeouts).
 
         Args:
             element_ids: List of element IDs to check.
 
         Returns:
-            Dict mapping element_id to {content_hash, has_summary}.
+            Dict mapping element_id to {content_hash, has_summary, has_summary_embedding,
+            has_code_embedding}.
         """
         if not element_ids:
             return {}
 
         client = self._get_client()
 
-        # Fetch content_hash and summary in one call
+        # Fetch content_hash, summary, and embeddings in one call
         response = client.mget(
             index=INDEX_NAME,
             ids=element_ids,
-            _source=["content_hash", "summary"],
+            _source=["content_hash", "summary", "summary_embedding", "code_embedding"],
         )
 
         result = {}
         for doc in response["docs"]:
             if doc.get("found", False):
                 source = doc.get("_source", {})
+                summary = source.get("summary")
+                summary_emb = source.get("summary_embedding")
+                code_emb = source.get("code_embedding")
+
+                # Check for actual non-empty content, not just existence
                 result[doc["_id"]] = {
                     "content_hash": source.get("content_hash"),
-                    "has_summary": bool(source.get("summary")),
+                    "has_summary": isinstance(summary, str) and len(summary) > 0,
+                    "has_summary_embedding": isinstance(summary_emb, list) and len(summary_emb) > 0,
+                    "has_code_embedding": isinstance(code_emb, list) and len(code_emb) > 0,
                 }
 
         return result

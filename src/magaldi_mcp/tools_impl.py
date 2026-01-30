@@ -254,8 +254,8 @@ def find_similar(
     """
     limit = max(1, min(limit, 50))
 
-    # Get source element
-    doc = es.get_document(element_id)
+    # Get source element (supports both element_id and hash_id)
+    doc = es.get_document_by_id_or_hash(element_id)
     if not doc:
         raise ValueError(f"Element not found: {element_id}")
 
@@ -335,7 +335,7 @@ def get_element(
     Returns:
         Element details.
     """
-    doc = es.get_document(element_id)
+    doc = es.get_document_by_id_or_hash(element_id)
     if not doc:
         raise ValueError(f"Element not found: {element_id}")
 
@@ -411,7 +411,7 @@ def get_context(
     Returns:
         Hierarchical context.
     """
-    doc = es.get_document(element_id)
+    doc = es.get_document_by_id_or_hash(element_id)
     if not doc:
         raise ValueError(f"Element not found: {element_id}")
 
@@ -677,8 +677,8 @@ def get_feature_members(
     Returns:
         Dict with 'members' list and 'glossary_terms' list.
     """
-    # Get feature/subfeature document
-    feature = es.get_document(feature_id)
+    # Get feature/subfeature document (supports both element_id and hash_id)
+    feature = es.get_document_by_id_or_hash(feature_id)
     if not feature:
         raise ValueError(f"Feature/subfeature not found: {feature_id}")
 
@@ -830,7 +830,8 @@ def batch_get_elements(
     """
     results = []
     for eid in element_ids:
-        doc = es.get_document(eid)
+        # Support both element_id and hash_id formats
+        doc = es.get_document_by_id_or_hash(eid)
         if doc:
             entry: dict[str, Any] = {
                 "name": doc.get("name"),
@@ -838,7 +839,7 @@ def batch_get_elements(
                 "file": doc.get("relative_path"),
                 "line": doc.get("line_start"),
                 "summary": doc.get("summary", ""),
-                "element_id": eid,
+                "element_id": doc.get("element_id", eid),  # Use canonical ID from doc
             }
             if doc.get("signature"):
                 entry["signature"] = doc["signature"]
@@ -979,8 +980,8 @@ def find_usages(
     Returns:
         List of usage locations with context.
     """
-    # Get the element to find its name
-    doc = es.get_document(element_id)
+    # Get the element to find its name (supports both element_id and hash_id)
+    doc = es.get_document_by_id_or_hash(element_id)
     if not doc:
         raise ValueError(f"Element not found: {element_id}")
 
@@ -1107,7 +1108,7 @@ def find_implementations(
 
     # Get the name and scope/repo to search for
     if element_id:
-        doc = es.get_document(element_id)
+        doc = es.get_document_by_id_or_hash(element_id)
         if not doc:
             raise ValueError(f"Element not found: {element_id}")
         name = doc.get("name")
@@ -1524,7 +1525,7 @@ def get_call_graph(
     Returns:
         Call graph with callers and callees lists.
     """
-    doc = es.get_document(element_id)
+    doc = es.get_document_by_id_or_hash(element_id)
     if not doc:
         raise ValueError(f"Element not found: {element_id}")
 
@@ -1619,8 +1620,8 @@ def find_callers(
     Returns:
         Dict with target info and lists of callers grouped by code/tests.
     """
-    # Get target element info
-    doc = es.get_document(element_id)
+    # Get target element info (supports both element_id and hash_id)
+    doc = es.get_document_by_id_or_hash(element_id)
     if not doc:
         raise ValueError(f"Element not found: {element_id}")
 
@@ -1710,8 +1711,8 @@ def find_call_chain(
     # Validate max_depth
     max_depth = max(1, min(max_depth, 10))
 
-    # Get root element info
-    doc = es.get_document(element_id)
+    # Get root element info (supports both element_id and hash_id)
+    doc = es.get_document_by_id_or_hash(element_id)
     if not doc:
         raise ValueError(f"Element not found: {element_id}")
 
@@ -2623,9 +2624,9 @@ def find_dependencies(
     """
     username = username or "main"
 
-    # Get the file element
+    # Get the file element (supports both element_id and hash_id)
     if element_id:
-        file_doc = es.get_document(element_id)
+        file_doc = es.get_document_by_id_or_hash(element_id)
         if not file_doc:
             raise ValueError(f"Element not found: {element_id}")
         if file_doc.get("element_type") != "file":
@@ -3031,7 +3032,7 @@ def explain_element(
     Raises:
         ValueError: If element not found.
     """
-    doc = es.get_document(element_id)
+    doc = es.get_document_by_id_or_hash(element_id)
     if not doc:
         raise ValueError(f"Element not found: {element_id}")
 
