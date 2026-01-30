@@ -209,11 +209,13 @@ class FeatureTimingStats:
                 return 0.0
             return (remaining * global_avg) / max(num_workers, 1)
 
-    def get_eta_breakdown_with_avg(self, num_workers: int = 1) -> list[tuple[int, float]]:
+    def get_eta_breakdown_with_avg(self, num_workers: int = 1) -> list[tuple[str, int, float, bool, int, int]]:
         """Get average time per tier for display.
 
         Returns:
-            List of (tier, avg_seconds) tuples, sorted by tier descending.
+            List of (type, tier, avg_seconds, is_fallback, done, total) tuples,
+            matching the format used by processor.py TimingStats.
+            Type is always "feature" for this class.
         """
         with self._lock:
             if not self.totals_by_tier:
@@ -222,13 +224,15 @@ class FeatureTimingStats:
             global_avg = (self.total_summarize_time + self.total_embed_time) / self.summarize_count if self.summarize_count > 0 else 0.0
 
             breakdown = []
-            for tier in self.totals_by_tier:
+            for tier, total in self.totals_by_tier.items():
+                done = self.count_by_tier.get(tier, 0)
                 avg = self._get_avg_for_tier(tier, global_avg)
-                if avg > 0:
-                    breakdown.append((tier, avg))
+                # is_fallback: True if we don't have actual data for this tier
+                is_fallback = tier not in self.count_by_tier or self.count_by_tier[tier] == 0
+                breakdown.append(("feature", tier, avg, is_fallback, done, total))
 
             # Sort by tier descending (largest first)
-            breakdown.sort(key=lambda x: -x[0])
+            breakdown.sort(key=lambda x: -x[1])
             return breakdown
 
 
@@ -382,11 +386,13 @@ class SubfeatureTimingStats:
                 return 0.0
             return (remaining * global_avg) / max(num_workers, 1)
 
-    def get_eta_breakdown_with_avg(self, num_workers: int = 1) -> list[tuple[int, float]]:
+    def get_eta_breakdown_with_avg(self, num_workers: int = 1) -> list[tuple[str, int, float, bool, int, int]]:
         """Get average time per tier for display.
 
         Returns:
-            List of (tier, avg_seconds) tuples, sorted by tier descending.
+            List of (type, tier, avg_seconds, is_fallback, done, total) tuples,
+            matching the format used by processor.py TimingStats.
+            Type is always "subfeature" for this class.
         """
         with self._lock:
             if not self.totals_by_tier:
@@ -395,13 +401,15 @@ class SubfeatureTimingStats:
             global_avg = (self.total_summarize_time + self.total_embed_time) / self.summarize_count if self.summarize_count > 0 else 0.0
 
             breakdown = []
-            for tier in self.totals_by_tier:
+            for tier, total in self.totals_by_tier.items():
+                done = self.count_by_tier.get(tier, 0)
                 avg = self._get_avg_for_tier(tier, global_avg)
-                if avg > 0:
-                    breakdown.append((tier, avg))
+                # is_fallback: True if we don't have actual data for this tier
+                is_fallback = tier not in self.count_by_tier or self.count_by_tier[tier] == 0
+                breakdown.append(("subfeature", tier, avg, is_fallback, done, total))
 
             # Sort by tier descending (largest first)
-            breakdown.sort(key=lambda x: -x[0])
+            breakdown.sort(key=lambda x: -x[1])
             return breakdown
 
 

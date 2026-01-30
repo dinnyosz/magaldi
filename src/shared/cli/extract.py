@@ -362,18 +362,59 @@ def run_feature_extraction(
                 bar_text.append(format_duration(eta), style="yellow")
                 bar_text.append(" ETA", style="dim")
 
-            # ETA breakdown per tier - show avg time per item
+            # ETA breakdown per tier - show as table like Phase 4
             eta_breakdown = state.timing.get_eta_breakdown_with_avg(state.num_workers)
+            eta_table = None
             if eta_breakdown:
-                breakdown_parts = []
                 tier_abbrev = {2048: "2k", 4096: "4k", 8192: "8k", 16384: "16k", 32768: "32k"}
-                for tier, avg_time in eta_breakdown:
-                    tier_str = tier_abbrev.get(tier, f"{tier//1024}k")
-                    breakdown_parts.append(f"{tier_str}:{avg_time:.1f}s")
-                if breakdown_parts:
-                    bar_text.append(" [", style="dim")
-                    bar_text.append(" ".join(breakdown_parts), style="dim yellow")
-                    bar_text.append("]", style="dim")
+                tiers = [32768, 16384, 8192, 4096, 2048]
+                type_order = ["feature"]
+
+                # Build lookup from breakdown data
+                eta_data: dict[tuple[str, int], tuple[float, bool, int, int]] = {}
+                for elem_type, tier, avg_time, is_fallback, done, total in eta_breakdown:
+                    eta_data[(elem_type, tier)] = (avg_time, is_fallback, done, total)
+
+                # Create grid table: rows=types, columns=tiers
+                eta_table = Table(show_header=True, box=None, padding=(0, 2), expand=False)
+                eta_table.add_column("", style="dim", width=10)
+                tier_colors = {32768: "magenta", 16384: "blue", 8192: "cyan", 4096: "green", 2048: "yellow"}
+                for tier in tiers:
+                    if any((t, tier) in eta_data for t in type_order):
+                        color = tier_colors.get(tier, "white")
+                        eta_table.add_column(f"[{color}]{tier_abbrev.get(tier, f'{tier//1024}k')}[/]", justify="center")
+
+                type_colors = {"feature": "blue"}
+                for elem_type in type_order:
+                    has_data = any((elem_type, t) in eta_data for t in tiers)
+                    if not has_data:
+                        continue
+
+                    type_color = type_colors.get(elem_type, "white")
+                    row = [f"[{type_color}]{elem_type}[/]"]
+                    for tier in tiers:
+                        if not any((t, tier) in eta_data for t in type_order):
+                            continue
+                        if (elem_type, tier) in eta_data:
+                            avg_time, is_fallback, done, total = eta_data[(elem_type, tier)]
+                            if done >= total:
+                                count_str = f"[green]{done}/{total}[/]"
+                            elif done > 0:
+                                count_str = f"[yellow]{done}[/][dim]/{total}[/]"
+                            else:
+                                count_str = f"[dim]{done}/{total}[/]"
+                            if avg_time > 0:
+                                time_style = "dim cyan" if is_fallback else "cyan"
+                                time_str = f"[{time_style}]{avg_time:.1f}s[/]"
+                                if is_fallback:
+                                    time_str = f"~{time_str}"
+                                cell = f"{time_str} {count_str}"
+                            else:
+                                cell = f"[dim]-[/] {count_str}"
+                        else:
+                            cell = ""
+                        row.append(cell)
+                    eta_table.add_row(*row)
 
             # Worker table
             import time as time_mod
@@ -387,14 +428,21 @@ def run_feature_extraction(
 
             workers_data = state.workers.get_all()
             now = time_mod.time()
+
+            # TODO: Get throttle decision for allowed workers
+            # For now, all non-busy workers show as idle
+            allowed_workers = num_workers
+
             for wid in range(num_workers):
                 if wid in workers_data:
                     feature_name, stage, model, ctx_size, start_time = workers_data[wid]
                     elapsed = now - start_time if start_time > 0 else 0
                     elapsed_str = f"{elapsed:.1f}s" if elapsed > 0 else ""
                     worker_table.add_row(f"[{wid}]", stage, model, ctx_size, elapsed_str, feature_name)
-                else:
+                elif wid < allowed_workers:
                     worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "", "", "")
+                else:
+                    worker_table.add_row(f"[{wid}]", "[dim yellow]throttled[/]", "", "", "", "")
 
             # Stats line - show both wall time and API time
             avg_api = state.timing.avg_summarize_time + state.timing.avg_embed_time
@@ -405,7 +453,12 @@ def run_feature_extraction(
             running_count = len(workers_data)
             stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[cyan]{num_workers}[/]"
 
-            return Group(bar_text, worker_table, stats)
+            # Build group with optional eta_table
+            elements = [bar_text]
+            if eta_table:
+                elements.append(eta_table)
+            elements.extend([worker_table, stats])
+            return Group(*elements)
 
         current_state = FeatureProgressState(
             total=clustering_result.cluster_count,
@@ -553,18 +606,59 @@ def run_feature_extraction(
                     bar_text.append(format_duration(eta), style="yellow")
                     bar_text.append(" ETA", style="dim")
 
-                # ETA breakdown per tier - show avg time per item
+                # ETA breakdown per tier - show as table like Phase 4
                 eta_breakdown = state.timing.get_eta_breakdown_with_avg(state.num_workers)
+                eta_table = None
                 if eta_breakdown:
-                    breakdown_parts = []
                     tier_abbrev = {2048: "2k", 4096: "4k", 8192: "8k", 16384: "16k", 32768: "32k"}
-                    for tier, avg_time in eta_breakdown:
-                        tier_str = tier_abbrev.get(tier, f"{tier//1024}k")
-                        breakdown_parts.append(f"{tier_str}:{avg_time:.1f}s")
-                    if breakdown_parts:
-                        bar_text.append(" [", style="dim")
-                        bar_text.append(" ".join(breakdown_parts), style="dim yellow")
-                        bar_text.append("]", style="dim")
+                    tiers = [32768, 16384, 8192, 4096, 2048]
+                    type_order = ["subfeature"]
+
+                    # Build lookup from breakdown data
+                    eta_data: dict[tuple[str, int], tuple[float, bool, int, int]] = {}
+                    for elem_type, tier, avg_time, is_fallback, done, total in eta_breakdown:
+                        eta_data[(elem_type, tier)] = (avg_time, is_fallback, done, total)
+
+                    # Create grid table: rows=types, columns=tiers
+                    eta_table = Table(show_header=True, box=None, padding=(0, 2), expand=False)
+                    eta_table.add_column("", style="dim", width=10)
+                    tier_colors = {32768: "magenta", 16384: "blue", 8192: "cyan", 4096: "green", 2048: "yellow"}
+                    for tier in tiers:
+                        if any((t, tier) in eta_data for t in type_order):
+                            color = tier_colors.get(tier, "white")
+                            eta_table.add_column(f"[{color}]{tier_abbrev.get(tier, f'{tier//1024}k')}[/]", justify="center")
+
+                    type_colors = {"subfeature": "green"}
+                    for elem_type in type_order:
+                        has_data = any((elem_type, t) in eta_data for t in tiers)
+                        if not has_data:
+                            continue
+
+                        type_color = type_colors.get(elem_type, "white")
+                        row = [f"[{type_color}]{elem_type}[/]"]
+                        for tier in tiers:
+                            if not any((t, tier) in eta_data for t in type_order):
+                                continue
+                            if (elem_type, tier) in eta_data:
+                                avg_time, is_fallback, done, total = eta_data[(elem_type, tier)]
+                                if done >= total:
+                                    count_str = f"[green]{done}/{total}[/]"
+                                elif done > 0:
+                                    count_str = f"[yellow]{done}[/][dim]/{total}[/]"
+                                else:
+                                    count_str = f"[dim]{done}/{total}[/]"
+                                if avg_time > 0:
+                                    time_style = "dim cyan" if is_fallback else "cyan"
+                                    time_str = f"[{time_style}]{avg_time:.1f}s[/]"
+                                    if is_fallback:
+                                        time_str = f"~{time_str}"
+                                    cell = f"{time_str} {count_str}"
+                                else:
+                                    cell = f"[dim]-[/] {count_str}"
+                            else:
+                                cell = ""
+                            row.append(cell)
+                        eta_table.add_row(*row)
 
                 # Worker table
                 import time as time_mod
@@ -579,6 +673,10 @@ def run_feature_extraction(
 
                 workers_data = state.workers.get_all()
                 now = time_mod.time()
+
+                # TODO: Get throttle decision for allowed workers
+                allowed_workers = num_workers
+
                 for wid in range(num_workers):
                     if wid in workers_data:
                         parent_feature, stage, model, subfeature, ctx_size, start_time = workers_data[wid]
@@ -587,8 +685,10 @@ def run_feature_extraction(
                         display_parent = parent_feature[:25] + "..." if len(parent_feature) > 28 else parent_feature
                         display_sub = subfeature[:35] + "..." if len(subfeature) > 38 else subfeature
                         worker_table.add_row(f"[{wid}]", stage, model, ctx_size, elapsed_str, display_parent, display_sub)
-                    else:
+                    elif wid < allowed_workers:
                         worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "", "", "", "")
+                    else:
+                        worker_table.add_row(f"[{wid}]", "[dim yellow]throttled[/]", "", "", "", "", "")
 
                 # Stats line - show both wall time and API time
                 avg_api = state.timing.avg_summarize_time + state.timing.avg_embed_time
@@ -618,7 +718,12 @@ def run_feature_extraction(
                     stats_text.append("/", style="dim")
                     stats_text.append(f"{num_workers}", style="cyan")
 
-                return Group(header_text, bar_text, worker_table, stats_text)
+                # Build group with optional eta_table
+                elements = [header_text, bar_text]
+                if eta_table:
+                    elements.append(eta_table)
+                elements.extend([worker_table, stats_text])
+                return Group(*elements)
 
             current_sub_state = SubfeatureProgressState(
                 total=0,
@@ -834,6 +939,60 @@ def run_glossary_extraction(
                 bar_text.append(format_duration(eta), style="yellow")
                 bar_text.append(" ETA", style="dim")
 
+            # ETA breakdown per tier - show as table like Phase 4
+            eta_breakdown = state.timing.get_eta_breakdown_with_avg(state.num_workers)
+            eta_table = None
+            if eta_breakdown:
+                tier_abbrev = {2048: "2k", 4096: "4k", 8192: "8k", 16384: "16k", 32768: "32k"}
+                tiers = [32768, 16384, 8192, 4096, 2048]
+                type_order = ["glossary"]
+
+                # Build lookup from breakdown data
+                eta_data: dict[tuple[str, int], tuple[float, bool, int, int]] = {}
+                for elem_type, tier, avg_time, is_fallback, done, total in eta_breakdown:
+                    eta_data[(elem_type, tier)] = (avg_time, is_fallback, done, total)
+
+                # Create grid table: rows=types, columns=tiers
+                eta_table = Table(show_header=True, box=None, padding=(0, 2), expand=False)
+                eta_table.add_column("", style="dim", width=10)
+                tier_colors = {32768: "magenta", 16384: "blue", 8192: "cyan", 4096: "green", 2048: "yellow"}
+                for tier in tiers:
+                    if any((t, tier) in eta_data for t in type_order):
+                        color = tier_colors.get(tier, "white")
+                        eta_table.add_column(f"[{color}]{tier_abbrev.get(tier, f'{tier//1024}k')}[/]", justify="center")
+
+                type_colors = {"glossary": "magenta"}
+                for elem_type in type_order:
+                    has_data = any((elem_type, t) in eta_data for t in tiers)
+                    if not has_data:
+                        continue
+
+                    type_color = type_colors.get(elem_type, "white")
+                    row = [f"[{type_color}]{elem_type}[/]"]
+                    for tier in tiers:
+                        if not any((t, tier) in eta_data for t in type_order):
+                            continue
+                        if (elem_type, tier) in eta_data:
+                            avg_time, is_fallback, done, total = eta_data[(elem_type, tier)]
+                            if done >= total:
+                                count_str = f"[green]{done}/{total}[/]"
+                            elif done > 0:
+                                count_str = f"[yellow]{done}[/][dim]/{total}[/]"
+                            else:
+                                count_str = f"[dim]{done}/{total}[/]"
+                            if avg_time > 0:
+                                time_style = "dim cyan" if is_fallback else "cyan"
+                                time_str = f"[{time_style}]{avg_time:.1f}s[/]"
+                                if is_fallback:
+                                    time_str = f"~{time_str}"
+                                cell = f"{time_str} {count_str}"
+                            else:
+                                cell = f"[dim]-[/] {count_str}"
+                        else:
+                            cell = ""
+                        row.append(cell)
+                    eta_table.add_row(*row)
+
             # Worker table
             worker_table = Table(show_header=False, box=None, padding=0)
             worker_table.add_column("ID", style="dim", width=4)
@@ -843,13 +1002,19 @@ def run_glossary_extraction(
             worker_table.add_column("Item")
 
             workers_data = state.workers.get_all()
+
+            # TODO: Get throttle decision for allowed workers
+            allowed_workers = num_workers
+
             for wid in range(num_workers):
                 if wid in workers_data:
                     item_label, model, ctx_size = workers_data[wid]
                     stage = "summarizing" if "summar" in phase.lower() else "extracting"
                     worker_table.add_row(f"[{wid}]", stage, model, ctx_size, item_label)
-                else:
+                elif wid < allowed_workers:
                     worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "", "")
+                else:
+                    worker_table.add_row(f"[{wid}]", "[dim yellow]throttled[/]", "", "", "")
 
             # Stats line - different labels for each phase
             avg_api = state.timing.avg_api_time
@@ -883,7 +1048,12 @@ def run_glossary_extraction(
             stats.append("/", style="dim")
             stats.append(f"{num_workers}", style="cyan")
 
-            return Group(phase_text, bar_text, worker_table, stats)
+            # Build group with optional eta_table
+            elements = [phase_text, bar_text]
+            if eta_table:
+                elements.append(eta_table)
+            elements.extend([worker_table, stats])
+            return Group(*elements)
 
         # Create shared state objects
         timing_stats = GlossaryTimingStats()

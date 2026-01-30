@@ -33,6 +33,16 @@ class GlossaryTimingStats:
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     throughput_tracker: ThroughputTracker = field(default_factory=lambda: ThroughputTracker(window_seconds=300.0))
 
+    # Per-tier tracking for accurate ETA (matches Feature/SubfeatureTimingStats)
+    total_time_by_tier: dict[int, float] = field(default_factory=dict)
+    count_by_tier: dict[int, int] = field(default_factory=dict)
+    totals_by_tier: dict[int, int] = field(default_factory=dict)
+
+    def set_totals_by_tier(self, totals: dict[int, int]) -> None:
+        """Set total counts by tier for ETA calculation."""
+        with self._lock:
+            self.totals_by_tier = dict(totals)
+
     @property
     def elapsed(self) -> float:
         """Elapsed wall time since start."""
@@ -47,11 +57,16 @@ class GlossaryTimingStats:
             return 0.0
         return self.total_api_time / self.features_processed
 
-    def record_api_call(self, api_time: float) -> None:
+    def record_api_call(self, api_time: float, tier: int = 0) -> None:
         """Record an API call timing."""
         with self._lock:
             self.total_api_time += api_time
             self.features_processed += 1
+
+            # Track per-tier timing
+            if tier > 0:
+                self.total_time_by_tier[tier] = self.total_time_by_tier.get(tier, 0.0) + api_time
+                self.count_by_tier[tier] = self.count_by_tier.get(tier, 0) + 1
 
     def record_task_runtime(self, runtime: float, concurrent_workers: float = 1.0) -> None:
         """Record task wall-clock runtime for throttling."""
@@ -61,6 +76,23 @@ class GlossaryTimingStats:
         """Get throughput statistics with concurrency context."""
         return self.throughput_tracker.get_stats_with_concurrency()
 
+    def _get_avg_for_tier(self, tier: int, global_avg: float) -> float:
+        """Get average time for a tier with fallback."""
+        # Exact tier match
+        if tier in self.count_by_tier and self.count_by_tier[tier] > 0:
+            return self.total_time_by_tier[tier] / self.count_by_tier[tier]
+
+        # Find closest tier with data
+        tiers_with_data = [t for t in self.count_by_tier if self.count_by_tier[t] > 0]
+        if tiers_with_data:
+            closest = min(tiers_with_data, key=lambda t: abs(t - tier))
+            base_avg = self.total_time_by_tier[closest] / self.count_by_tier[closest]
+            # Scale by tier ratio
+            tier_ratio = tier / closest if closest > 0 else 1.0
+            return base_avg * tier_ratio
+
+        return global_avg
+
     def eta_seconds(self, completed: int, total: int, num_workers: int) -> float:
         """Estimate time remaining based on current progress."""
         if completed == 0 or self.elapsed == 0:
@@ -68,6 +100,32 @@ class GlossaryTimingStats:
         rate = completed / self.elapsed
         remaining = total - completed
         return remaining / rate if rate > 0 else 0.0
+
+    def get_eta_breakdown_with_avg(self, num_workers: int = 1) -> list[tuple[str, int, float, bool, int, int]]:
+        """Get average time per tier for display.
+
+        Returns:
+            List of (type, tier, avg_seconds, is_fallback, done, total) tuples,
+            matching the format used by processor.py TimingStats.
+            Type is always "glossary" for this class.
+        """
+        with self._lock:
+            if not self.totals_by_tier:
+                return []
+
+            global_avg = self.total_api_time / self.features_processed if self.features_processed > 0 else 0.0
+
+            breakdown = []
+            for tier, total in self.totals_by_tier.items():
+                done = self.count_by_tier.get(tier, 0)
+                avg = self._get_avg_for_tier(tier, global_avg)
+                # is_fallback: True if we don't have actual data for this tier
+                is_fallback = tier not in self.count_by_tier or self.count_by_tier[tier] == 0
+                breakdown.append(("glossary", tier, avg, is_fallback, done, total))
+
+            # Sort by tier descending (largest first)
+            breakdown.sort(key=lambda x: -x[1])
+            return breakdown
 
 
 class GlossaryWorkerStatus:
@@ -892,8 +950,21 @@ def extract_glossary_from_features_concurrent(
         return compute_aggregation_num_ctx(prompt_chars, task_type="glossary_extract")
 
     # Group features by tier and process each tier with appropriate max_workers
-    tier_groups = iter_by_tier(features, estimate_feature_tier)
+    tier_groups = list(iter_by_tier(features, estimate_feature_tier))
     max_pool_workers = num_workers if num_workers > 0 else max(TIER_MAX_WORKERS.values())
+
+    # Build feature_id -> tier mapping for tracking
+    feature_to_tier: dict[str, int] = {}
+    tier_counts: dict[int, int] = {}
+    for tier, _, tier_features in tier_groups:
+        tier_counts[tier] = len(tier_features)
+        for feature in tier_features:
+            fid = feature.get("feature_id") or feature.get("subfeature_id", "")
+            if fid:
+                feature_to_tier[fid] = tier
+
+    # Set tier totals for ETA calculation
+    timing_stats.set_totals_by_tier(tier_counts)
 
     # Mutable state for current tier workers
     state = {"current_workers": max_pool_workers}
@@ -901,6 +972,10 @@ def extract_glossary_from_features_concurrent(
     def on_complete_phase1(feature: dict, result: tuple, avg_workers: float) -> None:
         """Handle completed feature extraction."""
         items, api_time, success = result
+
+        # Look up tier for this feature
+        fid = feature.get("feature_id") or feature.get("subfeature_id", "")
+        tier = feature_to_tier.get(fid, 0)
 
         # Record for throttling
         timing_stats.record_task_runtime(api_time, avg_workers)
@@ -911,7 +986,7 @@ def extract_glossary_from_features_concurrent(
                 counters["failed"] += 1
             else:
                 counters["terms_extracted"] += len(items)
-                timing_stats.record_api_call(api_time)
+                timing_stats.record_api_call(api_time, tier=tier)
 
         with items_lock:
             all_items.extend(items)
@@ -1046,7 +1121,20 @@ def extract_glossary_from_features_concurrent(
         return compute_aggregation_num_ctx(prompt_chars, task_type="glossary_summary")
 
     # Group items by tier and process each tier with appropriate max_workers
-    tier_groups = iter_by_tier(merged_items, estimate_term_tier)
+    tier_groups = list(iter_by_tier(merged_items, estimate_term_tier))
+
+    # Build term_name -> tier mapping for tracking
+    term_to_tier: dict[str, int] = {}
+    tier_counts_phase2: dict[int, int] = {}
+    for tier, _, tier_items in tier_groups:
+        tier_counts_phase2[tier] = len(tier_items)
+        for item in tier_items:
+            term_to_tier[item.name] = tier
+
+    # Reset tier totals for Phase 2
+    timing_stats.total_time_by_tier = {}
+    timing_stats.count_by_tier = {}
+    timing_stats.set_totals_by_tier(tier_counts_phase2)
 
     # Mutable state for current tier workers (Phase 2)
     phase2_state = {"current_workers": max_pool_workers}
@@ -1057,6 +1145,9 @@ def extract_glossary_from_features_concurrent(
         """Handle completed summary generation."""
         completed_item, api_time, success = result
 
+        # Look up tier for this term
+        tier = term_to_tier.get(item.name, 0)
+
         # Record for throttling
         timing_stats.record_task_runtime(api_time, avg_workers)
 
@@ -1065,7 +1156,7 @@ def extract_glossary_from_features_concurrent(
             if not success:
                 counters["failed"] += 1
             else:
-                timing_stats.record_api_call(api_time)
+                timing_stats.record_api_call(api_time, tier=tier)
 
         with final_lock:
             final_items.append(completed_item)
