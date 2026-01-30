@@ -127,7 +127,8 @@ def _extract_php_class(node: Node, lines: list[str]) -> ExtractedElement | None:
         name=name,
         line_start=node.start_point[0] + 1,
         line_end=node.end_point[0] + 1,
-        raw_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+        raw_code=node.text.decode('utf-8') if node.text else "",
+        byte_offset=node.start_byte,
         node=node,
     )
 
@@ -218,7 +219,8 @@ def _extract_php_function(node: Node, lines: list[str]) -> ExtractedElement | No
         name=name,
         line_start=node.start_point[0] + 1,
         line_end=node.end_point[0] + 1,
-        raw_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+        raw_code=node.text.decode('utf-8') if node.text else "",
+        byte_offset=node.start_byte,
         signature=signature,
         node=node,
         return_type=return_type,
@@ -299,7 +301,8 @@ def _extract_php_method(node: Node, lines: list[str]) -> ExtractedElement | None
         name=name,
         line_start=node.start_point[0] + 1,
         line_end=node.end_point[0] + 1,
-        raw_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+        raw_code=node.text.decode('utf-8') if node.text else "",
+        byte_offset=node.start_byte,
         signature=signature,
         decorators=decorators,
         node=node,
@@ -327,7 +330,8 @@ def _extract_php_property(node: Node, lines: list[str]) -> list[ExtractedElement
                                 name=name,
                                 line_start=node.start_point[0] + 1,
                                 line_end=node.end_point[0] + 1,
-                                raw_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+                                raw_code=node.text.decode('utf-8') if node.text else "",
+                                byte_offset=node.start_byte,
                                 decorators=[visibility],
                             ))
 

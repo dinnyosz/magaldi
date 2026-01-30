@@ -55,6 +55,7 @@ class ExtractedElement:
     line_start: int  # 1-indexed
     line_end: int  # 1-indexed
     raw_code: str
+    byte_offset: int = 0  # Byte offset from start of file (unique ID for minified files)
     signature: str | None = None
     decorators: list[str] | None = None
     decorator_details: list[DecoratorInfo] | None = None  # Rich decorator info
@@ -68,6 +69,18 @@ class ExtractedElement:
     def char_count(self) -> int:
         """Character count of the raw code for identifying large elements."""
         return len(self.raw_code) if self.raw_code else 0
+
+    def get_byte_offset(self) -> int:
+        """Get byte offset, computing from node if not explicitly set.
+
+        Returns byte_offset if set, otherwise node.start_byte if node exists,
+        otherwise falls back to 0.
+        """
+        if self.byte_offset > 0:
+            return self.byte_offset
+        if self.node is not None:
+            return self.node.start_byte
+        return 0
 
 
 @dataclass

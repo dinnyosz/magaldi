@@ -134,10 +134,10 @@ class TestGenerateElementId:
             relative_path="src/auth.py",
             element_type="function",
             name="login",
-            line_start=42,
+            byte_offset=420,
         )
 
-        assert element_id == "backend:auth-service:main:src/auth.py:function:login:42"
+        assert element_id == "backend:auth-service:main:src/auth.py:function:login:420"
 
     def test_different_users_different_ids(self):
         id1 = generate_element_id("scope", "repo", "main", "file.py", "function", "foo", 1)
@@ -1803,3 +1803,153 @@ class RegularClass:
         # Should not detect singleton pattern
         if class_elem.detected_patterns:
             assert "singleton" not in class_elem.detected_patterns
+
+
+# =============================================================================
+# MINIFIED CODE EXTRACTION
+# =============================================================================
+
+
+class TestMinifiedCodeExtraction:
+    """Tests for extracting elements from minified (single-line) code.
+
+    These tests verify that byte_offset is used correctly to generate unique
+    element IDs and that raw_code is extracted precisely for each element.
+    """
+
+    def test_minified_javascript_unique_ids(self):
+        """Minified JS with multiple functions on one line has unique element IDs."""
+        # Minified code: three functions on same line
+        minified_js = 'function foo(){return 1;}function bar(){return 2;}function baz(){return 3;}'
+
+        parser = JavaScriptParser()
+        file_info = FileInfo(
+            relative_path="app.min.js",
+            absolute_path=Path("/fake/app.min.js"),
+            language="javascript",
+        )
+
+        elements = parser.parse(minified_js, file_info, "scope", "repo", "main")
+
+        # Should extract 3 functions + 1 file element = 4 elements
+        functions = [e for e in elements if e.element_type == "function"]
+        assert len(functions) == 3, f"Expected 3 functions, got {len(functions)}"
+
+        # All element IDs should be unique
+        element_ids = [e.element_id for e in functions]
+        assert len(set(element_ids)) == 3, "Element IDs should be unique"
+
+        # Verify element names are correct
+        names = {e.name for e in functions}
+        assert names == {"foo", "bar", "baz"}
+
+    def test_minified_javascript_raw_code_extraction(self):
+        """Each function in minified JS has its own raw_code, not the whole file."""
+        minified_js = 'function foo(){return 1;}function bar(){return 2;}'
+
+        parser = JavaScriptParser()
+        file_info = FileInfo(
+            relative_path="app.min.js",
+            absolute_path=Path("/fake/app.min.js"),
+            language="javascript",
+        )
+
+        elements = parser.parse(minified_js, file_info, "scope", "repo", "main")
+        functions = [e for e in elements if e.element_type == "function"]
+
+        foo = next(e for e in functions if e.name == "foo")
+        bar = next(e for e in functions if e.name == "bar")
+
+        # raw_code should be the specific function, not the entire file
+        assert foo.raw_code == "function foo(){return 1;}", f"Got: {foo.raw_code!r}"
+        assert bar.raw_code == "function bar(){return 2;}", f"Got: {bar.raw_code!r}"
+
+    def test_minified_javascript_byte_offset_in_element_id(self):
+        """Byte offsets in minified JS should differ in element IDs."""
+        minified_js = 'function foo(){return 1;}function bar(){return 2;}'
+
+        parser = JavaScriptParser()
+        file_info = FileInfo(
+            relative_path="app.min.js",
+            absolute_path=Path("/fake/app.min.js"),
+            language="javascript",
+        )
+
+        elements = parser.parse(minified_js, file_info, "scope", "repo", "main")
+        functions = [e for e in elements if e.element_type == "function"]
+
+        foo = next(e for e in functions if e.name == "foo")
+        bar = next(e for e in functions if e.name == "bar")
+
+        # foo starts at byte 0, bar starts at byte 25
+        # The byte offset is encoded in the element_id
+        assert foo.element_id.endswith(":0"), f"foo element_id: {foo.element_id}"
+        assert bar.element_id.endswith(":25"), f"bar element_id: {bar.element_id}"
+
+    def test_minified_python_semicolon_separated(self):
+        """Minified Python with semicolon-separated statements on one line."""
+        # Python allows semicolons for multiple statements
+        # Note: This is unusual but technically valid Python
+        minified_py = 'def foo(): return 1\ndef bar(): return 2\ndef baz(): return 3'
+
+        parser = PythonParser()
+        file_info = FileInfo(
+            relative_path="app.min.py",
+            absolute_path=Path("/fake/app.min.py"),
+            language="python",
+        )
+
+        elements = parser.parse(minified_py, file_info, "scope", "repo", "main")
+        functions = [e for e in elements if e.element_type == "function"]
+
+        assert len(functions) == 3, f"Expected 3 functions, got {len(functions)}"
+
+        # All element IDs should be unique
+        element_ids = [e.element_id for e in functions]
+        assert len(set(element_ids)) == 3, "Element IDs should be unique"
+
+    def test_minified_js_class_with_methods(self):
+        """Minified JS class with methods on single line."""
+        minified_js = 'class Foo{constructor(){this.x=1;}bar(){return 2;}}'
+
+        parser = JavaScriptParser()
+        file_info = FileInfo(
+            relative_path="class.min.js",
+            absolute_path=Path("/fake/class.min.js"),
+            language="javascript",
+        )
+
+        elements = parser.parse(minified_js, file_info, "scope", "repo", "main")
+
+        # Should have: file, class, constructor method, bar method
+        classes = [e for e in elements if e.element_type == "class"]
+        methods = [e for e in elements if e.element_type == "method"]
+
+        assert len(classes) == 1
+        assert len(methods) == 2, f"Expected 2 methods, got {len(methods)}"
+
+        # All element IDs should be unique
+        all_elem_ids = [e.element_id for e in elements]
+        assert len(set(all_elem_ids)) == len(all_elem_ids), "All element IDs should be unique"
+
+    def test_element_id_contains_byte_offset(self):
+        """Element IDs should contain byte_offset, not line number."""
+        minified_js = 'function foo(){return 1;}function bar(){return 2;}'
+
+        parser = JavaScriptParser()
+        file_info = FileInfo(
+            relative_path="app.min.js",
+            absolute_path=Path("/fake/app.min.js"),
+            language="javascript",
+        )
+
+        elements = parser.parse(minified_js, file_info, "scope", "repo", "main")
+        functions = [e for e in elements if e.element_type == "function"]
+
+        # Both functions are on line 1, but byte_offsets differ
+        foo = next(e for e in functions if e.name == "foo")
+        bar = next(e for e in functions if e.name == "bar")
+
+        # IDs should end with different byte offsets
+        assert foo.element_id.endswith(":0"), f"foo element_id: {foo.element_id}"
+        assert bar.element_id.endswith(":25"), f"bar element_id: {bar.element_id}"

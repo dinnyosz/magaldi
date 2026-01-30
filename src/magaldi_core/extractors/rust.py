@@ -136,7 +136,8 @@ def _extract_rust_struct(node: Node, lines: list[str]) -> ExtractedElement | Non
         name=name,
         line_start=node.start_point[0] + 1,
         line_end=node.end_point[0] + 1,
-        raw_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+        raw_code=node.text.decode('utf-8') if node.text else "",
+        byte_offset=node.start_byte,
         node=node,
     )
 
@@ -157,7 +158,8 @@ def _extract_rust_enum(node: Node, lines: list[str]) -> ExtractedElement | None:
         name=name,
         line_start=node.start_point[0] + 1,
         line_end=node.end_point[0] + 1,
-        raw_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+        raw_code=node.text.decode('utf-8') if node.text else "",
+        byte_offset=node.start_byte,
         decorators=["enum"],
         node=node,
     )
@@ -248,7 +250,8 @@ def _extract_rust_function(node: Node, lines: list[str]) -> ExtractedElement | N
         name=name,
         line_start=node.start_point[0] + 1,
         line_end=node.end_point[0] + 1,
-        raw_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+        raw_code=node.text.decode('utf-8') if node.text else "",
+        byte_offset=node.start_byte,
         signature=signature,
         is_async=is_async,
         decorators=decorators,
@@ -300,7 +303,8 @@ def _extract_rust_impl(node: Node, lines: list[str]) -> ExtractedElement | None:
         name=name,
         line_start=node.start_point[0] + 1,
         line_end=node.end_point[0] + 1,
-        raw_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+        raw_code=node.text.decode('utf-8') if node.text else "",
+        byte_offset=node.start_byte,
         decorators=["impl"] + ([trait_name] if trait_name else []),
         node=node,
     )
@@ -393,7 +397,8 @@ def _extract_rust_method(node: Node, lines: list[str]) -> ExtractedElement | Non
         name=name,
         line_start=node.start_point[0] + 1,
         line_end=node.end_point[0] + 1,
-        raw_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+        raw_code=node.text.decode('utf-8') if node.text else "",
+        byte_offset=node.start_byte,
         signature=signature,
         is_async=is_async,
         decorators=decorators,
@@ -419,7 +424,8 @@ def _extract_rust_const(node: Node, lines: list[str]) -> ExtractedElement | None
         name=name,
         line_start=node.start_point[0] + 1,
         line_end=node.end_point[0] + 1,
-        raw_code="\n".join(lines[node.start_point[0]:node.end_point[0] + 1]),
+        raw_code=node.text.decode('utf-8') if node.text else "",
+        byte_offset=node.start_byte,
     )
 
 

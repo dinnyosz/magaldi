@@ -211,6 +211,7 @@ class CodeElement:
     # Position (1-indexed lines)
     line_start: int = 0
     line_end: int = 0
+    byte_offset: int = 0  # Byte offset from start of file (unique ID for minified files)
 
     # Content
     raw_code: str = ""
@@ -459,11 +460,14 @@ def generate_element_id(
     relative_path: str,
     element_type: str,
     name: str,
-    line_start: int,
+    byte_offset: int,
 ) -> str:
     """Generate unique element ID.
 
-    Format: {scope}:{repository}:{username}:{relative_path}:{type}:{name}:{line}
+    Format: {scope}:{repository}:{username}:{relative_path}:{type}:{name}:{byte_offset}
+
+    Uses byte_offset instead of line number to handle minified files where
+    multiple elements may be on the same line.
     """
     return ":".join([
         scope,
@@ -472,7 +476,7 @@ def generate_element_id(
         relative_path,
         element_type,
         name,
-        str(line_start),
+        str(byte_offset),
     ])
 
 
@@ -1002,7 +1006,7 @@ class PythonParser(TreeSitterParser):
         lines: list[str],
     ) -> CodeElement:
         """Convert extracted class to CodeElement."""
-        docstring = _extract_docstring(lines, ext.line_start)
+        docstring = _extract_docstring(lines, ext.line_start - 1)
 
         # Extract class attributes and base classes from AST
         class_attributes = None
@@ -1039,7 +1043,7 @@ class PythonParser(TreeSitterParser):
             base_classes=base_classes,
         )
         elem.element_id = generate_element_id(
-            scope, repository, username, file_info.relative_path, "class", ext.name, ext.line_start
+            scope, repository, username, file_info.relative_path, "class", ext.name, ext.get_byte_offset()
         )
         return elem
 
@@ -1053,7 +1057,7 @@ class PythonParser(TreeSitterParser):
         lines: list[str],
     ) -> CodeElement:
         """Convert extracted function to CodeElement."""
-        docstring = _extract_docstring(lines, ext.line_start)
+        docstring = _extract_docstring(lines, ext.line_start - 1)
 
         # Extract calls and exceptions from function body
         calls: list[Call] = []
@@ -1106,7 +1110,7 @@ class PythonParser(TreeSitterParser):
             parameters=parameters or [],
         )
         elem.element_id = generate_element_id(
-            scope, repository, username, file_info.relative_path, "function", ext.name, ext.line_start
+            scope, repository, username, file_info.relative_path, "function", ext.name, ext.get_byte_offset()
         )
         return elem
 
@@ -1121,7 +1125,7 @@ class PythonParser(TreeSitterParser):
         lines: list[str],
     ) -> CodeElement:
         """Convert extracted method to CodeElement."""
-        docstring = _extract_docstring(lines, ext.line_start)
+        docstring = _extract_docstring(lines, ext.line_start - 1)
 
         # Extract calls, exceptions, and modified attributes from method body
         calls: list[Call] = []
@@ -1178,7 +1182,7 @@ class PythonParser(TreeSitterParser):
             parameters=parameters or [],
         )
         elem.element_id = generate_element_id(
-            scope, repository, username, file_info.relative_path, "method", ext.name, ext.line_start
+            scope, repository, username, file_info.relative_path, "method", ext.name, ext.get_byte_offset()
         )
         return elem
 
@@ -1213,7 +1217,7 @@ class PythonParser(TreeSitterParser):
             parent_id=parent.element_id if parent else None,
         )
         elem.element_id = generate_element_id(
-            scope, repository, username, file_info.relative_path, ext.element_type, ext.name, ext.line_start
+            scope, repository, username, file_info.relative_path, ext.element_type, ext.name, ext.get_byte_offset()
         )
         return elem
 
@@ -1397,7 +1401,7 @@ class JavaScriptParser(TreeSitterParser):
             base_classes=base_classes,
         )
         elem.element_id = generate_element_id(
-            scope, repository, username, file_info.relative_path, "class", ext.name, ext.line_start
+            scope, repository, username, file_info.relative_path, "class", ext.name, ext.get_byte_offset()
         )
         return elem
 
@@ -1450,7 +1454,7 @@ class JavaScriptParser(TreeSitterParser):
             parameters=parameters or [],
         )
         elem.element_id = generate_element_id(
-            scope, repository, username, file_info.relative_path, "function", ext.name, ext.line_start
+            scope, repository, username, file_info.relative_path, "function", ext.name, ext.get_byte_offset()
         )
         return elem
 
@@ -1508,7 +1512,7 @@ class JavaScriptParser(TreeSitterParser):
             parameters=parameters or [],
         )
         elem.element_id = generate_element_id(
-            scope, repository, username, file_info.relative_path, "method", ext.name, ext.line_start
+            scope, repository, username, file_info.relative_path, "method", ext.name, ext.get_byte_offset()
         )
         return elem
 
@@ -1538,7 +1542,7 @@ class JavaScriptParser(TreeSitterParser):
             parent_id=parent.element_id if parent else None,
         )
         elem.element_id = generate_element_id(
-            scope, repository, username, file_info.relative_path, "variable", ext.name, ext.line_start
+            scope, repository, username, file_info.relative_path, "variable", ext.name, ext.get_byte_offset()
         )
         return elem
 
@@ -1716,7 +1720,7 @@ class PhpParser(TreeSitterParser):
             base_classes=base_classes,
         )
         elem.element_id = generate_element_id(
-            scope, repository, username, file_info.relative_path, "class", ext.name, ext.line_start
+            scope, repository, username, file_info.relative_path, "class", ext.name, ext.get_byte_offset()
         )
         return elem
 
@@ -1764,7 +1768,7 @@ class PhpParser(TreeSitterParser):
             parameters=parameters or [],
         )
         elem.element_id = generate_element_id(
-            scope, repository, username, file_info.relative_path, "function", ext.name, ext.line_start
+            scope, repository, username, file_info.relative_path, "function", ext.name, ext.get_byte_offset()
         )
         return elem
 
@@ -1818,7 +1822,7 @@ class PhpParser(TreeSitterParser):
             parameters=parameters or [],
         )
         elem.element_id = generate_element_id(
-            scope, repository, username, file_info.relative_path, "method", ext.name, ext.line_start
+            scope, repository, username, file_info.relative_path, "method", ext.name, ext.get_byte_offset()
         )
         return elem
 
@@ -1849,7 +1853,7 @@ class PhpParser(TreeSitterParser):
             parent_id=parent.element_id if parent else None,
         )
         elem.element_id = generate_element_id(
-            scope, repository, username, file_info.relative_path, "variable", ext.name, ext.line_start
+            scope, repository, username, file_info.relative_path, "variable", ext.name, ext.get_byte_offset()
         )
         return elem
 
@@ -2033,7 +2037,7 @@ class RustParser(TreeSitterParser):
             base_classes=base_classes,
         )
         elem.element_id = generate_element_id(
-            scope, repository, username, file_info.relative_path, "class", ext.name, ext.line_start
+            scope, repository, username, file_info.relative_path, "class", ext.name, ext.get_byte_offset()
         )
         return elem
 
@@ -2083,7 +2087,7 @@ class RustParser(TreeSitterParser):
             parameters=parameters or [],
         )
         elem.element_id = generate_element_id(
-            scope, repository, username, file_info.relative_path, "function", ext.name, ext.line_start
+            scope, repository, username, file_info.relative_path, "function", ext.name, ext.get_byte_offset()
         )
         return elem
 
@@ -2138,7 +2142,7 @@ class RustParser(TreeSitterParser):
             parameters=parameters or [],
         )
         elem.element_id = generate_element_id(
-            scope, repository, username, file_info.relative_path, ext.element_type, ext.name, ext.line_start
+            scope, repository, username, file_info.relative_path, ext.element_type, ext.name, ext.get_byte_offset()
         )
         return elem
 
@@ -2168,7 +2172,7 @@ class RustParser(TreeSitterParser):
             parent_id=parent.element_id if parent else None,
         )
         elem.element_id = generate_element_id(
-            scope, repository, username, file_info.relative_path, "constant", ext.name, ext.line_start
+            scope, repository, username, file_info.relative_path, "constant", ext.name, ext.get_byte_offset()
         )
         return elem
 

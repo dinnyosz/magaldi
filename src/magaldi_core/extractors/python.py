@@ -326,7 +326,8 @@ def _extract_python_class(
     start_node = decorated_node if decorated_node else node
     line_start = start_node.start_point[0] + 1  # 0-indexed to 1-indexed
     line_end = node.end_point[0] + 1
-    raw_code = "\n".join(lines[line_start - 1 : line_end])
+    # Use byte-based extraction for precise raw_code (handles minified files)
+    raw_code = start_node.text.decode('utf-8') if start_node.text else ""
 
     elem = ExtractedElement(
         element_type="class",
@@ -334,6 +335,7 @@ def _extract_python_class(
         line_start=line_start,
         line_end=line_end,
         raw_code=raw_code,
+        byte_offset=start_node.start_byte,
         decorators=decorators,
         decorator_details=decorator_details,
         node=node,
@@ -456,7 +458,8 @@ def _extract_python_function(
     start_node = decorated_node if decorated_node else node
     line_start = start_node.start_point[0] + 1
     line_end = node.end_point[0] + 1
-    raw_code = "\n".join(lines[line_start - 1 : line_end])
+    # Use byte-based extraction for precise raw_code (handles minified files)
+    raw_code = start_node.text.decode('utf-8') if start_node.text else ""
 
     # Build signature
     signature = f"{'async ' if is_async else ''}def {name}{params}"
@@ -471,6 +474,7 @@ def _extract_python_function(
         line_start=line_start,
         line_end=line_end,
         raw_code=raw_code,
+        byte_offset=start_node.start_byte,
         signature=signature,
         decorators=decorators,
         decorator_details=decorator_details,
@@ -497,7 +501,8 @@ def _extract_python_assignment(
 
     line_start = node.start_point[0] + 1
     line_end = node.end_point[0] + 1
-    raw_code = "\n".join(lines[line_start - 1 : line_end])
+    # Use byte-based extraction for precise raw_code (handles minified files)
+    raw_code = node.text.decode('utf-8') if node.text else ""
 
     # Determine element type: constant (UPPER_CASE) or variable
     if is_module_level and name.isupper() and "_" in name or (name.isupper() and len(name) > 1):
@@ -511,6 +516,7 @@ def _extract_python_assignment(
         line_start=line_start,
         line_end=line_end,
         raw_code=raw_code,
+        byte_offset=node.start_byte,
         parent_node=parent_class,
         node=node,
     )

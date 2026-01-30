@@ -215,7 +215,8 @@ def _extract_js_class(
     start_node = decorated_node if decorated_node else node
     line_start = start_node.start_point[0] + 1
     line_end = node.end_point[0] + 1
-    raw_code = "\n".join(lines[line_start - 1 : line_end])
+    # Use byte-based extraction for precise raw_code (handles minified files)
+    raw_code = start_node.text.decode('utf-8') if start_node.text else ""
 
     return ExtractedElement(
         element_type="class",
@@ -223,6 +224,7 @@ def _extract_js_class(
         line_start=line_start,
         line_end=line_end,
         raw_code=raw_code,
+        byte_offset=start_node.start_byte,
         node=node,
         decorators=decorators,
         decorator_details=decorator_details,
@@ -334,7 +336,7 @@ def _extract_js_function(node: Node, lines: list[str]) -> ExtractedElement:
 
     line_start = node.start_point[0] + 1
     line_end = node.end_point[0] + 1
-    raw_code = "\n".join(lines[line_start - 1 : line_end])
+    raw_code = node.text.decode('utf-8') if node.text else ""
 
     signature = f"{'async ' if is_async else ''}function {name}{params}"
     if return_type:
@@ -346,6 +348,7 @@ def _extract_js_function(node: Node, lines: list[str]) -> ExtractedElement:
         line_start=line_start,
         line_end=line_end,
         raw_code=raw_code,
+        byte_offset=node.start_byte,
         signature=signature,
         is_async=is_async,
         node=node,
@@ -364,7 +367,7 @@ def _extract_js_arrow_function(node: Node, name: str, lines: list[str]) -> Extra
     """
     line_start = node.start_point[0] + 1
     line_end = node.end_point[0] + 1
-    raw_code = "\n".join(lines[line_start - 1 : line_end])
+    raw_code = node.text.decode('utf-8') if node.text else ""
 
     # Get the actual arrow function node for call extraction
     value_node = get_child_by_field(node, "value")
@@ -376,6 +379,7 @@ def _extract_js_arrow_function(node: Node, name: str, lines: list[str]) -> Extra
         line_start=line_start,
         line_end=line_end,
         raw_code=raw_code,
+        byte_offset=node.start_byte,
         node=arrow_func_node,
     )
 
@@ -400,7 +404,7 @@ def _extract_ts_interface(node: Node, lines: list[str]) -> ExtractedElement:
 
     line_start = node.start_point[0] + 1
     line_end = node.end_point[0] + 1
-    raw_code = "\n".join(lines[line_start - 1 : line_end])
+    raw_code = node.text.decode('utf-8') if node.text else ""
 
     # Build signature with extends clause if present
     signature = f"interface {name}"
@@ -416,6 +420,7 @@ def _extract_ts_interface(node: Node, lines: list[str]) -> ExtractedElement:
         line_start=line_start,
         line_end=line_end,
         raw_code=raw_code,
+        byte_offset=node.start_byte,
         signature=signature,
         node=node,
     )
@@ -436,7 +441,7 @@ def _extract_ts_type_alias(node: Node, lines: list[str]) -> ExtractedElement:
 
     line_start = node.start_point[0] + 1
     line_end = node.end_point[0] + 1
-    raw_code = "\n".join(lines[line_start - 1 : line_end])
+    raw_code = node.text.decode('utf-8') if node.text else ""
 
     # Get the type value for signature
     value_node = get_child_by_field(node, "value")
@@ -454,6 +459,7 @@ def _extract_ts_type_alias(node: Node, lines: list[str]) -> ExtractedElement:
         line_start=line_start,
         line_end=line_end,
         raw_code=raw_code,
+        byte_offset=node.start_byte,
         signature=signature,
         node=node,
     )
@@ -474,7 +480,7 @@ def _extract_ts_enum(node: Node, lines: list[str]) -> ExtractedElement:
 
     line_start = node.start_point[0] + 1
     line_end = node.end_point[0] + 1
-    raw_code = "\n".join(lines[line_start - 1 : line_end])
+    raw_code = node.text.decode('utf-8') if node.text else ""
 
     # Check for const enum
     is_const = any(child.type == "const" for child in node.children)
@@ -486,6 +492,7 @@ def _extract_ts_enum(node: Node, lines: list[str]) -> ExtractedElement:
         line_start=line_start,
         line_end=line_end,
         raw_code=raw_code,
+        byte_offset=node.start_byte,
         signature=signature,
         node=node,
     )
@@ -518,7 +525,7 @@ def extract_javascript_class_members(
 
             line_start = child.start_point[0] + 1
             line_end = child.end_point[0] + 1
-            raw_code = "\n".join(lines[line_start - 1 : line_end])
+            raw_code = child.text.decode('utf-8') if child.text else ""
 
             signature = f"{name}{params}"
             if return_type:
@@ -531,6 +538,7 @@ def extract_javascript_class_members(
                     line_start=line_start,
                     line_end=line_end,
                     raw_code=raw_code,
+                    byte_offset=child.start_byte,
                     signature=signature,
                     is_async=is_async,
                     node=child,
@@ -544,7 +552,7 @@ def extract_javascript_class_members(
 
             line_start = child.start_point[0] + 1
             line_end = child.end_point[0] + 1
-            raw_code = lines[line_start - 1].strip() if line_start <= len(lines) else ""
+            raw_code = child.text.decode('utf-8') if child.text else ""
 
             fields.append(
                 ExtractedElement(
@@ -553,6 +561,7 @@ def extract_javascript_class_members(
                     line_start=line_start,
                     line_end=line_end,
                     raw_code=raw_code,
+                    byte_offset=child.start_byte,
                     node=child,
                 )
             )
