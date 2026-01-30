@@ -546,8 +546,8 @@ class TimingStats:
             breakdown = []
             for (element_type, tier), tot in self.totals_by_type_tier.items():
                 avg, is_fallback = self._get_avg_for_type_tier_with_fallback(element_type, tier, global_avg)
-                if avg > 0:
-                    breakdown.append((element_type, tier, avg, is_fallback))
+                # Include all items, even those with no timing data yet (avg=0)
+                breakdown.append((element_type, tier, avg, is_fallback))
 
             # Sort by hierarchy (file → class → function → method → variable), then tier descending
             type_order = {"file": 0, "class": 1, "function": 2, "method": 3, "variable": 4, "constant": 5}

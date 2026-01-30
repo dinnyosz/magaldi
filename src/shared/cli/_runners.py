@@ -220,10 +220,13 @@ def run_processing(
             for elem_type, tier, avg_time, is_fallback in eta_breakdown:
                 t_abbr = type_abbrev.get(elem_type, elem_type[:3])
                 tier_str = tier_abbrev.get(tier, f"{tier//1024}k")
-                time_style = "dim yellow" if is_fallback else "yellow"
-                time_str = f"[{time_style}]{avg_time:.1f}s[/]"
-                if is_fallback:
-                    time_str = f"[dim]~[/]{time_str}"
+                if avg_time > 0:
+                    time_style = "dim yellow" if is_fallback else "yellow"
+                    time_str = f"[{time_style}]{avg_time:.1f}s[/]"
+                    if is_fallback:
+                        time_str = f"[dim]~[/]{time_str}"
+                else:
+                    time_str = "[dim]-[/]"
                 row_items.append(f"[dim]{t_abbr}@{tier_str}:[/]{time_str}")
             # Display in a single row, wrapped
             if row_items:
