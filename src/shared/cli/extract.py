@@ -57,15 +57,12 @@ def _display_tier_counts(tier_counts: dict[int, int]) -> None:
     Args:
         tier_counts: Dict mapping tier (e.g., 2048, 4096) to count.
     """
-    from shared.ai.context_size import TIER_MAX_WORKERS
-
-    # Build display string
+    # Build display string - just counts, no worker limits (time-based throttling handles scaling)
     parts = []
     for tier in sorted(tier_counts.keys()):
         count = tier_counts[tier]
         tier_str = f"{tier // 1024}K"
-        max_workers = TIER_MAX_WORKERS.get(tier, 1)
-        parts.append(f"[cyan]{tier_str}[/]: {count} ({max_workers}w)")
+        parts.append(f"[cyan]{tier_str}[/]: {count}")
 
     distribution = " | ".join(parts)
     console.print(f"  [dim]Context tiers:[/] {distribution}")
