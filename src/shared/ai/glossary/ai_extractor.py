@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from shared.ai.llm_client import LLMClient, LLMError
-from shared.parallel_processor import ThrottleContext, run_throttled_tier
+from shared.parallel_processor import ThrottleContext, ThrottleDisplayInfo, run_throttled_tier
 from shared.throttling import ThroughputTracker
 
 if TYPE_CHECKING:
@@ -177,6 +177,8 @@ class GlossaryProgressState:
     workers: GlossaryWorkerStatus
     num_workers: int
     allowed_workers: int = 0  # Current throttle-allowed workers (0 = use num_workers)
+    current_max: float = 0.0  # Max runtime of active workers (for throttle display)
+    avg_base_time: float = 0.0  # Historical base time per worker
 
 
 # =============================================================================
@@ -992,7 +994,7 @@ def extract_glossary_from_features_concurrent(
         with items_lock:
             all_items.extend(items)
 
-    def on_tick_phase1(allowed_workers: int) -> None:
+    def on_tick_phase1(throttle_info: ThrottleDisplayInfo) -> None:
         """Update progress display."""
         if on_progress:
             progress_state = GlossaryProgressState(
@@ -1003,7 +1005,9 @@ def extract_glossary_from_features_concurrent(
                 timing=timing_stats,
                 workers=worker_status,
                 num_workers=state["current_workers"],
-                allowed_workers=allowed_workers,
+                allowed_workers=throttle_info.allowed_workers,
+                current_max=throttle_info.current_max,
+                avg_base_time=throttle_info.avg_base_time,
             )
             on_progress(progress_state)
 
@@ -1196,7 +1200,7 @@ def extract_glossary_from_features_concurrent(
             if on_indexed:
                 on_indexed(completed_item.name)
 
-    def on_tick_phase2(allowed_workers: int) -> None:
+    def on_tick_phase2(throttle_info: ThrottleDisplayInfo) -> None:
         """Update progress display for Phase 2."""
         if on_progress:
             progress_state = GlossaryProgressState(
@@ -1207,7 +1211,9 @@ def extract_glossary_from_features_concurrent(
                 timing=timing_stats,
                 workers=worker_status,
                 num_workers=phase2_state["current_workers"],
-                allowed_workers=allowed_workers,
+                allowed_workers=throttle_info.allowed_workers,
+                current_max=throttle_info.current_max,
+                avg_base_time=throttle_info.avg_base_time,
             )
             on_progress(progress_state)
 

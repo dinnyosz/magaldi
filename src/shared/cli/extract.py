@@ -448,9 +448,18 @@ def run_feature_extraction(
             wall_time = state.timing.elapsed / state.completed if state.completed > 0 else 0
             stats = f"  [dim]Wall:[/] [green]{wall_time:.2f}s[/]/feature [dim]|[/] [dim]API:[/] [green]{avg_api:.1f}s[/]/feature [dim]([/][green]{state.timing.avg_summarize_time:.1f}s[/] summ + [green]{state.timing.avg_embed_time:.1f}s[/] embed[dim])[/]"
 
-            # Worker count
+            # Worker count with throttle info
             running_count = len(workers_data)
-            stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[cyan]{num_workers}[/]"
+            if allowed_workers < num_workers:
+                stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[yellow]{allowed_workers}[/]/[cyan]{num_workers}[/]"
+            else:
+                stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[cyan]{num_workers}[/]"
+
+            # Show throttle info (max runtime and per-worker comparison)
+            if state.current_max > 0 or state.avg_base_time > 0:
+                normalized_max = state.current_max / max(running_count, 1)
+                stats += f" [dim]|[/] [dim]Max:[/] [yellow]{state.current_max:.1f}s[/]"
+                stats += f" [dim]|[/] [dim]Per Worker:[/] [yellow]{normalized_max:.1f}s[/] [dim]vs[/] [cyan]{state.avg_base_time:.1f}s[/] [dim](1w base)[/]"
 
             # Build group with optional eta_table
             elements = [bar_text]
@@ -709,13 +718,29 @@ def run_feature_extraction(
                         stats_text.append(" | ", style="dim")
                         stats_text.append(f"{state.failed} failed", style="red")
 
-                    # Worker count
+                    # Worker count with throttle info
                     running_count = len(workers_data)
                     stats_text.append(" | ", style="dim")
                     stats_text.append("Workers: ", style="dim")
                     stats_text.append(f"{running_count}", style="green")
                     stats_text.append("/", style="dim")
+                    if allowed_workers < num_workers:
+                        stats_text.append(f"{allowed_workers}", style="yellow")
+                        stats_text.append("/", style="dim")
                     stats_text.append(f"{num_workers}", style="cyan")
+
+                    # Show throttle info
+                    if state.current_max > 0 or state.avg_base_time > 0:
+                        normalized_max = state.current_max / max(running_count, 1)
+                        stats_text.append(" | ", style="dim")
+                        stats_text.append("Max: ", style="dim")
+                        stats_text.append(f"{state.current_max:.1f}s", style="yellow")
+                        stats_text.append(" | ", style="dim")
+                        stats_text.append("Per Worker: ", style="dim")
+                        stats_text.append(f"{normalized_max:.1f}s", style="yellow")
+                        stats_text.append(" vs ", style="dim")
+                        stats_text.append(f"{state.avg_base_time:.1f}s", style="cyan")
+                        stats_text.append(" (1w base)", style="dim")
 
                 # Build group with optional eta_table
                 elements = [header_text, bar_text]
@@ -1039,13 +1064,29 @@ def run_glossary_extraction(
                 stats.append(" | ", style="dim")
                 stats.append(f"{state.failed} failed", style="red")
 
-            # Worker count
+            # Worker count with throttle info
             running_count = len(workers_data)
             stats.append(" | ", style="dim")
             stats.append("Workers: ", style="dim")
             stats.append(f"{running_count}", style="green")
             stats.append("/", style="dim")
+            if allowed_workers < num_workers:
+                stats.append(f"{allowed_workers}", style="yellow")
+                stats.append("/", style="dim")
             stats.append(f"{num_workers}", style="cyan")
+
+            # Show throttle info
+            if state.current_max > 0 or state.avg_base_time > 0:
+                normalized_max = state.current_max / max(running_count, 1)
+                stats.append(" | ", style="dim")
+                stats.append("Max: ", style="dim")
+                stats.append(f"{state.current_max:.1f}s", style="yellow")
+                stats.append(" | ", style="dim")
+                stats.append("Per Worker: ", style="dim")
+                stats.append(f"{normalized_max:.1f}s", style="yellow")
+                stats.append(" vs ", style="dim")
+                stats.append(f"{state.avg_base_time:.1f}s", style="cyan")
+                stats.append(" (1w base)", style="dim")
 
             # Build group with optional eta_table
             elements = [phase_text, bar_text]

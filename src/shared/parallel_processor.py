@@ -384,6 +384,15 @@ class ThrottledParallelProcessor(Generic[T, R]):
 
 
 @dataclass
+class ThrottleDisplayInfo:
+    """Info for displaying throttle status."""
+
+    allowed_workers: int
+    current_max: float
+    avg_base_time: float
+
+
+@dataclass
 class ThrottleContext:
     """Context for throttle calculations."""
 
@@ -393,8 +402,8 @@ class ThrottleContext:
 
     def get_throttle_decision(
         self, active_workers: int, current_max_runtime: float
-    ) -> int:
-        """Get recommended workers based on current state."""
+    ) -> ThrottleDisplayInfo:
+        """Get throttle decision with display info."""
         throughput, avg_runtime, count, avg_conc, avg_base = (
             self.throughput_tracker.get_stats_with_concurrency()
         )
@@ -409,7 +418,11 @@ class ThrottleContext:
             avg_concurrency=avg_conc,
             avg_base_time=avg_base,
         )
-        return throttle.recommended_workers
+        return ThrottleDisplayInfo(
+            allowed_workers=throttle.recommended_workers,
+            current_max=max(current_max_runtime, throttle.historical_max),
+            avg_base_time=avg_base,
+        )
 
 
 def run_throttled_tier(
@@ -420,7 +433,7 @@ def run_throttled_tier(
     throttle_ctx: ThrottleContext,
     get_max_runtime: Callable[[], float],
     on_complete: Callable[[T, R, float], None],
-    on_tick: Callable[[int], None] | None = None,
+    on_tick: Callable[[ThrottleDisplayInfo], None] | None = None,
 ) -> None:
     """Run throttled processing for a single tier.
 
@@ -435,7 +448,7 @@ def run_throttled_tier(
         throttle_ctx: Context with throughput tracker and config
         get_max_runtime: Function to get current max active runtime
         on_complete: Called when item completes with (item, result, avg_workers)
-        on_tick: Called on each loop iteration with allowed_workers (for progress refresh)
+        on_tick: Called on each loop iteration with ThrottleDisplayInfo (for progress refresh)
     """
     tier_timeout = TIER_TIMEOUTS.get(tier, 180)
     throttle_ctx.tier_timeout = tier_timeout
@@ -451,9 +464,10 @@ def run_throttled_tier(
             # Get throttle decision
             active_workers = len(futures)
             current_max = get_max_runtime()
-            allowed_workers = throttle_ctx.get_throttle_decision(
+            throttle_info = throttle_ctx.get_throttle_decision(
                 active_workers, current_max
             )
+            allowed_workers = throttle_info.allowed_workers
 
             # Submit new tasks up to allowed limit
             while pending_items and len(futures) < allowed_workers:
@@ -471,7 +485,7 @@ def run_throttled_tier(
             # Handle completed tasks
             for future in done:
                 item = futures.pop(future)
-                # Use allowed workers (average of start and end)
+                # Use allowed workers (min of start and end for worst case)
                 allowed_at_start = future_to_allowed_at_start.pop(future, allowed_workers)
                 allowed_at_end = allowed_workers
                 avg_workers = min(allowed_at_start, allowed_at_end)
@@ -481,7 +495,7 @@ def run_throttled_tier(
 
             # Tick for progress refresh
             if on_tick:
-                on_tick(allowed_workers)
+                on_tick(throttle_info)
 
     finally:
         executor.shutdown(wait=True)

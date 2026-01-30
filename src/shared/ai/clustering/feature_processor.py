@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from shared.ai.clustering.clusterer import ClusteringResult, ClusterResult
 from shared.ai.context_size import TIER_TIMEOUTS
-from shared.parallel_processor import ThrottleContext, run_throttled_tier
+from shared.parallel_processor import ThrottleContext, ThrottleDisplayInfo, run_throttled_tier
 from shared.throttling import ThroughputTracker
 
 if TYPE_CHECKING:
@@ -276,6 +276,8 @@ class FeatureProgressState:
     workers: FeatureWorkerStatus
     num_workers: int = 1
     allowed_workers: int = 0  # Current throttle-allowed workers (0 = use num_workers)
+    current_max: float = 0.0  # Max runtime of active workers (for throttle display)
+    avg_base_time: float = 0.0  # Historical base time per worker
 
 
 @dataclass
@@ -454,6 +456,8 @@ class SubfeatureProgressState:
     workers: SubfeatureWorkerStatus
     num_workers: int = 1
     allowed_workers: int = 0  # Current throttle-allowed workers (0 = use num_workers)
+    current_max: float = 0.0  # Max runtime of active workers (for throttle display)
+    avg_base_time: float = 0.0  # Historical base time per worker
 
 
 @dataclass
@@ -979,7 +983,7 @@ def process_features(
             state["failed"] += 1
             errors.append(f"Feature {cluster.label}: {processed.error}")
 
-    def on_tick(allowed_workers: int) -> None:
+    def on_tick(throttle_info: "ThrottleDisplayInfo") -> None:
         """Update progress display."""
         if on_progress:
             progress_state = FeatureProgressState(
@@ -989,7 +993,9 @@ def process_features(
                 timing=timing_stats,
                 workers=worker_status,
                 num_workers=state["current_workers"],
-                allowed_workers=allowed_workers,
+                allowed_workers=throttle_info.allowed_workers,
+                current_max=throttle_info.current_max,
+                avg_base_time=throttle_info.avg_base_time,
             )
             on_progress(progress_state)
 
@@ -1550,12 +1556,18 @@ def process_subfeatures(
             if wid not in available_worker_ids:
                 available_worker_ids.append(wid)
 
-    # Mutable state for allowed workers
-    subfeature_state = {"allowed_workers": config.num_workers}
+    # Mutable state for throttle info
+    subfeature_state: dict = {
+        "allowed_workers": config.num_workers,
+        "current_max": 0.0,
+        "avg_base_time": 0.0,
+    }
 
-    def on_status_change(allowed_workers: int | None = None) -> None:
-        if allowed_workers is not None:
-            subfeature_state["allowed_workers"] = allowed_workers
+    def on_status_change(throttle_info: "ThrottleDisplayInfo | None" = None) -> None:
+        if throttle_info is not None:
+            subfeature_state["allowed_workers"] = throttle_info.allowed_workers
+            subfeature_state["current_max"] = throttle_info.current_max
+            subfeature_state["avg_base_time"] = throttle_info.avg_base_time
         if on_progress:
             on_progress(SubfeatureProgressState(
                 total=total,
@@ -1565,6 +1577,8 @@ def process_subfeatures(
                 workers=worker_status,
                 num_workers=config.num_workers,
                 allowed_workers=subfeature_state["allowed_workers"],
+                current_max=subfeature_state["current_max"],
+                avg_base_time=subfeature_state["avg_base_time"],
             ))
 
     def process_wrapper(work_item: SubfeatureWorkItem) -> ProcessedSubfeature:
