@@ -275,6 +275,11 @@ def _extract_python_elements_scm(tree: Tree, lines: list[str]) -> list[Extracted
             if elem:
                 elements.append(elem)
 
+    # Process import statements (simple top-level walk, no SCM query needed)
+    for node in tree.root_node.children:
+        if node.type in ("import_statement", "import_from_statement"):
+            elements.append(_extract_python_import(node, lines))
+
     return elements
 
 
@@ -291,6 +296,57 @@ def _is_inside_class(node: Node) -> bool:
     return False
 
 
+def _extract_python_import(node: Node, lines: list[str]) -> ExtractedElement:
+    """Extract an import statement as an element.
+
+    Args:
+        node: An import_statement or import_from_statement node.
+        lines: Source code lines.
+
+    Returns:
+        ExtractedElement with element_type="import".
+    """
+    line_start = node.start_point[0] + 1
+    line_end = node.end_point[0] + 1
+    raw_code = node.text.decode("utf-8") if node.text else ""
+
+    # Get module name based on import type
+    if node.type == "import_statement":
+        # import os, sys -> use first module name
+        for child in node.children:
+            if child.type == "dotted_name":
+                module = get_node_text(child)
+                break
+            elif child.type == "aliased_import":
+                name_node = get_child_by_field(child, "name")
+                module = get_node_text(name_node) if name_node else ""
+                break
+        else:
+            module = ""
+    else:  # import_from_statement
+        # from flask import ... -> use "flask"
+        module = ""
+        for child in node.children:
+            if child.type == "dotted_name":
+                module = get_node_text(child)
+                break
+            elif child.type == "relative_import":
+                # from . import x or from ..utils import y
+                module = get_node_text(child)
+                break
+
+    return ExtractedElement(
+        element_type="import",
+        name=module,
+        line_start=line_start,
+        line_end=line_end,
+        raw_code=raw_code,
+        byte_offset=node.start_byte,
+        signature=raw_code.strip(),
+        node=node,
+    )
+
+
 def _extract_python_elements_imperative(tree: Tree, lines: list[str]) -> list[ExtractedElement]:
     """Extract elements using imperative tree-walking (fallback).
 
@@ -299,9 +355,12 @@ def _extract_python_elements_imperative(tree: Tree, lines: list[str]) -> list[Ex
     elements: list[ExtractedElement] = []
     root = tree.root_node
 
-    # Extract classes (both decorated and undecorated)
+    # Extract imports and code elements
     for node in root.children:
-        if node.type == "class_definition":
+        # Import statements
+        if node.type in ("import_statement", "import_from_statement"):
+            elements.append(_extract_python_import(node, lines))
+        elif node.type == "class_definition":
             elements.append(_extract_python_class(node, lines))
         elif node.type == "decorated_definition":
             inner = get_child_by_field(node, "definition")
