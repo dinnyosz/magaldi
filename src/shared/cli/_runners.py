@@ -374,7 +374,7 @@ def run_processing(
                 # Normalize max by running workers for comparison with historical base
                 normalized_max = effective_max / max(running_count, 1)
                 stats += f" [dim]|[/] [dim]Max:[/] [yellow]{effective_max:.1f}s[/]"
-                stats += f" [dim]|[/] [dim]Per Worker:[/] [yellow]{normalized_max:.1f}s[/] [dim]vs[/] [cyan]{td.completed_avg:.1f}s[/] [dim](1w base)[/]"
+                stats += f" [dim]|[/] [dim]Per Worker:[/] [yellow]{normalized_max:.1f}s[/] [dim]vs[/] [cyan]{td.completed_avg:.1f}s[/] [dim](last {td.completion_count})[/]"
 
         parts: list[RenderableType] = [bar_text]
         if eta_table:

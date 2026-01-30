@@ -60,6 +60,7 @@ class ThrottleDecision:
     completed_avg: float  # Average runtime from completions (used for throttling)
     recommended_workers: int  # Suggested worker count
     reason: str
+    completion_count: int = 0  # Number of completions used for completed_avg
 
 
 class ThroughputTracker:
@@ -261,6 +262,7 @@ def compute_throttle_decision(
             completed_avg=current_max_runtime,
             recommended_workers=1,
             reason="Emergency (>60% timeout)",
+            completion_count=completion_count,
         )
 
     # Normalize max_runtime by current workers for hold threshold comparison
@@ -298,6 +300,7 @@ def compute_throttle_decision(
                 completed_avg=avg_runtime,
                 recommended_workers=active_workers,
                 reason=f"No data, holding (>{RAMP_HOLD_THRESHOLD:.0%} timeout)",
+                completion_count=completion_count,
             )
         elif active_workers > 0:
             # Tasks running fast, safe to ramp
@@ -316,6 +319,7 @@ def compute_throttle_decision(
                 completed_avg=avg_runtime,
                 recommended_workers=ramped,
                 reason=f"No data, ramped from {active_workers}",
+                completion_count=completion_count,
             )
         else:
             # Fresh start with no data - start with 1 worker for warmup
@@ -327,6 +331,7 @@ def compute_throttle_decision(
                 completed_avg=avg_runtime,
                 recommended_workers=1,
                 reason="No data (fresh)",
+                completion_count=completion_count,
             )
 
     # Calculate optimal workers: (timeout * safety_margin) / base_time
@@ -387,6 +392,7 @@ def compute_throttle_decision(
             completed_avg=effective_base_time,
             recommended_workers=effective_workers,
             reason=f"Throttle ({effective_workers}={int(effective_timeout)}s/{effective_base_time:.1f}s base{reason_suffix})",
+            completion_count=completion_count,
         )
     else:
         return ThrottleDecision(
@@ -396,4 +402,5 @@ def compute_throttle_decision(
             completed_avg=effective_base_time if effective_base_time > 0 else avg_runtime,
             recommended_workers=effective_workers,
             reason=f"Normal{reason_suffix}" if reason_suffix else "Normal",
+            completion_count=completion_count,
         )
