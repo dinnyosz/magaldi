@@ -264,8 +264,8 @@ def compute_throttle_decision(
     # know how many workers were active when each task STARTED (only current count).
     # Dividing current_max_runtime by active_workers gives wrong results when
     # workers have ramped up since the task started.
-    # Need >= 3 completions for reliable avg_base_time.
-    if completion_count >= 3 and avg_base_time > 0:
+    # Even 1 datapoint is useful - ramp-up and emergency throttle protect against outliers.
+    if avg_base_time > 0:
         effective_base_time = avg_base_time
     else:
         # No completion history yet - still apply ramp-up to avoid jumping to max
