@@ -136,6 +136,9 @@ def extract_javascript_elements(tree: Tree, lines: list[str]) -> list[ExtractedE
             elements.append(_extract_ts_type_alias(node, lines))
         elif node.type == "enum_declaration":
             elements.append(_extract_ts_enum(node, lines))
+        # Import statements
+        elif node.type == "import_statement":
+            elements.append(_extract_js_import(node, lines))
 
     return elements
 
@@ -489,6 +492,42 @@ def _extract_ts_enum(node: Node, lines: list[str]) -> ExtractedElement:
     return ExtractedElement(
         element_type="class",  # Treat enums as class-like
         name=name,
+        line_start=line_start,
+        line_end=line_end,
+        raw_code=raw_code,
+        byte_offset=node.start_byte,
+        signature=signature,
+        node=node,
+    )
+
+
+def _extract_js_import(node: Node, lines: list[str]) -> ExtractedElement:
+    """Extract an import statement as an element.
+
+    Args:
+        node: An import_statement node from tree-sitter.
+        lines: Source code lines.
+
+    Returns:
+        ExtractedElement with element_type="import".
+    """
+    line_start = node.start_point[0] + 1
+    line_end = node.end_point[0] + 1
+    raw_code = node.text.decode("utf-8") if node.text else ""
+
+    # Get the module path (the 'from' part)
+    module = ""
+    for child in node.children:
+        if child.type == "string":
+            module = get_node_text(child).strip("'\"")
+            break
+
+    # Build a readable signature showing what's imported
+    signature = raw_code.strip()
+
+    return ExtractedElement(
+        element_type="import",
+        name=module,  # Use module path as the name for grouping
         line_start=line_start,
         line_end=line_end,
         raw_code=raw_code,

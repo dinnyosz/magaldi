@@ -50,7 +50,7 @@ class ParameterInfo:
 class ExtractedElement:
     """A code element extracted from the AST."""
 
-    element_type: str  # 'class', 'interface', 'type_alias', 'function', 'method', 'constant', 'variable'
+    element_type: str  # 'class', 'interface', 'type_alias', 'function', 'method', 'constant', 'variable', 'import'
     name: str
     line_start: int  # 1-indexed
     line_end: int  # 1-indexed

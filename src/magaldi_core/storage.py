@@ -548,7 +548,7 @@ def should_embed(element: CodeElement) -> bool:
     Returns:
         True if element should be embedded.
     """
-    # Embed all code elements
+    # Embed all code elements (imports are tracked but not embedded)
     if element.element_type in ("file", "class", "interface", "type_alias", "function", "method", "constant", "variable"):
         return True
 
