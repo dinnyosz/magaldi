@@ -228,9 +228,9 @@ class TestComputeThrottleDecision:
         assert "No data" in decision.reason
 
     def test_emergency_near_timeout(self):
-        """Runtime >= 80% of timeout triggers emergency throttling."""
+        """Runtime >= 60% of timeout triggers emergency throttling."""
         decision = compute_throttle_decision(
-            current_max_runtime=150.0,  # ~83% of 180
+            current_max_runtime=110.0,  # ~61% of 180 (threshold is 60%)
             tier_timeout=180.0,
             base_workers=8,
             active_workers=4,

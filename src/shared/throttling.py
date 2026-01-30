@@ -243,8 +243,9 @@ def compute_throttle_decision(
     """
     # Emergency check FIRST - if any active task is near timeout, throttle hard
     # This applies even without completion history
+    # Use 60% threshold - more aggressive than safety margin (65%) to react before it's too late
     max_ratio = current_max_runtime / tier_timeout if tier_timeout > 0 else 0.0
-    if max_ratio >= 0.80:
+    if max_ratio >= 0.60:
         _log_throttle(
             f"EMERGENCY: max_runtime={current_max_runtime:.1f}s ({max_ratio:.0%} of {tier_timeout}s timeout) "
             f"active={active_workers} → forcing 1 worker"
@@ -255,7 +256,7 @@ def compute_throttle_decision(
             historical_max=0,
             completed_avg=current_max_runtime,
             recommended_workers=1,
-            reason="Emergency (>80% timeout)",
+            reason="Emergency (>60% timeout)",
         )
 
     # Use ONLY historical avg_base_time from actual completions.
