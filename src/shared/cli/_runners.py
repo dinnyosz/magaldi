@@ -233,14 +233,28 @@ def run_processing(
 
         workers_data = state.workers.get_all()
         now = time_mod.time()
+
+        # Determine allowed workers for idle vs throttled distinction
+        parallelism = state.parallelism
+        if parallelism and parallelism.tier_changing:
+            allowed_workers = 1
+        elif parallelism and parallelism.throttle_decision:
+            allowed_workers = parallelism.throttle_decision.recommended_workers
+        else:
+            allowed_workers = num_workers
+
         for wid in range(num_workers):
             if wid in workers_data:
                 elem, stage, model, ctx_size, start_time = workers_data[wid]
                 elapsed = now - start_time if start_time > 0 else 0
                 elapsed_str = f"{elapsed:.1f}s" if elapsed > 0 else ""
                 worker_table.add_row(f"[{wid}]", stage, model, ctx_size, elapsed_str, elem)
-            else:
+            elif wid < allowed_workers:
+                # Worker could run but no tasks available
                 worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "", "", "")
+            else:
+                # Worker is throttled - not allowed to run
+                worker_table.add_row(f"[{wid}]", "[dim yellow]throttled[/]", "", "", "", "")
 
         # Per-type stats
         type_colors = {
