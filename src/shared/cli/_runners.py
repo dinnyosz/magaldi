@@ -327,16 +327,16 @@ def run_processing(
         parallelism = state.parallelism
         if parallelism and parallelism.throttle_decision:
             td = parallelism.throttle_decision
-            # Show avg (drives adaptive throttling) and max (drives emergency throttling)
+            # Show base time (drives adaptive throttling) and max (drives emergency throttling)
             if td.completed_avg > 0 or td.current_max > 0:
                 effective_max = max(td.current_max, td.historical_max)
-                # Show whichever is more relevant: avg for normal, max for emergency
+                # Show whichever is more relevant: base for normal, max for emergency
                 if effective_max > td.completed_avg:
                     stats += f" [dim]|[/] [dim]Max:[/] [yellow]{effective_max:.1f}s[/]"
                     if td.completed_avg > 0:
-                        stats += f" [dim](avg:[/] [cyan]{td.completed_avg:.1f}s[/][dim])[/]"
+                        stats += f" [dim](1w base:[/] [cyan]{td.completed_avg:.1f}s[/][dim])[/]"
                 else:
-                    stats += f" [dim]|[/] [dim]Avg:[/] [cyan]{td.completed_avg:.1f}s[/]"
+                    stats += f" [dim]|[/] [dim]1w base:[/] [cyan]{td.completed_avg:.1f}s[/]"
                     if effective_max > 0:
                         stats += f" [dim](max:[/] [yellow]{effective_max:.1f}s[/][dim])[/]"
 
