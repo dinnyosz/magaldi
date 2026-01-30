@@ -2047,11 +2047,12 @@ def process_elements(
                     tier=element_tier,
                 )
 
-                # Record wall time for throttling history with concurrency at START time
-                # Using start time matters because that's when GPU contention began
-                # Completion-time count can be misleading (other tasks may have just finished)
+                # Record wall time for throttling history with average concurrency
+                # Average of start and end counts gives better estimate of actual contention
                 workers_at_start = future_to_workers_at_start.pop(future, 1)
-                timing_stats.record_task_runtime(processed.wall_time, workers_at_start)
+                workers_at_end = worker_status.active_count()
+                avg_workers = (workers_at_start + workers_at_end) / 2
+                timing_stats.record_task_runtime(processed.wall_time, avg_workers)
 
                 was_embedded = should_embed(element)
                 if processed.success:

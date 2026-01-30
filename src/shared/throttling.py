@@ -78,17 +78,17 @@ class ThroughputTracker:
         self.completions: deque[tuple[float, float, int]] = deque()
         self._lock = Lock()
 
-    def record_completion(self, runtime: float, concurrent_workers: int = 1) -> None:
+    def record_completion(self, runtime: float, concurrent_workers: float = 1.0) -> None:
         """Record a completed task with concurrency context.
 
         Args:
             runtime: Task runtime in seconds
-            concurrent_workers: Number of workers active when task completed
+            concurrent_workers: Average workers active during task (start + end / 2)
         """
         now = time.time()
-        base_time = runtime / max(concurrent_workers, 1)
+        base_time = runtime / max(concurrent_workers, 1.0)
         _log_throttle(
-            f"RECORD: wall={runtime:.1f}s workers={concurrent_workers} → base={base_time:.1f}s"
+            f"RECORD: wall={runtime:.1f}s workers={concurrent_workers:.1f} → base={base_time:.1f}s"
         )
         with self._lock:
             self.completions.append((now, runtime, concurrent_workers))
@@ -166,8 +166,8 @@ class ThroughputTracker:
 
             # Calculate avg base_time = runtime / workers for each completion
             # This normalizes for concurrency: a 50s task with 8 workers = 6.25s base
-            # For warmup tasks (workers=0), treat as 1 worker - they give us baseline timing
-            base_times = [r / max(c, 1) for _, r, c in self.completions]
+            # Workers is avg of start+end counts; for warmup (0), treat as 1
+            base_times = [r / max(c, 1.0) for _, r, c in self.completions]
             avg_base_time = sum(base_times) / len(base_times) if base_times else 0.0
 
             return throughput, avg_runtime, count, avg_concurrency, avg_base_time
