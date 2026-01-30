@@ -7,13 +7,12 @@ import re
 import threading
 import time
 from collections.abc import Callable
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from shared.ai.context_size import TIER_TIMEOUTS
 from shared.ai.llm_client import LLMClient, LLMError
-from shared.throttling import ThroughputTracker, compute_throttle_decision
+from shared.parallel_processor import ThrottleContext, run_throttled_tier
+from shared.throttling import ThroughputTracker
 
 if TYPE_CHECKING:
     from shared.config import MagaldiConfig
@@ -896,91 +895,67 @@ def extract_glossary_from_features_concurrent(
     tier_groups = iter_by_tier(features, estimate_feature_tier)
     max_pool_workers = num_workers if num_workers > 0 else max(TIER_MAX_WORKERS.values())
 
+    # Mutable state for current tier workers
+    state = {"current_workers": max_pool_workers}
+
+    def on_complete_phase1(feature: dict, result: tuple, avg_workers: float) -> None:
+        """Handle completed feature extraction."""
+        items, api_time, success = result
+
+        # Record for throttling
+        timing_stats.record_task_runtime(api_time, avg_workers)
+
+        with progress_lock:
+            counters["completed"] += 1
+            if not success:
+                counters["failed"] += 1
+            else:
+                counters["terms_extracted"] += len(items)
+                timing_stats.record_api_call(api_time)
+
+        with items_lock:
+            all_items.extend(items)
+
+    def on_tick_phase1() -> None:
+        """Update progress display."""
+        if on_progress:
+            progress_state = GlossaryProgressState(
+                total=total,
+                completed=counters["completed"],
+                failed=counters["failed"],
+                terms_extracted=counters["terms_extracted"],
+                timing=timing_stats,
+                workers=worker_status,
+                num_workers=state["current_workers"],
+            )
+            on_progress(progress_state)
+
+    # Create throttle context
+    throttle_ctx = ThrottleContext(
+        tier_timeout=180,
+        base_workers=max_pool_workers,
+        throughput_tracker=timing_stats.throughput_tracker,
+    )
+
     for _tier, tier_max_workers, tier_features in tier_groups:
         effective_workers = min(max_pool_workers, tier_max_workers)
-        tier_timeout = TIER_TIMEOUTS.get(_tier, 180)
+        state["current_workers"] = effective_workers
 
         # Reset worker ID pool for this tier
         with worker_id_lock:
             available_worker_ids.clear()
             available_worker_ids.extend(range(effective_workers))
 
-        executor = ThreadPoolExecutor(max_workers=effective_workers)
-        futures: dict = {}
-        future_to_workers_at_start: dict = {}
-        pending_features = list(tier_features)
-
-        try:
-            while pending_features or futures:
-                # Get throttle decision
-                active_workers = len(futures)
-                current_max = worker_status.get_max_active_runtime()
-                throughput, avg_runtime, count, avg_conc, avg_base = (
-                    timing_stats.get_throughput_stats_with_concurrency()
-                )
-                throttle = compute_throttle_decision(
-                    current_max_runtime=current_max,
-                    tier_timeout=tier_timeout,
-                    base_workers=effective_workers,
-                    active_workers=active_workers,
-                    throughput=throughput,
-                    avg_runtime=avg_runtime,
-                    completion_count=count,
-                    avg_concurrency=avg_conc,
-                    avg_base_time=avg_base,
-                )
-                allowed_workers = throttle.recommended_workers
-
-                # Submit new tasks up to allowed limit
-                while pending_features and len(futures) < allowed_workers:
-                    feature = pending_features.pop(0)
-                    workers_at_start = len(futures)
-                    future = executor.submit(process_feature, feature)
-                    futures[future] = feature
-                    future_to_workers_at_start[future] = workers_at_start
-
-                if not futures:
-                    break
-
-                # Wait for completion or timeout
-                done, _ = wait(futures.keys(), timeout=2.0, return_when=FIRST_COMPLETED)
-
-                for future in done:
-                    feature = futures.pop(future)
-                    workers_at_start = future_to_workers_at_start.pop(future, 1)
-                    workers_at_end = len(futures)
-                    avg_workers = (workers_at_start + workers_at_end) / 2
-
-                    items, api_time, success = future.result()
-
-                    # Record for throttling
-                    timing_stats.record_task_runtime(api_time, avg_workers)
-
-                    with progress_lock:
-                        counters["completed"] += 1
-                        if not success:
-                            counters["failed"] += 1
-                        else:
-                            counters["terms_extracted"] += len(items)
-                            timing_stats.record_api_call(api_time)
-
-                    with items_lock:
-                        all_items.extend(items)
-
-                # Update progress (always, for display refresh)
-                if on_progress:
-                    state = GlossaryProgressState(
-                        total=total,
-                        completed=counters["completed"],
-                        failed=counters["failed"],
-                        terms_extracted=counters["terms_extracted"],
-                        timing=timing_stats,
-                        workers=worker_status,
-                        num_workers=effective_workers,
-                    )
-                    on_progress(state)
-        finally:
-            executor.shutdown(wait=True)
+        run_throttled_tier(
+            items=list(tier_features),
+            tier=_tier,
+            effective_workers=effective_workers,
+            process_fn=process_feature,
+            throttle_ctx=throttle_ctx,
+            get_max_runtime=worker_status.get_max_active_runtime,
+            on_complete=on_complete_phase1,
+            on_tick=on_tick_phase1,
+        )
 
     # Merge items by term name
     merged_items = merge_glossary_items(all_items)
@@ -1073,123 +1048,102 @@ def extract_glossary_from_features_concurrent(
     # Group items by tier and process each tier with appropriate max_workers
     tier_groups = iter_by_tier(merged_items, estimate_term_tier)
 
+    # Mutable state for current tier workers (Phase 2)
+    phase2_state = {"current_workers": max_pool_workers}
+
+    def on_complete_phase2(
+        item: GlossaryItem, result: tuple, avg_workers: float
+    ) -> None:
+        """Handle completed summary generation."""
+        completed_item, api_time, success = result
+
+        # Record for throttling
+        timing_stats.record_task_runtime(api_time, avg_workers)
+
+        with progress_lock:
+            counters["completed"] += 1
+            if not success:
+                counters["failed"] += 1
+            else:
+                timing_stats.record_api_call(api_time)
+
+        with final_lock:
+            final_items.append(completed_item)
+
+        # Incremental indexing: index each item as it completes
+        if success and es_repo is not None and scope and repository and username:
+            glossary_id = f"{scope}:{repository}:{username}:glossary:{completed_item.name}"
+
+            # Build feature associations
+            feature_associations = []
+            for fid in completed_item.source_feature_ids:
+                if fid in features_by_id:
+                    feature_data = features_by_id[fid]
+                    feature_associations.append({
+                        "feature_id": fid,
+                        "feature_label": feature_data.get("label", ""),
+                        "frequency": 1,
+                        "total_members": 0,
+                        "percentage": 0.0,
+                    })
+
+            es_repo.index_glossary(
+                glossary_id=glossary_id,
+                scope=scope,
+                repository=repository,
+                username=username,
+                term=completed_item.name,
+                total_count=len(completed_item.source_feature_ids),
+                element_ids=completed_item.source_feature_ids,
+                file_paths=[],
+                description=completed_item.description,
+                feature_associations=feature_associations,
+            )
+
+            if on_indexed:
+                on_indexed(completed_item.name)
+
+    def on_tick_phase2() -> None:
+        """Update progress display for Phase 2."""
+        if on_progress:
+            progress_state = GlossaryProgressState(
+                total=total_terms,
+                completed=counters["completed"],
+                failed=counters["failed"],
+                terms_extracted=len(final_items),
+                timing=timing_stats,
+                workers=worker_status,
+                num_workers=phase2_state["current_workers"],
+            )
+            on_progress(progress_state)
+
+    # Create throttle context for Phase 2
+    # Note: reusing the same throughput_tracker for continuity
+    throttle_ctx_phase2 = ThrottleContext(
+        tier_timeout=180,
+        base_workers=max_pool_workers,
+        throughput_tracker=timing_stats.throughput_tracker,
+    )
+
     for _tier, tier_max_workers, tier_items in tier_groups:
         effective_workers = min(max_pool_workers, tier_max_workers)
-        tier_timeout = TIER_TIMEOUTS.get(_tier, 180)
+        phase2_state["current_workers"] = effective_workers
 
         # Reset worker ID pool for this tier
         with worker_id_lock:
             available_worker_ids.clear()
             available_worker_ids.extend(range(effective_workers))
 
-        executor = ThreadPoolExecutor(max_workers=effective_workers)
-        futures: dict = {}
-        future_to_workers_at_start: dict = {}
-        pending_items = list(tier_items)
-
-        try:
-            while pending_items or futures:
-                # Get throttle decision
-                active_workers = len(futures)
-                current_max = worker_status.get_max_active_runtime()
-                throughput, avg_runtime, count, avg_conc, avg_base = (
-                    timing_stats.get_throughput_stats_with_concurrency()
-                )
-                throttle = compute_throttle_decision(
-                    current_max_runtime=current_max,
-                    tier_timeout=tier_timeout,
-                    base_workers=effective_workers,
-                    active_workers=active_workers,
-                    throughput=throughput,
-                    avg_runtime=avg_runtime,
-                    completion_count=count,
-                    avg_concurrency=avg_conc,
-                    avg_base_time=avg_base,
-                )
-                allowed_workers = throttle.recommended_workers
-
-                # Submit new tasks up to allowed limit
-                while pending_items and len(futures) < allowed_workers:
-                    item = pending_items.pop(0)
-                    workers_at_start = len(futures)
-                    future = executor.submit(generate_summary_for_term, item)
-                    futures[future] = item
-                    future_to_workers_at_start[future] = workers_at_start
-
-                if not futures:
-                    break
-
-                # Wait for completion or timeout
-                done, _ = wait(futures.keys(), timeout=2.0, return_when=FIRST_COMPLETED)
-
-                for future in done:
-                    item = futures.pop(future)
-                    workers_at_start = future_to_workers_at_start.pop(future, 1)
-                    workers_at_end = len(futures)
-                    avg_workers = (workers_at_start + workers_at_end) / 2
-
-                    item, api_time, success = future.result()
-
-                    # Record for throttling
-                    timing_stats.record_task_runtime(api_time, avg_workers)
-
-                    with progress_lock:
-                        counters["completed"] += 1
-                        if not success:
-                            counters["failed"] += 1
-                        else:
-                            timing_stats.record_api_call(api_time)
-
-                    with final_lock:
-                        final_items.append(item)
-
-                    # Incremental indexing: index each item as it completes
-                    if success and es_repo is not None and scope and repository and username:
-                        glossary_id = f"{scope}:{repository}:{username}:glossary:{item.name}"
-
-                        # Build feature associations
-                        feature_associations = []
-                        for fid in item.source_feature_ids:
-                            if fid in features_by_id:
-                                feature_data = features_by_id[fid]
-                                feature_associations.append({
-                                    "feature_id": fid,
-                                    "feature_label": feature_data.get("label", ""),
-                                    "frequency": 1,
-                                    "total_members": 0,
-                                    "percentage": 0.0,
-                                })
-
-                        es_repo.index_glossary(
-                            glossary_id=glossary_id,
-                            scope=scope,
-                            repository=repository,
-                            username=username,
-                            term=item.name,
-                            total_count=len(item.source_feature_ids),
-                            element_ids=item.source_feature_ids,
-                            file_paths=[],
-                            description=item.description,
-                            feature_associations=feature_associations,
-                        )
-
-                        if on_indexed:
-                            on_indexed(item.name)
-
-                # Update progress (always, for display refresh)
-                if on_progress:
-                    state = GlossaryProgressState(
-                        total=total_terms,
-                        completed=counters["completed"],
-                        failed=counters["failed"],
-                        terms_extracted=len(final_items),
-                        timing=timing_stats,
-                        workers=worker_status,
-                        num_workers=effective_workers,
-                    )
-                    on_progress(state)
-        finally:
-            executor.shutdown(wait=True)
+        run_throttled_tier(
+            items=list(tier_items),
+            tier=_tier,
+            effective_workers=effective_workers,
+            process_fn=generate_summary_for_term,
+            throttle_ctx=throttle_ctx_phase2,
+            get_max_runtime=worker_status.get_max_active_runtime,
+            on_complete=on_complete_phase2,
+            on_tick=on_tick_phase2,
+        )
 
     final_items.sort(key=lambda x: x.name)
     return final_items

@@ -931,93 +931,69 @@ def process_features(
     # Handle workers=0 (auto) - will use tier-specific limits
     max_pool_workers = config.num_workers if config.num_workers > 0 else max(TIER_MAX_WORKERS.values())
 
+    # Mutable state for callbacks
+    state = {"completed": 0, "failed": 0, "current_workers": max_pool_workers}
+
+    def on_complete(cluster: ClusterResult, processed: ProcessedFeature, avg_workers: float) -> None:
+        """Handle completed feature processing."""
+        nonlocal processed_features, errors
+        tier = cluster_to_tier.get(processed.cluster_id, 0)
+
+        # Record for throttling
+        wall_time = processed.summarize_time + processed.embed_time
+        timing_stats.record_task_runtime(wall_time, avg_workers)
+        timing_stats.record(processed.summarize_time, processed.embed_time, tier=tier)
+
+        if processed.success:
+            state["completed"] += 1
+            processed_features[processed.cluster_id] = (processed.label, processed.summary)
+        else:
+            state["failed"] += 1
+            errors.append(f"Feature {cluster.label}: {processed.error}")
+
+    def on_tick() -> None:
+        """Update progress display."""
+        if on_progress:
+            progress_state = FeatureProgressState(
+                total=total,
+                completed=state["completed"],
+                failed=state["failed"],
+                timing=timing_stats,
+                workers=worker_status,
+                num_workers=state["current_workers"],
+            )
+            on_progress(progress_state)
+
+    # Create throttle context
+    throttle_ctx = ThrottleContext(
+        tier_timeout=180,
+        base_workers=max_pool_workers,
+        throughput_tracker=timing_stats.throughput_tracker,
+    )
+
     try:
         for _tier, tier_max_workers, tier_clusters in tier_groups:
-            # Use min of configured workers and tier limit
             effective_workers = min(max_pool_workers, tier_max_workers)
-            tier_timeout = TIER_TIMEOUTS.get(_tier, 180)
+            state["current_workers"] = effective_workers
 
             # Reset worker ID pool for this tier
             available_worker_ids.clear()
             available_worker_ids.extend(range(effective_workers))
 
-            executor = ThreadPoolExecutor(max_workers=effective_workers)
-            future_to_cluster: dict = {}
-            future_to_workers_at_start: dict = {}
-            pending_clusters = list(tier_clusters)
+            run_throttled_tier(
+                items=list(tier_clusters),
+                tier=_tier,
+                effective_workers=effective_workers,
+                process_fn=process_wrapper,
+                throttle_ctx=throttle_ctx,
+                get_max_runtime=worker_status.get_max_active_runtime,
+                on_complete=on_complete,
+                on_tick=on_tick,
+            )
 
-            while pending_clusters or future_to_cluster:
-                # Get throttle decision
-                active_workers = len(future_to_cluster)
-                current_max = worker_status.get_max_active_runtime()
-                throughput, avg_runtime, count, avg_conc, avg_base = (
-                    timing_stats.get_throughput_stats_with_concurrency()
-                )
-                throttle = compute_throttle_decision(
-                    current_max_runtime=current_max,
-                    tier_timeout=tier_timeout,
-                    base_workers=effective_workers,
-                    active_workers=active_workers,
-                    throughput=throughput,
-                    avg_runtime=avg_runtime,
-                    completion_count=count,
-                    avg_concurrency=avg_conc,
-                    avg_base_time=avg_base,
-                )
-                allowed_workers = throttle.recommended_workers
-
-                # Submit new tasks up to allowed limit
-                while pending_clusters and len(future_to_cluster) < allowed_workers:
-                    cluster = pending_clusters.pop(0)
-                    workers_at_start = len(future_to_cluster)
-                    future = executor.submit(process_wrapper, cluster)
-                    future_to_cluster[future] = cluster
-                    future_to_workers_at_start[future] = workers_at_start
-
-                if not future_to_cluster:
-                    break
-
-                # Wait for completion or timeout for periodic updates
-                done, _ = wait(future_to_cluster.keys(), timeout=2.0, return_when=FIRST_COMPLETED)
-
-                # Handle completed tasks
-                for future in done:
-                    cluster = future_to_cluster.pop(future)
-                    workers_at_start = future_to_workers_at_start.pop(future, 1)
-                    workers_at_end = len(future_to_cluster)
-                    avg_workers = (workers_at_start + workers_at_end) / 2
-
-                    processed = future.result()
-                    tier = cluster_to_tier.get(processed.cluster_id, _tier)
-
-                    # Record for throttling
-                    wall_time = processed.summarize_time + processed.embed_time
-                    timing_stats.record_task_runtime(wall_time, avg_workers)
-
-                    timing_stats.record(processed.summarize_time, processed.embed_time, tier=tier)
-
-                    if processed.success:
-                        completed_count += 1
-                        # Track processed feature data for sub-feature processing
-                        processed_features[processed.cluster_id] = (processed.label, processed.summary)
-                    else:
-                        failed_count += 1
-                        errors.append(f"Feature {cluster.label}: {processed.error}")
-
-                # Update progress (always, for display refresh)
-                if on_progress:
-                    progress_state = FeatureProgressState(
-                        total=total,
-                        completed=completed_count,
-                        failed=failed_count,
-                        timing=timing_stats,
-                        workers=worker_status,
-                        num_workers=effective_workers,
-                    )
-                    on_progress(progress_state)
-
-            # Shutdown executor for this tier before moving to next
-            executor.shutdown(wait=True)
+        # Update final counts
+        completed_count = state["completed"]
+        failed_count = state["failed"]
 
     except KeyboardInterrupt:
         if 'executor' in dir():
@@ -1635,85 +1611,57 @@ def process_subfeatures(
     # Handle workers=0 (auto) - will use tier-specific limits
     max_pool_workers = config.num_workers if config.num_workers > 0 else max(TIER_MAX_WORKERS.values())
 
+    # Mutable state for callbacks
+    state = {"completed": 0, "failed": 0}
+
+    def on_complete(work_item: SubfeatureWorkItem, processed: ProcessedSubfeature, avg_workers: float) -> None:
+        """Handle completed subfeature processing."""
+        nonlocal errors
+        tier = work_item_to_tier.get(
+            (work_item.parent_label, work_item.sub_cluster.cluster_id), 0
+        )
+
+        # Record for throttling
+        wall_time = processed.summarize_time + processed.embed_time
+        timing_stats.record_task_runtime(wall_time, avg_workers)
+        timing_stats.record(processed.summarize_time, processed.embed_time, tier=tier)
+
+        if processed.success:
+            state["completed"] += 1
+        else:
+            state["failed"] += 1
+            if processed.error:
+                errors.append(f"Subfeature {processed.sub_label} of {processed.parent_label}: {processed.error}")
+
+    # Create throttle context
+    throttle_ctx = ThrottleContext(
+        tier_timeout=180,
+        base_workers=max_pool_workers,
+        throughput_tracker=timing_stats.throughput_tracker,
+    )
+
     try:
         for _tier, tier_max_workers, tier_items in tier_groups:
-            # Use min of configured workers and tier limit
             effective_workers = min(max_pool_workers, tier_max_workers)
-            tier_timeout = TIER_TIMEOUTS.get(_tier, 180)
 
             # Reset worker ID pool for this tier
             available_worker_ids.clear()
             available_worker_ids.extend(range(effective_workers))
 
-            executor = ThreadPoolExecutor(max_workers=effective_workers)
-            future_to_work: dict = {}
-            future_to_workers_at_start: dict = {}
-            pending_items = list(tier_items)
+            run_throttled_tier(
+                items=list(tier_items),
+                tier=_tier,
+                effective_workers=effective_workers,
+                process_fn=process_wrapper,
+                throttle_ctx=throttle_ctx,
+                get_max_runtime=worker_status.get_max_active_runtime,
+                on_complete=on_complete,
+                on_tick=on_status_change,
+            )
 
-            while pending_items or future_to_work:
-                # Get throttle decision
-                active_workers = len(future_to_work)
-                current_max = worker_status.get_max_active_runtime()
-                throughput, avg_runtime, count, avg_conc, avg_base = (
-                    timing_stats.get_throughput_stats_with_concurrency()
-                )
-                throttle = compute_throttle_decision(
-                    current_max_runtime=current_max,
-                    tier_timeout=tier_timeout,
-                    base_workers=effective_workers,
-                    active_workers=active_workers,
-                    throughput=throughput,
-                    avg_runtime=avg_runtime,
-                    completion_count=count,
-                    avg_concurrency=avg_conc,
-                    avg_base_time=avg_base,
-                )
-                allowed_workers = throttle.recommended_workers
-
-                # Submit new tasks up to allowed limit
-                while pending_items and len(future_to_work) < allowed_workers:
-                    work_item = pending_items.pop(0)
-                    workers_at_start = len(future_to_work)
-                    future = executor.submit(process_wrapper, work_item)
-                    future_to_work[future] = work_item
-                    future_to_workers_at_start[future] = workers_at_start
-
-                if not future_to_work:
-                    break
-
-                # Wait for completion or timeout for periodic updates
-                done, _ = wait(future_to_work.keys(), timeout=2.0, return_when=FIRST_COMPLETED)
-
-                # Handle completed tasks
-                for future in done:
-                    work_item = future_to_work.pop(future)
-                    workers_at_start = future_to_workers_at_start.pop(future, 1)
-                    workers_at_end = len(future_to_work)
-                    avg_workers = (workers_at_start + workers_at_end) / 2
-
-                    processed = future.result()
-                    tier = work_item_to_tier.get(
-                        (work_item.parent_label, work_item.sub_cluster.cluster_id), _tier
-                    )
-
-                    # Record for throttling
-                    wall_time = processed.summarize_time + processed.embed_time
-                    timing_stats.record_task_runtime(wall_time, avg_workers)
-
-                    timing_stats.record(processed.summarize_time, processed.embed_time, tier=tier)
-
-                    if processed.success:
-                        completed_count += 1
-                    else:
-                        failed_count += 1
-                        if processed.error:
-                            errors.append(f"Subfeature {processed.sub_label} of {processed.parent_label}: {processed.error}")
-
-                # Update status (always, for display refresh)
-                on_status_change()
-
-            # Shutdown executor for this tier before moving to next
-            executor.shutdown(wait=True)
+        # Update final counts
+        completed_count = state["completed"]
+        failed_count = state["failed"]
 
     except KeyboardInterrupt:
         if 'executor' in dir():
