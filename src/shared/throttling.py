@@ -268,10 +268,11 @@ def compute_throttle_decision(
     normalized_max = current_max_runtime / max(active_workers, 1)
     max_ratio = normalized_max / tier_timeout if tier_timeout > 0 else 0.0
 
-    # Check if normalized per-worker cost is too high - if so, hold at current level
-    # This prevents ramping blindly when we don't have fresh completion feedback
+    # Check if per-worker cost is too high - if so, hold at current level
+    # Use max of normalized_max and historical to be conservative
     hold_threshold = tier_timeout * RAMP_HOLD_THRESHOLD
-    should_hold = normalized_max > hold_threshold and active_workers > 0
+    effective_for_hold = max(normalized_max, avg_base_time) if avg_base_time > 0 else normalized_max
+    should_hold = effective_for_hold > hold_threshold and active_workers > 0
 
     # Use the larger of historical avg_base_time or normalized_max for worker calculation.
     # - Historical: average from completed tasks
