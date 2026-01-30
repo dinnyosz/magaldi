@@ -367,6 +367,23 @@ class TimingStats:
 
         Must hold _lock when calling.
         """
+        avg, _ = self._get_avg_for_type_tier_with_fallback(element_type, tier, global_avg)
+        return avg
+
+    def _get_avg_for_type_tier_with_fallback(
+        self,
+        element_type: str,
+        tier: int,
+        global_avg: float,
+    ) -> tuple[float, bool]:
+        """Get average processing time for (type, tier) with smart fallback.
+
+        Returns:
+            Tuple of (avg_time, is_fallback) where is_fallback is True if
+            the value was estimated from a different (type, tier).
+
+        Must hold _lock when calling.
+        """
         type_tier_key = (element_type, tier)
 
         # 1. Exact match
@@ -374,7 +391,7 @@ class TimingStats:
             count = self.summarize_counts_by_type_tier[type_tier_key]
             if count > 0:
                 total_time = self.total_summarize_by_type_tier.get(type_tier_key, 0.0)
-                return total_time / count
+                return total_time / count, False
 
         # 2. Same type, find closest tier
         same_type_tiers = [
@@ -389,7 +406,7 @@ class TimingStats:
             # Scale by tier ratio (larger tier = proportionally longer)
             base_avg = total_time / count
             tier_ratio = tier / closest[1] if closest[1] > 0 else 1.0
-            return base_avg * tier_ratio
+            return base_avg * tier_ratio, True
 
         # 3. Same model group (large: file/class, small: function/method/variable)
         large_types = {"file", "class"}
@@ -412,17 +429,17 @@ class TimingStats:
             total_time = self.total_summarize_by_type_tier.get(closest, 0.0)
             base_avg = total_time / count
             tier_ratio = tier / closest[1] if closest[1] > 0 else 1.0
-            return base_avg * tier_ratio
+            return base_avg * tier_ratio, True
 
         # 4. Fall back to per-type average (ignoring tier)
         if element_type in self.summarize_counts_by_type:
             count = self.summarize_counts_by_type[element_type]
             if count > 0:
                 type_total = self.total_summarize_by_type.get(element_type, 0.0)
-                return type_total / count
+                return type_total / count, True
 
         # 5. Global fallback
-        return global_avg
+        return global_avg, True
 
     def eta_seconds(self, completed: int, total: int, num_workers: int = 1) -> float | None:
         """Calculate ETA based on per-(type, tier) API time averages.
@@ -510,11 +527,12 @@ class TimingStats:
             breakdown.sort(key=lambda x: x[4], reverse=True)
             return breakdown
 
-    def get_eta_breakdown_with_avg(self, num_workers: int = 1) -> list[tuple[str, int, float]]:
+    def get_eta_breakdown_with_avg(self, num_workers: int = 1) -> list[tuple[str, int, float, bool]]:
         """Get average time per item for each (type, tier) combination.
 
         Returns:
-            List of (type, tier, avg_seconds) tuples, sorted by tier then type.
+            List of (type, tier, avg_seconds, is_fallback) tuples, sorted by tier then type.
+            is_fallback is True if the avg was estimated from a different (type, tier).
         """
         with self._lock:
             if not self.totals_by_type_tier:
@@ -527,9 +545,9 @@ class TimingStats:
 
             breakdown = []
             for (element_type, tier), tot in self.totals_by_type_tier.items():
-                avg = self._get_avg_for_type_tier(element_type, tier, global_avg)
+                avg, is_fallback = self._get_avg_for_type_tier_with_fallback(element_type, tier, global_avg)
                 if avg > 0:
-                    breakdown.append((element_type, tier, avg))
+                    breakdown.append((element_type, tier, avg, is_fallback))
 
             # Sort by hierarchy (file → class → function → method → variable), then tier descending
             type_order = {"file": 0, "class": 1, "function": 2, "method": 3, "variable": 4, "constant": 5}

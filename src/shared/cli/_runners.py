@@ -206,20 +206,28 @@ def run_processing(
             bar_text.append(format_duration(eta), style="yellow")
             bar_text.append(" ETA", style="dim")
 
-        # ETA breakdown per (type, tier) - show avg time per item
+        # ETA breakdown per (type, tier) - show avg time per item in a table
         eta_breakdown = state.timing.get_eta_breakdown_with_avg(state.num_workers)
+        eta_table = None
         if eta_breakdown:
-            breakdown_parts = []
             tier_abbrev = {2048: "2k", 4096: "4k", 8192: "8k", 16384: "16k", 32768: "32k"}
             type_abbrev = {"function": "fn", "method": "mth", "class": "cls", "file": "file", "variable": "var", "constant": "const"}
-            for elem_type, tier, avg_time in eta_breakdown:
+            eta_table = Table(show_header=False, box=None, padding=(0, 1), expand=False)
+            eta_table.add_column("Type", style="dim")
+            # Group by type for compact display
+            current_type = None
+            row_items: list[str] = []
+            for elem_type, tier, avg_time, is_fallback in eta_breakdown:
                 t_abbr = type_abbrev.get(elem_type, elem_type[:3])
                 tier_str = tier_abbrev.get(tier, f"{tier//1024}k")
-                breakdown_parts.append(f"{t_abbr}@{tier_str}:{avg_time:.1f}s")
-            if breakdown_parts:
-                bar_text.append(" [", style="dim")
-                bar_text.append(" ".join(breakdown_parts), style="dim yellow")
-                bar_text.append("]", style="dim")
+                time_style = "dim yellow" if is_fallback else "yellow"
+                time_str = f"[{time_style}]{avg_time:.1f}s[/]"
+                if is_fallback:
+                    time_str = f"[dim]~[/]{time_str}"
+                row_items.append(f"[dim]{t_abbr}@{tier_str}:[/]{time_str}")
+            # Display in a single row, wrapped
+            if row_items:
+                eta_table.add_row(" ".join(row_items))
 
         # Worker table
         import time as time_mod
@@ -343,6 +351,8 @@ def run_processing(
         parts: list[RenderableType] = [bar_text, worker_table]
         if type_line:
             parts.append(type_line)
+        if eta_table:
+            parts.append(eta_table)
         parts.append(stats)
 
         # Show recent errors if any
