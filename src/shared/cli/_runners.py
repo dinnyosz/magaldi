@@ -206,31 +206,47 @@ def run_processing(
             bar_text.append(format_duration(eta), style="yellow")
             bar_text.append(" ETA", style="dim")
 
-        # ETA breakdown per (type, tier) - show avg time per item in a table
+        # ETA breakdown per (type, tier) - show avg time per item in a grid table
         eta_breakdown = state.timing.get_eta_breakdown_with_avg(state.num_workers)
         eta_table = None
         if eta_breakdown:
             tier_abbrev = {2048: "2k", 4096: "4k", 8192: "8k", 16384: "16k", 32768: "32k"}
             type_abbrev = {"function": "fn", "method": "mth", "class": "cls", "file": "file", "variable": "var", "constant": "const"}
-            eta_table = Table(show_header=False, box=None, padding=(0, 1), expand=False)
-            eta_table.add_column("Type", style="dim")
-            # Group by type for compact display
-            current_type = None
-            row_items: list[str] = []
+            tiers = [32768, 16384, 8192, 4096, 2048]
+            type_order = ["file", "class", "function", "method", "variable", "constant"]
+
+            # Build lookup from breakdown data
+            eta_data: dict[tuple[str, int], tuple[float, bool]] = {}
             for elem_type, tier, avg_time, is_fallback in eta_breakdown:
-                t_abbr = type_abbrev.get(elem_type, elem_type[:3])
-                tier_str = tier_abbrev.get(tier, f"{tier//1024}k")
-                if avg_time > 0:
-                    time_style = "dim yellow" if is_fallback else "yellow"
-                    time_str = f"[{time_style}]{avg_time:.1f}s[/]"
-                    if is_fallback:
-                        time_str = f"[dim]~[/]{time_str}"
-                else:
-                    time_str = "[dim]-[/]"
-                row_items.append(f"[dim]{t_abbr}@{tier_str}:[/]{time_str}")
-            # Display in a single row, wrapped
-            if row_items:
-                eta_table.add_row(" ".join(row_items))
+                eta_data[(elem_type, tier)] = (avg_time, is_fallback)
+
+            # Create grid table: rows=types, columns=tiers
+            eta_table = Table(show_header=True, box=None, padding=(0, 1), expand=False)
+            eta_table.add_column("", style="dim")  # type column
+            for tier in tiers:
+                eta_table.add_column(tier_abbrev.get(tier, f"{tier//1024}k"), style="dim", justify="right")
+
+            # Add rows for each element type that has data
+            for elem_type in type_order:
+                has_data = any((elem_type, t) in eta_data for t in tiers)
+                if not has_data:
+                    continue
+
+                row = [type_abbrev.get(elem_type, elem_type[:3])]
+                for tier in tiers:
+                    if (elem_type, tier) in eta_data:
+                        avg_time, is_fallback = eta_data[(elem_type, tier)]
+                        if avg_time > 0:
+                            time_style = "dim yellow" if is_fallback else "yellow"
+                            time_str = f"[{time_style}]{avg_time:.1f}s[/]"
+                            if is_fallback:
+                                time_str = f"~{time_str}"
+                        else:
+                            time_str = "[dim]-[/]"
+                    else:
+                        time_str = ""
+                    row.append(time_str)
+                eta_table.add_row(*row)
 
         # Worker table
         import time as time_mod
