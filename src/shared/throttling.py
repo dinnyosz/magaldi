@@ -166,9 +166,8 @@ class ThroughputTracker:
 
             # Calculate avg base_time = runtime / workers for each completion
             # This normalizes for concurrency: a 50s task with 8 workers = 6.25s base
-            # IMPORTANT: Only include completions where workers > 0 (exclude warmup tasks)
-            # Warmup tasks run alone and don't reflect contention behavior
-            base_times = [r / c for _, r, c in self.completions if c > 0]
+            # For warmup tasks (workers=0), treat as 1 worker - they give us baseline timing
+            base_times = [r / max(c, 1) for _, r, c in self.completions]
             avg_base_time = sum(base_times) / len(base_times) if base_times else 0.0
 
             return throughput, avg_runtime, count, avg_concurrency, avg_base_time

@@ -115,21 +115,20 @@ class TestThroughputTracker:
         # avg_base_time = (1 + 2 + 3) / 3 = 2s
         assert avg_base_time == pytest.approx(2.0)
 
-    def test_warmup_tasks_excluded_from_base_time(self):
-        """Warmup tasks (workers=0) should be excluded from avg_base_time.
+    def test_warmup_tasks_included_in_base_time(self):
+        """Warmup tasks (workers=0) are included, treated as 1 worker.
 
-        Warmup tasks run alone and don't reflect contention behavior.
-        Including them would artificially inflate avg_base_time.
+        Warmup tasks give us baseline timing - how long a task takes with no contention.
 
         Example: If we have:
-        - warmup: 50s with 0 workers → should be EXCLUDED
-        - warmup: 60s with 0 workers → should be EXCLUDED
+        - warmup: 50s with 0 workers → base_time = 50s (treated as 1)
+        - warmup: 60s with 0 workers → base_time = 60s (treated as 1)
         - normal: 40s with 2 workers → base_time = 20s
-        avg_base_time should be 20s, not (50+60+20)/3 = 43.3s
+        avg_base_time = (50+60+20)/3 = 43.3s
         """
         tracker = ThroughputTracker(window_seconds=10.0)
 
-        # Warmup tasks (workers=0) - should be excluded
+        # Warmup tasks (workers=0) - treated as 1 worker
         tracker.record_completion(50.0, concurrent_workers=0)
         tracker.record_completion(60.0, concurrent_workers=0)
 
@@ -143,14 +142,13 @@ class TestThroughputTracker:
         # Count includes all completions
         assert count == 3
 
-        # avg_base_time should only include workers > 0
-        # 40s / 2 workers = 20s base_time
-        assert avg_base_time == pytest.approx(20.0)
+        # avg_base_time includes all: (50/1 + 60/1 + 40/2) / 3 = (50+60+20)/3 = 43.3s
+        assert avg_base_time == pytest.approx((50 + 60 + 20) / 3)
 
-    def test_only_warmup_tasks_gives_zero_base_time(self):
-        """If only warmup tasks exist, avg_base_time should be 0.
+    def test_only_warmup_tasks_gives_base_time(self):
+        """If only warmup tasks exist, avg_base_time is their average.
 
-        This triggers the 'No data' ramp-up path in compute_throttle_decision.
+        Warmup tasks are treated as 1 worker for base_time calculation.
         """
         tracker = ThroughputTracker(window_seconds=10.0)
 
@@ -162,8 +160,9 @@ class TestThroughputTracker:
             tracker.get_stats_with_concurrency()
         )
 
-        assert count == 2  # Both recorded
-        assert avg_base_time == 0.0  # But excluded from base_time
+        assert count == 2
+        # (50/1 + 60/1) / 2 = 55s
+        assert avg_base_time == pytest.approx(55.0)
 
 
 class TestComputeThrottleDecision:
