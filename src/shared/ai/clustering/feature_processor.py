@@ -1007,18 +1007,18 @@ def process_features(
     )
 
     try:
-        for _tier, tier_max_workers, tier_clusters in tier_groups:
-            effective_workers = min(max_pool_workers, tier_max_workers)
-            state["current_workers"] = effective_workers
+        for _tier, _tier_max_workers, tier_clusters in tier_groups:
+            # Use full max workers like Phase 4 - time-based throttling handles scaling
+            state["current_workers"] = max_pool_workers
 
             # Reset worker ID pool for this tier
             available_worker_ids.clear()
-            available_worker_ids.extend(range(effective_workers))
+            available_worker_ids.extend(range(max_pool_workers))
 
             run_throttled_tier(
                 items=list(tier_clusters),
                 tier=_tier,
-                effective_workers=effective_workers,
+                effective_workers=max_pool_workers,
                 process_fn=process_wrapper,
                 throttle_ctx=throttle_ctx,
                 get_max_runtime=worker_status.get_max_active_runtime,
@@ -1690,17 +1690,15 @@ def process_subfeatures(
     )
 
     try:
-        for _tier, tier_max_workers, tier_items in tier_groups:
-            effective_workers = min(max_pool_workers, tier_max_workers)
-
-            # Reset worker ID pool for this tier
+        for _tier, _tier_max_workers, tier_items in tier_groups:
+            # Use full max workers like Phase 4 - time-based throttling handles scaling
             available_worker_ids.clear()
-            available_worker_ids.extend(range(effective_workers))
+            available_worker_ids.extend(range(max_pool_workers))
 
             run_throttled_tier(
                 items=list(tier_items),
                 tier=_tier,
-                effective_workers=effective_workers,
+                effective_workers=max_pool_workers,
                 process_fn=process_wrapper,
                 throttle_ctx=throttle_ctx,
                 get_max_runtime=worker_status.get_max_active_runtime,

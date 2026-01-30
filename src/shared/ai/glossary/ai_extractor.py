@@ -1018,19 +1018,19 @@ def extract_glossary_from_features_concurrent(
         throughput_tracker=timing_stats.throughput_tracker,
     )
 
-    for _tier, tier_max_workers, tier_features in tier_groups:
-        effective_workers = min(max_pool_workers, tier_max_workers)
-        state["current_workers"] = effective_workers
+    for _tier, _tier_max_workers, tier_features in tier_groups:
+        # Use full max workers like Phase 4 - time-based throttling handles scaling
+        state["current_workers"] = max_pool_workers
 
         # Reset worker ID pool for this tier
         with worker_id_lock:
             available_worker_ids.clear()
-            available_worker_ids.extend(range(effective_workers))
+            available_worker_ids.extend(range(max_pool_workers))
 
         run_throttled_tier(
             items=list(tier_features),
             tier=_tier,
-            effective_workers=effective_workers,
+            effective_workers=max_pool_workers,
             process_fn=process_feature,
             throttle_ctx=throttle_ctx,
             get_max_runtime=worker_status.get_max_active_runtime,
@@ -1225,19 +1225,19 @@ def extract_glossary_from_features_concurrent(
         throughput_tracker=timing_stats.throughput_tracker,
     )
 
-    for _tier, tier_max_workers, tier_items in tier_groups:
-        effective_workers = min(max_pool_workers, tier_max_workers)
-        phase2_state["current_workers"] = effective_workers
+    for _tier, _tier_max_workers, tier_items in tier_groups:
+        # Use full max workers like Phase 4 - time-based throttling handles scaling
+        phase2_state["current_workers"] = max_pool_workers
 
         # Reset worker ID pool for this tier
         with worker_id_lock:
             available_worker_ids.clear()
-            available_worker_ids.extend(range(effective_workers))
+            available_worker_ids.extend(range(max_pool_workers))
 
         run_throttled_tier(
             items=list(tier_items),
             tier=_tier,
-            effective_workers=effective_workers,
+            effective_workers=max_pool_workers,
             process_fn=generate_summary_for_term,
             throttle_ctx=throttle_ctx_phase2,
             get_max_runtime=worker_status.get_max_active_runtime,
