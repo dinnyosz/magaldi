@@ -156,7 +156,10 @@ def _extract_python_elements_scm(tree: Tree, lines: list[str]) -> list[Extracted
     from magaldi_core.tree_sitter_manager import get_manager
 
     elements: list[ExtractedElement] = []
-    seen_nodes: set[int] = set()  # Track by node id to avoid duplicates
+    # Track by (start_byte, node_type) to avoid duplicates.
+    # Note: Can't use id(node) because SCM queries create different node objects
+    # for the same source position when matched by different patterns.
+    seen_positions: set[tuple[int, str]] = set()
 
     manager = get_manager()
     result = manager.run_query_on_tree(tree, "python", "elements")
@@ -164,15 +167,18 @@ def _extract_python_elements_scm(tree: Tree, lines: list[str]) -> list[Extracted
     # Process decorated definitions first (they include the definition inside)
     for match in result.filter_by_capture("decorated.def"):
         decorated_node = match.get("decorated.def")
-        if not decorated_node or id(decorated_node) in seen_nodes:
+        if not decorated_node:
+            continue
+        deco_pos = (decorated_node.start_byte, decorated_node.type)
+        if deco_pos in seen_positions:
             continue
 
         func_node = match.get("decorated.function")
         class_node = match.get("decorated.class")
 
         if func_node:
-            seen_nodes.add(id(func_node))
-            seen_nodes.add(id(decorated_node))
+            seen_positions.add((func_node.start_byte, func_node.type))
+            seen_positions.add(deco_pos)
             deco_names, deco_details = _get_decorators(decorated_node)
             elem = _extract_python_function(
                 func_node, lines,
@@ -181,12 +187,16 @@ def _extract_python_elements_scm(tree: Tree, lines: list[str]) -> list[Extracted
                 decorated_node=decorated_node
             )
             elements.append(elem)
-            # Extract nested functions
-            elements.extend(_extract_nested_functions(func_node, lines))
+            # Extract nested functions and track their positions
+            nested = _extract_nested_functions(func_node, lines)
+            for nested_elem in nested:
+                if nested_elem.node:
+                    seen_positions.add((nested_elem.node.start_byte, nested_elem.node.type))
+            elements.extend(nested)
 
         elif class_node:
-            seen_nodes.add(id(class_node))
-            seen_nodes.add(id(decorated_node))
+            seen_positions.add((class_node.start_byte, class_node.type))
+            seen_positions.add(deco_pos)
             deco_names, deco_details = _get_decorators(decorated_node)
             elements.append(_extract_python_class(
                 class_node, lines,
@@ -198,39 +208,58 @@ def _extract_python_elements_scm(tree: Tree, lines: list[str]) -> list[Extracted
     # Process standalone functions (not already seen as decorated)
     for match in result.filter_by_capture("function.def"):
         func_node = match.get("function.def")
-        if not func_node or id(func_node) in seen_nodes:
+        if not func_node:
+            continue
+        func_pos = (func_node.start_byte, func_node.type)
+        if func_pos in seen_positions:
             continue
 
         # Skip if this is inside a class (methods are handled separately)
         if _is_inside_class(func_node):
             continue
 
-        seen_nodes.add(id(func_node))
+        seen_positions.add(func_pos)
         elem = _extract_python_function(func_node, lines)
         elements.append(elem)
-        elements.extend(_extract_nested_functions(func_node, lines))
+        # Extract nested functions and track their positions
+        nested = _extract_nested_functions(func_node, lines)
+        for nested_elem in nested:
+            if nested_elem.node:
+                seen_positions.add((nested_elem.node.start_byte, nested_elem.node.type))
+        elements.extend(nested)
 
     # Process async functions (not already seen)
     for match in result.filter_by_capture("async_function.def"):
         func_node = match.get("async_function.def")
-        if not func_node or id(func_node) in seen_nodes:
+        if not func_node:
+            continue
+        func_pos = (func_node.start_byte, func_node.type)
+        if func_pos in seen_positions:
             continue
 
         if _is_inside_class(func_node):
             continue
 
-        seen_nodes.add(id(func_node))
+        seen_positions.add(func_pos)
         elem = _extract_python_function(func_node, lines)
         elements.append(elem)
-        elements.extend(_extract_nested_functions(func_node, lines))
+        # Extract nested functions and track their positions
+        nested = _extract_nested_functions(func_node, lines)
+        for nested_elem in nested:
+            if nested_elem.node:
+                seen_positions.add((nested_elem.node.start_byte, nested_elem.node.type))
+        elements.extend(nested)
 
     # Process standalone classes (not already seen as decorated)
     for match in result.filter_by_capture("class.def"):
         class_node = match.get("class.def")
-        if not class_node or id(class_node) in seen_nodes:
+        if not class_node:
+            continue
+        class_pos = (class_node.start_byte, class_node.type)
+        if class_pos in seen_positions:
             continue
 
-        seen_nodes.add(id(class_node))
+        seen_positions.add(class_pos)
         elements.append(_extract_python_class(class_node, lines))
 
     # Process module-level assignments
