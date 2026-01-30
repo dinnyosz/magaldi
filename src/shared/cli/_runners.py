@@ -345,7 +345,7 @@ def run_processing(
                 info = "[yellow]tier draining...[/]"
             else:
                 # Warmup task loading model
-                info = "[yellow]model loading...[/]"
+                info = "[yellow]model warmup[/]"
         elif parallelism and parallelism.throttle_decision:
             # Always use recommended_workers - covers both throttling AND ramp-up
             allowed = parallelism.throttle_decision.recommended_workers
