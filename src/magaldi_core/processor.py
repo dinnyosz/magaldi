@@ -1795,10 +1795,24 @@ def process_elements(
     all_element_ids = list(new_element_ids)
     existing_states = es_repo.get_element_processing_state(all_element_ids)
 
+    # Fallback: for elements not found by ID, search by content_hash
+    # This handles "relocated" elements where line number changed but content didn't
+    elements_not_found_by_id = [
+        elem for elem in all_elements
+        if elem.element_id not in existing_states and elem.content_hash
+    ]
+    relocated_states: dict[str, dict] = {}  # content_hash -> state (includes actual data)
+    if elements_not_found_by_id:
+        content_hashes = list({elem.content_hash for elem in elements_not_found_by_id if elem.content_hash})
+        if content_hashes:
+            relocated_states = es_repo.find_elements_by_content_hash(
+                scope, repository, username, content_hashes
+            )
+
     # Debug: log state of first few elements
     _state_logged = 0
     with open("/tmp/magaldi_file_hash.log", "a") as f:
-        f.write(f"\n[SKIP CHECK] Total elements: {len(all_elements)}, unique IDs: {len(all_element_ids)}, existing states: {len(existing_states)}\n")
+        f.write(f"\n[SKIP CHECK] Total elements: {len(all_elements)}, unique IDs: {len(all_element_ids)}, existing states: {len(existing_states)}, relocated matches: {len(relocated_states)}\n")
         # Log first few element IDs
         for eid in all_element_ids[:3]:
             in_states = eid in existing_states
@@ -1813,8 +1827,18 @@ def process_elements(
     new_elements = 0
     state_none_count = 0
     state_found_count = 0
+    relocated_copied = 0
     for elem in all_elements:
         state = existing_states.get(elem.element_id)
+        is_relocated = False
+
+        # Fallback: check if element was found by content_hash (relocated element)
+        if state is None and elem.content_hash:
+            relocated_data = relocated_states.get(elem.content_hash)
+            if relocated_data is not None:
+                is_relocated = True
+                state = relocated_data
+
         if state is not None:
             state_found_count += 1
             content_unchanged = state.get("content_hash") == elem.content_hash
@@ -1830,11 +1854,33 @@ def process_elements(
             )
 
             if content_unchanged and is_fully_processed:
-                # Element exists with same content AND fully processed - skip entirely
-                result.elements_skipped += 1
-                skipped_by_file[elem.relative_path] = skipped_by_file.get(elem.relative_path, 0) + 1
-                skipped_with_summary += 1
-                continue
+                if is_relocated:
+                    # Relocated element: copy data to new element with new ID
+                    # This preserves the summary while updating line numbers
+                    file_hash = file_hashes.get(elem.relative_path) if file_hashes else None
+                    element_count = None
+                    if elem.element_type == "file" and element_counts:
+                        element_count = element_counts.get(elem.relative_path)
+                    _index_element(
+                        elem,
+                        state.get("summary"),
+                        state.get("summary_embedding"),
+                        state.get("code_embedding"),
+                        es_repo,
+                        file_hash,
+                        element_count,
+                    )
+                    relocated_copied += 1
+                    result.elements_skipped += 1
+                    skipped_by_file[elem.relative_path] = skipped_by_file.get(elem.relative_path, 0) + 1
+                    skipped_with_summary += 1
+                    continue
+                else:
+                    # Element exists with same ID and content - skip entirely
+                    result.elements_skipped += 1
+                    skipped_by_file[elem.relative_path] = skipped_by_file.get(elem.relative_path, 0) + 1
+                    skipped_with_summary += 1
+                    continue
             elif content_unchanged and not is_fully_processed:
                 skipped_no_summary += 1
                 if _state_logged < 3:
@@ -1860,7 +1906,7 @@ def process_elements(
         elements_to_process.append(elem)
 
     with open("/tmp/magaldi_file_hash.log", "a") as f:
-        f.write(f"[SKIP SUMMARY] state_found={state_found_count}, state_none={state_none_count}, skipped={skipped_with_summary}, needs_summary={skipped_no_summary}, new={new_elements}, to_process={len(elements_to_process)}\n")
+        f.write(f"[SKIP SUMMARY] state_found={state_found_count}, state_none={state_none_count}, relocated_copied={relocated_copied}, skipped={skipped_with_summary}, needs_summary={skipped_no_summary}, new={new_elements}, to_process={len(elements_to_process)}\n")
 
     total = len(all_elements)
 

@@ -302,6 +302,87 @@ class ElementRepository:
 
         return result
 
+    def find_elements_by_content_hash(
+        self,
+        scope: str,
+        repository: str,
+        username: str,
+        content_hashes: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Find elements by content_hash for relocated element matching.
+
+        When an element's line number changes (e.g., code inserted above it),
+        its element_id changes but content_hash stays the same. This method
+        finds existing elements by content_hash to reuse their summaries.
+
+        Args:
+            scope: Repository scope.
+            repository: Repository name.
+            username: Username.
+            content_hashes: List of content hashes to search for.
+
+        Returns:
+            Dict mapping content_hash to element data including:
+            - content_hash, has_summary, has_summary_embedding, has_code_embedding
+            - summary, summary_embedding, code_embedding (actual values for copying)
+            - element_id (original ID for reference)
+            If multiple elements have the same hash, returns the one with a summary.
+        """
+        if not content_hashes:
+            return {}
+
+        client = self._get_client()
+
+        # Search for elements matching any of the content hashes
+        response = client.search(
+            index=INDEX_NAME,
+            body={
+                "query": {
+                    "bool": {
+                        "filter": [
+                            {"term": {"scope": scope}},
+                            {"term": {"repository": repository}},
+                            {"term": {"username": username}},
+                            {"terms": {"content_hash": content_hashes}},
+                        ]
+                    }
+                },
+                "_source": ["content_hash", "summary", "summary_embedding", "code_embedding"],
+                "size": len(content_hashes) * 2,  # Allow for some duplicates
+            },
+        )
+
+        # Group by content_hash, preferring elements with summaries
+        result: dict[str, dict[str, Any]] = {}
+        for hit in response.get("hits", {}).get("hits", []):
+            source = hit.get("_source", {})
+            content_hash = source.get("content_hash")
+            if not content_hash:
+                continue
+
+            summary = source.get("summary")
+            summary_emb = source.get("summary_embedding")
+            code_emb = source.get("code_embedding")
+
+            state = {
+                "content_hash": content_hash,
+                "has_summary": isinstance(summary, str) and len(summary) > 0,
+                "has_summary_embedding": isinstance(summary_emb, list) and len(summary_emb) > 0,
+                "has_code_embedding": isinstance(code_emb, list) and len(code_emb) > 0,
+                "old_element_id": hit["_id"],  # Original ID for reference
+                # Include actual values for copying to new element
+                "summary": summary,
+                "summary_embedding": summary_emb,
+                "code_embedding": code_emb,
+            }
+
+            # Keep the better match (one with summary)
+            existing = result.get(content_hash)
+            if existing is None or (state["has_summary"] and not existing["has_summary"]):
+                result[content_hash] = state
+
+        return result
+
     def get_element_ids_by_file(
         self, scope: str, repository: str, username: str, relative_path: str
     ) -> set[str]:

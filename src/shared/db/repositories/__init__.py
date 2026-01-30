@@ -114,6 +114,18 @@ class ElasticsearchRepository:
         """Get content hash and summary state for smart skip logic."""
         return self._elements.get_element_processing_state(element_ids)
 
+    def find_elements_by_content_hash(
+        self,
+        scope: str,
+        repository: str,
+        username: str,
+        content_hashes: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Find elements by content_hash for relocated element matching."""
+        return self._elements.find_elements_by_content_hash(
+            scope, repository, username, content_hashes
+        )
+
     def get_element_ids_by_file(
         self, scope: str, repository: str, username: str, relative_path: str
     ) -> set[str]:
