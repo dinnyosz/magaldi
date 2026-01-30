@@ -18,7 +18,8 @@ from typing import TYPE_CHECKING, Any
 
 from shared.ai.clustering.clusterer import ClusteringResult, ClusterResult
 from shared.ai.context_size import TIER_TIMEOUTS
-from shared.throttling import ThroughputTracker, compute_throttle_decision
+from shared.parallel_processor import ThrottleContext, run_throttled_tier
+from shared.throttling import ThroughputTracker
 
 if TYPE_CHECKING:
     from shared.config import MagaldiConfig
