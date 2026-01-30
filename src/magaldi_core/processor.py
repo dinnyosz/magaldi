@@ -567,10 +567,9 @@ class TimingStats:
             if total_work_time <= 0:
                 return None
 
-            # Divide by number of workers to get wall clock time
-            # (parallel workers process elements concurrently)
-            eta = total_work_time / max(num_workers, 1)
-            return eta
+            # base_time is already throughput-normalized (wall_time / workers at record time)
+            # so total_work_time is already the ETA - no further division needed
+            return total_work_time
 
     def get_eta_breakdown(self, num_workers: int = 1) -> list[tuple[str, int, int, int, float]]:
         """Get ETA breakdown per (type, tier) for display.
@@ -594,8 +593,8 @@ class TimingStats:
                 remaining = tot - done
                 if remaining > 0:
                     avg = self._get_avg_for_type_tier(element_type, tier, global_avg)
-                    work_time = remaining * avg if avg > 0 else 0.0
-                    eta = work_time / max(num_workers, 1)
+                    # avg is already throughput-normalized, so work_time IS the ETA
+                    eta = remaining * avg if avg > 0 else 0.0
                     breakdown.append((element_type, tier, remaining, tot, eta))
 
             # Sort by ETA descending (largest remaining time first)

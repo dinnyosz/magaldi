@@ -592,13 +592,16 @@ class TestTimingStats:
     def test_eta_seconds_with_multiple_workers(self):
         """Test ETA calculation with multiple workers."""
         stats = TimingStats()
-        stats.set_totals_by_type({"function": 10})
+        # Use tier data for throughput-normalized ETA
+        stats.set_totals_by_type_tier({("function", 2048): 10})
 
-        stats.record(1.0, 0.5, 0.5, "function", True)
-        stats.record(1.0, 0.5, 0.5, "function", True)
+        # Simulate 2 workers: each element takes 1.0s wall time with 2 workers active
+        # base_time = 1.0 / 2 = 0.5s per element (throughput-normalized)
+        stats.record(1.0, 0.5, 0.5, "function", True, tier=2048, avg_workers=2.0)
+        stats.record(1.0, 0.5, 0.5, "function", True, tier=2048, avg_workers=2.0)
 
         eta = stats.eta_seconds(2, 10, num_workers=2)
-        # Remaining: 8 elements * 1.0s avg / 2 workers = 4s
+        # Remaining: 8 elements * 0.5s avg (already throughput-normalized) = 4s
         assert eta is not None
         assert abs(eta - 4.0) < 0.1
 
@@ -613,15 +616,17 @@ class TestTimingStats:
         })
 
         # Record timing for 2k tier (fast) and 8k tier (slow)
+        # wall_time is what's used for ETA, not summarize_time
         stats.record(0.5, 0.3, 0.2, "function", True, tier=2048)
         stats.record(0.5, 0.3, 0.2, "function", True, tier=2048)
         stats.record(2.0, 1.5, 0.5, "function", True, tier=8192)
 
         eta = stats.eta_seconds(3, 10, num_workers=1)
-        # Remaining: 3 @ 2k (0.3s avg) + 4 @ 8k (1.5s avg)
-        # = 3 * 0.3 + 4 * 1.5 = 0.9 + 6.0 = 6.9s
+        # avg_2k = 0.5s (wall_time), avg_8k = 2.0s (wall_time)
+        # Remaining: 3 @ 2k + 4 @ 8k
+        # = 3 * 0.5 + 4 * 2.0 = 1.5 + 8.0 = 9.5s
         assert eta is not None
-        assert abs(eta - 6.9) < 0.2
+        assert abs(eta - 9.5) < 0.2
 
     def test_eta_seconds_tier_fallback_to_same_type(self):
         """Test ETA fallback to same type when tier not found."""
@@ -633,15 +638,17 @@ class TestTimingStats:
             ("function", 4096): 3,  # No data for this tier
         })
 
-        # Only record data for 2k tier
+        # Only record data for 2k tier (wall_time=1.0)
         stats.record(1.0, 0.6, 0.4, "function", True, tier=2048)
         stats.record(1.0, 0.6, 0.4, "function", True, tier=2048)
 
         eta = stats.eta_seconds(2, 6, num_workers=1)
-        # Remaining: 1 @ 2k (0.6s avg) + 3 @ 4k (scaled from 2k: 0.6 * 4096/2048 = 1.2s)
-        # = 1 * 0.6 + 3 * 1.2 = 0.6 + 3.6 = 4.2s
+        # avg_2k = 1.0s (wall_time)
+        # 4k tier fallback: 1.0 * (4096/2048) = 2.0s
+        # Remaining: 1 @ 2k + 3 @ 4k
+        # = 1 * 1.0 + 3 * 2.0 = 1.0 + 6.0 = 7.0s
         assert eta is not None
-        assert abs(eta - 4.2) < 0.3
+        assert abs(eta - 7.0) < 0.3
 
     def test_eta_seconds_tier_fallback_to_same_model(self):
         """Test ETA fallback to same model group when type not found."""
@@ -653,16 +660,17 @@ class TestTimingStats:
             ("function", 2048): 3,
         })
 
-        # Only record data for function
+        # Only record data for function (wall_time=1.0)
         stats.record(1.0, 0.6, 0.4, "function", True, tier=2048)
         stats.record(1.0, 0.6, 0.4, "function", True, tier=2048)
 
         eta = stats.eta_seconds(2, 6, num_workers=1)
-        # Remaining: 1 @ function 2k + 3 @ method 2k
-        # Method should fall back to function's avg (same model group)
-        # = 1 * 0.6 + 3 * 0.6 = 2.4s
+        # avg_func_2k = 1.0s (wall_time)
+        # method/2k fallback to function's avg (same model group, same tier)
+        # Remaining: 1 @ function/2k + 3 @ method/2k
+        # = 1 * 1.0 + 3 * 1.0 = 4.0s
         assert eta is not None
-        assert abs(eta - 2.4) < 0.2
+        assert abs(eta - 4.0) < 0.2
 
     def test_get_eta_breakdown(self):
         """Test ETA breakdown returns per-(type, tier) estimates."""
