@@ -476,7 +476,7 @@ def _extract_ts_enum(node: Node, lines: list[str]) -> ExtractedElement:
         lines: Source code lines.
 
     Returns:
-        ExtractedElement with element_type="class" (enums are class-like).
+        ExtractedElement with element_type="enum".
     """
     name_node = get_child_by_field(node, "name")
     name = get_node_text(name_node) if name_node else "unknown"
@@ -488,15 +488,17 @@ def _extract_ts_enum(node: Node, lines: list[str]) -> ExtractedElement:
     # Check for const enum
     is_const = any(child.type == "const" for child in node.children)
     signature = f"{'const ' if is_const else ''}enum {name}"
+    decorators = ["const"] if is_const else []
 
     return ExtractedElement(
-        element_type="class",  # Treat enums as class-like
+        element_type="enum",
         name=name,
         line_start=line_start,
         line_end=line_end,
         raw_code=raw_code,
         byte_offset=node.start_byte,
         signature=signature,
+        decorators=decorators if decorators else None,
         node=node,
     )
 

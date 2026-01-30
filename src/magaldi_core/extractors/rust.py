@@ -154,13 +154,12 @@ def _extract_rust_enum(node: Node, lines: list[str]) -> ExtractedElement | None:
         return None
 
     return ExtractedElement(
-        element_type="class",  # Treat enum as class for consistency
+        element_type="enum",
         name=name,
         line_start=node.start_point[0] + 1,
         line_end=node.end_point[0] + 1,
         raw_code=node.text.decode('utf-8') if node.text else "",
         byte_offset=node.start_byte,
-        decorators=["enum"],
         node=node,
     )
 

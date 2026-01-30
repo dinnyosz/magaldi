@@ -417,8 +417,14 @@ def _extract_python_class(
     # Use byte-based extraction for precise raw_code (handles minified files)
     raw_code = start_node.text.decode('utf-8') if start_node.text else ""
 
+    # Check if this is an Enum class
+    base_classes = extract_python_base_classes(node)
+    element_type = "class"
+    if _is_python_enum(base_classes):
+        element_type = "enum"
+
     elem = ExtractedElement(
-        element_type="class",
+        element_type=element_type,
         name=name,
         line_start=line_start,
         line_end=line_end,
@@ -430,6 +436,15 @@ def _extract_python_class(
     )
 
     return elem
+
+
+def _is_python_enum(base_classes: list[str]) -> bool:
+    """Check if a class is an Enum based on its base classes."""
+    enum_types = {
+        "Enum", "IntEnum", "StrEnum", "Flag", "IntFlag",
+        "enum.Enum", "enum.IntEnum", "enum.StrEnum", "enum.Flag", "enum.IntFlag",
+    }
+    return any(base in enum_types for base in base_classes)
 
 
 def _extract_python_parameters(params_node: Node) -> list[ParameterInfo]:
