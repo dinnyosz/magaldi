@@ -39,7 +39,7 @@ from shared.ai.summarization import (
     build_prompt,
     clean_summary,
 )
-from shared.ai.context_size import compute_element_num_ctx, CONTEXT_TIERS
+from shared.ai.context_size import compute_element_num_ctx, CONTEXT_TIERS, TIER_TIMEOUTS
 from shared.throttling import ThroughputTracker, compute_throttle_decision, ThrottleDecision, TimeoutEvent
 
 
@@ -939,6 +939,13 @@ class DependencyTracker:
         with self._lock:
             return self._tier_changing
 
+    def get_current_tier_timeout(self) -> float:
+        """Get timeout for the current tier (scales with context size)."""
+        with self._lock:
+            if self._current_tier and self._current_tier in TIER_TIMEOUTS:
+                return float(TIER_TIMEOUTS[self._current_tier])
+            return self._timeout  # Fallback to default
+
     def get_current_model(self) -> str | None:
         """Get the current model key being used ('large' or 'small')."""
         with self._lock:
@@ -1035,7 +1042,7 @@ class DependencyTracker:
         with self._lock:
             return compute_throttle_decision(
                 current_max_runtime=current_max_runtime,
-                tier_timeout=self._timeout,
+                tier_timeout=self.get_current_tier_timeout(),
                 base_workers=self._max_num_workers,
                 active_workers=active_workers,
                 throughput=throughput,

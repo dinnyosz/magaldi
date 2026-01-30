@@ -30,6 +30,17 @@ TIER_MAX_WORKERS = {
     32768: 1,  # Very large - sequential to avoid OOM
 }
 
+# Timeout per tier in seconds (scales with context size)
+# Larger contexts take proportionally longer to process
+# NOTE: These are used for throttle calculations; Ollama may not enforce actual timeouts
+TIER_TIMEOUTS = {
+    2048: 60,    # 1 minute
+    4096: 120,   # 2 minutes
+    8192: 180,   # 3 minutes
+    16384: 360,  # 6 minutes
+    32768: 600,  # 10 minutes
+}
+
 # Estimated prompt overhead per element type (tokens)
 # Accounts for system prompt, user template, and parent context
 # - file: system prompt (~162) + template (~50) + imports (~50) = ~262
