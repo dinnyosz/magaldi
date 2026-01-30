@@ -1780,6 +1780,10 @@ class PhpParser(TreeSitterParser):
                 func_elem = self._convert_function(ext, file_info, scope, repository, username, lines)
                 elements.append(func_elem)
 
+            elif ext.element_type == "import":
+                import_elem = self._convert_import(ext, file_info, scope, repository, username)
+                elements.append(import_elem)
+
         # Set parent IDs
         self._set_hierarchy(elements, file_element)
 
@@ -1787,6 +1791,35 @@ class PhpParser(TreeSitterParser):
         self._resolve_calls_in_file(elements)
 
         return elements
+
+    def _convert_import(
+        self,
+        ext: ExtractedElement,
+        file_info: FileInfo,
+        scope: str,
+        repository: str,
+        username: str,
+    ) -> CodeElement:
+        """Convert PHP use statement (import) to CodeElement."""
+        elem = CodeElement(
+            scope=scope,
+            repository=repository,
+            username=username,
+            relative_path=file_info.relative_path,
+            element_type="import",
+            name=ext.name,  # Full namespace path
+            language="php",
+            line_start=ext.line_start,
+            line_end=ext.line_end,
+            raw_code=ext.raw_code,
+            signature=ext.signature,
+            level=0,  # Top level, same as file
+        )
+        elem.element_id = generate_element_id(
+            scope, repository, username, file_info.relative_path,
+            "import", ext.name, ext.get_byte_offset()
+        )
+        return elem
 
     def _convert_class(
         self,

@@ -20,6 +20,7 @@ from magaldi_core.extractors.types import (
     ExtractedElement,
     ExtractedImport,
     ExtractedReference,
+    HttpRoute,
     ParameterInfo,
 )
 
@@ -86,20 +87,25 @@ class PHPExtractor(BaseExtractor):
 
 
 def extract_php_elements(tree: Tree, lines: list[str]) -> list[ExtractedElement]:
-    """Extract classes and functions from PHP code.
+    """Extract classes, functions, and imports from PHP code.
 
     Args:
         tree: Parsed tree-sitter tree.
         lines: Source code lines.
 
     Returns:
-        List of extracted elements (classes, functions).
+        List of extracted elements (classes, functions, imports).
     """
     elements: list[ExtractedElement] = []
     root = tree.root_node
 
     for node in root.children:
-        if node.type == "class_declaration":
+        if node.type == "namespace_use_declaration":
+            # PHP use statements (imports)
+            elem = _extract_php_use_statement(node, lines)
+            if elem:
+                elements.append(elem)
+        elif node.type == "class_declaration":
             elem = _extract_php_class(node, lines)
             if elem:
                 elements.append(elem)
@@ -109,6 +115,45 @@ def extract_php_elements(tree: Tree, lines: list[str]) -> list[ExtractedElement]
                 elements.append(elem)
 
     return elements
+
+
+def _extract_php_use_statement(node: Node, lines: list[str]) -> ExtractedElement | None:
+    """Extract a PHP use statement (import) as an element.
+
+    Args:
+        node: A namespace_use_declaration node.
+        lines: Source code lines.
+
+    Returns:
+        ExtractedElement with element_type="import".
+    """
+    line_start = node.start_point[0] + 1
+    line_end = node.end_point[0] + 1
+    raw_code = node.text.decode("utf-8") if node.text else ""
+
+    # Get the module name from the use clause
+    module = ""
+    for child in node.children:
+        if child.type == "namespace_use_clause":
+            for clause_child in child.children:
+                if clause_child.type == "qualified_name":
+                    module = get_node_text(clause_child)
+                    break
+            break
+
+    if not module:
+        return None
+
+    return ExtractedElement(
+        element_type="import",
+        name=module,
+        line_start=line_start,
+        line_end=line_end,
+        raw_code=raw_code,
+        byte_offset=node.start_byte,
+        signature=raw_code.strip(),
+        node=node,
+    )
 
 
 def _extract_php_class(node: Node, lines: list[str]) -> ExtractedElement | None:
@@ -385,6 +430,32 @@ def extract_php_imports(
                         ))
 
     return imports
+
+
+# =============================================================================
+# PHP SLIM ROUTE DETECTION (delegated to frameworks module)
+# =============================================================================
+
+# Re-export for backwards compatibility
+from magaldi_core.extractors.patterns.slim import (  # noqa: E402
+    extract_slim_routes,
+    extract_slim_route_groups,
+)
+
+__all__ = [
+    "PHPExtractor",
+    "extract_php_elements",
+    "extract_php_class_members",
+    "extract_php_imports",
+    "extract_php_calls",
+    "extract_php_class_properties",
+    "extract_php_base_class",
+    "extract_php_thrown_exceptions",
+    "extract_php_modified_properties",
+    # Slim framework support
+    "extract_slim_routes",
+    "extract_slim_route_groups",
+]
 
 
 # =============================================================================
