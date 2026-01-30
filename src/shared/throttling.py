@@ -273,14 +273,16 @@ def compute_throttle_decision(
     hold_threshold = tier_timeout * RAMP_HOLD_THRESHOLD
     should_hold = normalized_max > hold_threshold and active_workers > 0
 
-    # Use ONLY historical avg_base_time from actual completions.
-    # We can't calculate base_time from current running tasks because we don't
-    # know how many workers were active when each task STARTED (only current count).
-    # Dividing current_max_runtime by active_workers gives wrong results when
-    # workers have ramped up since the task started.
-    # Even 1 datapoint is useful - ramp-up and emergency throttle protect against outliers.
+    # Use the larger of historical avg_base_time or normalized_max for worker calculation.
+    # - Historical: average from completed tasks
+    # - Normalized: current max / workers (reflects current conditions)
+    # Using max() is conservative: if current tasks are slower, account for that.
     if avg_base_time > 0:
-        effective_base_time = avg_base_time
+        effective_base_time = max(avg_base_time, normalized_max)
+        if normalized_max > avg_base_time:
+            _log_throttle(
+                f"BASE TIME: using normalized_max={normalized_max:.1f}s > historical={avg_base_time:.1f}s"
+            )
     else:
         # No completion history yet - check if we should hold or ramp
         if should_hold:
