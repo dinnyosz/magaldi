@@ -279,6 +279,7 @@ class FeatureProgressState:
     allowed_workers: int = 0  # Current throttle-allowed workers (0 = use num_workers)
     current_max: float = 0.0  # Max runtime of active workers (for throttle display)
     avg_base_time: float = 0.0  # Historical base time per worker
+    completion_count: int = 0  # Number of completions used for avg_base_time
 
 
 @dataclass
@@ -459,6 +460,7 @@ class SubfeatureProgressState:
     allowed_workers: int = 0  # Current throttle-allowed workers (0 = use num_workers)
     current_max: float = 0.0  # Max runtime of active workers (for throttle display)
     avg_base_time: float = 0.0  # Historical base time per worker
+    completion_count: int = 0  # Number of completions used for avg_base_time
 
 
 @dataclass
@@ -998,6 +1000,7 @@ def process_features(
                 allowed_workers=throttle_info.allowed_workers,
                 current_max=throttle_info.current_max,
                 avg_base_time=throttle_info.avg_base_time,
+                completion_count=throttle_info.completion_count,
             )
             on_progress(progress_state)
 
@@ -1564,6 +1567,7 @@ def process_subfeatures(
         "allowed_workers": config.num_workers,
         "current_max": 0.0,
         "avg_base_time": 0.0,
+        "completion_count": 0,
     }
 
     def on_status_change(throttle_info: "ThrottleDisplayInfo | None" = None) -> None:
@@ -1571,6 +1575,7 @@ def process_subfeatures(
             subfeature_state["allowed_workers"] = throttle_info.allowed_workers
             subfeature_state["current_max"] = throttle_info.current_max
             subfeature_state["avg_base_time"] = throttle_info.avg_base_time
+            subfeature_state["completion_count"] = throttle_info.completion_count
         if on_progress:
             on_progress(SubfeatureProgressState(
                 total=total,
@@ -1582,6 +1587,7 @@ def process_subfeatures(
                 allowed_workers=subfeature_state["allowed_workers"],
                 current_max=subfeature_state["current_max"],
                 avg_base_time=subfeature_state["avg_base_time"],
+                completion_count=subfeature_state["completion_count"],
             ))
 
     def process_wrapper(work_item: SubfeatureWorkItem) -> ProcessedSubfeature:

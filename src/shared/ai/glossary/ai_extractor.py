@@ -180,6 +180,7 @@ class GlossaryProgressState:
     allowed_workers: int = 0  # Current throttle-allowed workers (0 = use num_workers)
     current_max: float = 0.0  # Max runtime of active workers (for throttle display)
     avg_base_time: float = 0.0  # Historical base time per worker
+    completion_count: int = 0  # Number of completions used for avg_base_time
 
 
 # =============================================================================
@@ -1010,6 +1011,7 @@ def extract_glossary_from_features_concurrent(
                 allowed_workers=throttle_info.allowed_workers,
                 current_max=throttle_info.current_max,
                 avg_base_time=throttle_info.avg_base_time,
+                completion_count=throttle_info.completion_count,
             )
             on_progress(progress_state)
 
@@ -1216,6 +1218,7 @@ def extract_glossary_from_features_concurrent(
                 allowed_workers=throttle_info.allowed_workers,
                 current_max=throttle_info.current_max,
                 avg_base_time=throttle_info.avg_base_time,
+                completion_count=throttle_info.completion_count,
             )
             on_progress(progress_state)
 

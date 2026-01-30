@@ -393,6 +393,7 @@ class ThrottleDisplayInfo:
     allowed_workers: int
     current_max: float
     avg_base_time: float
+    completion_count: int  # Number of completions used to calculate avg_base_time
 
 
 @dataclass
@@ -425,6 +426,7 @@ class ThrottleContext:
             allowed_workers=throttle.recommended_workers,
             current_max=max(current_max_runtime, throttle.historical_max),
             avg_base_time=avg_base,
+            completion_count=count,
         )
 
 

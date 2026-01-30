@@ -456,7 +456,7 @@ def run_feature_extraction(
             if state.current_max > 0 or state.avg_base_time > 0:
                 normalized_max = state.current_max / max(running_count, 1)
                 stats += f" [dim]|[/] [dim]Max:[/] [yellow]{state.current_max:.1f}s[/]"
-                stats += f" [dim]|[/] [dim]Per Worker:[/] [yellow]{normalized_max:.1f}s[/] [dim]vs[/] [cyan]{state.avg_base_time:.1f}s[/] [dim](1w base)[/]"
+                stats += f" [dim]|[/] [dim]Per Worker:[/] [yellow]{normalized_max:.1f}s[/] [dim]vs[/] [cyan]{state.avg_base_time:.1f}s[/] [dim](last {state.completion_count})[/]"
 
             # Build group with optional eta_table
             elements = [bar_text]
@@ -737,7 +737,7 @@ def run_feature_extraction(
                         stats_text.append(f"{normalized_max:.1f}s", style="yellow")
                         stats_text.append(" vs ", style="dim")
                         stats_text.append(f"{state.avg_base_time:.1f}s", style="cyan")
-                        stats_text.append(" (1w base)", style="dim")
+                        stats_text.append(f" (last {state.completion_count})", style="dim")
 
                 # Build group with optional eta_table
                 elements = [header_text, bar_text]
@@ -1083,7 +1083,7 @@ def run_glossary_extraction(
                 stats.append(f"{normalized_max:.1f}s", style="yellow")
                 stats.append(" vs ", style="dim")
                 stats.append(f"{state.avg_base_time:.1f}s", style="cyan")
-                stats.append(" (1w base)", style="dim")
+                stats.append(f" (last {state.completion_count})", style="dim")
 
             # Build group with optional eta_table
             elements = [phase_text, bar_text]
