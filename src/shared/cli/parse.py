@@ -37,7 +37,8 @@ if TYPE_CHECKING:
 @click.argument("repo_path", type=click.Path(exists=True, file_okay=False, dir_okay=True))
 @click.option("--user", "-u", required=True, help="Username/branch (use 'main' for primary parse)")
 @click.option("--skip-ai", is_flag=True, help="Skip AI processing (summarization and embedding)")
-@click.option("--skip-features", is_flag=True, help="Skip feature extraction after processing")
+@click.option("--features", is_flag=True, help="Run feature/subfeature extraction")
+@click.option("--glossary", is_flag=True, help="Run glossary extraction")
 @click.option("--skip-tests", is_flag=True, help="Skip test files and directories")
 @click.option("--skip-resolve", is_flag=True, help="Skip call resolution phase (faster for large repos)")
 @click.option("--dry-run", is_flag=True, help="Use in-memory storage (no database required)")
@@ -45,7 +46,7 @@ if TYPE_CHECKING:
 @click.option("--workers", "-w", default=0, type=int, help="Max parallel workers (0=auto based on context tier)")
 @click.option("--force-clean", is_flag=True, help="Delete all indexed data for this repo/user before parsing")
 def parse(
-    repo_path: str, user: str, skip_ai: bool, skip_features: bool, skip_tests: bool, skip_resolve: bool,
+    repo_path: str, user: str, skip_ai: bool, features: bool, glossary: bool, skip_tests: bool, skip_resolve: bool,
     dry_run: bool, llm_url: str | None, workers: int, force_clean: bool
 ) -> None:
     """Parse a repository and index its code elements.
@@ -146,8 +147,8 @@ def parse(
             except Exception as e:
                 console.print(f"  [yellow]Warning: Hierarchy extraction failed: {e}[/]")
 
-        # Phase 5: Feature Extraction (optional)
-        if not skip_features and not skip_ai and not dry_run and processed > 0:
+        # Phase 5: Feature Extraction (opt-in with --features)
+        if features and not skip_ai and not dry_run and processed > 0:
             console.print("\n[bold blue]Phase 5:[/] Feature Extraction")
             feature_result = run_feature_extraction(
                 discovery_result.scope,
@@ -159,8 +160,8 @@ def parse(
             if feature_result:
                 print_feature_result(feature_result)
 
-        # Phase 6: Glossary Extraction (after features so we can extract from summaries)
-        if not skip_ai and not dry_run and processed > 0:
+        # Phase 6: Glossary Extraction (opt-in with --glossary)
+        if glossary and not skip_ai and not dry_run and processed > 0:
             console.print("\n[bold blue]Phase 6:[/] Glossary Extraction")
             run_glossary_extraction(
                 scope=discovery_result.scope,
