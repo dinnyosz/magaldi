@@ -424,6 +424,15 @@ class SubfeatureWorkerStatus:
         with self._lock:
             return dict(self._status)
 
+    def get_max_active_runtime(self) -> float:
+        """Get maximum runtime of currently active workers."""
+        with self._lock:
+            if not self._status:
+                return 0.0
+            now = time.time()
+            # start_time is index 5 in the tuple
+            return max(now - v[5] for v in self._status.values() if v[5] > 0)
+
 
 @dataclass
 class SubfeatureProgressState:
