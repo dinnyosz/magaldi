@@ -17,7 +17,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from shared.ai.clustering.clusterer import ClusteringResult, ClusterResult
-from shared.throttling import ThroughputTracker
+from shared.ai.context_size import TIER_TIMEOUTS
+from shared.throttling import ThroughputTracker, compute_throttle_decision
 
 if TYPE_CHECKING:
     from shared.config import MagaldiConfig
@@ -933,6 +934,7 @@ def process_features(
         for _tier, tier_max_workers, tier_clusters in tier_groups:
             # Use min of configured workers and tier limit
             effective_workers = min(max_pool_workers, tier_max_workers)
+            tier_timeout = TIER_TIMEOUTS.get(_tier, 180)
 
             # Reset worker ID pool for this tier
             available_worker_ids.clear()
@@ -940,19 +942,56 @@ def process_features(
 
             executor = ThreadPoolExecutor(max_workers=effective_workers)
             future_to_cluster: dict = {}
+            future_to_workers_at_start: dict = {}
+            pending_clusters = list(tier_clusters)
 
-            # Submit all clusters in this tier
-            for cluster in tier_clusters:
-                future = executor.submit(process_wrapper, cluster)
-                future_to_cluster[future] = cluster
+            while pending_clusters or future_to_cluster:
+                # Get throttle decision
+                active_workers = len(future_to_cluster)
+                current_max = worker_status.get_max_active_runtime()
+                throughput, avg_runtime, count, avg_conc, avg_base = (
+                    timing_stats.get_throughput_stats_with_concurrency()
+                )
+                throttle = compute_throttle_decision(
+                    current_max_runtime=current_max,
+                    tier_timeout=tier_timeout,
+                    base_workers=effective_workers,
+                    active_workers=active_workers,
+                    throughput=throughput,
+                    avg_runtime=avg_runtime,
+                    completion_count=count,
+                    avg_concurrency=avg_conc,
+                    avg_base_time=avg_base,
+                )
+                allowed_workers = throttle.recommended_workers
 
-            while future_to_cluster:
-                done, _ = wait(future_to_cluster.keys(), return_when=FIRST_COMPLETED)
+                # Submit new tasks up to allowed limit
+                while pending_clusters and len(future_to_cluster) < allowed_workers:
+                    cluster = pending_clusters.pop(0)
+                    workers_at_start = len(future_to_cluster)
+                    future = executor.submit(process_wrapper, cluster)
+                    future_to_cluster[future] = cluster
+                    future_to_workers_at_start[future] = workers_at_start
 
+                if not future_to_cluster:
+                    break
+
+                # Wait for completion or timeout for periodic updates
+                done, _ = wait(future_to_cluster.keys(), timeout=2.0, return_when=FIRST_COMPLETED)
+
+                # Handle completed tasks
                 for future in done:
                     cluster = future_to_cluster.pop(future)
+                    workers_at_start = future_to_workers_at_start.pop(future, 1)
+                    workers_at_end = len(future_to_cluster)
+                    avg_workers = (workers_at_start + workers_at_end) / 2
+
                     processed = future.result()
                     tier = cluster_to_tier.get(processed.cluster_id, _tier)
+
+                    # Record for throttling
+                    wall_time = processed.summarize_time + processed.embed_time
+                    timing_stats.record_task_runtime(wall_time, avg_workers)
 
                     timing_stats.record(processed.summarize_time, processed.embed_time, tier=tier)
 
@@ -964,16 +1003,17 @@ def process_features(
                         failed_count += 1
                         errors.append(f"Feature {cluster.label}: {processed.error}")
 
-                    if on_progress:
-                        progress_state = FeatureProgressState(
-                            total=total,
-                            completed=completed_count,
-                            failed=failed_count,
-                            timing=timing_stats,
-                            workers=worker_status,
-                            num_workers=effective_workers,
-                        )
-                        on_progress(progress_state)
+                # Update progress (always, for display refresh)
+                if on_progress:
+                    progress_state = FeatureProgressState(
+                        total=total,
+                        completed=completed_count,
+                        failed=failed_count,
+                        timing=timing_stats,
+                        workers=worker_status,
+                        num_workers=effective_workers,
+                    )
+                    on_progress(progress_state)
 
             # Shutdown executor for this tier before moving to next
             executor.shutdown(wait=True)
@@ -1598,6 +1638,7 @@ def process_subfeatures(
         for _tier, tier_max_workers, tier_items in tier_groups:
             # Use min of configured workers and tier limit
             effective_workers = min(max_pool_workers, tier_max_workers)
+            tier_timeout = TIER_TIMEOUTS.get(_tier, 180)
 
             # Reset worker ID pool for this tier
             available_worker_ids.clear()
@@ -1605,21 +1646,58 @@ def process_subfeatures(
 
             executor = ThreadPoolExecutor(max_workers=effective_workers)
             future_to_work: dict = {}
+            future_to_workers_at_start: dict = {}
+            pending_items = list(tier_items)
 
-            # Submit all work items in this tier
-            for work_item in tier_items:
-                future = executor.submit(process_wrapper, work_item)
-                future_to_work[future] = work_item
+            while pending_items or future_to_work:
+                # Get throttle decision
+                active_workers = len(future_to_work)
+                current_max = worker_status.get_max_active_runtime()
+                throughput, avg_runtime, count, avg_conc, avg_base = (
+                    timing_stats.get_throughput_stats_with_concurrency()
+                )
+                throttle = compute_throttle_decision(
+                    current_max_runtime=current_max,
+                    tier_timeout=tier_timeout,
+                    base_workers=effective_workers,
+                    active_workers=active_workers,
+                    throughput=throughput,
+                    avg_runtime=avg_runtime,
+                    completion_count=count,
+                    avg_concurrency=avg_conc,
+                    avg_base_time=avg_base,
+                )
+                allowed_workers = throttle.recommended_workers
 
-            while future_to_work:
-                done, _ = wait(future_to_work.keys(), return_when=FIRST_COMPLETED)
+                # Submit new tasks up to allowed limit
+                while pending_items and len(future_to_work) < allowed_workers:
+                    work_item = pending_items.pop(0)
+                    workers_at_start = len(future_to_work)
+                    future = executor.submit(process_wrapper, work_item)
+                    future_to_work[future] = work_item
+                    future_to_workers_at_start[future] = workers_at_start
 
+                if not future_to_work:
+                    break
+
+                # Wait for completion or timeout for periodic updates
+                done, _ = wait(future_to_work.keys(), timeout=2.0, return_when=FIRST_COMPLETED)
+
+                # Handle completed tasks
                 for future in done:
                     work_item = future_to_work.pop(future)
+                    workers_at_start = future_to_workers_at_start.pop(future, 1)
+                    workers_at_end = len(future_to_work)
+                    avg_workers = (workers_at_start + workers_at_end) / 2
+
                     processed = future.result()
                     tier = work_item_to_tier.get(
                         (work_item.parent_label, work_item.sub_cluster.cluster_id), _tier
                     )
+
+                    # Record for throttling
+                    wall_time = processed.summarize_time + processed.embed_time
+                    timing_stats.record_task_runtime(wall_time, avg_workers)
 
                     timing_stats.record(processed.summarize_time, processed.embed_time, tier=tier)
 
@@ -1630,7 +1708,8 @@ def process_subfeatures(
                         if processed.error:
                             errors.append(f"Subfeature {processed.sub_label} of {processed.parent_label}: {processed.error}")
 
-                    on_status_change()
+                # Update status (always, for display refresh)
+                on_status_change()
 
             # Shutdown executor for this tier before moving to next
             executor.shutdown(wait=True)
