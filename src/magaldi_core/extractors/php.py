@@ -437,7 +437,7 @@ def extract_php_imports(
 # =============================================================================
 
 # Re-export for backwards compatibility
-from magaldi_core.extractors.patterns.slim import (  # noqa: E402
+from magaldi_core.extractors.patterns.php.slim import (  # noqa: E402
     extract_slim_routes,
     extract_slim_route_groups,
 )

@@ -303,7 +303,7 @@ def parser_lab_analyze(
     # Extract framework-specific patterns
     framework_patterns: dict[str, Any] = {}
     if language == "php":
-        from magaldi_core.extractors.patterns.slim import extract_slim_routes, extract_slim_route_groups
+        from magaldi_core.extractors.patterns.php.slim import extract_slim_routes, extract_slim_route_groups
         slim_routes = extract_slim_routes(tree, lines)
         slim_groups = extract_slim_route_groups(tree, lines)
         if slim_routes or slim_groups:
