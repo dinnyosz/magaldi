@@ -321,7 +321,7 @@ class ThrottledParallelProcessor(Generic[T, R]):
                             # Use allowed workers (average of start and end)
                             allowed_at_start = future_to_allowed_at_start.pop(future, allowed_workers)
                             allowed_at_end = allowed_workers
-                            avg_workers = (allowed_at_start + allowed_at_end) / 2
+                            avg_workers = min(allowed_at_start, allowed_at_end)
 
                             item, result, worker_id = future.result()
 
@@ -474,7 +474,7 @@ def run_throttled_tier(
                 # Use allowed workers (average of start and end)
                 allowed_at_start = future_to_allowed_at_start.pop(future, allowed_workers)
                 allowed_at_end = allowed_workers
-                avg_workers = (allowed_at_start + allowed_at_end) / 2
+                avg_workers = min(allowed_at_start, allowed_at_end)
 
                 result = future.result()
                 on_complete(item, result, avg_workers)

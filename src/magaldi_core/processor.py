@@ -2153,7 +2153,7 @@ def process_elements(
                 # This is more stable than actual counts which fluctuate during ramp-up
                 allowed_at_start = future_to_allowed_at_start.pop(future, throttle_limit)
                 allowed_at_end = throttle_limit
-                avg_workers = (allowed_at_start + allowed_at_end) / 2
+                avg_workers = min(allowed_at_start, allowed_at_end)
 
                 # Record timing with element type, tier, and avg_workers (for throughput)
                 timing_stats.record(
