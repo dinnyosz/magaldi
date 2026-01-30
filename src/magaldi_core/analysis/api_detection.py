@@ -18,59 +18,51 @@ from magaldi_core.extractors.types import (
     ExtractedCall,
     HttpRoute,
 )
+from magaldi_core.extractors.patterns.python import (
+    PYTHON_HTTP_ROUTE_PATTERNS,
+    PYTHON_CLI_COMMAND_PATTERNS,
+    PYTHON_CLI_COMMAND_SUFFIXES,
+    extract_method_from_flask_args,
+    extract_method_from_drf_args,
+)
+from magaldi_core.extractors.patterns.javascript import (
+    JS_HTTP_ROUTE_PATTERNS,
+)
 
 # =============================================================================
 # HTTP ROUTE DETECTION
 # =============================================================================
 
-# HTTP route decorator patterns
-# Maps decorator name -> (HTTP method, framework)
-# Use "*" for method when it needs to be extracted from args
-_HTTP_ROUTE_PATTERNS: dict[str, tuple[str, str]] = {
-    # FastAPI patterns
-    "router.get": ("GET", "fastapi"),
-    "router.post": ("POST", "fastapi"),
-    "router.put": ("PUT", "fastapi"),
-    "router.delete": ("DELETE", "fastapi"),
-    "router.patch": ("PATCH", "fastapi"),
-    "router.head": ("HEAD", "fastapi"),
-    "router.options": ("OPTIONS", "fastapi"),
-    "app.get": ("GET", "fastapi"),
-    "app.post": ("POST", "fastapi"),
-    "app.put": ("PUT", "fastapi"),
-    "app.delete": ("DELETE", "fastapi"),
-    "app.patch": ("PATCH", "fastapi"),
-    # Flask patterns
-    "app.route": ("*", "flask"),
-    "blueprint.route": ("*", "flask"),
-    "bp.route": ("*", "flask"),
-    # Django REST Framework patterns
-    "api_view": ("*", "django-rest"),
-    "action": ("*", "django-rest"),
-    # Starlette patterns (same as FastAPI)
-    "route": ("*", "starlette"),
-    # Litestar patterns
-    "get": ("GET", "litestar"),
-    "post": ("POST", "litestar"),
-    "put": ("PUT", "litestar"),
-    "delete": ("DELETE", "litestar"),
-    "patch": ("PATCH", "litestar"),
-    # NestJS patterns (TypeScript/JavaScript)
-    "Get": ("GET", "nestjs"),
-    "Post": ("POST", "nestjs"),
-    "Put": ("PUT", "nestjs"),
-    "Delete": ("DELETE", "nestjs"),
-    "Patch": ("PATCH", "nestjs"),
-    # Hono patterns (JavaScript)
-    "c.get": ("GET", "hono"),
-    "c.post": ("POST", "hono"),
-    "c.put": ("PUT", "hono"),
-    "c.delete": ("DELETE", "hono"),
-    "app.get": ("GET", "hono"),  # Also used by Hono
-    "app.post": ("POST", "hono"),
-    # Generic patterns that could be any framework
+# Generic patterns that could be any framework
+_GENERIC_HTTP_ROUTE_PATTERNS: dict[str, tuple[str, str]] = {
     "route": ("*", "generic"),
 }
+
+
+def _get_http_route_patterns(language: str) -> dict[str, tuple[str, str]]:
+    """Get HTTP route patterns for a specific language.
+
+    Args:
+        language: Programming language (e.g., "python", "javascript", "typescript").
+
+    Returns:
+        Dict mapping decorator names to (method, framework) tuples.
+    """
+    if language == "python":
+        return {**PYTHON_HTTP_ROUTE_PATTERNS, **_GENERIC_HTTP_ROUTE_PATTERNS}
+    elif language in ("javascript", "typescript", "tsx"):
+        return {**JS_HTTP_ROUTE_PATTERNS, **_GENERIC_HTTP_ROUTE_PATTERNS}
+    else:
+        # For unknown languages, try all patterns
+        return {
+            **PYTHON_HTTP_ROUTE_PATTERNS,
+            **JS_HTTP_ROUTE_PATTERNS,
+            **_GENERIC_HTTP_ROUTE_PATTERNS,
+        }
+
+# Reference CLI patterns from Python module
+_CLI_COMMAND_PATTERNS = PYTHON_CLI_COMMAND_PATTERNS
+_CLI_COMMAND_SUFFIXES = PYTHON_CLI_COMMAND_SUFFIXES
 
 
 def _extract_path_params(path: str) -> list[str]:
@@ -108,59 +100,9 @@ def _extract_path_from_args(args: str | None) -> str | None:
     return None
 
 
-def _extract_method_from_flask_args(args: str | None) -> str:
-    """Extract HTTP method from Flask route arguments.
-
-    Handles parenthesized argument lists:
-    - 'methods=["POST"]' -> 'POST'
-    - '("/users", methods=["POST"])' -> 'POST'
-    """
-    if not args:
-        return "GET"
-
-    # Strip outer parentheses if present
-    cleaned = args.strip()
-    if cleaned.startswith("(") and cleaned.endswith(")"):
-        cleaned = cleaned[1:-1]
-
-    match = re.search(r'methods\s*=\s*\[([^\]]+)\]', cleaned)
-    if match:
-        methods_str = match.group(1)
-        method_match = re.search(r'["\'](\w+)["\']', methods_str)
-        if method_match:
-            return method_match.group(1).upper()
-    return "GET"
-
-
-def _extract_method_from_drf_args(args: str | None) -> str:
-    """Extract HTTP method from Django REST Framework @api_view args.
-
-    Handles:
-    - '(["GET"])' -> 'GET'
-    - '(["GET", "POST"])' -> 'GET'
-    - '["GET"]' -> 'GET'
-    """
-    if not args:
-        return "GET"
-
-    # Strip outer parentheses if present
-    cleaned = args.strip()
-    if cleaned.startswith("(") and cleaned.endswith(")"):
-        cleaned = cleaned[1:-1].strip()
-
-    # Match a list of methods as the first argument
-    match = re.match(r'\[([^\]]+)\]', cleaned)
-    if match:
-        methods_str = match.group(1)
-        method_match = re.search(r'["\'](\w+)["\']', methods_str)
-        if method_match:
-            return method_match.group(1).upper()
-    return "GET"
-
-
 def detect_http_routes(
     decorators: list[DecoratorInfo],
-    language: str,  # noqa: ARG001 - reserved for future language-specific patterns
+    language: str,
 ) -> list[HttpRoute]:
     """Detect HTTP routes from decorator information.
 
@@ -172,18 +114,19 @@ def detect_http_routes(
         List of detected HTTP routes.
     """
     routes = []
+    patterns = _get_http_route_patterns(language)
 
     for dec in decorators:
-        if dec.name in _HTTP_ROUTE_PATTERNS:
-            method, framework = _HTTP_ROUTE_PATTERNS[dec.name]
+        if dec.name in patterns:
+            method, framework = patterns[dec.name]
             path = _extract_path_from_args(dec.args)
 
             # Handle method extraction based on framework
             if method == "*":
                 if framework == "django-rest":
-                    method = _extract_method_from_drf_args(dec.args)
+                    method = extract_method_from_drf_args(dec.args)
                 else:
-                    method = _extract_method_from_flask_args(dec.args)
+                    method = extract_method_from_flask_args(dec.args)
 
             # For DRF, path may not be in decorator (comes from urls.py)
             # Still record the route with placeholder path
@@ -207,16 +150,8 @@ def detect_http_routes(
 # CLI COMMAND DETECTION
 # =============================================================================
 
-# CLI command decorator patterns (exact matches)
-_CLI_COMMAND_PATTERNS: dict[str, str] = {
-    "click.command": "click",
-    "click.group": "click",
-    "app.command": "typer",
-    "typer.command": "typer",
-}
-
-# CLI decorator suffixes that indicate a command (for patterns like main.command, web.group)
-_CLI_COMMAND_SUFFIXES = {".command", ".group"}
+# CLI patterns are imported from magaldi_core.extractors.patterns.python
+# and aliased as _CLI_COMMAND_PATTERNS and _CLI_COMMAND_SUFFIXES at the top
 
 
 def detect_cli_commands(
