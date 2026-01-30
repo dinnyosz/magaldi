@@ -121,6 +121,10 @@ def extract_php_elements(tree: Tree, lines: list[str]) -> list[ExtractedElement]
             elem = _extract_php_function(node, lines)
             if elem:
                 elements.append(elem)
+        elif node.type == "enum_declaration":
+            elem = _extract_php_enum(node, lines)
+            if elem:
+                elements.append(elem)
 
     return elements
 
@@ -237,6 +241,33 @@ def _extract_php_trait(node: Node, lines: list[str]) -> ExtractedElement | None:
         raw_code=node.text.decode('utf-8') if node.text else "",
         byte_offset=node.start_byte,
         node=node,
+    )
+
+
+def _extract_php_enum(node: Node, lines: list[str]) -> ExtractedElement | None:
+    """Extract a PHP 8.1 enum definition."""
+    name = None
+    backing_type = None
+
+    for child in node.children:
+        if child.type == "name":
+            name = get_node_text(child)
+        elif child.type == "primitive_type":
+            # Backed enum: enum Foo: string
+            backing_type = get_node_text(child)
+
+    if not name:
+        return None
+
+    return ExtractedElement(
+        element_type="enum",
+        name=name,
+        line_start=node.start_point[0] + 1,
+        line_end=node.end_point[0] + 1,
+        raw_code=node.text.decode('utf-8') if node.text else "",
+        byte_offset=node.start_byte,
+        node=node,
+        return_type=backing_type,  # Store backing type in return_type field
     )
 
 
