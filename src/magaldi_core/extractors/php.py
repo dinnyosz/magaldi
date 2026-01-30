@@ -97,9 +97,9 @@ def extract_php_elements(tree: Tree, lines: list[str]) -> list[ExtractedElement]
         List of extracted elements (classes, functions, imports).
     """
     elements: list[ExtractedElement] = []
-    root = tree.root_node
 
-    for node in root.children:
+    # Walk the entire tree to find elements inside namespaces
+    for node in walk_tree(tree.root_node):
         if node.type == "namespace_use_declaration":
             # PHP use statements (imports)
             elem = _extract_php_use_statement(node, lines)
@@ -107,6 +107,14 @@ def extract_php_elements(tree: Tree, lines: list[str]) -> list[ExtractedElement]
                 elements.append(elem)
         elif node.type == "class_declaration":
             elem = _extract_php_class(node, lines)
+            if elem:
+                elements.append(elem)
+        elif node.type == "interface_declaration":
+            elem = _extract_php_interface(node, lines)
+            if elem:
+                elements.append(elem)
+        elif node.type == "trait_declaration":
+            elem = _extract_php_trait(node, lines)
             if elem:
                 elements.append(elem)
         elif node.type == "function_definition":
@@ -157,12 +165,19 @@ def _extract_php_use_statement(node: Node, lines: list[str]) -> ExtractedElement
 
 
 def _extract_php_class(node: Node, lines: list[str]) -> ExtractedElement | None:
-    """Extract a PHP class definition."""
+    """Extract a PHP class definition with PHP 8 attributes."""
     name = None
+    decorators: list[str] = []
+
     for child in node.children:
         if child.type == "name":
             name = get_node_text(child)
-            break
+        elif child.type == "attribute_list":
+            # PHP 8 attributes
+            for attr in _extract_php_attributes(child):
+                decorators.append(attr)
+        elif child.type in ("abstract_modifier", "final_modifier", "readonly_modifier"):
+            decorators.append(get_node_text(child))
 
     if not name:
         return None
@@ -175,7 +190,74 @@ def _extract_php_class(node: Node, lines: list[str]) -> ExtractedElement | None:
         raw_code=node.text.decode('utf-8') if node.text else "",
         byte_offset=node.start_byte,
         node=node,
+        decorators=decorators if decorators else None,
     )
+
+
+def _extract_php_interface(node: Node, lines: list[str]) -> ExtractedElement | None:
+    """Extract a PHP interface definition."""
+    name = None
+
+    for child in node.children:
+        if child.type == "name":
+            name = get_node_text(child)
+            break
+
+    if not name:
+        return None
+
+    return ExtractedElement(
+        element_type="interface",
+        name=name,
+        line_start=node.start_point[0] + 1,
+        line_end=node.end_point[0] + 1,
+        raw_code=node.text.decode('utf-8') if node.text else "",
+        byte_offset=node.start_byte,
+        node=node,
+    )
+
+
+def _extract_php_trait(node: Node, lines: list[str]) -> ExtractedElement | None:
+    """Extract a PHP trait definition."""
+    name = None
+
+    for child in node.children:
+        if child.type == "name":
+            name = get_node_text(child)
+            break
+
+    if not name:
+        return None
+
+    return ExtractedElement(
+        element_type="trait",
+        name=name,
+        line_start=node.start_point[0] + 1,
+        line_end=node.end_point[0] + 1,
+        raw_code=node.text.decode('utf-8') if node.text else "",
+        byte_offset=node.start_byte,
+        node=node,
+    )
+
+
+def _extract_php_attributes(attr_list_node: Node) -> list[str]:
+    """Extract PHP 8 attribute names from an attribute_list node."""
+    attrs: list[str] = []
+
+    for child in attr_list_node.children:
+        if child.type == "attribute_group":
+            for attr_child in child.children:
+                if attr_child.type == "attribute":
+                    for name_node in attr_child.children:
+                        if name_node.type in ("name", "qualified_name"):
+                            attr_name = get_node_text(name_node)
+                            # Get just the last part for qualified names
+                            if "\\" in attr_name:
+                                attr_name = attr_name.split("\\")[-1]
+                            attrs.append(attr_name)
+                            break
+
+    return attrs
 
 
 def _extract_php_parameters(params_node: Node) -> list[ParameterInfo]:
