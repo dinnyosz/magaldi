@@ -338,10 +338,11 @@ class TestComputeThrottleDecision:
         We no longer calculate base_time from current running tasks because
         we don't know how many workers were active when each task started.
         avg_base_time=5.0s → optimal = 117/5 = 23 workers
-        Ramp-up applies: 8 + min(max(1, int(15*0.25)), 3) = 8 + 3 = 11 workers
+        Ramp-up applies: 8 + 1 = 9 workers (MAX_RAMP_INCREMENT=1)
+        current_max must be under 30% of timeout to allow ramp (not hold).
         """
         decision = compute_throttle_decision(
-            current_max_runtime=80.0,  # Ignored for base_time calculation
+            current_max_runtime=50.0,  # 27% of 180s, under hold threshold
             tier_timeout=180.0,
             base_workers=32,
             active_workers=8,
@@ -351,8 +352,8 @@ class TestComputeThrottleDecision:
             avg_base_time=5.0,  # 117/5 = 23.4 → 23 optimal
         )
         assert decision.should_throttle
-        # Optimal is 23, ramp from 8: 8 + min(max(1, 3), 3) = 11
-        assert decision.recommended_workers == 11
+        # Optimal is 23, ramp from 8: 8 + 1 = 9 (MAX_RAMP_INCREMENT=1)
+        assert decision.recommended_workers == 9
         assert "Throttle" in decision.reason
         assert "ramped" in decision.reason
 
@@ -381,8 +382,8 @@ class TestComputeThrottleDecision:
 
         With 2 active workers and base_time suggesting 23 optimal:
         delta = 23 - 2 = 21
-        increment = min(max(1, int(21*0.25)), 3) = min(5, 3) = 3
-        ramped = 2 + 3 = 5
+        increment = min(max(1, int(21*0.25)), 1) = 1 (MAX_RAMP_INCREMENT=1)
+        ramped = 2 + 1 = 3
         """
         decision = compute_throttle_decision(
             current_max_runtime=10.0,  # 10s with 2 workers = 5s base_time
@@ -395,8 +396,8 @@ class TestComputeThrottleDecision:
             avg_base_time=5.0,  # 117/5 = 23.4 → 23 optimal
         )
         assert decision.should_throttle
-        # Optimal is 23, but we ramp with max increment of 3: 2 + 3 = 5
-        assert decision.recommended_workers == 5
+        # Optimal is 23, but we ramp with max increment of 1: 2 + 1 = 3
+        assert decision.recommended_workers == 3
         assert "ramped from 2" in decision.reason
 
     def test_scale_down_immediate(self):

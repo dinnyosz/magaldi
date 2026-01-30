@@ -41,7 +41,13 @@ RAMP_UP_FACTOR = 0.25
 # Maximum workers to add per ramp-up. Even if 25% of gap is larger,
 # cap the increment to avoid overwhelming the system when base_time
 # estimates are too optimistic (e.g., first few tasks were easy/small).
-MAX_RAMP_INCREMENT = 3
+MAX_RAMP_INCREMENT = 1
+
+# Threshold for holding ramp-up. If any active task has been running longer
+# than this fraction of timeout, don't ramp up - wait for tasks to complete
+# and provide feedback. This prevents ramping blindly based on stale data.
+# 30% gives time for contention to show before we add more workers.
+RAMP_HOLD_THRESHOLD = 0.30
 
 
 @dataclass
@@ -258,6 +264,11 @@ def compute_throttle_decision(
             reason="Emergency (>60% timeout)",
         )
 
+    # Check if running tasks are taking too long - if so, hold at current level
+    # This prevents ramping blindly when we don't have fresh completion feedback
+    hold_threshold = tier_timeout * RAMP_HOLD_THRESHOLD
+    should_hold = current_max_runtime > hold_threshold and active_workers > 0
+
     # Use ONLY historical avg_base_time from actual completions.
     # We can't calculate base_time from current running tasks because we don't
     # know how many workers were active when each task STARTED (only current count).
@@ -267,15 +278,30 @@ def compute_throttle_decision(
     if avg_base_time > 0:
         effective_base_time = avg_base_time
     else:
-        # No completion history yet - still apply ramp-up to avoid jumping to max
-        # Target is base_workers but we ramp up gradually
-        if active_workers > 0:
+        # No completion history yet - check if we should hold or ramp
+        if should_hold:
+            # Tasks running long, hold at current level until we get feedback
+            _log_throttle(
+                f"NO DATA HOLD: max_runtime={current_max_runtime:.1f}s ({current_max_runtime/tier_timeout:.0%} of {tier_timeout}s) "
+                f"> {RAMP_HOLD_THRESHOLD:.0%} threshold, holding at {active_workers}"
+            )
+            return ThrottleDecision(
+                should_throttle=False,
+                current_max=current_max_runtime,
+                historical_max=0,
+                completed_avg=avg_runtime,
+                recommended_workers=active_workers,
+                reason=f"No data, holding (>{RAMP_HOLD_THRESHOLD:.0%} timeout)",
+            )
+        elif active_workers > 0:
+            # Tasks running fast, safe to ramp
             delta = base_workers - active_workers
             increment = min(max(1, int(delta * RAMP_UP_FACTOR)), MAX_RAMP_INCREMENT)
             ramped = active_workers + increment
             ramped = min(ramped, base_workers)
             _log_throttle(
-                f"NO DATA RAMP: active={active_workers} → ramped to {ramped} (+{increment}, max {MAX_RAMP_INCREMENT})"
+                f"NO DATA RAMP: active={active_workers} max_runtime={current_max_runtime:.1f}s "
+                f"< {hold_threshold:.0f}s threshold → ramped to {ramped} (+{increment})"
             )
             return ThrottleDecision(
                 should_throttle=False,
@@ -311,18 +337,28 @@ def compute_throttle_decision(
     # When DECREASING, apply immediately (we're seeing slowness, react fast)
     # Only ramp if we have active workers (not starting fresh)
     if target_workers > active_workers and active_workers > 0:
-        # Scaling UP - ramp gradually to avoid overwhelming during warmup
-        # Cap increment to MAX_RAMP_INCREMENT to handle optimistic base_time estimates
-        delta = target_workers - active_workers
-        increment = min(max(1, int(delta * RAMP_UP_FACTOR)), MAX_RAMP_INCREMENT)
-        ramped = active_workers + increment
-        ramped = min(ramped, target_workers)  # Don't exceed target
-        effective_workers = ramped
-        reason_suffix = f", ramped from {active_workers}"
-        _log_throttle(
-            f"RAMP UP: base_time={effective_base_time:.1f}s target={target_workers} "
-            f"active={active_workers} → ramped to {effective_workers} (+{increment}, max {MAX_RAMP_INCREMENT})"
-        )
+        # Check if we should hold due to long-running tasks
+        if should_hold:
+            # Tasks running long, hold at current level until we get fresh feedback
+            effective_workers = active_workers
+            reason_suffix = f", holding (>{RAMP_HOLD_THRESHOLD:.0%} timeout)"
+            _log_throttle(
+                f"RAMP HOLD: max_runtime={current_max_runtime:.1f}s ({current_max_runtime/tier_timeout:.0%}) "
+                f"> {RAMP_HOLD_THRESHOLD:.0%} threshold, holding at {active_workers} (target={target_workers})"
+            )
+        else:
+            # Scaling UP - ramp gradually to avoid overwhelming during warmup
+            # Cap increment to MAX_RAMP_INCREMENT to handle optimistic base_time estimates
+            delta = target_workers - active_workers
+            increment = min(max(1, int(delta * RAMP_UP_FACTOR)), MAX_RAMP_INCREMENT)
+            ramped = active_workers + increment
+            ramped = min(ramped, target_workers)  # Don't exceed target
+            effective_workers = ramped
+            reason_suffix = f", ramped from {active_workers}"
+            _log_throttle(
+                f"RAMP UP: base_time={effective_base_time:.1f}s target={target_workers} "
+                f"active={active_workers} max_runtime={current_max_runtime:.1f}s < {hold_threshold:.0f}s → ramped to {effective_workers} (+{increment})"
+            )
     else:
         # Scaling DOWN, steady, or starting fresh - apply immediately
         effective_workers = target_workers
