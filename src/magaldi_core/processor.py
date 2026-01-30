@@ -1785,34 +1785,52 @@ def process_elements(
         stale_ids = existing_ids - new_element_ids
         stale_element_ids.extend(stale_ids)
 
-    # Delete only stale elements (e.g., a variable that was removed from code)
-    if stale_element_ids:
-        es_repo.delete_elements(stale_element_ids)
-        result.elements_deleted = len(stale_element_ids)
-
     # Get content hashes and summary state for change detection
     # Only skip if content unchanged AND summary exists (handles interrupted runs)
     all_element_ids = list(new_element_ids)
     existing_states = es_repo.get_element_processing_state(all_element_ids)
 
-    # Fallback: for elements not found by ID, search by content_hash
-    # This handles "relocated" elements where line number changed but content didn't
+    # RELOCATED ELEMENT MATCHING (must happen BEFORE deleting stale elements!)
+    # When an element's line number changes, its ID changes but content_hash stays same.
+    # We find these "relocated" elements by matching content_hash from stale → new elements.
+    # IMPORTANT: Search per-file to avoid cross-file false matches (same code in different files).
     elements_not_found_by_id = [
         elem for elem in all_elements
         if elem.element_id not in existing_states and elem.content_hash
     ]
     relocated_states: dict[str, dict] = {}  # content_hash -> state (includes actual data)
+    relocated_old_ids: set[str] = set()  # old element IDs that were relocated (don't delete)
     if elements_not_found_by_id:
-        content_hashes = list({elem.content_hash for elem in elements_not_found_by_id if elem.content_hash})
-        if content_hashes:
-            relocated_states = es_repo.find_elements_by_content_hash(
-                scope, repository, username, content_hashes
+        # Group by file path for per-file searching
+        by_file: dict[str, list[str]] = {}
+        for elem in elements_not_found_by_id:
+            if elem.content_hash:
+                by_file.setdefault(elem.relative_path, []).append(elem.content_hash)
+
+        # Search each file separately to avoid cross-file false matches
+        for rel_path, hashes in by_file.items():
+            unique_hashes = list(set(hashes))
+            file_relocated = es_repo.find_elements_by_content_hash(
+                scope, repository, username, unique_hashes, relative_path=rel_path
             )
+            relocated_states.update(file_relocated)
+            # Track old element IDs that matched - these are relocated, not deleted
+            for state in file_relocated.values():
+                old_id = state.get("old_element_id")
+                if old_id:
+                    relocated_old_ids.add(old_id)
+
+    # Now delete stale elements, EXCLUDING relocated ones (they'll be updated, not deleted)
+    truly_stale_ids = [eid for eid in stale_element_ids if eid not in relocated_old_ids]
+    if truly_stale_ids:
+        es_repo.delete_elements(truly_stale_ids)
+        result.elements_deleted = len(truly_stale_ids)
 
     # Debug: log state of first few elements
     _state_logged = 0
     with open("/tmp/magaldi_file_hash.log", "a") as f:
-        f.write(f"\n[SKIP CHECK] Total elements: {len(all_elements)}, unique IDs: {len(all_element_ids)}, existing states: {len(existing_states)}, relocated matches: {len(relocated_states)}\n")
+        f.write(f"\n[SKIP CHECK] Total elements: {len(all_elements)}, unique IDs: {len(all_element_ids)}, existing states: {len(existing_states)}\n")
+        f.write(f"[RELOCATED] stale_total={len(stale_element_ids)}, relocated={len(relocated_old_ids)}, truly_deleted={len(truly_stale_ids)}, relocated_matches={len(relocated_states)}\n")
         # Log first few element IDs
         for eid in all_element_ids[:3]:
             in_states = eid in existing_states
@@ -1870,6 +1888,10 @@ def process_elements(
                         file_hash,
                         element_count,
                     )
+                    # Delete the old element now that we've indexed the new one
+                    old_element_id = state.get("old_element_id")
+                    if old_element_id:
+                        es_repo.delete_elements([old_element_id])
                     relocated_copied += 1
                     result.elements_skipped += 1
                     skipped_by_file[elem.relative_path] = skipped_by_file.get(elem.relative_path, 0) + 1
@@ -1932,7 +1954,10 @@ def process_elements(
                 for path, new_hash in list(files_to_update.items())[:3]:
                     f.write(f"  {path}: new_hash={new_hash[:16]}...\n")
 
-            updated_count = es_repo.update_file_hashes(scope, repository, username, files_to_update)
+            # Pass element_counts so FILE elements also get updated element_count
+            updated_count = es_repo.update_file_hashes(
+                scope, repository, username, files_to_update, elements_per_file
+            )
 
             with open("/tmp/magaldi_file_hash.log", "a") as f:
                 f.write(f"[AFTER UPDATE] {updated_count} elements updated in ES\n")

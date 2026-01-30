@@ -308,6 +308,7 @@ class ElementRepository:
         repository: str,
         username: str,
         content_hashes: list[str],
+        relative_path: str | None = None,
     ) -> dict[str, dict[str, Any]]:
         """Find elements by content_hash for relocated element matching.
 
@@ -334,17 +335,22 @@ class ElementRepository:
         client = self._get_client()
 
         # Search for elements matching any of the content hashes
+        # Only match within the same file to avoid cross-file false matches
+        filters = [
+            {"term": {"scope": scope}},
+            {"term": {"repository": repository}},
+            {"term": {"username": username}},
+            {"terms": {"content_hash": content_hashes}},
+        ]
+        if relative_path is not None:
+            filters.append({"term": {"relative_path": relative_path}})
+
         response = client.search(
             index=INDEX_NAME,
             body={
                 "query": {
                     "bool": {
-                        "filter": [
-                            {"term": {"scope": scope}},
-                            {"term": {"repository": repository}},
-                            {"term": {"username": username}},
-                            {"terms": {"content_hash": content_hashes}},
-                        ]
+                        "filter": filters
                     }
                 },
                 "_source": ["content_hash", "summary", "summary_embedding", "code_embedding"],
@@ -572,6 +578,7 @@ class ElementRepository:
         repository: str,
         username: str,
         file_updates: dict[str, str],
+        element_counts: dict[str, int] | None = None,
     ) -> int:
         """Bulk update file_hash for elements by relative_path.
 
@@ -584,6 +591,7 @@ class ElementRepository:
             repository: Repository to filter by.
             username: Username to filter by.
             file_updates: Dict mapping relative_path -> new file_hash.
+            element_counts: Dict mapping relative_path -> element count (for FILE elements).
 
         Returns:
             Number of elements updated.
@@ -640,6 +648,22 @@ class ElementRepository:
                 with open("/tmp/magaldi_file_hash.log", "a") as f:
                     f.write(f"  Elements matching: {pre_count.get('count', 0)} total, {pre_file_count.get('count', 0)} FILE elements\n")
 
+            # Build script to update file_hash, and element_count for FILE elements
+            element_count = element_counts.get(relative_path) if element_counts else None
+            if element_count is not None:
+                # Update both file_hash and element_count (for FILE elements)
+                script_source = """
+                    ctx._source.file_hash = params.file_hash;
+                    if (ctx._source.element_type == 'file') {
+                        ctx._source.element_count = params.element_count;
+                    }
+                """
+                script_params = {"file_hash": new_file_hash, "element_count": element_count}
+            else:
+                # Only update file_hash
+                script_source = "ctx._source.file_hash = params.file_hash"
+                script_params = {"file_hash": new_file_hash}
+
             result = client.update_by_query(
                 index=INDEX_NAME,
                 body={
@@ -654,8 +678,8 @@ class ElementRepository:
                         }
                     },
                     "script": {
-                        "source": "ctx._source.file_hash = params.file_hash",
-                        "params": {"file_hash": new_file_hash},
+                        "source": script_source,
+                        "params": script_params,
                     },
                 },
                 refresh=True,

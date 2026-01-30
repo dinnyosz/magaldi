@@ -120,10 +120,11 @@ class ElasticsearchRepository:
         repository: str,
         username: str,
         content_hashes: list[str],
+        relative_path: str | None = None,
     ) -> dict[str, dict[str, Any]]:
         """Find elements by content_hash for relocated element matching."""
         return self._elements.find_elements_by_content_hash(
-            scope, repository, username, content_hashes
+            scope, repository, username, content_hashes, relative_path
         )
 
     def get_element_ids_by_file(
@@ -170,9 +171,12 @@ class ElasticsearchRepository:
         repository: str,
         username: str,
         file_updates: dict[str, str],
+        element_counts: dict[str, int] | None = None,
     ) -> int:
-        """Bulk update file_hash for elements by relative_path."""
-        return self._elements.update_file_hashes(scope, repository, username, file_updates)
+        """Bulk update file_hash and element_count for elements by relative_path."""
+        return self._elements.update_file_hashes(
+            scope, repository, username, file_updates, element_counts
+        )
 
     def get_documents_batch(self, element_ids: list[str]) -> dict[str, dict[str, Any]]:
         """Get full documents for multiple elements in batch."""
