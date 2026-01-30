@@ -1904,10 +1904,11 @@ def process_elements(
             return 0  # Fallback
 
     def release_worker_id(wid: int) -> None:
-        """Return a worker ID to the pool."""
+        """Return a worker ID to the pool (sorted to prefer low IDs)."""
+        import bisect
         with worker_id_lock:
             if wid not in available_worker_ids:
-                available_worker_ids.append(wid)
+                bisect.insort(available_worker_ids, wid)
 
     def process_wrapper(element: CodeElement) -> ProcessedElement:
         """Wrapper to assign worker ID and call _process_single_element."""
