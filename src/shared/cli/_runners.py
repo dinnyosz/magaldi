@@ -216,15 +216,20 @@ def run_processing(
             type_order = ["file", "class", "function", "method", "variable", "constant"]
 
             # Build lookup from breakdown data
-            eta_data: dict[tuple[str, int], tuple[float, bool]] = {}
-            for elem_type, tier, avg_time, is_fallback in eta_breakdown:
-                eta_data[(elem_type, tier)] = (avg_time, is_fallback)
+            eta_data: dict[tuple[str, int], tuple[float, bool, int, int]] = {}
+            for elem_type, tier, avg_time, is_fallback, done, total in eta_breakdown:
+                eta_data[(elem_type, tier)] = (avg_time, is_fallback, done, total)
 
             # Create grid table: rows=types, columns=tiers
-            eta_table = Table(show_header=True, box=None, padding=(0, 1), expand=False)
-            eta_table.add_column("", style="dim")  # type column
+            eta_table = Table(show_header=True, box=None, padding=(0, 2), expand=False)
+            eta_table.add_column("", style="dim", width=10)  # type column
+            tier_colors = {32768: "magenta", 16384: "blue", 8192: "cyan", 4096: "green", 2048: "yellow"}
             for tier in tiers:
-                eta_table.add_column(tier_abbrev.get(tier, f"{tier//1024}k"), style="dim", justify="right")
+                color = tier_colors.get(tier, "white")
+                eta_table.add_column(f"[{color}]{tier_abbrev.get(tier, f'{tier//1024}k')}[/]", justify="center")
+
+            # Type colors for row labels
+            type_colors = {"file": "cyan", "class": "magenta", "function": "blue", "method": "green", "variable": "yellow", "constant": "red"}
 
             # Add rows for each element type that has data
             for elem_type in type_order:
@@ -232,20 +237,30 @@ def run_processing(
                 if not has_data:
                     continue
 
-                row = [type_abbrev.get(elem_type, elem_type[:3])]
+                type_color = type_colors.get(elem_type, "white")
+                row = [f"[{type_color}]{elem_type}[/]"]
                 for tier in tiers:
                     if (elem_type, tier) in eta_data:
-                        avg_time, is_fallback = eta_data[(elem_type, tier)]
+                        avg_time, is_fallback, done, total = eta_data[(elem_type, tier)]
+                        # Color progress: green if done, yellow if in progress
+                        if done >= total:
+                            count_str = f"[green]{done}/{total}[/]"
+                        elif done > 0:
+                            count_str = f"[yellow]{done}[/][dim]/{total}[/]"
+                        else:
+                            count_str = f"[dim]{done}/{total}[/]"
+                        # Time styling (time first, then count)
                         if avg_time > 0:
-                            time_style = "dim yellow" if is_fallback else "yellow"
+                            time_style = "dim cyan" if is_fallback else "cyan"
                             time_str = f"[{time_style}]{avg_time:.1f}s[/]"
                             if is_fallback:
                                 time_str = f"~{time_str}"
+                            cell = f"{time_str} {count_str}"
                         else:
-                            time_str = "[dim]-[/]"
+                            cell = f"[dim]-[/] {count_str}"
                     else:
-                        time_str = ""
-                    row.append(time_str)
+                        cell = ""
+                    row.append(cell)
                 eta_table.add_row(*row)
 
         # Worker table
@@ -297,12 +312,11 @@ def run_processing(
         for t in ["file", "class", "function", "method", "constant", "variable"]:
             if t in type_stats:
                 done, tot, avg_wall, avg_summ, avg_embed = type_stats[t]
-                api_time = avg_summ + avg_embed
                 color = type_colors.get(t, "white")
                 if done >= tot:
-                    type_parts.append(f"[{color}]{t}[/]: [green]{done}/{tot}[/] [dim]({api_time:.1f}s)[/]")
+                    type_parts.append(f"[{color}]{t}[/]: [green]{done}/{tot}[/] [dim]({avg_wall:.1f}s)[/]")
                 else:
-                    type_parts.append(f"[{color}]{t}[/]: [yellow]{done}/{tot}[/] [dim]({api_time:.1f}s)[/]")
+                    type_parts.append(f"[{color}]{t}[/]: [yellow]{done}/{tot}[/] [dim]({avg_wall:.1f}s)[/]")
         type_line = f"  [dim]Progress:[/] {' [dim]|[/] '.join(type_parts)}" if type_parts else ""
 
         # Stats line
@@ -367,11 +381,12 @@ def run_processing(
                     if effective_max > 0:
                         stats += f" [dim](max:[/] [yellow]{effective_max:.1f}s[/][dim])[/]"
 
-        parts: list[RenderableType] = [bar_text, worker_table]
-        if type_line:
-            parts.append(type_line)
+        parts: list[RenderableType] = [bar_text]
         if eta_table:
             parts.append(eta_table)
+        parts.append(worker_table)
+        if type_line:
+            parts.append(type_line)
         parts.append(stats)
 
         # Show recent errors if any
