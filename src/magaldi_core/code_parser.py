@@ -2243,6 +2243,7 @@ PARSERS: dict[str, TreeSitterParser] = {
     "python": PythonParser(),
     "javascript": JavaScriptParser("javascript"),
     "typescript": JavaScriptParser("typescript"),
+    "tsx": JavaScriptParser("tsx"),
     "php": PhpParser(),
     "rust": RustParser(),
 }
