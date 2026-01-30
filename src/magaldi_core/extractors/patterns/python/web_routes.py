@@ -1,6 +1,6 @@
-"""Python web framework route patterns.
+"""Python web framework route patterns and detection.
 
-Pattern definitions for detecting HTTP routes from decorator information
+Pattern definitions and detection functions for HTTP routes
 in Python web frameworks:
 - FastAPI
 - Flask
@@ -13,13 +13,15 @@ from __future__ import annotations
 
 import re
 
+from magaldi_core.extractors.types import DecoratorInfo, HttpRoute
+
 # =============================================================================
 # HTTP ROUTE PATTERNS
 # =============================================================================
 
 # Maps decorator name -> (HTTP method, framework)
 # Use "*" for method when it needs to be extracted from args
-PYTHON_HTTP_ROUTE_PATTERNS: dict[str, tuple[str, str]] = {
+_PYTHON_HTTP_ROUTE_PATTERNS: dict[str, tuple[str, str]] = {
     # FastAPI patterns
     "router.get": ("GET", "fastapi"),
     "router.post": ("POST", "fastapi"),
@@ -52,7 +54,7 @@ PYTHON_HTTP_ROUTE_PATTERNS: dict[str, tuple[str, str]] = {
 
 
 # =============================================================================
-# FRAMEWORK-SPECIFIC EXTRACTION HELPERS
+# HELPER FUNCTIONS
 # =============================================================================
 
 
@@ -116,3 +118,86 @@ def extract_method_from_drf_args(args: str | None) -> str:
         if method_match:
             return method_match.group(1).upper()
     return "GET"
+
+
+def _extract_path_params(path: str) -> list[str]:
+    """Extract path parameters from a route path."""
+    params = []
+    # FastAPI/OpenAPI style: {param}
+    for match in re.finditer(r"\{(\w+)\}", path):
+        params.append(match.group(1))
+    # Flask style: <param>
+    for match in re.finditer(r"<(\w+)>", path):
+        params.append(match.group(1))
+    return params
+
+
+def _extract_path_from_args(args: str | None) -> str | None:
+    """Extract path from decorator arguments.
+
+    Handles both raw strings and parenthesized argument lists:
+    - '"/users"' -> '/users'
+    - '("/users")' -> '/users'
+    - '("/users", methods=["GET"])' -> '/users'
+    """
+    if not args:
+        return None
+
+    # Strip whitespace and outer parentheses if present
+    cleaned = args.strip()
+    if cleaned.startswith("(") and cleaned.endswith(")"):
+        cleaned = cleaned[1:-1].strip()
+
+    # Extract first quoted string (the path)
+    match = re.match(r'["\']([^"\']+)["\']', cleaned)
+    if match:
+        return match.group(1)
+    return None
+
+
+# =============================================================================
+# DETECTION FUNCTION
+# =============================================================================
+
+
+def detect_python_http_routes(
+    decorators: list[DecoratorInfo],
+) -> list[HttpRoute]:
+    """Detect HTTP routes from Python decorator information.
+
+    Args:
+        decorators: List of decorator information extracted from a function.
+
+    Returns:
+        List of detected HTTP routes.
+    """
+    routes = []
+
+    for dec in decorators:
+        if dec.name in _PYTHON_HTTP_ROUTE_PATTERNS:
+            method, framework = _PYTHON_HTTP_ROUTE_PATTERNS[dec.name]
+            path = _extract_path_from_args(dec.args)
+
+            # Handle method extraction based on framework
+            if method == "*":
+                if framework == "django-rest":
+                    method = extract_method_from_drf_args(dec.args)
+                else:
+                    method = extract_method_from_flask_args(dec.args)
+
+            # For DRF, path may not be in decorator (comes from urls.py)
+            # Still record the route with placeholder path
+            if framework == "django-rest" and not path:
+                path = "<url-pattern>"  # Placeholder for DRF routes
+
+            if path:
+                routes.append(
+                    HttpRoute(
+                        method=method,
+                        path=path,
+                        path_params=_extract_path_params(path),
+                        framework=framework,
+                    )
+                )
+
+    return routes

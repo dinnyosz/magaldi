@@ -1,13 +1,13 @@
 """JavaScript/TypeScript framework pattern extractors.
 
-This package contains pattern definitions for JS/TS web frameworks:
+This package contains detection functions for JS/TS web frameworks:
 - web_routes.py - NestJS, Hono, Express
 """
 
 from magaldi_core.extractors.patterns.javascript.web_routes import (
-    JS_HTTP_ROUTE_PATTERNS,
+    detect_javascript_http_routes,
 )
 
 __all__ = [
-    "JS_HTTP_ROUTE_PATTERNS",
+    "detect_javascript_http_routes",
 ]
