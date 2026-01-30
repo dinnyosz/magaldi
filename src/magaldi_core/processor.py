@@ -1941,7 +1941,7 @@ def process_elements(
     # Track current throttle decision for display
     current_throttle: ThrottleDecision | None = None
     # Interval for wait() timeout - allows periodic display updates
-    HISTORY_RECORD_INTERVAL = 10.0
+    HISTORY_RECORD_INTERVAL = 2.0  # Refresh display every 2 seconds
 
     try:
         while not dependency_tracker.is_complete():
@@ -2112,10 +2112,13 @@ def process_elements(
                 if on_progress:
                     # Refresh throttle decision with current throughput values for accurate display
                     fresh_current_max = worker_status.get_max_active_runtime()
-                    fresh_throughput, fresh_avg, fresh_count = timing_stats.get_throughput_stats()
+                    fresh_throughput, fresh_avg, fresh_count, fresh_avg_conc, fresh_high_load = (
+                        timing_stats.get_throughput_stats_with_concurrency()
+                    )
                     fresh_active = worker_status.active_count()
                     fresh_throttle = dependency_tracker.compute_throttle_decision(
-                        fresh_current_max, fresh_active, fresh_throughput, fresh_avg, fresh_count
+                        fresh_current_max, fresh_active, fresh_throughput, fresh_avg, fresh_count,
+                        fresh_avg_conc, fresh_high_load
                     )
                     progress_state = ProgressState(
                         total=total,
