@@ -1542,8 +1542,6 @@ def process_subfeatures(
 
     # Phase 2: Process subfeatures in parallel with workers
     total = len(work_queue)
-    completed_count = 0
-    failed_count = 0
     errors: list[str] = []
 
     # Worker ID pool
@@ -1562,12 +1560,14 @@ def process_subfeatures(
                 # Insert in sorted position to keep lower IDs at front
                 bisect.insort(available_worker_ids, wid)
 
-    # Mutable state for throttle info
+    # Mutable state for throttle info and progress tracking
     subfeature_state: dict = {
         "allowed_workers": config.num_workers,
         "current_max": 0.0,
         "avg_base_time": 0.0,
         "completion_count": 0,
+        "completed": 0,
+        "failed": 0,
     }
 
     def on_status_change(throttle_info: "ThrottleDisplayInfo | None" = None) -> None:
@@ -1579,8 +1579,8 @@ def process_subfeatures(
         if on_progress:
             on_progress(SubfeatureProgressState(
                 total=total,
-                completed=completed_count,
-                failed=failed_count,
+                completed=subfeature_state["completed"],
+                failed=subfeature_state["failed"],
                 timing=timing_stats,
                 workers=worker_status,
                 num_workers=config.num_workers,
@@ -1669,9 +1669,6 @@ def process_subfeatures(
     # Handle workers=0 (auto) - will use tier-specific limits
     max_pool_workers = config.num_workers if config.num_workers > 0 else max(TIER_MAX_WORKERS.values())
 
-    # Mutable state for callbacks
-    state = {"completed": 0, "failed": 0}
-
     def on_complete(work_item: SubfeatureWorkItem, processed: ProcessedSubfeature, avg_workers: float) -> None:
         """Handle completed subfeature processing."""
         nonlocal errors
@@ -1685,9 +1682,9 @@ def process_subfeatures(
         timing_stats.record(processed.summarize_time, processed.embed_time, tier=tier)
 
         if processed.success:
-            state["completed"] += 1
+            subfeature_state["completed"] += 1
         else:
-            state["failed"] += 1
+            subfeature_state["failed"] += 1
             if processed.error:
                 errors.append(f"Subfeature {processed.sub_label} of {processed.parent_label}: {processed.error}")
 
@@ -1715,10 +1712,6 @@ def process_subfeatures(
                 on_tick=on_status_change,
             )
 
-        # Update final counts
-        completed_count = state["completed"]
-        failed_count = state["failed"]
-
     except KeyboardInterrupt:
         if 'executor' in dir():
             executor.shutdown(wait=False, cancel_futures=True)
@@ -1727,7 +1720,7 @@ def process_subfeatures(
         raise
 
     return {
-        "subfeatures_created": completed_count,
+        "subfeatures_created": subfeature_state["completed"],
         "parent_features_processed": len(parents_with_subfeatures),
         "errors": errors,
     }
