@@ -356,6 +356,60 @@ class TestParseCommand:
 
         assert result.exit_code != 0
 
+    @patch("shared.cli.parse.load_config")
+    @patch("shared.cli.parse.run_discovery")
+    @patch("shared.cli.parse.run_change_detection")
+    @patch("shared.cli.parse._run_extraction_only")
+    def test_parse_runs_features_glossary_when_no_changes(
+        self,
+        mock_run_extraction_only,
+        mock_run_change_detection,
+        mock_run_discovery,
+        mock_load_config,
+        cli_runner,
+        mock_config,
+        mock_discovery_result,
+        tmp_path,
+    ):
+        """Test parse runs --features/--glossary even when no code changes detected."""
+        from datetime import datetime
+        from magaldi_core.change_detection import ChangeManifest
+
+        # Create a temp directory as repo
+        repo_path = tmp_path / "test-repo"
+        repo_path.mkdir()
+        (repo_path / "magaldi.yaml").write_text("scope: test")
+
+        mock_load_config.return_value = mock_config
+        mock_run_discovery.return_value = mock_discovery_result
+
+        # Create a manifest with no files to parse
+        empty_manifest = ChangeManifest(
+            scope="test",
+            repository="test-repo",
+            username="testuser",
+            timestamp=datetime.now(),
+            total_files_scanned=0,
+            new_files=[],
+            modified_files=[],
+            deleted_files=[],
+        )
+        mock_run_change_detection.return_value = empty_manifest
+
+        result = cli_runner.invoke(main, [
+            "parse",
+            str(repo_path),
+            "--user", "testuser",
+            "--features",
+            "--glossary",
+        ])
+
+        # Should call _run_extraction_only since no changes but flags specified
+        assert mock_run_extraction_only.called
+        call_args = mock_run_extraction_only.call_args
+        assert call_args[0][3] is True  # features=True
+        assert call_args[0][4] is True  # glossary=True
+
 
 class TestExtractFeaturesCommand:
     """Tests for extract-features command."""
