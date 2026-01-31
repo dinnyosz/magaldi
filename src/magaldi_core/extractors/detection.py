@@ -130,8 +130,12 @@ _PUBLIC_API_DECORATORS = {
     "c.get", "c.post", "c.put", "c.delete", "c.patch",
     "server.get", "server.post", "server.put", "server.delete", "server.patch",
     "koaRouter.get", "koaRouter.post", "koaRouter.put", "koaRouter.delete", "koaRouter.patch",
-    # Click/Typer CLI
+    # Click/Typer CLI (Python)
     "click.command", "click.group", "app.command", "typer.command", "app.callback",
+    # Symfony Console CLI (PHP)
+    "AsCommand",
+    # Symfony Route (PHP)
+    "Route",
 }
 
 
