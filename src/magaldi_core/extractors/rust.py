@@ -116,6 +116,14 @@ def extract_rust_elements(tree: Tree, lines: list[str]) -> list[ExtractedElement
             elem = _extract_rust_impl(node, lines)
             if elem:
                 elements.append(elem)
+        elif node.type == "trait_item":
+            elem = _extract_rust_trait(node, lines)
+            if elem:
+                elements.append(elem)
+        elif node.type == "use_declaration":
+            elem = _extract_rust_use(node, lines)
+            if elem:
+                elements.append(elem)
 
     return elements
 
@@ -162,6 +170,95 @@ def _extract_rust_enum(node: Node, lines: list[str]) -> ExtractedElement | None:
         byte_offset=node.start_byte,
         node=node,
     )
+
+
+def _extract_rust_trait(node: Node, lines: list[str]) -> ExtractedElement | None:
+    """Extract a Rust trait definition."""
+    name = None
+    for child in node.children:
+        if child.type == "type_identifier":
+            name = get_node_text(child)
+            break
+
+    if not name:
+        return None
+
+    return ExtractedElement(
+        element_type="trait",
+        name=name,
+        line_start=node.start_point[0] + 1,
+        line_end=node.end_point[0] + 1,
+        raw_code=node.text.decode('utf-8') if node.text else "",
+        byte_offset=node.start_byte,
+        node=node,
+    )
+
+
+def _extract_rust_use(node: Node, lines: list[str]) -> ExtractedElement | None:
+    """Extract a Rust use declaration (import)."""
+    raw_code = node.text.decode('utf-8') if node.text else ""
+
+    # Extract module name from use statement
+    # Examples: use std::fmt::Debug; -> std::fmt::Debug
+    #           use std::fmt::{Debug, Display}; -> std::fmt
+    #           use std::collections::HashMap; -> std::collections::HashMap
+    module = ""
+    for child in node.children:
+        if child.type == "use_tree":
+            module = _extract_use_tree_path(child)
+            break
+        elif child.type == "scoped_identifier":
+            module = get_node_text(child)
+            break
+        elif child.type == "scoped_use_list":
+            # Handle: use std::fmt::{Debug, Display};
+            module = _extract_scoped_use_list_path(child)
+            break
+        elif child.type == "identifier":
+            module = get_node_text(child)
+            break
+
+    if not module:
+        return None
+
+    return ExtractedElement(
+        element_type="import",
+        name=module,
+        line_start=node.start_point[0] + 1,
+        line_end=node.end_point[0] + 1,
+        raw_code=raw_code,
+        byte_offset=node.start_byte,
+        node=node,
+    )
+
+
+def _extract_scoped_use_list_path(node: Node) -> str:
+    """Extract the base path from a scoped_use_list node.
+
+    For: use std::fmt::{Debug, Display};
+    Returns: std::fmt
+    """
+    for child in node.children:
+        if child.type == "scoped_identifier":
+            return get_node_text(child)
+        elif child.type == "identifier":
+            return get_node_text(child)
+    return ""
+
+
+def _extract_use_tree_path(node: Node) -> str:
+    """Extract the path from a use_tree node."""
+    parts = []
+    for child in node.children:
+        if child.type == "identifier":
+            parts.append(get_node_text(child))
+        elif child.type == "scoped_identifier":
+            parts.append(get_node_text(child))
+        elif child.type == "use_tree":
+            inner = _extract_use_tree_path(child)
+            if inner:
+                parts.append(inner)
+    return "::".join(parts) if parts else ""
 
 
 def _extract_rust_parameters(params_node: Node) -> list[ParameterInfo]:
