@@ -350,6 +350,10 @@ def _extract_js_function(node: Node, lines: list[str]) -> ExtractedElement:
     if return_type:
         signature += f": {return_type}"
 
+    # Check if this is a React hook
+    decorators = ["hook"] if _is_react_hook(name) else None
+    decorator_details = [DecoratorInfo(name="hook", args=None, full="hook")] if decorators else None
+
     return ExtractedElement(
         element_type="function",
         name=name,
@@ -362,6 +366,8 @@ def _extract_js_function(node: Node, lines: list[str]) -> ExtractedElement:
         node=node,
         return_type=return_type,
         parameters=parameters or None,
+        decorators=decorators,
+        decorator_details=decorator_details,
     )
 
 
@@ -381,6 +387,10 @@ def _extract_js_arrow_function(node: Node, name: str, lines: list[str]) -> Extra
     value_node = get_child_by_field(node, "value")
     arrow_func_node = value_node if value_node and value_node.type == "arrow_function" else node
 
+    # Check if this is a React hook
+    decorators = ["hook"] if _is_react_hook(name) else None
+    decorator_details = [DecoratorInfo(name="hook", args=None, full="hook")] if decorators else None
+
     return ExtractedElement(
         element_type="function",
         name=name,
@@ -389,11 +399,25 @@ def _extract_js_arrow_function(node: Node, name: str, lines: list[str]) -> Extra
         raw_code=raw_code,
         byte_offset=node.start_byte,
         node=arrow_func_node,
+        decorators=decorators,
+        decorator_details=decorator_details,
     )
 
 
 # React wrapper functions that wrap components
 REACT_WRAPPERS = {"memo", "forwardRef", "lazy", "React.memo", "React.forwardRef", "React.lazy"}
+
+
+def _is_react_hook(name: str) -> bool:
+    """Check if a function name follows React hook naming convention.
+
+    React hooks must start with "use" followed by an uppercase letter.
+    Examples: useCounter, useState, useWindowSize
+    Non-hooks: useless, user, use (too short)
+    """
+    if len(name) <= 3:
+        return False
+    return name.startswith("use") and name[3].isupper()
 
 
 def _extract_react_wrapped_component(

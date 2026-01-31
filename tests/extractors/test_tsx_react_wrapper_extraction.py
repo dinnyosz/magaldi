@@ -128,3 +128,99 @@ const result = someFunction(function inner() {
         # Should not extract 'result' as a function since someFunction is not a React wrapper
         result = next((e for e in elements if e.name == "result"), None)
         assert result is None
+
+
+class TestReactHookDetection:
+    """Test detection of React custom hooks."""
+
+    @pytest.fixture
+    def tsx_parser(self):
+        """Create a TSX parser."""
+        tsx_lang = Language(ts_tsx.language_tsx())
+        return Parser(tsx_lang)
+
+    def test_custom_hook_function_declaration(self, tsx_parser):
+        """Test that function declarations starting with 'use' are marked as hooks."""
+        code = """
+function useCounter(initialValue = 0) {
+  const [count, setCount] = useState(initialValue);
+  return count;
+}
+"""
+        tree = tsx_parser.parse(code.encode())
+        elements = extract_javascript_elements(tree, code.split("\n"))
+
+        hook = next((e for e in elements if e.name == "useCounter"), None)
+        assert hook is not None
+        assert hook.decorators == ["hook"]
+
+    def test_custom_hook_arrow_function(self, tsx_parser):
+        """Test that arrow functions starting with 'use' are marked as hooks."""
+        code = """
+const useWindowSize = () => {
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  return size;
+};
+"""
+        tree = tsx_parser.parse(code.encode())
+        elements = extract_javascript_elements(tree, code.split("\n"))
+
+        hook = next((e for e in elements if e.name == "useWindowSize"), None)
+        assert hook is not None
+        assert hook.decorators == ["hook"]
+
+    def test_regular_function_not_hook(self, tsx_parser):
+        """Test that regular functions are not marked as hooks."""
+        code = """
+function calculateTotal(items) {
+  return items.reduce((sum, item) => sum + item.price, 0);
+}
+"""
+        tree = tsx_parser.parse(code.encode())
+        elements = extract_javascript_elements(tree, code.split("\n"))
+
+        func = next((e for e in elements if e.name == "calculateTotal"), None)
+        assert func is not None
+        assert func.decorators is None
+
+    def test_useless_not_hook(self, tsx_parser):
+        """Test that 'useless' (lowercase after 'use') is not a hook."""
+        code = """
+function useless() {
+  return null;
+}
+"""
+        tree = tsx_parser.parse(code.encode())
+        elements = extract_javascript_elements(tree, code.split("\n"))
+
+        func = next((e for e in elements if e.name == "useless"), None)
+        assert func is not None
+        assert func.decorators is None
+
+    def test_use_only_not_hook(self, tsx_parser):
+        """Test that 'use' alone is not a hook (too short)."""
+        code = """
+function use() {
+  return null;
+}
+"""
+        tree = tsx_parser.parse(code.encode())
+        elements = extract_javascript_elements(tree, code.split("\n"))
+
+        func = next((e for e in elements if e.name == "use"), None)
+        assert func is not None
+        assert func.decorators is None
+
+    def test_user_not_hook(self, tsx_parser):
+        """Test that 'user' is not a hook."""
+        code = """
+function user() {
+  return { name: 'John' };
+}
+"""
+        tree = tsx_parser.parse(code.encode())
+        elements = extract_javascript_elements(tree, code.split("\n"))
+
+        func = next((e for e in elements if e.name == "user"), None)
+        assert func is not None
+        assert func.decorators is None
