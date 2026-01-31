@@ -46,6 +46,12 @@ class PHPExtractor(BaseExtractor):
         """Extract methods and properties from a PHP class."""
         return extract_php_class_members(class_node, lines)
 
+    def extract_enum_members(
+        self, enum_node: Node, lines: list[str]
+    ) -> tuple[list[ExtractedElement], list[ExtractedElement]]:
+        """Extract methods and cases from a PHP enum."""
+        return extract_php_enum_members(enum_node, lines)
+
     def extract_imports(self, tree: Tree, lines: list[str]) -> list[ExtractedImport]:
         """Extract use statements from PHP AST."""
         return extract_php_imports(tree, lines)
@@ -123,6 +129,11 @@ def extract_php_elements(tree: Tree, lines: list[str]) -> list[ExtractedElement]
                 elements.append(elem)
         elif node.type == "enum_declaration":
             elem = _extract_php_enum(node, lines)
+            if elem:
+                elements.append(elem)
+        elif node.type == "assignment_expression":
+            # Check for arrow functions and closures assigned to variables
+            elem = _extract_php_assigned_callable(node, lines)
             if elem:
                 elements.append(elem)
 
@@ -268,6 +279,71 @@ def _extract_php_enum(node: Node, lines: list[str]) -> ExtractedElement | None:
         byte_offset=node.start_byte,
         node=node,
         return_type=backing_type,  # Store backing type in return_type field
+    )
+
+
+def _extract_php_assigned_callable(node: Node, lines: list[str]) -> ExtractedElement | None:
+    """Extract arrow functions and closures assigned to variables.
+
+    Handles patterns like:
+        $multiply = fn($x, $y) => $x * $y;
+        $add = function($a, $b) { return $a + $b; };
+
+    Args:
+        node: An assignment_expression node.
+        lines: Source code lines.
+
+    Returns:
+        ExtractedElement if this is a callable assignment, None otherwise.
+    """
+    var_name = None
+    callable_node = None
+    callable_type = None  # "arrow" or "closure"
+
+    for child in node.children:
+        if child.type == "variable_name":
+            # Get the variable name (without $)
+            for name_child in child.children:
+                if name_child.type == "name":
+                    var_name = get_node_text(name_child)
+                    break
+        elif child.type == "arrow_function":
+            callable_node = child
+            callable_type = "arrow"
+        elif child.type == "anonymous_function":
+            callable_node = child
+            callable_type = "closure"
+
+    if not var_name or not callable_node:
+        return None
+
+    # Extract parameters
+    params_node = None
+    for child in callable_node.children:
+        if child.type == "formal_parameters":
+            params_node = child
+            break
+
+    parameters = _extract_php_parameters(params_node) if params_node else []
+    params_str = get_node_text(params_node) if params_node else "()"
+
+    # Build signature
+    if callable_type == "arrow":
+        signature = f"fn{params_str}"
+    else:
+        signature = f"function{params_str}"
+
+    return ExtractedElement(
+        element_type="function",
+        name=var_name,
+        line_start=node.start_point[0] + 1,
+        line_end=node.end_point[0] + 1,
+        raw_code=node.text.decode('utf-8') if node.text else "",
+        byte_offset=node.start_byte,
+        node=callable_node,
+        signature=signature,
+        decorators=[callable_type],
+        parameters=parameters or None,
     )
 
 
@@ -423,6 +499,70 @@ def extract_php_class_members(
     return methods, properties
 
 
+def extract_php_enum_members(
+    enum_node: Node, lines: list[str]
+) -> tuple[list[ExtractedElement], list[ExtractedElement]]:
+    """Extract methods and cases from a PHP enum.
+
+    Args:
+        enum_node: An enum_declaration node.
+        lines: Source code lines.
+
+    Returns:
+        Tuple of (methods, cases).
+    """
+    methods: list[ExtractedElement] = []
+    cases: list[ExtractedElement] = []
+
+    # Find enum_declaration_list (enum body)
+    decl_list = None
+    for child in enum_node.children:
+        if child.type == "enum_declaration_list":
+            decl_list = child
+            break
+
+    if not decl_list:
+        return methods, cases
+
+    for child in decl_list.children:
+        if child.type == "method_declaration":
+            elem = _extract_php_method(child, lines)
+            if elem:
+                methods.append(elem)
+        elif child.type == "enum_case":
+            elem = _extract_php_enum_case(child, lines)
+            if elem:
+                cases.append(elem)
+
+    return methods, cases
+
+
+def _extract_php_enum_case(node: Node, lines: list[str]) -> ExtractedElement | None:
+    """Extract a PHP enum case definition."""
+    name = None
+    value = None
+
+    for child in node.children:
+        if child.type == "name":
+            name = get_node_text(child)
+        elif child.type == "string" or child.type == "integer":
+            value = get_node_text(child)
+
+    if not name:
+        return None
+
+    return ExtractedElement(
+        element_type="constant",
+        name=name,
+        line_start=node.start_point[0] + 1,
+        line_end=node.end_point[0] + 1,
+        raw_code=node.text.decode('utf-8') if node.text else "",
+        byte_offset=node.start_byte,
+        node=node,
+        signature=f"case {name}" + (f" = {value}" if value else ""),
+    )
+
+
 def _extract_php_method(node: Node, lines: list[str]) -> ExtractedElement | None:
     """Extract a PHP method definition."""
     name = None
@@ -559,6 +699,7 @@ __all__ = [
     "PHPExtractor",
     "extract_php_elements",
     "extract_php_class_members",
+    "extract_php_enum_members",
     "extract_php_imports",
     "extract_php_calls",
     "extract_php_class_properties",
