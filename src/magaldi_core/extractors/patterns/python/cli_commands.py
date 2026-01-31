@@ -4,6 +4,8 @@ Pattern definitions and detection functions for CLI commands
 in Python CLI frameworks:
 - Click
 - Typer
+- argparse (via main function detection)
+- Fire (implicit via function exposure)
 """
 
 from __future__ import annotations
@@ -17,14 +19,18 @@ from magaldi_core.extractors.types import CliCommand, DecoratorInfo
 # CLI command decorator patterns (exact matches)
 # Maps decorator name -> framework
 _PYTHON_CLI_COMMAND_PATTERNS: dict[str, str] = {
+    # Click patterns
     "click.command": "click",
     "click.group": "click",
+    # Typer patterns
     "app.command": "typer",
     "typer.command": "typer",
+    "app.callback": "typer",  # Typer root command callback
+    "typer.callback": "typer",
 }
 
 # CLI decorator suffixes that indicate a command (for patterns like main.command, web.group)
-_PYTHON_CLI_COMMAND_SUFFIXES: set[str] = {".command", ".group"}
+_PYTHON_CLI_COMMAND_SUFFIXES: set[str] = {".command", ".group", ".callback"}
 
 # CLI option decorator patterns
 _PYTHON_CLI_OPTION_PATTERNS: set[str] = {

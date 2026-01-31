@@ -2,11 +2,14 @@
 
 Pattern definitions and detection functions for HTTP routes
 in Python web frameworks:
-- FastAPI
+- FastAPI (including WebSocket)
 - Flask
 - Django REST Framework
-- Starlette
+- Starlette (including WebSocket)
 - Litestar
+- Quart (async Flask)
+- Sanic
+- Falcon
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from magaldi_core.extractors.types import DecoratorInfo, HttpRoute
 
 # Maps decorator name -> (HTTP method, framework)
 # Use "*" for method when it needs to be extracted from args
+# Use "WEBSOCKET" for WebSocket endpoints
 _PYTHON_HTTP_ROUTE_PATTERNS: dict[str, tuple[str, str]] = {
     # FastAPI patterns
     "router.get": ("GET", "fastapi"),
@@ -30,11 +34,17 @@ _PYTHON_HTTP_ROUTE_PATTERNS: dict[str, tuple[str, str]] = {
     "router.patch": ("PATCH", "fastapi"),
     "router.head": ("HEAD", "fastapi"),
     "router.options": ("OPTIONS", "fastapi"),
+    "router.trace": ("TRACE", "fastapi"),
+    "router.websocket": ("WEBSOCKET", "fastapi"),
     "app.get": ("GET", "fastapi"),
     "app.post": ("POST", "fastapi"),
     "app.put": ("PUT", "fastapi"),
     "app.delete": ("DELETE", "fastapi"),
     "app.patch": ("PATCH", "fastapi"),
+    "app.head": ("HEAD", "fastapi"),
+    "app.options": ("OPTIONS", "fastapi"),
+    "app.trace": ("TRACE", "fastapi"),
+    "app.websocket": ("WEBSOCKET", "fastapi"),
     # Flask patterns
     "app.route": ("*", "flask"),
     "blueprint.route": ("*", "flask"),
@@ -42,14 +52,35 @@ _PYTHON_HTTP_ROUTE_PATTERNS: dict[str, tuple[str, str]] = {
     # Django REST Framework patterns
     "api_view": ("*", "django-rest"),
     "action": ("*", "django-rest"),
-    # Starlette patterns (same syntax as FastAPI)
+    # Starlette patterns
     "route": ("*", "starlette"),
+    "websocket_route": ("WEBSOCKET", "starlette"),
     # Litestar patterns
     "get": ("GET", "litestar"),
     "post": ("POST", "litestar"),
     "put": ("PUT", "litestar"),
     "delete": ("DELETE", "litestar"),
     "patch": ("PATCH", "litestar"),
+    "head": ("HEAD", "litestar"),
+    "websocket": ("WEBSOCKET", "litestar"),
+    # Quart patterns (async Flask)
+    "quart.route": ("*", "quart"),
+    "quart.get": ("GET", "quart"),
+    "quart.post": ("POST", "quart"),
+    "quart.put": ("PUT", "quart"),
+    "quart.delete": ("DELETE", "quart"),
+    "quart.websocket": ("WEBSOCKET", "quart"),
+    # Sanic patterns
+    "sanic.route": ("*", "sanic"),
+    "sanic.get": ("GET", "sanic"),
+    "sanic.post": ("POST", "sanic"),
+    "sanic.put": ("PUT", "sanic"),
+    "sanic.delete": ("DELETE", "sanic"),
+    "sanic.patch": ("PATCH", "sanic"),
+    "sanic.websocket": ("WEBSOCKET", "sanic"),
+    # Falcon patterns
+    "falcon.before": ("*", "falcon"),
+    "falcon.after": ("*", "falcon"),
 }
 
 

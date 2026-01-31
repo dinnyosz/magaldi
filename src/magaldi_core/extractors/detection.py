@@ -96,17 +96,27 @@ _PUBLIC_API_DECORATORS = {
     "public",
     "export",
     "exposed",
-    # FastAPI
+    # FastAPI (including WebSocket)
     "router.get", "router.post", "router.put", "router.delete", "router.patch",
+    "router.head", "router.options", "router.trace", "router.websocket",
     "app.get", "app.post", "app.put", "app.delete", "app.patch",
+    "app.head", "app.options", "app.trace", "app.websocket",
     # Flask
     "app.route", "blueprint.route", "bp.route",
     # Django REST
     "api_view", "action",
+    # Starlette
+    "route", "websocket_route",
+    # Litestar
+    "get", "post", "put", "delete", "patch", "head", "websocket",
+    # Quart (async Flask)
+    "quart.route", "quart.websocket",
+    # Sanic
+    "sanic.route", "sanic.websocket",
     # NestJS
     "Get", "Post", "Put", "Delete", "Patch",
     # Click/Typer CLI
-    "click.command", "click.group", "app.command", "typer.command",
+    "click.command", "click.group", "app.command", "typer.command", "app.callback",
 }
 
 

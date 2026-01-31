@@ -286,6 +286,63 @@ class TestHttpRouteDetection:
         assert len(routes) == 1
         assert routes[0].path_params == ["user_id"]
 
+    def test_detect_fastapi_websocket(self):
+        """Test FastAPI WebSocket route detection."""
+        decorators = [
+            DecoratorInfo(
+                name="router.websocket",
+                args='"/ws"',
+                full='router.websocket("/ws")',
+            )
+        ]
+        routes = detect_http_routes(decorators, "python")
+        assert len(routes) == 1
+        assert routes[0].method == "WEBSOCKET"
+        assert routes[0].path == "/ws"
+        assert routes[0].framework == "fastapi"
+
+    def test_detect_app_websocket(self):
+        """Test FastAPI app.websocket detection."""
+        decorators = [
+            DecoratorInfo(
+                name="app.websocket",
+                args='"/ws/{channel}"',
+                full='app.websocket("/ws/{channel}")',
+            )
+        ]
+        routes = detect_http_routes(decorators, "python")
+        assert len(routes) == 1
+        assert routes[0].method == "WEBSOCKET"
+        assert routes[0].path_params == ["channel"]
+
+    def test_detect_litestar_websocket(self):
+        """Test Litestar websocket decorator detection."""
+        decorators = [
+            DecoratorInfo(
+                name="websocket",
+                args='"/stream"',
+                full='websocket("/stream")',
+            )
+        ]
+        routes = detect_http_routes(decorators, "python")
+        assert len(routes) == 1
+        assert routes[0].method == "WEBSOCKET"
+        assert routes[0].framework == "litestar"
+
+    def test_detect_sanic_route(self):
+        """Test Sanic route detection."""
+        decorators = [
+            DecoratorInfo(
+                name="sanic.get",
+                args='"/api/data"',
+                full='sanic.get("/api/data")',
+            )
+        ]
+        routes = detect_http_routes(decorators, "python")
+        assert len(routes) == 1
+        assert routes[0].method == "GET"
+        assert routes[0].framework == "sanic"
+
 
 class TestCliCommandDetection:
     """Tests for CLI command detection."""
@@ -334,6 +391,20 @@ class TestCliCommandDetection:
         # Check that required option is detected
         option_names = [opt["name"] for opt in commands[0].options]
         assert "--verbose" in option_names or "path" in option_names
+
+    def test_detect_typer_callback(self):
+        """Test Typer callback (root command) detection."""
+        decorators = [DecoratorInfo(name="app.callback", args=None, full="app.callback()")]
+        commands = detect_cli_commands(decorators, "main", "python")
+        assert len(commands) == 1
+        assert commands[0].framework == "typer"
+
+    def test_detect_command_suffix_pattern(self):
+        """Test detection of commands with custom group names like main.command."""
+        decorators = [DecoratorInfo(name="web.command", args=None, full="web.command()")]
+        commands = detect_cli_commands(decorators, "serve", "python")
+        assert len(commands) == 1
+        assert commands[0].framework == "click"
 
 
 class TestPublicApiDetection:
