@@ -122,13 +122,18 @@ def extract_javascript_elements(tree: Tree, lines: list[str]) -> list[ExtractedE
         elif node.type == "function_declaration":
             elements.append(_extract_js_function(node, lines))
         elif node.type == "lexical_declaration":
-            # const/let declarations - check for arrow functions
+            # const/let declarations - check for arrow functions and React wrappers
             for decl in get_children_by_type(node, "variable_declarator"):
                 name_node = get_child_by_field(decl, "name")
                 value_node = get_child_by_field(decl, "value")
+                name = get_node_text(name_node) if name_node else "unknown"
                 if value_node and value_node.type == "arrow_function":
-                    name = get_node_text(name_node) if name_node else "unknown"
                     elements.append(_extract_js_arrow_function(decl, name, lines))
+                elif value_node and value_node.type == "call_expression":
+                    # Check for React wrapper patterns: memo(), forwardRef(), lazy()
+                    elem = _extract_react_wrapped_component(decl, name, value_node, lines)
+                    if elem:
+                        elements.append(elem)
         # TypeScript-specific declarations
         elif node.type == "interface_declaration":
             elements.append(_extract_ts_interface(node, lines))
@@ -384,6 +389,73 @@ def _extract_js_arrow_function(node: Node, name: str, lines: list[str]) -> Extra
         raw_code=raw_code,
         byte_offset=node.start_byte,
         node=arrow_func_node,
+    )
+
+
+# React wrapper functions that wrap components
+REACT_WRAPPERS = {"memo", "forwardRef", "lazy", "React.memo", "React.forwardRef", "React.lazy"}
+
+
+def _extract_react_wrapped_component(
+    decl_node: Node, name: str, call_node: Node, lines: list[str]
+) -> ExtractedElement | None:
+    """Extract a React component wrapped in memo, forwardRef, or lazy.
+
+    Handles patterns like:
+        const Greeting = memo(function Greeting({ name }) {...});
+        const MyInput = forwardRef(function MyInput(props, ref) {...});
+        const LazyComponent = lazy(() => import('./Component'));
+
+    Args:
+        decl_node: The variable_declarator node.
+        name: The variable name (component name).
+        call_node: The call_expression node (e.g., memo(...)).
+        lines: Source code lines.
+
+    Returns:
+        ExtractedElement if this is a React wrapper pattern, None otherwise.
+    """
+    # Get the wrapper function name (memo, forwardRef, etc.)
+    func_node = get_child_by_field(call_node, "function")
+    if not func_node:
+        return None
+
+    wrapper_name = get_node_text(func_node)
+    if wrapper_name not in REACT_WRAPPERS:
+        return None
+
+    # Get the arguments to find the wrapped function
+    args_node = get_child_by_field(call_node, "arguments")
+    if not args_node:
+        return None
+
+    # Find the function/arrow_function in the arguments
+    wrapped_func_node: Node | None = None
+    for child in args_node.children:
+        if child.type in ("function", "function_expression", "arrow_function"):
+            wrapped_func_node = child
+            break
+
+    line_start = decl_node.start_point[0] + 1
+    line_end = decl_node.end_point[0] + 1
+    raw_code = decl_node.text.decode('utf-8') if decl_node.text else ""
+
+    # Use the wrapped function node for call extraction if available
+    node_for_calls = wrapped_func_node if wrapped_func_node else call_node
+
+    # Add the wrapper as a decorator for discoverability
+    decorator_info = DecoratorInfo(name=wrapper_name, args=None, full=wrapper_name)
+
+    return ExtractedElement(
+        element_type="function",
+        name=name,
+        line_start=line_start,
+        line_end=line_end,
+        raw_code=raw_code,
+        byte_offset=decl_node.start_byte,
+        node=node_for_calls,
+        decorators=[wrapper_name],
+        decorator_details=[decorator_info],
     )
 
 
