@@ -289,6 +289,8 @@ class FeatureRepository:
                 }
             },
             refresh=True,
+            timeout="5m",
+            request_timeout=300,
         )
 
         return response.get("deleted", 0)
@@ -326,6 +328,8 @@ class FeatureRepository:
                 }
             },
             refresh=True,
+            timeout="5m",
+            request_timeout=300,
         )
 
         return response.get("deleted", 0)
