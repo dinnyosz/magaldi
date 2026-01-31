@@ -44,9 +44,14 @@ class ElasticsearchRepository:
     # =========================================================================
 
     @property
+    def config(self) -> MagaldiConfig:
+        """Get configuration."""
+        return self._base._config
+
+    @property
     def _config(self) -> MagaldiConfig:
         """Get configuration (for backward compatibility)."""
-        return self._base.config
+        return self._base._config
 
     @property
     def _client(self) -> Any:
