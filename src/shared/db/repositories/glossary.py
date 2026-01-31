@@ -21,6 +21,10 @@ class GlossaryRepository:
         """Get Elasticsearch client from base."""
         return self._base._get_client()
 
+    def _get_bulk_timeout(self) -> int:
+        """Get bulk operation timeout from config."""
+        return self._base._config.elasticsearch.bulk_timeout
+
     def index_glossary(
         self,
         glossary_id: str,
@@ -306,6 +310,7 @@ class GlossaryRepository:
             Number of glossary entries deleted.
         """
         client = self._get_client()
+        bulk_timeout = self._get_bulk_timeout()
 
         response = client.delete_by_query(
             index=INDEX_NAME,
@@ -320,8 +325,8 @@ class GlossaryRepository:
                 }
             },
             refresh=True,
-            timeout="5m",
-            request_timeout=300,
+            timeout=f"{bulk_timeout}s",
+            request_timeout=bulk_timeout,
         )
 
         return response.get("deleted", 0)

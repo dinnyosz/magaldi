@@ -25,6 +25,10 @@ class ElementRepository:
         """Get Elasticsearch client from base."""
         return self._base._get_client()
 
+    def _get_bulk_timeout(self) -> int:
+        """Get bulk operation timeout from config."""
+        return self._base._config.elasticsearch.bulk_timeout
+
     def index_element(
         self,
         element: CodeElement,
@@ -451,6 +455,7 @@ class ElementRepository:
     ) -> int:
         """Delete all documents for a file."""
         client = self._get_client()
+        bulk_timeout = self._get_bulk_timeout()
         result = client.delete_by_query(
             index=INDEX_NAME,
             body={
@@ -466,6 +471,8 @@ class ElementRepository:
                 }
             },
             refresh=True,
+            timeout=f"{bulk_timeout}s",
+            request_timeout=bulk_timeout,
         )
         return result.get("deleted", 0)
 
@@ -530,6 +537,7 @@ class ElementRepository:
         Used for cleanup when file needs to be reprocessed.
         """
         client = self._get_client()
+        bulk_timeout = self._get_bulk_timeout()
         result = client.delete_by_query(
             index=INDEX_NAME,
             body={
@@ -545,6 +553,8 @@ class ElementRepository:
                 }
             },
             refresh=True,
+            timeout=f"{bulk_timeout}s",
+            request_timeout=bulk_timeout,
         )
         return result.get("deleted", 0)
 
@@ -555,6 +565,7 @@ class ElementRepository:
             Number of documents deleted.
         """
         client = self._get_client()
+        bulk_timeout = self._get_bulk_timeout()
         response = client.delete_by_query(
             index=INDEX_NAME,
             body={
@@ -569,6 +580,8 @@ class ElementRepository:
                 }
             },
             refresh=True,
+            timeout=f"{bulk_timeout}s",
+            request_timeout=bulk_timeout,
         )
         return response.get("deleted", 0)
 
@@ -664,6 +677,7 @@ class ElementRepository:
                 script_source = "ctx._source.file_hash = params.file_hash"
                 script_params = {"file_hash": new_file_hash}
 
+            bulk_timeout = self._get_bulk_timeout()
             result = client.update_by_query(
                 index=INDEX_NAME,
                 body={
@@ -683,6 +697,8 @@ class ElementRepository:
                     },
                 },
                 refresh=True,
+                timeout=f"{bulk_timeout}s",
+                request_timeout=bulk_timeout,
             )
             updated = result.get("updated", 0)
             total_updated += updated

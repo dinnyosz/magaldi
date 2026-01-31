@@ -48,6 +48,7 @@ class ElasticsearchConfig:
     scheme: str = "http"
     index: str = "magaldi_code_elements"
     timeout: int = 30
+    bulk_timeout: int = 300  # 5 minutes for bulk operations (delete_by_query, update_by_query)
     retry_on_timeout: bool = True
     max_retries: int = 3
 
@@ -749,6 +750,7 @@ def _apply_env_overrides(config: MagaldiConfig) -> MagaldiConfig:
         "MAGALDI_ELASTICSEARCH_SCHEME": ("elasticsearch", "scheme"),
         "MAGALDI_ELASTICSEARCH_INDEX": ("elasticsearch", "index"),
         "MAGALDI_ELASTICSEARCH_TIMEOUT": ("elasticsearch", "timeout", int),
+        "MAGALDI_ELASTICSEARCH_BULK_TIMEOUT": ("elasticsearch", "bulk_timeout", int),
         # Redis
         "MAGALDI_REDIS_HOST": ("redis", "host"),
         "MAGALDI_REDIS_PORT": ("redis", "port", int),

@@ -21,6 +21,10 @@ class FeatureRepository:
         """Get Elasticsearch client from base."""
         return self._base._get_client()
 
+    def _get_bulk_timeout(self) -> int:
+        """Get bulk operation timeout from config."""
+        return self._base._config.elasticsearch.bulk_timeout
+
     def index_feature(
         self,
         feature_id: str,
@@ -274,6 +278,7 @@ class FeatureRepository:
         """
         client = self._get_client()
 
+        bulk_timeout = self._get_bulk_timeout()
         response = client.delete_by_query(
             index=INDEX_NAME,
             body={
@@ -289,8 +294,8 @@ class FeatureRepository:
                 }
             },
             refresh=True,
-            timeout="5m",
-            request_timeout=300,
+            timeout=f"{bulk_timeout}s",
+            request_timeout=bulk_timeout,
         )
 
         return response.get("deleted", 0)
@@ -312,6 +317,7 @@ class FeatureRepository:
             Number of subfeatures deleted.
         """
         client = self._get_client()
+        bulk_timeout = self._get_bulk_timeout()
 
         response = client.delete_by_query(
             index=INDEX_NAME,
@@ -328,8 +334,8 @@ class FeatureRepository:
                 }
             },
             refresh=True,
-            timeout="5m",
-            request_timeout=300,
+            timeout=f"{bulk_timeout}s",
+            request_timeout=bulk_timeout,
         )
 
         return response.get("deleted", 0)
@@ -471,6 +477,7 @@ class FeatureRepository:
             Number of elements updated.
         """
         client = self._get_client()
+        bulk_timeout = self._get_bulk_timeout()
 
         response = client.update_by_query(
             index=INDEX_NAME,
@@ -491,6 +498,8 @@ class FeatureRepository:
                 },
             },
             refresh=True,
+            timeout=f"{bulk_timeout}s",
+            request_timeout=bulk_timeout,
         )
 
         return response.get("updated", 0)

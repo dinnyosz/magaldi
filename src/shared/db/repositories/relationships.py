@@ -22,6 +22,10 @@ if TYPE_CHECKING:
 class RelationshipsRepository(ElasticsearchBase):
     """Repository for querying and storing code relationships."""
 
+    def _get_bulk_timeout(self) -> int:
+        """Get bulk operation timeout from config."""
+        return self._config.elasticsearch.bulk_timeout
+
     # =========================================================================
     # CRUD Operations
     # =========================================================================
@@ -100,6 +104,7 @@ class RelationshipsRepository(ElasticsearchBase):
             Number of deleted relationships.
         """
         client = self._get_client()
+        bulk_timeout = self._get_bulk_timeout()
         result = client.delete_by_query(
             index=RELATIONSHIPS_INDEX_NAME,
             body={
@@ -114,6 +119,8 @@ class RelationshipsRepository(ElasticsearchBase):
                 }
             },
             refresh=True,
+            timeout=f"{bulk_timeout}s",
+            request_timeout=bulk_timeout,
         )
         return result.get("deleted", 0)
 
@@ -347,6 +354,7 @@ class RelationshipsRepository(ElasticsearchBase):
     ) -> int:
         """Delete all external refs for a specific user."""
         client = self._get_client()
+        bulk_timeout = self._get_bulk_timeout()
         result = client.delete_by_query(
             index=EXTERNAL_REFS_INDEX_NAME,
             body={
@@ -361,5 +369,7 @@ class RelationshipsRepository(ElasticsearchBase):
                 }
             },
             refresh=True,
+            timeout=f"{bulk_timeout}s",
+            request_timeout=bulk_timeout,
         )
         return result.get("deleted", 0)

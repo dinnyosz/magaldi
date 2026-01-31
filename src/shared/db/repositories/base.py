@@ -405,6 +405,9 @@ class ElasticsearchBase:
                     "port": es_config.port,
                     "scheme": es_config.scheme,
                 }],
+                timeout=es_config.timeout,
+                retry_on_timeout=es_config.retry_on_timeout,
+                max_retries=es_config.max_retries,
             )
             # Ensure index exists
             self._ensure_index()
