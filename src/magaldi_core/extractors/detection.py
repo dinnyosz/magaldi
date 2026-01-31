@@ -136,6 +136,11 @@ _PUBLIC_API_DECORATORS = {
     "AsCommand",
     # Symfony Route (PHP)
     "Route",
+    # Rust Actix-web/Rocket routes
+    "get", "post", "put", "delete", "patch", "head", "options", "trace", "route",
+    "actix_web::main", "actix_rt::main", "launch", "rocket::launch",
+    # Rust Tokio/test
+    "tokio::main", "test", "tokio::test", "actix_rt::test",
 }
 
 

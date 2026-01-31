@@ -6,7 +6,7 @@ patterns/
   php/          - PHP frameworks (Slim, Laravel, Symfony)
   python/       - Python frameworks (FastAPI, Flask, Django, Click, Typer)
   javascript/   - JS/TS frameworks (Express, NestJS, Hono)
-  rust/         - Rust frameworks (Actix, Axum, Rocket) [future]
+  rust/         - Rust frameworks (Actix-web, Rocket)
 
 These extractors build on top of language extractors to detect
 framework/library-specific code structures like routes and CLI commands.
@@ -29,6 +29,11 @@ from magaldi_core.extractors.patterns.javascript import (
     detect_javascript_http_routes,
 )
 
+# Rust patterns (attribute-based detection)
+from magaldi_core.extractors.patterns.rust import (
+    detect_rust_http_routes,
+)
+
 __all__ = [
     # PHP
     "extract_slim_routes",
@@ -38,4 +43,6 @@ __all__ = [
     "detect_python_cli_commands",
     # JavaScript/TypeScript
     "detect_javascript_http_routes",
+    # Rust
+    "detect_rust_http_routes",
 ]
