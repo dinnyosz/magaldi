@@ -30,7 +30,50 @@ from shared.cli._shared import check_model_availability, console, main
 from shared.config import load_config
 
 if TYPE_CHECKING:
+    from magaldi_core.discovery import DiscoveryResult
     from shared.config import MagaldiConfig
+
+
+def _run_extraction_only(
+    discovery_result: DiscoveryResult,
+    config: MagaldiConfig,
+    user: str,
+    features: bool,
+    glossary: bool,
+    skip_ai: bool,
+    workers: int,
+) -> None:
+    """Run feature and/or glossary extraction without parsing.
+
+    Called when --features or --glossary is specified but no code changes detected.
+    """
+    from shared.cli.extract import run_feature_extraction, run_glossary_extraction
+
+    if skip_ai:
+        console.print("[yellow]Skipping extraction: --skip-ai is set[/]")
+        return
+
+    if features:
+        console.print("\n[bold blue]Feature Extraction[/] (no code changes)")
+        feature_result = run_feature_extraction(
+            discovery_result.scope,
+            discovery_result.repository,
+            user,
+            config,
+            workers=workers,
+        )
+        if feature_result:
+            print_feature_result(feature_result)
+
+    if glossary:
+        console.print("\n[bold blue]Glossary Extraction[/] (no code changes)")
+        run_glossary_extraction(
+            scope=discovery_result.scope,
+            repository=discovery_result.repository,
+            username=user,
+            config=config,
+            workers=workers,
+        )
 
 
 @main.command()
@@ -93,6 +136,11 @@ def parse(
 
         if manifest.files_to_parse == 0:
             console.print("\n[green]No files to parse. Repository is up to date.[/]")
+            # If --features or --glossary requested, still run those phases
+            if (features or glossary) and not dry_run:
+                _run_extraction_only(
+                    discovery_result, config, user, features, glossary, skip_ai, workers
+                )
             return
 
         # Phase 3: Parsing
