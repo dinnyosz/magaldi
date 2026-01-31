@@ -343,6 +343,139 @@ class TestHttpRouteDetection:
         assert routes[0].method == "GET"
         assert routes[0].framework == "sanic"
 
+    # JavaScript/TypeScript tests
+    def test_detect_nestjs_get(self):
+        """Test NestJS @Get decorator detection."""
+        decorators = [
+            DecoratorInfo(
+                name="Get",
+                args='"/users/:id"',
+                full='Get("/users/:id")',
+            )
+        ]
+        routes = detect_http_routes(decorators, "typescript")
+        assert len(routes) == 1
+        assert routes[0].method == "GET"
+        assert routes[0].path == "/users/:id"
+        assert routes[0].path_params == ["id"]
+        assert routes[0].framework == "nestjs"
+
+    def test_detect_nestjs_websocket_gateway(self):
+        """Test NestJS @WebSocketGateway decorator detection."""
+        decorators = [
+            DecoratorInfo(
+                name="WebSocketGateway",
+                args='"/chat"',
+                full='WebSocketGateway("/chat")',
+            )
+        ]
+        routes = detect_http_routes(decorators, "typescript")
+        assert len(routes) == 1
+        assert routes[0].method == "WEBSOCKET"
+        assert routes[0].framework == "nestjs"
+
+    def test_detect_nestjs_subscribe_message(self):
+        """Test NestJS @SubscribeMessage decorator detection."""
+        decorators = [
+            DecoratorInfo(
+                name="SubscribeMessage",
+                args='"events"',
+                full='SubscribeMessage("events")',
+            )
+        ]
+        routes = detect_http_routes(decorators, "typescript")
+        assert len(routes) == 1
+        assert routes[0].method == "WEBSOCKET"
+        assert routes[0].path == "events"
+        assert routes[0].framework == "nestjs"
+
+    def test_detect_nestjs_message_pattern(self):
+        """Test NestJS @MessagePattern decorator detection."""
+        decorators = [
+            DecoratorInfo(
+                name="MessagePattern",
+                args='"sum"',
+                full='MessagePattern("sum")',
+            )
+        ]
+        routes = detect_http_routes(decorators, "typescript")
+        assert len(routes) == 1
+        assert routes[0].method == "MESSAGE"
+        assert routes[0].path == "sum"
+        assert routes[0].framework == "nestjs"
+
+    def test_detect_nestjs_event_pattern(self):
+        """Test NestJS @EventPattern decorator detection."""
+        decorators = [
+            DecoratorInfo(
+                name="EventPattern",
+                args='"user_created"',
+                full='EventPattern("user_created")',
+            )
+        ]
+        routes = detect_http_routes(decorators, "typescript")
+        assert len(routes) == 1
+        assert routes[0].method == "EVENT"
+        assert routes[0].path == "user_created"
+        assert routes[0].framework == "nestjs"
+
+    def test_detect_nestjs_sse(self):
+        """Test NestJS @Sse decorator detection."""
+        decorators = [
+            DecoratorInfo(
+                name="Sse",
+                args='"/events"',
+                full='Sse("/events")',
+            )
+        ]
+        routes = detect_http_routes(decorators, "typescript")
+        assert len(routes) == 1
+        assert routes[0].method == "SSE"
+        assert routes[0].path == "/events"
+        assert routes[0].framework == "nestjs"
+
+    def test_detect_express_router(self):
+        """Test Express router.get detection."""
+        decorators = [
+            DecoratorInfo(
+                name="router.get",
+                args='"/api/items"',
+                full='router.get("/api/items")',
+            )
+        ]
+        routes = detect_http_routes(decorators, "javascript")
+        assert len(routes) == 1
+        assert routes[0].method == "GET"
+        assert routes[0].framework == "express"
+
+    def test_detect_fastify_route(self):
+        """Test Fastify route detection."""
+        decorators = [
+            DecoratorInfo(
+                name="fastify.post",
+                args='"/api/submit"',
+                full='fastify.post("/api/submit")',
+            )
+        ]
+        routes = detect_http_routes(decorators, "javascript")
+        assert len(routes) == 1
+        assert routes[0].method == "POST"
+        assert routes[0].framework == "fastify"
+
+    def test_detect_hono_route(self):
+        """Test Hono route detection."""
+        decorators = [
+            DecoratorInfo(
+                name="hono.get",
+                args='"/health"',
+                full='hono.get("/health")',
+            )
+        ]
+        routes = detect_http_routes(decorators, "javascript")
+        assert len(routes) == 1
+        assert routes[0].method == "GET"
+        assert routes[0].framework == "hono"
+
 
 class TestCliCommandDetection:
     """Tests for CLI command detection."""

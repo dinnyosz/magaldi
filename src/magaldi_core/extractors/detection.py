@@ -113,8 +113,23 @@ _PUBLIC_API_DECORATORS = {
     "quart.route", "quart.websocket",
     # Sanic
     "sanic.route", "sanic.websocket",
-    # NestJS
-    "Get", "Post", "Put", "Delete", "Patch",
+    # NestJS HTTP
+    "Get", "Post", "Put", "Delete", "Patch", "Head", "Options", "All",
+    # NestJS WebSocket
+    "WebSocketGateway", "SubscribeMessage",
+    # NestJS Microservices
+    "MessagePattern", "EventPattern",
+    # NestJS SSE
+    "Sse",
+    # Express/Fastify/Hono/Koa (method calls used as decorators)
+    "router.get", "router.post", "router.put", "router.delete", "router.patch",
+    "router.head", "router.options", "router.all",
+    "express.get", "express.post", "express.put", "express.delete", "express.patch",
+    "fastify.get", "fastify.post", "fastify.put", "fastify.delete", "fastify.patch",
+    "hono.get", "hono.post", "hono.put", "hono.delete", "hono.patch",
+    "c.get", "c.post", "c.put", "c.delete", "c.patch",
+    "server.get", "server.post", "server.put", "server.delete", "server.patch",
+    "koaRouter.get", "koaRouter.post", "koaRouter.put", "koaRouter.delete", "koaRouter.patch",
     # Click/Typer CLI
     "click.command", "click.group", "app.command", "typer.command", "app.callback",
 }

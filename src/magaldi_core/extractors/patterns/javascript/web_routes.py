@@ -2,9 +2,11 @@
 
 Pattern definitions and detection functions for HTTP routes
 in JS/TS web frameworks:
-- NestJS
+- NestJS (HTTP, WebSocket, Microservices, SSE)
 - Hono
 - Express
+- Fastify
+- Koa
 """
 
 from __future__ import annotations
@@ -19,8 +21,12 @@ from magaldi_core.extractors.types import DecoratorInfo, HttpRoute
 
 # Maps decorator name -> (HTTP method, framework)
 # Use "*" for method when it needs to be extracted from args
+# Use "WEBSOCKET" for WebSocket endpoints
+# Use "MESSAGE" for microservice message patterns
+# Use "EVENT" for microservice event patterns
+# Use "SSE" for Server-Sent Events
 _JAVASCRIPT_HTTP_ROUTE_PATTERNS: dict[str, tuple[str, str]] = {
-    # NestJS patterns (decorators)
+    # NestJS HTTP patterns (decorators)
     "Get": ("GET", "nestjs"),
     "Post": ("POST", "nestjs"),
     "Put": ("PUT", "nestjs"),
@@ -29,6 +35,14 @@ _JAVASCRIPT_HTTP_ROUTE_PATTERNS: dict[str, tuple[str, str]] = {
     "Head": ("HEAD", "nestjs"),
     "Options": ("OPTIONS", "nestjs"),
     "All": ("*", "nestjs"),
+    # NestJS WebSocket patterns
+    "WebSocketGateway": ("WEBSOCKET", "nestjs"),
+    "SubscribeMessage": ("WEBSOCKET", "nestjs"),
+    # NestJS Microservices patterns
+    "MessagePattern": ("MESSAGE", "nestjs"),
+    "EventPattern": ("EVENT", "nestjs"),
+    # NestJS Server-Sent Events
+    "Sse": ("SSE", "nestjs"),
     # Hono patterns (method calls, similar to Express)
     "c.get": ("GET", "hono"),
     "c.post": ("POST", "hono"),
@@ -40,14 +54,45 @@ _JAVASCRIPT_HTTP_ROUTE_PATTERNS: dict[str, tuple[str, str]] = {
     "app.put": ("PUT", "hono"),
     "app.delete": ("DELETE", "hono"),
     "app.patch": ("PATCH", "hono"),
+    "hono.get": ("GET", "hono"),
+    "hono.post": ("POST", "hono"),
+    "hono.put": ("PUT", "hono"),
+    "hono.delete": ("DELETE", "hono"),
+    "hono.patch": ("PATCH", "hono"),
     # Express patterns (method calls)
     # Note: Express uses method calls like app.get(), router.get()
-    # These overlap with Hono but work the same way
     "router.get": ("GET", "express"),
     "router.post": ("POST", "express"),
     "router.put": ("PUT", "express"),
     "router.delete": ("DELETE", "express"),
     "router.patch": ("PATCH", "express"),
+    "router.head": ("HEAD", "express"),
+    "router.options": ("OPTIONS", "express"),
+    "router.all": ("ALL", "express"),
+    "express.get": ("GET", "express"),
+    "express.post": ("POST", "express"),
+    "express.put": ("PUT", "express"),
+    "express.delete": ("DELETE", "express"),
+    "express.patch": ("PATCH", "express"),
+    # Fastify patterns (method calls)
+    "fastify.get": ("GET", "fastify"),
+    "fastify.post": ("POST", "fastify"),
+    "fastify.put": ("PUT", "fastify"),
+    "fastify.delete": ("DELETE", "fastify"),
+    "fastify.patch": ("PATCH", "fastify"),
+    "fastify.head": ("HEAD", "fastify"),
+    "fastify.options": ("OPTIONS", "fastify"),
+    "server.get": ("GET", "fastify"),
+    "server.post": ("POST", "fastify"),
+    "server.put": ("PUT", "fastify"),
+    "server.delete": ("DELETE", "fastify"),
+    "server.patch": ("PATCH", "fastify"),
+    # Koa patterns (via koa-router)
+    "koaRouter.get": ("GET", "koa"),
+    "koaRouter.post": ("POST", "koa"),
+    "koaRouter.put": ("PUT", "koa"),
+    "koaRouter.delete": ("DELETE", "koa"),
+    "koaRouter.patch": ("PATCH", "koa"),
 }
 
 
