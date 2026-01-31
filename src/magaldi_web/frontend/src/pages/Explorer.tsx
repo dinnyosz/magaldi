@@ -35,6 +35,10 @@ type TypeConfig = {
 const typeConfig: Record<string, TypeConfig> = {
   file: { icon: 'bi-file-code', color: 'info', canHaveChildren: true },
   class: { icon: 'bi-box', color: 'primary', canHaveChildren: true },
+  interface: { icon: 'bi-layers', color: 'info', canHaveChildren: true },
+  type_alias: { icon: 'bi-type', color: 'info' },
+  trait: { icon: 'bi-diagram-3', color: 'info', canHaveChildren: true },
+  enum: { icon: 'bi-list-ol', color: 'warning', canHaveChildren: true },
   function: { icon: 'bi-braces', color: 'success', canHaveCallGraph: true },
   method: { icon: 'bi-gear', color: 'warning', canHaveCallGraph: true },
   variable: { icon: 'bi-x-diamond', color: 'secondary' },

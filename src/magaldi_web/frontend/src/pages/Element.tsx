@@ -19,6 +19,10 @@ import { getElement, getSimilarElements, explainElement, getGlossaryTermsForFeat
 const typeConfig: Record<string, { icon: string; color: string; label: string }> = {
   file: { icon: 'bi-file-code', color: 'info', label: 'File' },
   class: { icon: 'bi-box', color: 'purple', label: 'Class' },
+  interface: { icon: 'bi-layers', color: 'info', label: 'Interface' },
+  type_alias: { icon: 'bi-type', color: 'info', label: 'Type Alias' },
+  trait: { icon: 'bi-diagram-3', color: 'info', label: 'Trait' },
+  enum: { icon: 'bi-list-ol', color: 'warning', label: 'Enum' },
   function: { icon: 'bi-braces', color: 'primary', label: 'Function' },
   method: { icon: 'bi-gear', color: 'success', label: 'Method' },
   variable: { icon: 'bi-x-diamond', color: 'secondary', label: 'Variable' },

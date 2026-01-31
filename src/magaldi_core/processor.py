@@ -1177,15 +1177,19 @@ def should_embed(element: CodeElement) -> bool:
     Returns:
         True if element should be embedded.
     """
-    # Files, classes, functions, and methods always get embedded
-    if element.element_type in ("file", "class", "function", "method"):
-        return True
-
-    # Constants and variables always get embedded
-    if element.element_type in ("constant", "variable"):
+    # All code elements get embedded (imports are tracked but not embedded)
+    if element.element_type in (
+        "file", "class", "interface", "type_alias", "trait", "enum",
+        "function", "method", "constant", "variable"
+    ):
         return True
 
     return False
+
+
+# Element types that should NOT go through AI processing (summarization, embedding)
+# These are tracked/stored but don't need AI-generated summaries
+_NON_AI_ELEMENT_TYPES = frozenset({"import"})
 
 
 # =============================================================================
@@ -1847,6 +1851,10 @@ def process_elements(
     state_found_count = 0
     relocated_copied = 0
     for elem in all_elements:
+        # Skip import elements - they're stored but don't need AI processing
+        if elem.element_type in _NON_AI_ELEMENT_TYPES:
+            continue
+
         state = existing_states.get(elem.element_id)
         is_relocated = False
 

@@ -21,6 +21,10 @@ import { getRepositories, getVectorMap, getClusters, type VectorPoint } from '..
 const ELEMENT_COLORS: Record<string, string> = {
   file: '#17a2b8',
   class: '#6f42c1',
+  interface: '#20c997',
+  type_alias: '#6c757d',
+  trait: '#0dcaf0',
+  enum: '#ffc107',
   function: '#0d6efd',
   method: '#198754',
   variable: '#dc3545',
