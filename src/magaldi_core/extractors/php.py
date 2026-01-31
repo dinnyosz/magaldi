@@ -136,6 +136,12 @@ def extract_php_elements(tree: Tree, lines: list[str]) -> list[ExtractedElement]
             elem = _extract_php_assigned_callable(node, lines)
             if elem:
                 elements.append(elem)
+        elif node.type == "const_declaration":
+            # Global constants (const FOO = 'bar';)
+            # Only extract if not inside a class (class constants are handled separately)
+            if node.parent and node.parent.type not in ("declaration_list", "enum_declaration_list"):
+                consts = _extract_php_global_constants(node, lines)
+                elements.extend(consts)
 
     return elements
 
@@ -280,6 +286,49 @@ def _extract_php_enum(node: Node, lines: list[str]) -> ExtractedElement | None:
         node=node,
         return_type=backing_type,  # Store backing type in return_type field
     )
+
+
+def _extract_php_global_constants(node: Node, lines: list[str]) -> list[ExtractedElement]:
+    """Extract global PHP constants from a const_declaration node.
+
+    Handles patterns like:
+        const APP_VERSION = '1.0.0';
+        const DEBUG = true, VERBOSE = false;  // Multiple constants
+
+    Args:
+        node: A const_declaration node.
+        lines: Source code lines.
+
+    Returns:
+        List of ExtractedElement with element_type="constant".
+    """
+    constants: list[ExtractedElement] = []
+
+    for child in node.children:
+        if child.type == "const_element":
+            name = None
+            value = None
+            for elem_child in child.children:
+                if elem_child.type == "name":
+                    name = get_node_text(elem_child)
+                elif elem_child.type in ("string", "integer", "boolean", "float", "null"):
+                    value = get_node_text(elem_child)
+                elif elem_child.type == "array_creation_expression":
+                    value = get_node_text(elem_child)
+
+            if name:
+                constants.append(ExtractedElement(
+                    element_type="constant",
+                    name=name,
+                    line_start=child.start_point[0] + 1,
+                    line_end=child.end_point[0] + 1,
+                    raw_code=child.text.decode('utf-8') if child.text else "",
+                    byte_offset=child.start_byte,
+                    node=child,
+                    signature=f"const {name}" + (f" = {value}" if value else ""),
+                ))
+
+    return constants
 
 
 def _extract_php_assigned_callable(node: Node, lines: list[str]) -> ExtractedElement | None:

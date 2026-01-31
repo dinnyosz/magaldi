@@ -193,3 +193,77 @@ readonly class Point
         assert point is not None
         assert point.element_type == "class"
         assert "readonly" in point.decorators
+
+
+class TestPhpGlobalConstants:
+    """Test extraction of PHP global constants."""
+
+    @pytest.fixture
+    def php_parser(self):
+        """Create a PHP parser."""
+        php_lang = Language(ts_php.language_php())
+        return Parser(php_lang)
+
+    def test_string_constant_extraction(self, php_parser):
+        """Test extraction of string constant."""
+        code = """<?php
+const APP_VERSION = '1.0.0';
+"""
+        tree = php_parser.parse(code.encode())
+        elements = extract_php_elements(tree, code.split("\n"))
+
+        const = next((e for e in elements if e.name == "APP_VERSION"), None)
+        assert const is not None
+        assert const.element_type == "constant"
+        assert "const APP_VERSION" in const.signature
+
+    def test_boolean_constant_extraction(self, php_parser):
+        """Test extraction of boolean constant."""
+        code = """<?php
+const DEBUG = true;
+"""
+        tree = php_parser.parse(code.encode())
+        elements = extract_php_elements(tree, code.split("\n"))
+
+        const = next((e for e in elements if e.name == "DEBUG"), None)
+        assert const is not None
+        assert const.element_type == "constant"
+
+    def test_array_constant_extraction(self, php_parser):
+        """Test extraction of array constant."""
+        code = """<?php
+const ITEMS = ['a', 'b', 'c'];
+"""
+        tree = php_parser.parse(code.encode())
+        elements = extract_php_elements(tree, code.split("\n"))
+
+        const = next((e for e in elements if e.name == "ITEMS"), None)
+        assert const is not None
+        assert const.element_type == "constant"
+
+    def test_class_constants_not_duplicated(self, php_parser):
+        """Test that class constants are not extracted as global constants."""
+        code = """<?php
+const GLOBAL_CONST = 'global';
+
+class Config
+{
+    public const CLASS_CONST = 'class';
+}
+"""
+        tree = php_parser.parse(code.encode())
+        elements = extract_php_elements(tree, code.split("\n"))
+
+        # Should have global constant
+        global_const = next((e for e in elements if e.name == "GLOBAL_CONST"), None)
+        assert global_const is not None
+        assert global_const.element_type == "constant"
+
+        # Should NOT have class constant at top level (it's inside the class)
+        class_const = next((e for e in elements if e.name == "CLASS_CONST"), None)
+        assert class_const is None
+
+        # Should have the class
+        config = next((e for e in elements if e.name == "Config"), None)
+        assert config is not None
+        assert config.element_type == "class"
