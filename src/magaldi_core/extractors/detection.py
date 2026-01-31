@@ -121,6 +121,9 @@ _PUBLIC_API_DECORATORS = {
     "MessagePattern", "EventPattern",
     # NestJS SSE
     "Sse",
+    # NestJS/Angular Dependency Injection
+    "Injectable", "Inject", "Controller", "Module", "Component",
+    "UseGuards", "UseInterceptors", "UsePipes",
     # Express/Fastify/Hono/Koa (method calls used as decorators)
     "router.get", "router.post", "router.put", "router.delete", "router.patch",
     "router.head", "router.options", "router.all",
@@ -132,6 +135,8 @@ _PUBLIC_API_DECORATORS = {
     "koaRouter.get", "koaRouter.post", "koaRouter.put", "koaRouter.delete", "koaRouter.patch",
     # Click/Typer CLI (Python)
     "click.command", "click.group", "app.command", "typer.command", "app.callback",
+    # Python Dependency Injection (FastAPI, dataclass, attrs)
+    "dataclass", "attrs", "define", "frozen",
     # Symfony Console CLI (PHP)
     "AsCommand",
     # Symfony Route (PHP)

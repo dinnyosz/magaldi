@@ -929,16 +929,16 @@ def extract_php_class_properties(class_node: Node) -> list[dict[str, str | int]]
 
 
 def extract_php_base_class(class_node: Node) -> list[str]:
-    """Extract the base class and interfaces from a PHP class.
+    """Extract the base class, interfaces, and traits from a PHP class.
 
-    For: class Foo extends Bar implements Baz { ... }
-    Returns: ["Bar", "Baz"]
+    For: class Foo extends Bar implements Baz { use TraitA; ... }
+    Returns: ["Bar", "Baz", "TraitA"]
 
     Args:
         class_node: A class_declaration node from tree-sitter.
 
     Returns:
-        List of base class and interface names.
+        List of base class, interface, and trait names.
     """
     bases: list[str] = []
 
@@ -957,6 +957,15 @@ def extract_php_base_class(class_node: Node) -> list[str]:
             for ic_child in child.children:
                 if ic_child.type == "name":
                     bases.append(get_node_text(ic_child))
+
+        # Class body - look for trait usage
+        elif child.type == "declaration_list":
+            for decl_child in child.children:
+                # Trait usage: use TraitName;
+                if decl_child.type == "use_declaration":
+                    for use_child in decl_child.children:
+                        if use_child.type == "name":
+                            bases.append(get_node_text(use_child))
 
     return bases
 

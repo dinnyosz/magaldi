@@ -103,18 +103,29 @@ def extract_javascript_elements(tree: Tree, lines: list[str]) -> list[ExtractedE
 
     for node in walk_tree(root):
         if node.type == "class_declaration":
-            # Check for decorators in parent node (export_statement or similar)
+            # Check for decorators in parent node or as siblings
             decorators: list[str] | None = None
             decorator_details: list[DecoratorInfo] | None = None
             decorated_node: Node | None = None
 
             parent = node.parent
-            if parent and parent.type == "export_statement":
-                # Look for decorator siblings
-                has_decorators = any(c.type == "decorator" for c in parent.children)
-                if has_decorators:
-                    decorators, decorator_details = _get_js_decorators(parent)
-                    decorated_node = parent
+            if parent:
+                # Check export_statement for decorators
+                if parent.type == "export_statement":
+                    has_decorators = any(c.type == "decorator" for c in parent.children)
+                    if has_decorators:
+                        decorators, decorator_details = _get_js_decorators(parent)
+                        decorated_node = parent
+                # Check if class itself has decorator children (TypeScript)
+                elif any(c.type == "decorator" for c in node.children):
+                    decorators, decorator_details = _get_js_decorators(node)
+                    decorated_node = node
+                # Check for decorated_definition wrapper or statement-level decorators
+                elif parent.type in ("program", "statement_block"):
+                    # Look for decorator siblings preceding this class
+                    decorators, decorator_details = _get_preceding_decorators(node, parent)
+                    if decorators:
+                        decorated_node = parent
 
             elements.append(_extract_js_class(
                 node, lines, decorators, decorator_details, decorated_node
@@ -198,6 +209,75 @@ def _get_js_decorators(parent_node: Node) -> tuple[list[str], list[DecoratorInfo
                     break
 
     return decorators, details
+
+
+def _get_preceding_decorators(
+    node: Node, parent: Node
+) -> tuple[list[str] | None, list[DecoratorInfo] | None]:
+    """Extract decorators that precede a class/function declaration.
+
+    In TypeScript, decorators can be siblings preceding the class at statement level:
+    @Injectable()
+    class AuthService { }
+
+    Args:
+        node: The class/function declaration node.
+        parent: The parent node (program or statement_block).
+
+    Returns:
+        Tuple of (decorator_names, decorator_details) or (None, None) if no decorators.
+    """
+    # Find the index of our node in parent's children
+    node_index = -1
+    for i, child in enumerate(parent.children):
+        if child is node or child.id == node.id:
+            node_index = i
+            break
+
+    if node_index <= 0:
+        return None, None
+
+    # Look backwards for consecutive decorators
+    decorators: list[str] = []
+    details: list[DecoratorInfo] = []
+
+    for i in range(node_index - 1, -1, -1):
+        sibling = parent.children[i]
+        if sibling.type == "decorator":
+            full_text = get_node_text(sibling)
+            if full_text.startswith("@"):
+                full_text = full_text[1:].strip()
+
+            # Extract decorator info
+            for deco_child in sibling.children:
+                if deco_child.type == "@":
+                    continue
+                elif deco_child.type == "identifier":
+                    name = get_node_text(deco_child)
+                    decorators.insert(0, name)  # Insert at beginning to preserve order
+                    details.insert(0, DecoratorInfo(name=name, args=None, full=full_text))
+                    break
+                elif deco_child.type == "call_expression":
+                    func_node = get_child_by_field(deco_child, "function")
+                    args_node = get_child_by_field(deco_child, "arguments")
+                    if func_node:
+                        name = get_node_text(func_node)
+                        args = get_node_text(args_node) if args_node else None
+                        decorators.insert(0, name)
+                        details.insert(0, DecoratorInfo(name=name, args=args, full=full_text))
+                    break
+                elif deco_child.type == "member_expression":
+                    name = get_node_text(deco_child)
+                    decorators.insert(0, name)
+                    details.insert(0, DecoratorInfo(name=name, args=None, full=full_text))
+                    break
+        else:
+            # Stop when we hit a non-decorator
+            break
+
+    if decorators:
+        return decorators, details
+    return None, None
 
 
 def _extract_js_class(
@@ -1163,35 +1243,56 @@ def extract_javascript_class_fields(class_node: Node) -> list[dict[str, str | in
 
 
 def extract_javascript_base_class(class_node: Node) -> list[str]:
-    """Extract the base class name from a JavaScript/TypeScript class.
+    """Extract base classes and implemented interfaces from a JavaScript/TypeScript class.
 
-    For: class Foo extends Bar { ... }
-    Returns: ["Bar"]
+    For: class Foo extends Bar implements IBaz, IQux { ... }
+    Returns: ["Bar", "IBaz", "IQux"]
 
     Args:
         class_node: A class_declaration node from tree-sitter.
 
     Returns:
-        List with single base class name, or empty list.
+        List of base class and interface names.
     """
     bases: list[str] = []
 
     if class_node.type != "class_declaration":
         return bases
 
-    # Find class_heritage node which contains extends clause
     for child in class_node.children:
+        # Handle class_heritage which contains extends and implements clauses
         if child.type == "class_heritage":
-            # The base class identifier is directly under class_heritage
             for heritage_child in child.children:
+                # Simple identifier (JavaScript extends)
                 if heritage_child.type == "identifier":
                     bases.append(get_node_text(heritage_child))
-                    break
                 elif heritage_child.type == "member_expression":
                     # Handle qualified names like module.ClassName
                     bases.append(get_node_text(heritage_child))
-                    break
-            break
+                # TypeScript: extends clause
+                elif heritage_child.type == "extends_clause":
+                    for ext_child in heritage_child.children:
+                        if ext_child.type in ("identifier", "type_identifier"):
+                            bases.append(get_node_text(ext_child))
+                        elif ext_child.type == "member_expression":
+                            bases.append(get_node_text(ext_child))
+                        elif ext_child.type == "generic_type":
+                            # Generic<T> - get the base type
+                            for gen_child in ext_child.children:
+                                if gen_child.type in ("type_identifier", "identifier"):
+                                    bases.append(get_node_text(gen_child))
+                                    break
+                # TypeScript: implements clause (inside class_heritage)
+                elif heritage_child.type == "implements_clause":
+                    for impl_child in heritage_child.children:
+                        if impl_child.type in ("type_identifier", "identifier"):
+                            bases.append(get_node_text(impl_child))
+                        elif impl_child.type == "generic_type":
+                            # Extract base type from generic like Comparable<T>
+                            for gen_child in impl_child.children:
+                                if gen_child.type in ("type_identifier", "identifier"):
+                                    bases.append(get_node_text(gen_child))
+                                    break
 
     return bases
 
