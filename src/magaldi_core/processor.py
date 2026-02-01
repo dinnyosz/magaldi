@@ -11,6 +11,7 @@ Only indexes to ES after full processing, ensuring ES presence = completion.
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
@@ -426,8 +427,9 @@ class TimingStats:
             total_count = sum(self.summarize_counts_by_type_tier[key] for key in closest_items)
             base_avg = total_time / total_count
             # Scale by tier ratio (use first closest tier for ratio)
+            # Use sqrt for sub-linear scaling: larger context doesn't mean proportionally longer output
             closest_tier = closest_items[0][1]
-            tier_ratio = tier / closest_tier if closest_tier > 0 else 1.0
+            tier_ratio = math.sqrt(tier / closest_tier) if closest_tier > 0 else 1.0
             return base_avg * tier_ratio, True
 
         # 3. Same model group (large: file/class/interface/type_alias, small: function/method/variable)
@@ -453,8 +455,9 @@ class TimingStats:
             total_count = sum(self.summarize_counts_by_type_tier[key] for key in closest_items)
             base_avg = total_time / total_count
             # Scale by tier ratio (use first closest tier for ratio)
+            # Use sqrt for sub-linear scaling: larger context doesn't mean proportionally longer output
             closest_tier = closest_items[0][1]
-            tier_ratio = tier / closest_tier if closest_tier > 0 else 1.0
+            tier_ratio = math.sqrt(tier / closest_tier) if closest_tier > 0 else 1.0
             return base_avg * tier_ratio, True
 
         # 4. Fall back to per-type average (ignoring tier) - use wall_time from type_tier

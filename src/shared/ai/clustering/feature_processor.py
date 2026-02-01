@@ -10,6 +10,7 @@ Processes feature clusters:
 from __future__ import annotations
 
 import bisect
+import math
 import threading
 import time
 from collections.abc import Callable
@@ -178,8 +179,8 @@ class FeatureTimingStats:
         if tiers_with_data:
             closest = min(tiers_with_data, key=lambda t: abs(t - tier))
             base_avg = self.total_time_by_tier[closest] / self.count_by_tier[closest]
-            # Scale by tier ratio
-            tier_ratio = tier / closest if closest > 0 else 1.0
+            # Scale by tier ratio - use sqrt for sub-linear scaling
+            tier_ratio = math.sqrt(tier / closest) if closest > 0 else 1.0
             return base_avg * tier_ratio
 
         return global_avg
@@ -359,8 +360,8 @@ class SubfeatureTimingStats:
         if tiers_with_data:
             closest = min(tiers_with_data, key=lambda t: abs(t - tier))
             base_avg = self.total_time_by_tier[closest] / self.count_by_tier[closest]
-            # Scale by tier ratio
-            tier_ratio = tier / closest if closest > 0 else 1.0
+            # Scale by tier ratio - use sqrt for sub-linear scaling
+            tier_ratio = math.sqrt(tier / closest) if closest > 0 else 1.0
             return base_avg * tier_ratio
 
         return global_avg

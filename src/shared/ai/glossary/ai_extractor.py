@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import bisect
 import json
+import math
 import re
 import threading
 import time
@@ -88,8 +89,8 @@ class GlossaryTimingStats:
         if tiers_with_data:
             closest = min(tiers_with_data, key=lambda t: abs(t - tier))
             base_avg = self.total_time_by_tier[closest] / self.count_by_tier[closest]
-            # Scale by tier ratio
-            tier_ratio = tier / closest if closest > 0 else 1.0
+            # Scale by tier ratio - use sqrt for sub-linear scaling
+            tier_ratio = math.sqrt(tier / closest) if closest > 0 else 1.0
             return base_avg * tier_ratio
 
         return global_avg
