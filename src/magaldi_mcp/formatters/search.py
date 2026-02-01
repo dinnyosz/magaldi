@@ -22,7 +22,10 @@ class CodeSearchListFormatter(ResultFormatter):
         lines = [f"Found {len(result)} results:\n"]
         for r in result:
             loc = f"{r.get('file', '?')}:{r.get('line', '?')}" if r.get('file') else "N/A"
+            element_id = r.get('element_id', '')
             lines.append(f"[{r.get('type', '?')}] {r.get('name', '?')} ({loc})")
+            if element_id:
+                lines.append(f"  id: {element_id}")
             if r.get('signature'):
                 lines.append(f"  {r['signature']}")
             if r.get('summary'):
@@ -84,7 +87,10 @@ class GroupedSearchFormatter(ResultFormatter):
             lines.append(f"Code Results ({total_code}):\n")
             for r in code_results:
                 loc = f"{r.get('file', '?')}:{r.get('line', '?')}" if r.get('file') else "N/A"
+                element_id = r.get('element_id', '')
                 lines.append(f"[{r.get('type', '?')}] {r.get('name', '?')} ({loc})")
+                if element_id:
+                    lines.append(f"  id: {element_id}")
                 if r.get('signature'):
                     lines.append(f"  {r['signature']}")
                 if r.get('summary'):
@@ -112,7 +118,10 @@ class GroupedSearchFormatter(ResultFormatter):
             lines.append(f"Test Results ({total_tests}):\n")
             for r in test_results:
                 loc = f"{r.get('file', '?')}:{r.get('line', '?')}" if r.get('file') else "N/A"
+                element_id = r.get('element_id', '')
                 lines.append(f"[{r.get('type', '?')}] {r.get('name', '?')} ({loc})")
+                if element_id:
+                    lines.append(f"  id: {element_id}")
                 if r.get('signature'):
                     lines.append(f"  {r['signature']}")
                 if r.get('summary'):
