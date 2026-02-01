@@ -84,6 +84,7 @@ class ModelConfig:
     temperature: float | None = None
     max_tokens: int | None = None
     dimensions: int | None = None  # For embedding models
+    num_ctx: int | None = None  # Context window size (Ollama num_ctx)
 
     def get_litellm_model(self) -> str:
         """Get the full LiteLLM model identifier."""
@@ -351,11 +352,13 @@ class BenchmarkConfig:
             name="qwen3:1.7b",
             provider="ollama",
             url="http://localhost:11434",
+            num_ctx=16384,
         ),
         "qwen3-4b": ModelConfig(
             name="qwen3:4b-instruct",
             provider="ollama",
             url="http://localhost:11434",
+            num_ctx=16384,
         ),
         # Falcon H1 models (hybrid Transformer + Mamba-2 SSM architecture)
         # Requires manual import from GGUF - see plans/ollama_model_research.md
@@ -363,21 +366,25 @@ class BenchmarkConfig:
             name="falcon-h1-tiny-90m",
             provider="ollama",
             url="http://localhost:11434",
+            num_ctx=16384,
         ),
         "falcon-h1-0.5b": ModelConfig(
             name="falcon-h1-0.5b",
             provider="ollama",
             url="http://localhost:11434",
+            num_ctx=16384,
         ),
         "falcon-h1-1.5b": ModelConfig(
             name="falcon-h1-1.5b-deep",
             provider="ollama",
             url="http://localhost:11434",
+            num_ctx=16384,
         ),
         "falcon-h1-3b": ModelConfig(
             name="falcon-h1-3b",
             provider="ollama",
             url="http://localhost:11434",
+            num_ctx=16384,
         ),
     })
 
