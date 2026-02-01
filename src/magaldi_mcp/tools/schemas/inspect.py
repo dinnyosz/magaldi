@@ -10,10 +10,10 @@ INSPECT_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "element_id": {"type": "string", "description": "Element ID from search results"},
+                "hash_id": {"type": "string", "description": "Element ID (hash_id from search results)"},
                 "include_code": {"type": "boolean", "default": False},
             },
-            "required": ["element_id"],
+            "required": ["hash_id"],
         },
     ),
     Tool(
@@ -23,14 +23,14 @@ INSPECT_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "element_ids": {
+                "hash_ids": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "List of element IDs",
+                    "description": "List of element IDs (hash_ids from search results)",
                 },
                 "include_code": {"type": "boolean", "default": False},
             },
-            "required": ["element_ids"],
+            "required": ["hash_ids"],
         },
     ),
     Tool(
@@ -40,11 +40,11 @@ INSPECT_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "element_id": {"type": "string"},
+                "hash_id": {"type": "string", "description": "Element ID (hash_id from search results)"},
                 "include_children": {"type": "boolean", "default": True},
                 "include_siblings": {"type": "boolean", "default": False},
             },
-            "required": ["element_id"],
+            "required": ["hash_id"],
         },
     ),
     Tool(
@@ -54,9 +54,9 @@ INSPECT_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "element_id": {"type": "string", "description": "Parent element ID"},
+                "hash_id": {"type": "string", "description": "Parent element ID (hash_id from search results)"},
             },
-            "required": ["element_id"],
+            "required": ["hash_id"],
         },
     ),
 ]

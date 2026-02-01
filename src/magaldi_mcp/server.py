@@ -158,7 +158,7 @@ class MagaldiMCPServer:
             return await asyncio.to_thread(
                 find_similar,
                 es,
-                element_id=args["element_id"],
+                element_id=args["hash_id"],
                 limit=args.get("limit", 10),
                 same_repo_only=args.get("same_repo_only", False),
                 include_tests=args.get("include_tests", True),
@@ -167,14 +167,14 @@ class MagaldiMCPServer:
             return await asyncio.to_thread(
                 get_element,
                 es,
-                element_id=args["element_id"],
+                element_id=args["hash_id"],
                 include_code=args.get("include_code", False),
             )
         elif name == "get_context":
             return await asyncio.to_thread(
                 get_context,
                 es,
-                element_id=args["element_id"],
+                element_id=args["hash_id"],
                 include_siblings=args.get("include_siblings", False),
                 include_children=args.get("include_children", True),
             )
@@ -213,7 +213,7 @@ class MagaldiMCPServer:
             return await asyncio.to_thread(
                 get_children,
                 es,
-                element_id=args["element_id"],
+                element_id=args["hash_id"],
             )
         elif name == "get_feature_members":
             return await asyncio.to_thread(
@@ -225,7 +225,7 @@ class MagaldiMCPServer:
             return await asyncio.to_thread(
                 batch_get_elements,
                 es,
-                element_ids=args["element_ids"],
+                element_ids=args["hash_ids"],
                 include_code=args.get("include_code", False),
             )
         elif name == "find_files":
@@ -258,7 +258,7 @@ class MagaldiMCPServer:
             return await asyncio.to_thread(
                 find_usages,
                 es,
-                element_id=args["element_id"],
+                element_id=args["hash_id"],
                 limit=args.get("limit", 30),
             )
         elif name == "find_implementations":
@@ -266,7 +266,7 @@ class MagaldiMCPServer:
             return await asyncio.to_thread(
                 find_implementations,
                 es,
-                element_id=args.get("element_id"),
+                element_id=args.get("hash_id"),
                 class_name=args.get("class_name"),
                 scope=args.get("scope"),
                 repository=args.get("repository"),
@@ -277,14 +277,14 @@ class MagaldiMCPServer:
             return await asyncio.to_thread(
                 get_call_graph,
                 es,
-                element_id=args["element_id"],
+                element_id=args["hash_id"],
                 direction=args.get("direction", "both"),
             )
         elif name == "find_callers":
             return await asyncio.to_thread(
                 find_callers,
                 es,
-                element_id=args["element_id"],
+                element_id=args["hash_id"],
                 scope=args.get("scope"),
                 repository=args.get("repository"),
                 username=args.get("username"),
@@ -295,7 +295,7 @@ class MagaldiMCPServer:
             return await asyncio.to_thread(
                 find_call_chain,
                 es,
-                element_id=args["element_id"],
+                element_id=args["hash_id"],
                 direction=args.get("direction", "callees"),
                 max_depth=args.get("max_depth", 5),
                 scope=args.get("scope"),
@@ -337,7 +337,7 @@ class MagaldiMCPServer:
             return await asyncio.to_thread(
                 explain_element,
                 es,
-                element_id=args["element_id"],
+                element_id=args["hash_id"],
             )
         elif name == "list_glossary":
             return await asyncio.to_thread(
@@ -371,7 +371,7 @@ class MagaldiMCPServer:
                 find_dependencies,
                 es,
                 file_path=args.get("file_path"),
-                element_id=args.get("element_id"),
+                element_id=args.get("hash_id"),
                 scope=args.get("scope"),
                 repository=args.get("repository"),
                 username=args.get("username"),

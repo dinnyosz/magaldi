@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import warnings
 from unittest.mock import MagicMock
 
 import pytest
@@ -37,17 +36,6 @@ from magaldi_mcp.tools import (
 )
 
 
-# grep_code was deprecated and removed; stub for legacy tests
-def grep_code(*_args, **_kwargs):  # noqa: ARG001
-    import warnings
-
-    warnings.warn(
-        "grep_code has been removed; use pattern_search instead",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    # Return empty result for tests that still reference this function
-    return {"code_results": [], "test_results": [], "total_code": 0, "total_tests": 0}
 
 
 # =============================================================================
@@ -63,6 +51,12 @@ def mock_es_repo():
     repo.get_document.return_value = None
     repo.search_by_text.return_value = []
     repo.get_indexed_repositories.return_value = []
+
+    # Make get_document_by_id_or_hash delegate to get_document
+    # This ensures tests that set get_document.return_value or side_effect
+    # also work with get_document_by_id_or_hash
+    repo.get_document_by_id_or_hash.side_effect = lambda x: repo.get_document(x)
+
     return repo
 
 
@@ -250,47 +244,6 @@ class TestListRepos:
         result = list_repos(es=mock_es_repo, scope="test-scope")
 
         assert isinstance(result, list)
-
-
-# =============================================================================
-# GREP CODE TESTS
-# =============================================================================
-
-
-class TestGrepCode:
-    """Tests for grep_code function."""
-
-    def test_grep_code_returns_matches(self, mock_es_repo):
-        """Test grep_code returns pattern matches."""
-        mock_es_repo.grep_code.return_value = {
-            "matches": [
-                {
-                    "file": "file.py",
-                    "line": 10,
-                    "content": "def test_function():",
-                }
-            ],
-            "total_matches": 1,
-        }
-
-        result = grep_code(
-            es=mock_es_repo,
-            pattern="test_function",
-        )
-
-        assert result is not None
-
-    def test_grep_code_with_glob_filter(self, mock_es_repo):
-        """Test grep_code with glob filter."""
-        mock_es_repo.grep_code.return_value = {"matches": [], "total_matches": 0}
-
-        result = grep_code(
-            es=mock_es_repo,
-            pattern="test",
-            glob="*.py",
-        )
-
-        assert result is not None
 
 
 # =============================================================================
@@ -968,80 +921,6 @@ class TestFindFilesExtended:
 
 
 # =============================================================================
-# GREP CODE EXTENDED TESTS
-# =============================================================================
-
-
-class TestGrepCodeExtended:
-    """Extended tests for grep_code function."""
-
-    def test_grep_code_with_regex_match(self, mock_es_repo):
-        """Test grep_code finds regex matches in code."""
-        mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
-        mock_client.search.return_value = {
-            "hits": {
-                "hits": [
-                    {
-                        "_source": {
-                            "element_id": "id1",
-                            "name": "test_func",
-                            "element_type": "function",
-                            "relative_path": "test.py",
-                            "line_start": 10,
-                            "raw_code": "def test_func():\n    return True\n",
-                            "is_test": False,
-                        }
-                    }
-                ]
-            }
-        }
-
-        result = grep_code(
-            es=mock_es_repo,
-            pattern=r"def\s+test_",
-        )
-
-        assert "code_results" in result
-        assert len(result["code_results"]) >= 1
-        assert result["code_results"][0]["file"] == "test.py"
-        assert "def test_" in result["code_results"][0]["content"]
-
-    def test_grep_code_with_context_lines(self, mock_es_repo):
-        """Test grep_code includes context lines."""
-        mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
-        mock_client.search.return_value = {
-            "hits": {
-                "hits": [
-                    {
-                        "_source": {
-                            "element_id": "id1",
-                            "name": "func",
-                            "element_type": "function",
-                            "relative_path": "test.py",
-                            "line_start": 1,
-                            "raw_code": "line1\nline2\nmatch here\nline4\nline5\n",
-                            "is_test": False,
-                        }
-                    }
-                ]
-            }
-        }
-
-        result = grep_code(
-            es=mock_es_repo,
-            pattern="match",
-            context_lines=2,
-        )
-
-        assert "code_results" in result
-        assert len(result["code_results"]) >= 1
-        assert "context_before" in result["code_results"][0]
-        assert "context_after" in result["code_results"][0]
-
-
-# =============================================================================
 # FIND USAGES TESTS
 # =============================================================================
 
@@ -1550,151 +1429,6 @@ class TestFindSimilarTestGrouping:
 
 
 # =============================================================================
-# GREP CODE TEST GROUPING TESTS
-# =============================================================================
-
-
-class TestGrepCodeTestGrouping:
-    """Tests for grep_code test result grouping."""
-
-    def test_groups_grep_results_by_is_test(self, mock_es_repo):
-        """Test that grep results are grouped by is_test."""
-        # Mock ES search to return elements with raw_code
-        mock_es_repo._get_client().search.return_value = {
-            "hits": {
-                "hits": [
-                    {
-                        "_source": {
-                            "element_id": "id1",
-                            "name": "func",
-                            "element_type": "function",
-                            "relative_path": "src/app.py",
-                            "line_start": 1,
-                            "raw_code": "def func():\n    pattern_match\n",
-                            "is_test": False,
-                        }
-                    },
-                    {
-                        "_source": {
-                            "element_id": "id2",
-                            "name": "test_func",
-                            "element_type": "function",
-                            "relative_path": "tests/test_app.py",
-                            "line_start": 1,
-                            "raw_code": "def test_func():\n    pattern_match\n",
-                            "is_test": True,
-                        }
-                    },
-                ]
-            }
-        }
-
-        result = grep_code(es=mock_es_repo, pattern="pattern_match")
-
-        assert "code_results" in result
-        assert "test_results" in result
-
-    def test_include_tests_false_excludes_tests(self, mock_es_repo):
-        """Test that include_tests=False excludes test results."""
-        mock_es_repo._get_client().search.return_value = {
-            "hits": {
-                "hits": [
-                    {
-                        "_source": {
-                            "element_id": "id1",
-                            "name": "func",
-                            "element_type": "function",
-                            "relative_path": "src/app.py",
-                            "line_start": 1,
-                            "raw_code": "def func():\n    pattern_match\n",
-                            "is_test": False,
-                        }
-                    },
-                    {
-                        "_source": {
-                            "element_id": "id2",
-                            "name": "test_func",
-                            "element_type": "function",
-                            "relative_path": "tests/test_app.py",
-                            "line_start": 1,
-                            "raw_code": "def test_func():\n    pattern_match\n",
-                            "is_test": True,
-                        }
-                    },
-                ]
-            }
-        }
-
-        result = grep_code(es=mock_es_repo, pattern="pattern_match", include_tests=False)
-
-        assert len(result["code_results"]) == 1
-        assert len(result["test_results"]) == 0
-
-    def test_results_include_is_test_field(self, mock_es_repo):
-        """Test that individual results include is_test field."""
-        mock_es_repo._get_client().search.return_value = {
-            "hits": {
-                "hits": [
-                    {
-                        "_source": {
-                            "element_id": "id1",
-                            "name": "test_func",
-                            "element_type": "function",
-                            "relative_path": "tests/test_app.py",
-                            "line_start": 1,
-                            "raw_code": "def test_func():\n    pattern_match\n",
-                            "is_test": True,
-                        }
-                    },
-                ]
-            }
-        }
-
-        result = grep_code(es=mock_es_repo, pattern="pattern_match")
-
-        assert len(result["test_results"]) == 1
-        assert result["test_results"][0]["is_test"] is True
-
-    def test_results_include_totals(self, mock_es_repo):
-        """Test that results include total counts."""
-        mock_es_repo._get_client().search.return_value = {
-            "hits": {
-                "hits": [
-                    {
-                        "_source": {
-                            "element_id": "id1",
-                            "name": "func",
-                            "element_type": "function",
-                            "relative_path": "src/app.py",
-                            "line_start": 1,
-                            "raw_code": "def func():\n    pattern_match\n",
-                            "is_test": False,
-                        }
-                    },
-                    {
-                        "_source": {
-                            "element_id": "id2",
-                            "name": "test_func",
-                            "element_type": "function",
-                            "relative_path": "tests/test_app.py",
-                            "line_start": 1,
-                            "raw_code": "def test_func():\n    pattern_match\n",
-                            "is_test": True,
-                        }
-                    },
-                ]
-            }
-        }
-
-        result = grep_code(es=mock_es_repo, pattern="pattern_match")
-
-        assert "total_code" in result
-        assert "total_tests" in result
-        assert result["total_code"] == 1
-        assert result["total_tests"] == 1
-
-
-# =============================================================================
 # SEARCH FEATURES GLOSSARY FILTER TESTS
 # =============================================================================
 
@@ -1704,7 +1438,9 @@ class TestSearchFeaturesGlossaryFilter:
 
     @pytest.fixture
     def mock_es(self):
-        return MagicMock()
+        repo = MagicMock()
+        repo.get_document_by_id_or_hash.side_effect = lambda x: repo.get_document(x)
+        return repo
 
     @pytest.fixture
     def mock_embed(self):
@@ -1820,7 +1556,9 @@ class TestGetFeatureMembersGlossary:
 
     @pytest.fixture
     def mock_es(self):
-        return MagicMock()
+        repo = MagicMock()
+        repo.get_document_by_id_or_hash.side_effect = lambda x: repo.get_document(x)
+        return repo
 
     def test_returns_glossary_terms_for_feature(self, mock_es):
         """Feature members response includes associated glossary terms."""
@@ -2324,32 +2062,6 @@ class TestFindUsagesWithPatternSearch:
         pattern = call_args[1]["pattern"]
         # Dots should be escaped as \.
         assert "\\." in pattern
-
-
-# =============================================================================
-# GREP CODE DEPRECATION TESTS
-# =============================================================================
-
-
-class TestGrepCodeDeprecation:
-    """Tests for grep_code deprecation."""
-
-    def test_grep_code_emits_deprecation_warning(self, mock_es_repo):
-        """Test that grep_code emits a deprecation warning."""
-        mock_es_repo._get_client.return_value.search.return_value = {"hits": {"hits": []}}
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            grep_code(
-                es=mock_es_repo,
-                pattern="test",
-                scope="test",
-                repository="repo",
-            )
-
-            assert len(w) == 1
-            assert issubclass(w[0].category, DeprecationWarning)
-            assert "pattern_search" in str(w[0].message)
 
 
 # =============================================================================

@@ -23,6 +23,8 @@ def mock_es_repo():
     repo.search_by_vector.return_value = []
     repo.get_document.return_value = None
     repo.search_by_text.return_value = []
+    # Delegate get_document_by_id_or_hash to get_document
+    repo.get_document_by_id_or_hash.side_effect = lambda x: repo.get_document(x)
     return repo
 
 
@@ -157,7 +159,7 @@ class TestGetElementTool:
 
         result = await server._handle_tool(
             "get_element",
-            {"element_id": "scope:repo:user:file.py:function:test:1"},
+            {"hash_id": "scope:repo:user:file.py:function:test:1"},
         )
 
         assert result is not None
@@ -171,7 +173,7 @@ class TestGetElementTool:
         with pytest.raises(ValueError, match="Element not found"):
             await server._handle_tool(
                 "get_element",
-                {"element_id": "nonexistent"},
+                {"hash_id": "nonexistent"},
             )
 
 
@@ -190,28 +192,6 @@ class TestListReposTool:
         # Result is a list of repositories
         assert isinstance(result, list)
         assert len(result) == 1
-
-
-class TestGrepCodeTool:
-    """Tests for grep_code tool."""
-
-    @pytest.mark.asyncio
-    async def test_grep_code_returns_matches(self, server, mock_es_repo):
-        """Test grep_code tool returns pattern matches."""
-        mock_es_repo.grep_code.return_value = {
-            "matches": [
-                {
-                    "file": "file.py",
-                    "line": 10,
-                    "content": "def test_function():",
-                }
-            ],
-            "total_matches": 1,
-        }
-
-        result = await server._handle_tool("grep_code", {"pattern": "test_function"})
-
-        assert "matches" in result or result is not None
 
 
 # =============================================================================
@@ -376,7 +356,7 @@ class TestFindSimilarTool:
 
         result = await server._handle_tool(
             "find_similar",
-            {"element_id": "scope:repo:user:file.py:function:test:1"},
+            {"hash_id": "scope:repo:user:file.py:function:test:1"},
         )
 
         # Result is a dict with code_results and test_results
@@ -402,7 +382,7 @@ class TestGetContextTool:
 
         result = await server._handle_tool(
             "get_context",
-            {"element_id": "scope:repo:user:file.py:function:test:1"},
+            {"hash_id": "scope:repo:user:file.py:function:test:1"},
         )
 
         assert isinstance(result, dict)
@@ -482,7 +462,7 @@ class TestGetChildrenTool:
 
         result = await server._handle_tool(
             "get_children",
-            {"element_id": "scope:repo:user:file.py:class:Parent:1"},
+            {"hash_id": "scope:repo:user:file.py:class:Parent:1"},
         )
 
         assert isinstance(result, list)
@@ -532,7 +512,7 @@ class TestBatchGetElementsTool:
 
         result = await server._handle_tool(
             "batch_get_elements",
-            {"element_ids": ["id1", "id2"]},
+            {"hash_ids": ["id1", "id2"]},
         )
 
         assert isinstance(result, list)
@@ -579,7 +559,7 @@ class TestFindUsagesTool:
 
         result = await server._handle_tool(
             "find_usages",
-            {"element_id": "scope:repo:user:file.py:function:test:1"},
+            {"hash_id": "scope:repo:user:file.py:function:test:1"},
         )
 
         assert result is not None
@@ -619,7 +599,7 @@ class TestGetCallGraphTool:
 
         result = await server._handle_tool(
             "get_call_graph",
-            {"element_id": "scope:repo:user:file.py:function:test:1"},
+            {"hash_id": "scope:repo:user:file.py:function:test:1"},
         )
 
         assert isinstance(result, dict)
@@ -1062,13 +1042,13 @@ class TestLazyInitialization:
     def test_get_embed_client_uses_embed_provider(self):
         """Test that _get_embed_client uses embed_provider if set."""
         mock_config = MagicMock()
-        mock_config.llm = MagicMock()
-        mock_config.llm.url = "http://localhost:11434"
-        mock_config.llm.embed_model = "text-embedding"
-        mock_config.llm.provider = "ollama"
-        mock_config.llm.embed_provider = "openai"
-        mock_config.llm.api_key = "default-key"
-        mock_config.llm.embed_api_key = "embed-key"
+        # Mock the get_embed_model() method to return a model config
+        mock_embed_model = MagicMock()
+        mock_embed_model.url = "http://localhost:11434"
+        mock_embed_model.name = "text-embedding"
+        mock_embed_model.provider = "openai"
+        mock_embed_model.api_key = "embed-key"
+        mock_config.llm.get_embed_model.return_value = mock_embed_model
 
         with patch("magaldi_mcp.server.get_config", return_value=mock_config), \
              patch("magaldi_mcp.server.CodeEmbeddingClient") as mock_client_class:
@@ -1107,7 +1087,7 @@ class TestCallToolErrorHandling:
         with pytest.raises(ValueError, match="Element not found"):
             await server._handle_tool(
                 "get_element",
-                {"element_id": "nonexistent"},
+                {"hash_id": "nonexistent"},
             )
 
 

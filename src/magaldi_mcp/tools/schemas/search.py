@@ -77,12 +77,12 @@ SEARCH_TOOLS = [
     ),
     Tool(
         name="find_similar",
-        description="FIND RELATED CODE: Given an element_id, find similar implementations. "
+        description="FIND RELATED CODE: Given an element ID, find similar implementations. "
         "Use after search_code to find related patterns or alternative approaches.",
         inputSchema={
             "type": "object",
             "properties": {
-                "element_id": {"type": "string", "description": "Element ID from search results"},
+                "hash_id": {"type": "string", "description": "Element ID (hash_id from search results)"},
                 "limit": {"type": "integer", "default": 10},
                 "same_repo_only": {"type": "boolean", "default": False},
                 "include_tests": {
@@ -91,7 +91,7 @@ SEARCH_TOOLS = [
                     "default": True,
                 },
             },
-            "required": ["element_id"],
+            "required": ["hash_id"],
         },
     ),
 ]

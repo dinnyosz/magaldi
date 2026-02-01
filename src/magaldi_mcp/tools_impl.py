@@ -655,6 +655,7 @@ def get_children(
     return [
         {
             "element_id": c.get("element_id"),
+            "hash_id": c.get("hash_id"),
             "name": c.get("name"),
             "type": c.get("element_type"),
             "line_start": c.get("line_start"),
@@ -696,6 +697,7 @@ def get_feature_members(
             members.append(
                 {
                     "element_id": doc.get("element_id"),
+                    "hash_id": doc.get("hash_id"),
                     "name": doc.get("name"),
                     "type": doc.get("element_type"),
                     "file": doc.get("relative_path"),
@@ -1546,6 +1548,7 @@ def get_call_graph(
             "file": defining_file,
             "line": line_start,
             "element_id": element_id,
+            "hash_id": doc.get("hash_id"),
         },
         "callers": [],
         "callees": [],
@@ -1564,6 +1567,7 @@ def get_call_graph(
             result["callers"].append(
                 {
                     "element_id": caller.get("element_id"),
+                    "hash_id": caller.get("hash_id"),
                     "name": caller.get("name"),
                     "type": caller.get("element_type"),
                     "file": caller.get("relative_path"),
@@ -1654,6 +1658,7 @@ def find_callers(
 
         entry = {
             "element_id": caller.get("element_id"),
+            "hash_id": caller.get("hash_id"),
             "name": caller.get("name"),
             "type": caller.get("element_type"),
             "file": caller.get("relative_path"),
@@ -1674,6 +1679,7 @@ def find_callers(
     return {
         "target": {
             "element_id": element_id,
+            "hash_id": doc.get("hash_id"),
             "name": doc.get("name"),
             "type": doc.get("element_type"),
             "file": doc.get("relative_path"),
@@ -2456,6 +2462,7 @@ def pattern_search(
 
         entry = {
             "element_id": result.get("element_id"),
+            "hash_id": result.get("hash_id"),
             "file": result.get("relative_path"),
             "name": result.get("name"),
             "element_type": result.get("element_type"),
@@ -2780,6 +2787,7 @@ def find_dependents(
             {
                 "file": dep.get("relative_path"),
                 "element_id": dep.get("element_id"),
+                "hash_id": dep.get("hash_id"),
                 "language": dep.get("language"),
             }
         )
@@ -3095,6 +3103,7 @@ def explain_element(
             result["callers"].append(
                 {
                     "element_id": caller.get("element_id"),
+                    "hash_id": caller.get("hash_id"),
                     "name": caller.get("name"),
                     "type": caller.get("element_type"),
                     "file": caller.get("relative_path"),
@@ -3145,6 +3154,7 @@ def explain_element(
             result["similar_code"].append(
                 {
                     "element_id": sim.get("element_id"),
+                    "hash_id": sim.get("hash_id"),
                     "name": sim.get("name"),
                     "type": sim.get("element_type"),
                     "file": sim.get("relative_path"),
@@ -3163,6 +3173,7 @@ def explain_element(
         if parent_doc:
             result["parent"] = {
                 "element_id": parent_id,
+                "hash_id": parent_doc.get("hash_id"),
                 "name": parent_doc.get("name"),
                 "type": parent_doc.get("element_type"),
                 "file": parent_doc.get("relative_path"),
@@ -3281,6 +3292,7 @@ def get_purity(
 
     return {
         "element_id": doc.get("element_id"),
+        "hash_id": doc.get("hash_id"),
         "name": doc.get("name"),
         "purity": doc.get("purity"),
         "side_effects": doc.get("side_effects", []),
@@ -3326,13 +3338,14 @@ def find_pure_functions(
         body={
             "query": {"bool": {"must": must_clauses}},
             "size": limit,
-            "_source": ["element_id", "name", "relative_path", "line_start", "purity"],
+            "_source": ["element_id", "hash_id", "name", "relative_path", "line_start", "purity"],
         },
     )
 
     return [
         {
             "element_id": hit["_source"].get("element_id"),
+            "hash_id": hit["_source"].get("hash_id"),
             "name": hit["_source"].get("name"),
             "file": hit["_source"].get("relative_path"),
             "line": hit["_source"].get("line_start"),
@@ -3388,13 +3401,14 @@ def find_side_effects(
         body={
             "query": {"bool": {"must": must_clauses}},
             "size": limit,
-            "_source": ["element_id", "name", "relative_path", "line_start", "side_effects"],
+            "_source": ["element_id", "hash_id", "name", "relative_path", "line_start", "side_effects"],
         },
     )
 
     return [
         {
             "element_id": hit["_source"].get("element_id"),
+            "hash_id": hit["_source"].get("hash_id"),
             "name": hit["_source"].get("name"),
             "file": hit["_source"].get("relative_path"),
             "line": hit["_source"].get("line_start"),
@@ -3446,7 +3460,7 @@ def trace_type(
         body={
             "query": {"bool": {"must": must_clauses}},
             "size": limit,
-            "_source": ["element_id", "name", "relative_path", "line_start", "type_annotations"],
+            "_source": ["element_id", "hash_id", "name", "relative_path", "line_start", "type_annotations"],
         },
     )
 
@@ -3461,6 +3475,7 @@ def trace_type(
 
             entry = {
                 "element_id": source.get("element_id"),
+                "hash_id": source.get("hash_id"),
                 "name": source.get("name"),
                 "file": source.get("relative_path"),
                 "line": source.get("line_start"),
@@ -3561,7 +3576,7 @@ def find_http_routes(
         body={
             "query": {"bool": {"must": must_clauses}},
             "size": limit,
-            "_source": ["element_id", "name", "relative_path", "line_start", "http_routes"],
+            "_source": ["element_id", "hash_id", "name", "relative_path", "line_start", "http_routes"],
         },
     )
 
@@ -3577,6 +3592,7 @@ def find_http_routes(
             routes.append(
                 {
                     "element_id": source.get("element_id"),
+                    "hash_id": source.get("hash_id"),
                     "handler": source.get("name"),
                     "file": source.get("relative_path"),
                     "line": source.get("line_start"),
@@ -3640,7 +3656,7 @@ def find_cli_commands(
         body={
             "query": {"bool": {"must": must_clauses}},
             "size": limit,
-            "_source": ["element_id", "name", "relative_path", "line_start", "cli_commands"],
+            "_source": ["element_id", "hash_id", "name", "relative_path", "line_start", "cli_commands"],
         },
     )
 
@@ -3651,6 +3667,7 @@ def find_cli_commands(
             commands.append(
                 {
                     "element_id": source.get("element_id"),
+                    "hash_id": source.get("hash_id"),
                     "handler": source.get("name"),
                     "file": source.get("relative_path"),
                     "line": source.get("line_start"),
@@ -3844,6 +3861,7 @@ def find_by_pattern(
             "size": limit * 2,  # Fetch extra for confidence filtering
             "_source": [
                 "element_id",
+                "hash_id",
                 "name",
                 "relative_path",
                 "line_start",
@@ -3866,6 +3884,7 @@ def find_by_pattern(
         classes.append(
             {
                 "element_id": source.get("element_id"),
+                "hash_id": source.get("hash_id"),
                 "name": source.get("name"),
                 "file": source.get("relative_path"),
                 "line": source.get("line_start"),

@@ -12,7 +12,7 @@ DEPENDENCY_TOOLS = [
             "type": "object",
             "properties": {
                 "file_path": {"type": "string", "description": "Relative file path (e.g., 'src/utils.py')"},
-                "element_id": {"type": "string", "description": "Or provide file element ID directly"},
+                "hash_id": {"type": "string", "description": "Or provide file element ID directly (hash_id)"},
                 "scope": {"type": "string", "description": "Repository scope (required if using file_path)"},
                 "repository": {"type": "string", "description": "Repository name (required if using file_path)"},
                 "username": {"type": "string", "description": "User branch"},

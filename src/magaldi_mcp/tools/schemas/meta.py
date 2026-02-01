@@ -55,9 +55,9 @@ META_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "element_id": {"type": "string", "description": "Element ID to explain"},
+                "hash_id": {"type": "string", "description": "Element ID to explain (hash_id)"},
             },
-            "required": ["element_id"],
+            "required": ["hash_id"],
         },
     ),
     Tool(

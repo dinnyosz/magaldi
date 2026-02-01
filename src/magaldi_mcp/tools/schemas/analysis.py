@@ -44,10 +44,10 @@ ANALYSIS_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "element_id": {"type": "string", "description": "Element ID from search results"},
+                "hash_id": {"type": "string", "description": "Element ID (hash_id from search results)"},
                 "limit": {"type": "integer", "default": 30},
             },
-            "required": ["element_id"],
+            "required": ["hash_id"],
         },
     ),
     Tool(
@@ -57,7 +57,7 @@ ANALYSIS_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "element_id": {"type": "string", "description": "Element ID of the protocol/base class"},
+                "hash_id": {"type": "string", "description": "Element ID of the protocol/base class (hash_id)"},
                 "class_name": {"type": "string", "description": "Or just the class name to search for"},
                 "scope": {"type": "string", "description": "Filter by scope"},
                 "repository": {"type": "string", "description": "Filter by repo"},
@@ -73,10 +73,10 @@ ANALYSIS_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "element_id": {"type": "string", "description": "Function/method element ID"},
+                "hash_id": {"type": "string", "description": "Function/method element ID (hash_id)"},
                 "direction": {"type": "string", "enum": ["callers", "callees", "both"], "default": "both"},
             },
-            "required": ["element_id"],
+            "required": ["hash_id"],
         },
     ),
     Tool(
@@ -86,14 +86,14 @@ ANALYSIS_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "element_id": {"type": "string", "description": "Target element ID to find callers of"},
+                "hash_id": {"type": "string", "description": "Target element ID to find callers of (hash_id)"},
                 "scope": {"type": "string", "description": "Filter by scope"},
                 "repository": {"type": "string", "description": "Filter by repository"},
                 "username": {"type": "string", "description": "Filter by username branch"},
                 "limit": {"type": "integer", "default": 30, "description": "Max results"},
                 "include_tests": {"type": "boolean", "default": True, "description": "Include test functions"},
             },
-            "required": ["element_id"],
+            "required": ["hash_id"],
         },
     ),
     Tool(
@@ -104,7 +104,7 @@ ANALYSIS_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "element_id": {"type": "string", "description": "Starting element ID"},
+                "hash_id": {"type": "string", "description": "Starting element ID (hash_id)"},
                 "direction": {
                     "type": "string",
                     "enum": ["callers", "callees", "both"],
@@ -116,7 +116,7 @@ ANALYSIS_TOOLS = [
                 "repository": {"type": "string", "description": "Filter by repository"},
                 "username": {"type": "string", "description": "Filter by username branch"},
             },
-            "required": ["element_id"],
+            "required": ["hash_id"],
         },
     ),
     Tool(
