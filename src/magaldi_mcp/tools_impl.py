@@ -110,6 +110,7 @@ def search_code(
             "file": result.get("relative_path"),
             "line": result.get("line_start"),
             "element_id": result.get("element_id"),
+            "hash_id": result.get("hash_id"),
             "is_test": is_test,
         }
 
@@ -299,6 +300,7 @@ def find_similar(
             "line": result.get("line_start"),
             "summary": result.get("summary", ""),
             "element_id": result.get("element_id"),
+            "hash_id": result.get("hash_id"),
             "is_test": is_test,
         }
 
