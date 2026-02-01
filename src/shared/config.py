@@ -357,11 +357,6 @@ class BenchmarkConfig:
             provider="ollama",
             url="http://localhost:11434",
         ),
-        "gemma3-4b": ModelConfig(
-            name="gemma3:4b",
-            provider="ollama",
-            url="http://localhost:11434",
-        ),
         # Falcon H1 models (hybrid Transformer + Mamba-2 SSM architecture)
         # Requires manual import from GGUF - see plans/ollama_model_research.md
         "falcon-h1-tiny": ModelConfig(
@@ -390,7 +385,6 @@ class BenchmarkConfig:
     benchmark_models: list[str] = field(default_factory=lambda: [
         "qwen3-small",   # Best balance (8.2 rating, 114 t/s)
         "qwen3-4b",      # Best quality (8.7 rating, 65 t/s)
-        "gemma3-4b",     # Google Gemma 3 4B
         # Falcon H1 models - hybrid Transformer + Mamba-2 SSM (requires GGUF import)
         "falcon-h1-tiny",        # 90M params, general instruct
         "falcon-h1-0.5b",        # 0.5B params, instruct
