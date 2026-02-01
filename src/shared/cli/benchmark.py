@@ -1006,6 +1006,7 @@ def _build_summarization_prompt(
 @click.option("--models", "-m", default=None, help="Comma-separated list of Ollama models (default: from config)")
 @click.option("--ollama-url", default=None, help="Ollama API URL (default: from config or http://localhost:11434)")
 @click.option("--user", "-u", default="benchmark", help="Username for parsing (default: benchmark)")
+@click.option("--skip-warmup", is_flag=True, default=False, help="Skip model warmup phase")
 def benchmark_models(
     repo_path: str,
     file_path: str | None,
@@ -1014,6 +1015,7 @@ def benchmark_models(
     models: str | None,
     ollama_url: str | None,
     user: str,
+    skip_warmup: bool,
 ) -> None:
     """Benchmark Ollama models on code summarization.
 
@@ -1112,13 +1114,16 @@ def benchmark_models(
         test_model_names = [f"{mc.provider}/{mc.name}" for mc in models_to_test]
         console.print(f"  Testing models: {', '.join(test_model_names)}")
 
-        # Phase 6: Warmup models
-        console.print("\n[bold blue]Phase 6:[/] Model Warmup")
-        models_to_test = _warmup_benchmark_models(models_to_test, benchmark_config)
+        # Phase 6: Warmup models (optional)
+        if skip_warmup:
+            console.print("\n[bold blue]Phase 6:[/] Model Warmup [dim](skipped)[/]")
+        else:
+            console.print("\n[bold blue]Phase 6:[/] Model Warmup")
+            models_to_test = _warmup_benchmark_models(models_to_test, benchmark_config)
 
-        if not models_to_test:
-            console.print("[red]No models available after warmup.[/]")
-            sys.exit(1)
+            if not models_to_test:
+                console.print("[red]No models available after warmup.[/]")
+                sys.exit(1)
 
         # Phase 7: Run benchmarks with hierarchical context (file → class → method)
         console.print("\n[bold blue]Phase 7:[/] Benchmarking (with hierarchical context)")
