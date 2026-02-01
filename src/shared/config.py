@@ -345,6 +345,7 @@ class BenchmarkConfig:
     # Named model configurations for benchmarking
     # NOTE: qwen3 models after July 2025 split into "thinking" and "instruct" variants
     #       The default qwen3:Xb has thinking baked in, use instruct variants instead
+    # NOTE: Falcon H1 models require manual GGUF import - see plans/ollama_model_research.md
     models: dict[str, ModelConfig] = field(default_factory=lambda: {
         "qwen3-small": ModelConfig(
             name="qwen3:1.7b",
@@ -361,6 +362,28 @@ class BenchmarkConfig:
             provider="ollama",
             url="http://localhost:11434",
         ),
+        # Falcon H1 models (hybrid Transformer + Mamba-2 SSM architecture)
+        # Requires manual import from GGUF - see plans/ollama_model_research.md
+        "falcon-h1-tiny": ModelConfig(
+            name="falcon-h1-tiny-90m",
+            provider="ollama",
+            url="http://localhost:11434",
+        ),
+        "falcon-h1-0.5b": ModelConfig(
+            name="falcon-h1-0.5b",
+            provider="ollama",
+            url="http://localhost:11434",
+        ),
+        "falcon-h1-1.5b": ModelConfig(
+            name="falcon-h1-1.5b-deep",
+            provider="ollama",
+            url="http://localhost:11434",
+        ),
+        "falcon-h1-3b": ModelConfig(
+            name="falcon-h1-3b",
+            provider="ollama",
+            url="http://localhost:11434",
+        ),
     })
 
     # Which models to benchmark (reference by name)
@@ -368,6 +391,11 @@ class BenchmarkConfig:
         "qwen3-small",   # Best balance (8.2 rating, 114 t/s)
         "qwen3-4b",      # Best quality (8.7 rating, 65 t/s)
         "gemma3-4b",     # Google Gemma 3 4B
+        # Falcon H1 models - hybrid Transformer + Mamba-2 SSM (requires GGUF import)
+        "falcon-h1-tiny",        # 90M params, general instruct
+        "falcon-h1-0.5b",        # 0.5B params, instruct
+        "falcon-h1-1.5b",        # 1.5B params, deep model
+        "falcon-h1-3b",          # 3B params, largest in set
     ])
 
     # Models used for evaluating/rating summaries (LLM-as-judge)
@@ -462,6 +490,14 @@ class BenchmarkConfig:
             top_k=50,
             repetition_penalty=1.05,
             max_tokens=1024,  # Thinking models need more tokens
+        ),
+        # Falcon H1 models: Hybrid Transformer + Mamba-2 SSM architecture
+        # huggingface.co/tiiuae/Falcon-H1-3B-Instruct
+        # temperature=0.6, top_p=0.9, repetition_penalty=1.1
+        "falcon-h1": ModelParams(
+            temperature=0.6,
+            top_p=0.9,
+            repetition_penalty=1.1,
         ),
     })
 
