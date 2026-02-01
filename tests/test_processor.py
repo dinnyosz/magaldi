@@ -644,11 +644,11 @@ class TestTimingStats:
 
         eta = stats.eta_seconds(2, 6, num_workers=1)
         # avg_2k = 1.0s (wall_time)
-        # 4k tier fallback: 1.0 * sqrt(4096/2048) = 1.0 * sqrt(2) ≈ 1.414s
+        # 4k tier fallback: 1.0 * (4096/2048)^0.65 = 1.0 * 2^0.65 ≈ 1.569s
         # Remaining: 1 @ 2k + 3 @ 4k
-        # = 1 * 1.0 + 3 * 1.414 ≈ 5.24s
+        # = 1 * 1.0 + 3 * 1.569 ≈ 5.71s
         assert eta is not None
-        assert abs(eta - 5.24) < 0.3
+        assert abs(eta - 5.71) < 0.1
 
     def test_eta_seconds_tier_fallback_to_same_model(self):
         """Test ETA fallback to same model group when type not found."""

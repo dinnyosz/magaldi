@@ -40,7 +40,7 @@ from shared.ai.summarization import (
     build_prompt,
     clean_summary,
 )
-from shared.ai.context_size import compute_element_num_ctx, CONTEXT_TIERS, TIER_TIMEOUTS
+from shared.ai.context_size import compute_element_num_ctx, CONTEXT_TIERS, TIER_TIMEOUTS, TIER_SCALING_EXPONENT
 from shared.throttling import ThroughputTracker, compute_throttle_decision, ThrottleDecision, TimeoutEvent
 
 
@@ -427,9 +427,9 @@ class TimingStats:
             total_count = sum(self.summarize_counts_by_type_tier[key] for key in closest_items)
             base_avg = total_time / total_count
             # Scale by tier ratio (use first closest tier for ratio)
-            # Use sqrt for sub-linear scaling: larger context doesn't mean proportionally longer output
+            # Use empirically-derived exponent for sub-linear scaling
             closest_tier = closest_items[0][1]
-            tier_ratio = math.sqrt(tier / closest_tier) if closest_tier > 0 else 1.0
+            tier_ratio = (tier / closest_tier) ** TIER_SCALING_EXPONENT if closest_tier > 0 else 1.0
             return base_avg * tier_ratio, True
 
         # 3. Same model group (large: file/class/interface/type_alias, small: function/method/variable)
@@ -455,9 +455,9 @@ class TimingStats:
             total_count = sum(self.summarize_counts_by_type_tier[key] for key in closest_items)
             base_avg = total_time / total_count
             # Scale by tier ratio (use first closest tier for ratio)
-            # Use sqrt for sub-linear scaling: larger context doesn't mean proportionally longer output
+            # Use empirically-derived exponent for sub-linear scaling
             closest_tier = closest_items[0][1]
-            tier_ratio = math.sqrt(tier / closest_tier) if closest_tier > 0 else 1.0
+            tier_ratio = (tier / closest_tier) ** TIER_SCALING_EXPONENT if closest_tier > 0 else 1.0
             return base_avg * tier_ratio, True
 
         # 4. Fall back to per-type average (ignoring tier) - use wall_time from type_tier

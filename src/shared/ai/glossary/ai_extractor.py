@@ -12,6 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from shared.ai.context_size import TIER_SCALING_EXPONENT
 from shared.ai.llm_client import LLMClient, LLMError
 from shared.parallel_processor import ThrottleContext, ThrottleDisplayInfo, run_throttled_tier
 from shared.throttling import ThroughputTracker
@@ -89,8 +90,8 @@ class GlossaryTimingStats:
         if tiers_with_data:
             closest = min(tiers_with_data, key=lambda t: abs(t - tier))
             base_avg = self.total_time_by_tier[closest] / self.count_by_tier[closest]
-            # Scale by tier ratio - use sqrt for sub-linear scaling
-            tier_ratio = math.sqrt(tier / closest) if closest > 0 else 1.0
+            # Scale by tier ratio - use empirically-derived exponent for sub-linear scaling
+            tier_ratio = (tier / closest) ** TIER_SCALING_EXPONENT if closest > 0 else 1.0
             return base_avg * tier_ratio
 
         return global_avg

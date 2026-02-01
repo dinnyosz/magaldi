@@ -19,6 +19,12 @@ T = TypeVar("T")
 # Context size tiers (powers of 2 for memory alignment)
 CONTEXT_TIERS = [2048, 4096, 8192, 16384, 32768]
 
+# Tier scaling exponent for ETA estimation fallback.
+# Empirically derived from timing data: time_ratio = tier_ratio^TIER_SCALING_EXPONENT
+# Higher tiers take longer, but sub-linearly (larger context doesn't mean proportionally longer output).
+# Analysis of real data showed exponent ~0.65, compared to sqrt (0.5).
+TIER_SCALING_EXPONENT = 0.65
+
 # Max concurrent workers per tier (inversely proportional to context size)
 # Smaller contexts = more parallelism, larger contexts = less to avoid GPU saturation
 # Tuned for M4 Pro 48GB - adjust for different hardware
