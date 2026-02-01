@@ -492,13 +492,11 @@ class BenchmarkConfig:
             repetition_penalty=1.05,
             max_tokens=1024,  # Thinking models need more tokens
         ),
-        # Falcon H1 models: Hybrid Transformer + Mamba-2 SSM architecture
-        # huggingface.co/tiiuae/Falcon-H1-3B-Instruct
-        # temperature=0.6, top_p=0.9, repetition_penalty=1.1
+        # Falcon H1 Instruct models: Hybrid Transformer + Mamba-2 SSM architecture
+        # huggingface.co/spaces/tiiuae/Falcon-H1-playground/discussions/1
+        # "For optimal performance, the recommended model temperature is 0.1"
         "falcon-h1": ModelParams(
-            temperature=0.6,
-            top_p=0.9,
-            repetition_penalty=1.1,
+            temperature=0.1,
         ),
     })
 
