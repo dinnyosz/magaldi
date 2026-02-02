@@ -1658,6 +1658,27 @@ The index has already done the hard work:
             result["allowed_tools_added"] = False
             result["allowed_tools_note"] = "Magaldi tools already in allowedTools"
 
+    # Add reference to CLAUDE.md (only for project scope)
+    if scope == "project" and project_root:
+        claude_md_path = Path(project_root) / "CLAUDE.md"
+        skill_reference = "## Magaldi MCP\n\n**See `.claude/skills/magaldi/SKILL.md` for detailed MCP tool usage guidance.**\n\nMagaldi tools auto-detect `scope` and `repository` from `magaldi.yaml` - no need to specify these parameters manually.\n"
+
+        if claude_md_path.exists():
+            content = claude_md_path.read_text()
+            # Check if reference already exists
+            if ".claude/skills/magaldi/SKILL.md" not in content:
+                # Append to end of file
+                updated_content = content.rstrip() + "\n\n" + skill_reference
+                claude_md_path.write_text(updated_content)
+                result["claude_md_updated"] = True
+            else:
+                result["claude_md_updated"] = False
+                result["claude_md_note"] = "Magaldi skill reference already exists"
+        else:
+            # Create CLAUDE.md with skill reference
+            claude_md_path.write_text(f"# Project\n\n{skill_reference}")
+            result["claude_md_created"] = True
+
     # Provide next steps
     next_steps = ["Restart Claude Code to pick up the new skill."]
     if not add_allowed_tools:
