@@ -363,7 +363,7 @@ def watch_loop(
 @click.option("--skip-resolve", is_flag=True, help="Skip call resolution phase")
 @click.option("--llm-url", default=None, help="LLM API URL (default: from config)")
 @click.option("--workers", "-w", default=0, type=int, help="Max parallel workers (0=auto)")
-@click.option("--debounce", default=1.0, type=float, help="Seconds to wait after last change before processing")
+@click.option("--debounce", default=10.0, type=float, help="Seconds to wait after last change before processing")
 @click.option("--no-initial-scan", is_flag=True, help="Skip initial change detection scan")
 def watch(
     repo_path: str,
