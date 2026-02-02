@@ -511,7 +511,7 @@ class MetadataRepository:
         with open("/tmp/magaldi_file_hash.log", "a") as f:
             f.write(f"[GET_FILE_STATES SUMMARY] Found {total_hits} FILE elements, {null_hash_count} with null file_hash, {orphan_count} orphan paths\n")
             if orphan_count > 0:
-                f.write(f"[ORPHAN PATHS] First few orphans (have elements but no FILE element):\n")
+                f.write("[ORPHAN PATHS] First few orphans (have elements but no FILE element):\n")
                 for op in list(orphan_paths)[:5]:
                     f.write(f"  {op}\n")
 
@@ -574,6 +574,55 @@ class MetadataRepository:
         )
 
         return result["count"] > 0
+
+    def update_file_element_count(
+        self,
+        scope: str,
+        repository: str,
+        username: str,
+        relative_path: str,
+        element_count: int,
+    ) -> bool:
+        """Update element_count for a FILE element.
+
+        Called when element count drifts (e.g., due to parser changes) to keep
+        the stored metadata accurate.
+
+        Args:
+            scope: Scope to filter by.
+            repository: Repository to filter by.
+            username: Username to filter by.
+            relative_path: File path to update.
+            element_count: New element count.
+
+        Returns:
+            True if update succeeded.
+        """
+        client = self._get_client()
+
+        result = client.update_by_query(
+            index=INDEX_NAME,
+            body={
+                "query": {
+                    "bool": {
+                        "must": [
+                            {"term": {"scope": scope}},
+                            {"term": {"repository": repository}},
+                            {"term": {"username": username}},
+                            {"term": {"relative_path": relative_path}},
+                            {"term": {"element_type": "file"}},
+                        ]
+                    }
+                },
+                "script": {
+                    "source": "ctx._source.element_count = params.count",
+                    "params": {"count": element_count},
+                },
+            },
+            refresh=True,
+        )
+
+        return result.get("updated", 0) > 0
 
     def get_all_embeddings(
         self,

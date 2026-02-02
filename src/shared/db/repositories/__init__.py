@@ -294,6 +294,19 @@ class ElasticsearchRepository:
         """Get file states for change detection."""
         return self._metadata.get_file_states(scope, repository, username)
 
+    def update_file_element_count(
+        self,
+        scope: str,
+        repository: str,
+        username: str,
+        relative_path: str,
+        element_count: int,
+    ) -> bool:
+        """Update element_count for a FILE element."""
+        return self._metadata.update_file_element_count(
+            scope, repository, username, relative_path, element_count
+        )
+
     def main_branch_exists(self, scope: str, repository: str) -> bool:
         """Check if main branch has been indexed."""
         return self._metadata.main_branch_exists(scope, repository)

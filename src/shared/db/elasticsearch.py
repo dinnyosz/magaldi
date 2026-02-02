@@ -50,24 +50,19 @@ class ElasticsearchFileStateRepository:
             file_hash = state.get("file_hash")
             element_count = state.get("element_count")
 
-            # Verify completeness when we have a file_hash
-            if file_hash:
-                if element_count is None:
-                    # Old data without element_count - treat as incomplete
-                    # This forces reindexing of data from before completeness tracking
-                    file_hash = None
-                else:
-                    # Check that actual element count matches expected
-                    # Use count_elements_by_path (not by_hash) because multiple files
-                    # can have identical content (same hash)
-                    actual_count = self._es.count_elements_by_path(
-                        scope, repository, username, path
+            # If element count mismatches, update it to match actual count in ES.
+            # This handles cases where parser changes altered element extraction
+            # without changing file content. File hash is the source of truth.
+            if file_hash and element_count is not None:
+                actual_count = self._es.count_elements_by_path(
+                    scope, repository, username, path
+                )
+                if actual_count != element_count:
+                    # Update the stored element_count to match reality
+                    self._es.update_file_element_count(
+                        scope, repository, username, path, actual_count
                     )
-                    if actual_count != element_count:
-                        # Incomplete - set file_hash to None so it's treated as modified
-                        with open("/tmp/magaldi_file_hash.log", "a") as f:
-                            f.write(f"[COUNT MISMATCH] {path}: expected={element_count}, actual={actual_count}\n")
-                        file_hash = None
+                    element_count = actual_count
 
             result[path] = DBFileState(
                 relative_path=path,
