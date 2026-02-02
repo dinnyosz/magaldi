@@ -18,7 +18,7 @@ import {
 import ReactMarkdown from 'react-markdown'
 import { search, generateSearchSummary, getRepositories, getBrowseFilters, type SearchResult } from '../api'
 
-const ELEMENT_TYPES = ['file', 'class', 'function', 'method', 'variable', 'constant', 'feature', 'subfeature']
+const ELEMENT_TYPES = ['file', 'class', 'interface', 'type_alias', 'function', 'method', 'variable', 'constant', 'feature', 'subfeature']
 const DEBOUNCE_MS = 300
 
 function Search() {
