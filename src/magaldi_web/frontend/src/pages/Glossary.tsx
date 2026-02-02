@@ -13,6 +13,7 @@ import {
   Form,
   InputGroup,
 } from 'react-bootstrap'
+import ReactMarkdown from 'react-markdown'
 import {
   getRepositories,
   getGlossaryTerms,
@@ -53,7 +54,9 @@ function TermDetail({ term, scope, repository }: { term: string; scope: string; 
               <i className="bi bi-info-circle me-1"></i>
               Definition
             </small>
-            <span>{data.description}</span>
+            <div className="glossary-description">
+              <ReactMarkdown>{data.description}</ReactMarkdown>
+            </div>
           </Card.Body>
         </Card>
       )}
