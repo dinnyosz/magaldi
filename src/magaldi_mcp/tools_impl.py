@@ -1501,6 +1501,7 @@ The index has already done the hard work:
     skill_dir.mkdir(parents=True, exist_ok=True)
     skill_path.write_text(skill_content)
     result["written_to"] = str(skill_path)
+    result["next_step"] = "Restart Claude Code to pick up the new skill."
 
     return result
 
