@@ -1602,15 +1602,18 @@ def _process_single_element(
         path = element.relative_path
         if len(path) > max_path_len:
             path = "..." + path[-(max_path_len - 3):]
-        if element.element_type != "file":
+        if element.element_type == "file":
+            # For file elements, show the path as the name
             parts.append(path)
-        # Add parent class if method
-        if element.parent_id:
-            parent = summary_cache.get_element(element.parent_id)
-            if parent and parent.element_type == "class":
-                parts.append(parent.name)
-        # Add element name
-        parts.append(element.name)
+        else:
+            parts.append(path)
+            # Add parent class if method
+            if element.parent_id:
+                parent = summary_cache.get_element(element.parent_id)
+                if parent and parent.element_type == "class":
+                    parts.append(parent.name)
+            # Add element name
+            parts.append(element.name)
         # Prefix with element type (use angle brackets to avoid Rich markup interpretation)
         return f"<{element.element_type}> " + " → ".join(parts)
 
