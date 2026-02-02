@@ -918,8 +918,6 @@ def find_files(
     # Auto-detect scope/repository from magaldi.yaml if not provided
     scope, repository = _resolve_scope_repo(scope, repository)
 
-    import fnmatch
-
     client = es._get_client()
 
     # Build ES query for file elements
@@ -950,8 +948,8 @@ def find_files(
         source = hit["_source"]
         rel_path = source.get("relative_path", "")
 
-        # Apply glob pattern filter
-        if fnmatch.fnmatch(rel_path, pattern):
+        # Apply glob pattern filter (Path.match supports ** patterns)
+        if Path(rel_path).match(pattern):
             matches.append(
                 {
                     "path": rel_path,
