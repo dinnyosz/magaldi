@@ -1708,9 +1708,10 @@ The index has already done the hard work:
             result["allowed_tools_added"] = False
             result["allowed_tools_note"] = "Magaldi tools already in allowedTools"
 
-    # Add reference to CLAUDE.md (if project_root provided, regardless of scope)
-    if project_root:
-        claude_md_path = Path(project_root) / "CLAUDE.md"
+    # Add reference to CLAUDE.md (auto-detect project_root from cwd if not provided)
+    effective_project_root = project_root or str(Path.cwd())
+    if effective_project_root:
+        claude_md_path = Path(effective_project_root) / "CLAUDE.md"
         skill_reference = "## Magaldi MCP\n\n**See `.claude/skills/magaldi/SKILL.md` for detailed MCP tool usage guidance.**\n\nMagaldi tools auto-detect `scope` and `repository` from `magaldi.yaml` - no need to specify these parameters manually.\n"
 
         if claude_md_path.exists():
