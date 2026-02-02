@@ -82,8 +82,12 @@ def run_feature_extraction(
     min_samples: int = 3,
     skip_labeling: bool = False,
     workers: int = 4,
+    compact: bool = False,
 ) -> dict | None:
     """Run Phase 5: Feature Extraction.
+
+    Args:
+        compact: If True, hide worker table in display (for watch mode).
 
     Returns:
         Dict with feature extraction results or None if no elements to extract.
@@ -462,7 +466,9 @@ def run_feature_extraction(
             elements = [bar_text]
             if eta_table:
                 elements.append(eta_table)
-            elements.extend([worker_table, stats])
+            if not compact:
+                elements.append(worker_table)
+            elements.append(stats)
             return Group(*elements)
 
         current_state = FeatureProgressState(
@@ -743,7 +749,9 @@ def run_feature_extraction(
                 elements = [header_text, bar_text]
                 if eta_table:
                     elements.append(eta_table)
-                elements.extend([worker_table, stats_text])
+                if not compact:
+                    elements.append(worker_table)
+                elements.append(stats_text)
                 return Group(*elements)
 
             current_sub_state = SubfeatureProgressState(
@@ -868,6 +876,7 @@ def run_glossary_extraction(
     config: MagaldiConfig,
     es_repo: ElasticsearchRepository | None = None,
     workers: int = 8,
+    compact: bool = False,
 ) -> dict | None:
     """Run Glossary Extraction using AI-powered extraction from feature summaries.
 
@@ -878,6 +887,7 @@ def run_glossary_extraction(
         config: Magaldi configuration.
         es_repo: Optional ES repository (creates one if not provided).
         workers: Number of concurrent workers.
+        compact: If True, hide worker table in display (for watch mode).
 
     Returns:
         Dict with glossary extraction results or None if no features.
@@ -1089,7 +1099,9 @@ def run_glossary_extraction(
             elements = [phase_text, bar_text]
             if eta_table:
                 elements.append(eta_table)
-            elements.extend([worker_table, stats])
+            if not compact:
+                elements.append(worker_table)
+            elements.append(stats)
             return Group(*elements)
 
         # Create shared state objects

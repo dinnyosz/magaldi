@@ -235,7 +235,7 @@ def process_file_changes(
         file_hashes[fi.relative_path] = fi.hash
 
     processed, skipped, indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, failed_elements, deleted = run_processing(
-        parsing_result, manifest, config, dry_run=False, skip_ai=skip_ai, workers=workers, skip_resolve=skip_resolve
+        parsing_result, manifest, config, dry_run=False, skip_ai=skip_ai, workers=workers, skip_resolve=skip_resolve, compact=True
     )
 
     console.print(f"  Processed {processed} elements, indexed {indexed}")
@@ -249,6 +249,7 @@ def process_file_changes(
             user,
             config,
             workers=workers,
+            compact=True,
         )
 
     # Glossary extraction (if requested)
@@ -260,6 +261,7 @@ def process_file_changes(
             username=user,
             config=config,
             workers=workers,
+            compact=True,
         )
 
 
@@ -435,7 +437,7 @@ def watch(
                     # Phase 4: Processing
                     console.print("\n[bold blue]Processing[/]")
                     processed, skipped, indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, failed_elements, deleted = run_processing(
-                        parsing_result, manifest, config, dry_run=False, skip_ai=skip_ai, workers=workers, skip_resolve=skip_resolve
+                        parsing_result, manifest, config, dry_run=False, skip_ai=skip_ai, workers=workers, skip_resolve=skip_resolve, compact=True
                     )
                     print_processing_result(processed, skipped, indexed, skip_ai, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, workers, deleted)
 
@@ -468,6 +470,7 @@ def watch(
                             user,
                             config,
                             workers=workers,
+                            compact=True,
                         )
 
                     # Glossary extraction (if requested)
@@ -480,6 +483,7 @@ def watch(
                             user,
                             config,
                             workers=workers,
+                            compact=True,
                         )
             else:
                 console.print("  [green]Repository is up to date[/]")

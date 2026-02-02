@@ -110,11 +110,13 @@ def run_processing(
     skip_ai: bool,
     workers: int,
     skip_resolve: bool = False,
+    compact: bool = False,
 ) -> tuple[int, int, int, float, float, float, float, "TimingStats | None", list[tuple[str, str]], int]:
     """Run unified processing: summarize -> embed -> index.
 
     Args:
         skip_resolve: If True, skip the call resolution phase.
+        compact: If True, hide worker table in display (for watch mode).
 
     Returns:
         Tuple of (processed, skipped, indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, failed_elements, deleted).
@@ -387,7 +389,8 @@ def run_processing(
         parts: list[RenderableType] = [bar_text]
         if eta_table:
             parts.append(eta_table)
-        parts.append(worker_table)
+        if not compact:
+            parts.append(worker_table)
         if type_line:
             parts.append(type_line)
         parts.append(stats)
