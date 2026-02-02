@@ -6,10 +6,65 @@ plus tool-specific parameters, and returns a dict or list result.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
+
+import yaml
 
 from shared.ai.embedding import CodeEmbeddingClient
 from shared.db.elasticsearch import ElasticsearchRepository
+
+
+# =============================================================================
+# AUTO-DETECTION HELPER
+# =============================================================================
+
+
+def _auto_detect_repo_config() -> tuple[str | None, str | None]:
+    """Auto-detect scope and repository from magaldi.yaml in cwd or parent directories.
+
+    Walks up from current working directory looking for magaldi.yaml.
+
+    Returns:
+        Tuple of (scope, repository) or (None, None) if not found.
+    """
+    cwd = Path.cwd()
+
+    # Walk up directory tree looking for magaldi.yaml
+    for directory in [cwd, *cwd.parents]:
+        config_path = directory / "magaldi.yaml"
+        if config_path.exists():
+            try:
+                with open(config_path, encoding="utf-8") as f:
+                    config = yaml.safe_load(f) or {}
+                scope = config.get("scope")
+                repository = config.get("repository") or config.get("name") or directory.name
+                if scope:
+                    return scope, repository
+            except (yaml.YAMLError, OSError):
+                continue
+
+    return None, None
+
+
+def _resolve_scope_repo(
+    scope: str | None, repository: str | None
+) -> tuple[str | None, str | None]:
+    """Resolve scope and repository, auto-detecting from magaldi.yaml if not provided.
+
+    Args:
+        scope: Explicit scope or None to auto-detect.
+        repository: Explicit repository or None to auto-detect.
+
+    Returns:
+        Tuple of (scope, repository) with auto-detected values filled in.
+    """
+    if scope is None or repository is None:
+        auto_scope, auto_repo = _auto_detect_repo_config()
+        scope = scope or auto_scope
+        repository = repository or auto_repo
+    return scope, repository
+
 
 # =============================================================================
 # SEARCH TOOLS
@@ -51,6 +106,9 @@ def search_code(
     Returns:
         Dict with code_results and test_results lists, grouped by is_test field.
     """
+    # Auto-detect scope/repository from magaldi.yaml if not provided
+    scope, repository = _resolve_scope_repo(scope, repository)
+
     # Validate limit
     limit = max(1, min(limit, 50))
 
@@ -569,23 +627,33 @@ def get_context(
 
 def get_file_structure(
     es: ElasticsearchRepository,
-    scope: str,
-    repository: str,
-    file_path: str,
+    scope: str | None = None,
+    repository: str | None = None,
+    file_path: str = "",
     username: str = "main",
 ) -> dict[str, Any]:
     """Get structure of a file (classes, functions, methods, imports).
 
     Args:
         es: Elasticsearch repository.
-        scope: Repository scope.
-        repository: Repository name.
+        scope: Repository scope (auto-detected from magaldi.yaml if not provided).
+        repository: Repository name (auto-detected from magaldi.yaml if not provided).
         file_path: Relative file path.
         username: User branch.
 
     Returns:
         File structure with nested elements.
     """
+    # Auto-detect scope/repository from magaldi.yaml if not provided
+    scope, repository = _resolve_scope_repo(scope, repository)
+    if not scope or not repository:
+        raise ValueError(
+            "scope and repository are required. Either provide them explicitly "
+            "or create a magaldi.yaml file in your project root."
+        )
+    if not file_path:
+        raise ValueError("file_path is required")
+
     # Get file element
     file_doc = _find_file_element(es, scope, repository, username, file_path)
     if not file_doc:
@@ -685,21 +753,28 @@ def list_features(
 
 def get_repo_stats(
     es: ElasticsearchRepository,
-    scope: str,
-    repository: str,
+    scope: str | None = None,
+    repository: str | None = None,
     username: str = "main",
 ) -> dict[str, Any]:
     """Get statistics for a repository.
 
     Args:
         es: Elasticsearch repository.
-        scope: Repository scope.
-        repository: Repository name.
+        scope: Repository scope (auto-detected from magaldi.yaml if not provided).
+        repository: Repository name (auto-detected from magaldi.yaml if not provided).
         username: User branch.
 
     Returns:
         Repository statistics.
     """
+    # Auto-detect scope/repository from magaldi.yaml if not provided
+    scope, repository = _resolve_scope_repo(scope, repository)
+    if not scope or not repository:
+        raise ValueError(
+            "scope and repository are required. Either provide them explicitly "
+            "or create a magaldi.yaml file in your project root."
+        )
     return es.get_repository_stats(scope, repository, username)
 
 
@@ -840,6 +915,9 @@ def find_files(
     Returns:
         List of matching files with basic info.
     """
+    # Auto-detect scope/repository from magaldi.yaml if not provided
+    scope, repository = _resolve_scope_repo(scope, repository)
+
     import fnmatch
 
     client = es._get_client()
@@ -2454,8 +2532,8 @@ def pattern_search(
     es: ElasticsearchRepository,
     pattern: str,
     mode: str,
-    scope: str,
-    repository: str,
+    scope: str | None = None,
+    repository: str | None = None,
     username: str | None = None,
     slop: int = 5,
     glob: str | None = None,
@@ -2473,8 +2551,8 @@ def pattern_search(
         es: Elasticsearch repository.
         pattern: Search pattern (syntax depends on mode).
         mode: One of "regexp", "wildcard", "proximity".
-        scope: Filter by scope (required).
-        repository: Filter by repository (required).
+        scope: Filter by scope (auto-detected from magaldi.yaml if not provided).
+        repository: Filter by repository (auto-detected from magaldi.yaml if not provided).
         username: User branch to search (optional).
         slop: For proximity mode: max positions between terms.
         glob: File path glob filter (e.g., '*.py').
@@ -2487,6 +2565,14 @@ def pattern_search(
     Raises:
         ValueError: If mode is not one of the valid options.
     """
+    # Auto-detect scope/repository from magaldi.yaml if not provided
+    scope, repository = _resolve_scope_repo(scope, repository)
+    if not scope or not repository:
+        raise ValueError(
+            "scope and repository are required. Either provide them explicitly "
+            "or create a magaldi.yaml file in your project root."
+        )
+
     valid_modes = ("regexp", "wildcard", "proximity")
     if mode not in valid_modes:
         raise ValueError(f"Invalid mode: {mode}. Must be one of {valid_modes}")
@@ -2566,8 +2652,8 @@ def pattern_search(
 
 def list_glossary(
     es: ElasticsearchRepository,
-    scope: str,
-    repository: str,
+    scope: str | None = None,
+    repository: str | None = None,
     username: str = "main",
     min_count: int = 1,
 ) -> list[dict[str, Any]]:
@@ -2578,8 +2664,8 @@ def list_glossary(
 
     Args:
         es: Elasticsearch repository.
-        scope: Repository scope.
-        repository: Repository name.
+        scope: Repository scope (auto-detected from magaldi.yaml if not provided).
+        repository: Repository name (auto-detected from magaldi.yaml if not provided).
         username: User branch (default: main).
         min_count: Minimum occurrence count to include (default: 1).
 
@@ -2591,6 +2677,13 @@ def list_glossary(
         - file_paths: Files where term appears
         - feature_associations: Linked features (if glossary was linked)
     """
+    # Auto-detect scope/repository from magaldi.yaml if not provided
+    scope, repository = _resolve_scope_repo(scope, repository)
+    if not scope or not repository:
+        raise ValueError(
+            "scope and repository are required. Either provide them explicitly "
+            "or create a magaldi.yaml file in your project root."
+        )
     return es.get_glossary_terms(
         scope=scope,
         repository=repository,
@@ -2601,17 +2694,17 @@ def list_glossary(
 
 def get_glossary_term(
     es: ElasticsearchRepository,
-    scope: str,
-    repository: str,
-    term: str,
+    scope: str | None = None,
+    repository: str | None = None,
+    term: str = "",
     username: str = "main",
 ) -> dict[str, Any] | None:
     """Get full details for a specific glossary term.
 
     Args:
         es: Elasticsearch repository.
-        scope: Repository scope.
-        repository: Repository name.
+        scope: Repository scope (auto-detected from magaldi.yaml if not provided).
+        repository: Repository name (auto-detected from magaldi.yaml if not provided).
         term: The glossary term to retrieve.
         username: User branch (default: main).
 
@@ -2625,6 +2718,15 @@ def get_glossary_term(
         - feature_associations: Linked features with frequency/percentage
         Or None if term not found.
     """
+    # Auto-detect scope/repository from magaldi.yaml if not provided
+    scope, repository = _resolve_scope_repo(scope, repository)
+    if not scope or not repository:
+        raise ValueError(
+            "scope and repository are required. Either provide them explicitly "
+            "or create a magaldi.yaml file in your project root."
+        )
+    if not term:
+        raise ValueError("term is required")
     return es.get_glossary_term(
         scope=scope,
         repository=repository,
@@ -2635,9 +2737,9 @@ def get_glossary_term(
 
 def search_glossary(
     es: ElasticsearchRepository,
-    scope: str,
-    repository: str,
-    query: str,
+    scope: str | None = None,
+    repository: str | None = None,
+    query: str = "",
     username: str = "main",
 ) -> list[dict[str, Any]]:
     """Search glossary terms by partial match.
@@ -2647,8 +2749,8 @@ def search_glossary(
 
     Args:
         es: Elasticsearch repository.
-        scope: Repository scope.
-        repository: Repository name.
+        scope: Repository scope (auto-detected from magaldi.yaml if not provided).
+        repository: Repository name (auto-detected from magaldi.yaml if not provided).
         query: Partial term to search for.
         username: User branch (default: main).
 
@@ -2658,6 +2760,15 @@ def search_glossary(
         - total_count: Number of occurrences
         - description: AI-generated description explaining the term's meaning
     """
+    # Auto-detect scope/repository from magaldi.yaml if not provided
+    scope, repository = _resolve_scope_repo(scope, repository)
+    if not scope or not repository:
+        raise ValueError(
+            "scope and repository are required. Either provide them explicitly "
+            "or create a magaldi.yaml file in your project root."
+        )
+    if not query:
+        raise ValueError("query is required")
     return es.search_glossary(
         scope=scope,
         repository=repository,

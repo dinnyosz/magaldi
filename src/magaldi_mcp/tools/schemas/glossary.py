@@ -15,7 +15,7 @@ GLOSSARY_TOOLS = [
                 "repository": {"type": "string", "description": "Filter by repo"},
                 "min_count": {"type": "integer", "default": 1, "description": "Minimum occurrence count"},
             },
-            "required": ["scope", "repository"],
+            "required": [],
         },
     ),
     Tool(
@@ -29,7 +29,7 @@ GLOSSARY_TOOLS = [
                 "repository": {"type": "string"},
                 "term": {"type": "string", "description": "The glossary term to look up"},
             },
-            "required": ["scope", "repository", "term"],
+            "required": ["term"],
         },
     ),
     Tool(
@@ -43,7 +43,7 @@ GLOSSARY_TOOLS = [
                 "repository": {"type": "string"},
                 "query": {"type": "string", "description": "Partial term to search for"},
             },
-            "required": ["scope", "repository", "query"],
+            "required": ["query"],
         },
     ),
 ]

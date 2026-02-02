@@ -23,7 +23,7 @@ META_TOOLS = [
                 "scope": {"type": "string"},
                 "repository": {"type": "string"},
             },
-            "required": ["scope", "repository"],
+            "required": [],
         },
     ),
     Tool(

@@ -1130,8 +1130,11 @@ class TestPatternSearchTool:
         assert "pattern" in schema["properties"]
         assert "mode" in schema["properties"]
         assert schema["properties"]["mode"]["enum"] == ["regexp", "wildcard", "proximity"]
-        assert "scope" in schema["required"]
-        assert "repository" in schema["required"]
+        # scope and repository are now optional (auto-detected from magaldi.yaml)
+        assert "scope" in schema["properties"]
+        assert "repository" in schema["properties"]
+        assert "pattern" in schema["required"]
+        assert "mode" in schema["required"]
 
     @pytest.mark.asyncio
     async def test_pattern_search_returns_results(self, server, mock_es_repo):

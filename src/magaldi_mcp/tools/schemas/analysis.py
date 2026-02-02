@@ -21,8 +21,8 @@ ANALYSIS_TOOLS = [
                     "wildcard: Simple wildcards (e.g., '*column*'). "
                     "proximity: Terms near each other (e.g., 'add column Model').",
                 },
-                "scope": {"type": "string", "description": "Filter by scope (required)"},
-                "repository": {"type": "string", "description": "Filter by repo (required)"},
+                "scope": {"type": "string", "description": "Filter by scope"},
+                "repository": {"type": "string", "description": "Filter by repo"},
                 "username": {"type": "string", "description": "User branch to search"},
                 "slop": {
                     "type": "integer",
@@ -33,7 +33,7 @@ ANALYSIS_TOOLS = [
                 "limit": {"type": "integer", "default": 50},
                 "include_tests": {"type": "boolean", "default": True},
             },
-            "required": ["pattern", "mode", "scope", "repository"],
+            "required": ["pattern", "mode"],
         },
     ),
     Tool(
@@ -127,12 +127,12 @@ ANALYSIS_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "scope": {"type": "string", "description": "Repository scope (required)"},
-                "repository": {"type": "string", "description": "Repository name (required)"},
+                "scope": {"type": "string", "description": "Repository scope"},
+                "repository": {"type": "string", "description": "Repository name"},
                 "username": {"type": "string", "description": "Username branch"},
                 "include_tests": {"type": "boolean", "default": False, "description": "Include test functions in check"},
             },
-            "required": ["scope", "repository"],
+            "required": [],
         },
     ),
     Tool(
@@ -143,11 +143,11 @@ ANALYSIS_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "scope": {"type": "string", "description": "Repository scope (required)"},
-                "repository": {"type": "string", "description": "Repository name (required)"},
+                "scope": {"type": "string", "description": "Repository scope"},
+                "repository": {"type": "string", "description": "Repository name"},
                 "username": {"type": "string", "description": "Username branch"},
             },
-            "required": ["scope", "repository"],
+            "required": [],
         },
     ),
 ]

@@ -27,10 +27,10 @@ FILE_TOOLS = [
             "type": "object",
             "properties": {
                 "file_path": {"type": "string", "description": "Relative file path"},
-                "scope": {"type": "string"},
-                "repository": {"type": "string"},
+                "scope": {"type": "string", "description": "Filter by scope"},
+                "repository": {"type": "string", "description": "Filter by repo"},
             },
-            "required": ["scope", "repository", "file_path"],
+            "required": ["file_path"],
         },
     ),
 ]
