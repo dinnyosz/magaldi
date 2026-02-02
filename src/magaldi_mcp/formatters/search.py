@@ -21,7 +21,10 @@ class CodeSearchListFormatter(ResultFormatter):
         """Format code search results."""
         lines = [f"Found {len(result)} results:\n"]
         for r in result:
-            loc = f"{r.get('file', '?')}:{r.get('line', '?')}" if r.get('file') else "N/A"
+            line_start = r.get('line', '?')
+            line_end = r.get('line_end', '')
+            line_range = f"{line_start}-{line_end}" if line_end else str(line_start)
+            loc = f"{r.get('file', '?')}:{line_range}" if r.get('file') else "N/A"
             hash_id = r.get('hash_id', '')
             id_suffix = f" | id:{hash_id}" if hash_id else ""
             lines.append(f"[{r.get('type', '?')}] {r.get('name', '?')} ({loc}){id_suffix}")
@@ -87,7 +90,10 @@ class GroupedSearchFormatter(ResultFormatter):
         if code_results:
             lines.append(f"Code Results ({total_code}):\n")
             for r in code_results:
-                loc = f"{r.get('file', '?')}:{r.get('line', '?')}" if r.get('file') else "N/A"
+                line_start = r.get('line', '?')
+                line_end = r.get('line_end', '')
+                line_range = f"{line_start}-{line_end}" if line_end else str(line_start)
+                loc = f"{r.get('file', '?')}:{line_range}" if r.get('file') else "N/A"
                 hash_id = r.get('hash_id', '')
                 id_suffix = f" | id:{hash_id}" if hash_id else ""
                 lines.append(f"[{r.get('type', '?')}] {r.get('name', '?')} ({loc}){id_suffix}")
@@ -117,7 +123,10 @@ class GroupedSearchFormatter(ResultFormatter):
         if test_results:
             lines.append(f"Test Results ({total_tests}):\n")
             for r in test_results:
-                loc = f"{r.get('file', '?')}:{r.get('line', '?')}" if r.get('file') else "N/A"
+                line_start = r.get('line', '?')
+                line_end = r.get('line_end', '')
+                line_range = f"{line_start}-{line_end}" if line_end else str(line_start)
+                loc = f"{r.get('file', '?')}:{line_range}" if r.get('file') else "N/A"
                 hash_id = r.get('hash_id', '')
                 id_suffix = f" | id:{hash_id}" if hash_id else ""
                 lines.append(f"[{r.get('type', '?')}] {r.get('name', '?')} ({loc}){id_suffix}")
