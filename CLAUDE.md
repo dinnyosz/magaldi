@@ -121,7 +121,7 @@ Use `mcp__magaldi__generate_config(repo_path="/path/to/repo")` to auto-generate 
 
 **See `.claude/skills/magaldi/SKILL.md` for detailed MCP tool usage guidance.**
 
-When using Magaldi MCP tools, **always read `magaldi.yaml` first** to get the correct `scope` and `repository` parameters.
+Magaldi MCP tools **auto-detect `scope` and `repository`** from `magaldi.yaml` in the current directory. No need to specify these parameters manually - just call the tools directly.
 
 ## CRITICAL: Data Safety
 
