@@ -146,27 +146,15 @@ function Admin() {
                 </div>
               ) : indexStats ? (
                 <Row>
-                  <Col md={3} className="text-center">
+                  <Col md={6} className="text-center">
                     <h3 className="text-primary">
                       {indexStats.document_count.toLocaleString()}
                     </h3>
                     <p className="text-muted mb-0">Documents</p>
                   </Col>
-                  <Col md={3} className="text-center">
+                  <Col md={6} className="text-center">
                     <h3 className="text-info">{indexStats.size_human}</h3>
                     <p className="text-muted mb-0">Index Size</p>
-                  </Col>
-                  <Col md={3} className="text-center">
-                    <h3 className="text-success">
-                      {indexStats.with_vectors.toLocaleString()}
-                    </h3>
-                    <p className="text-muted mb-0">With Vectors</p>
-                  </Col>
-                  <Col md={3} className="text-center">
-                    <h3 className="text-warning">
-                      {indexStats.vector_coverage_pct}%
-                    </h3>
-                    <p className="text-muted mb-0">Coverage</p>
                   </Col>
                 </Row>
               ) : (
