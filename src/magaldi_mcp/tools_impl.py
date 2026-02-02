@@ -1614,11 +1614,12 @@ The index has already done the hard work:
         else None
     )
 
-    if skill_path.exists():
+    skill_already_exists = skill_path.exists()
+    if skill_already_exists:
         result["skipped"] = True
         result["reason"] = f"Skill already exists at: {skill_path}"
         result["path"] = str(skill_path)
-        return result
+        # Don't return early - still update CLAUDE.md if needed
 
     # Warn if exists in the other location
     if scope == "project" and global_path.exists():
@@ -1626,10 +1627,11 @@ The index has already done the hard work:
     elif scope == "global" and project_path and project_path.exists():
         result["warning"] = f"Note: Skill also exists in project at {project_path}"
 
-    # Write the skill file
-    skill_dir.mkdir(parents=True, exist_ok=True)
-    skill_path.write_text(skill_content)
-    result["written_to"] = str(skill_path)
+    # Write the skill file (only if it doesn't already exist)
+    if not skill_already_exists:
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        skill_path.write_text(skill_content)
+        result["written_to"] = str(skill_path)
 
     # List all magaldi tools
     all_tools = [
@@ -1706,8 +1708,8 @@ The index has already done the hard work:
             result["allowed_tools_added"] = False
             result["allowed_tools_note"] = "Magaldi tools already in allowedTools"
 
-    # Add reference to CLAUDE.md (only for project scope)
-    if scope == "project" and project_root:
+    # Add reference to CLAUDE.md (if project_root provided, regardless of scope)
+    if project_root:
         claude_md_path = Path(project_root) / "CLAUDE.md"
         skill_reference = "## Magaldi MCP\n\n**See `.claude/skills/magaldi/SKILL.md` for detailed MCP tool usage guidance.**\n\nMagaldi tools auto-detect `scope` and `repository` from `magaldi.yaml` - no need to specify these parameters manually.\n"
 
