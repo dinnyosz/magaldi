@@ -7,6 +7,7 @@ Commands are organized in separate modules:
 - _runners: Phase runner functions
 - _printers: Output formatting functions
 - parse: Parse command
+- watch: Watch command (continuous file monitoring)
 - extract: Extract-features and extract-glossary commands
 - web: Web server commands
 - benchmark: Benchmark-models command
@@ -14,32 +15,33 @@ Commands are organized in separate modules:
 
 from __future__ import annotations
 
-# Import the main CLI group first
-from shared.cli._shared import main
-
 # Import command modules to register their commands with main
 # The import side-effect registers @main.command decorators
-from shared.cli import parse  # noqa: F401
-from shared.cli import extract  # noqa: F401
-from shared.cli import web  # noqa: F401
-from shared.cli import benchmark  # noqa: F401
-
-# Re-export commonly used items
-from shared.cli._shared import console, format_duration, check_model_availability
-from shared.cli._runners import (
-    run_discovery,
-    run_change_detection,
-    run_parsing,
-    run_processing,
+from shared.cli import (
+    benchmark,  # noqa: F401
+    extract,  # noqa: F401
+    parse,  # noqa: F401
+    watch,  # noqa: F401
+    web,  # noqa: F401
 )
 from shared.cli._printers import (
-    print_discovery_result,
     print_change_manifest,
-    print_parsing_result,
+    print_discovery_result,
     print_feature_result,
+    print_parsing_result,
     print_processing_result,
     print_summary,
 )
+from shared.cli._runners import (
+    run_change_detection,
+    run_discovery,
+    run_parsing,
+    run_processing,
+)
+
+# Import the main CLI group first
+# Re-export commonly used items
+from shared.cli._shared import check_model_availability, console, format_duration, main
 from shared.cli.extract import run_feature_extraction, run_glossary_extraction
 
 __all__ = [
