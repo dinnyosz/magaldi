@@ -342,6 +342,7 @@ def get_element(
         raise ValueError(f"Element not found: {element_id}")
 
     result: dict[str, Any] = {
+        "hash_id": doc.get("hash_id"),
         "name": doc.get("name"),
         "type": doc.get("element_type"),
         "file": doc.get("relative_path"),
@@ -371,6 +372,12 @@ def get_element(
         result["visibility"] = doc["visibility"]
     if doc.get("language"):
         result["language"] = doc["language"]
+    if doc.get("scope"):
+        result["scope"] = doc["scope"]
+    if doc.get("repository"):
+        result["repository"] = doc["repository"]
+    if doc.get("level") is not None:
+        result["level"] = doc["level"]
 
     # Enhanced context fields
     if doc.get("base_classes"):
