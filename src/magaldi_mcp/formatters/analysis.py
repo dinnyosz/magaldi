@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from magaldi_mcp.formatters.base import ResultFormatter
+from magaldi_mcp.formatters.base import ResultFormatter, terse_summary
 
 
 class CallGraphFormatter(ResultFormatter):
@@ -27,7 +27,7 @@ class CallGraphFormatter(ResultFormatter):
                 loc = f"{c.get('file')}:{c.get('line')}" if c.get('file') else "?"
                 lines.append(f"  [{c.get('type', '?')}] {c.get('name')} ({loc})")
                 if c.get('summary'):
-                    summary = c['summary'][:100] + "..." if len(c.get('summary', '')) > 100 else c.get('summary', '')
+                    summary = terse_summary(c['summary'], max_length=100)
                     lines.append(f"    {summary}")
             lines.append("")
 
@@ -38,7 +38,7 @@ class CallGraphFormatter(ResultFormatter):
                     loc = f"{c.get('file')}:{c.get('target_line')}" if c.get('file') else "?"
                     lines.append(f"  [{c.get('type', '?')}] {c.get('name')} ({loc})")
                     if c.get('summary'):
-                        summary = c['summary'][:100] + "..." if len(c.get('summary', '')) > 100 else c.get('summary', '')
+                        summary = terse_summary(c['summary'], max_length=100)
                         lines.append(f"    {summary}")
                 else:
                     receiver = f"{c.get('receiver')}." if c.get('receiver') else ""
@@ -71,7 +71,7 @@ class FindCallersFormatter(ResultFormatter):
                 loc = f"{c.get('file')}:{c.get('line')}" if c.get('file') else "?"
                 lines.append(f"  [{c.get('type', '?')}] {c.get('name')} ({loc})")
                 if c.get('summary'):
-                    summary = c['summary'][:100] + "..." if len(c.get('summary', '')) > 100 else c.get('summary', '')
+                    summary = terse_summary(c['summary'], max_length=100)
                     lines.append(f"    {summary}")
             lines.append("")
 
@@ -159,7 +159,7 @@ class DeadCodeFormatter(ResultFormatter):
                 loc = f"{d.get('file')}:{d.get('line')}" if d.get('file') else "?"
                 lines.append(f"  [{d.get('type', '?')}] {d.get('name')} ({loc})")
                 if d.get('summary'):
-                    summary = d['summary'][:100] + "..." if len(d.get('summary', '')) > 100 else d.get('summary', '')
+                    summary = terse_summary(d['summary'], max_length=100)
                     lines.append(f"    {summary}")
         else:
             lines.append("No potentially dead code found!")
@@ -235,7 +235,7 @@ class ExplainElementFormatter(ResultFormatter):
         if parent:
             lines.append(f"Parent: [{parent.get('type')}] {parent.get('name')} ({parent.get('file')}:{parent.get('line')})")
             if parent.get('summary'):
-                lines.append(f"  {parent['summary'][:100]}...")
+                lines.append(f"  {terse_summary(parent['summary'], max_length=100)}")
             lines.append("")
 
         # Callers
@@ -246,7 +246,7 @@ class ExplainElementFormatter(ResultFormatter):
                 loc = f"{c.get('file')}:{c.get('line')}" if c.get('file') else "?"
                 lines.append(f"  [{c.get('type', '?')}] {c.get('name')} ({loc})")
                 if c.get('summary'):
-                    summary = c['summary'][:80] + "..." if len(c.get('summary', '')) > 80 else c.get('summary', '')
+                    summary = terse_summary(c['summary'], max_length=80)
                     lines.append(f"    {summary}")
             lines.append("")
 
@@ -259,7 +259,7 @@ class ExplainElementFormatter(ResultFormatter):
                     loc = f"{c.get('file')}:{c.get('target_line')}" if c.get('file') else "?"
                     lines.append(f"  [{c.get('type', '?')}] {c.get('name')} ({loc})")
                     if c.get('summary'):
-                        summary = c['summary'][:80] + "..." if len(c.get('summary', '')) > 80 else c.get('summary', '')
+                        summary = terse_summary(c['summary'], max_length=80)
                         lines.append(f"    {summary}")
                 else:
                     receiver = f"{c.get('receiver')}." if c.get('receiver') else ""
@@ -293,7 +293,7 @@ class ExplainElementFormatter(ResultFormatter):
                 sim_score = s.get('similarity', 0)
                 lines.append(f"  [{s.get('type', '?')}] {s.get('name')} ({loc}) - {sim_score:.1%} similar")
                 if s.get('summary'):
-                    summary = s['summary'][:80] + "..." if len(s.get('summary', '')) > 80 else s.get('summary', '')
+                    summary = terse_summary(s['summary'], max_length=80)
                     lines.append(f"    {summary}")
 
         return "\n".join(lines)
