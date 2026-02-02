@@ -6,7 +6,8 @@ FEATURE_TOOLS = [
     Tool(
         name="list_features",
         description="LIST ALL FEATURES: See all extracted features/capabilities in a repo. "
-        "Use to get a high-level understanding of what the codebase does.",
+        "Use to get a high-level understanding of what the codebase does. "
+        "Then use get_feature_members to see the actual code.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -19,7 +20,7 @@ FEATURE_TOOLS = [
     Tool(
         name="get_feature_members",
         description="FEATURE DETAILS: Get all functions that belong to a feature. "
-        "Use after list_features or search_features to see implementations.",
+        "Shows the actual implementations grouped under a feature.",
         inputSchema={
             "type": "object",
             "properties": {

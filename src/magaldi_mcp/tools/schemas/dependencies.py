@@ -7,7 +7,8 @@ DEPENDENCY_TOOLS = [
         name="find_dependencies",
         description="FIND DEPENDENCIES: Get imports for a file. "
         "Shows what a file depends on - both internal (from within the repo) "
-        "and external (third-party packages) imports.",
+        "and external (third-party packages) imports. "
+        "Use find_dependents for the reverse (who imports this).",
         inputSchema={
             "type": "object",
             "properties": {
@@ -24,7 +25,8 @@ DEPENDENCY_TOOLS = [
         name="find_dependents",
         description="FIND DEPENDENTS: Find files that import a module. "
         "Shows what depends on a given module - useful for impact analysis "
-        "before making changes to a module.",
+        "before making changes to a module. "
+        "Use find_dependencies for the reverse (what does this import).",
         inputSchema={
             "type": "object",
             "properties": {

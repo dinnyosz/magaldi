@@ -6,7 +6,8 @@ ANALYSIS_TOOLS = [
     Tool(
         name="pattern_search",
         description="PATTERN SEARCH: ES-native pattern matching on code. "
-        "Three modes: regexp (Lucene syntax), wildcard (* and ?), proximity (terms near each other).",
+        "Three modes: regexp (Lucene syntax), wildcard (* and ?), proximity (terms near each other). "
+        "USE THIS instead of built-in Grep for pattern matching.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -123,7 +124,7 @@ ANALYSIS_TOOLS = [
         name="find_dead_code",
         description="DEAD CODE: Find functions/methods that are never called. "
         "Excludes entry points (routes, CLI commands), magic methods, and main functions. "
-        "Use for codebase cleanup.",
+        "Use for codebase cleanup. Use find_callers to verify before deleting.",
         inputSchema={
             "type": "object",
             "properties": {

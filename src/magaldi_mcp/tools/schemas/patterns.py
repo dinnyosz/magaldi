@@ -6,7 +6,8 @@ PATTERN_TOOLS = [
     Tool(
         name="list_patterns",
         description="LIST PATTERNS: Show all detected design patterns in a repository. "
-        "Returns pattern types (singleton, builder, factory, repository) with counts and example classes.",
+        "Returns pattern types (singleton, builder, factory, repository) with counts and example classes. "
+        "Then use find_by_pattern to get all instances of a specific pattern.",
         inputSchema={
             "type": "object",
             "properties": {

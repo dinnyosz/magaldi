@@ -8,7 +8,8 @@ SEARCH_TOOLS = [
         description="FIND CODE: Search for functions, classes, methods by what they do. "
         "Uses pre-indexed semantic embeddings - finds 'login' when you search 'authentication'. "
         "Returns AI summaries so you understand code without reading it. "
-        "Use include_code=true to see implementation. Use brief=true for exploration.",
+        "Use include_code=true to see implementation. Use brief=true for exploration. "
+        "USE THIS instead of grepping for keywords.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -51,7 +52,8 @@ SEARCH_TOOLS = [
         name="search_features",
         description="FIND CAPABILITIES: Search for high-level features (groups of related functions). "
         "Pre-clustered by AI - 'authentication' returns all auth-related functions grouped together. "
-        "Use to understand what the codebase CAN DO, not just specific implementations.",
+        "Use to understand what the codebase CAN DO, not just specific implementations. "
+        "Then use get_feature_members to see the actual code.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -78,7 +80,7 @@ SEARCH_TOOLS = [
     Tool(
         name="find_similar",
         description="FIND RELATED CODE: Given an element ID, find similar implementations. "
-        "Use after search_code to find related patterns or alternative approaches.",
+        "Finds related patterns or alternative approaches.",
         inputSchema={
             "type": "object",
             "properties": {

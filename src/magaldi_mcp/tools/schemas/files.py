@@ -7,7 +7,8 @@ FILE_TOOLS = [
         name="find_files",
         description="FIND FILES: Search for files by glob pattern. "
         "USE THIS instead of built-in Glob - searches indexed codebase. "
-        "Discovers file structure (e.g., '**/*.py', 'src/**/*.ts').",
+        "Discovers file structure (e.g., '**/*.py', 'src/**/*.ts'). "
+        "Then use get_file_structure to see what's inside a file.",
         inputSchema={
             "type": "object",
             "properties": {

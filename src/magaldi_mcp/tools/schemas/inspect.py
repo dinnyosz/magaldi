@@ -6,7 +6,7 @@ INSPECT_TOOLS = [
     Tool(
         name="get_element",
         description="INSPECT ELEMENT: Get full details of a specific element by ID. "
-        "Use after search_code to see complete info. Use include_code=true for source.",
+        "Use include_code=true to see source code.",
         inputSchema={
             "type": "object",
             "properties": {

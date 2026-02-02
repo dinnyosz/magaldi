@@ -7,7 +7,8 @@ GLOSSARY_TOOLS = [
         name="list_glossary",
         description="LIST GLOSSARY: List all glossary terms for a repository. "
         "Shows domain concepts extracted from code element names. "
-        "Use to discover what terminology exists in the codebase.",
+        "Use to discover what terminology exists in the codebase. "
+        "Then use get_glossary_term for details or search_features to find related features.",
         inputSchema={
             "type": "object",
             "properties": {
