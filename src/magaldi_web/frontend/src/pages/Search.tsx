@@ -18,7 +18,9 @@ import {
 import ReactMarkdown from 'react-markdown'
 import { search, generateSearchSummary, getRepositories, getBrowseFilters, type SearchResult } from '../api'
 
-const ELEMENT_TYPES = ['file', 'class', 'interface', 'type_alias', 'function', 'method', 'variable', 'constant', 'feature', 'subfeature']
+// Base types always shown in filters, conditional types only shown if data exists
+const BASE_ELEMENT_TYPES = ['file', 'class', 'function', 'method', 'variable', 'constant', 'feature', 'subfeature']
+const CONDITIONAL_ELEMENT_TYPES = ['interface', 'type_alias', 'trait', 'import']
 const DEBOUNCE_MS = 300
 
 function Search() {
@@ -231,7 +233,8 @@ function Search() {
               <Form.Group className="mb-3">
                 <Form.Label>Element Types</Form.Label>
                 <div>
-                  {ELEMENT_TYPES.map((type) => (
+                  {/* Base types always shown */}
+                  {BASE_ELEMENT_TYPES.map((type) => (
                     <Form.Check
                       key={type}
                       type="checkbox"
@@ -241,6 +244,19 @@ function Search() {
                       onChange={() => toggleType(type)}
                     />
                   ))}
+                  {/* Conditional types only shown if they exist in the data */}
+                  {CONDITIONAL_ELEMENT_TYPES
+                    .filter((type) => filters?.element_types?.includes(type))
+                    .map((type) => (
+                      <Form.Check
+                        key={type}
+                        type="checkbox"
+                        id={`type-${type}`}
+                        label={type}
+                        checked={selectedTypes.includes(type)}
+                        onChange={() => toggleType(type)}
+                      />
+                    ))}
                 </div>
               </Form.Group>
 

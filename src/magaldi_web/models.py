@@ -50,6 +50,8 @@ class RepoSummary(BaseModel):
     description: str | None = None
     file_count: int = 0
     class_count: int = 0
+    interface_count: int = 0
+    trait_count: int = 0
     function_count: int = 0
     method_count: int = 0
     variable_count: int = 0
@@ -67,6 +69,8 @@ class DashboardStats(BaseModel):
     element_count: int = 0
     file_count: int = 0
     class_count: int = 0
+    interface_count: int = 0
+    trait_count: int = 0
     function_count: int = 0
     method_count: int = 0
     variable_count: int = 0

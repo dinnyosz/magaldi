@@ -125,6 +125,38 @@ function Dashboard() {
             </Card.Body>
           </Card>
         </Col>
+        {(dashboard?.stats?.interface_count ?? 0) > 0 && (
+          <Col>
+            <Card
+              className="text-center h-100"
+              style={{ cursor: 'pointer' }}
+              onClick={() => navigate('/explorer?type=interface')}
+            >
+              <Card.Body className="py-3">
+                <h3 className="mb-0" style={{ color: '#e83e8c' }}>
+                  {dashboard?.stats?.interface_count?.toLocaleString()}
+                </h3>
+                <small className="text-muted">Interfaces</small>
+              </Card.Body>
+            </Card>
+          </Col>
+        )}
+        {(dashboard?.stats?.trait_count ?? 0) > 0 && (
+          <Col>
+            <Card
+              className="text-center h-100"
+              style={{ cursor: 'pointer' }}
+              onClick={() => navigate('/explorer?type=trait')}
+            >
+              <Card.Body className="py-3">
+                <h3 className="mb-0" style={{ color: '#d63384' }}>
+                  {dashboard?.stats?.trait_count?.toLocaleString()}
+                </h3>
+                <small className="text-muted">Traits</small>
+              </Card.Body>
+            </Card>
+          </Col>
+        )}
         <Col>
           <Card
             className="text-center h-100"
@@ -580,56 +612,67 @@ function Dashboard() {
         </Card.Header>
         <Card.Body>
           {dashboard?.recent_repos?.length ? (
-            <Table hover responsive size="sm">
-              <thead>
-                <tr>
-                  <th>Repository</th>
-                  <th className="text-end">Files</th>
-                  <th className="text-end">Classes</th>
-                  <th className="text-end">Functions</th>
-                  <th className="text-end">Methods</th>
-                  <th className="text-end">Variables</th>
-                  <th className="text-end">Constants</th>
-                  <th className="text-end">Features</th>
-                  <th className="text-end">Total</th>
-                  <th>Languages</th>
-                </tr>
-              </thead>
-              <tbody>
-                {dashboard.recent_repos.map((repo) => (
-                  <tr
-                    key={`${repo.scope}/${repo.name}`}
-                    style={{ cursor: 'pointer' }}
-                    onClick={() => navigate(`/repos/${repo.scope}/${repo.name}`)}
-                  >
-                    <td>
-                      <code>{repo.scope}/{repo.name}</code>
-                    </td>
-                    <td className="text-end">{repo.file_count.toLocaleString()}</td>
-                    <td className="text-end">{repo.class_count.toLocaleString()}</td>
-                    <td className="text-end">{repo.function_count.toLocaleString()}</td>
-                    <td className="text-end">{repo.method_count.toLocaleString()}</td>
-                    <td className="text-end">{repo.variable_count.toLocaleString()}</td>
-                    <td className="text-end">{repo.constant_count.toLocaleString()}</td>
-                    <td className="text-end">
-                      {repo.feature_count > 0 ? (
-                        <Badge bg="success">{repo.feature_count}</Badge>
-                      ) : (
-                        <span className="text-muted">0</span>
-                      )}
-                    </td>
-                    <td className="text-end fw-bold">{repo.element_count.toLocaleString()}</td>
-                    <td>
-                      {repo.languages?.map((lang) => (
-                        <Badge key={lang} bg="secondary" className="me-1">
-                          {lang}
-                        </Badge>
-                      ))}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
+            (() => {
+              // Check if any repo has interfaces or traits
+              const hasAnyInterfaces = dashboard.recent_repos.some(r => (r.interface_count ?? 0) > 0)
+              const hasAnyTraits = dashboard.recent_repos.some(r => (r.trait_count ?? 0) > 0)
+              return (
+                <Table hover responsive size="sm">
+                  <thead>
+                    <tr>
+                      <th>Repository</th>
+                      <th className="text-end">Files</th>
+                      <th className="text-end">Classes</th>
+                      {hasAnyInterfaces && <th className="text-end">Interfaces</th>}
+                      {hasAnyTraits && <th className="text-end">Traits</th>}
+                      <th className="text-end">Functions</th>
+                      <th className="text-end">Methods</th>
+                      <th className="text-end">Variables</th>
+                      <th className="text-end">Constants</th>
+                      <th className="text-end">Features</th>
+                      <th className="text-end">Total</th>
+                      <th>Languages</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dashboard.recent_repos.map((repo) => (
+                      <tr
+                        key={`${repo.scope}/${repo.name}`}
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => navigate(`/repos/${repo.scope}/${repo.name}`)}
+                      >
+                        <td>
+                          <code>{repo.scope}/{repo.name}</code>
+                        </td>
+                        <td className="text-end">{repo.file_count.toLocaleString()}</td>
+                        <td className="text-end">{repo.class_count.toLocaleString()}</td>
+                        {hasAnyInterfaces && <td className="text-end">{(repo.interface_count ?? 0).toLocaleString()}</td>}
+                        {hasAnyTraits && <td className="text-end">{(repo.trait_count ?? 0).toLocaleString()}</td>}
+                        <td className="text-end">{repo.function_count.toLocaleString()}</td>
+                        <td className="text-end">{repo.method_count.toLocaleString()}</td>
+                        <td className="text-end">{repo.variable_count.toLocaleString()}</td>
+                        <td className="text-end">{repo.constant_count.toLocaleString()}</td>
+                        <td className="text-end">
+                          {repo.feature_count > 0 ? (
+                            <Badge bg="success">{repo.feature_count}</Badge>
+                          ) : (
+                            <span className="text-muted">0</span>
+                          )}
+                        </td>
+                        <td className="text-end fw-bold">{repo.element_count.toLocaleString()}</td>
+                        <td>
+                          {repo.languages?.map((lang) => (
+                            <Badge key={lang} bg="secondary" className="me-1">
+                              {lang}
+                            </Badge>
+                          ))}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              )
+            })()
           ) : (
             <p className="text-muted mb-0">
               No repositories indexed yet. Run <code>magaldi parse</code> to index a repository.

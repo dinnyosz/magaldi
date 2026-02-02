@@ -51,6 +51,10 @@ const typeConfig: Record<string, TypeConfig> = {
 
 const defaultTypeConfig: TypeConfig = { icon: 'bi-dot', color: 'secondary' }
 
+// Base types always shown in filters, conditional types only shown if data exists
+const BASE_ELEMENT_TYPES = ['file', 'class', 'function', 'method', 'variable', 'constant', 'feature', 'subfeature']
+const CONDITIONAL_ELEMENT_TYPES = ['interface', 'type_alias', 'trait', 'enum', 'import', 'glossary']
+
 // Simple pluralization for element types
 function pluralize(type: string): string {
   if (type === 'class') return 'Classes'
@@ -514,7 +518,16 @@ function Explorer() {
                   onChange={(e) => updateFilter('type', e.target.value)}
                 >
                   <option value="">All Types</option>
-                  {filters?.element_types.map((t) => (
+                  {/* Base types always shown */}
+                  {BASE_ELEMENT_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {t} {stats?.type_counts[t] ? `(${stats.type_counts[t].toLocaleString()})` : '(0)'}
+                    </option>
+                  ))}
+                  {/* Conditional types only shown if they exist in data */}
+                  {CONDITIONAL_ELEMENT_TYPES
+                    .filter((t) => filters?.element_types?.includes(t))
+                    .map((t) => (
                       <option key={t} value={t}>
                         {t} {stats?.type_counts[t] ? `(${stats.type_counts[t].toLocaleString()})` : ''}
                       </option>

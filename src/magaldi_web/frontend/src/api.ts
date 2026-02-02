@@ -10,6 +10,8 @@ export interface DashboardStats {
     element_count: number
     file_count: number
     class_count: number
+    interface_count: number
+    trait_count: number
     function_count: number
     method_count: number
     variable_count: number
@@ -23,6 +25,8 @@ export interface DashboardStats {
     description: string | null
     file_count: number
     class_count: number
+    interface_count: number
+    trait_count: number
     function_count: number
     method_count: number
     variable_count: number
