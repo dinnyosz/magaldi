@@ -25,6 +25,8 @@ import asyncio
 import atexit
 import os
 import random
+import signal
+import sys
 import time
 import warnings
 from dataclasses import dataclass
@@ -51,6 +53,12 @@ litellm.suppress_debug_info = True
 # Suppress Pydantic 2.12+ serialization warnings from LiteLLM
 # See: https://github.com/BerriAI/litellm/issues/11759
 warnings.filterwarnings("ignore", message="Pydantic serializer warnings")
+
+# Suppress "coroutine 'ollama_aembeddings' was never awaited" warnings from LiteLLM.
+# LiteLLM creates async coroutines internally even for sync embedding calls,
+# and these aren't properly cleaned up on Ctrl+C or shutdown.
+# See: https://github.com/BerriAI/litellm/issues/13220
+warnings.filterwarnings("ignore", message="coroutine .* was never awaited", category=RuntimeWarning)
 
 # Note: Python 3.14 may show "_UnixSelectorEventLoop has no attribute '_ssock'"
 # errors during shutdown. These are harmless GC cleanup messages from event loops
@@ -178,6 +186,27 @@ async def cleanup_llm_sessions_async() -> None:
 
 # Register cleanup on interpreter exit
 atexit.register(cleanup_llm_sessions)
+
+
+def _sigint_handler(signum: int, frame: Any) -> None:
+    """Handle SIGINT (Ctrl+C) with proper cleanup before exit.
+
+    This ensures HTTP sessions are closed before Python starts
+    garbage collection, avoiding "coroutine was never awaited" warnings.
+    """
+    cleanup_llm_sessions()
+    # Raise KeyboardInterrupt to let the application handle it normally
+    raise KeyboardInterrupt
+
+
+# Install SIGINT handler only if we're in the main thread
+# (signal handlers can only be installed from the main thread)
+try:
+    if hasattr(signal, "SIGINT"):
+        signal.signal(signal.SIGINT, _sigint_handler)
+except ValueError:
+    # Not in main thread, skip signal handler installation
+    pass
 
 
 class LLMError(Exception):
