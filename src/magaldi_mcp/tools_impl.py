@@ -1326,6 +1326,7 @@ def generate_skill(
     project_root: str | None = None,
     skill_name: str = "magaldi",
     scope: str = "project",
+    add_allowed_tools: bool = False,
 ) -> dict[str, Any]:
     """Generate a SKILL.md file that teaches LLMs how to use this MCP effectively.
 
@@ -1333,10 +1334,12 @@ def generate_skill(
         project_root: Project root directory (required for scope="project").
         skill_name: Name of the skill (default: "magaldi").
         scope: Where to install - "project" (.claude/skills in project) or "global" (~/.claude/skills).
+        add_allowed_tools: If True, add all magaldi tools to allowed tools in settings.
 
     Returns:
         Dict with skill content and metadata.
     """
+    import json
     from pathlib import Path
 
     skill_content = """---
@@ -1579,7 +1582,90 @@ The index has already done the hard work:
     skill_dir.mkdir(parents=True, exist_ok=True)
     skill_path.write_text(skill_content)
     result["written_to"] = str(skill_path)
-    result["next_step"] = "Restart Claude Code to pick up the new skill."
+
+    # List all magaldi tools
+    all_tools = [
+        "mcp__magaldi__search_code",
+        "mcp__magaldi__search_features",
+        "mcp__magaldi__find_similar",
+        "mcp__magaldi__pattern_search",
+        "mcp__magaldi__find_usages",
+        "mcp__magaldi__find_implementations",
+        "mcp__magaldi__find_files",
+        "mcp__magaldi__get_file_structure",
+        "mcp__magaldi__get_element",
+        "mcp__magaldi__batch_get_elements",
+        "mcp__magaldi__get_context",
+        "mcp__magaldi__get_children",
+        "mcp__magaldi__get_call_graph",
+        "mcp__magaldi__find_callers",
+        "mcp__magaldi__find_call_chain",
+        "mcp__magaldi__list_features",
+        "mcp__magaldi__get_feature_members",
+        "mcp__magaldi__list_glossary",
+        "mcp__magaldi__get_glossary_term",
+        "mcp__magaldi__search_glossary",
+        "mcp__magaldi__list_repos",
+        "mcp__magaldi__get_repo_stats",
+        "mcp__magaldi__find_dead_code",
+        "mcp__magaldi__find_entry_points",
+        "mcp__magaldi__get_route_tree",
+        "mcp__magaldi__get_command_tree",
+        "mcp__magaldi__find_dependencies",
+        "mcp__magaldi__find_dependents",
+        "mcp__magaldi__dependency_graph",
+        "mcp__magaldi__list_patterns",
+        "mcp__magaldi__find_by_pattern",
+        "mcp__magaldi__find_complex_functions",
+        "mcp__magaldi__find_security_issues",
+        "mcp__magaldi__find_undocumented",
+        "mcp__magaldi__find_env_usage",
+        "mcp__magaldi__find_async_code",
+        "mcp__magaldi__explain_element",
+        "mcp__magaldi__generate_skill",
+        "mcp__magaldi__generate_config",
+    ]
+
+    # Add allowed tools to settings if requested
+    if add_allowed_tools:
+        # Determine settings path based on scope
+        if scope == "global":
+            settings_path = Path.home() / ".claude" / "settings.json"
+        else:
+            settings_path = Path(project_root) / ".claude" / "settings.json"
+
+        # Load existing settings or create new
+        settings: dict[str, Any] = {}
+        if settings_path.exists():
+            try:
+                settings = json.loads(settings_path.read_text())
+            except json.JSONDecodeError:
+                settings = {}
+
+        # Add tools to allowedTools (use wildcard for simplicity)
+        existing_allowed = settings.get("allowedTools", [])
+        wildcard_tool = "mcp__magaldi__*"
+        if wildcard_tool not in existing_allowed:
+            existing_allowed.append(wildcard_tool)
+            settings["allowedTools"] = existing_allowed
+
+            # Write settings
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            settings_path.write_text(json.dumps(settings, indent=2))
+            result["allowed_tools_added"] = True
+            result["settings_updated"] = str(settings_path)
+        else:
+            result["allowed_tools_added"] = False
+            result["allowed_tools_note"] = "Magaldi tools already in allowedTools"
+
+    # Provide next steps
+    next_steps = ["Restart Claude Code to pick up the new skill."]
+    if not add_allowed_tools:
+        next_steps.append(
+            "To allow all magaldi tools without prompts, call generate_skill again with add_allowed_tools=true"
+        )
+    result["next_steps"] = next_steps
+    result["available_tools"] = all_tools
 
     return result
 

@@ -30,7 +30,8 @@ META_TOOLS = [
         name="generate_skill",
         description="GENERATE SKILL: Create a SKILL.md file that teaches LLMs how to use this MCP effectively. "
         "The skill file documents best practices, workflows, and anti-patterns for token-efficient code discovery. "
-        "ASK THE USER whether to install globally (~/.claude/skills) or project-local (.claude/skills).",
+        "ASK THE USER whether to install globally (~/.claude/skills) or project-local (.claude/skills), "
+        "and whether to add all magaldi tools to allowed tools.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -41,6 +42,11 @@ META_TOOLS = [
                     "enum": ["project", "global"],
                     "default": "project",
                     "description": "Where to install: 'project' (this project only) or 'global' (all projects)",
+                },
+                "add_allowed_tools": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Add all magaldi MCP tools to allowed tools (no permission prompts)",
                 },
             },
             "required": [],
