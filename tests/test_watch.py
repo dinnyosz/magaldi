@@ -256,3 +256,110 @@ class TestWatchCommand:
 
         # The command should show the watching message before the interrupt
         assert "Watching for changes" in result.output
+
+
+class TestAtomicSaveDetection:
+    """Tests for atomic save detection in watch_loop."""
+
+    def test_deleted_file_that_exists_becomes_modified(self, tmp_path: Path):
+        """Test that a 'deleted' file which exists on disk is treated as modified."""
+        # This simulates atomic saves where editors delete then recreate files
+        # but watchdog only delivers the delete event
+        from shared.cli.watch import watch_loop
+
+        # Create a file that will be "deleted" but actually exists
+        test_file = tmp_path / "test.py"
+        test_file.write_text("print('hello')")
+
+        # Create mock discovery result
+        discovery_result = MagicMock()
+        discovery_result.repo_path = tmp_path
+        discovery_result.scope = "test"
+        discovery_result.repository = "repo"
+
+        # Create mock config
+        config = MagicMock()
+
+        # Create queue and add a "delete" event for a file that exists
+        change_queue: queue.Queue = queue.Queue()
+        change_queue.put(("deleted", str(test_file)))
+
+        stop_event = MagicMock()
+        # Stop after first iteration
+        stop_event.is_set.side_effect = [False, True]
+
+        # Mock process_file_changes to capture what gets passed
+        with patch("shared.cli.watch.process_file_changes") as mock_process:
+            with patch("shared.cli.watch.console"):
+                # Use a very short debounce so we process immediately
+                watch_loop(
+                    change_queue,
+                    discovery_result,
+                    config,
+                    user="test",
+                    debounce=0.01,  # Very short debounce
+                    skip_ai=True,
+                    skip_resolve=True,
+                    workers=1,
+                    features=False,
+                    glossary=False,
+                    stop_event=stop_event,
+                )
+
+            # File exists, so it should be in changed_files, not deleted_files
+            if mock_process.called:
+                call_args = mock_process.call_args
+                changed_files = call_args[0][0]  # First positional arg
+                deleted_files = call_args[0][1]  # Second positional arg
+                assert str(test_file) in changed_files
+                assert str(test_file) not in deleted_files
+
+    def test_actually_deleted_file_stays_deleted(self, tmp_path: Path):
+        """Test that a truly deleted file is processed as deleted."""
+        from shared.cli.watch import watch_loop
+
+        # Create path for a file that doesn't exist
+        test_file = tmp_path / "deleted.py"
+        # Don't create the file - it's truly deleted
+
+        # Create mock discovery result
+        discovery_result = MagicMock()
+        discovery_result.repo_path = tmp_path
+        discovery_result.scope = "test"
+        discovery_result.repository = "repo"
+
+        # Create mock config
+        config = MagicMock()
+
+        # Create queue and add a "delete" event for a file that doesn't exist
+        change_queue: queue.Queue = queue.Queue()
+        change_queue.put(("deleted", str(test_file)))
+
+        stop_event = MagicMock()
+        # Stop after first iteration
+        stop_event.is_set.side_effect = [False, True]
+
+        # Mock process_file_changes to capture what gets passed
+        with patch("shared.cli.watch.process_file_changes") as mock_process:
+            with patch("shared.cli.watch.console"):
+                watch_loop(
+                    change_queue,
+                    discovery_result,
+                    config,
+                    user="test",
+                    debounce=0.01,
+                    skip_ai=True,
+                    skip_resolve=True,
+                    workers=1,
+                    features=False,
+                    glossary=False,
+                    stop_event=stop_event,
+                )
+
+            # File doesn't exist, so it should be in deleted_files
+            if mock_process.called:
+                call_args = mock_process.call_args
+                changed_files = call_args[0][0]
+                deleted_files = call_args[0][1]
+                assert str(test_file) not in changed_files
+                assert str(test_file) in deleted_files

@@ -297,6 +297,21 @@ def watch_loop(
                 and last_change_time > 0
                 and time.time() - last_change_time >= debounce
             ):
+                # Before processing, verify deleted files are actually deleted
+                # This handles atomic saves (delete + create) where we may have
+                # received the delete event but the create event was delayed
+                resurrected = set()
+                for path in deleted_files:
+                    if Path(path).exists():
+                        resurrected.add(path)
+                        changed_files.add(path)
+
+                if resurrected:
+                    deleted_files -= resurrected
+                    for path in resurrected:
+                        rel_path = Path(path).relative_to(discovery_result.repo_path)
+                        console.print(f"  [dim](atomic save detected)[/] [cyan]Modified:[/] {rel_path}")
+
                 # Process batch
                 total = len(changed_files) + len(deleted_files)
                 console.print(f"\n[bold cyan]Processing {total} file(s)...[/]")
