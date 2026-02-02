@@ -170,11 +170,12 @@ def process_file_changes(
         scope=discovery_result.scope,
         repository=discovery_result.repository,
         username=user,
-        repo_path=discovery_result.repo_path,
+        timestamp=datetime.now(),
+        total_files_scanned=len(new_or_modified) + len(deleted_infos),
         new_files=[],  # Treat all as modified for simplicity
         modified_files=new_or_modified,
         deleted_files=deleted_infos,
-        unchanged_files=[],
+        unchanged_count=0,
     )
 
     console.print(f"  [bold blue]Parsing[/] {len(new_or_modified)} file(s)")
@@ -372,14 +373,79 @@ def watch(
         console.print(f"  Path: [dim]{discovery_result.repo_path}[/]")
         console.print(f"  Files: [cyan]{discovery_result.total_files}[/]")
 
-        # Initial scan (optional)
+        # Initial scan and processing (optional)
         if not no_initial_scan:
-            console.print("\n[bold blue]Initial Scan[/]")
+            console.print("\n[bold blue]Change Detection[/]")
             manifest = run_change_detection(discovery_result, config, dry_run=False)
 
             if manifest.files_to_parse > 0:
                 console.print(f"  Found {manifest.files_to_parse} file(s) to parse")
-                console.print("  [dim]Run 'magaldi parse' first to index existing changes[/]")
+
+                # Pre-flight check for AI processing
+                if not skip_ai:
+                    model_errors = check_model_availability(config, skip_ai)
+                    if model_errors:
+                        console.print("  [yellow]AI models unavailable, skipping AI processing[/]")
+                        skip_ai = True
+
+                # Phase 3: Parsing
+                from shared.cli._printers import print_parsing_result, print_processing_result
+                from shared.cli._runners import run_hierarchy_extraction, run_parsing
+
+                console.print("\n[bold blue]Parsing[/]")
+                parsing_result = run_parsing(manifest)
+                print_parsing_result(parsing_result)
+
+                if parsing_result.total_elements > 0:
+                    # Phase 4: Processing
+                    console.print("\n[bold blue]Processing[/]")
+                    processed, skipped, indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, failed_elements, deleted = run_processing(
+                        parsing_result, manifest, config, dry_run=False, skip_ai=skip_ai, workers=workers, skip_resolve=skip_resolve
+                    )
+                    print_processing_result(processed, skipped, indexed, skip_ai, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, workers, deleted)
+
+                    # Hierarchy Extraction
+                    if indexed > 0:
+                        from shared.db.elasticsearch import ElasticsearchRepository
+                        es_repo = ElasticsearchRepository(config)
+                        console.print("\n  [bold]Hierarchy Extraction[/]")
+                        try:
+                            cli_entry_point = discovery_result.repository
+                            rel_indexed, ref_indexed = run_hierarchy_extraction(
+                                discovery_result.scope,
+                                discovery_result.repository,
+                                user,
+                                es_repo,
+                                cli_entry_point=cli_entry_point,
+                            )
+                            if rel_indexed > 0 or ref_indexed > 0:
+                                console.print(f"  Indexed {rel_indexed} relationships, {ref_indexed} external refs")
+                        except Exception as e:
+                            console.print(f"  [yellow]Warning: Hierarchy extraction failed: {e}[/]")
+
+                    # Feature extraction (if requested)
+                    if features and not skip_ai and processed > 0:
+                        from shared.cli.extract import run_feature_extraction
+                        console.print("\n[bold blue]Feature Extraction[/]")
+                        run_feature_extraction(
+                            discovery_result.scope,
+                            discovery_result.repository,
+                            user,
+                            config,
+                            workers=workers,
+                        )
+
+                    # Glossary extraction (if requested)
+                    if glossary and not skip_ai and processed > 0:
+                        from shared.cli.extract import run_glossary_extraction
+                        console.print("\n[bold blue]Glossary Extraction[/]")
+                        run_glossary_extraction(
+                            discovery_result.scope,
+                            discovery_result.repository,
+                            user,
+                            config,
+                            workers=workers,
+                        )
             else:
                 console.print("  [green]Repository is up to date[/]")
 
