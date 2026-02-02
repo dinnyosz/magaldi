@@ -21,7 +21,7 @@ FILE_TOOLS = [
     ),
     Tool(
         name="get_file_structure",
-        description="FILE OVERVIEW: Get the structure of a file (all classes, functions, methods). "
+        description="FILE OVERVIEW: Get the structure of a file (classes, functions, methods, imports). "
         "Use to understand what's in a file without reading it.",
         inputSchema={
             "type": "object",

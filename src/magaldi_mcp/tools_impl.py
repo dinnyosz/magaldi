@@ -567,7 +567,7 @@ def get_file_structure(
     file_path: str,
     username: str = "main",
 ) -> dict[str, Any]:
-    """Get full structure of a file.
+    """Get structure of a file (classes, functions, methods, imports).
 
     Args:
         es: Elasticsearch repository.
@@ -585,41 +585,38 @@ def get_file_structure(
         raise ValueError(f"File not found: {file_path}")
 
     # Get all elements in file
-    elements = _find_elements_in_file(es, scope, repository, username, file_path)
+    all_elements = _find_elements_in_file(es, scope, repository, username, file_path)
 
-    # Build tree structure
+    # Filter to classes, functions, methods, imports (reduces output significantly)
+    structure_types = {"class", "function", "method", "import"}
+    elements = [e for e in all_elements if e.get("element_type") in structure_types]
+
+    # Build tree structure (minimal - use get_element for details)
     def build_tree(parent_id: str | None) -> list[dict]:
         children = []
         for elem in elements:
             if elem.get("parent_id") == parent_id:
                 node = {
-                    "id": elem.get("element_id"),
+                    "hash_id": elem.get("hash_id"),
                     "name": elem.get("name"),
                     "type": elem.get("element_type"),
-                    "line_start": elem.get("line_start"),
-                    "line_end": elem.get("line_end"),
-                    "summary": elem.get("summary", ""),
-                    "signature": elem.get("signature", ""),
+                    "line": elem.get("line_start"),
                     "children": build_tree(elem.get("element_id")),
                 }
                 children.append(node)
-        return sorted(children, key=lambda x: x.get("line_start", 0))
+        return sorted(children, key=lambda x: x.get("line", 0))
 
     file_id = file_doc.get("element_id")
 
     return {
-        "file": {
-            "path": file_path,
-            "language": file_doc.get("language"),
-            "summary": file_doc.get("summary", ""),
-            "line_count": file_doc.get("line_end", 0),
-        },
+        "file": file_path,
+        "language": file_doc.get("language"),
         "structure": build_tree(file_id),
-        "stats": {
+        "counts": {
             "classes": sum(1 for e in elements if e.get("element_type") == "class"),
             "functions": sum(1 for e in elements if e.get("element_type") == "function"),
             "methods": sum(1 for e in elements if e.get("element_type") == "method"),
-            "total": len(elements),
+            "imports": sum(1 for e in elements if e.get("element_type") == "import"),
         },
     }
 
