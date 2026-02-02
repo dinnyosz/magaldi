@@ -23,9 +23,8 @@ class CodeSearchListFormatter(ResultFormatter):
         for r in result:
             loc = f"{r.get('file', '?')}:{r.get('line', '?')}" if r.get('file') else "N/A"
             hash_id = r.get('hash_id', '')
-            lines.append(f"[{r.get('type', '?')}] {r.get('name', '?')} ({loc})")
-            if hash_id:
-                lines.append(f"  id: {hash_id}")
+            id_suffix = f" | id:{hash_id}" if hash_id else ""
+            lines.append(f"[{r.get('type', '?')}] {r.get('name', '?')} ({loc}){id_suffix}")
             if r.get('signature'):
                 lines.append(f"  {r['signature']}")
             if r.get('summary'):
@@ -54,7 +53,9 @@ class FeatureSearchListFormatter(ResultFormatter):
         """Format feature search results."""
         lines = [f"Found {len(result)} features:\n"]
         for r in result:
-            lines.append(f"[feature] {r.get('label', '?')} ({r.get('member_count', 0)} members)")
+            feature_id = r.get('feature_id', '')
+            id_suffix = f" | id:{feature_id}" if feature_id else ""
+            lines.append(f"[feature] {r.get('label', '?')} ({r.get('member_count', 0)} members){id_suffix}")
             if r.get('summary'):
                 summary = r['summary']
                 if len(summary) > 200:
@@ -88,9 +89,8 @@ class GroupedSearchFormatter(ResultFormatter):
             for r in code_results:
                 loc = f"{r.get('file', '?')}:{r.get('line', '?')}" if r.get('file') else "N/A"
                 hash_id = r.get('hash_id', '')
-                lines.append(f"[{r.get('type', '?')}] {r.get('name', '?')} ({loc})")
-                if hash_id:
-                    lines.append(f"  id: {hash_id}")
+                id_suffix = f" | id:{hash_id}" if hash_id else ""
+                lines.append(f"[{r.get('type', '?')}] {r.get('name', '?')} ({loc}){id_suffix}")
                 if r.get('signature'):
                     lines.append(f"  {r['signature']}")
                 if r.get('summary'):
@@ -119,9 +119,8 @@ class GroupedSearchFormatter(ResultFormatter):
             for r in test_results:
                 loc = f"{r.get('file', '?')}:{r.get('line', '?')}" if r.get('file') else "N/A"
                 hash_id = r.get('hash_id', '')
-                lines.append(f"[{r.get('type', '?')}] {r.get('name', '?')} ({loc})")
-                if hash_id:
-                    lines.append(f"  id: {hash_id}")
+                id_suffix = f" | id:{hash_id}" if hash_id else ""
+                lines.append(f"[{r.get('type', '?')}] {r.get('name', '?')} ({loc}){id_suffix}")
                 if r.get('signature'):
                     lines.append(f"  {r['signature']}")
                 if r.get('summary'):

@@ -5,13 +5,18 @@ from mcp.types import Tool
 INSPECT_TOOLS = [
     Tool(
         name="get_element",
-        description="INSPECT ELEMENT: Get full details of a specific element by ID. "
-        "Use include_code=true to see source code.",
+        description="INSPECT ELEMENT: Get details of a specific element by ID. "
+        "Use include_code=true to see source code. Use brief=false for full details.",
         inputSchema={
             "type": "object",
             "properties": {
                 "hash_id": {"type": "string", "description": "Element ID (hash_id from search results)"},
                 "include_code": {"type": "boolean", "default": False},
+                "brief": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Return core fields only (default). Set false for calls, complexity, etc.",
+                },
             },
             "required": ["hash_id"],
         },

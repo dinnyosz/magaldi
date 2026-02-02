@@ -205,6 +205,7 @@ class MagaldiMCPServer:
                 es,
                 element_id=args["hash_id"],
                 include_code=args.get("include_code", False),
+                brief=args.get("brief", True),
             )
         elif name == "get_context":
             return await asyncio.to_thread(
@@ -236,6 +237,7 @@ class MagaldiMCPServer:
                 scope=args["scope"],
                 repository=args["repository"],
                 username=args.get("username", self.default_username),
+                brief=args.get("brief", True),
             )
         elif name == "get_repo_stats":
             return await asyncio.to_thread(

@@ -384,13 +384,15 @@ def get_element(
     es: ElasticsearchRepository,
     element_id: str,
     include_code: bool = False,
+    brief: bool = True,
 ) -> dict[str, Any]:
-    """Get full details of a code element.
+    """Get details of a code element.
 
     Args:
         es: Elasticsearch repository.
         element_id: Element ID.
         include_code: Include raw source code.
+        brief: Return only core fields (default True). Set False for full details.
 
     Returns:
         Element details.
@@ -399,6 +401,7 @@ def get_element(
     if not doc:
         raise ValueError(f"Element not found: {element_id}")
 
+    # Core fields (always included)
     result: dict[str, Any] = {
         "hash_id": doc.get("hash_id"),
         "name": doc.get("name"),
@@ -409,25 +412,33 @@ def get_element(
         "summary": doc.get("summary", ""),
     }
 
-    # Only include if present and meaningful
+    # Brief mode: signature, visibility, and a few key fields
     if doc.get("signature"):
         result["signature"] = doc["signature"]
+    if doc.get("visibility"):
+        result["visibility"] = doc["visibility"]
+    if doc.get("is_async"):
+        result["is_async"] = True
+    if doc.get("is_test"):
+        result["is_test"] = True
+
+    # Return early for brief mode
+    if brief:
+        if include_code:
+            result["code"] = doc.get("raw_code", "")
+        return result
+
+    # Full mode: include all available fields
     if doc.get("docstring"):
         result["docstring"] = doc["docstring"]
     if doc.get("decorators"):
         result["decorators"] = doc["decorators"]
     if doc.get("decorator_details"):
         result["decorator_details"] = doc["decorator_details"]
-    if doc.get("is_async"):
-        result["is_async"] = True
-    if doc.get("is_test"):
-        result["is_test"] = True
     if doc.get("parent_id"):
         result["parent_id"] = doc["parent_id"]
 
     # Core metadata fields
-    if doc.get("visibility"):
-        result["visibility"] = doc["visibility"]
     if doc.get("language"):
         result["language"] = doc["language"]
     if doc.get("scope"):
@@ -722,6 +733,7 @@ def list_features(
     scope: str,
     repository: str,
     username: str = "main",
+    brief: bool = True,
 ) -> list[dict[str, Any]]:
     """List all features and subfeatures for a repository.
 
@@ -730,6 +742,7 @@ def list_features(
         scope: Repository scope.
         repository: Repository name.
         username: User branch.
+        brief: Return only core fields (default True). Set False to include summaries.
 
     Returns:
         List of features and subfeatures with parent info.
@@ -747,6 +760,11 @@ def list_features(
     # Combine and sort by member count
     all_features = features + subfeatures
     all_features.sort(key=lambda x: x.get("member_count", 0), reverse=True)
+
+    # In brief mode, remove summaries to save tokens
+    if brief:
+        for f in all_features:
+            f.pop("summary", None)
 
     return all_features
 

@@ -13,6 +13,11 @@ FEATURE_TOOLS = [
             "properties": {
                 "scope": {"type": "string"},
                 "repository": {"type": "string"},
+                "brief": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Omit summaries (default). Set false to include feature summaries.",
+                },
             },
             "required": ["scope", "repository"],
         },

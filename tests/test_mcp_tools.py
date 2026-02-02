@@ -542,7 +542,7 @@ class TestGetElementExtended:
     """Extended tests for get_element function."""
 
     def test_get_element_includes_optional_fields(self, mock_es_repo):
-        """Test get_element includes all optional fields when present."""
+        """Test get_element includes all optional fields when brief=False."""
         mock_es_repo.get_document.return_value = {
             "element_id": "id1",
             "name": "test",
@@ -557,7 +557,7 @@ class TestGetElementExtended:
             "parent_id": "parent_id",
         }
 
-        result = get_element(es=mock_es_repo, element_id="id1")
+        result = get_element(es=mock_es_repo, element_id="id1", brief=False)
 
         assert result["signature"] == "def test():"
         assert result["docstring"] == "A test function."
