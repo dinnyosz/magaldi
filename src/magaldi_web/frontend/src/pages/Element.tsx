@@ -423,6 +423,26 @@ function Element() {
                 </div>
               )}
 
+              {/* Type Annotations */}
+              {element.type_annotations && element.type_annotations.length > 0 && (
+                <div className="mb-3">
+                  <small className="text-uppercase text-muted fw-bold d-block mb-1">
+                    <i className="bi bi-braces-asterisk me-1"></i>
+                    Type Annotations ({element.type_annotations.length})
+                  </small>
+                  <div className="bg-light p-2 rounded" style={{ maxHeight: '150px', overflowY: 'auto' }}>
+                    {element.type_annotations.map((ann, i) => (
+                      <div key={i} className="d-flex align-items-center py-1">
+                        <code className="me-2">{ann.name}</code>
+                        <Badge bg="light" text="dark" className="me-2">{ann.kind}</Badge>
+                        {ann.location && <small className="text-muted">{ann.location}</small>}
+                        {ann.line && <small className="text-muted ms-auto">L{ann.line}</small>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* HTTP Routes */}
               {element.http_routes && element.http_routes.length > 0 && (
                 <div className="mb-3">
@@ -519,6 +539,23 @@ function Element() {
                         {effect.target && <code className="me-2">{effect.target}</code>}
                         <small className="text-muted ms-auto">L{effect.line}</small>
                       </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Mutated State */}
+              {element.mutated_state && element.mutated_state.length > 0 && (
+                <div className="mb-3">
+                  <small className="text-uppercase text-muted fw-bold d-block mb-1">
+                    <i className="bi bi-pencil-square me-1"></i>
+                    Mutated State
+                  </small>
+                  <div className="d-flex flex-wrap gap-1">
+                    {element.mutated_state.map((state, i) => (
+                      <Badge key={i} bg="secondary" className="fw-normal">
+                        {state}
+                      </Badge>
                     ))}
                   </div>
                 </div>
@@ -735,6 +772,27 @@ function Element() {
                         </code>
                         <small className="text-body-secondary">from {imp.module}</small>
                         {imp.line && <small className="text-body-secondary ms-auto">L{imp.line}</small>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Section Markers - for file elements */}
+              {element.element_type === 'file' && element.section_markers && element.section_markers.length > 0 && (
+                <div className="mb-3">
+                  <small className="text-uppercase text-muted fw-bold d-block mb-1">
+                    <i className="bi bi-signpost-2 me-1"></i>
+                    Code Sections ({element.section_markers.length})
+                  </small>
+                  <div className="bg-light p-2 rounded" style={{ maxHeight: '150px', overflowY: 'auto' }}>
+                    {element.section_markers.map((marker, i) => (
+                      <div key={i} className="d-flex align-items-center py-1">
+                        <Badge bg="light" text="dark" className="me-2">
+                          {marker.style === 'banner' ? '═══' : marker.style === 'box' ? '┌─┐' : '───'}
+                        </Badge>
+                        <span>{marker.label}</span>
+                        <small className="text-muted ms-auto">L{marker.line}</small>
                       </div>
                     ))}
                   </div>
