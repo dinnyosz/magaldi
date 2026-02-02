@@ -920,24 +920,32 @@ def find_files(
 
     client = es._get_client()
 
-    # Build ES query for file elements
+    # Convert glob pattern to ES wildcard
+    if "*" not in pattern and "?" not in pattern:
+        # No wildcards: exact filename match anywhere in tree
+        es_pattern = f"*/{pattern}"
+    else:
+        # Has wildcards: convert ** to * (ES wildcard doesn't have **)
+        es_pattern = pattern.replace("**", "*")
+
+    # Build ES query with wildcard filter (filtering happens in ES, not client-side)
     filters = [
         {"term": {"element_type": "file"}},
         {"term": {"username": username}},
+        {"wildcard": {"relative_path": es_pattern}},
     ]
     if scope:
         filters.append({"term": {"scope": scope}})
     if repository:
         filters.append({"term": {"repository": repository}})
 
-    # Fetch file elements
+    # Fetch file elements - ES filters directly, no need for extra results
     es_result = client.search(
         index="magaldi-code-elements",
         body={
             "query": {"bool": {"filter": filters}},
             "_source": ["element_id", "relative_path", "language", "line_end"],
-            "size": min(limit * 5, 2000),  # Get extra to filter by pattern
-            "sort": [{"relative_path": "asc"}],
+            "size": limit,
         },
     )
 
@@ -946,19 +954,13 @@ def find_files(
 
     for hit in hits:
         source = hit["_source"]
-        rel_path = source.get("relative_path", "")
-
-        # Apply glob pattern filter (Path.match supports ** patterns)
-        if Path(rel_path).match(pattern):
-            matches.append(
-                {
-                    "path": rel_path,
-                    "language": source.get("language"),
-                    "lines": source.get("line_end", 0),
-                }
-            )
-            if len(matches) >= limit:
-                break
+        matches.append(
+            {
+                "path": source.get("relative_path", ""),
+                "language": source.get("language"),
+                "lines": source.get("line_end", 0),
+            }
+        )
 
     return matches
 
