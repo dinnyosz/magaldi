@@ -1322,10 +1322,48 @@ def find_implementations(
     return implementations
 
 
+def _detect_mcp_installation_scope(project_root: str | None) -> str:
+    """Detect whether magaldi MCP is installed at project or global level.
+
+    Checks for magaldi in MCP server configs to determine default scope.
+
+    Returns:
+        "project" if found in project config, "global" otherwise.
+    """
+    import json
+    from pathlib import Path
+
+    # Check project-level config first
+    if project_root:
+        project_claude_json = Path(project_root) / ".claude.json"
+        if project_claude_json.exists():
+            try:
+                config = json.loads(project_claude_json.read_text())
+                mcp_servers = config.get("mcpServers", {})
+                if "magaldi" in mcp_servers:
+                    return "project"
+            except (json.JSONDecodeError, OSError):
+                pass
+
+    # Check global config
+    global_claude_json = Path.home() / ".claude.json"
+    if global_claude_json.exists():
+        try:
+            config = json.loads(global_claude_json.read_text())
+            mcp_servers = config.get("mcpServers", {})
+            if "magaldi" in mcp_servers:
+                return "global"
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # Default to project if can't determine
+    return "project"
+
+
 def generate_skill(
     project_root: str | None = None,
     skill_name: str = "magaldi",
-    scope: str = "project",
+    scope: str | None = None,
     add_allowed_tools: bool = False,
 ) -> dict[str, Any]:
     """Generate a SKILL.md file that teaches LLMs how to use this MCP effectively.
@@ -1333,7 +1371,7 @@ def generate_skill(
     Args:
         project_root: Project root directory (required for scope="project").
         skill_name: Name of the skill (default: "magaldi").
-        scope: Where to install - "project" (.claude/skills in project) or "global" (~/.claude/skills).
+        scope: Where to install - "project" or "global". Defaults to MCP installation scope.
         add_allowed_tools: If True, add all magaldi tools to allowed tools in settings.
 
     Returns:
@@ -1341,6 +1379,13 @@ def generate_skill(
     """
     import json
     from pathlib import Path
+
+    # Auto-detect scope based on MCP installation if not specified
+    if scope is None:
+        scope = _detect_mcp_installation_scope(project_root)
+        detected_scope = True
+    else:
+        detected_scope = False
 
     skill_content = """---
 name: magaldi
@@ -1537,12 +1582,15 @@ The index has already done the hard work:
 **Use magaldi tools. Don't re-grep what's already indexed.**
 """
 
-    result = {
+    result: dict[str, Any] = {
         "skill_name": skill_name,
         "content": skill_content,
         "version": "1.0.0",
         "scope": scope,
     }
+    if detected_scope:
+        result["scope_auto_detected"] = True
+        result["scope_note"] = f"Auto-detected '{scope}' based on MCP installation location"
 
     # Determine target path based on scope
     if scope == "global":
