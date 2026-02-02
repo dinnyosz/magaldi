@@ -150,16 +150,24 @@ def run_processing(
     # Default worker count (matches DependencyTracker.DEFAULT_WORKERS)
     DEFAULT_WORKERS = 8
 
+    # Smart worker count: cap at total elements (no point having more workers than items)
+    total_elements = parsing_result.total_elements
+    effective_workers = workers if workers > 0 else DEFAULT_WORKERS
+    if total_elements > 0 and total_elements < effective_workers:
+        effective_workers = total_elements
+        if workers > 0:
+            console.print(f"  [dim]Reducing workers from {workers} to {total_elements} (matching element count)[/]")
+
     proc_config = ProcessingConfig(
         summarize_model=config.llm.get_summarize_model(),
         summarize_model_small=config.llm.get_summarize_model_small(),
         embed_model=config.llm.get_embed_model(),
         skip_ai=skip_ai,
-        num_workers=workers,
+        num_workers=effective_workers,
     )
 
-    # Calculate actual max workers for display (0 = use default)
-    display_workers = workers if workers > 0 else DEFAULT_WORKERS
+    # Use effective workers for display
+    display_workers = effective_workers
 
     # Pass context sizes from parsing to processing (for KV cache optimization)
     proc_config.context_sizes = parsing_result.context_sizes
