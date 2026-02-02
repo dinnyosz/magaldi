@@ -280,6 +280,55 @@ export interface ConcurrencyInfo {
   patterns: string[]
 }
 
+// Extended code intelligence types
+export interface TypeAnnotationInfo {
+  name: string
+  kind: string
+  location: string
+  line: number
+  generic_args: string[] | null
+}
+
+export interface TodoInfo {
+  kind: string
+  text: string
+  line: number
+  assignee: string | null
+  priority: string | null
+  issue_ref: string | null
+}
+
+export interface SectionMarkerInfo {
+  label: string
+  line: number
+  style: string
+}
+
+export interface CommentInfo {
+  text: string
+  line: number
+  kind: string
+  position: string
+}
+
+export interface PurityInfo {
+  level: string
+  confidence: string
+  reasons: string[]
+}
+
+export interface SideEffectInfo {
+  kind: string
+  target: string | null
+  line: number
+}
+
+export interface ParameterInfo {
+  name: string
+  type: string | null
+  default: string | null
+}
+
 export interface MetricsSummaryInfo {
   total_elements: number
   total_functions: number
@@ -315,11 +364,29 @@ export interface ElementDetail {
   base_classes: string[]
   class_attributes: ClassAttributeInfo[]
   // Enhanced context for functions/methods
+  return_type: string | null
+  parameters: ParameterInfo[]
   exceptions_raised: string[]
   attributes_modified: string[]
   // For file elements
   imports: ElementImportInfo[]
   element_count: number | null
+  // Type annotations
+  type_annotations: TypeAnnotationInfo[]
+  // Pattern detection
+  detected_patterns: string[]
+  pattern_confidence: Record<string, number>
+  // Documentation artifacts
+  todos: TodoInfo[]
+  section_markers: SectionMarkerInfo[]
+  associated_comments: CommentInfo[]
+  // API surface
+  http_routes: HttpRouteInfo[]
+  cli_commands: CliCommandInfo[]
+  // Purity and side effects
+  purity: PurityInfo | null
+  side_effects: SideEffectInfo[]
+  mutated_state: string[]
   // Context and relationships
   context: {
     file: ElementDetailFile | null

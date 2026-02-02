@@ -386,6 +386,159 @@ function Element() {
                 </div>
               )}
 
+              {/* Parameters for functions/methods */}
+              {isCallable && element.parameters && element.parameters.length > 0 && (
+                <div className="mb-3">
+                  <small className="text-uppercase text-muted fw-bold d-block mb-1">
+                    <i className="bi bi-input-cursor me-1"></i>
+                    Parameters
+                  </small>
+                  <div className="bg-light p-2 rounded">
+                    {element.parameters.map((param, i) => (
+                      <div key={i} className="d-flex align-items-center py-1">
+                        <code className="me-2">{param.name}</code>
+                        {param.type && <small className="text-muted">: {param.type}</small>}
+                        {param.default && <small className="text-muted ms-2">= {param.default}</small>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Return Type for functions/methods */}
+              {isCallable && element.return_type && (
+                <div className="mb-3">
+                  <small className="text-uppercase text-muted fw-bold d-block mb-1">
+                    <i className="bi bi-arrow-return-right me-1"></i>
+                    Returns
+                  </small>
+                  <code className="bg-light p-2 rounded d-inline-block">{element.return_type}</code>
+                </div>
+              )}
+
+              {/* HTTP Routes */}
+              {element.http_routes && element.http_routes.length > 0 && (
+                <div className="mb-3">
+                  <small className="text-uppercase text-muted fw-bold d-block mb-1">
+                    <i className="bi bi-globe me-1"></i>
+                    HTTP Routes
+                  </small>
+                  <div className="bg-light p-2 rounded">
+                    {element.http_routes.map((route, i) => (
+                      <div key={i} className="d-flex align-items-center py-1">
+                        <Badge bg={route.method === 'GET' ? 'success' : route.method === 'POST' ? 'primary' : route.method === 'DELETE' ? 'danger' : 'secondary'} className="me-2">
+                          {route.method}
+                        </Badge>
+                        <code className="me-2">{route.path}</code>
+                        <small className="text-muted">({route.framework})</small>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* CLI Commands */}
+              {element.cli_commands && element.cli_commands.length > 0 && (
+                <div className="mb-3">
+                  <small className="text-uppercase text-muted fw-bold d-block mb-1">
+                    <i className="bi bi-terminal me-1"></i>
+                    CLI Commands
+                  </small>
+                  <div className="bg-light p-2 rounded">
+                    {element.cli_commands.map((cmd, i) => (
+                      <div key={i} className="d-flex align-items-center py-1">
+                        <code className="me-2">{cmd.name}</code>
+                        <small className="text-muted">({cmd.framework})</small>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Detected Patterns */}
+              {element.detected_patterns && element.detected_patterns.length > 0 && (
+                <div className="mb-3">
+                  <small className="text-uppercase text-muted fw-bold d-block mb-1">
+                    <i className="bi bi-puzzle me-1"></i>
+                    Design Patterns
+                  </small>
+                  <div className="d-flex flex-wrap gap-2">
+                    {element.detected_patterns.map((pattern, i) => (
+                      <Badge key={i} bg="info" className="fw-normal">
+                        {pattern}
+                        {element.pattern_confidence?.[pattern] && (
+                          <small className="ms-1 opacity-75">
+                            ({Math.round(element.pattern_confidence[pattern] * 100)}%)
+                          </small>
+                        )}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Purity */}
+              {element.purity && (
+                <div className="mb-3">
+                  <small className="text-uppercase text-muted fw-bold d-block mb-1">
+                    <i className="bi bi-shield-check me-1"></i>
+                    Purity
+                  </small>
+                  <Badge bg={element.purity.level === 'pure' ? 'success' : element.purity.level === 'read_only' ? 'info' : 'warning'} className="me-2">
+                    {element.purity.level}
+                  </Badge>
+                  <small className="text-muted">({element.purity.confidence} confidence)</small>
+                  {element.purity.reasons.length > 0 && (
+                    <div className="mt-1">
+                      {element.purity.reasons.map((reason, i) => (
+                        <small key={i} className="d-block text-muted">{reason}</small>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Side Effects */}
+              {element.side_effects && element.side_effects.length > 0 && (
+                <div className="mb-3">
+                  <small className="text-uppercase text-muted fw-bold d-block mb-1">
+                    <i className="bi bi-exclamation-diamond me-1"></i>
+                    Side Effects
+                  </small>
+                  <div className="bg-light p-2 rounded">
+                    {element.side_effects.map((effect, i) => (
+                      <div key={i} className="d-flex align-items-center py-1">
+                        <Badge bg="warning" text="dark" className="me-2">{effect.kind}</Badge>
+                        {effect.target && <code className="me-2">{effect.target}</code>}
+                        <small className="text-muted ms-auto">L{effect.line}</small>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* TODOs */}
+              {element.todos && element.todos.length > 0 && (
+                <div className="mb-3">
+                  <small className="text-uppercase text-muted fw-bold d-block mb-1">
+                    <i className="bi bi-check2-square me-1"></i>
+                    TODOs ({element.todos.length})
+                  </small>
+                  <div className="bg-light p-2 rounded" style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                    {element.todos.map((todo, i) => (
+                      <div key={i} className="py-1 border-bottom">
+                        <Badge bg={todo.kind === 'FIXME' ? 'danger' : todo.kind === 'BUG' ? 'warning' : 'secondary'} className="me-2">
+                          {todo.kind}
+                        </Badge>
+                        <span>{todo.text}</span>
+                        {todo.assignee && <small className="text-muted ms-2">@{todo.assignee}</small>}
+                        <small className="text-muted ms-auto float-end">L{todo.line}</small>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Summary */}
               {element.summary && (
                 <Alert variant="light" className="border mb-3">

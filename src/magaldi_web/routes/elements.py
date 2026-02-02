@@ -9,7 +9,9 @@ from magaldi_web.models import (
     CallInfo,
     ChildInfo,
     ClassAttributeInfo,
+    CliCommandInfo,
     CodeMetricsInfo,
+    CommentInfo,
     ComplexityInfo,
     ConcurrencyInfo,
     DecoratorDetailInfo,
@@ -22,15 +24,21 @@ from magaldi_web.models import (
     FileContext,
     GlossaryFeatureAssociation,
     GlossaryInfo,
+    HttpRouteInfo,
     ImportInfo,
     MetricsSummaryInfo,
     ParameterInfo,
     ParentContext,
     ParentFeatureInfo,
+    PurityInfo,
     RepoRef,
+    SectionMarkerInfo,
     SecurityIssueInfo,
     SiblingInfo,
+    SideEffectInfo,
     SubfeatureInfo,
+    TodoInfo,
+    TypeAnnotationInfo,
 )
 from shared.db.elasticsearch import ElasticsearchRepository, INDEX_NAME
 
@@ -550,6 +558,108 @@ async def get_element_detail(
                 security_by_severity=raw_metrics_summary.get("security_by_severity") or {},
             )
 
+    # Type annotations
+    type_annotations = []
+    raw_type_annotations = source.get("type_annotations", [])
+    for ta in raw_type_annotations:
+        type_annotations.append(
+            TypeAnnotationInfo(
+                name=ta.get("name", ""),
+                kind=ta.get("kind", ""),
+                location=ta.get("location", ""),
+                line=ta.get("line", 0),
+                generic_args=ta.get("generic_args"),
+            )
+        )
+
+    # TODOs
+    todos = []
+    raw_todos = source.get("todos", [])
+    for todo in raw_todos:
+        todos.append(
+            TodoInfo(
+                kind=todo.get("kind", ""),
+                text=todo.get("text", ""),
+                line=todo.get("line", 0),
+                assignee=todo.get("assignee"),
+                priority=todo.get("priority"),
+                issue_ref=todo.get("issue_ref"),
+            )
+        )
+
+    # Section markers
+    section_markers = []
+    raw_section_markers = source.get("section_markers", [])
+    for sm in raw_section_markers:
+        section_markers.append(
+            SectionMarkerInfo(
+                label=sm.get("label", ""),
+                line=sm.get("line", 0),
+                style=sm.get("style", ""),
+            )
+        )
+
+    # Associated comments
+    associated_comments = []
+    raw_comments = source.get("associated_comments", [])
+    for comment in raw_comments:
+        associated_comments.append(
+            CommentInfo(
+                text=comment.get("text", ""),
+                line=comment.get("line", 0),
+                kind=comment.get("kind", ""),
+                position=comment.get("position", ""),
+            )
+        )
+
+    # HTTP routes
+    http_routes = []
+    raw_http_routes = source.get("http_routes", [])
+    for route in raw_http_routes:
+        http_routes.append(
+            HttpRouteInfo(
+                method=route.get("method", ""),
+                path=route.get("path", ""),
+                path_params=route.get("path_params", []),
+                framework=route.get("framework", ""),
+                line=route.get("line"),
+            )
+        )
+
+    # CLI commands
+    cli_commands = []
+    raw_cli_commands = source.get("cli_commands", [])
+    for cmd in raw_cli_commands:
+        cli_commands.append(
+            CliCommandInfo(
+                name=cmd.get("name", ""),
+                options=cmd.get("options", []),
+                framework=cmd.get("framework", ""),
+            )
+        )
+
+    # Purity
+    purity = None
+    raw_purity = source.get("purity")
+    if raw_purity:
+        purity = PurityInfo(
+            level=raw_purity.get("level", ""),
+            confidence=raw_purity.get("confidence", ""),
+            reasons=raw_purity.get("reasons", []),
+        )
+
+    # Side effects
+    side_effects = []
+    raw_side_effects = source.get("side_effects", [])
+    for se in raw_side_effects:
+        side_effects.append(
+            SideEffectInfo(
+                kind=se.get("kind", ""),
+                target=se.get("target"),
+                line=se.get("line", 0),
+            )
+        )
+
     return ElementDetailResponse(
         element_id=source["element_id"],
         hash_id=source.get("hash_id"),
@@ -581,6 +691,22 @@ async def get_element_detail(
         # For file elements
         imports=imports,
         element_count=source.get("element_count"),
+        # Type annotations
+        type_annotations=type_annotations,
+        # Pattern detection
+        detected_patterns=source.get("detected_patterns", []),
+        pattern_confidence=source.get("pattern_confidence", {}),
+        # Documentation artifacts
+        todos=todos,
+        section_markers=section_markers,
+        associated_comments=associated_comments,
+        # API surface
+        http_routes=http_routes,
+        cli_commands=cli_commands,
+        # Purity and side effects
+        purity=purity,
+        side_effects=side_effects,
+        mutated_state=source.get("mutated_state", []),
         # Context and relationships
         context=ElementContext(
             file=file_context,

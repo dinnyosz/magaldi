@@ -494,6 +494,83 @@ class ConcurrencyInfo(BaseModel):
     patterns: list[str] = Field(default_factory=list)
 
 
+# =============================================================================
+# EXTENDED CODE INTELLIGENCE MODELS
+# =============================================================================
+
+
+class TypeAnnotationInfo(BaseModel):
+    """Type annotation extracted from source code."""
+
+    name: str
+    kind: str
+    location: str
+    line: int
+    generic_args: list[str] | None = None
+
+
+class TodoInfo(BaseModel):
+    """A TODO/FIXME comment extracted from source code."""
+
+    kind: str
+    text: str
+    line: int
+    assignee: str | None = None
+    priority: str | None = None
+    issue_ref: str | None = None
+
+
+class SectionMarkerInfo(BaseModel):
+    """A section marker comment."""
+
+    label: str
+    line: int
+    style: str
+
+
+class CommentInfo(BaseModel):
+    """A comment associated with a code element."""
+
+    text: str
+    line: int
+    kind: str
+    position: str
+
+
+class PurityInfo(BaseModel):
+    """Purity analysis result for a function."""
+
+    level: str
+    confidence: str
+    reasons: list[str] = Field(default_factory=list)
+
+
+class SideEffectInfo(BaseModel):
+    """A side effect detected in a function."""
+
+    kind: str
+    target: str | None = None
+    line: int
+
+
+class HttpRouteInfo(BaseModel):
+    """An HTTP route extracted from a web framework."""
+
+    method: str
+    path: str
+    path_params: list[str] = Field(default_factory=list)
+    framework: str
+    line: int | None = None
+
+
+class CliCommandInfo(BaseModel):
+    """A CLI command extracted from a CLI framework."""
+
+    name: str
+    options: list[dict[str, Any]] = Field(default_factory=list)
+    framework: str
+
+
 class MetricsSummaryInfo(BaseModel):
     """Aggregated metrics summary for files and classes."""
 
@@ -541,6 +618,22 @@ class ElementDetailResponse(BaseModel):
     # For file elements
     imports: list[ImportInfo] = Field(default_factory=list)
     element_count: int | None = None
+    # Type annotations
+    type_annotations: list[TypeAnnotationInfo] = Field(default_factory=list)
+    # Pattern detection
+    detected_patterns: list[str] = Field(default_factory=list)
+    pattern_confidence: dict[str, float] = Field(default_factory=dict)
+    # Documentation artifacts
+    todos: list[TodoInfo] = Field(default_factory=list)
+    section_markers: list[SectionMarkerInfo] = Field(default_factory=list)
+    associated_comments: list[CommentInfo] = Field(default_factory=list)
+    # API surface
+    http_routes: list[HttpRouteInfo] = Field(default_factory=list)
+    cli_commands: list[CliCommandInfo] = Field(default_factory=list)
+    # Purity and side effects
+    purity: PurityInfo | None = None
+    side_effects: list[SideEffectInfo] = Field(default_factory=list)
+    mutated_state: list[str] = Field(default_factory=list)
     # Context and relationships
     context: ElementContext
     repository: RepoRef

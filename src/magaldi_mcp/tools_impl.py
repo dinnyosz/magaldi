@@ -366,6 +366,12 @@ def get_element(
     if doc.get("parent_id"):
         result["parent_id"] = doc["parent_id"]
 
+    # Core metadata fields
+    if doc.get("visibility"):
+        result["visibility"] = doc["visibility"]
+    if doc.get("language"):
+        result["language"] = doc["language"]
+
     # Enhanced context fields
     if doc.get("base_classes"):
         result["base_classes"] = doc["base_classes"]
@@ -389,6 +395,54 @@ def get_element(
     # Calls (for function/method elements)
     if doc.get("calls"):
         result["calls"] = doc["calls"]
+
+    # Type annotations
+    if doc.get("type_annotations"):
+        result["type_annotations"] = doc["type_annotations"]
+
+    # Pattern detection
+    if doc.get("detected_patterns"):
+        result["detected_patterns"] = doc["detected_patterns"]
+    if doc.get("pattern_confidence"):
+        result["pattern_confidence"] = doc["pattern_confidence"]
+
+    # Documentation artifacts
+    if doc.get("todos"):
+        result["todos"] = doc["todos"]
+    if doc.get("section_markers"):
+        result["section_markers"] = doc["section_markers"]
+    if doc.get("associated_comments"):
+        result["associated_comments"] = doc["associated_comments"]
+
+    # API surface
+    if doc.get("http_routes"):
+        result["http_routes"] = doc["http_routes"]
+    if doc.get("cli_commands"):
+        result["cli_commands"] = doc["cli_commands"]
+
+    # Purity and side effects
+    if doc.get("purity"):
+        result["purity"] = doc["purity"]
+    if doc.get("side_effects"):
+        result["side_effects"] = doc["side_effects"]
+    if doc.get("mutated_state"):
+        result["mutated_state"] = doc["mutated_state"]
+
+    # Code metrics
+    if doc.get("complexity"):
+        result["complexity"] = doc["complexity"]
+    if doc.get("code_metrics"):
+        result["code_metrics"] = doc["code_metrics"]
+    if doc.get("docstring_quality"):
+        result["docstring_quality"] = doc["docstring_quality"]
+
+    # Security and environment
+    if doc.get("security_issues"):
+        result["security_issues"] = doc["security_issues"]
+    if doc.get("env_vars"):
+        result["env_vars"] = doc["env_vars"]
+    if doc.get("concurrency"):
+        result["concurrency"] = doc["concurrency"]
 
     if include_code:
         result["code"] = doc.get("raw_code", "")
