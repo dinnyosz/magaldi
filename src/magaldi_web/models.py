@@ -705,6 +705,39 @@ class AdminOverviewResponse(BaseModel):
 
 
 # =============================================================================
+# MCP ANALYTICS MODELS
+# =============================================================================
+
+
+class ToolUsageInfo(BaseModel):
+    """Usage info for a single MCP tool."""
+
+    tool_name: str
+    call_count: int
+    percentage: float  # Percentage of total calls
+
+
+class ToolTransitionInfo(BaseModel):
+    """Transition from one tool to another."""
+
+    from_tool: str
+    to_tool: str
+    count: int
+    percentage: float  # Percentage of transitions from from_tool
+
+
+class MCPAnalyticsResponse(BaseModel):
+    """Response for MCP analytics endpoint."""
+
+    total_calls: int
+    unique_tools: int
+    today_calls: int
+    tool_usage: list[ToolUsageInfo]
+    top_transitions: list[ToolTransitionInfo]
+    transition_matrix: dict[str, dict[str, int]]  # from_tool -> to_tool -> count
+
+
+# =============================================================================
 # VECTOR MAP MODELS
 # =============================================================================
 

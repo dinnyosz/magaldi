@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import uuid
 from typing import Any
 
 from mcp.server import Server
@@ -18,6 +20,7 @@ from magaldi_mcp.tools.schemas import ALL_TOOL_SCHEMAS
 from shared.ai.embedding import CodeEmbeddingClient
 from shared.config import get_config, load_config
 from shared.db.elasticsearch import ElasticsearchRepository
+from shared.db.redis import RedisMCPAnalyticsRepository
 
 log = logging.getLogger(__name__)
 
@@ -28,12 +31,19 @@ class MagaldiMCPServer:
     def __init__(
         self,
         default_username: str = "main",
+        enable_analytics: bool = True,
     ) -> None:
         self.server = Server("magaldi")
         self.config = get_config()
         self.default_username = default_username
         self.es_repo: ElasticsearchRepository | None = None
         self.embed_client: CodeEmbeddingClient | None = None
+
+        # Analytics tracking
+        self._enable_analytics = enable_analytics
+        self._analytics_repo: RedisMCPAnalyticsRepository | None = None
+        # Session ID: use PID + random suffix to identify this MCP session
+        self._session_id = f"{os.getpid()}-{uuid.uuid4().hex[:8]}"
 
         # Register handlers
         self._register_tools()
@@ -56,6 +66,29 @@ class MagaldiMCPServer:
             )
         return self.embed_client
 
+    def _get_analytics_repo(self) -> RedisMCPAnalyticsRepository | None:
+        """Get or create analytics repository."""
+        if not self._enable_analytics:
+            return None
+        if self._analytics_repo is None:
+            try:
+                self._analytics_repo = RedisMCPAnalyticsRepository(self.config)
+            except Exception as e:
+                log.warning(f"Failed to initialize analytics: {e}")
+                self._enable_analytics = False
+                return None
+        return self._analytics_repo
+
+    def _record_tool_call(self, tool_name: str) -> None:
+        """Record a tool call for analytics."""
+        try:
+            repo = self._get_analytics_repo()
+            if repo:
+                repo.record_tool_call(tool_name, self._session_id)
+        except Exception as e:
+            # Don't let analytics failures affect tool execution
+            log.debug(f"Analytics recording failed: {e}")
+
     def _register_tools(self) -> None:
         """Register all MCP tools."""
 
@@ -67,6 +100,9 @@ class MagaldiMCPServer:
         @self.server.call_tool()
         async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             """Handle tool calls."""
+            # Record analytics before execution
+            self._record_tool_call(name)
+
             try:
                 result = await self._handle_tool(name, arguments)
                 return [TextContent(type="text", text=format_result(result))]

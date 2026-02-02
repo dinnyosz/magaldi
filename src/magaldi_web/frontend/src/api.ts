@@ -519,6 +519,29 @@ export interface IndexStats {
   vector_coverage_pct: number
 }
 
+// MCP Analytics types
+export interface ToolUsageInfo {
+  tool_name: string
+  call_count: number
+  percentage: number
+}
+
+export interface ToolTransitionInfo {
+  from_tool: string
+  to_tool: string
+  count: number
+  percentage: number
+}
+
+export interface MCPAnalyticsResponse {
+  total_calls: number
+  unique_tools: number
+  today_calls: number
+  tool_usage: ToolUsageInfo[]
+  top_transitions: ToolTransitionInfo[]
+  transition_matrix: Record<string, Record<string, number>>
+}
+
 // API functions
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
@@ -630,6 +653,14 @@ export async function getJobs(): Promise<JobStatsResponse> {
 
 export async function getIndexStats(): Promise<IndexStats> {
   return fetchJson(`${API_BASE}/admin/index-stats`)
+}
+
+export async function getMCPAnalytics(): Promise<MCPAnalyticsResponse> {
+  return fetchJson(`${API_BASE}/admin/mcp-analytics`)
+}
+
+export async function clearMCPAnalytics(): Promise<{ status: string; message?: string }> {
+  return fetchJson(`${API_BASE}/admin/mcp-analytics/clear`, { method: 'POST' })
 }
 
 // Browse API

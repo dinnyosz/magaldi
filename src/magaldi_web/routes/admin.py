@@ -18,10 +18,14 @@ from magaldi_web.models import (
     HealthStatus,
     IndexStatsResponse,
     JobStatsResponse,
+    MCPAnalyticsResponse,
     QueueStats,
     ServiceHealth,
+    ToolTransitionInfo,
+    ToolUsageInfo,
 )
-from shared.db.elasticsearch import ElasticsearchRepository, INDEX_NAME
+from shared.db.elasticsearch import INDEX_NAME, ElasticsearchRepository
+from shared.db.redis import RedisMCPAnalyticsRepository
 
 router = APIRouter()
 
@@ -188,3 +192,86 @@ async def refresh_index(
     client = es_repo._get_client()
     client.indices.refresh(index=INDEX_NAME)
     return {"status": "refreshed"}
+
+
+@router.get("/admin/mcp-analytics", response_model=MCPAnalyticsResponse)
+async def get_mcp_analytics() -> MCPAnalyticsResponse:
+    """Get MCP tool usage analytics."""
+    config = get_cached_config()
+
+    try:
+        analytics_repo = RedisMCPAnalyticsRepository(config)
+
+        # Get total counts
+        tool_counts = analytics_repo.get_tool_counts()
+        total_calls = sum(tool_counts.values())
+        unique_tools = len(tool_counts)
+
+        # Get today's counts
+        daily_counts = analytics_repo.get_daily_counts()
+        today_calls = sum(daily_counts.values())
+
+        # Build tool usage list with percentages
+        tool_usage = []
+        for tool_name, count in sorted(
+            tool_counts.items(), key=lambda x: x[1], reverse=True
+        ):
+            percentage = (count / total_calls * 100) if total_calls > 0 else 0.0
+            tool_usage.append(
+                ToolUsageInfo(
+                    tool_name=tool_name,
+                    call_count=count,
+                    percentage=round(percentage, 1),
+                )
+            )
+
+        # Get top transitions
+        raw_transitions = analytics_repo.get_top_transitions(limit=20)
+        transition_matrix = analytics_repo.get_tool_transitions()
+
+        top_transitions = []
+        for from_tool, to_tool, count in raw_transitions:
+            # Calculate percentage of transitions from from_tool
+            total_from = sum(transition_matrix.get(from_tool, {}).values())
+            percentage = (count / total_from * 100) if total_from > 0 else 0.0
+            top_transitions.append(
+                ToolTransitionInfo(
+                    from_tool=from_tool,
+                    to_tool=to_tool,
+                    count=count,
+                    percentage=round(percentage, 1),
+                )
+            )
+
+        return MCPAnalyticsResponse(
+            total_calls=total_calls,
+            unique_tools=unique_tools,
+            today_calls=today_calls,
+            tool_usage=tool_usage,
+            top_transitions=top_transitions,
+            transition_matrix=transition_matrix,
+        )
+
+    except Exception:
+        # Return empty response if Redis is unavailable
+        return MCPAnalyticsResponse(
+            total_calls=0,
+            unique_tools=0,
+            today_calls=0,
+            tool_usage=[],
+            top_transitions=[],
+            transition_matrix={},
+        )
+
+
+@router.post("/admin/mcp-analytics/clear")
+async def clear_mcp_analytics() -> dict:
+    """Clear all MCP analytics data."""
+    config = get_cached_config()
+
+    try:
+        analytics_repo = RedisMCPAnalyticsRepository(config)
+        analytics_repo.clear_analytics()
+        return {"status": "cleared"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}

@@ -14,7 +14,6 @@ import redis
 
 from shared.config import MagaldiConfig, get_config
 
-
 # Redis key prefixes with scope/repository/username isolation
 # Format: magaldi:{job_type}:{key_type}:{scope}:{repository}:{username}
 SUMMARIZATION_QUEUE = "magaldi:summarization:queue:{scope}:{repository}:{username}"
@@ -1018,3 +1017,195 @@ class RedisSubfeatureLabelingJobRepository(RedisRepository):
             client.srem(
                 _key(SUBFEATURE_LABELING_RUNNING, scope, repository, username), parent_label
             )
+
+
+# MCP Analytics Redis keys
+MCP_TOOL_CALLS = "magaldi:mcp:tool_calls"
+MCP_TOOL_TRANSITIONS = "magaldi:mcp:tool_transitions"
+MCP_SESSION_PREFIX = "magaldi:mcp:session:"
+MCP_DAILY_CALLS_PREFIX = "magaldi:mcp:daily:"
+
+
+class RedisMCPAnalyticsRepository(RedisRepository):
+    """Redis-based MCP tool usage analytics.
+
+    Tracks:
+    - Tool call counts (total and daily)
+    - Tool transitions (which tool follows which)
+    - Session-based tracking for transition computation
+    """
+
+    SESSION_TTL = 3600  # 1 hour session timeout
+    DAILY_TTL = 30 * 24 * 3600  # 30 days retention for daily data
+
+    def record_tool_call(
+        self,
+        tool_name: str,
+        session_id: str | None = None,
+    ) -> None:
+        """Record a tool call and compute transitions.
+
+        Args:
+            tool_name: Name of the tool being called.
+            session_id: Optional session identifier for transition tracking.
+        """
+        client = self._get_client()
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        # Increment total call count
+        client.hincrby(MCP_TOOL_CALLS, tool_name, 1)
+
+        # Increment daily call count
+        daily_key = f"{MCP_DAILY_CALLS_PREFIX}{today}:calls"
+        client.hincrby(daily_key, tool_name, 1)
+        client.expire(daily_key, self.DAILY_TTL)
+
+        # Track transitions if we have a session
+        if session_id:
+            session_key = f"{MCP_SESSION_PREFIX}{session_id}"
+            last_tool = client.get(session_key)
+
+            if last_tool:
+                # Record transition from last_tool to tool_name
+                transition_key = f"{last_tool}:{tool_name}"
+                client.hincrby(MCP_TOOL_TRANSITIONS, transition_key, 1)
+
+                # Also track daily transitions
+                daily_trans_key = f"{MCP_DAILY_CALLS_PREFIX}{today}:transitions"
+                client.hincrby(daily_trans_key, transition_key, 1)
+                client.expire(daily_trans_key, self.DAILY_TTL)
+
+            # Update session with current tool
+            client.setex(session_key, self.SESSION_TTL, tool_name)
+
+    def get_tool_counts(self) -> dict[str, int]:
+        """Get all tool call counts.
+
+        Returns:
+            Dict mapping tool name to call count.
+        """
+        client = self._get_client()
+        counts = client.hgetall(MCP_TOOL_CALLS)
+        return {k: int(v) for k, v in counts.items()}
+
+    def get_tool_transitions(self) -> dict[str, dict[str, int]]:
+        """Get tool transition matrix.
+
+        Returns:
+            Nested dict: from_tool -> to_tool -> count
+        """
+        client = self._get_client()
+        raw_transitions = client.hgetall(MCP_TOOL_TRANSITIONS)
+
+        matrix: dict[str, dict[str, int]] = {}
+        for transition_key, count in raw_transitions.items():
+            parts = transition_key.split(":", 1)
+            if len(parts) == 2:
+                from_tool, to_tool = parts
+                if from_tool not in matrix:
+                    matrix[from_tool] = {}
+                matrix[from_tool][to_tool] = int(count)
+
+        return matrix
+
+    def get_top_tools(self, limit: int = 10) -> list[tuple[str, int]]:
+        """Get most frequently called tools.
+
+        Args:
+            limit: Maximum number of tools to return.
+
+        Returns:
+            List of (tool_name, count) tuples, sorted by count descending.
+        """
+        counts = self.get_tool_counts()
+        sorted_tools = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+        return sorted_tools[:limit]
+
+    def get_top_transitions(
+        self, limit: int = 10
+    ) -> list[tuple[str, str, int]]:
+        """Get most common tool transitions.
+
+        Args:
+            limit: Maximum number of transitions to return.
+
+        Returns:
+            List of (from_tool, to_tool, count) tuples, sorted by count descending.
+        """
+        client = self._get_client()
+        raw_transitions = client.hgetall(MCP_TOOL_TRANSITIONS)
+
+        transitions = []
+        for transition_key, count in raw_transitions.items():
+            parts = transition_key.split(":", 1)
+            if len(parts) == 2:
+                from_tool, to_tool = parts
+                transitions.append((from_tool, to_tool, int(count)))
+
+        transitions.sort(key=lambda x: x[2], reverse=True)
+        return transitions[:limit]
+
+    def get_daily_counts(self, date: str | None = None) -> dict[str, int]:
+        """Get tool counts for a specific day.
+
+        Args:
+            date: Date string (YYYY-MM-DD). Defaults to today.
+
+        Returns:
+            Dict mapping tool name to call count for that day.
+        """
+        if date is None:
+            date = datetime.now().strftime("%Y-%m-%d")
+
+        client = self._get_client()
+        daily_key = f"{MCP_DAILY_CALLS_PREFIX}{date}:calls"
+        counts = client.hgetall(daily_key)
+        return {k: int(v) for k, v in counts.items()}
+
+    def get_daily_transitions(
+        self, date: str | None = None
+    ) -> dict[str, dict[str, int]]:
+        """Get transitions for a specific day.
+
+        Args:
+            date: Date string (YYYY-MM-DD). Defaults to today.
+
+        Returns:
+            Nested dict: from_tool -> to_tool -> count
+        """
+        if date is None:
+            date = datetime.now().strftime("%Y-%m-%d")
+
+        client = self._get_client()
+        daily_key = f"{MCP_DAILY_CALLS_PREFIX}{date}:transitions"
+        raw_transitions = client.hgetall(daily_key)
+
+        matrix: dict[str, dict[str, int]] = {}
+        for transition_key, count in raw_transitions.items():
+            parts = transition_key.split(":", 1)
+            if len(parts) == 2:
+                from_tool, to_tool = parts
+                if from_tool not in matrix:
+                    matrix[from_tool] = {}
+                matrix[from_tool][to_tool] = int(count)
+
+        return matrix
+
+    def clear_analytics(self) -> None:
+        """Clear all analytics data.
+
+        Warning: This permanently deletes all tracking data.
+        """
+        client = self._get_client()
+
+        # Delete main keys
+        client.delete(MCP_TOOL_CALLS)
+        client.delete(MCP_TOOL_TRANSITIONS)
+
+        # Delete all session keys
+        for key in client.scan_iter(f"{MCP_SESSION_PREFIX}*"):
+            client.delete(key)
+
+        # Delete all daily keys
+        for key in client.scan_iter(f"{MCP_DAILY_CALLS_PREFIX}*"):
+            client.delete(key)

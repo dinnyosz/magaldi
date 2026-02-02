@@ -7,8 +7,10 @@ import {
   Spinner,
   Alert,
   Table,
+  Button,
+  ProgressBar,
 } from 'react-bootstrap'
-import { getHealth, getIndexStats, getDashboard } from '../api'
+import { getHealth, getIndexStats, getDashboard, getMCPAnalytics, clearMCPAnalytics } from '../api'
 
 function Admin() {
   const { data: health, isLoading: healthLoading } = useQuery({
@@ -28,6 +30,19 @@ function Admin() {
     queryFn: getIndexStats,
     refetchInterval: 30000,
   })
+
+  const { data: mcpAnalytics, isLoading: analyticsLoading, refetch: refetchAnalytics } = useQuery({
+    queryKey: ['mcpAnalytics'],
+    queryFn: getMCPAnalytics,
+    refetchInterval: 30000,
+  })
+
+  const handleClearAnalytics = async () => {
+    if (window.confirm('Are you sure you want to clear all MCP analytics data?')) {
+      await clearMCPAnalytics()
+      refetchAnalytics()
+    }
+  }
 
   const getStatusBadge = (status: string) => {
     switch (status.toLowerCase()) {
@@ -467,6 +482,151 @@ function Admin() {
                     </Table>
                   ) : (
                     <p className="text-muted small mb-0">No pending jobs</p>
+                  )}
+                </Col>
+              </Row>
+            </>
+          )}
+        </Card.Body>
+      </Card>
+
+      {/* MCP Tool Analytics */}
+      <Card className="mt-4">
+        <Card.Header className="d-flex justify-content-between align-items-center">
+          <span>
+            <i className="bi bi-graph-up me-2"></i>
+            MCP Tool Analytics
+          </span>
+          <div>
+            <Button
+              variant="outline-secondary"
+              size="sm"
+              className="me-2"
+              onClick={() => refetchAnalytics()}
+            >
+              <i className="bi bi-arrow-clockwise"></i>
+            </Button>
+            <Button
+              variant="outline-danger"
+              size="sm"
+              onClick={handleClearAnalytics}
+            >
+              Clear
+            </Button>
+          </div>
+        </Card.Header>
+        <Card.Body>
+          {analyticsLoading ? (
+            <div className="text-center py-3">
+              <Spinner animation="border" size="sm" />
+            </div>
+          ) : !mcpAnalytics || mcpAnalytics.total_calls === 0 ? (
+            <p className="text-muted mb-0 text-center">
+              <i className="bi bi-info-circle me-2"></i>
+              No MCP tool usage data yet. Data is collected when tools are called via the MCP server.
+            </p>
+          ) : (
+            <>
+              {/* Summary Stats */}
+              <Row className="mb-4">
+                <Col md={4} className="text-center">
+                  <h3 className="text-primary">{mcpAnalytics.total_calls.toLocaleString()}</h3>
+                  <p className="text-muted mb-0">Total Calls</p>
+                </Col>
+                <Col md={4} className="text-center">
+                  <h3 className="text-info">{mcpAnalytics.unique_tools}</h3>
+                  <p className="text-muted mb-0">Unique Tools</p>
+                </Col>
+                <Col md={4} className="text-center">
+                  <h3 className="text-success">{mcpAnalytics.today_calls.toLocaleString()}</h3>
+                  <p className="text-muted mb-0">Today</p>
+                </Col>
+              </Row>
+
+              <Row>
+                {/* Tool Usage */}
+                <Col md={6}>
+                  <h6 className="text-muted mb-3">
+                    <i className="bi bi-bar-chart me-2"></i>
+                    Tool Usage
+                  </h6>
+                  {mcpAnalytics.tool_usage.length > 0 ? (
+                    <Table size="sm" className="mb-0">
+                      <thead>
+                        <tr>
+                          <th>Tool</th>
+                          <th className="text-end" style={{ width: '80px' }}>Calls</th>
+                          <th style={{ width: '150px' }}>Usage</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {mcpAnalytics.tool_usage.slice(0, 15).map((tool) => (
+                          <tr key={tool.tool_name}>
+                            <td>
+                              <code className="small">{tool.tool_name}</code>
+                            </td>
+                            <td className="text-end">{tool.call_count.toLocaleString()}</td>
+                            <td>
+                              <div className="d-flex align-items-center">
+                                <ProgressBar
+                                  now={tool.percentage}
+                                  style={{ height: '8px', flex: 1 }}
+                                  variant="primary"
+                                />
+                                <span className="ms-2 small text-muted" style={{ width: '40px' }}>
+                                  {tool.percentage}%
+                                </span>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </Table>
+                  ) : (
+                    <p className="text-muted small">No tool usage data</p>
+                  )}
+                </Col>
+
+                {/* Tool Transitions */}
+                <Col md={6}>
+                  <h6 className="text-muted mb-3">
+                    <i className="bi bi-arrow-right-circle me-2"></i>
+                    Top Tool Transitions
+                  </h6>
+                  {mcpAnalytics.top_transitions.length > 0 ? (
+                    <Table size="sm" className="mb-0">
+                      <thead>
+                        <tr>
+                          <th>From</th>
+                          <th></th>
+                          <th>To</th>
+                          <th className="text-end">Count</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {mcpAnalytics.top_transitions.slice(0, 15).map((transition, idx) => (
+                          <tr key={idx}>
+                            <td>
+                              <code className="small">{transition.from_tool}</code>
+                            </td>
+                            <td className="text-center text-muted">
+                              <i className="bi bi-arrow-right"></i>
+                            </td>
+                            <td>
+                              <code className="small">{transition.to_tool}</code>
+                            </td>
+                            <td className="text-end">
+                              {transition.count.toLocaleString()}
+                              <span className="text-muted small ms-1">
+                                ({transition.percentage}%)
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </Table>
+                  ) : (
+                    <p className="text-muted small">No transition data yet (need at least 2 consecutive tool calls)</p>
                   )}
                 </Col>
               </Row>
