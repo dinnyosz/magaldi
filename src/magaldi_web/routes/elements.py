@@ -707,6 +707,10 @@ async def get_element_detail(
         purity=purity,
         side_effects=side_effects,
         mutated_state=source.get("mutated_state", []),
+        # API surface flag
+        is_public_api=source.get("is_public_api", False),
+        # Variable context (how variables are used)
+        context_usages=source.get("context_usages", []),
         # Context and relationships
         context=ElementContext(
             file=file_context,

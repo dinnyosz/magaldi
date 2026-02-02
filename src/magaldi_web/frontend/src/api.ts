@@ -387,6 +387,10 @@ export interface ElementDetail {
   purity: PurityInfo | null
   side_effects: SideEffectInfo[]
   mutated_state: string[]
+  // API surface
+  is_public_api: boolean
+  // Variable context
+  context_usages: string[]
   // Context and relationships
   context: {
     file: ElementDetailFile | null

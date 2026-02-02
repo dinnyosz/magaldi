@@ -444,6 +444,18 @@ def get_element(
     if doc.get("concurrency"):
         result["concurrency"] = doc["concurrency"]
 
+    # API surface flag
+    if doc.get("is_public_api"):
+        result["is_public_api"] = True
+
+    # Context usages (for variables - how they're used)
+    if doc.get("context_usages"):
+        result["context_usages"] = doc["context_usages"]
+
+    # Aggregated metrics (for files/classes)
+    if doc.get("metrics_summary"):
+        result["metrics_summary"] = doc["metrics_summary"]
+
     if include_code:
         result["code"] = doc.get("raw_code", "")
 

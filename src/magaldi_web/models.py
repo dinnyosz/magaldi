@@ -634,6 +634,10 @@ class ElementDetailResponse(BaseModel):
     purity: PurityInfo | None = None
     side_effects: list[SideEffectInfo] = Field(default_factory=list)
     mutated_state: list[str] = Field(default_factory=list)
+    # API surface flag
+    is_public_api: bool = False
+    # Variable context (how variables are used)
+    context_usages: list[str] = Field(default_factory=list)
     # Context and relationships
     context: ElementContext
     repository: RepoRef

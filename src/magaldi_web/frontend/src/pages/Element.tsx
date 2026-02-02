@@ -329,6 +329,12 @@ function Element() {
                       test
                     </Badge>
                   )}
+                  {element.is_public_api && (
+                    <Badge bg="success" className="ms-2" pill>
+                      <i className="bi bi-globe2 me-1"></i>
+                      public API
+                    </Badge>
+                  )}
                   {entryPointType && (
                     <Badge bg={entryPointType.color} className="ms-2" pill>
                       <i className={`bi ${entryPointType.icon} me-1`}></i>
@@ -533,6 +539,23 @@ function Element() {
                         <span>{todo.text}</span>
                         {todo.assignee && <small className="text-muted ms-2">@{todo.assignee}</small>}
                         <small className="text-muted ms-auto float-end">L{todo.line}</small>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Context Usages (for variables) */}
+              {element.context_usages && element.context_usages.length > 0 && (
+                <div className="mb-3">
+                  <small className="text-uppercase text-muted fw-bold d-block mb-1">
+                    <i className="bi bi-signpost-split me-1"></i>
+                    Used In ({element.context_usages.length})
+                  </small>
+                  <div className="bg-light p-2 rounded" style={{ maxHeight: '150px', overflowY: 'auto' }}>
+                    {element.context_usages.map((usage, i) => (
+                      <div key={i} className="py-1">
+                        <code className="small">{usage}</code>
                       </div>
                     ))}
                   </div>
