@@ -165,16 +165,35 @@ def process_file_changes(
         console.print("  [dim]No valid files to process[/]")
         return
 
-    # Create a minimal change manifest
+    # Handle deleted files first (no parsing needed)
+    if deleted_infos:
+        from shared.db.elasticsearch import ElasticsearchRepository
+        es_repo = ElasticsearchRepository(config)
+        total_deleted = 0
+        for file_info in deleted_infos:
+            count = es_repo.delete_by_file(
+                discovery_result.scope, discovery_result.repository, user, file_info.relative_path
+            )
+            if count > 0:
+                console.print(f"  [red]Deleted[/] {count} elements from {file_info.relative_path}")
+                total_deleted += count
+        if total_deleted == 0 and not new_or_modified:
+            console.print("  [dim]No indexed elements found for deleted files[/]")
+
+    # If no files to parse, we're done
+    if not new_or_modified:
+        return
+
+    # Create a minimal change manifest for parsing
     manifest = ChangeManifest(
         scope=discovery_result.scope,
         repository=discovery_result.repository,
         username=user,
         timestamp=datetime.now(),
-        total_files_scanned=len(new_or_modified) + len(deleted_infos),
+        total_files_scanned=len(new_or_modified),
         new_files=[],  # Treat all as modified for simplicity
         modified_files=new_or_modified,
-        deleted_files=deleted_infos,
+        deleted_files=[],  # Already handled above
         unchanged_count=0,
     )
 
@@ -208,17 +227,6 @@ def process_file_changes(
     )
 
     console.print(f"  Processed {processed} elements, indexed {indexed}")
-
-    # Handle deleted files
-    if deleted_infos:
-        from shared.db.elasticsearch import ElasticsearchRepository
-        es_repo = ElasticsearchRepository(config)
-        for file_info in deleted_infos:
-            count = es_repo.delete_by_file(
-                manifest.scope, manifest.repository, manifest.username, file_info.relative_path
-            )
-            if count > 0:
-                console.print(f"  Deleted {count} elements from {file_info.relative_path}")
 
     # Feature extraction (if requested and we processed elements)
     if features and not skip_ai and processed > 0:
