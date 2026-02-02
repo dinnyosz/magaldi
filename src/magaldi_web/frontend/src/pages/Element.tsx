@@ -27,6 +27,7 @@ const typeConfig: Record<string, { icon: string; color: string; label: string }>
   method: { icon: 'bi-gear', color: 'success', label: 'Method' },
   variable: { icon: 'bi-x-diamond', color: 'secondary', label: 'Variable' },
   constant: { icon: 'bi-hash', color: 'warning', label: 'Constant' },
+  import: { icon: 'bi-box-arrow-in-right', color: 'secondary', label: 'Import' },
   feature: { icon: 'bi-collection', color: 'info', label: 'Feature' },
   subfeature: { icon: 'bi-collection-fill', color: 'info', label: 'Subfeature' },
   glossary: { icon: 'bi-book', color: 'primary', label: 'Glossary Term' },

@@ -43,6 +43,7 @@ const typeConfig: Record<string, TypeConfig> = {
   method: { icon: 'bi-gear', color: 'warning', canHaveCallGraph: true },
   variable: { icon: 'bi-x-diamond', color: 'secondary' },
   constant: { icon: 'bi-hash', color: 'danger' },
+  import: { icon: 'bi-box-arrow-in-right', color: 'secondary' },
   feature: { icon: 'bi-collection', color: 'info' },
   subfeature: { icon: 'bi-collection-fill', color: 'info' },
   glossary: { icon: 'bi-book', color: 'primary' },
