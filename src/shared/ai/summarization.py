@@ -634,7 +634,8 @@ For each file, provide a {sentence_range} sentence summary answering:
 5. DEPENDENCIES: What external modules or systems does this integrate with?
 
 Do NOT list individual classes/functions - those are documented separately.
-Write ONLY the {sentence_range} sentence summary. No reasoning, explanations, or bullet points.""",
+Write ONLY the {sentence_range} sentence summary. No reasoning, explanations, or bullet points.
+Start directly with what it does - never start with "This module...", "This file...", or similar.""",
 
     "class": """You summarize classes for AI agents navigating codebases.
 
@@ -646,7 +647,8 @@ For each class, provide a {sentence_range} sentence summary answering:
 5. COLLABORATORS: What other classes or modules does it work with?
 
 Do NOT list methods - those are documented separately.
-Write ONLY the {sentence_range} sentence summary. No reasoning, explanations, or bullet points.""",
+Write ONLY the {sentence_range} sentence summary. No reasoning, explanations, or bullet points.
+Start directly with what it models/does - never start with "This class...", "The X class...", or similar.""",
 
     "function": """You describe functions for AI agents navigating codebases.
 
@@ -657,7 +659,8 @@ For each function, provide a {sentence_range} sentence description answering:
 4. SIDE EFFECTS: Does it modify external state, perform I/O, or raise exceptions?
 5. EDGE CASES: What happens with empty/None inputs? What preconditions must hold?
 
-Write ONLY the {sentence_range} sentence description. No reasoning, explanations, or bullet points.""",
+Write ONLY the {sentence_range} sentence description. No reasoning, explanations, or bullet points.
+Start with an action verb - never start with "This function...", "The X function...", or "This function is used to...".""",
 
     "method": """You describe methods for AI agents navigating codebases.
 
@@ -668,7 +671,8 @@ For each method, provide a {sentence_range} sentence description answering:
 4. LIFECYCLE: Is this setup/init, cleanup/teardown, or called repeatedly?
 5. ERRORS: What exceptions can it raise? What preconditions must hold?
 
-Write ONLY the {sentence_range} sentence description. No reasoning, explanations, or bullet points.""",
+Write ONLY the {sentence_range} sentence description. No reasoning, explanations, or bullet points.
+Start with an action verb - never start with "This method...", "The X method...", or "This method is used to...".""",
 
     "constant": """You describe constants for AI agents navigating codebases.
 
@@ -677,7 +681,8 @@ For each constant, provide a {sentence_range} sentence description answering:
 2. USAGE: Where in the system is it used?
 3. CONSTRAINTS: What are valid values? Any min/max bounds?
 
-Write ONLY the {sentence_range} sentence description. No reasoning, explanations, or bullet points.""",
+Write ONLY the {sentence_range} sentence description. No reasoning, explanations, or bullet points.
+Start directly with what it represents - never start with "This constant...", "The X constant...", or similar.""",
 
     "variable": """You describe variables for AI agents navigating codebases.
 
@@ -686,7 +691,8 @@ For each variable, provide a {sentence_range} sentence description answering:
 2. LIFECYCLE: How is it initialized? When does it change?
 3. ROLE: How does this variable influence its containing scope?
 
-Write ONLY the {sentence_range} sentence description. No reasoning, explanations, or bullet points.""",
+Write ONLY the {sentence_range} sentence description. No reasoning, explanations, or bullet points.
+Start directly with what it holds - never start with "This variable...", "The X variable...", or similar.""",
 }
 
 # User message templates - contain variable content
@@ -777,6 +783,7 @@ Code:
 {code}
 
 Write ONLY the {sentence_range} sentence summary. No reasoning or bullet points.
+Start directly with what it does - never start with "This module...", "This file...", or similar.
 
 Summary:""",
     "class": """Summarize this {language} class in {sentence_range} sentences for an AI agent.
@@ -803,6 +810,7 @@ Code:
 {usages_section}
 
 Write ONLY the {sentence_range} sentence summary. No reasoning or bullet points.
+Start directly with what it models/does - never start with "This class...", "The X class...", or similar.
 
 Summary:""",
     "function": """Describe this function in {sentence_range} sentences for an AI agent.
@@ -827,6 +835,7 @@ Code:
 {code}
 
 Write ONLY the {sentence_range} sentence summary. No reasoning or bullet points.
+Start with an action verb - never start with "This function...", "The X function...", or "This function is used to...".
 
 Summary:""",
     "method": """Describe this method in {sentence_range} sentences for an AI agent.
@@ -852,6 +861,7 @@ Code:
 {usages_section}
 
 Write ONLY the {sentence_range} sentence summary. No reasoning or bullet points.
+Start with an action verb - never start with "This method...", "The X method...", or "This method is used to...".
 
 Summary:""",
     "constant": """Describe this constant in {sentence_range} sentences for an AI agent.
@@ -871,6 +881,7 @@ Value:
 {code}
 
 Write ONLY the {sentence_range} sentence description. No reasoning or bullet points.
+Start directly with what it represents - never start with "This constant...", "The X constant...", or similar.
 
 Description:""",
     "variable": """Describe this variable in {sentence_range} sentences for an AI agent.
@@ -892,6 +903,7 @@ Value:
 {usages_section}
 
 Write ONLY the {sentence_range} sentence description. No reasoning or bullet points.
+Start directly with what it holds - never start with "This variable...", "The X variable...", or similar.
 
 Description:""",
 }
