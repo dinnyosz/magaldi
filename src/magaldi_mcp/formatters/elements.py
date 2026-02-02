@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from magaldi_mcp.formatters.base import ResultFormatter, terse_summary
+from magaldi_mcp.formatters.base import ResultFormatter
 
 
 class ElementDetailsFormatter(ResultFormatter):
@@ -228,7 +228,10 @@ class FeatureMembersFormatter(ResultFormatter):
                 if m.get('signature'):
                     lines.append(f"  {m['signature']}")
                 if m.get('summary'):
-                    lines.append(f"  {terse_summary(m['summary'])}")
+                    summary = m['summary']
+                    if len(summary) > 200:
+                        summary = summary[:200] + "..."
+                    lines.append(f"  {summary}")
                 lines.append("")
         else:
             lines.append("No members.\n")

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from magaldi_mcp.formatters.base import ResultFormatter, short_id, terse_summary
+from magaldi_mcp.formatters.base import ResultFormatter
 
 
 class CodeSearchListFormatter(ResultFormatter):
@@ -25,13 +25,16 @@ class CodeSearchListFormatter(ResultFormatter):
             line_end = r.get('line_end', '')
             line_range = f"{line_start}-{line_end}" if line_end else str(line_start)
             loc = f"{r.get('file', '?')}:{line_range}" if r.get('file') else "N/A"
-            short_id = short_id(r.get('hash_id', ''))
-            id_suffix = f" | id:{short_id}" if short_id else ""
+            hash_id = r.get('hash_id', '')
+            id_suffix = f" | id:{hash_id}" if hash_id else ""
             lines.append(f"[{r.get('type', '?')}] {r.get('name', '?')} ({loc}){id_suffix}")
             if r.get('signature'):
                 lines.append(f"  {r['signature']}")
             if r.get('summary'):
-                lines.append(f"  {terse_summary(r['summary'])}")
+                summary = r['summary']
+                if len(summary) > 200:
+                    summary = summary[:200] + "..."
+                lines.append(f"  {summary}")
             if r.get('code'):
                 lines.append("  ```")
                 lines.append(r['code'])
@@ -54,11 +57,13 @@ class FeatureSearchListFormatter(ResultFormatter):
         lines = [f"Found {len(result)} features:\n"]
         for r in result:
             feature_id = r.get('feature_id', '')
-            # Feature IDs are already short, no need to truncate
             id_suffix = f" | id:{feature_id}" if feature_id else ""
             lines.append(f"[feature] {r.get('label', '?')} ({r.get('member_count', 0)} members){id_suffix}")
             if r.get('summary'):
-                lines.append(f"  {terse_summary(r['summary'])}")
+                summary = r['summary']
+                if len(summary) > 200:
+                    summary = summary[:200] + "..."
+                lines.append(f"  {summary}")
             lines.append("")
         return "\n".join(lines)
 
@@ -89,13 +94,16 @@ class GroupedSearchFormatter(ResultFormatter):
                 line_end = r.get('line_end', '')
                 line_range = f"{line_start}-{line_end}" if line_end else str(line_start)
                 loc = f"{r.get('file', '?')}:{line_range}" if r.get('file') else "N/A"
-                short_id = short_id(r.get('hash_id', ''))
-                id_suffix = f" | id:{short_id}" if short_id else ""
+                hash_id = r.get('hash_id', '')
+                id_suffix = f" | id:{hash_id}" if hash_id else ""
                 lines.append(f"[{r.get('type', '?')}] {r.get('name', '?')} ({loc}){id_suffix}")
                 if r.get('signature'):
                     lines.append(f"  {r['signature']}")
                 if r.get('summary'):
-                    lines.append(f"  {terse_summary(r['summary'])}")
+                    summary = r['summary']
+                    if len(summary) > 200:
+                        summary = summary[:200] + "..."
+                    lines.append(f"  {summary}")
                 if r.get('code'):
                     lines.append("  ```")
                     lines.append(r['code'])
@@ -119,13 +127,16 @@ class GroupedSearchFormatter(ResultFormatter):
                 line_end = r.get('line_end', '')
                 line_range = f"{line_start}-{line_end}" if line_end else str(line_start)
                 loc = f"{r.get('file', '?')}:{line_range}" if r.get('file') else "N/A"
-                short_id = short_id(r.get('hash_id', ''))
-                id_suffix = f" | id:{short_id}" if short_id else ""
+                hash_id = r.get('hash_id', '')
+                id_suffix = f" | id:{hash_id}" if hash_id else ""
                 lines.append(f"[{r.get('type', '?')}] {r.get('name', '?')} ({loc}){id_suffix}")
                 if r.get('signature'):
                     lines.append(f"  {r['signature']}")
                 if r.get('summary'):
-                    lines.append(f"  {terse_summary(r['summary'])}")
+                    summary = r['summary']
+                    if len(summary) > 200:
+                        summary = summary[:200] + "..."
+                    lines.append(f"  {summary}")
                 if r.get('code'):
                     lines.append("  ```")
                     lines.append(r['code'])
