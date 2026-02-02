@@ -640,9 +640,122 @@ Implement metrics to track:
 
 ---
 
-## Part 6: Future Considerations
+## Part 6: Falcon H1 Models (January 2026)
 
-### 6.1 Emerging Models to Watch
+Falcon H1 is a new hybrid architecture model family from TII (Technology Innovation Institute) that combines Transformer attention with Mamba-2 State Space Models (SSMs). This provides better long-context performance and computational efficiency.
+
+### 6.1 Falcon H1 Model Lineup for Benchmarking
+
+| Model | Params | Context | HumanEval | MBPP | Notes |
+|-------|--------|---------|-----------|------|-------|
+| **Falcon-H1-Tiny-Coder-90M** | 90M | 256K | - | - | Code-specialized, FIM support |
+| **Falcon-H1-Tiny-90M-Instruct** | 90M | 256K | - | - | General instructions |
+| **Falcon-H1-Tiny-R-0.6B** | 600M | 256K | - | - | Reasoning-specialized |
+| **Falcon-H1-0.5B-Instruct** | 500M | 256K | 51.83% | - | Edge deployment |
+| **Falcon-H1-1.5B-Deep-Instruct** | 1.5B | 256K | **73.78%** | **68.25%** | **Best quality/size ratio** |
+| **Falcon-H1-3B-Instruct** | 3B | 256K | - | - | Balanced option |
+
+### 6.2 Falcon H1 vs Current Models (Coding Benchmarks)
+
+**Falcon-H1-1.5B-Deep vs Qwen models:**
+
+| Benchmark | Falcon-H1-1.5B-Deep | Qwen3-1.7B | Qwen2.5-1.5B |
+|-----------|---------------------|------------|--------------|
+| **HumanEval** | **73.78%** | 67.68% | 56.1% |
+| **HumanEval+** | **68.9%** | 60.96% | 50.61% |
+| **MBPP** | **68.25%** | 58.73% | 64.81% |
+| **MBPP+** | **56.61%** | 49.74% | 56.08% |
+| **MMLU** | **66.11%** | 57.04% | 59.76% |
+| **IFEval** | **83.5%** | 70.77% | 45.33% |
+| **GSM8k** | **82.34%** | 69.83% | 57.47% |
+
+**Key insight**: Falcon-H1-1.5B-Deep outperforms Qwen3-1.7B by 6-13% on coding benchmarks.
+
+### 6.3 Architecture Advantages
+
+- **Hybrid Transformer + Mamba**: Linear scaling for long contexts
+- **256K context length**: Even the 90M models support this
+- **Efficient inference**: Up to 4x faster prefill, 8x faster generation vs pure transformers
+- **Apache 2.0 license**: Fully open for commercial use
+
+### 6.4 Ollama Availability
+
+Falcon H1 models are **not yet in Ollama's library** but can be used via GGUF:
+
+```bash
+# Download GGUF from HuggingFace
+# Falcon-H1-1.5B-Deep-Instruct (recommended for quality)
+wget https://huggingface.co/mradermacher/Falcon-H1-1.5B-Deep-Instruct-i1-GGUF/resolve/main/Falcon-H1-1.5B-Deep-Instruct.Q4_K_M.gguf
+
+# Falcon-H1-0.5B-Instruct (fast option)
+wget https://huggingface.co/tiiuae/Falcon-H1-0.5B-Instruct-GGUF/resolve/main/Falcon-H1-0.5B-Instruct-Q4_K_M.gguf
+
+# Falcon-H1-Tiny-Coder-90M (ultra-fast, code-specialized)
+wget https://huggingface.co/tiiuae/Falcon-H1-Tiny-Coder-90M-GGUF/resolve/main/Falcon-H1-Tiny-Coder-90M-Q8_0.gguf
+
+# Falcon-H1-Tiny-R-0.6B (reasoning)
+wget https://huggingface.co/tiiuae/Falcon-H1-Tiny-R-0.6B-GGUF/resolve/main/Falcon-H1-Tiny-R-0.6B-Q4_K_M.gguf
+
+# Create Modelfile and import
+cat > Modelfile << 'EOF'
+FROM ./Falcon-H1-1.5B-Deep-Instruct.Q4_K_M.gguf
+PARAMETER temperature 0.7
+PARAMETER num_ctx 8192
+EOF
+
+ollama create falcon-h1-1.5b-deep -f Modelfile
+```
+
+### 6.5 Recommended Benchmark Configuration
+
+```yaml
+# Falcon H1 models to benchmark against current Qwen setup
+benchmark_models:
+  # Ultra-fast tier (< 100M params)
+  - name: falcon-h1-tiny-coder-90m
+    params: 90M
+    use_case: "Ultra-fast code summarization"
+    compare_to: null  # New category
+
+  # Fast tier (500M-600M params)
+  - name: falcon-h1-0.5b-instruct
+    params: 500M
+    use_case: "Fast summarization with quality"
+    compare_to: null  # New category
+
+  - name: falcon-h1-tiny-r-0.6b
+    params: 600M
+    use_case: "Reasoning-heavy tasks"
+    compare_to: null  # New category
+
+  # Quality tier (1.5B-3B params)
+  - name: falcon-h1-1.5b-deep-instruct
+    params: 1.5B
+    use_case: "Primary summarization model"
+    compare_to: "qwen3:1.7b"  # Should outperform
+
+  - name: falcon-h1-3b-instruct
+    params: 3B
+    use_case: "Higher quality option"
+    compare_to: "qwen3:4b"
+```
+
+### 6.6 HuggingFace Links
+
+| Model | HuggingFace | GGUF |
+|-------|-------------|------|
+| Falcon-H1-Tiny-Coder-90M | [Link](https://huggingface.co/tiiuae/Falcon-H1-Tiny-Coder-90M) | [GGUF](https://huggingface.co/tiiuae/Falcon-H1-Tiny-Coder-90M-GGUF) |
+| Falcon-H1-Tiny-90M-Instruct | [Link](https://huggingface.co/tiiuae/Falcon-H1-Tiny-90M-Instruct) | [GGUF](https://huggingface.co/tiiuae/Falcon-H1-Tiny-90M-Instruct-GGUF) |
+| Falcon-H1-Tiny-R-0.6B | [Link](https://huggingface.co/tiiuae/Falcon-H1-Tiny-R-0.6B) | [GGUF](https://huggingface.co/tiiuae/Falcon-H1-Tiny-R-0.6B-GGUF) |
+| Falcon-H1-0.5B-Instruct | [Link](https://huggingface.co/tiiuae/Falcon-H1-0.5B-Instruct) | [GGUF](https://huggingface.co/tiiuae/Falcon-H1-0.5B-Instruct-GGUF) |
+| Falcon-H1-1.5B-Deep-Instruct | [Link](https://huggingface.co/tiiuae/Falcon-H1-1.5B-Deep-Instruct) | [GGUF](https://huggingface.co/mradermacher/Falcon-H1-1.5B-Deep-Instruct-i1-GGUF) |
+| Falcon-H1-3B-Instruct | [Link](https://huggingface.co/tiiuae/Falcon-H1-3B-Instruct) | [GGUF](https://huggingface.co/tiiuae/Falcon-H1-3B-Instruct-GGUF) |
+
+---
+
+## Part 7: Other Emerging Models
+
+### 7.1 Models to Watch
 
 1. **Qwen3-Coder** (released 2025)
    - Even stronger performance on benchmarks
