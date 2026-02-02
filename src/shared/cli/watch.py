@@ -12,11 +12,9 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
-from watchdog.events import FileSystemEvent, FileSystemEventHandler
-from watchdog.observers import Observer
 
 from shared.cli._printers import print_parsing_result
 from shared.cli._runners import run_change_detection, run_discovery, run_processing
@@ -26,6 +24,7 @@ from shared.config import load_config
 if TYPE_CHECKING:
     from magaldi_core.discovery import DiscoveryResult
     from shared.config import MagaldiConfig
+    from watchdog.events import FileSystemEvent
 
 # Supported file extensions (from discovery.py)
 SUPPORTED_EXTENSIONS: set[str] = {
@@ -33,55 +32,68 @@ SUPPORTED_EXTENSIONS: set[str] = {
 }
 
 
-class MagaldiFileHandler(FileSystemEventHandler):
-    """Handle file system events and queue changes for processing."""
+def _create_file_handler(
+    change_queue: queue.Queue,
+    discovery_result: "DiscoveryResult",
+) -> Any:
+    """Create a file handler for watchdog events.
 
-    def __init__(
-        self,
-        change_queue: queue.Queue,
-        discovery_result: DiscoveryResult,
-    ):
-        self.change_queue = change_queue
-        self.discovery_result = discovery_result
-        self.repo_path = discovery_result.repo_path
+    This is a factory function that imports watchdog lazily to avoid
+    requiring it when the watch command isn't used.
+    """
+    from watchdog.events import FileSystemEventHandler
 
-    def _should_process(self, path: str) -> bool:
-        """Check if file should be processed based on extension and excludes."""
-        try:
-            file_path = Path(path)
-            rel_path = file_path.relative_to(self.repo_path)
-        except ValueError:
-            # Path is not relative to repo
-            return False
+    class MagaldiFileHandler(FileSystemEventHandler):
+        """Handle file system events and queue changes for processing."""
 
-        # Check extension
-        if file_path.suffix not in SUPPORTED_EXTENSIONS:
-            return False
+        def __init__(
+            self,
+            cqueue: queue.Queue,
+            dresult: "DiscoveryResult",
+        ):
+            self.change_queue = cqueue
+            self.discovery_result = dresult
+            self.repo_path = dresult.repo_path
 
-        # Check excluded directories
-        for part in rel_path.parts[:-1]:  # Exclude filename from directory check
-            for exclude in self.discovery_result.exclude_directories:
-                if fnmatch.fnmatch(part, exclude):
-                    return False
-
-        # Check excluded files
-        for exclude in self.discovery_result.exclude_files:
-            if fnmatch.fnmatch(rel_path.name, exclude):
+        def _should_process(self, path: str) -> bool:
+            """Check if file should be processed based on extension and excludes."""
+            try:
+                file_path = Path(path)
+                rel_path = file_path.relative_to(self.repo_path)
+            except ValueError:
+                # Path is not relative to repo
                 return False
 
-        return True
+            # Check extension
+            if file_path.suffix not in SUPPORTED_EXTENSIONS:
+                return False
 
-    def on_modified(self, event: FileSystemEvent) -> None:
-        if not event.is_directory and self._should_process(event.src_path):
-            self.change_queue.put(("modified", event.src_path))
+            # Check excluded directories
+            for part in rel_path.parts[:-1]:  # Exclude filename from directory check
+                for exclude in self.discovery_result.exclude_directories:
+                    if fnmatch.fnmatch(part, exclude):
+                        return False
 
-    def on_created(self, event: FileSystemEvent) -> None:
-        if not event.is_directory and self._should_process(event.src_path):
-            self.change_queue.put(("created", event.src_path))
+            # Check excluded files
+            for exclude in self.discovery_result.exclude_files:
+                if fnmatch.fnmatch(rel_path.name, exclude):
+                    return False
 
-    def on_deleted(self, event: FileSystemEvent) -> None:
-        if not event.is_directory and self._should_process(event.src_path):
-            self.change_queue.put(("deleted", event.src_path))
+            return True
+
+        def on_modified(self, event: "FileSystemEvent") -> None:
+            if not event.is_directory and self._should_process(event.src_path):
+                self.change_queue.put(("modified", event.src_path))
+
+        def on_created(self, event: "FileSystemEvent") -> None:
+            if not event.is_directory and self._should_process(event.src_path):
+                self.change_queue.put(("created", event.src_path))
+
+        def on_deleted(self, event: "FileSystemEvent") -> None:
+            if not event.is_directory and self._should_process(event.src_path):
+                self.change_queue.put(("deleted", event.src_path))
+
+    return MagaldiFileHandler(change_queue, discovery_result)
 
 
 def process_file_changes(
@@ -472,9 +484,11 @@ def watch(
             else:
                 console.print("  [green]Repository is up to date[/]")
 
-        # Set up file watcher
+        # Set up file watcher (import watchdog lazily)
+        from watchdog.observers import Observer
+
         change_queue: queue.Queue = queue.Queue()
-        event_handler = MagaldiFileHandler(change_queue, discovery_result)
+        event_handler = _create_file_handler(change_queue, discovery_result)
         observer = Observer()
         observer.schedule(event_handler, str(discovery_result.repo_path), recursive=True)
 

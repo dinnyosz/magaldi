@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
-from shared.cli.watch import MagaldiFileHandler, SUPPORTED_EXTENSIONS
+from shared.cli.watch import _create_file_handler, SUPPORTED_EXTENSIONS
 
 
 class TestMagaldiFileHandler:
@@ -27,73 +27,73 @@ class TestMagaldiFileHandler:
         return result
 
     @pytest.fixture
-    def handler(self, discovery_result: MagicMock) -> MagaldiFileHandler:
+    def handler(self, discovery_result: MagicMock):
         """Create a file handler."""
         change_queue: queue.Queue = queue.Queue()
-        return MagaldiFileHandler(change_queue, discovery_result)
+        return _create_file_handler(change_queue, discovery_result)
 
-    def test_should_process_python_file(self, handler: MagaldiFileHandler, tmp_path: Path):
+    def test_should_process_python_file(self, handler, tmp_path: Path):
         """Test that Python files are processed."""
         test_file = tmp_path / "test.py"
         assert handler._should_process(str(test_file)) is True
 
-    def test_should_process_javascript_file(self, handler: MagaldiFileHandler, tmp_path: Path):
+    def test_should_process_javascript_file(self, handler, tmp_path: Path):
         """Test that JavaScript files are processed."""
         test_file = tmp_path / "test.js"
         assert handler._should_process(str(test_file)) is True
 
-    def test_should_process_typescript_file(self, handler: MagaldiFileHandler, tmp_path: Path):
+    def test_should_process_typescript_file(self, handler, tmp_path: Path):
         """Test that TypeScript files are processed."""
         test_file = tmp_path / "test.ts"
         assert handler._should_process(str(test_file)) is True
 
-    def test_should_not_process_text_file(self, handler: MagaldiFileHandler, tmp_path: Path):
+    def test_should_not_process_text_file(self, handler, tmp_path: Path):
         """Test that text files are not processed."""
         test_file = tmp_path / "readme.txt"
         assert handler._should_process(str(test_file)) is False
 
-    def test_should_not_process_markdown_file(self, handler: MagaldiFileHandler, tmp_path: Path):
+    def test_should_not_process_markdown_file(self, handler, tmp_path: Path):
         """Test that markdown files are not processed."""
         test_file = tmp_path / "README.md"
         assert handler._should_process(str(test_file)) is False
 
-    def test_should_not_process_node_modules(self, handler: MagaldiFileHandler, tmp_path: Path):
+    def test_should_not_process_node_modules(self, handler, tmp_path: Path):
         """Test that files in node_modules are not processed."""
         test_file = tmp_path / "node_modules" / "lodash" / "index.js"
         assert handler._should_process(str(test_file)) is False
 
-    def test_should_not_process_pycache(self, handler: MagaldiFileHandler, tmp_path: Path):
+    def test_should_not_process_pycache(self, handler, tmp_path: Path):
         """Test that files in __pycache__ are not processed."""
         test_file = tmp_path / "__pycache__" / "module.cpython-311.pyc"
         assert handler._should_process(str(test_file)) is False
 
-    def test_should_not_process_git_directory(self, handler: MagaldiFileHandler, tmp_path: Path):
+    def test_should_not_process_git_directory(self, handler, tmp_path: Path):
         """Test that files in .git are not processed."""
         test_file = tmp_path / ".git" / "config"
         assert handler._should_process(str(test_file)) is False
 
-    def test_should_not_process_minified_js(self, handler: MagaldiFileHandler, tmp_path: Path):
+    def test_should_not_process_minified_js(self, handler, tmp_path: Path):
         """Test that minified JS files are not processed."""
         test_file = tmp_path / "app.min.js"
         assert handler._should_process(str(test_file)) is False
 
-    def test_should_not_process_lock_files(self, handler: MagaldiFileHandler, tmp_path: Path):
+    def test_should_not_process_lock_files(self, handler, tmp_path: Path):
         """Test that lock files are not processed."""
         test_file = tmp_path / "package-lock.json"
         # Note: .json is not in supported extensions anyway, but the exclude pattern should also match
         assert handler._should_process(str(test_file)) is False
 
-    def test_should_process_nested_python_file(self, handler: MagaldiFileHandler, tmp_path: Path):
+    def test_should_process_nested_python_file(self, handler, tmp_path: Path):
         """Test that nested Python files are processed."""
         test_file = tmp_path / "src" / "modules" / "utils.py"
         assert handler._should_process(str(test_file)) is True
 
-    def test_should_not_process_outside_repo(self, handler: MagaldiFileHandler, tmp_path: Path):
+    def test_should_not_process_outside_repo(self, handler, tmp_path: Path):
         """Test that files outside repo are not processed."""
         test_file = Path("/some/other/path/test.py")
         assert handler._should_process(str(test_file)) is False
 
-    def test_on_modified_queues_valid_file(self, handler: MagaldiFileHandler, tmp_path: Path):
+    def test_on_modified_queues_valid_file(self, handler, tmp_path: Path):
         """Test that modified events queue valid files."""
         test_file = tmp_path / "test.py"
         event = MagicMock()
@@ -107,7 +107,7 @@ class TestMagaldiFileHandler:
         assert event_type == "modified"
         assert path == str(test_file)
 
-    def test_on_created_queues_valid_file(self, handler: MagaldiFileHandler, tmp_path: Path):
+    def test_on_created_queues_valid_file(self, handler, tmp_path: Path):
         """Test that created events queue valid files."""
         test_file = tmp_path / "new_file.py"
         event = MagicMock()
@@ -121,7 +121,7 @@ class TestMagaldiFileHandler:
         assert event_type == "created"
         assert path == str(test_file)
 
-    def test_on_deleted_queues_valid_file(self, handler: MagaldiFileHandler, tmp_path: Path):
+    def test_on_deleted_queues_valid_file(self, handler, tmp_path: Path):
         """Test that deleted events queue valid files."""
         test_file = tmp_path / "removed.py"
         event = MagicMock()
@@ -135,7 +135,7 @@ class TestMagaldiFileHandler:
         assert event_type == "deleted"
         assert path == str(test_file)
 
-    def test_ignores_directory_events(self, handler: MagaldiFileHandler, tmp_path: Path):
+    def test_ignores_directory_events(self, handler, tmp_path: Path):
         """Test that directory events are ignored."""
         test_dir = tmp_path / "new_dir"
         event = MagicMock()
@@ -205,7 +205,7 @@ class TestWatchCommand:
         assert "--skip-ai" in result.output
         assert "--user" in result.output
 
-    @patch("shared.cli.watch.Observer")
+    @patch("watchdog.observers.Observer")
     @patch("shared.cli.watch.run_discovery")
     @patch("shared.cli.watch.run_change_detection")
     @patch("shared.cli.watch.load_config")
