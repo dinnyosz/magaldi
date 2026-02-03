@@ -7,6 +7,8 @@ and enhanced context from PHP source code.
 
 from __future__ import annotations
 
+import logging
+
 from tree_sitter import Node, Tree
 
 from magaldi_core.extractors.base import (
@@ -23,6 +25,14 @@ from magaldi_core.extractors.types import (
     HttpRoute,
     ParameterInfo,
 )
+from magaldi_core.extractors.usefulness_filter import (
+    get_extraction_stats,
+    reset_extraction_stats,
+    should_skip_variable,
+    SKIP_NAMES,
+)
+
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # PHP EXTRACTOR CLASS
@@ -92,16 +102,22 @@ class PHPExtractor(BaseExtractor):
 # =============================================================================
 
 
-def extract_php_elements(tree: Tree, lines: list[str]) -> list[ExtractedElement]:
+def extract_php_elements(
+    tree: Tree, lines: list[str], file_path: str | None = None
+) -> list[ExtractedElement]:
     """Extract classes, functions, and imports from PHP code.
 
     Args:
         tree: Parsed tree-sitter tree.
         lines: Source code lines.
+        file_path: Optional file path for logging purposes.
 
     Returns:
         List of extracted elements (classes, functions, imports).
     """
+    # Reset stats for this file
+    reset_extraction_stats()
+
     elements: list[ExtractedElement] = []
 
     # Walk the entire tree to find elements inside namespaces
@@ -132,16 +148,26 @@ def extract_php_elements(tree: Tree, lines: list[str]) -> list[ExtractedElement]
             if elem:
                 elements.append(elem)
         elif node.type == "assignment_expression":
-            # Check for arrow functions and closures assigned to variables
+            # Check for arrow functions and closures first
             elem = _extract_php_assigned_callable(node, lines)
             if elem:
                 elements.append(elem)
+            else:
+                # Not a callable - extract as variable with usefulness filter
+                elem = _extract_php_variable(node, lines)
+                if elem:
+                    elements.append(elem)
         elif node.type == "const_declaration":
             # Global constants (const FOO = 'bar';)
             # Only extract if not inside a class (class constants are handled separately)
             if node.parent and node.parent.type not in ("declaration_list", "enum_declaration_list"):
                 consts = _extract_php_global_constants(node, lines)
                 elements.extend(consts)
+
+    # Log extraction stats if we have any skipped variables
+    stats = reset_extraction_stats()
+    if stats and stats.skipped_count > 0:
+        stats.log_summary(file_path or "<unknown>")
 
     return elements
 
@@ -393,6 +419,110 @@ def _extract_php_assigned_callable(node: Node, lines: list[str]) -> ExtractedEle
         signature=signature,
         decorators=[callable_type],
         parameters=parameters or None,
+    )
+
+
+def _extract_php_variable(node: Node, lines: list[str]) -> ExtractedElement | None:
+    """Extract a PHP variable assignment.
+
+    Applies usefulness filter to skip transient variables like object creations
+    and function call results.
+
+    Args:
+        node: An assignment_expression node.
+        lines: Source code lines.
+
+    Returns:
+        ExtractedElement if the variable is useful, None otherwise.
+    """
+    var_name = None
+    value_node = None
+
+    for child in node.children:
+        if child.type == "variable_name":
+            # Get the variable name (without $)
+            for name_child in child.children:
+                if name_child.type == "name":
+                    var_name = get_node_text(name_child)
+                    break
+        elif child.type not in ("=", "variable_name"):
+            # This is the value node
+            value_node = child
+
+    if not var_name or not value_node:
+        return None
+
+    # Skip short/temp names early
+    if var_name in SKIP_NAMES:
+        return None
+
+    line_start = node.start_point[0] + 1
+    value_type = value_node.type
+    value_text = value_node.text.decode("utf-8") if value_node.text else ""
+
+    # Determine function/constructor name if this is a call
+    func_name: str | None = None
+    if value_type == "object_creation_expression":
+        # new SomeClass()
+        for child in value_node.children:
+            if child.type == "name":
+                func_name = get_node_text(child)
+                break
+            elif child.type == "qualified_name":
+                func_name = get_node_text(child)
+                break
+    elif value_type == "function_call_expression":
+        # someFunction() or SomeClass::method()
+        for child in value_node.children:
+            if child.type == "name":
+                func_name = get_node_text(child)
+                break
+            elif child.type == "qualified_name":
+                func_name = get_node_text(child)
+                break
+    elif value_type == "member_call_expression":
+        # $obj->method()
+        func_name = "->method"  # Marker for method call
+    elif value_type == "scoped_call_expression":
+        # SomeClass::staticMethod()
+        func_name = "::method"  # Marker for static method call
+
+    # Apply usefulness filter
+    skip, reason = should_skip_variable(
+        name=var_name,
+        value_type=value_type,
+        func_name=func_name,
+        language="php",
+        is_module_level=True,
+    )
+
+    if skip:
+        # Record the skip for reporting
+        stats = get_extraction_stats()
+        stats.record_skip(var_name, line_start, reason, value_type, value_text)
+        return None
+
+    # Record that we kept this one
+    stats = get_extraction_stats()
+    stats.record_keep()
+
+    line_end = node.end_point[0] + 1
+    raw_code = node.text.decode("utf-8") if node.text else ""
+
+    # Determine element type
+    if var_name.isupper() and len(var_name) > 1:
+        elem_type = "constant"
+    else:
+        elem_type = "variable"
+
+    return ExtractedElement(
+        element_type=elem_type,
+        name=var_name,
+        line_start=line_start,
+        line_end=line_end,
+        raw_code=raw_code,
+        byte_offset=node.start_byte,
+        node=node,
     )
 
 

@@ -1,6 +1,6 @@
 # Variable/Constant Usefulness Filter
 
-## Status: ✅ Implemented (Python)
+## Status: ✅ Implemented (All Languages)
 
 ## Problem
 
@@ -13,16 +13,16 @@ These clutter the index and waste storage/tokens without adding searchable value
 
 ## Solution
 
-Add a usefulness filter at parse time that skips variables/constants unlikely to be useful for code discovery.
+Add a usefulness filter at parse time that skips variables/constants unlikely to be useful for code discovery. The filter is implemented as a shared module (`usefulness_filter.py`) used by all language extractors.
 
 ## Language Analysis
 
-| Language | Issue Severity | Implementation Status |
-|----------|---------------|----------------------|
-| **Python** | High - extracts all assignments | ✅ Filter implemented |
-| **JavaScript** | Low - only extracts arrow functions, React wrappers, class fields | N/A - already selective |
-| **PHP** | Low - only extracts constants, closures, class properties | N/A - already selective |
-| **Rust** | Low - only extracts impl constants | N/A - already selective |
+| Language | Implementation Status |
+|----------|----------------------|
+| **Python** | ✅ Filter implemented - `_is_useful_assignment()` |
+| **JavaScript** | ✅ Filter implemented - `_extract_js_variable()` |
+| **PHP** | ✅ Filter implemented - `_extract_php_variable()` |
+| **Rust** | ✅ Filter implemented - `_extract_rust_variable()`, `_extract_rust_module_const()`, `_extract_rust_static()` |
 
 ## Usefulness Criteria
 
@@ -191,22 +191,36 @@ def _is_useful_assignment(name: str, value_node: Node | None, is_module_level: b
     return is_module_level
 ```
 
-### ⏭️ Phase 2: JavaScript/TypeScript Extractor (NOT NEEDED)
+### ✅ Phase 2: JavaScript/TypeScript Extractor (DONE)
 
-JavaScript extractor is already selective - only extracts:
-- Arrow functions (`const add = (a, b) => a + b`)
-- React wrapped components (`memo()`, `forwardRef()`, `lazy()`)
-- Class field definitions (`class Foo { x = 1; }`)
+Modified `extract_javascript_elements()` in `src/magaldi_core/extractors/javascript.py`.
 
-Does NOT extract plain `const x = value` assignments, so no filter needed.
+**Key additions:**
+- Now extracts all `const`/`let`/`var` declarations with usefulness filter
+- `_extract_js_variable()` - extracts variables, applies usefulness filter
+- Handles `new_expression` by looking at "constructor" field for class name
 
-### ⏭️ Phase 3: PHP/Rust Extractors (NOT NEEDED)
+### ✅ Phase 3: PHP Extractor (DONE)
 
-Both extractors are already selective:
-- PHP: Only extracts constants, closures, class properties
-- Rust: Only extracts impl constants
+Modified `extract_php_elements()` in `src/magaldi_core/extractors/php.py`.
 
-No additional filtering needed.
+**Key additions:**
+- Now extracts all assignment expressions with usefulness filter
+- `_extract_php_variable()` - handles PHP-specific AST nodes:
+  - `object_creation_expression` (new SomeClass())
+  - `function_call_expression` (someFunction())
+  - `member_call_expression` ($obj->method())
+  - `scoped_call_expression` (SomeClass::staticMethod())
+
+### ✅ Phase 4: Rust Extractor (DONE)
+
+Modified `extract_rust_elements()` in `src/magaldi_core/extractors/rust.py`.
+
+**Key additions:**
+- Now extracts module-level `const_item`, `static_item`, and `let_declaration`
+- `_extract_rust_module_const()` - extracts const with usefulness filter
+- `_extract_rust_static()` - extracts static with usefulness filter
+- `_extract_rust_variable()` - extracts let declarations with usefulness filter
 
 ## Testing
 

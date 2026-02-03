@@ -22,6 +22,12 @@ from magaldi_core.extractors.types import (
     ExtractedReference,
     ParameterInfo,
 )
+from magaldi_core.extractors.usefulness_filter import (
+    get_extraction_stats,
+    reset_extraction_stats,
+    should_skip_variable,
+    SKIP_NAMES,
+)
 
 # =============================================================================
 # RUST EXTRACTOR CLASS
@@ -85,16 +91,22 @@ class RustExtractor(BaseExtractor):
 # =============================================================================
 
 
-def extract_rust_elements(tree: Tree, lines: list[str]) -> list[ExtractedElement]:
-    """Extract structs, enums, and functions from Rust code.
+def extract_rust_elements(
+    tree: Tree, lines: list[str], file_path: str | None = None
+) -> list[ExtractedElement]:
+    """Extract structs, enums, functions, and module-level variables from Rust code.
 
     Args:
         tree: Parsed tree-sitter tree.
         lines: Source code lines.
+        file_path: Optional file path for logging purposes.
 
     Returns:
         List of extracted elements.
     """
+    # Reset stats for this file
+    reset_extraction_stats()
+
     elements: list[ExtractedElement] = []
     root = tree.root_node
 
@@ -124,6 +136,26 @@ def extract_rust_elements(tree: Tree, lines: list[str]) -> list[ExtractedElement
             elem = _extract_rust_use(node, lines)
             if elem:
                 elements.append(elem)
+        elif node.type == "const_item":
+            # Module-level const: const FOO: i32 = 42;
+            elem = _extract_rust_module_const(node, lines)
+            if elem:
+                elements.append(elem)
+        elif node.type == "static_item":
+            # Module-level static: static FOO: i32 = 42;
+            elem = _extract_rust_static(node, lines)
+            if elem:
+                elements.append(elem)
+        elif node.type == "let_declaration":
+            # Module-level let (rare, but handle it)
+            elem = _extract_rust_variable(node, lines)
+            if elem:
+                elements.append(elem)
+
+    # Log extraction stats if we have any skipped variables
+    stats = reset_extraction_stats()
+    if stats and stats.skipped_count > 0:
+        stats.log_summary(file_path or "<unknown>")
 
     return elements
 
@@ -259,6 +291,266 @@ def _extract_use_tree_path(node: Node) -> str:
             if inner:
                 parts.append(inner)
     return "::".join(parts) if parts else ""
+
+
+def _extract_rust_module_const(node: Node, lines: list[str]) -> ExtractedElement | None:
+    """Extract a module-level const declaration.
+
+    Handles patterns like:
+        const MAX_SIZE: usize = 1024;
+        const CONFIG: Config = Config::new();
+
+    Args:
+        node: A const_item node.
+        lines: Source code lines.
+
+    Returns:
+        ExtractedElement if the constant is useful, None otherwise.
+    """
+    name = None
+    value_node = None
+    type_node = None
+
+    for child in node.children:
+        if child.type == "identifier":
+            name = get_node_text(child)
+        elif child.type in ("primitive_type", "type_identifier", "generic_type", "scoped_type_identifier"):
+            type_node = child
+        elif child.type in (
+            "integer_literal", "float_literal", "string_literal", "char_literal",
+            "boolean_literal", "array_expression", "tuple_expression",
+            "call_expression", "macro_invocation",
+        ):
+            value_node = child
+
+    if not name:
+        return None
+
+    # Skip short/temp names
+    if name in SKIP_NAMES:
+        return None
+
+    line_start = node.start_point[0] + 1
+    value_type = value_node.type if value_node else "unknown"
+    value_text = value_node.text.decode("utf-8") if value_node and value_node.text else ""
+
+    # Determine function name if this is a call
+    func_name: str | None = None
+    if value_node and value_node.type == "call_expression":
+        func_node = value_node.children[0] if value_node.children else None
+        if func_node:
+            func_name = get_node_text(func_node)
+    elif value_node and value_node.type == "macro_invocation":
+        # vec![], lazy_static!, etc. - generally useful
+        func_name = None  # Don't skip macro invocations
+
+    # Apply usefulness filter
+    skip, reason = should_skip_variable(
+        name=name,
+        value_type=value_type,
+        func_name=func_name,
+        language="rust",
+        is_module_level=True,
+    )
+
+    if skip:
+        stats = get_extraction_stats()
+        stats.record_skip(name, line_start, reason, value_type, value_text)
+        return None
+
+    # Record that we kept this one
+    stats = get_extraction_stats()
+    stats.record_keep()
+
+    line_end = node.end_point[0] + 1
+    raw_code = node.text.decode("utf-8") if node.text else ""
+    const_type = get_node_text(type_node) if type_node else None
+
+    return ExtractedElement(
+        element_type="constant",
+        name=name,
+        line_start=line_start,
+        line_end=line_end,
+        raw_code=raw_code,
+        byte_offset=node.start_byte,
+        node=node,
+        return_type=const_type,  # Store type in return_type field
+    )
+
+
+def _extract_rust_static(node: Node, lines: list[str]) -> ExtractedElement | None:
+    """Extract a module-level static declaration.
+
+    Handles patterns like:
+        static INSTANCE: Mutex<Option<Service>> = Mutex::new(None);
+
+    Args:
+        node: A static_item node.
+        lines: Source code lines.
+
+    Returns:
+        ExtractedElement if the static is useful, None otherwise.
+    """
+    name = None
+    value_node = None
+    type_node = None
+    is_mutable = False
+
+    for child in node.children:
+        if child.type == "identifier":
+            name = get_node_text(child)
+        elif child.type == "mutable_specifier":
+            is_mutable = True
+        elif child.type in ("primitive_type", "type_identifier", "generic_type", "scoped_type_identifier"):
+            type_node = child
+        elif child.type in (
+            "integer_literal", "float_literal", "string_literal", "char_literal",
+            "boolean_literal", "array_expression", "tuple_expression",
+            "call_expression", "macro_invocation",
+        ):
+            value_node = child
+
+    if not name:
+        return None
+
+    # Skip short/temp names
+    if name in SKIP_NAMES:
+        return None
+
+    line_start = node.start_point[0] + 1
+    value_type = value_node.type if value_node else "unknown"
+    value_text = value_node.text.decode("utf-8") if value_node and value_node.text else ""
+
+    # Determine function name if this is a call
+    func_name: str | None = None
+    if value_node and value_node.type == "call_expression":
+        func_node = value_node.children[0] if value_node.children else None
+        if func_node:
+            func_name = get_node_text(func_node)
+
+    # Apply usefulness filter
+    skip, reason = should_skip_variable(
+        name=name,
+        value_type=value_type,
+        func_name=func_name,
+        language="rust",
+        is_module_level=True,
+    )
+
+    if skip:
+        stats = get_extraction_stats()
+        stats.record_skip(name, line_start, reason, value_type, value_text)
+        return None
+
+    # Record that we kept this one
+    stats = get_extraction_stats()
+    stats.record_keep()
+
+    line_end = node.end_point[0] + 1
+    raw_code = node.text.decode("utf-8") if node.text else ""
+    static_type = get_node_text(type_node) if type_node else None
+
+    decorators = ["static"]
+    if is_mutable:
+        decorators.append("mut")
+
+    return ExtractedElement(
+        element_type="variable",
+        name=name,
+        line_start=line_start,
+        line_end=line_end,
+        raw_code=raw_code,
+        byte_offset=node.start_byte,
+        node=node,
+        return_type=static_type,
+        decorators=decorators,
+    )
+
+
+def _extract_rust_variable(node: Node, lines: list[str]) -> ExtractedElement | None:
+    """Extract a Rust let declaration.
+
+    Applies usefulness filter to skip transient variables like object creations
+    and function call results.
+
+    Args:
+        node: A let_declaration node.
+        lines: Source code lines.
+
+    Returns:
+        ExtractedElement if the variable is useful, None otherwise.
+    """
+    name = None
+    value_node = None
+    is_mutable = False
+
+    # Find pattern (name) and value
+    pattern_node = get_child_by_field(node, "pattern")
+    value_node = get_child_by_field(node, "value")
+
+    if pattern_node:
+        if pattern_node.type == "identifier":
+            name = get_node_text(pattern_node)
+        elif pattern_node.type == "mut_pattern":
+            is_mutable = True
+            for child in pattern_node.children:
+                if child.type == "identifier":
+                    name = get_node_text(child)
+                    break
+
+    if not name or not value_node:
+        return None
+
+    # Skip short/temp names
+    if name in SKIP_NAMES:
+        return None
+
+    line_start = node.start_point[0] + 1
+    value_type = value_node.type
+    value_text = value_node.text.decode("utf-8") if value_node.text else ""
+
+    # Determine function name if this is a call
+    func_name: str | None = None
+    if value_type == "call_expression":
+        func_node = value_node.children[0] if value_node.children else None
+        if func_node:
+            func_name = get_node_text(func_node)
+
+    # Apply usefulness filter
+    skip, reason = should_skip_variable(
+        name=name,
+        value_type=value_type,
+        func_name=func_name,
+        language="rust",
+        is_module_level=True,
+    )
+
+    if skip:
+        stats = get_extraction_stats()
+        stats.record_skip(name, line_start, reason, value_type, value_text)
+        return None
+
+    # Record that we kept this one
+    stats = get_extraction_stats()
+    stats.record_keep()
+
+    line_end = node.end_point[0] + 1
+    raw_code = node.text.decode("utf-8") if node.text else ""
+
+    decorators = []
+    if is_mutable:
+        decorators.append("mut")
+
+    return ExtractedElement(
+        element_type="variable",
+        name=name,
+        line_start=line_start,
+        line_end=line_end,
+        raw_code=raw_code,
+        byte_offset=node.start_byte,
+        node=node,
+        decorators=decorators if decorators else None,
+    )
 
 
 def _extract_rust_parameters(params_node: Node) -> list[ParameterInfo]:
