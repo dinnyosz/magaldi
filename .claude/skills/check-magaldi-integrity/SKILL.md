@@ -36,6 +36,8 @@ Every piece of data extracted during parsing MUST be surfaced to users through A
 | Web API routes | `src/magaldi_web/routes/` |
 | Web frontend pages | `src/magaldi_web/frontend/src/pages/` |
 | TypeScript types | `src/magaldi_web/frontend/src/api.ts` |
+| Element icons (Explorer) | `typeConfig` in `src/magaldi_web/frontend/src/pages/Explorer.tsx` |
+| Element icons (Element detail) | `typeConfig` in `src/magaldi_web/frontend/src/pages/Element.tsx` |
 
 ---
 
@@ -58,8 +60,9 @@ When adding a new element type:
 ### Web UI
 - [ ] Dashboard stats: `src/magaldi_web/routes/dashboard.py`
 - [ ] Search filters: `src/magaldi_web/routes/search.py`
-- [ ] Explorer icons: `src/magaldi_web/frontend/src/pages/Explorer.tsx`
-- [ ] Element detail: `src/magaldi_web/frontend/src/pages/Element.tsx`
+- [ ] Explorer icons: Add to `typeConfig` in `src/magaldi_web/frontend/src/pages/Explorer.tsx`
+- [ ] Element detail icons: Add to `typeConfig` in `src/magaldi_web/frontend/src/pages/Element.tsx`
+- [ ] Element detail rendering: Handle new type in `src/magaldi_web/frontend/src/pages/Element.tsx`
 - [ ] TypeScript interfaces: `src/magaldi_web/frontend/src/api.ts`
 
 ### MCP Tools
@@ -169,12 +172,29 @@ python -c "from shared.ai.summarization import PROMPTS; print(list(PROMPTS.keys(
 - Read `src/magaldi_web/frontend/src/api.ts`
 - Verify all fields rendered and typed
 
-### Step 4: Check MCP
+### Step 4: Check Icon Coverage
+Verify all element types have icons in both Explorer and Element pages:
+```bash
+# Extract types from summarization (source of truth for element types)
+source .venv/bin/activate
+python -c "from shared.ai.summarization import LINE_THRESHOLDS; print(sorted(LINE_THRESHOLDS.keys()))"
+
+# Then grep for typeConfig in both files and verify all types are covered:
+grep -A 20 "const typeConfig" src/magaldi_web/frontend/src/pages/Explorer.tsx
+grep -A 20 "const typeConfig" src/magaldi_web/frontend/src/pages/Element.tsx
+```
+
+Each element type needs an entry with:
+- `icon`: Bootstrap icon class (e.g., `bi-box`, `bi-braces`)
+- `color`: Badge color (e.g., `primary`, `success`, `warning`)
+- Optional flags: `canHaveChildren`, `canHaveCallGraph` (Explorer only)
+
+### Step 5: Check MCP
 - Read `src/magaldi_mcp/tools_impl.py`
 - Verify `get_element` returns all fields
 - Verify search tools filter correctly
 
-### Step 5: Run Tests
+### Step 6: Run Tests
 ```bash
 pytest tests/test_summarization.py -v
 ```
@@ -193,13 +213,18 @@ pytest tests/test_summarization.py -v
    - Summarization prompts (all 5 dicts!)
    - Dashboard statistics
    - Search filter options
-   - Explorer rendering
+   - Explorer `typeConfig` (missing icon/color)
+   - Element detail `typeConfig` (missing icon/color)
 
 3. **Element links not using hash_id**:
    - Always use `hash_id` (stable) not `element_id` (may change)
 
 4. **Prompt missing anti-verbose instruction**:
    - Check all prompts end with "Start..." instruction
+
+5. **Icon config mismatch between Explorer and Element pages**:
+   - Both `typeConfig` objects should have the same element types
+   - Icons and colors should be consistent across pages
 
 ---
 
@@ -217,6 +242,11 @@ After verification, produce:
 - [ ] `new_field` not shown in Element detail
 - [ ] `new_type` missing icon in Explorer
 
+### Missing Icon Coverage
+- [ ] `new_type` missing from Explorer.tsx `typeConfig`
+- [ ] `new_type` missing from Element.tsx `typeConfig`
+- [ ] Icon/color mismatch between Explorer and Element for `some_type`
+
 ### Missing in MCP
 - [ ] `get_element` doesn't return `new_field`
 
@@ -226,4 +256,5 @@ After verification, produce:
 ### Recommendations
 1. Add `new_type` to all prompt dicts in summarization.py
 2. Add `new_field` to Element.tsx
+3. Add `new_type` to typeConfig in both Explorer.tsx and Element.tsx
 ```
