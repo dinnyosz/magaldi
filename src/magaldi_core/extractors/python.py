@@ -9,7 +9,228 @@ Uses SCM queries for pattern matching with Python post-processing.
 
 from __future__ import annotations
 
+import logging
+from dataclasses import dataclass, field
+
 from tree_sitter import Node, Tree
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# VARIABLE USEFULNESS FILTER
+# =============================================================================
+
+# Factory functions that produce useful, indexable values
+USEFUL_FACTORIES = frozenset({
+    # Enums
+    "Enum", "IntEnum", "StrEnum", "Flag", "IntFlag", "auto",
+    # Typing constructs
+    "TypeVar", "ParamSpec", "TypeVarTuple", "NewType", "TypedDict",
+    # Collections
+    "namedtuple", "NamedTuple", "defaultdict", "OrderedDict", "Counter",
+    # Regex
+    "compile",  # re.compile
+    # Logging
+    "getLogger",
+    # Threading primitives
+    "Lock", "RLock", "Semaphore", "BoundedSemaphore", "Condition", "Event", "Barrier",
+    # Paths
+    "Path", "PurePath", "PurePosixPath", "PureWindowsPath",
+    # Dataclass
+    "field",
+    # Functools
+    "partial", "lru_cache", "cache",
+})
+
+# Attribute-style factory calls that produce useful values
+USEFUL_ATTRIBUTE_FACTORIES = frozenset({
+    "re.compile",
+    "logging.getLogger",
+    "threading.Lock",
+    "threading.RLock",
+    "threading.Semaphore",
+    "threading.Condition",
+    "threading.Event",
+    "pathlib.Path",
+    "functools.partial",
+    "functools.lru_cache",
+    "collections.defaultdict",
+    "collections.OrderedDict",
+    "collections.Counter",
+    "collections.namedtuple",
+})
+
+# Short/temporary variable names to always skip
+SKIP_NAMES = frozenset({
+    "i", "j", "k", "x", "y", "z", "n", "m",
+    "_", "__", "___",
+    "self", "cls", "mcs",
+    "tmp", "temp", "ret", "res", "val", "var",
+    "e", "ex", "err", "exc",  # exception handlers
+})
+
+
+@dataclass
+class SkippedVariable:
+    """Record of a variable that was skipped by the usefulness filter."""
+
+    name: str
+    line: int
+    reason: str
+    value_type: str
+    value_preview: str
+
+
+@dataclass
+class ExtractionStats:
+    """Statistics about variable extraction for a single file."""
+
+    kept_count: int = 0
+    skipped_count: int = 0
+    skipped_variables: list[SkippedVariable] = field(default_factory=list)
+
+    def record_skip(self, name: str, line: int, reason: str, value_type: str, value_preview: str) -> None:
+        """Record a skipped variable."""
+        self.skipped_count += 1
+        self.skipped_variables.append(SkippedVariable(
+            name=name,
+            line=line,
+            reason=reason,
+            value_type=value_type,
+            value_preview=value_preview[:60] if value_preview else "",
+        ))
+
+    def record_keep(self) -> None:
+        """Record a kept variable."""
+        self.kept_count += 1
+
+    def log_summary(self, file_path: str) -> None:
+        """Log a summary of extraction stats."""
+        if self.skipped_count > 0:
+            logger.debug(
+                "Variable filter for %s: kept=%d, skipped=%d",
+                file_path, self.kept_count, self.skipped_count
+            )
+            for sv in self.skipped_variables:
+                logger.debug(
+                    "  SKIP: %s (line %d) - %s [%s] %s",
+                    sv.name, sv.line, sv.reason, sv.value_type, sv.value_preview
+                )
+
+
+# Thread-local stats for current file being parsed
+_current_stats: ExtractionStats | None = None
+
+
+def _get_extraction_stats() -> ExtractionStats:
+    """Get or create extraction stats for current parse."""
+    global _current_stats
+    if _current_stats is None:
+        _current_stats = ExtractionStats()
+    return _current_stats
+
+
+def reset_extraction_stats() -> ExtractionStats | None:
+    """Reset and return the extraction stats. Call after parsing a file."""
+    global _current_stats
+    stats = _current_stats
+    _current_stats = None
+    return stats
+
+
+def get_extraction_stats() -> ExtractionStats | None:
+    """Get current extraction stats without resetting (for inspection)."""
+    return _current_stats
+
+
+def _is_useful_assignment(
+    name: str,
+    value_node: Node | None,
+    is_module_level: bool,
+) -> tuple[bool, str]:
+    """Determine if a variable assignment is useful for code discovery.
+
+    Returns:
+        Tuple of (is_useful, skip_reason). If is_useful is True, skip_reason is empty.
+    """
+    if not value_node:
+        return False, "no_value"
+
+    value_type = value_node.type
+    value_text = value_node.text.decode("utf-8") if value_node.text else ""
+
+    # USEFUL: Constants by naming convention (UPPER_CASE)
+    if name.isupper() and len(name) > 1:
+        return True, ""
+
+    # USEFUL: Dunder names (module metadata like __all__, __version__)
+    if name.startswith("__") and name.endswith("__"):
+        return True, ""
+
+    # USEFUL: Literal values (configuration, data)
+    literal_types = {
+        "string", "integer", "float", "true", "false", "none",
+        "list", "dictionary", "tuple", "set",
+        "concatenated_string", "binary_operator",  # string concatenation
+    }
+    if value_type in literal_types:
+        return True, ""
+
+    # USEFUL: Type references (type aliases) - identifier or subscript without call
+    # Examples: UserID = int, OptionalStr = Optional[str], Callback = Callable[[int], str]
+    if value_type in ("identifier", "subscript", "attribute"):
+        return True, ""
+
+    # Check call expressions
+    if value_type == "call":
+        func_node = value_node.child_by_field_name("function")
+        if func_node:
+            func_text = func_node.text.decode("utf-8") if func_node.text else ""
+
+            # USEFUL: Known useful factory functions
+            if func_text in USEFUL_FACTORIES:
+                return True, ""
+
+            # USEFUL: Known useful attribute factories (re.compile, logging.getLogger, etc.)
+            if func_text in USEFUL_ATTRIBUTE_FACTORIES:
+                return True, ""
+
+            # Check the last part of attribute for useful factories
+            if "." in func_text:
+                last_part = func_text.rsplit(".", 1)[-1]
+                if last_part in USEFUL_FACTORIES:
+                    return True, ""
+
+            # SKIP: Instance creation (PascalCase class name like SomeClient())
+            if func_node.type == "identifier":
+                if func_text and func_text[0].isupper() and not func_text.isupper():
+                    return False, "instance_creation"
+
+            # SKIP: Method calls on objects (attribute calls like obj.method())
+            if func_node.type == "attribute":
+                return False, "method_call_result"
+
+            # SKIP: Function call results (lowercase function like get_value())
+            if func_node.type == "identifier" and func_text and func_text[0].islower():
+                return False, "function_call_result"
+
+    # USEFUL: Await expressions on useful calls
+    if value_type == "await":
+        # Check the awaited expression
+        for child in value_node.children:
+            if child.type == "call":
+                return _is_useful_assignment(name, child, is_module_level)
+
+    # USEFUL: Lambda expressions (these are callable definitions)
+    if value_type == "lambda":
+        return True, ""
+
+    # Default: keep if module-level (might be configuration), skip if local
+    if is_module_level:
+        return True, ""
+
+    return False, "local_variable"
 
 from magaldi_core.extractors.base import (
     BaseExtractor,
@@ -126,7 +347,9 @@ def _extract_nested_functions(func_node: Node, lines: list[str]) -> list[Extract
     return nested
 
 
-def extract_python_elements(tree: Tree, lines: list[str]) -> list[ExtractedElement]:
+def extract_python_elements(
+    tree: Tree, lines: list[str], file_path: str | None = None
+) -> list[ExtractedElement]:
     """Extract code elements from a Python AST using SCM queries.
 
     Uses declarative SCM patterns for matching, with Python post-processing
@@ -135,17 +358,28 @@ def extract_python_elements(tree: Tree, lines: list[str]) -> list[ExtractedEleme
     Args:
         tree: Parsed tree-sitter Tree.
         lines: Source code lines for raw code extraction.
+        file_path: Optional file path for logging purposes.
 
     Returns:
         List of extracted elements.
     """
+    # Reset stats for this file
+    reset_extraction_stats()
+
     # Check if we have SCM queries available
     query_dir = QUERIES_DIR / "python"
     if not query_dir.exists() or not (query_dir / "elements.scm").exists():
         # Fall back to imperative extraction
-        return _extract_python_elements_imperative(tree, lines)
+        elements = _extract_python_elements_imperative(tree, lines)
+    else:
+        elements = _extract_python_elements_scm(tree, lines)
 
-    return _extract_python_elements_scm(tree, lines)
+    # Log extraction stats if we have any skipped variables
+    stats = reset_extraction_stats()
+    if stats and stats.skipped_count > 0:
+        stats.log_summary(file_path or "<unknown>")
+
+    return elements
 
 
 def _extract_python_elements_scm(tree: Tree, lines: list[str]) -> list[ExtractedElement]:
@@ -591,18 +825,40 @@ def _extract_python_function(
 def _extract_python_assignment(
     node: Node, lines: list[str], is_module_level: bool = False, parent_class: Node | None = None
 ) -> ExtractedElement | None:
-    """Extract a variable/constant assignment."""
+    """Extract a variable/constant assignment.
+
+    Applies usefulness filter to skip variables unlikely to be useful for code discovery,
+    such as instance creations, function call results, and temporary variables.
+    """
     left_node = get_child_by_field(node, "left")
     if not left_node or left_node.type != "identifier":
         return None
 
     name = get_node_text(left_node)
+    line_start = node.start_point[0] + 1
 
-    # Skip common non-interesting patterns
-    if name in ("i", "j", "k", "x", "y", "z", "_"):
+    # Skip common non-interesting names
+    if name in SKIP_NAMES:
         return None
 
-    line_start = node.start_point[0] + 1
+    # Get the right-hand side value for usefulness check
+    right_node = get_child_by_field(node, "right")
+    value_type = right_node.type if right_node else "none"
+    value_text = right_node.text.decode("utf-8") if right_node and right_node.text else ""
+
+    # Apply usefulness filter
+    is_useful, skip_reason = _is_useful_assignment(name, right_node, is_module_level)
+
+    if not is_useful:
+        # Record the skip for reporting
+        stats = _get_extraction_stats()
+        stats.record_skip(name, line_start, skip_reason, value_type, value_text)
+        return None
+
+    # Record that we kept this one
+    stats = _get_extraction_stats()
+    stats.record_keep()
+
     line_end = node.end_point[0] + 1
     # Use byte-based extraction for precise raw_code (handles minified files)
     raw_code = node.text.decode('utf-8') if node.text else ""
