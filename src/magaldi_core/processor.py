@@ -1579,7 +1579,7 @@ def _process_single_element(
     code_embed_time = 0.0
 
     # Build hierarchical display name: [type] .../path/file.py → Class → method
-    def build_display_name(max_path_len: int = 40) -> str:
+    def build_display_name(max_path_len: int = 60) -> str:
         parts = []
         # Add path (truncated from left if too long)
         path = element.relative_path
