@@ -394,8 +394,8 @@ class MagaldiMCPServer:
             return await asyncio.to_thread(
                 list_glossary,
                 es,
-                scope=args["scope"],
-                repository=args["repository"],
+                scope=args.get("scope"),
+                repository=args.get("repository"),
                 username=args.get("username", self.default_username),
                 min_count=args.get("min_count", 1),
             )
@@ -403,8 +403,8 @@ class MagaldiMCPServer:
             return await asyncio.to_thread(
                 get_glossary_term,
                 es,
-                scope=args["scope"],
-                repository=args["repository"],
+                scope=args.get("scope"),
+                repository=args.get("repository"),
                 term=args["term"],
                 username=args.get("username", self.default_username),
             )
@@ -412,8 +412,8 @@ class MagaldiMCPServer:
             return await asyncio.to_thread(
                 search_glossary,
                 es,
-                scope=args["scope"],
-                repository=args["repository"],
+                scope=args.get("scope"),
+                repository=args.get("repository"),
                 query=args["query"],
                 username=args.get("username", self.default_username),
             )
