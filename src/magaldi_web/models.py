@@ -732,6 +732,15 @@ class ToolTransitionInfo(BaseModel):
     percentage: float  # Percentage of transitions from from_tool
 
 
+class ToolDurationInfo(BaseModel):
+    """Execution duration info for a single MCP tool."""
+
+    tool_name: str
+    total_ms: int
+    call_count: int
+    avg_ms: float
+
+
 class MCPAnalyticsResponse(BaseModel):
     """Response for MCP analytics endpoint."""
 
@@ -741,6 +750,7 @@ class MCPAnalyticsResponse(BaseModel):
     tool_usage: list[ToolUsageInfo]
     top_transitions: list[ToolTransitionInfo]
     transition_matrix: dict[str, dict[str, int]]  # from_tool -> to_tool -> count
+    tool_durations: list[ToolDurationInfo] = []  # Tool execution times
 
 
 class DailyActivityItem(BaseModel):

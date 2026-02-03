@@ -24,6 +24,7 @@ from magaldi_web.models import (
     MCPAnalyticsResponse,
     QueueStats,
     ServiceHealth,
+    ToolDurationInfo,
     ToolTransitionInfo,
     ToolUsageInfo,
 )
@@ -246,6 +247,22 @@ async def get_mcp_analytics() -> MCPAnalyticsResponse:
                 )
             )
 
+        # Get tool durations
+        duration_stats = analytics_repo.get_tool_durations()
+        tool_durations = [
+            ToolDurationInfo(
+                tool_name=tool_name,
+                total_ms=stats["total_ms"],
+                call_count=stats["count"],
+                avg_ms=stats["avg_ms"],
+            )
+            for tool_name, stats in sorted(
+                duration_stats.items(),
+                key=lambda x: x[1]["avg_ms"],
+                reverse=True,
+            )
+        ]
+
         return MCPAnalyticsResponse(
             total_calls=total_calls,
             unique_tools=unique_tools,
@@ -253,6 +270,7 @@ async def get_mcp_analytics() -> MCPAnalyticsResponse:
             tool_usage=tool_usage,
             top_transitions=top_transitions,
             transition_matrix=transition_matrix,
+            tool_durations=tool_durations,
         )
 
     except Exception:
@@ -264,6 +282,7 @@ async def get_mcp_analytics() -> MCPAnalyticsResponse:
             tool_usage=[],
             top_transitions=[],
             transition_matrix={},
+            tool_durations=[],
         )
 
 

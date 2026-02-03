@@ -652,19 +652,26 @@ function Admin() {
                             <th>Tool</th>
                             <th className="text-end">Calls</th>
                             <th className="text-end">%</th>
+                            <th className="text-end">Avg (ms)</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {mcpAnalytics.tool_usage.map((tool, idx) => (
-                            <tr key={tool.tool_name}>
-                              <td className="text-muted">{idx + 1}</td>
-                              <td>
-                                <code className="small">{tool.tool_name}</code>
-                              </td>
-                              <td className="text-end">{tool.call_count.toLocaleString()}</td>
-                              <td className="text-end text-muted">{tool.percentage}%</td>
-                            </tr>
-                          ))}
+                          {mcpAnalytics.tool_usage.map((tool, idx) => {
+                            const duration = mcpAnalytics.tool_durations?.find(d => d.tool_name === tool.tool_name)
+                            return (
+                              <tr key={tool.tool_name}>
+                                <td className="text-muted">{idx + 1}</td>
+                                <td>
+                                  <code className="small">{tool.tool_name}</code>
+                                </td>
+                                <td className="text-end">{tool.call_count.toLocaleString()}</td>
+                                <td className="text-end text-muted">{tool.percentage}%</td>
+                                <td className="text-end text-muted">
+                                  {duration ? duration.avg_ms.toLocaleString(undefined, { maximumFractionDigits: 0 }) : '-'}
+                                </td>
+                              </tr>
+                            )
+                          })}
                         </tbody>
                       </Table>
                     </div>

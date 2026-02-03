@@ -89,6 +89,16 @@ class MagaldiMCPServer:
             # Don't let analytics failures affect tool execution
             log.debug(f"Analytics recording failed: {e}")
 
+    def _record_tool_end(self) -> None:
+        """Record that the current tool call has ended."""
+        try:
+            repo = self._get_analytics_repo()
+            if repo:
+                repo.record_tool_end(self._session_id)
+        except Exception as e:
+            # Don't let analytics failures affect tool execution
+            log.debug(f"Analytics end recording failed: {e}")
+
     def _register_tools(self) -> None:
         """Register all MCP tools."""
 
@@ -109,6 +119,9 @@ class MagaldiMCPServer:
             except Exception as e:
                 log.exception(f"Tool {name} failed")
                 return [TextContent(type="text", text=f"Error: {e}")]
+            finally:
+                # Always record end time for duration tracking
+                self._record_tool_end()
 
     async def _handle_tool(self, name: str, args: dict[str, Any]) -> Any:
         """Dispatch tool call to implementation."""

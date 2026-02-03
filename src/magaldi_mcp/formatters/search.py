@@ -50,15 +50,19 @@ class FeatureSearchListFormatter(ResultFormatter):
         """Check if result is a list of features."""
         if not isinstance(result, list) or not result:
             return False
-        return "feature_id" in result[0]
+        return "feature_id" in result[0] or "subfeature_id" in result[0]
 
     def format(self, result: list[dict[str, Any]]) -> str:
         """Format feature search results."""
         lines = [f"Found {len(result)} features:\n"]
         for r in result:
-            feature_id = r.get('feature_id', '')
-            id_suffix = f" | id:{feature_id}" if feature_id else ""
-            lines.append(f"[feature] {r.get('label', '?')} ({r.get('member_count', 0)} members){id_suffix}")
+            # Use hash_id (stable) over feature_id/subfeature_id
+            hash_id = r.get('hash_id', '')
+            id_suffix = f" | id:{hash_id}" if hash_id else ""
+            # Determine type - only show if mixed or subfeature
+            elem_type = r.get('type', 'feature')
+            type_prefix = f"[{elem_type}] " if elem_type == 'subfeature' else ""
+            lines.append(f"{type_prefix}{r.get('label', '?')} ({r.get('member_count', 0)} members){id_suffix}")
             if r.get('summary'):
                 summary = r['summary']
                 if len(summary) > 200:

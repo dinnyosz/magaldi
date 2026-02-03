@@ -281,7 +281,149 @@ pytest tests/test_summarization.py -v
 
 ---
 
-## 8. Report Format
+## 8. MCP Analytics Integrity
+
+When modifying MCP analytics (what data is collected, stored, or displayed), verify full data flow:
+
+### Source of Truth Files
+
+| What | Where |
+|------|-------|
+| Redis storage methods | `RedisMCPAnalyticsRepository` class @ `src/shared/db/redis.py` |
+| API response models | `MCP*Response`, `Tool*Info`, `Daily*` @ `src/magaldi_web/models.py` |
+| Admin API endpoints | `/admin/mcp-analytics*` @ `src/magaldi_web/routes/admin.py` |
+| TypeScript interfaces | `MCP*Response`, `Tool*Info`, `Daily*` @ `src/magaldi_web/frontend/src/api.ts` |
+| Admin UI rendering | `Admin.tsx` @ `src/magaldi_web/frontend/src/pages/Admin.tsx` |
+| MCP server recording | `server.py` @ `src/magaldi_mcp/server.py` |
+
+### Verification Steps
+
+1. **Check what Redis stores** - Read `RedisMCPAnalyticsRepository` class methods:
+   - `record_tool_call()` - what is recorded on tool invocation
+   - `record_tool_end()` - what is recorded on completion
+   - `get_tool_counts()`, `get_daily_counts()`, `get_tool_transitions()`, `get_tool_durations()` - what can be retrieved
+
+2. **Check what API exposes** - Read admin routes and models:
+   - Compare Python response models (e.g., `MCPAnalyticsResponse`) with Redis getter returns
+   - Verify all Redis data has corresponding model fields
+
+3. **Check TypeScript types** - Read `api.ts`:
+   - Each Python model field must have TypeScript equivalent
+   - Compare `MCPAnalyticsResponse` interface with Python model
+
+4. **Check Admin UI rendering** - Read `Admin.tsx`:
+   - Every field in `MCPAnalyticsResponse` should be displayed somewhere
+   - Charts and tables should cover all data dimensions
+
+### Checklist for New Analytics Data
+
+- [ ] Add storage method in `RedisMCPAnalyticsRepository` (redis.py)
+- [ ] Add recording calls in MCP server (server.py)
+- [ ] Add getter method in Redis repo if needed
+- [ ] Add field to Python response model (models.py)
+- [ ] Populate field in admin route handler (admin.py)
+- [ ] Add TypeScript interface field (api.ts)
+- [ ] Display in Admin.tsx (chart/table/metric)
+
+### Display Guidelines
+
+- Keep Admin page compact - avoid sprawling layouts
+- Use **charts** for trends and distributions (pie chart for proportions, line chart for time series)
+- Use **tables** for detailed lists with multiple columns
+- Combine related data (e.g., add avg_ms column to tool usage table rather than separate table)
+- Show numerical summaries (totals, counts) prominently
+
+### Report Format for Analytics
+
+```markdown
+### MCP Analytics Gaps
+
+**Redis stores but not exposed:**
+- [ ] `X_data` stored by `record_X()` but not returned by any getter
+
+**API exposes but not in model:**
+- [ ] `Y_field` returned by admin route but missing from `MCPAnalyticsResponse`
+
+**Model has but TypeScript missing:**
+- [ ] `Z_field` in Python `MCPAnalyticsResponse` but not in TS interface
+
+**API returns but not displayed:**
+- [ ] `W_field` in TypeScript type but not rendered in Admin.tsx
+```
+
+---
+
+## 9. MCP Output Token Efficiency
+
+MCP tool output should be token-efficient since it's consumed by LLMs. Every wasted token costs money and context.
+
+### Source of Truth Files
+
+| What | Where |
+|------|-------|
+| MCP formatters | `src/magaldi_mcp/formatters/*.py` |
+| ES repository getters | `src/shared/db/repositories/*.py` |
+| Tool implementations | `src/magaldi_mcp/tools_impl.py` |
+
+### Common Token Waste Patterns
+
+1. **Redundant type prefixes**: Don't repeat `[feature]` on every line when listing features - context already makes it clear
+2. **Using `element_id` instead of `hash_id`**: Always return `hash_id` (stable, required for follow-up calls)
+3. **Verbose field names**: Prefer compact field names in output
+4. **Unnecessary whitespace**: Avoid excessive blank lines between items
+5. **Full summaries when `brief=True`**: Respect brief mode and omit summaries
+
+### Checklist for MCP Output
+
+- [ ] ES repository getters include `hash_id` in `_source` list
+- [ ] Repository returns include `hash_id` field (not just `element_id` or `feature_id`)
+- [ ] Formatters use `hash_id` in output (for follow-up tool calls)
+- [ ] Type prefixes only shown when necessary (mixed types or disambiguation)
+- [ ] Brief mode omits summaries and verbose fields
+- [ ] Output uses compact format (no unnecessary repetition)
+
+### Verification Steps
+
+1. **Check repository getters** - Read `src/shared/db/repositories/*.py`:
+   - Every `get_*` method should include `hash_id` in `_source`
+   - Return dict should include `hash_id` field
+
+2. **Check formatters** - Read `src/magaldi_mcp/formatters/*.py`:
+   - Use `hash_id` in ID suffix (not `element_id`, `feature_id`, etc.)
+   - Avoid redundant type prefixes for homogeneous lists
+   - Respect length limits on summaries
+
+3. **Test output** - Run tools and check for waste:
+   ```
+   # Good: compact, uses hash_id
+   feature_name (10 members) | id:abc123
+
+   # Bad: wasteful prefix, uses element_id
+   [feature] feature_name (10 members) | id:scope:repo:main:feature:name:1
+   ```
+
+### Report Format for Output Issues
+
+After verifying repository getters and formatters, report any gaps found:
+
+```markdown
+### MCP Output Token Waste
+
+**Missing hash_id:**
+- [ ] `{getter_name}` doesn't include `hash_id` in `_source` or return dict
+
+**Formatter issues:**
+- [ ] `{formatter_name}` uses `{wrong_id_field}` instead of `hash_id`
+- [ ] `{formatter_name}` repeats type prefix unnecessarily for homogeneous lists
+
+**Verbose output:**
+- [ ] `{tool_name}` doesn't respect `brief` parameter
+- [ ] `{formatter_name}` has unnecessary blank lines between items
+```
+
+---
+
+## 10. Report Format
 
 After verification, produce:
 

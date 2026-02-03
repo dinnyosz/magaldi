@@ -539,6 +539,13 @@ export interface ToolTransitionInfo {
   percentage: number
 }
 
+export interface ToolDurationInfo {
+  tool_name: string
+  total_ms: number
+  call_count: number
+  avg_ms: number
+}
+
 export interface MCPAnalyticsResponse {
   total_calls: number
   unique_tools: number
@@ -546,6 +553,7 @@ export interface MCPAnalyticsResponse {
   tool_usage: ToolUsageInfo[]
   top_transitions: ToolTransitionInfo[]
   transition_matrix: Record<string, Record<string, number>>
+  tool_durations: ToolDurationInfo[]
 }
 
 export interface DailyActivityItem {

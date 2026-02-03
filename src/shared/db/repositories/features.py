@@ -170,6 +170,7 @@ class FeatureRepository:
                 "sort": [{"member_count": "desc"}],
                 "_source": [
                     "element_id",
+                    "hash_id",
                     "cluster_id",
                     "cluster_label",
                     "summary",
@@ -184,6 +185,7 @@ class FeatureRepository:
             source = hit["_source"]
             features.append({
                 "feature_id": source.get("element_id"),
+                "hash_id": source.get("hash_id"),
                 "label": source.get("cluster_label"),
                 "summary": source.get("summary", ""),
                 "member_count": source.get("member_count", 0),
@@ -234,6 +236,7 @@ class FeatureRepository:
                 "sort": [{"member_count": "desc"}],
                 "_source": [
                     "element_id",
+                    "hash_id",
                     "cluster_id",
                     "cluster_label",
                     "summary",
@@ -250,6 +253,7 @@ class FeatureRepository:
             source = hit["_source"]
             subfeatures.append({
                 "subfeature_id": source.get("element_id"),
+                "hash_id": source.get("hash_id"),
                 "label": source.get("cluster_label"),
                 "summary": source.get("summary", ""),
                 "member_count": source.get("member_count", 0),

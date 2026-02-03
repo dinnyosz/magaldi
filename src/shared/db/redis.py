@@ -1037,6 +1037,7 @@ class RedisMCPAnalyticsRepository(RedisRepository):
 
     SESSION_TTL = 3600  # 1 hour session timeout
     DAILY_TTL = 30 * 24 * 3600  # 30 days retention for daily data
+    TRANSITION_MAX_GAP_SECONDS = 10  # Max gap between calls to count as a transition
 
     def record_tool_call(
         self,
@@ -1045,12 +1046,19 @@ class RedisMCPAnalyticsRepository(RedisRepository):
     ) -> None:
         """Record a tool call and compute transitions.
 
+        Transitions are only recorded if the gap between the previous tool's
+        end time and this tool's start time is <= TRANSITION_MAX_GAP_SECONDS.
+        This ensures only related tool calls are counted as transitions.
+
         Args:
             tool_name: Name of the tool being called.
             session_id: Optional session identifier for transition tracking.
         """
+        import json
+
         client = self._get_client()
-        today = datetime.now().strftime("%Y-%m-%d")
+        now = datetime.now()
+        today = now.strftime("%Y-%m-%d")
 
         # Increment total call count
         client.hincrby(MCP_TOOL_CALLS, tool_name, 1)
@@ -1063,20 +1071,116 @@ class RedisMCPAnalyticsRepository(RedisRepository):
         # Track transitions if we have a session
         if session_id:
             session_key = f"{MCP_SESSION_PREFIX}{session_id}"
-            last_tool = client.get(session_key)
+            last_data = client.get(session_key)
 
-            if last_tool:
-                # Record transition from last_tool to tool_name
-                transition_key = f"{last_tool}:{tool_name}"
-                client.hincrby(MCP_TOOL_TRANSITIONS, transition_key, 1)
+            if last_data:
+                try:
+                    # Parse previous tool data (JSON: {tool, end_time})
+                    data = json.loads(last_data)
+                    last_tool = data.get("tool")
+                    last_end_time = data.get("end_time")
 
-                # Also track daily transitions
-                daily_trans_key = f"{MCP_DAILY_CALLS_PREFIX}{today}:transitions"
-                client.hincrby(daily_trans_key, transition_key, 1)
-                client.expire(daily_trans_key, self.DAILY_TTL)
+                    # Only record transition if previous call ended recently
+                    if last_tool and last_end_time:
+                        end_dt = datetime.fromisoformat(last_end_time)
+                        gap_seconds = (now - end_dt).total_seconds()
 
-            # Update session with current tool
-            client.setex(session_key, self.SESSION_TTL, tool_name)
+                        if gap_seconds <= self.TRANSITION_MAX_GAP_SECONDS:
+                            # Record transition from last_tool to tool_name
+                            transition_key = f"{last_tool}:{tool_name}"
+                            client.hincrby(MCP_TOOL_TRANSITIONS, transition_key, 1)
+
+                            # Also track daily transitions
+                            daily_trans_key = f"{MCP_DAILY_CALLS_PREFIX}{today}:transitions"
+                            client.hincrby(daily_trans_key, transition_key, 1)
+                            client.expire(daily_trans_key, self.DAILY_TTL)
+                except (json.JSONDecodeError, ValueError):
+                    # Invalid data format, skip transition tracking
+                    pass
+
+            # Update session with current tool (start_time for duration, end_time for transitions)
+            session_data = json.dumps({
+                "tool": tool_name,
+                "start_time": now.isoformat(),
+                "end_time": None,
+            })
+            client.setex(session_key, self.SESSION_TTL, session_data)
+
+    def record_tool_end(self, session_id: str | None = None) -> None:
+        """Record that the current tool call has ended.
+
+        This updates the session with the end time, which is used to determine
+        if subsequent tool calls should be counted as transitions. Also records
+        the tool execution duration for runtime analytics.
+
+        Args:
+            session_id: Session identifier for transition tracking.
+        """
+        import json
+
+        if not session_id:
+            return
+
+        client = self._get_client()
+        session_key = f"{MCP_SESSION_PREFIX}{session_id}"
+        current_data = client.get(session_key)
+
+        if current_data:
+            try:
+                data = json.loads(current_data)
+                now = datetime.now()
+                data["end_time"] = now.isoformat()
+
+                # Calculate and record duration if we have start_time
+                start_time = data.get("start_time")
+                tool_name = data.get("tool")
+                if start_time and tool_name:
+                    start_dt = datetime.fromisoformat(start_time)
+                    duration_ms = int((now - start_dt).total_seconds() * 1000)
+
+                    # Record duration stats: total_ms and call_count for averaging
+                    duration_key = f"{MCP_DAILY_CALLS_PREFIX}durations"
+                    client.hincrby(duration_key, f"{tool_name}:total_ms", duration_ms)
+                    client.hincrby(duration_key, f"{tool_name}:count", 1)
+
+                client.setex(session_key, self.SESSION_TTL, json.dumps(data))
+            except json.JSONDecodeError:
+                pass
+
+    def get_tool_durations(self) -> dict[str, dict[str, int | float]]:
+        """Get tool execution duration statistics.
+
+        Returns:
+            Dict mapping tool name to {total_ms, count, avg_ms}.
+        """
+        client = self._get_client()
+        duration_key = f"{MCP_DAILY_CALLS_PREFIX}durations"
+        raw_data = client.hgetall(duration_key)
+
+        # Parse and aggregate
+        tools: dict[str, dict[str, int]] = {}
+        for key, value in raw_data.items():
+            # key format: "tool_name:total_ms" or "tool_name:count"
+            parts = key.rsplit(":", 1)
+            if len(parts) == 2:
+                tool_name, metric = parts
+                if tool_name not in tools:
+                    tools[tool_name] = {"total_ms": 0, "count": 0}
+                tools[tool_name][metric] = int(value)
+
+        # Calculate averages
+        result: dict[str, dict[str, int | float]] = {}
+        for tool_name, stats in tools.items():
+            total_ms = stats.get("total_ms", 0)
+            count = stats.get("count", 0)
+            avg_ms = total_ms / count if count > 0 else 0
+            result[tool_name] = {
+                "total_ms": total_ms,
+                "count": count,
+                "avg_ms": round(avg_ms, 1),
+            }
+
+        return result
 
     def get_tool_counts(self) -> dict[str, int]:
         """Get all tool call counts.
