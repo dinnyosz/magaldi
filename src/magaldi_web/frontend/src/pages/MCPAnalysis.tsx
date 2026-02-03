@@ -29,8 +29,11 @@ import {
   getMCPActivityHistory,
   clearMCPAnalytics,
   getMCPTransitionDetails,
+  getMCPRecentCalls,
   ToolTransitionInfo,
   TransitionDetailInfo,
+  ToolUsageInfo,
+  RecentToolCallInfo,
 } from '../api'
 
 // Chart colors
@@ -40,6 +43,7 @@ function MCPAnalysis() {
   const [historyDays, setHistoryDays] = useState(7)
   const [expandedTransition, setExpandedTransition] = useState<string | null>(null)
   const [transitionFilter, setTransitionFilter] = useState<{ from?: string; to?: string }>({})
+  const [expandedTool, setExpandedTool] = useState<string | null>(null)
 
   const { data: mcpAnalytics, isLoading: analyticsLoading, refetch: refetchAnalytics } = useQuery({
     queryKey: ['mcpAnalytics'],
@@ -64,6 +68,16 @@ function MCPAnalysis() {
     enabled: !!transitionFilter.from && !!transitionFilter.to,
   })
 
+  // Query for tool details - triggered when a tool is clicked
+  const { data: toolDetails, isLoading: toolDetailsLoading } = useQuery({
+    queryKey: ['mcpToolDetails', expandedTool],
+    queryFn: () => getMCPRecentCalls({
+      tool_name: expandedTool!,
+      limit: 100,
+    }),
+    enabled: !!expandedTool,
+  })
+
   const handleDaysChange = (newDays: number) => {
     const maxDays = activityHistory?.max_days || 30
     const validDays = Math.max(1, Math.min(newDays, maxDays))
@@ -84,9 +98,22 @@ function MCPAnalysis() {
       setExpandedTransition(null)
       setTransitionFilter({})
     } else {
-      // Expand and fetch details
+      // Expand and fetch details (collapse tool details if open)
       setExpandedTransition(key)
       setTransitionFilter({ from: transition.from_tool, to: transition.to_tool })
+      setExpandedTool(null)
+    }
+  }
+
+  const handleToolClick = (tool: ToolUsageInfo) => {
+    if (expandedTool === tool.tool_name) {
+      // Collapse if clicking same tool
+      setExpandedTool(null)
+    } else {
+      // Expand and fetch details (collapse transition details if open)
+      setExpandedTool(tool.tool_name)
+      setExpandedTransition(null)
+      setTransitionFilter({})
     }
   }
 
@@ -226,11 +253,12 @@ function MCPAnalysis() {
 
               {/* Row 2: Tables */}
               <Row>
-                {/* Tool Usage Table */}
+                {/* Tool Usage Table (Clickable) */}
                 <Col md={6}>
                   <h6 className="text-muted mb-3">
                     <i className="bi bi-list-ol me-2"></i>
                     Tool Usage (Total: {mcpAnalytics.total_calls.toLocaleString()})
+                    <small className="text-info ms-2">(click row for details)</small>
                   </h6>
                   {mcpAnalytics.tool_usage.length > 0 ? (
                     <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
@@ -247,11 +275,22 @@ function MCPAnalysis() {
                         <tbody>
                           {mcpAnalytics.tool_usage.map((tool, idx) => {
                             const duration = mcpAnalytics.tool_durations?.find(d => d.tool_name === tool.tool_name)
+                            const isExpanded = expandedTool === tool.tool_name
                             return (
-                              <tr key={tool.tool_name}>
-                                <td className="text-muted">{idx + 1}</td>
+                              <tr
+                                key={tool.tool_name}
+                                onClick={() => handleToolClick(tool)}
+                                style={{ cursor: 'pointer' }}
+                              >
+                                <td
+                                  className="text-muted"
+                                  style={{ borderLeft: isExpanded ? '3px solid var(--bs-primary)' : 'none' }}
+                                >
+                                  {idx + 1}
+                                </td>
                                 <td>
                                   <code className="small">{tool.tool_name}</code>
+                                  {isExpanded && <i className="bi bi-chevron-down ms-2 text-primary"></i>}
                                 </td>
                                 <td className="text-end">{tool.call_count.toLocaleString()}</td>
                                 <td className="text-end text-muted">{tool.percentage}%</td>
@@ -450,6 +489,96 @@ function MCPAnalysis() {
                                         {detail.elapsed_ms}ms
                                       </span>
                                     ) : '-'}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </Table>
+                        </div>
+                      )}
+                    </Card.Body>
+                  </Card>
+                </div>
+              </Collapse>
+
+              {/* Tool Details (shown when a tool is clicked) */}
+              <Collapse in={!!expandedTool}>
+                <div>
+                  <Card className="mt-4 border-info">
+                    <Card.Header className="bg-info text-white d-flex justify-content-between align-items-center">
+                      <span>
+                        <i className="bi bi-terminal me-2"></i>
+                        Tool Details: {expandedTool}
+                      </span>
+                      <Button
+                        variant="light"
+                        size="sm"
+                        onClick={() => setExpandedTool(null)}
+                      >
+                        <i className="bi bi-x-lg"></i>
+                      </Button>
+                    </Card.Header>
+                    <Card.Body>
+                      {toolDetailsLoading ? (
+                        <div className="text-center py-3">
+                          <Spinner animation="border" size="sm" />
+                        </div>
+                      ) : !toolDetails || toolDetails.calls.length === 0 ? (
+                        <Alert variant="info">
+                          No detailed call data available for this tool.
+                        </Alert>
+                      ) : (
+                        <div style={{ overflowX: 'auto' }}>
+                          <Table bordered hover className="mb-0">
+                            <thead className="table-dark">
+                              <tr>
+                                <th style={{ minWidth: '300px' }}>Input</th>
+                                <th style={{ minWidth: '120px' }}>Tool</th>
+                                <th style={{ minWidth: '400px' }}>Output</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {toolDetails.calls.map((call: RecentToolCallInfo, idx: number) => (
+                                <tr key={idx}>
+                                  <td>
+                                    <pre className="mb-0" style={{
+                                      maxHeight: '200px',
+                                      overflow: 'auto',
+                                      whiteSpace: 'pre-wrap',
+                                      wordBreak: 'break-word',
+                                      backgroundColor: 'rgba(13, 110, 253, 0.1)',
+                                      border: '1px solid rgba(13, 110, 253, 0.3)',
+                                      color: 'inherit',
+                                      padding: '6px',
+                                      borderRadius: '4px',
+                                      fontSize: '0.7rem',
+                                    }}>
+                                      {call.input_args || <em className="text-muted">No input</em>}
+                                    </pre>
+                                  </td>
+                                  <td className="text-center align-top">
+                                    <code className="small fw-bold">{call.tool_name}</code>
+                                    {call.duration_ms != null && (
+                                      <small className="text-muted d-block">
+                                        {call.duration_ms}ms
+                                      </small>
+                                    )}
+                                  </td>
+                                  <td>
+                                    <pre className="mb-0" style={{
+                                      maxHeight: '200px',
+                                      overflow: 'auto',
+                                      whiteSpace: 'pre-wrap',
+                                      wordBreak: 'break-word',
+                                      backgroundColor: 'rgba(25, 135, 84, 0.1)',
+                                      border: '1px solid rgba(25, 135, 84, 0.3)',
+                                      color: 'inherit',
+                                      padding: '6px',
+                                      borderRadius: '4px',
+                                      fontSize: '0.7rem',
+                                    }}>
+                                      {call.output_result || <em className="text-muted">No output</em>}
+                                    </pre>
                                   </td>
                                 </tr>
                               ))}

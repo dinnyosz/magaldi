@@ -744,8 +744,14 @@ export async function getMCPTransitionDetails(params?: {
   return fetchJson(`${API_BASE}/admin/mcp-analytics/transition-details${query}`)
 }
 
-export async function getMCPRecentCalls(limit?: number): Promise<MCPRecentCallsResponse> {
-  const query = limit ? `?limit=${limit}` : ''
+export async function getMCPRecentCalls(params?: {
+  limit?: number
+  tool_name?: string
+}): Promise<MCPRecentCallsResponse> {
+  const searchParams = new URLSearchParams()
+  if (params?.limit) searchParams.set('limit', String(params.limit))
+  if (params?.tool_name) searchParams.set('tool_name', params.tool_name)
+  const query = searchParams.toString() ? `?${searchParams.toString()}` : ''
   return fetchJson(`${API_BASE}/admin/mcp-analytics/recent-calls${query}`)
 }
 

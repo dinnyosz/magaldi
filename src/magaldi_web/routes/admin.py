@@ -423,11 +423,13 @@ async def get_mcp_transition_details(
 @router.get("/admin/mcp-analytics/recent-calls", response_model=MCPRecentCallsResponse)
 async def get_mcp_recent_calls(
     limit: int = Query(default=100, ge=1, le=500, description="Max calls to return"),
+    tool_name: str | None = Query(default=None, description="Filter by tool name"),
 ) -> MCPRecentCallsResponse:
     """Get recent tool calls with full input/output details.
 
     Args:
         limit: Maximum number of calls to return.
+        tool_name: Optional filter to show only calls for this tool.
 
     Returns:
         List of recent tool calls with their inputs and outputs.
@@ -437,6 +439,10 @@ async def get_mcp_recent_calls(
     try:
         analytics_repo = RedisMCPAnalyticsRepository(config)
         calls_data = analytics_repo.get_recent_calls(limit=limit)
+
+        # Filter by tool name if specified
+        if tool_name:
+            calls_data = [c for c in calls_data if c.get("tool_name") == tool_name]
 
         calls = [
             RecentToolCallInfo(
