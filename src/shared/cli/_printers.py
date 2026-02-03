@@ -41,7 +41,11 @@ def print_parsing_result(result: "ParsingResult") -> None:
     # Existing summary line
     types = ", ".join(f"{t}: [green]{c}[/]" for t, c in sorted(result.elements_by_type.items()))
     failed = f" | [red]{len(result.failed_files)} failed[/]" if result.failed_files else ""
-    console.print(f"  [green]{len(result.parsed_files)}[/] files → [green]{result.total_elements}[/] elements ({types}){failed}")
+    # Add filtered variables info if any were filtered
+    filtered = ""
+    if result.variables_filtered > 0:
+        filtered = f" | [dim]{result.variables_filtered} vars filtered[/]"
+    console.print(f"  [green]{len(result.parsed_files)}[/] files → [green]{result.total_elements}[/] elements ({types}){failed}{filtered}")
 
     # Per-tier context size analysis
     tiers = result.elements_by_tier

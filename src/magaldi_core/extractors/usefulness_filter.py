@@ -196,6 +196,10 @@ class ExtractionStats:
 # Thread-local stats for current file being parsed
 _current_stats: ExtractionStats | None = None
 
+# Global accumulator for total filtered stats across all files
+_global_kept: int = 0
+_global_skipped: int = 0
+
 
 def get_extraction_stats() -> ExtractionStats:
     """Get or create extraction stats for current parse."""
@@ -207,10 +211,35 @@ def get_extraction_stats() -> ExtractionStats:
 
 def reset_extraction_stats() -> ExtractionStats | None:
     """Reset and return the extraction stats. Call after parsing a file."""
-    global _current_stats
+    global _current_stats, _global_kept, _global_skipped
     stats = _current_stats
+    if stats:
+        _global_kept += stats.kept_count
+        _global_skipped += stats.skipped_count
     _current_stats = None
     return stats
+
+
+def get_global_filter_stats() -> tuple[int, int]:
+    """Get total kept and skipped counts across all files.
+
+    Returns:
+        Tuple of (kept_count, skipped_count).
+    """
+    return _global_kept, _global_skipped
+
+
+def reset_global_filter_stats() -> tuple[int, int]:
+    """Reset and return global filter stats. Call at start of parsing session.
+
+    Returns:
+        Tuple of (kept_count, skipped_count) before reset.
+    """
+    global _global_kept, _global_skipped
+    kept, skipped = _global_kept, _global_skipped
+    _global_kept = 0
+    _global_skipped = 0
+    return kept, skipped
 
 
 # =============================================================================

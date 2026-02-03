@@ -328,6 +328,10 @@ class ParsingResult:
     parsed_files: list[ParsedFile] = field(default_factory=list)
     failed_files: list[tuple[FileInfo, str]] = field(default_factory=list)
 
+    # Variable usefulness filter stats
+    variables_kept: int = 0
+    variables_filtered: int = 0
+
     @property
     def total_elements(self) -> int:
         return sum(len(pf.elements) for pf in self.parsed_files)
@@ -2565,6 +2569,14 @@ def parse_files(
     Returns:
         ParsingResult with all parsed files and elements.
     """
+    from magaldi_core.extractors.usefulness_filter import (
+        get_global_filter_stats,
+        reset_global_filter_stats,
+    )
+
+    # Reset global filter stats at start of parsing session
+    reset_global_filter_stats()
+
     result = ParsingResult(
         scope=manifest.scope,
         repository=manifest.repository,
@@ -2592,5 +2604,10 @@ def parse_files(
 
     # Link cross-file references to their definitions
     link_references(result)
+
+    # Store filter stats in result
+    kept, skipped = get_global_filter_stats()
+    result.variables_kept = kept
+    result.variables_filtered = skipped
 
     return result
