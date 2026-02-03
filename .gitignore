@@ -131,8 +131,9 @@ data/
 # CLAUDE CODE
 # =============================================================================
 
-# Claude Code local settings
-.claude/
+# Claude Code local settings (except skills which are shared)
+.claude/*
+!.claude/skills/
 
 # =============================================================================
 # NODE.JS

@@ -123,6 +123,22 @@ Use `mcp__magaldi__generate_config(repo_path="/path/to/repo")` to auto-generate 
 
 Magaldi MCP tools **auto-detect `scope` and `repository`** from `magaldi.yaml` in the current directory. No need to specify these parameters manually - just call the tools directly.
 
+## CRITICAL: Implementation Checklist
+
+**BEFORE implementing any of these changes, you MUST read `.claude/skills/implementation-checklist/SKILL.md`:**
+
+- Adding new element types (e.g., `trait`, `enum`, `interface`)
+- Extracting new metadata from code (e.g., `http_routes`, `security_issues`)
+- Modifying summarization prompts
+- Adding new fields to `CodeElement`
+
+The checklist ensures:
+1. **No gaps**: Every extracted data point surfaces in Web UI, MCP tools, AND summarization
+2. **Anti-verbose prompts**: All summaries start with action/content, never "This X is..."
+3. **Token efficiency**: Context added to prompts is minimal and conditional
+
+**Run `/check-magaldi-integrity` after parser or element type changes to verify completeness.**
+
 ## CRITICAL: Data Safety
 
 **NEVER delete or drop data without explicit user permission.** This includes:
