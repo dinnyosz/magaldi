@@ -17,7 +17,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Callable, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from shared.config import MagaldiConfig
@@ -41,7 +41,7 @@ from shared.ai.summarization import (
     clean_summary,
 )
 from shared.ai.context_size import compute_element_num_ctx, CONTEXT_TIERS, TIER_TIMEOUTS, TIER_SCALING_EXPONENT
-from shared.throttling import ThroughputTracker, compute_throttle_decision, ThrottleDecision, TimeoutEvent
+from shared.throttling import ThroughputTracker, compute_throttle_decision, ThrottleDecision
 
 
 def _get_model_display_name(model_config: ModelConfig, num_ctx: int) -> str:
@@ -899,12 +899,6 @@ class DependencyTracker:
             target_level = min(by_level.keys())
             level_ready = by_level[target_level]
 
-            # Debug: log level selection
-            with open("/tmp/magaldi_warmup.log", "a") as f:
-                level_counts = {lvl: len(elems) for lvl, elems in by_level.items()}
-                f.write(f"[LEVEL SELECT] levels={level_counts}, picked={target_level}, "
-                        f"count={len(level_ready)}\n")
-
             # Within the level, group by (model, tier) for optimal batching
             by_model_tier: dict[tuple[str, int], list[CodeElement]] = {}
             for elem in level_ready:
@@ -968,10 +962,6 @@ class DependencyTracker:
             # Set tier_changing flag for warmup (model change or tier change)
             if model_changing or tier_changing or self._current_model is None:
                 self._tier_changing = True
-                with open("/tmp/magaldi_warmup.log", "a") as f:
-                    f.write(f"[TIER SWITCH] model={self._current_model}->{selected_model}, "
-                            f"tier={self._current_tier}->{selected_tier}, "
-                            f"in_progress={len(self._in_progress)}\n")
 
             self._current_model = selected_model
             self._previous_tier = self._current_tier
@@ -1012,9 +1002,6 @@ class DependencyTracker:
             # During warmup, only return 1 element maximum
             if self._tier_changing:
                 effective_limit = 1
-                with open("/tmp/magaldi_warmup.log", "a") as f:
-                    f.write(f"[WARMUP] tier_changing=True, in_progress={len(self._in_progress)}, "
-                            f"warmup_task={self._warmup_task_id}, effective_limit={effective_limit}\n")
 
             # Get elements from current (model, tier) batch
             batch_key = (selected_model, selected_tier)
@@ -1026,8 +1013,6 @@ class DependencyTracker:
                 # Track warmup task (first task dispatched when tier_changing)
                 if self._tier_changing and self._warmup_task_id is None:
                     self._warmup_task_id = e.element_id
-                    with open("/tmp/magaldi_warmup.log", "a") as f:
-                        f.write(f"[WARMUP] Set warmup_task_id={e.element_id[:50]}\n")
 
             return batch_ready
 
@@ -1056,8 +1041,6 @@ class DependencyTracker:
             # Clear warmup flag only when the warmup task itself completes
             # This ensures the model is fully loaded before ramping up
             if self._tier_changing and element_id == self._warmup_task_id:
-                with open("/tmp/magaldi_warmup.log", "a") as f:
-                    f.write(f"[WARMUP] Cleared! warmup_task completed: {element_id[:50]}\n")
                 self._tier_changing = False
                 self._warmup_task_id = None
 
@@ -1767,9 +1750,6 @@ def process_elements(
             seen_paths.add(pf.file_info.relative_path)
             unique_parsed_files.append(pf)
 
-    if len(unique_parsed_files) != len(parsed_files):
-        with open("/tmp/magaldi_file_hash.log", "a") as f:
-            f.write(f"[DEDUP FILES] Removed {len(parsed_files) - len(unique_parsed_files)} duplicate file paths\n")
     parsed_files = unique_parsed_files
 
     # Collect all elements and compute element counts per file
@@ -1835,16 +1815,6 @@ def process_elements(
     if truly_stale_ids:
         es_repo.delete_elements(truly_stale_ids)
         result.elements_deleted = len(truly_stale_ids)
-
-    # Debug: log state of first few elements
-    _state_logged = 0
-    with open("/tmp/magaldi_file_hash.log", "a") as f:
-        f.write(f"\n[SKIP CHECK] Total elements: {len(all_elements)}, unique IDs: {len(all_element_ids)}, existing states: {len(existing_states)}\n")
-        f.write(f"[RELOCATED] stale_total={len(stale_element_ids)}, relocated={len(relocated_old_ids)}, truly_deleted={len(truly_stale_ids)}, relocated_matches={len(relocated_states)}\n")
-        # Log first few element IDs
-        for eid in all_element_ids[:3]:
-            in_states = eid in existing_states
-            f.write(f"  Sample ID: {eid[:70]}... in_states={in_states}\n")
 
     # Filter: only process elements that are new, changed, or missing summary
     # Also track which files had skipped elements (need file_hash update)
@@ -1919,30 +1889,11 @@ def process_elements(
                     continue
             elif content_unchanged and not is_fully_processed:
                 skipped_no_summary += 1
-                if _state_logged < 3:
-                    missing = []
-                    if not has_summary:
-                        missing.append("summary")
-                    if is_embeddable:
-                        if not has_summary_embedding:
-                            missing.append("summary_embedding")
-                        if not has_code_embedding:
-                            missing.append("code_embedding")
-                    with open("/tmp/magaldi_file_hash.log", "a") as f:
-                        f.write(f"[NEEDS PROCESSING] {elem.element_id[:60]}... (missing: {', '.join(missing)})\n")
-                    _state_logged += 1
         else:
             state_none_count += 1
             new_elements += 1
-            if _state_logged < 3:
-                with open("/tmp/magaldi_file_hash.log", "a") as f:
-                    f.write(f"[NEW ELEMENT] {elem.element_id[:60]}... (not in ES)\n")
-                _state_logged += 1
         # Element is new OR content changed OR missing summary/embeddings - needs processing
         elements_to_process.append(elem)
-
-    with open("/tmp/magaldi_file_hash.log", "a") as f:
-        f.write(f"[SKIP SUMMARY] state_found={state_found_count}, state_none={state_none_count}, relocated_copied={relocated_copied}, skipped={skipped_with_summary}, needs_summary={skipped_no_summary}, new={new_elements}, to_process={len(elements_to_process)}\n")
 
     total = len(all_elements)
 
@@ -1963,18 +1914,10 @@ def process_elements(
                     files_to_update[rel_path] = file_hashes[rel_path]
 
         if files_to_update:
-            with open("/tmp/magaldi_file_hash.log", "a") as f:
-                f.write(f"[BEFORE UPDATE] {len(files_to_update)} files to update\n")
-                for path, new_hash in list(files_to_update.items())[:3]:
-                    f.write(f"  {path}: new_hash={new_hash[:16]}...\n")
-
             # Pass element_counts so FILE elements also get updated element_count
-            updated_count = es_repo.update_file_hashes(
+            es_repo.update_file_hashes(
                 scope, repository, username, files_to_update, elements_per_file
             )
-
-            with open("/tmp/magaldi_file_hash.log", "a") as f:
-                f.write(f"[AFTER UPDATE] {updated_count} elements updated in ES\n")
 
     if not elements_to_process:
         # All elements unchanged - fire progress callback showing 100% complete
@@ -2282,25 +2225,6 @@ def process_elements(
                     recent_errors.append((short_name, processed.error or "Unknown error"))
                     if len(recent_errors) > 3:
                         recent_errors.pop(0)
-
-                    # Log timeout events with detailed worker info
-                    error_lower = (processed.error or "").lower()
-                    if "timeout" in error_lower or "timed out" in error_lower:
-                        current_throughput, current_avg, current_count = timing_stats.get_throughput_stats()
-                        current_max = worker_status.get_max_active_runtime()
-                        active_count = worker_status.active_count()
-                        tier = dependency_tracker._get_tier(element.element_id)
-                        timeout_event = TimeoutEvent(
-                            element_id=element.element_id,
-                            element_type=element.element_type,
-                            tier=tier,
-                            workers_active=active_count,
-                            avg_runtime=current_avg,
-                            max_runtime=current_max,
-                            timeout_limit=config.summarize_timeout,
-                        )
-                        with open("/tmp/magaldi_warmup.log", "a") as f:
-                            f.write(timeout_event.to_log_line() + "\n")
 
                     # Update Redis job status
                     if redis_tracker:

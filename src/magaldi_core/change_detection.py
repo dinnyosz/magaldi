@@ -302,7 +302,6 @@ def compare_main_branch(
 
     local_paths = set()
 
-    _logged_count = 0
     for file_info in files:
         local_paths.add(file_info.relative_path)
         db_state = db_states.get(file_info.relative_path)
@@ -314,13 +313,7 @@ def compare_main_branch(
             # Unchanged
             unchanged_count += 1
         else:
-            # Modified - log first few for debugging
-            if _logged_count < 3:
-                with open("/tmp/magaldi_file_hash.log", "a") as f:
-                    f.write(f"[COMPARE] {file_info.relative_path}\n")
-                    f.write(f"  disk_hash={file_info.hash[:16] if file_info.hash else 'None'}...\n")
-                    f.write(f"  es_hash={db_state.file_hash[:16] if db_state.file_hash else 'None'}...\n")
-                _logged_count += 1
+            # Modified
             file_info.previous_hash = db_state.file_hash
             modified_files.append(file_info)
 

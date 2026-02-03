@@ -9,21 +9,13 @@ from __future__ import annotations
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from pathlib import Path
 from threading import Lock
-
-# Throttle log file for debugging
-THROTTLE_LOG_PATH = Path("/tmp/magaldi_throttle.log")
 
 
 def _log_throttle(message: str) -> None:
-    """Append a timestamped message to the throttle log."""
-    try:
-        timestamp = time.strftime("%H:%M:%S")
-        with open(THROTTLE_LOG_PATH, "a") as f:
-            f.write(f"[{timestamp}] {message}\n")
-    except Exception:
-        pass  # Don't let logging failures affect throttling
+    """No-op debug logging (disabled for performance)."""
+    pass
+
 
 # Safety margin for throttling - use 65% of timeout to leave 35% headroom
 # for variance in task runtimes when running concurrently.
@@ -203,7 +195,7 @@ class TimeoutEvent:
     timestamp: float = field(default_factory=time.time)
 
     def to_log_line(self) -> str:
-        """Format as a log line for /tmp/magaldi_warmup.log."""
+        """Format as a log line for debugging."""
         return (
             f"[TIMEOUT] element={self.element_type}:{self.element_id.split(':')[-2]}, "
             f"tier={self.tier}, workers={self.workers_active}, "

@@ -408,9 +408,6 @@ class MetadataRepository:
         Returns:
             Dict mapping relative_path to {file_hash, is_deleted, element_count}.
         """
-        with open("/tmp/magaldi_file_hash.log", "a") as f:
-            f.write(f"[GET_FILE_STATES PARAMS] scope={scope} repository={repository} username={username}\n")
-
         client = self._get_client()
 
         # Search for all file-level elements
@@ -431,16 +428,6 @@ class MetadataRepository:
                 "_source": ["relative_path", "file_hash", "element_count"],
             },
         )
-
-        # Debug: check total hits vs returned
-        total_hits = result.get("hits", {}).get("total", {})
-        if isinstance(total_hits, dict):
-            total_count = total_hits.get("value", 0)
-        else:
-            total_count = total_hits
-        returned_count = len(result.get("hits", {}).get("hits", []))
-        with open("/tmp/magaldi_file_hash.log", "a") as f:
-            f.write(f"[ES QUERY] Total FILE elements in ES: {total_count}, returned: {returned_count}\n")
 
         # Also find orphan files: paths with elements but no FILE element
         # This handles interrupted runs where FILE element wasn't created
@@ -477,29 +464,17 @@ class MetadataRepository:
         }
 
         states = {}
-        total_hits = len(result["hits"]["hits"])
-        null_hash_count = 0
-        _logged = 0
         for hit in result["hits"]["hits"]:
             source = hit["_source"]
-            fh = source.get("file_hash")
-            if fh is None:
-                null_hash_count += 1
             states[source["relative_path"]] = {
-                "file_hash": fh,
+                "file_hash": source.get("file_hash"),
                 "is_deleted": False,
                 "element_count": source.get("element_count"),
             }
-            # Log first few to see what we're reading
-            if _logged < 5:
-                with open("/tmp/magaldi_file_hash.log", "a") as f:
-                    f.write(f"[GET_FILE_STATES] {source['relative_path']}: file_hash={fh[:16] if fh else 'None'}...\n")
-                _logged += 1
 
         # Detect orphan paths: have elements but no FILE element (from interrupted runs)
         # Add them to states with file_hash=None so they get re-parsed
         orphan_paths = all_element_paths - set(states.keys())
-        orphan_count = len(orphan_paths)
         for orphan_path in orphan_paths:
             states[orphan_path] = {
                 "file_hash": None,  # Will trigger re-parse
@@ -507,42 +482,6 @@ class MetadataRepository:
                 "element_count": None,
                 "is_orphan": True,  # Mark as orphan for logging
             }
-
-        with open("/tmp/magaldi_file_hash.log", "a") as f:
-            f.write(f"[GET_FILE_STATES SUMMARY] Found {total_hits} FILE elements, {null_hash_count} with null file_hash, {orphan_count} orphan paths\n")
-            if orphan_count > 0:
-                f.write("[ORPHAN PATHS] First few orphans (have elements but no FILE element):\n")
-                for op in list(orphan_paths)[:5]:
-                    f.write(f"  {op}\n")
-
-            # Debug: check if problematic paths exist with ANY scope/repo/user
-            test_path = "frontend/popscript/license/m_s.js"
-            f.write(f"[PATH CHECK] test_path={test_path} in_states={test_path in states}\n")
-            if test_path in states:
-                st = states[test_path]
-                f.write(f"[PATH CHECK] file_hash={st.get('file_hash')}, is_orphan={st.get('is_orphan')}\n")
-            if test_path not in states:
-                any_scope_check = client.search(
-                    index=INDEX_NAME,
-                    body={
-                        "query": {
-                            "bool": {
-                                "must": [
-                                    {"term": {"relative_path": test_path}},
-                                    {"term": {"element_type": "file"}},
-                                ]
-                            }
-                        },
-                        "_source": ["scope", "repository", "username", "file_hash"],
-                        "size": 10,
-                    },
-                )
-                any_hits = any_scope_check.get("hits", {}).get("hits", [])
-                f.write(f"[SCOPE CHECK] {test_path} not in states. Found {len(any_hits)} FILE elements with ANY scope/repo/user:\n")
-                for h in any_hits:
-                    s = h.get("_source", {})
-                    fh = s.get("file_hash")
-                    f.write(f"  scope={s.get('scope')} repo={s.get('repository')} user={s.get('username')} hash={fh[:16] if fh else 'None'}...\n")
 
         return states
 
