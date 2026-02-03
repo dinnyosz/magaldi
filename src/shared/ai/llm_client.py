@@ -21,15 +21,6 @@ Usage:
 
 from __future__ import annotations
 
-import os
-
-# Workaround for LiteLLM bug #11657: Ollama embeddings leak aiohttp sessions
-# causing "Too many open files" errors. Disabling aiohttp transport forces
-# LiteLLM to use httpx which has proper connection pooling.
-# See: https://github.com/BerriAI/litellm/issues/11657
-# IMPORTANT: Must be set BEFORE importing litellm to take effect!
-os.environ.setdefault("DISABLE_AIOHTTP_TRANSPORT", "True")
-
 import asyncio
 import atexit
 import random
