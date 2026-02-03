@@ -525,7 +525,8 @@ Write a 6-8 sentence summary describing:
 2. The key operations it provides
 3. How the member functions work together
 
-Write ONLY the summary. No reasoning, explanations, or bullet points."""
+Write ONLY the summary. No reasoning, explanations, or bullet points.
+Start directly with what it provides - never start with "This feature...", "The X feature...", or similar."""
 
 FEATURE_USER_PROMPT = """Feature name: {label}
 Number of members: {member_count}
@@ -547,6 +548,8 @@ Write a 6-8 sentence summary describing:
 1. The overall purpose of this feature
 2. The key operations it provides
 3. How the member functions work together
+
+Start directly with what it provides - never start with "This feature...", "The X feature...", or similar.
 
 Summary:"""
 
@@ -1067,7 +1070,8 @@ Write a 6-8 sentence summary describing:
 2. How the member functions work together
 3. The key operations this sub-group provides
 
-Write ONLY the summary. No reasoning, explanations, or bullet points."""
+Write ONLY the summary. No reasoning, explanations, or bullet points.
+Start directly with what it does - never start with "This sub-group...", "This subfeature...", or similar."""
 
 SUBFEATURE_USER_PROMPT = """Parent feature: {parent_label}
 Parent feature description: {parent_summary}
@@ -1092,6 +1096,8 @@ Write a 6-8 sentence summary describing:
 1. What this specific sub-group does within the context of the parent feature
 2. How the member functions work together
 3. The key operations this sub-group provides
+
+Start directly with what it does - never start with "This sub-group...", "This subfeature...", or similar.
 
 Summary:"""
 
