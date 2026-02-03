@@ -125,19 +125,18 @@ Magaldi MCP tools **auto-detect `scope` and `repository`** from `magaldi.yaml` i
 
 ## CRITICAL: Implementation Checklist
 
-**BEFORE implementing any of these changes, you MUST read `.claude/skills/implementation-checklist/SKILL.md`:**
+**BEFORE and AFTER implementing any of these changes, you MUST run `/check-magaldi-integrity`:**
 
-- Adding new element types (e.g., `trait`, `enum`, `interface`)
-- Extracting new metadata from code (e.g., `http_routes`, `security_issues`)
+- Adding new element types
+- Extracting new metadata from code
 - Modifying summarization prompts
 - Adding new fields to `CodeElement`
 
-The checklist ensures:
+The skill ensures:
 1. **No gaps**: Every extracted data point surfaces in Web UI, MCP tools, AND summarization
 2. **Anti-verbose prompts**: All summaries start with action/content, never "This X is..."
 3. **Token efficiency**: Context added to prompts is minimal and conditional
-
-**Run `/check-magaldi-integrity` after parser or element type changes to verify completeness.**
+4. **Source references**: No hardcoded values, always reference source files
 
 ## CRITICAL: Data Safety
 
