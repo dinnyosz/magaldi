@@ -38,6 +38,10 @@ Every piece of data extracted during parsing MUST be surfaced to users through A
 | TypeScript types | `src/magaldi_web/frontend/src/api.ts` |
 | Element icons (Explorer) | `typeConfig` in `src/magaldi_web/frontend/src/pages/Explorer.tsx` |
 | Element icons (Element detail) | `typeConfig` in `src/magaldi_web/frontend/src/pages/Element.tsx` |
+| Dashboard stats model | `DashboardStats`, `RepoSummary` @ `src/magaldi_web/models.py` |
+| Dashboard aggregations | `get_dashboard()` @ `src/magaldi_web/routes/dashboard.py` |
+| ES serialization | `index_element()` @ `src/shared/db/repositories/elements.py` |
+| Conditional element types | `CONDITIONAL_ELEMENT_TYPES` @ `src/magaldi_web/frontend/src/pages/Explorer.tsx`, `Search.tsx` |
 
 ---
 
@@ -58,16 +62,25 @@ When adding a new element type:
 - [ ] Update context building in `build_prompt()` and `build_messages()` if needed
 
 ### Web UI
-- [ ] Dashboard stats: `src/magaldi_web/routes/dashboard.py`
+- [ ] Dashboard stats model: Add `{type}_count` to `DashboardStats` and `RepoSummary` in `src/magaldi_web/models.py`
+- [ ] Dashboard aggregations: Add aggregation in `src/magaldi_web/routes/dashboard.py`
+- [ ] Dashboard TS interface: Add `{type}_count` to `DashboardStats` in `src/magaldi_web/frontend/src/api.ts`
+- [ ] **Conditional display**: If type is language-specific (not universal), add to `CONDITIONAL_ELEMENT_TYPES` in `Explorer.tsx` and `Search.tsx`
 - [ ] Search filters: `src/magaldi_web/routes/search.py`
 - [ ] Explorer icons: Add to `typeConfig` in `src/magaldi_web/frontend/src/pages/Explorer.tsx`
 - [ ] Element detail icons: Add to `typeConfig` in `src/magaldi_web/frontend/src/pages/Element.tsx`
 - [ ] Element detail rendering: Handle new type in `src/magaldi_web/frontend/src/pages/Element.tsx`
 - [ ] TypeScript interfaces: `src/magaldi_web/frontend/src/api.ts`
 
+**Conditional vs Always-Visible Types**:
+- **Always visible** (universal across languages): `file`, `class`, `function`, `method`, `variable`, `constant`
+- **Conditional** (language-specific, hide when count=0): `interface`, `trait`, `enum`, `type_alias`, `import`
+- New language-specific types should be added to `CONDITIONAL_ELEMENT_TYPES` arrays
+
 ### MCP Tools
 - [ ] Verify `search_code` returns new element type
 - [ ] Verify `get_element` returns all fields
+- [ ] Update `element_types` description in `src/magaldi_mcp/tools/schemas/search.py` (must list all valid types)
 - [ ] Update schemas if needed: `src/magaldi_mcp/tools/schemas/`
 - [ ] Update formatters if needed: `src/magaldi_mcp/formatters/`
 
@@ -189,12 +202,42 @@ Each element type needs an entry with:
 - `color`: Badge color (e.g., `primary`, `success`, `warning`)
 - Optional flags: `canHaveChildren`, `canHaveCallGraph` (Explorer only)
 
-### Step 5: Check MCP
+### Step 5: Check Dashboard Stats
+Verify all element types have corresponding `*_count` fields:
+```bash
+# Get element types from source of truth
+source .venv/bin/activate
+python -c "from shared.ai.summarization import LINE_THRESHOLDS; print(sorted(LINE_THRESHOLDS.keys()))"
+
+# Check DashboardStats and RepoSummary models
+grep -A 20 "class DashboardStats" src/magaldi_web/models.py
+grep -A 20 "class RepoSummary" src/magaldi_web/models.py
+
+# Check dashboard route aggregations
+grep -A 30 '"aggs":' src/magaldi_web/routes/dashboard.py | head -40
+```
+
+Each element type should have:
+- `{type}_count: int = 0` field in `DashboardStats`
+- `{type}_count: int = 0` field in `RepoSummary`
+- Aggregation in dashboard.py: `"{type}_count": {"filter": {"term": {"element_type": "{type}"}}}`
+
+**Note**: `feature` and `subfeature` are AI-generated types (not parsed), so they appear in stats but not in `LINE_THRESHOLDS`.
+
+### Step 6: Check MCP Schemas
+Verify `element_types` descriptions include all valid types:
+```bash
+grep -A 5 "element_types" src/magaldi_mcp/tools/schemas/search.py
+```
+
+The description should list ALL element types from the source of truth, not just common ones.
+
+### Step 7: Check MCP Implementation
 - Read `src/magaldi_mcp/tools_impl.py`
 - Verify `get_element` returns all fields
 - Verify search tools filter correctly
 
-### Step 6: Run Tests
+### Step 8: Run Tests
 ```bash
 pytest tests/test_summarization.py -v
 ```
@@ -211,10 +254,11 @@ pytest tests/test_summarization.py -v
 
 2. **New element type but not in**:
    - Summarization prompts (all 5 dicts!)
-   - Dashboard statistics
+   - Dashboard statistics (`DashboardStats`, `RepoSummary` models + route aggregations)
    - Search filter options
    - Explorer `typeConfig` (missing icon/color)
    - Element detail `typeConfig` (missing icon/color)
+   - MCP schema `element_types` description
 
 3. **Element links not using hash_id**:
    - Always use `hash_id` (stable) not `element_id` (may change)
@@ -225,6 +269,15 @@ pytest tests/test_summarization.py -v
 5. **Icon config mismatch between Explorer and Element pages**:
    - Both `typeConfig` objects should have the same element types
    - Icons and colors should be consistent across pages
+
+6. **Dashboard stats showing irrelevant types**:
+   - Only "common" types should always display: `file`, `class`, `function`, `method`, `variable`, `constant`
+   - "Conditional" types should only appear when count > 0: `interface`, `trait`, `enum`, `type_alias`, `import`
+   - See `CONDITIONAL_ELEMENT_TYPES` in `Explorer.tsx` and `Search.tsx`
+
+7. **MCP schema element_types description incomplete**:
+   - `search_code` schema must list ALL valid element types, not just common ones
+   - Check `src/magaldi_mcp/tools/schemas/search.py`
 
 ---
 
@@ -247,8 +300,19 @@ After verification, produce:
 - [ ] `new_type` missing from Element.tsx `typeConfig`
 - [ ] Icon/color mismatch between Explorer and Element for `some_type`
 
+### Missing in Dashboard Stats
+- [ ] `{type}_count` missing from `DashboardStats` model
+- [ ] `{type}_count` missing from `RepoSummary` model
+- [ ] Aggregation for `{type}` missing in dashboard.py
+- [ ] `{type}_count` missing from TypeScript `DashboardStats` interface
+
+### Missing Conditional Display Config
+- [ ] Language-specific `new_type` not in `CONDITIONAL_ELEMENT_TYPES` (Explorer.tsx)
+- [ ] Language-specific `new_type` not in `CONDITIONAL_ELEMENT_TYPES` (Search.tsx)
+
 ### Missing in MCP
 - [ ] `get_element` doesn't return `new_field`
+- [ ] `search_code` schema `element_types` description incomplete
 
 ### Anti-verbose Issues
 - [ ] `new_type` prompt missing "Start..." instruction
@@ -257,4 +321,7 @@ After verification, produce:
 1. Add `new_type` to all prompt dicts in summarization.py
 2. Add `new_field` to Element.tsx
 3. Add `new_type` to typeConfig in both Explorer.tsx and Element.tsx
+4. Add `{type}_count` to DashboardStats, RepoSummary, and dashboard route
+5. If language-specific, add to CONDITIONAL_ELEMENT_TYPES arrays
+6. Update MCP schema element_types description
 ```
