@@ -232,8 +232,8 @@ class MagaldiMCPServer:
             return await asyncio.to_thread(
                 get_file_structure,
                 es,
-                scope=args["scope"],
-                repository=args["repository"],
+                scope=args.get("scope"),
+                repository=args.get("repository"),
                 file_path=args["file_path"],
                 username=args.get("username", self.default_username),
             )
@@ -247,8 +247,8 @@ class MagaldiMCPServer:
             return await asyncio.to_thread(
                 list_features,
                 es,
-                scope=args["scope"],
-                repository=args["repository"],
+                scope=args.get("scope"),
+                repository=args.get("repository"),
                 username=args.get("username", self.default_username),
                 brief=args.get("brief", True),
             )
@@ -256,8 +256,8 @@ class MagaldiMCPServer:
             return await asyncio.to_thread(
                 get_repo_stats,
                 es,
-                scope=args["scope"],
-                repository=args["repository"],
+                scope=args.get("scope"),
+                repository=args.get("repository"),
                 username=args.get("username", self.default_username),
             )
         elif name == "get_children":
@@ -296,8 +296,8 @@ class MagaldiMCPServer:
                 es,
                 pattern=args["pattern"],
                 mode=args["mode"],
-                scope=args["scope"],
-                repository=args["repository"],
+                scope=args.get("scope"),
+                repository=args.get("repository"),
                 username=args.get("username"),  # Pass None if not provided
                 slop=args.get("slop", 5),
                 glob=args.get("glob"),
@@ -357,8 +357,8 @@ class MagaldiMCPServer:
             return await asyncio.to_thread(
                 find_dead_code,
                 es,
-                scope=args["scope"],
-                repository=args["repository"],
+                scope=args.get("scope"),
+                repository=args.get("repository"),
                 username=args.get("username"),
                 include_tests=args.get("include_tests", False),
             )
@@ -366,8 +366,8 @@ class MagaldiMCPServer:
             return await asyncio.to_thread(
                 find_entry_points,
                 es,
-                scope=args["scope"],
-                repository=args["repository"],
+                scope=args.get("scope"),
+                repository=args.get("repository"),
                 username=args.get("username"),
             )
         elif name == "generate_config":
@@ -432,8 +432,8 @@ class MagaldiMCPServer:
                 find_dependents,
                 es,
                 module=args["module"],
-                scope=args["scope"],
-                repository=args["repository"],
+                scope=args.get("scope"),
+                repository=args.get("repository"),
                 username=args.get("username"),
                 limit=args.get("limit", 50),
             )
@@ -441,8 +441,8 @@ class MagaldiMCPServer:
             return await asyncio.to_thread(
                 dependency_graph,
                 es,
-                scope=args["scope"],
-                repository=args["repository"],
+                scope=args.get("scope"),
+                repository=args.get("repository"),
                 username=args.get("username"),
                 internal_only=args.get("internal_only", True),
             )
@@ -450,8 +450,8 @@ class MagaldiMCPServer:
             return await asyncio.to_thread(
                 list_patterns,
                 es,
-                scope=args["scope"],
-                repository=args["repository"],
+                scope=args.get("scope"),
+                repository=args.get("repository"),
                 username=args.get("username", self.default_username),
             )
         elif name == "find_by_pattern":
@@ -459,8 +459,8 @@ class MagaldiMCPServer:
                 find_by_pattern,
                 es,
                 pattern=args["pattern"],
-                scope=args["scope"],
-                repository=args["repository"],
+                scope=args.get("scope"),
+                repository=args.get("repository"),
                 username=args.get("username", self.default_username),
                 min_confidence=args.get("min_confidence", 0.6),
                 limit=args.get("limit", 20),
@@ -501,8 +501,8 @@ class MagaldiMCPServer:
             return await asyncio.to_thread(
                 find_complex_functions,
                 es,
-                scope=args["scope"],
-                repository=args["repository"],
+                scope=args.get("scope"),
+                repository=args.get("repository"),
                 username=args.get("username", self.default_username),
                 min_complexity=args.get("min_complexity", 10),
                 limit=args.get("limit", 20),
@@ -512,8 +512,8 @@ class MagaldiMCPServer:
             return await asyncio.to_thread(
                 find_security_issues,
                 es,
-                scope=args["scope"],
-                repository=args["repository"],
+                scope=args.get("scope"),
+                repository=args.get("repository"),
                 username=args.get("username", self.default_username),
                 severity=args.get("severity", "high"),
                 kind=args.get("kind"),
@@ -523,8 +523,8 @@ class MagaldiMCPServer:
             return await asyncio.to_thread(
                 find_undocumented,
                 es,
-                scope=args["scope"],
-                repository=args["repository"],
+                scope=args.get("scope"),
+                repository=args.get("repository"),
                 username=args.get("username", self.default_username),
                 max_coverage=args.get("max_coverage", 0.5),
                 public_only=args.get("public_only", True),
@@ -535,8 +535,8 @@ class MagaldiMCPServer:
             return await asyncio.to_thread(
                 find_env_usage,
                 es,
-                scope=args["scope"],
-                repository=args["repository"],
+                scope=args.get("scope"),
+                repository=args.get("repository"),
                 username=args.get("username", self.default_username),
                 env_name=args.get("env_name"),
                 limit=args.get("limit", 50),
@@ -545,8 +545,8 @@ class MagaldiMCPServer:
             return await asyncio.to_thread(
                 find_async_code,
                 es,
-                scope=args["scope"],
-                repository=args["repository"],
+                scope=args.get("scope"),
+                repository=args.get("repository"),
                 username=args.get("username", self.default_username),
                 pattern=args.get("pattern", "all"),
                 limit=args.get("limit", 30),
@@ -556,16 +556,16 @@ class MagaldiMCPServer:
             return await asyncio.to_thread(
                 get_command_tree,
                 es,
-                scope=args["scope"],
-                repository=args["repository"],
+                scope=args.get("scope"),
+                repository=args.get("repository"),
                 username=args.get("username", self.default_username),
             )
         elif name == "get_route_tree":
             return await asyncio.to_thread(
                 get_route_tree,
                 es,
-                scope=args["scope"],
-                repository=args["repository"],
+                scope=args.get("scope"),
+                repository=args.get("repository"),
                 username=args.get("username", self.default_username),
             )
         else:
