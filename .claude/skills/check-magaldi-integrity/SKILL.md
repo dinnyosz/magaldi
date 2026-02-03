@@ -279,9 +279,113 @@ pytest tests/test_summarization.py -v
    - `search_code` schema must list ALL valid element types, not just common ones
    - Check `src/magaldi_mcp/tools/schemas/search.py`
 
+8. **Variable/constant extraction inconsistency across languages**:
+   - All languages MUST extract variables/constants, then apply usefulness filter
+   - Check each extractor extracts `variable`/`constant` element types
+   - See Variable Usefulness Filter section below
+
 ---
 
-## 8. MCP Analytics Integrity
+## 8. Variable/Constant Usefulness Filter
+
+All language extractors MUST follow the same pattern for variable/constant extraction:
+
+1. **Extract ALL** module-level and class-level variable/constant assignments
+2. **Apply usefulness filter** to skip transient/temporary values
+3. **Log skipped variables** at DEBUG level for visibility
+
+### Source of Truth Files
+
+| What | Where |
+|------|-------|
+| Python filter implementation | `_is_useful_assignment()` @ `src/magaldi_core/extractors/python.py` |
+| Useful factory functions | `USEFUL_FACTORIES`, `USEFUL_ATTRIBUTE_FACTORIES` @ `src/magaldi_core/extractors/python.py` |
+| Skip names list | `SKIP_NAMES` @ `src/magaldi_core/extractors/python.py` |
+| Extraction stats | `ExtractionStats`, `SkippedVariable` @ `src/magaldi_core/extractors/python.py` |
+| Plan document | `plans/variable_usefulness_filter.md` |
+
+### Usefulness Criteria (apply to ALL languages)
+
+**KEEP (Useful):**
+- Constants by naming convention (UPPER_CASE, SCREAMING_SNAKE)
+- Literal values (strings, numbers, arrays, objects, booleans)
+- Type aliases and type definitions
+- Enum definitions
+- TypeVar/generic type definitions
+- Named tuples / data structures
+- Compiled patterns (regex)
+- Loggers
+- Threading primitives (locks, semaphores)
+- Lambda/arrow functions assigned to variables
+
+**SKIP (Not Useful):**
+- Instance creations: `client = SomeClient()`, `new HttpClient()`
+- Factory method results: `service = Factory.create()`
+- Function call results: `data = process_items()`
+- Method call results: `response = http.get(url)`
+- Short/temp variable names: `i`, `j`, `tmp`, `temp`, `val`, `res`
+
+### Language Implementation Status
+
+| Language | Status | Notes |
+|----------|--------|-------|
+| Python | ✅ Done | Full filter with logging |
+| JavaScript | ❌ TODO | Currently only extracts arrow functions, needs to extract all `const`/`let` |
+| PHP | ❌ TODO | Currently only extracts `const` declarations, needs to extract `$var = ...` |
+| Rust | ❌ TODO | Currently only extracts `const`/`static`, needs to extract `let` bindings |
+
+### Verification Steps
+
+```bash
+# Check Python filter is working
+source .venv/bin/activate
+python -c "
+from magaldi_core.extractors.python import USEFUL_FACTORIES, SKIP_NAMES
+print('Useful factories:', len(USEFUL_FACTORIES))
+print('Skip names:', len(SKIP_NAMES))
+"
+
+# Run extraction with DEBUG logging to see skipped variables
+PYTHONPATH=src python -c "
+import logging
+logging.basicConfig(level=logging.DEBUG)
+from magaldi_core.extractors import extract_python_elements
+from magaldi_core.tree_sitter_manager import get_manager
+code = 'client = HttpClient()\nMAX = 100'
+tree = get_manager().parse(code.encode(), 'python')
+extract_python_elements(tree, code.split('\n'), 'test.py')
+"
+```
+
+### Checklist for Adding Filter to New Language
+
+- [ ] Modify extractor to extract ALL variable/constant assignments (not just specific patterns)
+- [ ] Import/adapt `USEFUL_FACTORIES`, `SKIP_NAMES` from Python extractor (or create language-specific versions)
+- [ ] Implement `_is_useful_assignment()` for language-specific AST node types
+- [ ] Add `ExtractionStats` tracking and DEBUG logging
+- [ ] Add tests verifying useful variables kept, transient ones skipped
+- [ ] Update `plans/variable_usefulness_filter.md` with implementation status
+
+### Report Format
+
+```markdown
+### Variable Extraction Gaps
+
+**Language missing filter:**
+- [ ] JavaScript: Only extracts arrow functions, not `const x = "value"`
+- [ ] PHP: Only extracts `const`, not `$x = "value"`
+- [ ] Rust: Only extracts `const`/`static`, not `let x = value`
+
+**Filter too aggressive:**
+- [ ] `{language}`: Skipping `{pattern}` which should be kept because `{reason}`
+
+**Filter too permissive:**
+- [ ] `{language}`: Keeping `{pattern}` which should be skipped because `{reason}`
+```
+
+---
+
+## 9. MCP Analytics Integrity
 
 When modifying MCP analytics (what data is collected, stored, or displayed), verify full data flow:
 
