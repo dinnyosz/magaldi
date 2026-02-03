@@ -384,23 +384,64 @@ MCP tool output should be token-efficient since it's consumed by LLMs. Every was
 
 ### Verification Steps
 
-1. **Check repository getters** - Read `src/shared/db/repositories/*.py`:
-   - Every `get_*` method should include `hash_id` in `_source`
-   - Return dict should include `hash_id` field
+**IMPORTANT**: Review ALL files listed below, not just ones you think might have issues.
 
-2. **Check formatters** - Read `src/magaldi_mcp/formatters/*.py`:
-   - Use `hash_id` in ID suffix (not `element_id`, `feature_id`, etc.)
-   - Avoid redundant type prefixes for homogeneous lists
-   - Respect length limits on summaries
+#### Step 1: Review ALL Repository Getters
 
-3. **Test output** - Run tools and check for waste:
-   ```
-   # Good: compact, uses hash_id
-   feature_name (10 members) | id:abc123
+Read each file and check every `get_*` method:
 
-   # Bad: wasteful prefix, uses element_id
-   [feature] feature_name (10 members) | id:scope:repo:main:feature:name:1
-   ```
+| File | Check |
+|------|-------|
+| `src/shared/db/repositories/elements.py` | `_source` includes `hash_id`, return dict has `hash_id` |
+| `src/shared/db/repositories/features.py` | `get_features()`, `get_subfeatures()` return `hash_id` |
+| `src/shared/db/repositories/search.py` | Search results include `hash_id` |
+| `src/shared/db/repositories/glossary.py` | Glossary results include `hash_id` where applicable |
+
+For each getter, verify:
+- [ ] `hash_id` is in `_source` list (ES query)
+- [ ] `hash_id` is in the returned dict/object
+
+#### Step 2: Review ALL Formatters
+
+Read each formatter file and check every `format()` method:
+
+| File | Formatters to Check |
+|------|---------------------|
+| `src/magaldi_mcp/formatters/search.py` | `CodeSearchListFormatter`, `FeatureSearchListFormatter`, `GroupedSearchFormatter` |
+| `src/magaldi_mcp/formatters/elements.py` | `ElementDetailsFormatter`, `RepoListFormatter`, `FileListFormatter`, `FeatureMembersFormatter`, etc. |
+| `src/magaldi_mcp/formatters/analysis.py` | `CallGraphFormatter`, `DeadCodeFormatter`, `EntryPointsFormatter`, `ExplainElementFormatter`, etc. |
+| `src/magaldi_mcp/formatters/dependencies.py` | All dependency-related formatters |
+
+For each formatter, verify:
+- [ ] Uses `hash_id` in ID suffix (not `element_id`, `feature_id`, `subfeature_id`)
+- [ ] Type prefix `[type]` only shown when necessary (mixed types or disambiguation needed)
+- [ ] Summaries truncated appropriately (typically 100-200 chars)
+- [ ] No excessive blank lines between items
+- [ ] Respects `brief` parameter if applicable
+
+#### Step 3: Test Actual Output
+
+Run MCP tools and verify output is token-efficient:
+
+```bash
+# Test list_features - should NOT have [feature] prefix on every line
+mcp__magaldi__list_features(scope="X", repository="Y", brief=True)
+
+# Test search_code - should use hash_id not element_id
+mcp__magaldi__search_code(query="test", limit=3)
+
+# Test get_element - should use hash_id
+mcp__magaldi__get_element(hash_id="...")
+```
+
+Example of good vs bad output:
+```
+# Good: compact, uses hash_id, no redundant prefix
+feature_name (10 members) | id:abc123def456...
+
+# Bad: wasteful prefix, uses element_id format
+[feature] feature_name (10 members) | id:scope:repo:main:feature:name:1
+```
 
 ### Report Format for Output Issues
 
