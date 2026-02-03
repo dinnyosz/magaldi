@@ -101,6 +101,7 @@ LINE_THRESHOLDS: dict[str, dict[str, int]] = {
     "method":     {"tiny": 5,   "small": 15,  "medium": 50},
     "constant":   {"tiny": 1,   "small": 3,   "medium": 5},
     "variable":   {"tiny": 1,   "small": 3,   "medium": 5},
+    "import":     {"tiny": 1,   "small": 1,   "medium": 1},
 }
 
 SENTENCE_RANGES: dict[str, dict[str, tuple[int, int]]] = {
@@ -163,6 +164,12 @@ SENTENCE_RANGES: dict[str, dict[str, tuple[int, int]]] = {
         "small":  (1, 2),
         "medium": (2, 2),
         "large":  (2, 3),
+    },
+    "import": {
+        "tiny":   (1, 1),
+        "small":  (1, 1),
+        "medium": (1, 1),
+        "large":  (1, 1),
     },
 }
 
@@ -763,6 +770,15 @@ For each variable, provide a {sentence_range} sentence description answering:
 
 Write ONLY the {sentence_range} sentence description. No reasoning, explanations, or bullet points.
 Start directly with what it holds - never start with "This variable...", "The X variable...", or similar.""",
+
+    "import": """You describe imports for AI agents navigating codebases.
+
+For each import, provide a {sentence_range} sentence description answering:
+1. PROVIDES: What module/package is being imported and what does it provide?
+2. PURPOSE: Why is this import needed in this file?
+
+Write ONLY the {sentence_range} sentence description. No reasoning, explanations, or bullet points.
+Start with what it imports - never start with "This import...", "The import...", or similar.""",
 }
 
 # User message templates - contain variable content
@@ -865,6 +881,13 @@ Name: {name}
 Value:
 {code}
 {usages_section}""",
+
+    "import": """File context: {file_summary}
+
+Import: {name}
+
+Code:
+{code}""",
 }
 
 # Legacy single-prompt templates (kept for backwards compatibility)
@@ -1096,6 +1119,25 @@ Value:
 
 Write ONLY the {sentence_range} sentence description. No reasoning or bullet points.
 Start directly with what it holds - never start with "This variable...", "The X variable...", or similar.
+
+Description:""",
+    "import": """Describe this import in {sentence_range} sentences for an AI agent.
+
+FOCUS on what this import provides.
+
+Answer these questions:
+1. PROVIDES: What module/package is being imported and what does it provide?
+2. PURPOSE: Why is this import needed in this file?
+
+File context: {file_summary}
+
+Import: {name}
+
+Code:
+{code}
+
+Write ONLY the {sentence_range} sentence description. No reasoning or bullet points.
+Start with what it imports - never start with "This import...", "The import...", or similar.
 
 Description:""",
 }
