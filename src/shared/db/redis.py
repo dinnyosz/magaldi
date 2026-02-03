@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import time
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 import redis
 
@@ -71,6 +71,34 @@ class RedisRepository:
         if self._client:
             self._client.close()
             self._client = None
+
+    # Typed wrapper methods for Redis operations.
+    # These cast the union types (Awaitable[T] | T) to sync types.
+    # Override these in an async subclass to use await instead.
+
+    def _redis_get(self, key: str) -> str | None:
+        """Get a string value from Redis."""
+        return cast(str | None, self._get_client().get(key))
+
+    def _redis_hget(self, name: str, key: str) -> str | None:
+        """Get a field from a Redis hash."""
+        return cast(str | None, self._get_client().hget(name, key))
+
+    def _redis_hgetall(self, name: str) -> dict[str, str]:
+        """Get all fields from a Redis hash."""
+        return cast(dict[str, str], self._get_client().hgetall(name))
+
+    def _redis_lrange(self, name: str, start: int, end: int) -> list[str]:
+        """Get a range of elements from a Redis list."""
+        return cast(list[str], self._get_client().lrange(name, start, end))
+
+    def _redis_zrevrange(self, name: str, start: int, end: int) -> list[str]:
+        """Get a range of elements from a Redis sorted set (highest scores first)."""
+        return cast(list[str], self._get_client().zrevrange(name, start, end))
+
+    def _redis_zrange(self, name: str, start: int, end: int) -> list[str]:
+        """Get a range of elements from a Redis sorted set (lowest scores first)."""
+        return cast(list[str], self._get_client().zrange(name, start, end))
 
 
 class RedisSummarizationJobRepository(RedisRepository):
@@ -146,12 +174,11 @@ class RedisSummarizationJobRepository(RedisRepository):
             repository: Repository name.
             username: User who owns this job.
         """
-        client = self._get_client()
-        data = client.hget(
+        data = self._redis_hget(
             _key(SUMMARIZATION_JOBS, scope, repository, username), element_id
         )
         if data:
-            return json.loads(data)
+            return cast(dict[str, Any], json.loads(data))
         return None
 
     def claim_pending_jobs(
@@ -182,7 +209,7 @@ class RedisSummarizationJobRepository(RedisRepository):
         running_key = _key(SUMMARIZATION_RUNNING, scope, repository, username)
 
         # Get highest priority jobs (highest scores first)
-        element_ids = client.zrevrange(queue_key, 0, batch_size - 1)
+        element_ids = self._redis_zrevrange(queue_key, 0, batch_size - 1)
 
         for element_id in element_ids:
             # Atomically move from queue to running
@@ -283,7 +310,7 @@ class RedisSummarizationJobRepository(RedisRepository):
         queue_key = _key(SUMMARIZATION_QUEUE, scope, repository, username)
 
         # Scan jobs to find children
-        all_jobs = client.hgetall(jobs_key)
+        all_jobs = self._redis_hgetall(jobs_key)
         for element_id, data in all_jobs.items():
             job_data = json.loads(data)
             if (
@@ -357,12 +384,11 @@ class RedisEmbeddingJobRepository(RedisRepository):
             repository: Repository name.
             username: User who owns this job.
         """
-        client = self._get_client()
-        data = client.hget(
+        data = self._redis_hget(
             _key(EMBEDDING_JOBS, scope, repository, username), element_id
         )
         if data:
-            return json.loads(data)
+            return cast(dict[str, Any], json.loads(data))
         return None
 
     def claim_pending_jobs(
@@ -393,7 +419,7 @@ class RedisEmbeddingJobRepository(RedisRepository):
         running_key = _key(EMBEDDING_RUNNING, scope, repository, username)
 
         # Get oldest jobs first (FIFO)
-        element_ids = client.zrange(queue_key, 0, batch_size - 1)
+        element_ids = self._redis_zrange(queue_key, 0, batch_size - 1)
 
         for element_id in element_ids:
             removed = client.zrem(queue_key, element_id)
@@ -499,8 +525,7 @@ class RedisSummaryStore(RedisRepository):
         """Get element data."""
         from magaldi_core.code_parser import CodeElement
 
-        client = self._get_client()
-        data = client.hget(self.ELEMENTS_KEY, element_id)
+        data = self._redis_hget(self.ELEMENTS_KEY, element_id)
         if data:
             elem_data = json.loads(data)
             # Return minimal CodeElement for summarization
@@ -528,16 +553,14 @@ class RedisSummaryStore(RedisRepository):
 
     def get_summary(self, element_id: str) -> str | None:
         """Get a summary."""
-        client = self._get_client()
-        return client.hget(self.SUMMARIES_KEY, element_id)
+        return self._redis_hget(self.SUMMARIES_KEY, element_id)
 
     def get_parent_summaries(self, element: Any) -> dict[str, str]:
         """Get parent summaries for context."""
         summaries: dict[str, str] = {}
 
         # Get element data
-        client = self._get_client()
-        elem_data = client.hget(self.ELEMENTS_KEY, element.element_id)
+        elem_data = self._redis_hget(self.ELEMENTS_KEY, element.element_id)
         if not elem_data:
             return summaries
 
@@ -545,7 +568,7 @@ class RedisSummaryStore(RedisRepository):
         parent_id = parsed.get("parent_id")
 
         if parent_id:
-            parent_data = client.hget(self.ELEMENTS_KEY, parent_id)
+            parent_data = self._redis_hget(self.ELEMENTS_KEY, parent_id)
             if parent_data:
                 parent = json.loads(parent_data)
                 parent_summary = self.get_summary(parent_id)
@@ -603,12 +626,11 @@ class RedisFeatureJobRepository(RedisRepository):
         self, feature_id: str, scope: str, repository: str, username: str
     ) -> dict[str, Any] | None:
         """Get job data by feature ID."""
-        client = self._get_client()
-        data = client.hget(
+        data = self._redis_hget(
             _key(FEATURE_JOBS, scope, repository, username), feature_id
         )
         if data:
-            return json.loads(data)
+            return cast(dict[str, Any], json.loads(data))
         return None
 
     def mark_running(
@@ -708,12 +730,11 @@ class RedisLabelingJobRepository(RedisRepository):
         self, cluster_id: int, scope: str, repository: str, username: str
     ) -> dict[str, Any] | None:
         """Get job data by cluster ID."""
-        client = self._get_client()
-        data = client.hget(
+        data = self._redis_hget(
             _key(LABELING_JOBS, scope, repository, username), str(cluster_id)
         )
         if data:
-            return json.loads(data)
+            return cast(dict[str, Any], json.loads(data))
         return None
 
     def mark_running(
@@ -833,12 +854,11 @@ class RedisSubfeatureJobRepository(RedisRepository):
         self, subfeature_id: str, scope: str, repository: str, username: str
     ) -> dict[str, Any] | None:
         """Get job data by subfeature ID."""
-        client = self._get_client()
-        data = client.hget(
+        data = self._redis_hget(
             _key(SUBFEATURE_JOBS, scope, repository, username), subfeature_id
         )
         if data:
-            return json.loads(data)
+            return cast(dict[str, Any], json.loads(data))
         return None
 
     def mark_running(
@@ -951,12 +971,11 @@ class RedisSubfeatureLabelingJobRepository(RedisRepository):
         self, parent_label: str, scope: str, repository: str, username: str
     ) -> dict[str, Any] | None:
         """Get job data by parent label."""
-        client = self._get_client()
-        data = client.hget(
+        data = self._redis_hget(
             _key(SUBFEATURE_LABELING_JOBS, scope, repository, username), parent_label
         )
         if data:
-            return json.loads(data)
+            return cast(dict[str, Any], json.loads(data))
         return None
 
     def mark_running(
@@ -1092,7 +1111,7 @@ class RedisMCPAnalyticsRepository(RedisRepository):
         # Track transitions if we have a session
         if session_id:
             session_key = f"{MCP_SESSION_PREFIX}{session_id}"
-            last_data = client.get(session_key)
+            last_data = self._redis_get(session_key)
 
             if last_data:
                 try:
@@ -1144,7 +1163,7 @@ class RedisMCPAnalyticsRepository(RedisRepository):
 
         client = self._get_client()
         session_key = f"{MCP_SESSION_PREFIX}{session_id}"
-        current_data = client.get(session_key)
+        current_data = self._redis_get(session_key)
 
         if current_data:
             try:
@@ -1174,9 +1193,8 @@ class RedisMCPAnalyticsRepository(RedisRepository):
         Returns:
             Dict mapping tool name to {total_ms, count, avg_ms}.
         """
-        client = self._get_client()
         duration_key = f"{MCP_DAILY_CALLS_PREFIX}durations"
-        raw_data = client.hgetall(duration_key)
+        raw_data = self._redis_hgetall(duration_key)
 
         # Parse and aggregate
         tools: dict[str, dict[str, int]] = {}
@@ -1209,8 +1227,7 @@ class RedisMCPAnalyticsRepository(RedisRepository):
         Returns:
             Dict mapping tool name to call count.
         """
-        client = self._get_client()
-        counts = client.hgetall(MCP_TOOL_CALLS)
+        counts = self._redis_hgetall(MCP_TOOL_CALLS)
         return {k: int(v) for k, v in counts.items()}
 
     def get_tool_transitions(self) -> dict[str, dict[str, int]]:
@@ -1219,8 +1236,7 @@ class RedisMCPAnalyticsRepository(RedisRepository):
         Returns:
             Nested dict: from_tool -> to_tool -> count
         """
-        client = self._get_client()
-        raw_transitions = client.hgetall(MCP_TOOL_TRANSITIONS)
+        raw_transitions = self._redis_hgetall(MCP_TOOL_TRANSITIONS)
 
         matrix: dict[str, dict[str, int]] = {}
         for transition_key, count in raw_transitions.items():
@@ -1257,8 +1273,7 @@ class RedisMCPAnalyticsRepository(RedisRepository):
         Returns:
             List of (from_tool, to_tool, count) tuples, sorted by count descending.
         """
-        client = self._get_client()
-        raw_transitions = client.hgetall(MCP_TOOL_TRANSITIONS)
+        raw_transitions = self._redis_hgetall(MCP_TOOL_TRANSITIONS)
 
         transitions = []
         for transition_key, count in raw_transitions.items():
@@ -1282,9 +1297,8 @@ class RedisMCPAnalyticsRepository(RedisRepository):
         if date is None:
             date = datetime.now().strftime("%Y-%m-%d")
 
-        client = self._get_client()
         daily_key = f"{MCP_DAILY_CALLS_PREFIX}{date}:calls"
-        counts = client.hgetall(daily_key)
+        counts = self._redis_hgetall(daily_key)
         return {k: int(v) for k, v in counts.items()}
 
     def get_daily_transitions(
@@ -1301,9 +1315,8 @@ class RedisMCPAnalyticsRepository(RedisRepository):
         if date is None:
             date = datetime.now().strftime("%Y-%m-%d")
 
-        client = self._get_client()
         daily_key = f"{MCP_DAILY_CALLS_PREFIX}{date}:transitions"
-        raw_transitions = client.hgetall(daily_key)
+        raw_transitions = self._redis_hgetall(daily_key)
 
         matrix: dict[str, dict[str, int]] = {}
         for transition_key, count in raw_transitions.items():
@@ -1322,8 +1335,7 @@ class RedisMCPAnalyticsRepository(RedisRepository):
         Returns:
             Nested dict: from_tool -> to_tool -> count
         """
-        client = self._get_client()
-        raw_transitions = client.hgetall(MCP_CONFIRMED_TRANSITIONS)
+        raw_transitions = self._redis_hgetall(MCP_CONFIRMED_TRANSITIONS)
 
         matrix: dict[str, dict[str, int]] = {}
         for transition_key, count in raw_transitions.items():
@@ -1363,7 +1375,7 @@ class RedisMCPAnalyticsRepository(RedisRepository):
                 })
 
         # Sort by total count descending
-        result.sort(key=lambda x: x["total_count"], reverse=True)
+        result.sort(key=lambda x: cast(int, x["total_count"]), reverse=True)
         return result
 
     def clear_analytics(self) -> None:
@@ -1502,13 +1514,13 @@ class RedisMCPAnalyticsRepository(RedisRepository):
         Returns:
             Causal link info dict, or None if no link detected.
         """
-        client = self._get_client()
-
         # Get the most recent completed calls from this session
         # Check up to CAUSAL_HISTORY_LOOKBACK calls to find the original source
         # This handles cases where one search leads to multiple follow-up calls
         session_history_key = f"{MCP_SESSION_PREFIX}{session_id}:history"
-        recent_calls_raw = client.lrange(session_history_key, 0, self.CAUSAL_HISTORY_LOOKBACK - 1)
+        recent_calls_raw = self._redis_lrange(
+            session_history_key, 0, self.CAUSAL_HISTORY_LOOKBACK - 1
+        )
 
         if not recent_calls_raw:
             return None
@@ -1632,7 +1644,7 @@ class RedisMCPAnalyticsRepository(RedisRepository):
         """
         client = self._get_client()
         session_call_key = f"{MCP_SESSION_PREFIX}{session_id}:current_call"
-        call_data_str = client.get(session_call_key)
+        call_data_str = self._redis_get(session_call_key)
 
         if not call_data_str:
             return
@@ -1696,8 +1708,7 @@ class RedisMCPAnalyticsRepository(RedisRepository):
         """
         import json
 
-        client = self._get_client()
-        raw_calls = client.lrange(MCP_RECENT_CALLS, 0, limit - 1)
+        raw_calls = self._redis_lrange(MCP_RECENT_CALLS, 0, limit - 1)
 
         calls = []
         for raw_call in raw_calls:
@@ -1829,9 +1840,9 @@ class RedisMCPAnalyticsRepository(RedisRepository):
                     if source_tool != from_tool:
                         continue
 
-                    # Find the caller in this session
+                    # Find the source caller in this session
                     source_call_id = triggered_by.get("call_id")
-                    caller = calls_by_id.get(source_call_id) if source_call_id else None
+                    source_caller = calls_by_id.get(source_call_id) if source_call_id else None
 
                     # Skip if we already have this pair from consecutive logic
                     pair_key = (source_call_id or "", callee.get("call_id", ""))
@@ -1845,14 +1856,14 @@ class RedisMCPAnalyticsRepository(RedisRepository):
                     caller_output = None
                     caller_duration_ms = None
 
-                    if caller:
-                        caller_input = caller.get("input_args")
-                        caller_output = caller.get("output_result")
-                        caller_duration_ms = caller.get("duration_ms")
+                    if source_caller:
+                        caller_input = source_caller.get("input_args")
+                        caller_output = source_caller.get("output_result")
+                        caller_duration_ms = source_caller.get("duration_ms")
 
-                        if caller.get("end_time") and callee.get("start_time"):
+                        if source_caller.get("end_time") and callee.get("start_time"):
                             try:
-                                caller_end = datetime.fromisoformat(caller["end_time"])
+                                caller_end = datetime.fromisoformat(source_caller["end_time"])
                                 callee_start = datetime.fromisoformat(callee["start_time"])
                                 elapsed_ms = int(
                                     (callee_start - caller_end).total_seconds() * 1000
