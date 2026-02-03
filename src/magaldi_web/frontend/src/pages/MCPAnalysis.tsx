@@ -90,15 +90,6 @@ function MCPAnalysis() {
     }
   }
 
-  const formatTimestamp = (ts: string | null) => {
-    if (!ts) return '-'
-    try {
-      return new Date(ts).toLocaleString()
-    } catch {
-      return ts
-    }
-  }
-
   return (
     <div>
       <h1 className="mb-4">
@@ -304,14 +295,18 @@ function MCPAnalysis() {
                                 key={idx}
                                 onClick={() => handleTransitionClick(transition)}
                                 style={{ cursor: 'pointer' }}
-                                className={isExpanded ? 'table-primary' : ''}
                               >
-                                <td className="text-muted">{idx + 1}</td>
+                                <td
+                                  className="text-muted"
+                                  style={{ borderLeft: isExpanded ? '3px solid var(--bs-primary)' : 'none' }}
+                                >
+                                  {idx + 1}
+                                </td>
                                 <td>
                                   <code className="small">{transition.from_tool}</code>
                                   <i className={`bi bi-arrow-right mx-2 ${isExpanded ? 'text-primary' : 'text-muted'}`}></i>
                                   <code className="small">{transition.to_tool}</code>
-                                  {isExpanded && <i className="bi bi-chevron-down ms-2"></i>}
+                                  {isExpanded && <i className="bi bi-chevron-down ms-2 text-primary"></i>}
                                 </td>
                                 <td className="text-end">{transition.count.toLocaleString()}</td>
                               </tr>
@@ -364,26 +359,28 @@ function MCPAnalysis() {
                                 <th style={{ minWidth: '120px' }}>Callee</th>
                                 <th style={{ minWidth: '250px' }}>Callee Output</th>
                                 <th style={{ minWidth: '80px' }}>Gap</th>
-                                <th style={{ minWidth: '130px' }}>Time</th>
                               </tr>
                             </thead>
                             <tbody>
                               {transitionDetails.transitions.map((detail: TransitionDetailInfo, idx: number) => (
                                 <tr key={idx}>
                                   <td>
-                                    <pre className="mb-0 small" style={{
+                                    <pre className="mb-0" style={{
                                       maxHeight: '200px',
-                                      overflowY: 'auto',
+                                      overflow: 'auto',
                                       whiteSpace: 'pre-wrap',
                                       wordBreak: 'break-word',
-                                      backgroundColor: '#e7f5ff',
-                                      padding: '8px',
+                                      backgroundColor: 'rgba(13, 110, 253, 0.1)',
+                                      border: '1px solid rgba(13, 110, 253, 0.3)',
+                                      color: 'inherit',
+                                      padding: '6px',
                                       borderRadius: '4px',
+                                      fontSize: '0.7rem',
                                     }}>
                                       {detail.caller_input || <em className="text-muted">No input</em>}
                                     </pre>
                                   </td>
-                                  <td className="text-center align-middle">
+                                  <td className="text-center align-top">
                                     <code className="small fw-bold">{detail.caller}</code>
                                     {detail.caller_duration_ms != null && (
                                       <small className="text-muted d-block">
@@ -392,32 +389,38 @@ function MCPAnalysis() {
                                     )}
                                   </td>
                                   <td>
-                                    <pre className="mb-0 small" style={{
+                                    <pre className="mb-0" style={{
                                       maxHeight: '200px',
-                                      overflowY: 'auto',
+                                      overflow: 'auto',
                                       whiteSpace: 'pre-wrap',
                                       wordBreak: 'break-word',
-                                      backgroundColor: '#e6fcf5',
-                                      padding: '8px',
+                                      backgroundColor: 'rgba(25, 135, 84, 0.1)',
+                                      border: '1px solid rgba(25, 135, 84, 0.3)',
+                                      color: 'inherit',
+                                      padding: '6px',
                                       borderRadius: '4px',
+                                      fontSize: '0.7rem',
                                     }}>
                                       {detail.caller_output || <em className="text-muted">No output</em>}
                                     </pre>
                                   </td>
                                   <td>
-                                    <pre className="mb-0 small" style={{
+                                    <pre className="mb-0" style={{
                                       maxHeight: '200px',
-                                      overflowY: 'auto',
+                                      overflow: 'auto',
                                       whiteSpace: 'pre-wrap',
                                       wordBreak: 'break-word',
-                                      backgroundColor: '#fff9db',
-                                      padding: '8px',
+                                      backgroundColor: 'rgba(255, 193, 7, 0.1)',
+                                      border: '1px solid rgba(255, 193, 7, 0.3)',
+                                      color: 'inherit',
+                                      padding: '6px',
                                       borderRadius: '4px',
+                                      fontSize: '0.7rem',
                                     }}>
                                       {detail.callee_input || <em className="text-muted">No input</em>}
                                     </pre>
                                   </td>
-                                  <td className="text-center align-middle">
+                                  <td className="text-center align-top">
                                     <code className="small fw-bold">{detail.callee}</code>
                                     {detail.callee_duration_ms != null && (
                                       <small className="text-muted d-block">
@@ -426,27 +429,27 @@ function MCPAnalysis() {
                                     )}
                                   </td>
                                   <td>
-                                    <pre className="mb-0 small" style={{
+                                    <pre className="mb-0" style={{
                                       maxHeight: '200px',
-                                      overflowY: 'auto',
+                                      overflow: 'auto',
                                       whiteSpace: 'pre-wrap',
                                       wordBreak: 'break-word',
-                                      backgroundColor: '#ffe3e3',
-                                      padding: '8px',
+                                      backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                                      border: '1px solid rgba(220, 53, 69, 0.3)',
+                                      color: 'inherit',
+                                      padding: '6px',
                                       borderRadius: '4px',
+                                      fontSize: '0.7rem',
                                     }}>
                                       {detail.callee_output || <em className="text-muted">No output</em>}
                                     </pre>
                                   </td>
-                                  <td className="text-end align-middle">
+                                  <td className="text-end align-top">
                                     {detail.elapsed_ms != null ? (
                                       <span className={detail.elapsed_ms > 1000 ? 'text-warning fw-bold' : ''}>
                                         {detail.elapsed_ms}ms
                                       </span>
                                     ) : '-'}
-                                  </td>
-                                  <td className="small text-muted align-middle">
-                                    {formatTimestamp(detail.timestamp)}
                                   </td>
                                 </tr>
                               ))}
