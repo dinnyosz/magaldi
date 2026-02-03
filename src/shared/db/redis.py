@@ -1317,7 +1317,7 @@ class RedisMCPAnalyticsRepository(RedisRepository):
             client.delete(key)
 
     # Maximum size for stored inputs/outputs (in characters)
-    MAX_IO_SIZE = 2000
+    MAX_IO_SIZE = 10000
     # Maximum number of recent calls to keep
     MAX_RECENT_CALLS = 1000
 
