@@ -94,6 +94,8 @@ LINE_THRESHOLDS: dict[str, dict[str, int]] = {
     "file":       {"tiny": 20,  "small": 50,  "medium": 200},
     "class":      {"tiny": 10,  "small": 30,  "medium": 100},
     "interface":  {"tiny": 5,   "small": 15,  "medium": 50},
+    "trait":      {"tiny": 5,   "small": 15,  "medium": 50},
+    "enum":       {"tiny": 3,   "small": 10,  "medium": 30},
     "type_alias": {"tiny": 1,   "small": 3,   "medium": 10},
     "function":   {"tiny": 5,   "small": 15,  "medium": 50},
     "method":     {"tiny": 5,   "small": 15,  "medium": 50},
@@ -115,6 +117,18 @@ SENTENCE_RANGES: dict[str, dict[str, tuple[int, int]]] = {
         "large":  (5, 6),
     },
     "interface": {
+        "tiny":   (1, 2),
+        "small":  (2, 3),
+        "medium": (3, 4),
+        "large":  (4, 5),
+    },
+    "trait": {
+        "tiny":   (1, 2),
+        "small":  (2, 3),
+        "medium": (3, 4),
+        "large":  (4, 5),
+    },
+    "enum": {
         "tiny":   (1, 2),
         "small":  (2, 3),
         "medium": (3, 4),
@@ -675,6 +689,27 @@ For each interface, provide a {sentence_range} sentence summary answering:
 Write ONLY the {sentence_range} sentence summary. No reasoning, explanations, or bullet points.
 Start directly with what contract it defines - never start with "This interface...", "The X interface...", or similar.""",
 
+    "trait": """You summarize traits for AI agents navigating codebases.
+
+For each trait, provide a {sentence_range} sentence summary answering:
+1. CAPABILITY: What shared behavior or capability does this trait provide?
+2. IMPLEMENTERS: What types of structs/classes should implement this?
+3. METHODS: What key methods does it define or require?
+4. COMPOSITION: How does this trait combine with others?
+
+Write ONLY the {sentence_range} sentence summary. No reasoning, explanations, or bullet points.
+Start directly with what capability it provides - never start with "This trait...", "The X trait...", or similar.""",
+
+    "enum": """You summarize enums for AI agents navigating codebases.
+
+For each enum, provide a {sentence_range} sentence summary answering:
+1. DOMAIN: What set of values or states does this enum represent?
+2. VARIANTS: What are the key variants and what do they mean?
+3. USAGE: Where and how is this enum used in the codebase?
+
+Write ONLY the {sentence_range} sentence summary. No reasoning, explanations, or bullet points.
+Start directly with what it represents - never start with "This enum...", "The X enum...", or similar.""",
+
     "type_alias": """You describe type aliases for AI agents navigating codebases.
 
 For each type alias, provide a {sentence_range} sentence description answering:
@@ -756,6 +791,23 @@ Code:
 
 Interface: {name}
 {base_classes_section}
+
+Code:
+{code}
+{usages_section}""",
+
+    "trait": """File context: {file_summary}
+
+Trait: {name}
+{base_classes_section}
+
+Code:
+{code}
+{usages_section}""",
+
+    "enum": """File context: {file_summary}
+
+Enum: {name}
 
 Code:
 {code}
@@ -886,6 +938,50 @@ Code:
 
 Write ONLY the {sentence_range} sentence summary. No reasoning or bullet points.
 Start directly with what contract it defines - never start with "This interface...", "The X interface...", or similar.
+
+Summary:""",
+    "trait": """Summarize this trait in {sentence_range} sentences for an AI agent.
+
+FOCUS on the trait itself. Use file context only to understand how it fits in.
+
+Answer these questions:
+1. CAPABILITY: What shared behavior or capability does this trait provide?
+2. IMPLEMENTERS: What types of structs/classes should implement this?
+3. METHODS: What key methods does it define or require?
+4. COMPOSITION: How does this trait combine with others?
+{base_classes_section}
+
+File context: {file_summary}
+
+Trait: {name}
+
+Code:
+{code}
+{usages_section}
+
+Write ONLY the {sentence_range} sentence summary. No reasoning or bullet points.
+Start directly with what capability it provides - never start with "This trait...", "The X trait...", or similar.
+
+Summary:""",
+    "enum": """Summarize this enum in {sentence_range} sentences for an AI agent.
+
+FOCUS on the enum itself.
+
+Answer these questions:
+1. DOMAIN: What set of values or states does this enum represent?
+2. VARIANTS: What are the key variants and what do they mean?
+3. USAGE: Where and how is this enum used in the codebase?
+
+File context: {file_summary}
+
+Enum: {name}
+
+Code:
+{code}
+{usages_section}
+
+Write ONLY the {sentence_range} sentence summary. No reasoning or bullet points.
+Start directly with what it represents - never start with "This enum...", "The X enum...", or similar.
 
 Summary:""",
     "type_alias": """Describe this type alias in {sentence_range} sentences for an AI agent.
@@ -1192,7 +1288,7 @@ def build_prompt(
     # Build enhanced context sections based on element type
     imports_section = _build_imports_section(element) if element_type == "file" else ""
     attributes_section = _build_attributes_section(element) if element_type == "class" else ""
-    base_classes_section = _build_base_classes_section(element) if element_type in ("class", "interface") else ""
+    base_classes_section = _build_base_classes_section(element) if element_type in ("class", "interface", "trait") else ""
     collaborators_section = _build_collaborators_section(element) if element_type == "class" else ""
     instantiation_hints = _build_instantiation_hints(element) if element_type == "class" else ""
     exceptions_section = _build_exceptions_section(element) if element_type in ("function", "method") else ""
@@ -1305,7 +1401,7 @@ def build_messages(
     # Build enhanced context sections
     imports_section = _build_imports_section(element) if element_type == "file" else ""
     attributes_section = _build_attributes_section(element) if element_type == "class" else ""
-    base_classes_section = _build_base_classes_section(element) if element_type in ("class", "interface") else ""
+    base_classes_section = _build_base_classes_section(element) if element_type in ("class", "interface", "trait") else ""
     collaborators_section = _build_collaborators_section(element) if element_type == "class" else ""
     instantiation_hints = _build_instantiation_hints(element) if element_type == "class" else ""
     exceptions_section = _build_exceptions_section(element) if element_type in ("function", "method") else ""
