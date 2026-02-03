@@ -464,7 +464,64 @@ After verifying repository getters and formatters, report any gaps found:
 
 ---
 
-## 10. Report Format
+## 10. MCP Tool Handler Parameter Safety
+
+MCP tool handlers in `server.py` must use `args.get()` for optional parameters to enable auto-detection from `magaldi.yaml`.
+
+### Source of Truth Files
+
+| What | Where |
+|------|-------|
+| MCP server handlers | `_handle_tool()` @ `src/magaldi_mcp/server.py` |
+| Tool implementations | Functions in `src/magaldi_mcp/tools_impl.py` |
+| Tool schemas | `src/magaldi_mcp/tools/schemas/*.py` |
+
+### Rules
+
+**Always use `args.get()` for:**
+- `scope` - auto-detected from `magaldi.yaml`
+- `repository` - auto-detected from `magaldi.yaml`
+- `username` - has default value
+
+**Use `args["key"]` only for:**
+- Truly required parameters (e.g., `query`, `hash_id`, `pattern`)
+- Parameters marked `required: true` in schema with no auto-detection
+
+### Verification
+
+```bash
+# Find any args["scope"], args["repository"], or args["username"] usages
+grep -n 'args\["scope"\]\|args\["repository"\]\|args\["username"\]' src/magaldi_mcp/server.py
+```
+
+**Expected output:** No matches (all should use `args.get()`)
+
+### Bad vs Good
+
+```python
+# BAD - crashes when scope/repository not provided
+scope=args["scope"],
+repository=args["repository"],
+
+# GOOD - allows auto-detection from magaldi.yaml
+scope=args.get("scope"),
+repository=args.get("repository"),
+username=args.get("username", self.default_username),
+```
+
+### Report Format
+
+```markdown
+### MCP Handler Parameter Issues
+
+**Using args[] instead of args.get():**
+- [ ] Line {N}: `args["scope"]` should be `args.get("scope")`
+- [ ] Line {N}: `args["repository"]` should be `args.get("repository")`
+```
+
+---
+
+## 11. Report Format
 
 After verification, produce:
 
