@@ -166,10 +166,10 @@ SENTENCE_RANGES: dict[str, dict[str, tuple[int, int]]] = {
         "large":  (2, 3),
     },
     "import": {
-        "tiny":   (1, 1),
-        "small":  (1, 1),
-        "medium": (1, 1),
-        "large":  (1, 1),
+        "tiny":   (1, 2),
+        "small":  (1, 2),
+        "medium": (1, 2),
+        "large":  (1, 2),
     },
 }
 
