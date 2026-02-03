@@ -1026,6 +1026,25 @@ MCP_SESSION_PREFIX = "magaldi:mcp:session:"
 MCP_DAILY_CALLS_PREFIX = "magaldi:mcp:daily:"
 MCP_RECENT_CALLS = "magaldi:mcp:recent_calls"  # List of recent tool calls with details
 
+# Known MCP tool names for causal detection (tool mention in output)
+MCP_TOOL_NAMES = {
+    "search_code", "search_features", "find_similar", "get_element",
+    "batch_get_elements", "get_context", "get_children", "find_files",
+    "get_file_structure", "list_features", "get_feature_members",
+    "pattern_search", "find_usages", "find_implementations", "get_call_graph",
+    "find_callers", "find_call_chain", "find_dead_code", "find_entry_points",
+    "list_glossary", "get_glossary_term", "search_glossary",
+    "find_dependencies", "find_dependents", "dependency_graph",
+    "list_patterns", "find_by_pattern", "find_complex_functions",
+    "find_security_issues", "find_undocumented", "find_env_usage",
+    "find_async_code", "get_command_tree", "get_route_tree",
+    "list_repos", "get_repo_stats", "explain_element", "generate_config",
+    "generate_skill", "parser_lab_analyze", "parser_lab_create_test",
+    "parser_lab_run_tests", "parser_lab_suggest_fix",
+    # Context7 tools
+    "resolve-library-id", "query-docs",
+}
+
 
 class RedisMCPAnalyticsRepository(RedisRepository):
     """Redis-based MCP tool usage analytics.
@@ -1320,6 +1339,170 @@ class RedisMCPAnalyticsRepository(RedisRepository):
     MAX_IO_SIZE = 10000
     # Maximum number of recent calls to keep
     MAX_RECENT_CALLS = 1000
+    # Time window for causal link detection (seconds)
+    CAUSAL_LINK_WINDOW = 60
+
+    def _extract_trackable_values(self, output: str) -> set[str]:
+        """Extract values from output that could be tracked as causal links.
+
+        Looks for:
+        - hash_id values (64 char hex strings)
+        - library IDs (format: /org/project)
+        - file paths (containing / and common extensions)
+        - element IDs with colons (scope:repo:user:path:type:name:line)
+
+        Args:
+            output: Tool output string.
+
+        Returns:
+            Set of trackable values found.
+        """
+        import re
+
+        values: set[str] = set()
+
+        # Hash IDs (64 character hex strings)
+        hash_pattern = r"\b([a-f0-9]{64})\b"
+        values.update(re.findall(hash_pattern, output))
+
+        # Library IDs (Context7 format: /org/project or /org/project/version)
+        lib_pattern = r"(/[a-zA-Z0-9_-]+/[a-zA-Z0-9._-]+(?:/[a-zA-Z0-9._-]+)?)"
+        values.update(re.findall(lib_pattern, output))
+
+        # Element IDs with colons (at least 3 colon-separated parts)
+        element_pattern = r"\b([a-zA-Z0-9_-]+(?::[a-zA-Z0-9_./+-]+){3,})\b"
+        values.update(re.findall(element_pattern, output))
+
+        # File paths with extensions
+        path_pattern = r"([a-zA-Z0-9_./+-]+\.(?:py|ts|tsx|js|jsx|rs|php|go|java|rb))\b"
+        values.update(re.findall(path_pattern, output))
+
+        # Filter out very short values (likely false positives)
+        return {v for v in values if len(v) >= 8}
+
+    def _detect_tool_mentions(self, output: str) -> set[str]:
+        """Detect MCP tool names mentioned in output.
+
+        Args:
+            output: Tool output string.
+
+        Returns:
+            Set of tool names mentioned.
+        """
+        mentioned: set[str] = set()
+        output_lower = output.lower()
+
+        for tool_name in MCP_TOOL_NAMES:
+            # Check for exact tool name or with underscores/hyphens
+            if tool_name.lower() in output_lower:
+                mentioned.add(tool_name)
+            # Also check snake_case vs kebab-case variants
+            alt_name = tool_name.replace("-", "_")
+            if alt_name != tool_name and alt_name.lower() in output_lower:
+                mentioned.add(tool_name)
+
+        return mentioned
+
+    def _find_matching_value(
+        self,
+        input_args: dict[str, Any],
+        trackable_values: set[str],
+    ) -> str | None:
+        """Find if any input argument contains a trackable value.
+
+        Args:
+            input_args: Current tool's input arguments.
+            trackable_values: Values extracted from previous output.
+
+        Returns:
+            The matched value, or None if no match.
+        """
+        import json
+
+        input_str = json.dumps(input_args, default=str)
+
+        for value in trackable_values:
+            if value in input_str:
+                return value
+
+        return None
+
+    def _detect_causal_link(
+        self,
+        tool_name: str,
+        session_id: str,
+        input_args: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Detect if current tool call was triggered by a previous call.
+
+        Uses hybrid approach:
+        1. Parameter matching: Check if input contains values from recent output
+        2. Tool suggestion: Check if previous output mentioned this tool
+
+        Args:
+            tool_name: Name of the current tool being called.
+            session_id: Session identifier.
+            input_args: Current tool's input arguments.
+
+        Returns:
+            Causal link info dict, or None if no link detected.
+        """
+        client = self._get_client()
+
+        # Get the most recent completed call from this session
+        session_history_key = f"{MCP_SESSION_PREFIX}{session_id}:history"
+        recent_calls_raw = client.lrange(session_history_key, 0, 4)  # Last 5 calls
+
+        if not recent_calls_raw:
+            return None
+
+        now = datetime.now()
+
+        for call_raw in recent_calls_raw:
+            try:
+                prev_call = json.loads(call_raw)
+            except json.JSONDecodeError:
+                continue
+
+            prev_output = prev_call.get("output_result", "")
+            prev_tool = prev_call.get("tool_name", "")
+            prev_end_time = prev_call.get("end_time")
+
+            if not prev_output or not prev_tool:
+                continue
+
+            # Check time window
+            if prev_end_time:
+                try:
+                    end_dt = datetime.fromisoformat(prev_end_time)
+                    if (now - end_dt).total_seconds() > self.CAUSAL_LINK_WINDOW:
+                        continue
+                except ValueError:
+                    pass
+
+            # Strategy 1: Parameter matching
+            trackable_values = self._extract_trackable_values(prev_output)
+            matched_value = self._find_matching_value(input_args, trackable_values)
+
+            if matched_value:
+                return {
+                    "call_id": prev_call.get("call_id"),
+                    "tool_name": prev_tool,
+                    "matched_value": matched_value,
+                    "match_type": "parameter",
+                }
+
+            # Strategy 2: Tool suggestion (previous output mentioned this tool)
+            mentioned_tools = self._detect_tool_mentions(prev_output)
+            if tool_name in mentioned_tools or tool_name.replace("_", "-") in mentioned_tools:
+                return {
+                    "call_id": prev_call.get("call_id"),
+                    "tool_name": prev_tool,
+                    "matched_value": None,
+                    "match_type": "tool_suggestion",
+                }
+
+        return None
 
     def record_tool_call_details(
         self,
@@ -1330,6 +1513,10 @@ class RedisMCPAnalyticsRepository(RedisRepository):
     ) -> str:
         """Record a tool call with its input arguments.
 
+        Also detects causal relationships with previous calls using:
+        1. Parameter matching (value from previous output used in current input)
+        2. Tool suggestion (previous output mentioned this tool)
+
         Args:
             tool_name: Name of the tool being called.
             session_id: Session identifier.
@@ -1339,7 +1526,6 @@ class RedisMCPAnalyticsRepository(RedisRepository):
         Returns:
             Call ID for later updating with output.
         """
-        import json
         import uuid
 
         client = self._get_client()
@@ -1351,6 +1537,9 @@ class RedisMCPAnalyticsRepository(RedisRepository):
         if len(input_str) > self.MAX_IO_SIZE:
             input_str = input_str[: self.MAX_IO_SIZE - 3] + "..."
 
+        # Detect causal link with previous calls
+        triggered_by = self._detect_causal_link(tool_name, session_id, input_args)
+
         call_data = {
             "call_id": call_id,
             "tool_name": tool_name,
@@ -1360,6 +1549,8 @@ class RedisMCPAnalyticsRepository(RedisRepository):
             "start_time": now,
             "end_time": None,
             "duration_ms": None,
+            "triggered_by": triggered_by,  # Causal link info
+            "suggested_tools": None,  # Will be populated in record_tool_output
         }
 
         # Store in session for later update
@@ -1375,12 +1566,13 @@ class RedisMCPAnalyticsRepository(RedisRepository):
     ) -> None:
         """Record tool output and finalize the call record.
 
+        Also extracts suggested tools from output and stores the call
+        in session history for causal link detection in subsequent calls.
+
         Args:
             session_id: Session identifier.
             output_result: Tool output result (will be truncated if too large).
         """
-        import json
-
         client = self._get_client()
         session_call_key = f"{MCP_SESSION_PREFIX}{session_id}:current_call"
         call_data_str = client.get(session_call_key)
@@ -1403,10 +1595,22 @@ class RedisMCPAnalyticsRepository(RedisRepository):
                 output_result = output_result[: self.MAX_IO_SIZE - 3] + "..."
             call_data["output_result"] = output_result
 
+            # Extract suggested tools from output for causal tracking
+            suggested_tools = list(self._detect_tool_mentions(output_result))
+            call_data["suggested_tools"] = suggested_tools if suggested_tools else None
+
             # Push to recent calls list (LPUSH for newest first)
             client.lpush(MCP_RECENT_CALLS, json.dumps(call_data))
             # Trim to keep only recent calls
             client.ltrim(MCP_RECENT_CALLS, 0, self.MAX_RECENT_CALLS - 1)
+
+            # Add to session history for causal link detection
+            # This allows subsequent calls to check this call's output
+            session_history_key = f"{MCP_SESSION_PREFIX}{session_id}:history"
+            client.lpush(session_history_key, json.dumps(call_data))
+            # Keep last 10 calls per session for causal detection
+            client.ltrim(session_history_key, 0, 9)
+            client.expire(session_history_key, self.SESSION_TTL)
 
             # Clean up session key
             client.delete(session_call_key)
@@ -1520,3 +1724,68 @@ class RedisMCPAnalyticsRepository(RedisRepository):
                 break
 
         return transitions
+
+    def get_causal_statistics(self) -> dict[str, Any]:
+        """Get statistics about causal relationships between tool calls.
+
+        Returns:
+            Dict with causal chain statistics:
+            - total_causal_links: Number of calls with detected causal links
+            - by_match_type: Counts by match type (parameter vs tool_suggestion)
+            - top_causal_pairs: Most common source->target causal pairs
+            - causal_chains: Example causal chains
+        """
+        calls = self.get_recent_calls(limit=500)
+
+        total_links = 0
+        by_match_type: dict[str, int] = {"parameter": 0, "tool_suggestion": 0}
+        causal_pairs: dict[str, int] = {}  # "source:target" -> count
+
+        for call in calls:
+            triggered_by = call.get("triggered_by")
+            if triggered_by:
+                total_links += 1
+                match_type = triggered_by.get("match_type", "unknown")
+                by_match_type[match_type] = by_match_type.get(match_type, 0) + 1
+
+                # Track causal pairs
+                source_tool = triggered_by.get("tool_name", "unknown")
+                target_tool = call.get("tool_name", "unknown")
+                pair_key = f"{source_tool}:{target_tool}"
+                causal_pairs[pair_key] = causal_pairs.get(pair_key, 0) + 1
+
+        # Get top causal pairs
+        sorted_pairs = sorted(causal_pairs.items(), key=lambda x: x[1], reverse=True)
+        top_pairs = [
+            {"source": pair.split(":")[0], "target": pair.split(":")[1], "count": count}
+            for pair, count in sorted_pairs[:10]
+        ]
+
+        return {
+            "total_causal_links": total_links,
+            "total_calls": len(calls),
+            "causal_rate": round(total_links / len(calls) * 100, 1) if calls else 0,
+            "by_match_type": by_match_type,
+            "top_causal_pairs": top_pairs,
+        }
+
+    def get_calls_with_causal_info(
+        self,
+        limit: int = 100,
+        only_with_links: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Get recent calls with causal relationship information.
+
+        Args:
+            limit: Maximum number of calls to return.
+            only_with_links: If True, only return calls that have causal links.
+
+        Returns:
+            List of call records with triggered_by and suggested_tools fields.
+        """
+        calls = self.get_recent_calls(limit=limit * 2 if only_with_links else limit)
+
+        if only_with_links:
+            calls = [c for c in calls if c.get("triggered_by")][:limit]
+
+        return calls

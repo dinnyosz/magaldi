@@ -16,12 +16,15 @@ from magaldi_web.dependencies import (
 )
 from magaldi_web.models import (
     AdminOverviewResponse,
+    CausalLinkInfo,
+    CausalPairInfo,
     DailyActivityItem,
     HealthStatus,
     IndexStatsResponse,
     JobStatsResponse,
     MCPActivityHistoryResponse,
     MCPAnalyticsResponse,
+    MCPCausalStatisticsResponse,
     MCPRecentCallsResponse,
     MCPTransitionDetailsResponse,
     QueueStats,
@@ -424,39 +427,58 @@ async def get_mcp_transition_details(
 async def get_mcp_recent_calls(
     limit: int = Query(default=100, ge=1, le=500, description="Max calls to return"),
     tool_name: str | None = Query(default=None, description="Filter by tool name"),
+    only_causal: bool = Query(default=False, description="Only return calls with causal links"),
 ) -> MCPRecentCallsResponse:
     """Get recent tool calls with full input/output details.
 
     Args:
         limit: Maximum number of calls to return.
         tool_name: Optional filter to show only calls for this tool.
+        only_causal: If True, only return calls that have causal links.
 
     Returns:
-        List of recent tool calls with their inputs and outputs.
+        List of recent tool calls with their inputs, outputs, and causal info.
     """
     config = get_cached_config()
 
     try:
         analytics_repo = RedisMCPAnalyticsRepository(config)
-        calls_data = analytics_repo.get_recent_calls(limit=limit)
+        calls_data = analytics_repo.get_calls_with_causal_info(
+            limit=limit,
+            only_with_links=only_causal,
+        )
 
         # Filter by tool name if specified
         if tool_name:
             calls_data = [c for c in calls_data if c.get("tool_name") == tool_name]
 
-        calls = [
-            RecentToolCallInfo(
-                call_id=c.get("call_id", ""),
-                tool_name=c.get("tool_name", ""),
-                session_id=c.get("session_id", ""),
-                input_args=c.get("input_args"),
-                output_result=c.get("output_result"),
-                start_time=c.get("start_time"),
-                end_time=c.get("end_time"),
-                duration_ms=c.get("duration_ms"),
+        calls = []
+        for c in calls_data:
+            # Parse triggered_by into CausalLinkInfo if present
+            triggered_by = None
+            if c.get("triggered_by"):
+                tb = c["triggered_by"]
+                triggered_by = CausalLinkInfo(
+                    call_id=tb.get("call_id"),
+                    tool_name=tb.get("tool_name", "unknown"),
+                    matched_value=tb.get("matched_value"),
+                    match_type=tb.get("match_type", "unknown"),
+                )
+
+            calls.append(
+                RecentToolCallInfo(
+                    call_id=c.get("call_id", ""),
+                    tool_name=c.get("tool_name", ""),
+                    session_id=c.get("session_id", ""),
+                    input_args=c.get("input_args"),
+                    output_result=c.get("output_result"),
+                    start_time=c.get("start_time"),
+                    end_time=c.get("end_time"),
+                    duration_ms=c.get("duration_ms"),
+                    triggered_by=triggered_by,
+                    suggested_tools=c.get("suggested_tools"),
+                )
             )
-            for c in calls_data
-        ]
 
         return MCPRecentCallsResponse(
             calls=calls,
@@ -467,4 +489,43 @@ async def get_mcp_recent_calls(
         return MCPRecentCallsResponse(
             calls=[],
             total=0,
+        )
+
+
+@router.get("/admin/mcp-analytics/causal", response_model=MCPCausalStatisticsResponse)
+async def get_mcp_causal_statistics() -> MCPCausalStatisticsResponse:
+    """Get statistics about causal relationships between MCP tool calls.
+
+    Returns statistics about how tools trigger other tools via:
+    - Parameter matching (values passed from output to input)
+    - Tool suggestions (previous output mentioned the current tool)
+    """
+    config = get_cached_config()
+
+    try:
+        analytics_repo = RedisMCPAnalyticsRepository(config)
+        stats = analytics_repo.get_causal_statistics()
+
+        return MCPCausalStatisticsResponse(
+            total_causal_links=stats["total_causal_links"],
+            total_calls=stats["total_calls"],
+            causal_rate=stats["causal_rate"],
+            by_match_type=stats["by_match_type"],
+            top_causal_pairs=[
+                CausalPairInfo(
+                    source=p["source"],
+                    target=p["target"],
+                    count=p["count"],
+                )
+                for p in stats["top_causal_pairs"]
+            ],
+        )
+
+    except Exception:
+        return MCPCausalStatisticsResponse(
+            total_causal_links=0,
+            total_calls=0,
+            causal_rate=0.0,
+            by_match_type={},
+            top_causal_pairs=[],
         )

@@ -794,6 +794,15 @@ class MCPTransitionDetailsResponse(BaseModel):
     total: int
 
 
+class CausalLinkInfo(BaseModel):
+    """Information about a causal relationship between tool calls."""
+
+    call_id: str | None = None
+    tool_name: str
+    matched_value: str | None = None
+    match_type: str  # "parameter" or "tool_suggestion"
+
+
 class RecentToolCallInfo(BaseModel):
     """Information about a recent tool call."""
 
@@ -805,6 +814,8 @@ class RecentToolCallInfo(BaseModel):
     start_time: str | None = None
     end_time: str | None = None
     duration_ms: int | None = None
+    triggered_by: CausalLinkInfo | None = None
+    suggested_tools: list[str] | None = None
 
 
 class MCPRecentCallsResponse(BaseModel):
@@ -812,6 +823,24 @@ class MCPRecentCallsResponse(BaseModel):
 
     calls: list[RecentToolCallInfo]
     total: int
+
+
+class CausalPairInfo(BaseModel):
+    """Information about a causal relationship pair."""
+
+    source: str
+    target: str
+    count: int
+
+
+class MCPCausalStatisticsResponse(BaseModel):
+    """Response for MCP causal statistics endpoint."""
+
+    total_causal_links: int
+    total_calls: int
+    causal_rate: float  # Percentage of calls with causal links
+    by_match_type: dict[str, int]
+    top_causal_pairs: list[CausalPairInfo]
 
 
 # =============================================================================
