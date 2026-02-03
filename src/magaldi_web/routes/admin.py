@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from magaldi_web.dependencies import (
     check_elasticsearch_health,
@@ -15,9 +16,11 @@ from magaldi_web.dependencies import (
 )
 from magaldi_web.models import (
     AdminOverviewResponse,
+    DailyActivityItem,
     HealthStatus,
     IndexStatsResponse,
     JobStatsResponse,
+    MCPActivityHistoryResponse,
     MCPAnalyticsResponse,
     QueueStats,
     ServiceHealth,
@@ -275,3 +278,59 @@ async def clear_mcp_analytics() -> dict:
         return {"status": "cleared"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+@router.get("/admin/mcp-analytics/history", response_model=MCPActivityHistoryResponse)
+async def get_mcp_activity_history(
+    days: int = Query(default=7, ge=1, le=30, description="Number of days of history (1-30)"),
+) -> MCPActivityHistoryResponse:
+    """Get MCP tool usage activity history for the last N days.
+
+    Args:
+        days: Number of days of history to return (default 7, max 30).
+
+    Returns:
+        Daily activity breakdown for the requested period.
+    """
+    config = get_cached_config()
+    max_days = 30  # Matches DAILY_TTL in RedisMCPAnalyticsRepository
+
+    try:
+        analytics_repo = RedisMCPAnalyticsRepository(config)
+
+        daily_activity = []
+        total_calls = 0
+
+        # Get activity for each day, going backwards from today
+        for i in range(days):
+            date = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
+            tool_counts = analytics_repo.get_daily_counts(date)
+            day_total = sum(tool_counts.values())
+            total_calls += day_total
+
+            daily_activity.append(
+                DailyActivityItem(
+                    date=date,
+                    total_calls=day_total,
+                    tool_counts=tool_counts,
+                )
+            )
+
+        # Reverse so oldest day is first (chronological order)
+        daily_activity.reverse()
+
+        return MCPActivityHistoryResponse(
+            days=days,
+            max_days=max_days,
+            daily_activity=daily_activity,
+            total_calls=total_calls,
+        )
+
+    except Exception:
+        # Return empty response if Redis is unavailable
+        return MCPActivityHistoryResponse(
+            days=days,
+            max_days=max_days,
+            daily_activity=[],
+            total_calls=0,
+        )

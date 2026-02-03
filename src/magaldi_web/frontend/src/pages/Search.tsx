@@ -20,7 +20,7 @@ import { search, generateSearchSummary, getRepositories, getBrowseFilters, type 
 
 // Base types always shown in filters, conditional types only shown if data exists
 const BASE_ELEMENT_TYPES = ['file', 'class', 'function', 'method', 'variable', 'constant', 'feature', 'subfeature']
-const CONDITIONAL_ELEMENT_TYPES = ['interface', 'type_alias', 'trait', 'import']
+const CONDITIONAL_ELEMENT_TYPES = ['interface', 'type_alias', 'trait', 'enum', 'import']
 const DEBOUNCE_MS = 300
 
 function Search() {

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Row,
@@ -9,10 +10,13 @@ import {
   Table,
   Button,
   ProgressBar,
+  Form,
+  InputGroup,
 } from 'react-bootstrap'
-import { getHealth, getIndexStats, getDashboard, getMCPAnalytics, clearMCPAnalytics } from '../api'
+import { getHealth, getIndexStats, getDashboard, getMCPAnalytics, getMCPActivityHistory, clearMCPAnalytics } from '../api'
 
 function Admin() {
+  const [historyDays, setHistoryDays] = useState(7)
   const { data: health, isLoading: healthLoading } = useQuery({
     queryKey: ['health'],
     queryFn: getHealth,
@@ -36,6 +40,18 @@ function Admin() {
     queryFn: getMCPAnalytics,
     refetchInterval: 30000,
   })
+
+  const { data: activityHistory, isLoading: historyLoading, refetch: refetchHistory } = useQuery({
+    queryKey: ['mcpActivityHistory', historyDays],
+    queryFn: () => getMCPActivityHistory(historyDays),
+    refetchInterval: 60000,
+  })
+
+  const handleDaysChange = (newDays: number) => {
+    const maxDays = activityHistory?.max_days || 30
+    const validDays = Math.max(1, Math.min(newDays, maxDays))
+    setHistoryDays(validDays)
+  }
 
   const handleClearAnalytics = async () => {
     if (window.confirm('Are you sure you want to clear all MCP analytics data?')) {
@@ -618,6 +634,169 @@ function Admin() {
                   )}
                 </Col>
               </Row>
+            </>
+          )}
+        </Card.Body>
+      </Card>
+
+      {/* Activity History */}
+      <Card className="mt-4">
+        <Card.Header className="d-flex justify-content-between align-items-center">
+          <span>
+            <i className="bi bi-calendar3 me-2"></i>
+            Activity History
+          </span>
+          <div className="d-flex align-items-center gap-2">
+            <InputGroup size="sm" style={{ width: '140px' }}>
+              <InputGroup.Text>Days</InputGroup.Text>
+              <Form.Control
+                type="number"
+                min={1}
+                max={activityHistory?.max_days || 30}
+                value={historyDays}
+                onChange={(e) => handleDaysChange(parseInt(e.target.value) || 7)}
+              />
+            </InputGroup>
+            <Button
+              variant="outline-secondary"
+              size="sm"
+              onClick={() => refetchHistory()}
+            >
+              <i className="bi bi-arrow-clockwise"></i>
+            </Button>
+          </div>
+        </Card.Header>
+        <Card.Body>
+          {historyLoading ? (
+            <div className="text-center py-3">
+              <Spinner animation="border" size="sm" />
+            </div>
+          ) : !activityHistory || activityHistory.daily_activity.length === 0 ? (
+            <p className="text-muted mb-0 text-center">
+              <i className="bi bi-info-circle me-2"></i>
+              No activity data for the selected period.
+            </p>
+          ) : (
+            <>
+              {/* Summary */}
+              <Row className="mb-4">
+                <Col md={4} className="text-center">
+                  <h3 className="text-primary">{activityHistory.total_calls.toLocaleString()}</h3>
+                  <p className="text-muted mb-0">Total Calls ({historyDays} days)</p>
+                </Col>
+                <Col md={4} className="text-center">
+                  <h3 className="text-info">
+                    {activityHistory.daily_activity.length > 0
+                      ? Math.round(activityHistory.total_calls / activityHistory.daily_activity.length)
+                      : 0}
+                  </h3>
+                  <p className="text-muted mb-0">Avg. per Day</p>
+                </Col>
+                <Col md={4} className="text-center">
+                  <h3 className="text-success">
+                    {Math.max(...activityHistory.daily_activity.map(d => d.total_calls))}
+                  </h3>
+                  <p className="text-muted mb-0">Peak Day</p>
+                </Col>
+              </Row>
+
+              {/* Daily Activity Chart (Simple Bar) */}
+              <h6 className="text-muted mb-3">
+                <i className="bi bi-bar-chart-fill me-2"></i>
+                Daily Activity
+              </h6>
+              <div className="mb-4">
+                {activityHistory.daily_activity.map((day) => {
+                  const maxCalls = Math.max(...activityHistory.daily_activity.map(d => d.total_calls))
+                  const percentage = maxCalls > 0 ? (day.total_calls / maxCalls) * 100 : 0
+                  const date = new Date(day.date)
+                  const dayLabel = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+
+                  return (
+                    <div key={day.date} className="d-flex align-items-center mb-2">
+                      <span className="text-muted small" style={{ width: '100px' }}>
+                        {dayLabel}
+                      </span>
+                      <div className="flex-grow-1 mx-2">
+                        <ProgressBar
+                          now={percentage}
+                          style={{ height: '20px' }}
+                          variant={day.total_calls > 0 ? 'primary' : 'secondary'}
+                        />
+                      </div>
+                      <span className="text-end" style={{ width: '60px' }}>
+                        {day.total_calls.toLocaleString()}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* Top Tools per Day */}
+              <h6 className="text-muted mb-3">
+                <i className="bi bi-trophy me-2"></i>
+                Top Tools by Day
+              </h6>
+              <Table size="sm" className="mb-0">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Total</th>
+                    <th>Top Tool</th>
+                    <th>Top 3 Tools</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activityHistory.daily_activity
+                    .slice()
+                    .reverse()
+                    .filter(day => day.total_calls > 0)
+                    .slice(0, 10)
+                    .map((day) => {
+                      const sortedTools = Object.entries(day.tool_counts)
+                        .sort((a, b) => b[1] - a[1])
+                      const topTool = sortedTools[0]
+                      const top3 = sortedTools.slice(0, 3)
+
+                      return (
+                        <tr key={day.date}>
+                          <td>
+                            <code className="small">{day.date}</code>
+                          </td>
+                          <td>{day.total_calls}</td>
+                          <td>
+                            {topTool ? (
+                              <>
+                                <code className="small">{topTool[0]}</code>
+                                <Badge bg="secondary" className="ms-1">{topTool[1]}</Badge>
+                              </>
+                            ) : (
+                              <span className="text-muted">-</span>
+                            )}
+                          </td>
+                          <td>
+                            {top3.length > 0 ? (
+                              top3.map(([tool, count], idx) => (
+                                <span key={tool}>
+                                  {idx > 0 && ', '}
+                                  <code className="small">{tool}</code>
+                                  <span className="text-muted small ms-1">({count})</span>
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-muted">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                </tbody>
+              </Table>
+              {activityHistory.daily_activity.filter(d => d.total_calls > 0).length === 0 && (
+                <p className="text-muted small text-center mt-2">
+                  No tool usage recorded in this period.
+                </p>
+              )}
             </>
           )}
         </Card.Body>

@@ -52,10 +52,13 @@ class RepoSummary(BaseModel):
     class_count: int = 0
     interface_count: int = 0
     trait_count: int = 0
+    enum_count: int = 0
+    type_alias_count: int = 0
     function_count: int = 0
     method_count: int = 0
     variable_count: int = 0
     constant_count: int = 0
+    import_count: int = 0
     feature_count: int = 0
     element_count: int = 0
     languages: list[str] = Field(default_factory=list)
@@ -71,10 +74,13 @@ class DashboardStats(BaseModel):
     class_count: int = 0
     interface_count: int = 0
     trait_count: int = 0
+    enum_count: int = 0
+    type_alias_count: int = 0
     function_count: int = 0
     method_count: int = 0
     variable_count: int = 0
     constant_count: int = 0
+    import_count: int = 0
     feature_count: int = 0
     subfeature_count: int = 0
 
@@ -735,6 +741,23 @@ class MCPAnalyticsResponse(BaseModel):
     tool_usage: list[ToolUsageInfo]
     top_transitions: list[ToolTransitionInfo]
     transition_matrix: dict[str, dict[str, int]]  # from_tool -> to_tool -> count
+
+
+class DailyActivityItem(BaseModel):
+    """Activity data for a single day."""
+
+    date: str  # YYYY-MM-DD
+    total_calls: int
+    tool_counts: dict[str, int]  # tool_name -> count
+
+
+class MCPActivityHistoryResponse(BaseModel):
+    """Response for MCP activity history endpoint."""
+
+    days: int  # Number of days requested
+    max_days: int = 30  # Maximum retention period
+    daily_activity: list[DailyActivityItem]
+    total_calls: int  # Sum across all days
 
 
 # =============================================================================

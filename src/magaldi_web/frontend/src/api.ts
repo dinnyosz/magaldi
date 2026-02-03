@@ -12,10 +12,13 @@ export interface DashboardStats {
     class_count: number
     interface_count: number
     trait_count: number
+    enum_count: number
+    type_alias_count: number
     function_count: number
     method_count: number
     variable_count: number
     constant_count: number
+    import_count: number
     feature_count: number
     subfeature_count: number
   }
@@ -27,10 +30,13 @@ export interface DashboardStats {
     class_count: number
     interface_count: number
     trait_count: number
+    enum_count: number
+    type_alias_count: number
     function_count: number
     method_count: number
     variable_count: number
     constant_count: number
+    import_count: number
     feature_count: number
     element_count: number
     languages: string[]
@@ -542,6 +548,19 @@ export interface MCPAnalyticsResponse {
   transition_matrix: Record<string, Record<string, number>>
 }
 
+export interface DailyActivityItem {
+  date: string // YYYY-MM-DD
+  total_calls: number
+  tool_counts: Record<string, number>
+}
+
+export interface MCPActivityHistoryResponse {
+  days: number
+  max_days: number
+  daily_activity: DailyActivityItem[]
+  total_calls: number
+}
+
 // API functions
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
@@ -657,6 +676,10 @@ export async function getIndexStats(): Promise<IndexStats> {
 
 export async function getMCPAnalytics(): Promise<MCPAnalyticsResponse> {
   return fetchJson(`${API_BASE}/admin/mcp-analytics`)
+}
+
+export async function getMCPActivityHistory(days: number = 7): Promise<MCPActivityHistoryResponse> {
+  return fetchJson(`${API_BASE}/admin/mcp-analytics/history?days=${days}`)
 }
 
 export async function clearMCPAnalytics(): Promise<{ status: string; message?: string }> {
