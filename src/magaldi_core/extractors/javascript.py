@@ -7,6 +7,8 @@ and enhanced context from JavaScript and TypeScript source code.
 
 from __future__ import annotations
 
+import logging
+
 from tree_sitter import Node, Tree
 
 from magaldi_core.extractors.base import (
@@ -24,6 +26,15 @@ from magaldi_core.extractors.types import (
     ExtractedReference,
     ParameterInfo,
 )
+from magaldi_core.extractors.usefulness_filter import (
+    ExtractionStats,
+    get_extraction_stats,
+    reset_extraction_stats,
+    should_skip_variable,
+    SKIP_NAMES,
+)
+
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # JAVASCRIPT EXTRACTOR CLASS
@@ -96,8 +107,22 @@ def _is_likely_class_name(name: str) -> bool:
 # =============================================================================
 
 
-def extract_javascript_elements(tree: Tree, lines: list[str]) -> list[ExtractedElement]:
-    """Extract code elements from a JavaScript/TypeScript AST."""
+def extract_javascript_elements(
+    tree: Tree, lines: list[str], file_path: str | None = None
+) -> list[ExtractedElement]:
+    """Extract code elements from a JavaScript/TypeScript AST.
+
+    Args:
+        tree: Parsed tree-sitter Tree.
+        lines: Source code lines for raw code extraction.
+        file_path: Optional file path for logging purposes.
+
+    Returns:
+        List of extracted elements.
+    """
+    # Reset stats for this file
+    reset_extraction_stats()
+
     elements: list[ExtractedElement] = []
     root = tree.root_node
 
@@ -133,7 +158,8 @@ def extract_javascript_elements(tree: Tree, lines: list[str]) -> list[ExtractedE
         elif node.type == "function_declaration":
             elements.append(_extract_js_function(node, lines))
         elif node.type == "lexical_declaration":
-            # const/let declarations - check for arrow functions and React wrappers
+            # const/let declarations - extract arrow functions, React wrappers, and useful variables
+            is_const = any(c.type == "const" for c in node.children)
             for decl in get_children_by_type(node, "variable_declarator"):
                 name_node = get_child_by_field(decl, "name")
                 value_node = get_child_by_field(decl, "value")
@@ -143,6 +169,28 @@ def extract_javascript_elements(tree: Tree, lines: list[str]) -> list[ExtractedE
                 elif value_node and value_node.type == "call_expression":
                     # Check for React wrapper patterns: memo(), forwardRef(), lazy()
                     elem = _extract_react_wrapped_component(decl, name, value_node, lines)
+                    if elem:
+                        elements.append(elem)
+                    else:
+                        # Not a React wrapper - extract as variable with usefulness filter
+                        elem = _extract_js_variable(decl, name, value_node, lines, is_const)
+                        if elem:
+                            elements.append(elem)
+                elif value_node:
+                    # Other value types (literals, objects, arrays, etc.)
+                    elem = _extract_js_variable(decl, name, value_node, lines, is_const)
+                    if elem:
+                        elements.append(elem)
+        elif node.type == "variable_declaration":
+            # var declarations (older style) - same logic as lexical_declaration
+            for decl in get_children_by_type(node, "variable_declarator"):
+                name_node = get_child_by_field(decl, "name")
+                value_node = get_child_by_field(decl, "value")
+                name = get_node_text(name_node) if name_node else "unknown"
+                if value_node and value_node.type == "arrow_function":
+                    elements.append(_extract_js_arrow_function(decl, name, lines))
+                elif value_node:
+                    elem = _extract_js_variable(decl, name, value_node, lines, is_const=False)
                     if elem:
                         elements.append(elem)
         # TypeScript-specific declarations
@@ -155,6 +203,11 @@ def extract_javascript_elements(tree: Tree, lines: list[str]) -> list[ExtractedE
         # Import statements
         elif node.type == "import_statement":
             elements.append(_extract_js_import(node, lines))
+
+    # Log extraction stats if we have any skipped variables
+    stats = reset_extraction_stats()
+    if stats and stats.skipped_count > 0:
+        stats.log_summary(file_path or "<unknown>")
 
     return elements
 
@@ -481,6 +534,90 @@ def _extract_js_arrow_function(node: Node, name: str, lines: list[str]) -> Extra
         node=arrow_func_node,
         decorators=decorators,
         decorator_details=decorator_details,
+    )
+
+
+def _extract_js_variable(
+    decl_node: Node,
+    name: str,
+    value_node: Node,
+    lines: list[str],
+    is_const: bool = False,
+) -> ExtractedElement | None:
+    """Extract a JavaScript/TypeScript variable or constant.
+
+    Applies usefulness filter to skip transient variables like instance
+    creations and function call results.
+
+    Args:
+        decl_node: The variable_declarator node.
+        name: The variable name.
+        value_node: The value node (right-hand side of assignment).
+        lines: Source code lines.
+        is_const: Whether this is a const declaration.
+
+    Returns:
+        ExtractedElement if the variable is useful, None otherwise.
+    """
+    # Skip short/temp names early
+    if name in SKIP_NAMES:
+        return None
+
+    line_start = decl_node.start_point[0] + 1
+    value_type = value_node.type
+    value_text = value_node.text.decode("utf-8") if value_node.text else ""
+
+    # Determine function name if this is a call
+    func_name: str | None = None
+    if value_type == "call_expression":
+        func_node = get_child_by_field(value_node, "function")
+        if func_node:
+            func_name = get_node_text(func_node)
+    elif value_type == "new_expression":
+        # For new expressions, the class name is in the "constructor" field
+        constructor_node = get_child_by_field(value_node, "constructor")
+        if constructor_node:
+            func_name = get_node_text(constructor_node)
+
+    # Apply usefulness filter
+    # Use "typescript" for language since JS and TS have same AST types
+    skip, reason = should_skip_variable(
+        name=name,
+        value_type=value_type,
+        func_name=func_name,
+        language="typescript",
+        is_module_level=True,  # JS doesn't have module-level distinction in our context
+    )
+
+    if skip:
+        # Record the skip for reporting
+        stats = get_extraction_stats()
+        stats.record_skip(name, line_start, reason, value_type, value_text)
+        return None
+
+    # Record that we kept this one
+    stats = get_extraction_stats()
+    stats.record_keep()
+
+    line_end = decl_node.end_point[0] + 1
+    raw_code = decl_node.text.decode("utf-8") if decl_node.text else ""
+
+    # Determine element type: constant if UPPER_CASE or const with literal
+    if name.isupper() and len(name) > 1:
+        elem_type = "constant"
+    elif is_const and value_type in ("string", "number", "true", "false", "null"):
+        elem_type = "constant"
+    else:
+        elem_type = "variable"
+
+    return ExtractedElement(
+        element_type=elem_type,
+        name=name,
+        line_start=line_start,
+        line_end=line_end,
+        raw_code=raw_code,
+        byte_offset=decl_node.start_byte,
+        node=decl_node,
     )
 
 
