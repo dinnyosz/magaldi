@@ -785,6 +785,7 @@ class TransitionDetailInfo(BaseModel):
     caller_duration_ms: int | None = None
     callee_duration_ms: int | None = None
     timestamp: str | None = None
+    is_consecutive: bool = True  # Whether this is a consecutive (temporal) transition
     is_causal: bool = False  # Whether this transition has a confirmed causal link
     causal_match_type: str | None = None  # "parameter" or "tool_suggestion"
     causal_matched_value: str | None = None  # The value that linked the calls

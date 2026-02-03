@@ -708,6 +708,7 @@ export interface TransitionDetailInfo {
   caller_duration_ms: number | null
   callee_duration_ms: number | null
   timestamp: string | null
+  is_consecutive: boolean
   is_causal: boolean
   causal_match_type: string | null
   causal_matched_value: string | null

@@ -1807,6 +1807,7 @@ class RedisMCPAnalyticsRepository(RedisRepository):
                         "caller_duration_ms": caller.get("duration_ms"),
                         "callee_duration_ms": callee.get("duration_ms"),
                         "timestamp": callee.get("start_time"),
+                        "is_consecutive": True,  # This is a consecutive (temporal) transition
                         "is_causal": is_causal,
                         "causal_match_type": causal_match_type,
                         "causal_matched_value": causal_matched_value,
@@ -1871,6 +1872,7 @@ class RedisMCPAnalyticsRepository(RedisRepository):
                             "caller_duration_ms": caller_duration_ms,
                             "callee_duration_ms": callee.get("duration_ms"),
                             "timestamp": callee.get("start_time"),
+                            "is_consecutive": False,  # Non-consecutive causal transition
                             "is_causal": True,
                             "causal_match_type": triggered_by.get("match_type"),
                             "causal_matched_value": triggered_by.get("matched_value"),

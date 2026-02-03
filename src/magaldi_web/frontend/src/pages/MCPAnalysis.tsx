@@ -590,9 +590,9 @@ function MCPAnalysis() {
                                   </td>
                                   <td className="text-center align-top">
                                     <div>
-                                      {detail.is_causal ? (
+                                      {detail.is_causal && (
                                         <span
-                                          className="badge bg-success mb-1"
+                                          className="badge bg-success mb-1 me-1"
                                           title={detail.causal_match_type === 'parameter'
                                             ? `Causal: parameter match${detail.causal_matched_value ? ` (${detail.causal_matched_value.substring(0, 20)}...)` : ''}`
                                             : 'Causal: tool suggestion'}
@@ -600,9 +600,15 @@ function MCPAnalysis() {
                                           <i className="bi bi-link-45deg me-1"></i>
                                           Causal
                                         </span>
-                                      ) : (
-                                        <span className="badge bg-secondary mb-1" title="Temporal sequence only">
+                                      )}
+                                      {detail.is_consecutive && (
+                                        <span className="badge bg-secondary mb-1" title="Consecutive (temporal) transition">
                                           Temporal
+                                        </span>
+                                      )}
+                                      {!detail.is_causal && !detail.is_consecutive && (
+                                        <span className="badge bg-light text-dark mb-1" title="Unknown transition type">
+                                          -
                                         </span>
                                       )}
                                     </div>

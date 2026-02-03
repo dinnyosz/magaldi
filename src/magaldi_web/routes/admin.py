@@ -412,6 +412,7 @@ async def get_mcp_transition_details(
                 caller_duration_ms=t.get("caller_duration_ms"),
                 callee_duration_ms=t.get("callee_duration_ms"),
                 timestamp=t.get("timestamp"),
+                is_consecutive=t.get("is_consecutive", True),
                 is_causal=t.get("is_causal", False),
                 causal_match_type=t.get("causal_match_type"),
                 causal_matched_value=t.get("causal_matched_value"),
