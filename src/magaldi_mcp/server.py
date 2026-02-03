@@ -79,22 +79,28 @@ class MagaldiMCPServer:
                 return None
         return self._analytics_repo
 
-    def _record_tool_call(self, tool_name: str) -> None:
+    def _record_tool_call(self, tool_name: str, input_args: dict[str, Any] | None = None) -> None:
         """Record a tool call for analytics."""
         try:
             repo = self._get_analytics_repo()
             if repo:
                 repo.record_tool_call(tool_name, self._session_id)
+                # Also record detailed call info if args provided
+                if input_args is not None:
+                    repo.record_tool_call_details(tool_name, self._session_id, input_args)
         except Exception as e:
             # Don't let analytics failures affect tool execution
             log.debug(f"Analytics recording failed: {e}")
 
-    def _record_tool_end(self) -> None:
+    def _record_tool_end(self, output_result: str | None = None) -> None:
         """Record that the current tool call has ended."""
         try:
             repo = self._get_analytics_repo()
             if repo:
                 repo.record_tool_end(self._session_id)
+                # Also record output if provided
+                if output_result is not None:
+                    repo.record_tool_output(self._session_id, output_result)
         except Exception as e:
             # Don't let analytics failures affect tool execution
             log.debug(f"Analytics end recording failed: {e}")
@@ -110,18 +116,20 @@ class MagaldiMCPServer:
         @self.server.call_tool()
         async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             """Handle tool calls."""
-            # Record analytics before execution
-            self._record_tool_call(name)
+            # Record analytics before execution (with input args)
+            self._record_tool_call(name, arguments)
 
             try:
                 result = await self._handle_tool(name, arguments)
-                return [TextContent(type="text", text=format_result(result))]
+                formatted_result = format_result(result)
+                # Record end time and output for analytics
+                self._record_tool_end(formatted_result)
+                return [TextContent(type="text", text=formatted_result)]
             except Exception as e:
                 log.exception(f"Tool {name} failed")
-                return [TextContent(type="text", text=f"Error: {e}")]
-            finally:
-                # Always record end time for duration tracking
-                self._record_tool_end()
+                error_msg = f"Error: {e}"
+                self._record_tool_end(error_msg)
+                return [TextContent(type="text", text=error_msg)]
 
     async def _handle_tool(self, name: str, args: dict[str, Any]) -> Any:
         """Dispatch tool call to implementation."""

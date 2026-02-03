@@ -770,6 +770,50 @@ class MCPActivityHistoryResponse(BaseModel):
     total_calls: int  # Sum across all days
 
 
+class TransitionDetailInfo(BaseModel):
+    """Detailed information about a tool transition."""
+
+    caller: str
+    caller_input: str | None = None
+    caller_output: str | None = None
+    callee: str
+    callee_input: str | None = None
+    callee_output: str | None = None
+    elapsed_ms: int | None = None
+    caller_duration_ms: int | None = None
+    callee_duration_ms: int | None = None
+    timestamp: str | None = None
+
+
+class MCPTransitionDetailsResponse(BaseModel):
+    """Response for MCP transition details endpoint."""
+
+    transitions: list[TransitionDetailInfo]
+    from_tool: str | None = None
+    to_tool: str | None = None
+    total: int
+
+
+class RecentToolCallInfo(BaseModel):
+    """Information about a recent tool call."""
+
+    call_id: str
+    tool_name: str
+    session_id: str
+    input_args: str | None = None
+    output_result: str | None = None
+    start_time: str | None = None
+    end_time: str | None = None
+    duration_ms: int | None = None
+
+
+class MCPRecentCallsResponse(BaseModel):
+    """Response for MCP recent calls endpoint."""
+
+    calls: list[RecentToolCallInfo]
+    total: int
+
+
 # =============================================================================
 # VECTOR MAP MODELS
 # =============================================================================

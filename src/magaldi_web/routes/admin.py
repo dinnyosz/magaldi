@@ -22,11 +22,15 @@ from magaldi_web.models import (
     JobStatsResponse,
     MCPActivityHistoryResponse,
     MCPAnalyticsResponse,
+    MCPRecentCallsResponse,
+    MCPTransitionDetailsResponse,
     QueueStats,
+    RecentToolCallInfo,
     ServiceHealth,
     ToolDurationInfo,
     ToolTransitionInfo,
     ToolUsageInfo,
+    TransitionDetailInfo,
 )
 from shared.db.elasticsearch import INDEX_NAME, ElasticsearchRepository
 from shared.db.redis import RedisMCPAnalyticsRepository
@@ -352,4 +356,109 @@ async def get_mcp_activity_history(
             max_days=max_days,
             daily_activity=[],
             total_calls=0,
+        )
+
+
+@router.get("/admin/mcp-analytics/transition-details", response_model=MCPTransitionDetailsResponse)
+async def get_mcp_transition_details(
+    from_tool: str | None = Query(default=None, description="Filter by source tool"),
+    to_tool: str | None = Query(default=None, description="Filter by destination tool"),
+    limit: int = Query(default=50, ge=1, le=200, description="Max transitions to return"),
+) -> MCPTransitionDetailsResponse:
+    """Get detailed transition information including caller output and callee input.
+
+    This endpoint returns tool transitions with the actual data passed between
+    consecutive tool calls: the caller's output and the callee's input.
+
+    Args:
+        from_tool: Filter by source tool name (optional).
+        to_tool: Filter by destination tool name (optional).
+        limit: Maximum number of transitions to return.
+
+    Returns:
+        List of transition details with caller output and callee input.
+    """
+    config = get_cached_config()
+
+    try:
+        analytics_repo = RedisMCPAnalyticsRepository(config)
+        transitions_data = analytics_repo.get_transition_details(
+            from_tool=from_tool,
+            to_tool=to_tool,
+            limit=limit,
+        )
+
+        transitions = [
+            TransitionDetailInfo(
+                caller=t["caller"],
+                caller_input=t.get("caller_input"),
+                caller_output=t.get("caller_output"),
+                callee=t["callee"],
+                callee_input=t.get("callee_input"),
+                callee_output=t.get("callee_output"),
+                elapsed_ms=t.get("elapsed_ms"),
+                caller_duration_ms=t.get("caller_duration_ms"),
+                callee_duration_ms=t.get("callee_duration_ms"),
+                timestamp=t.get("timestamp"),
+            )
+            for t in transitions_data
+        ]
+
+        return MCPTransitionDetailsResponse(
+            transitions=transitions,
+            from_tool=from_tool,
+            to_tool=to_tool,
+            total=len(transitions),
+        )
+
+    except Exception:
+        return MCPTransitionDetailsResponse(
+            transitions=[],
+            from_tool=from_tool,
+            to_tool=to_tool,
+            total=0,
+        )
+
+
+@router.get("/admin/mcp-analytics/recent-calls", response_model=MCPRecentCallsResponse)
+async def get_mcp_recent_calls(
+    limit: int = Query(default=100, ge=1, le=500, description="Max calls to return"),
+) -> MCPRecentCallsResponse:
+    """Get recent tool calls with full input/output details.
+
+    Args:
+        limit: Maximum number of calls to return.
+
+    Returns:
+        List of recent tool calls with their inputs and outputs.
+    """
+    config = get_cached_config()
+
+    try:
+        analytics_repo = RedisMCPAnalyticsRepository(config)
+        calls_data = analytics_repo.get_recent_calls(limit=limit)
+
+        calls = [
+            RecentToolCallInfo(
+                call_id=c.get("call_id", ""),
+                tool_name=c.get("tool_name", ""),
+                session_id=c.get("session_id", ""),
+                input_args=c.get("input_args"),
+                output_result=c.get("output_result"),
+                start_time=c.get("start_time"),
+                end_time=c.get("end_time"),
+                duration_ms=c.get("duration_ms"),
+            )
+            for c in calls_data
+        ]
+
+        return MCPRecentCallsResponse(
+            calls=calls,
+            total=len(calls),
+        )
+
+    except Exception:
+        return MCPRecentCallsResponse(
+            calls=[],
+            total=0,
         )

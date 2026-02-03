@@ -1024,6 +1024,7 @@ MCP_TOOL_CALLS = "magaldi:mcp:tool_calls"
 MCP_TOOL_TRANSITIONS = "magaldi:mcp:tool_transitions"
 MCP_SESSION_PREFIX = "magaldi:mcp:session:"
 MCP_DAILY_CALLS_PREFIX = "magaldi:mcp:daily:"
+MCP_RECENT_CALLS = "magaldi:mcp:recent_calls"  # List of recent tool calls with details
 
 
 class RedisMCPAnalyticsRepository(RedisRepository):
@@ -1305,6 +1306,7 @@ class RedisMCPAnalyticsRepository(RedisRepository):
         # Delete main keys
         client.delete(MCP_TOOL_CALLS)
         client.delete(MCP_TOOL_TRANSITIONS)
+        client.delete(MCP_RECENT_CALLS)
 
         # Delete all session keys
         for key in client.scan_iter(f"{MCP_SESSION_PREFIX}*"):
@@ -1313,3 +1315,208 @@ class RedisMCPAnalyticsRepository(RedisRepository):
         # Delete all daily keys
         for key in client.scan_iter(f"{MCP_DAILY_CALLS_PREFIX}*"):
             client.delete(key)
+
+    # Maximum size for stored inputs/outputs (in characters)
+    MAX_IO_SIZE = 2000
+    # Maximum number of recent calls to keep
+    MAX_RECENT_CALLS = 1000
+
+    def record_tool_call_details(
+        self,
+        tool_name: str,
+        session_id: str,
+        input_args: dict[str, Any],
+        timestamp: str | None = None,
+    ) -> str:
+        """Record a tool call with its input arguments.
+
+        Args:
+            tool_name: Name of the tool being called.
+            session_id: Session identifier.
+            input_args: Tool input arguments.
+            timestamp: Optional ISO timestamp (defaults to now).
+
+        Returns:
+            Call ID for later updating with output.
+        """
+        import json
+        import uuid
+
+        client = self._get_client()
+        call_id = f"{session_id}:{uuid.uuid4().hex[:8]}"
+        now = timestamp or datetime.now().isoformat()
+
+        # Truncate input args to prevent huge storage
+        input_str = json.dumps(input_args, default=str)
+        if len(input_str) > self.MAX_IO_SIZE:
+            input_str = input_str[: self.MAX_IO_SIZE - 3] + "..."
+
+        call_data = {
+            "call_id": call_id,
+            "tool_name": tool_name,
+            "session_id": session_id,
+            "input_args": input_str,
+            "output_result": None,
+            "start_time": now,
+            "end_time": None,
+            "duration_ms": None,
+        }
+
+        # Store in session for later update
+        session_call_key = f"{MCP_SESSION_PREFIX}{session_id}:current_call"
+        client.setex(session_call_key, self.SESSION_TTL, json.dumps(call_data))
+
+        return call_id
+
+    def record_tool_output(
+        self,
+        session_id: str,
+        output_result: str,
+    ) -> None:
+        """Record tool output and finalize the call record.
+
+        Args:
+            session_id: Session identifier.
+            output_result: Tool output result (will be truncated if too large).
+        """
+        import json
+
+        client = self._get_client()
+        session_call_key = f"{MCP_SESSION_PREFIX}{session_id}:current_call"
+        call_data_str = client.get(session_call_key)
+
+        if not call_data_str:
+            return
+
+        try:
+            call_data = json.loads(call_data_str)
+            now = datetime.now()
+            call_data["end_time"] = now.isoformat()
+
+            # Calculate duration
+            if call_data.get("start_time"):
+                start_dt = datetime.fromisoformat(call_data["start_time"])
+                call_data["duration_ms"] = int((now - start_dt).total_seconds() * 1000)
+
+            # Truncate output
+            if len(output_result) > self.MAX_IO_SIZE:
+                output_result = output_result[: self.MAX_IO_SIZE - 3] + "..."
+            call_data["output_result"] = output_result
+
+            # Push to recent calls list (LPUSH for newest first)
+            client.lpush(MCP_RECENT_CALLS, json.dumps(call_data))
+            # Trim to keep only recent calls
+            client.ltrim(MCP_RECENT_CALLS, 0, self.MAX_RECENT_CALLS - 1)
+
+            # Clean up session key
+            client.delete(session_call_key)
+
+        except json.JSONDecodeError:
+            pass
+
+    def get_recent_calls(self, limit: int = 100) -> list[dict[str, Any]]:
+        """Get recent tool calls with details.
+
+        Args:
+            limit: Maximum number of calls to return.
+
+        Returns:
+            List of call records with input/output details.
+        """
+        import json
+
+        client = self._get_client()
+        raw_calls = client.lrange(MCP_RECENT_CALLS, 0, limit - 1)
+
+        calls = []
+        for raw_call in raw_calls:
+            try:
+                calls.append(json.loads(raw_call))
+            except json.JSONDecodeError:
+                continue
+
+        return calls
+
+    def get_transition_details(
+        self,
+        from_tool: str | None = None,
+        to_tool: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Get detailed transition information.
+
+        Finds consecutive tool calls within the same session and returns
+        details about the caller's output and callee's input.
+
+        Args:
+            from_tool: Filter by source tool (optional).
+            to_tool: Filter by destination tool (optional).
+            limit: Maximum number of transitions to return.
+
+        Returns:
+            List of transition records with caller output and callee input.
+        """
+        # Get recent calls and find consecutive pairs in same session
+        calls = self.get_recent_calls(limit=500)  # Get more to find transitions
+
+        # Group by session
+        sessions: dict[str, list[dict[str, Any]]] = {}
+        for call in calls:
+            session_id = call.get("session_id", "")
+            if session_id not in sessions:
+                sessions[session_id] = []
+            sessions[session_id].append(call)
+
+        transitions = []
+        for session_id, session_calls in sessions.items():
+            # Sort by start_time (oldest first)
+            session_calls.sort(key=lambda x: x.get("start_time", ""))
+
+            # Find consecutive pairs
+            for i in range(len(session_calls) - 1):
+                caller = session_calls[i]
+                callee = session_calls[i + 1]
+
+                caller_name = caller.get("tool_name", "")
+                callee_name = callee.get("tool_name", "")
+
+                # Apply filters
+                if from_tool and caller_name != from_tool:
+                    continue
+                if to_tool and callee_name != to_tool:
+                    continue
+
+                # Calculate elapsed time between calls
+                elapsed_ms = None
+                if caller.get("end_time") and callee.get("start_time"):
+                    try:
+                        caller_end = datetime.fromisoformat(caller["end_time"])
+                        callee_start = datetime.fromisoformat(callee["start_time"])
+                        elapsed_ms = int(
+                            (callee_start - caller_end).total_seconds() * 1000
+                        )
+                    except ValueError:
+                        pass
+
+                transitions.append(
+                    {
+                        "caller": caller_name,
+                        "caller_input": caller.get("input_args"),
+                        "caller_output": caller.get("output_result"),
+                        "callee": callee_name,
+                        "callee_input": callee.get("input_args"),
+                        "callee_output": callee.get("output_result"),
+                        "elapsed_ms": elapsed_ms,
+                        "caller_duration_ms": caller.get("duration_ms"),
+                        "callee_duration_ms": callee.get("duration_ms"),
+                        "timestamp": callee.get("start_time"),
+                    }
+                )
+
+                if len(transitions) >= limit:
+                    break
+
+            if len(transitions) >= limit:
+                break
+
+        return transitions

@@ -9,6 +9,7 @@ import Explorer from './pages/Explorer'
 import VectorMap from './pages/VectorMap'
 import Glossary from './pages/Glossary'
 import Admin from './pages/Admin'
+import MCPAnalysis from './pages/MCPAnalysis'
 import DeadCode from './pages/DeadCode'
 import EntryPoints from './pages/EntryPoints'
 import CallExplorer from './pages/CallExplorer'
@@ -79,6 +80,13 @@ function App() {
               >
                 Admin
               </Nav.Link>
+              <Nav.Link
+                as={Link}
+                to="/mcp-analysis"
+                active={location.pathname.startsWith('/mcp-analysis')}
+              >
+                MCP Analysis
+              </Nav.Link>
             </Nav>
           </Navbar.Collapse>
         </Container>
@@ -102,6 +110,7 @@ function App() {
           <Route path="/glossary" element={<Glossary />} />
           <Route path="/glossary/:scope/:repository" element={<Glossary />} />
           <Route path="/admin" element={<Admin />} />
+          <Route path="/mcp-analysis" element={<MCPAnalysis />} />
         </Routes>
       </Container>
 

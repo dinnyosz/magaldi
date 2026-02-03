@@ -694,6 +694,61 @@ export async function clearMCPAnalytics(): Promise<{ status: string; message?: s
   return fetchJson(`${API_BASE}/admin/mcp-analytics/clear`, { method: 'POST' })
 }
 
+// MCP Transition Details types
+export interface TransitionDetailInfo {
+  caller: string
+  caller_input: string | null
+  caller_output: string | null
+  callee: string
+  callee_input: string | null
+  callee_output: string | null
+  elapsed_ms: number | null
+  caller_duration_ms: number | null
+  callee_duration_ms: number | null
+  timestamp: string | null
+}
+
+export interface MCPTransitionDetailsResponse {
+  transitions: TransitionDetailInfo[]
+  from_tool: string | null
+  to_tool: string | null
+  total: number
+}
+
+export interface RecentToolCallInfo {
+  call_id: string
+  tool_name: string
+  session_id: string
+  input_args: string | null
+  output_result: string | null
+  start_time: string | null
+  end_time: string | null
+  duration_ms: number | null
+}
+
+export interface MCPRecentCallsResponse {
+  calls: RecentToolCallInfo[]
+  total: number
+}
+
+export async function getMCPTransitionDetails(params?: {
+  from_tool?: string
+  to_tool?: string
+  limit?: number
+}): Promise<MCPTransitionDetailsResponse> {
+  const searchParams = new URLSearchParams()
+  if (params?.from_tool) searchParams.set('from_tool', params.from_tool)
+  if (params?.to_tool) searchParams.set('to_tool', params.to_tool)
+  if (params?.limit) searchParams.set('limit', String(params.limit))
+  const query = searchParams.toString() ? `?${searchParams.toString()}` : ''
+  return fetchJson(`${API_BASE}/admin/mcp-analytics/transition-details${query}`)
+}
+
+export async function getMCPRecentCalls(limit?: number): Promise<MCPRecentCallsResponse> {
+  const query = limit ? `?limit=${limit}` : ''
+  return fetchJson(`${API_BASE}/admin/mcp-analytics/recent-calls${query}`)
+}
+
 // Browse API
 
 export interface BrowseFilters {
