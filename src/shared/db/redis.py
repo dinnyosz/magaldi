@@ -1716,8 +1716,9 @@ class RedisMCPAnalyticsRepository(RedisRepository):
     ) -> list[dict[str, Any]]:
         """Get detailed transition information.
 
-        Finds consecutive tool calls within the same session and returns
-        details about the caller's output and callee's input.
+        Finds tool call transitions and returns details about the caller's
+        output and callee's input. Includes both consecutive (sequential)
+        transitions and non-consecutive causal transitions.
 
         Args:
             from_tool: Filter by source tool (optional).
@@ -1727,8 +1728,8 @@ class RedisMCPAnalyticsRepository(RedisRepository):
         Returns:
             List of transition records with caller output and callee input.
         """
-        # Get recent calls and find consecutive pairs in same session
-        calls = self.get_recent_calls(limit=500)  # Get more to find transitions
+        # Get recent calls and find transitions
+        calls = self.get_recent_calls(limit=500)
 
         # Group by session
         sessions: dict[str, list[dict[str, Any]]] = {}
@@ -1739,11 +1740,20 @@ class RedisMCPAnalyticsRepository(RedisRepository):
             sessions[session_id].append(call)
 
         transitions = []
+        seen_pairs: set[tuple[str, str]] = set()  # (caller_call_id, callee_call_id)
+
         for session_id, session_calls in sessions.items():
             # Sort by start_time (oldest first)
             session_calls.sort(key=lambda x: x.get("start_time", ""))
 
-            # Find consecutive pairs
+            # Build lookup by call_id for finding causal sources
+            calls_by_id: dict[str, dict[str, Any]] = {}
+            for call in session_calls:
+                call_id = call.get("call_id")
+                if call_id:
+                    calls_by_id[call_id] = call
+
+            # Find consecutive pairs (sequential transitions)
             for i in range(len(session_calls) - 1):
                 caller = session_calls[i]
                 callee = session_calls[i + 1]
@@ -1756,6 +1766,11 @@ class RedisMCPAnalyticsRepository(RedisRepository):
                     continue
                 if to_tool and callee_name != to_tool:
                     continue
+
+                pair_key = (caller.get("call_id", str(i)), callee.get("call_id", str(i + 1)))
+                if pair_key in seen_pairs:
+                    continue
+                seen_pairs.add(pair_key)
 
                 # Calculate elapsed time between calls
                 elapsed_ms = None
@@ -1798,13 +1813,77 @@ class RedisMCPAnalyticsRepository(RedisRepository):
                     }
                 )
 
-                if len(transitions) >= limit:
-                    break
+            # Find non-consecutive causal transitions (when filtering by tools)
+            if from_tool and to_tool:
+                for callee in session_calls:
+                    callee_name = callee.get("tool_name", "")
+                    if callee_name != to_tool:
+                        continue
+
+                    triggered_by = callee.get("triggered_by")
+                    if not triggered_by:
+                        continue
+
+                    source_tool = triggered_by.get("tool_name", "")
+                    if source_tool != from_tool:
+                        continue
+
+                    # Find the caller in this session
+                    source_call_id = triggered_by.get("call_id")
+                    caller = calls_by_id.get(source_call_id) if source_call_id else None
+
+                    # Skip if we already have this pair from consecutive logic
+                    pair_key = (source_call_id or "", callee.get("call_id", ""))
+                    if pair_key in seen_pairs:
+                        continue
+                    seen_pairs.add(pair_key)
+
+                    # Calculate elapsed time if we found the caller
+                    elapsed_ms = None
+                    caller_input = None
+                    caller_output = None
+                    caller_duration_ms = None
+
+                    if caller:
+                        caller_input = caller.get("input_args")
+                        caller_output = caller.get("output_result")
+                        caller_duration_ms = caller.get("duration_ms")
+
+                        if caller.get("end_time") and callee.get("start_time"):
+                            try:
+                                caller_end = datetime.fromisoformat(caller["end_time"])
+                                callee_start = datetime.fromisoformat(callee["start_time"])
+                                elapsed_ms = int(
+                                    (callee_start - caller_end).total_seconds() * 1000
+                                )
+                            except ValueError:
+                                pass
+
+                    transitions.append(
+                        {
+                            "caller": from_tool,
+                            "caller_input": caller_input,
+                            "caller_output": caller_output,
+                            "callee": callee_name,
+                            "callee_input": callee.get("input_args"),
+                            "callee_output": callee.get("output_result"),
+                            "elapsed_ms": elapsed_ms,
+                            "caller_duration_ms": caller_duration_ms,
+                            "callee_duration_ms": callee.get("duration_ms"),
+                            "timestamp": callee.get("start_time"),
+                            "is_causal": True,
+                            "causal_match_type": triggered_by.get("match_type"),
+                            "causal_matched_value": triggered_by.get("matched_value"),
+                        }
+                    )
 
             if len(transitions) >= limit:
                 break
 
-        return transitions
+        # Sort: causal first, then by timestamp
+        transitions.sort(key=lambda t: (not t.get("is_causal", False), t.get("timestamp", "")))
+
+        return transitions[:limit]
 
     def get_causal_statistics(self) -> dict[str, Any]:
         """Get statistics about causal relationships between tool calls.

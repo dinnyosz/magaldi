@@ -419,9 +419,6 @@ async def get_mcp_transition_details(
             for t in transitions_data
         ]
 
-        # Sort so causal transitions appear first
-        transitions.sort(key=lambda t: (not t.is_causal, t.timestamp or ""), reverse=False)
-
         return MCPTransitionDetailsResponse(
             transitions=transitions,
             from_tool=from_tool,
