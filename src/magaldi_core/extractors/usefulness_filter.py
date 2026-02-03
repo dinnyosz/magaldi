@@ -304,15 +304,27 @@ def is_useful_value_type(
     return True, ""
 
 
-def is_useful_factory_call(func_name: str) -> tuple[bool, str]:
+def is_useful_factory_call(func_name: str, value_type: str | None = None) -> tuple[bool, str]:
     """Check if a function/constructor call produces a useful value.
 
     Args:
         func_name: The name of the function being called.
+        value_type: Optional AST node type of the value (e.g., "new_expression").
 
     Returns:
         Tuple of (is_useful, skip_reason). If is_useful is True, skip_reason is empty.
     """
+    # Check for instance creation via AST node type (reliable, language-agnostic)
+    INSTANCE_CREATION_TYPES = {"new_expression", "object_creation_expression"}
+    USEFUL_CONSTRUCTORS = {"Map", "Set", "WeakMap", "WeakSet", "RegExp", "Promise", "Error"}
+
+    if value_type in INSTANCE_CREATION_TYPES:
+        # Allow useful built-in constructors
+        if func_name in USEFUL_CONSTRUCTORS:
+            return True, ""
+        # Skip all other instance creations
+        return False, "instance_creation"
+
     # Known useful factory functions
     if func_name in USEFUL_FACTORIES:
         return True, ""
@@ -329,15 +341,15 @@ def is_useful_factory_call(func_name: str) -> tuple[bool, str]:
         if last_part in USEFUL_FACTORIES:
             return True, ""
 
-    # Instance creation (PascalCase class name)
-    if func_name and func_name[0].isupper() and not func_name.isupper():
-        return False, "instance_creation"
-
-    # Method calls (contains . or ::)
+    # Method calls (contains . or ::) - skip
     if "." in func_name or "::" in func_name:
         return False, "method_call_result"
 
-    # Function call results (lowercase function)
+    # For Python (no new keyword): use PascalCase heuristic for class instantiation
+    if func_name and func_name[0].isupper() and not func_name.isupper():
+        return False, "instance_creation"
+
+    # Function call results (lowercase function) - skip
     if func_name and func_name[0].islower():
         return False, "function_call_result"
 
@@ -385,7 +397,7 @@ def should_skip_variable(
 
     # Check if it's a call
     if func_name is not None:
-        is_useful, reason = is_useful_factory_call(func_name)
+        is_useful, reason = is_useful_factory_call(func_name, value_type)
         if not is_useful:
             return True, reason
 

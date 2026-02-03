@@ -332,6 +332,79 @@ class TestPhpSpecificCases:
         assert skip, "Object creation should be skipped"
 
 
+class TestASTBasedInstanceDetection:
+    """Test that instance creation is detected via AST node type, not naming."""
+
+    def test_js_new_expression_skipped_regardless_of_case(self):
+        """JS new expressions should be skipped even with non-PascalCase names."""
+        # camelCase constructor
+        skip, reason = should_skip_variable(
+            name="client",
+            value_type="new_expression",
+            func_name="httpClient",  # camelCase
+            language="javascript",
+            is_module_level=True,
+        )
+        assert skip, "new httpClient() should be skipped"
+        assert reason == "instance_creation"
+
+        # snake_case constructor
+        skip, reason = should_skip_variable(
+            name="client",
+            value_type="new_expression",
+            func_name="http_client",  # snake_case
+            language="javascript",
+            is_module_level=True,
+        )
+        assert skip, "new http_client() should be skipped"
+        assert reason == "instance_creation"
+
+    def test_php_object_creation_skipped_regardless_of_case(self):
+        """PHP object creations should be skipped even with non-PascalCase names."""
+        skip, reason = should_skip_variable(
+            name="service",
+            value_type="object_creation_expression",
+            func_name="myService",  # camelCase
+            language="php",
+            is_module_level=True,
+        )
+        assert skip, "new myService() should be skipped"
+        assert reason == "instance_creation"
+
+    def test_js_new_map_is_kept(self):
+        """new Map() should be kept as a useful built-in."""
+        skip, reason = should_skip_variable(
+            name="cache",
+            value_type="new_expression",
+            func_name="Map",
+            language="javascript",
+            is_module_level=True,
+        )
+        assert not skip, "new Map() should be kept"
+
+    def test_js_new_set_is_kept(self):
+        """new Set() should be kept as a useful built-in."""
+        skip, reason = should_skip_variable(
+            name="items",
+            value_type="new_expression",
+            func_name="Set",
+            language="javascript",
+            is_module_level=True,
+        )
+        assert not skip, "new Set() should be kept"
+
+    def test_js_new_regexp_is_kept(self):
+        """new RegExp() should be kept as a useful built-in."""
+        skip, reason = should_skip_variable(
+            name="pattern",
+            value_type="new_expression",
+            func_name="RegExp",
+            language="javascript",
+            is_module_level=True,
+        )
+        assert not skip, "new RegExp() should be kept"
+
+
 class TestRustSpecificCases:
     """Test Rust-specific usefulness criteria."""
 
