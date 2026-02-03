@@ -10,21 +10,23 @@ Every piece of data extracted during parsing MUST be surfaced to users through A
 
 ## 1. New Element Type Checklist
 
-When adding a new element type (like `trait`, `enum`, `interface`):
+**Source of truth for element types:** `CodeElement.element_type` field docstring in `src/magaldi_core/code_parser.py:207`
+
+When adding a new element type:
 
 ### Parsing Layer
 - [ ] Add to `CodeElement.element_type` docstring in `src/magaldi_core/code_parser.py`
-- [ ] Implement extraction in relevant language extractors
+- [ ] Implement extraction in relevant language extractors in `src/magaldi_core/extractors/`
 
-### Summarization Prompts (`src/shared/ai/summarization.py`)
-- [ ] Add to `LINE_THRESHOLDS` dict
-- [ ] Add to `SENTENCE_RANGES` dict
-- [ ] Add to `SYSTEM_PROMPTS` dict with:
-  - Relevant questions for this element type
-  - Anti-verbose instruction (see below)
-- [ ] Add to `USER_PROMPTS` dict
-- [ ] Add to legacy `PROMPTS` dict with anti-verbose instruction
-- [ ] Update context building if element needs special sections (e.g., `base_classes_section` for interfaces)
+### Summarization Prompts
+**Source of truth:** `src/shared/ai/summarization.py`
+
+- [ ] Add to `LINE_THRESHOLDS` dict - defines size tiers for the element
+- [ ] Add to `SENTENCE_RANGES` dict - defines sentence count per size tier
+- [ ] Add to `SYSTEM_PROMPTS` dict - the main prompt (see anti-verbose rules below)
+- [ ] Add to `USER_PROMPTS` dict - the variable content template
+- [ ] Add to legacy `PROMPTS` dict - single-prompt format for backwards compat
+- [ ] Update context building in `build_prompt()` and `build_messages()` if element needs special sections
 
 ### Web UI
 - [ ] Dashboard stats: `src/magaldi_web/routes/dashboard.py`
@@ -43,32 +45,34 @@ When adding a new element type (like `trait`, `enum`, `interface`):
 
 ## 2. New Metadata Checklist
 
-When extracting new metadata (like `http_routes`, `security_issues`, `complexity`):
+**Source of truth for element fields:** `CodeElement` dataclass in `src/magaldi_core/code_parser.py`
+
+When extracting new metadata:
 
 ### Parsing Layer
 - [ ] Add field to `CodeElement` dataclass in `src/magaldi_core/code_parser.py`
 - [ ] Add field to `ExtractedElement` in `src/magaldi_core/extractors/types.py`
-- [ ] Implement extraction in relevant extractors
+- [ ] Implement extraction in relevant extractors in `src/magaldi_core/extractors/`
 
 ### Elasticsearch
 - [ ] Add field mapping in `src/shared/db/elasticsearch.py`
 - [ ] Update element serialization in `src/magaldi_core/storage.py`
 
 ### Summarization Prompts
-- [ ] Add to relevant prompt context sections (token-efficient!)
-- [ ] Only include if non-empty: `if element.new_field:`
-- [ ] Keep format minimal: `\nNew field: {', '.join(element.new_field)}`
+- [ ] Add to relevant prompt context sections in `src/shared/ai/summarization.py`
+- [ ] Use helper function pattern (see section 4)
+- [ ] Only include if non-empty
 
 ### Web UI
-- [ ] Display in element detail page
-- [ ] Add to search filters if filterable
-- [ ] Update TypeScript interfaces
+- [ ] Display in element detail page: `src/magaldi_web/frontend/src/pages/Element.tsx`
+- [ ] Add to search filters if filterable: `src/magaldi_web/routes/search.py`
+- [ ] Update TypeScript interfaces: `src/magaldi_web/frontend/src/api.ts`
 
 ### MCP Tools
-- [ ] Include in `get_element` response
+- [ ] Include in `get_element` response: `src/magaldi_mcp/tools_impl.py`
 - [ ] Include in search results if relevant
-- [ ] Create dedicated tool if complex (e.g., `find_security_issues`)
-- [ ] Update formatters to display new field
+- [ ] Create dedicated tool if complex (check existing patterns in `src/magaldi_mcp/tools/schemas/`)
+- [ ] Update formatters: `src/magaldi_mcp/formatters/`
 
 ---
 
@@ -76,23 +80,24 @@ When extracting new metadata (like `http_routes`, `security_issues`, `complexity
 
 **ALL summarization prompts MUST include anti-verbose instructions.**
 
-### Format
+### Reference Implementation
+See existing prompts in `SYSTEM_PROMPTS` dict in `src/shared/ai/summarization.py` for the exact format used per element type.
+
+### Pattern
 Add at the end of every system/legacy prompt:
 ```
 Start [action] - never start with "This [type]...", "The X [type]...", or similar.
 ```
 
-### Examples by Element Type
+### Guidelines by Element Category
 
-| Type | Anti-verbose instruction |
-|------|-------------------------|
-| file | `Start directly with what it does - never start with "This module...", "This file...", or similar.` |
-| class | `Start directly with what it models/does - never start with "This class...", "The X class...", or similar.` |
-| function/method | `Start with an action verb - never start with "This function...", "The X function...", or "This function is used to...".` |
-| interface/trait | `Start directly with what contract/capability it defines - never start with "This interface...", "This trait...", or similar.` |
-| enum | `Start directly with what it represents - never start with "This enum...", "The X enum...", or similar.` |
-| constant/variable | `Start directly with what it represents/holds - never start with "This constant...", "This variable...", or similar.` |
-| import | `Start with what it imports - never start with "This import...", "The import...", or similar.` |
+| Category | Instruction Pattern |
+|----------|---------------------|
+| Containers (file, class) | `Start directly with what it does/models - never start with "This [type]..."` |
+| Contracts (interface, trait) | `Start directly with what contract/capability it defines - never start with "This [type]..."` |
+| Callables (function, method) | `Start with an action verb - never start with "This [type]..." or "[type] is used to..."` |
+| Data (enum, type_alias, constant, variable) | `Start directly with what it represents/holds - never start with "This [type]..."` |
+| Dependencies (import) | `Start with what it imports - never start with "This import..."` |
 
 ### Bad vs Good Examples
 
@@ -106,56 +111,61 @@ Start [action] - never start with "This [type]...", "The X [type]...", or simila
 
 ## 4. Token-Efficient Context in Prompts
 
-When adding metadata to prompts:
+### Helper Function Pattern
+**Reference:** See `_build_*_section()` functions in `src/shared/ai/summarization.py`
 
-### Do
-- Use conditional inclusion: `{exceptions_section}` only if non-empty
-- Use compact format: `\nRaises: ValueError, TypeError`
-- Limit lists: `[:5]` or `[:3]` for long lists
-- Use helper functions: `_build_X_section(element)`
-
-### Don't
-- Include empty sections
-- Use verbose labels: "The following exceptions may be raised:"
-- Include full details when names suffice
-- Repeat information available in code
-
-### Example Helper Pattern
 ```python
-def _build_exceptions_section(element: CodeElement) -> str:
-    if not element.exceptions_raised:
+def _build_X_section(element: CodeElement) -> str:
+    """Build X section for prompt. Returns empty string if no data."""
+    if not element.X_field:
         return ""
-    return f"\nRaises: {', '.join(element.exceptions_raised)}"
+    # Limit to reasonable count
+    items = element.X_field[:5]
+    return f"\nX: {', '.join(items)}"
 ```
+
+### Rules
+- Use conditional inclusion: `{section}` only if non-empty
+- Use compact format: `\nField: value1, value2`
+- Limit lists: `[:5]` or `[:3]` for long lists
+- Never include empty sections
+- Never use verbose labels like "The following X may be..."
 
 ---
 
-## 5. Quick Reference: Key Files
+## 5. Source of Truth Reference
 
-| Area | Files |
+| What | Where |
 |------|-------|
-| Element types | `src/magaldi_core/code_parser.py:207` |
-| Summarization | `src/shared/ai/summarization.py` |
-| Feature/subfeature prompts | `src/shared/ai/clustering/feature_processor.py` |
-| Glossary prompts | `src/shared/ai/glossary/ai_extractor.py` |
-| MCP tools | `src/magaldi_mcp/tools_impl.py` |
-| MCP schemas | `src/magaldi_mcp/tools/schemas/` |
+| Element types | `CodeElement.element_type` docstring @ `src/magaldi_core/code_parser.py:207` |
+| Element fields/metadata | `CodeElement` dataclass @ `src/magaldi_core/code_parser.py` |
+| Extractor element types | `ExtractedElement` @ `src/magaldi_core/extractors/types.py` |
+| Summarization prompts | `SYSTEM_PROMPTS`, `USER_PROMPTS`, `PROMPTS` @ `src/shared/ai/summarization.py` |
+| Prompt sentence ranges | `LINE_THRESHOLDS`, `SENTENCE_RANGES` @ `src/shared/ai/summarization.py` |
+| Feature/subfeature prompts | `FEATURE_*_PROMPT`, `SUBFEATURE_*_PROMPT` @ `src/shared/ai/clustering/feature_processor.py` |
+| Glossary prompts | `GLOSSARY_*_PROMPT` @ `src/shared/ai/glossary/ai_extractor.py` |
+| MCP tool implementations | `src/magaldi_mcp/tools_impl.py` |
+| MCP tool schemas | `src/magaldi_mcp/tools/schemas/` |
 | MCP formatters | `src/magaldi_mcp/formatters/` |
-| Web API | `src/magaldi_web/routes/` |
-| Web frontend | `src/magaldi_web/frontend/src/` |
-| ES mappings | `src/shared/db/elasticsearch.py` |
+| ES field mappings | `src/shared/db/elasticsearch.py` |
+| Web API routes | `src/magaldi_web/routes/` |
+| Web frontend pages | `src/magaldi_web/frontend/src/pages/` |
+| TypeScript types | `src/magaldi_web/frontend/src/api.ts` |
 
 ---
 
-## 6. Verification Commands
+## 6. Verification
 
+### Check element types have prompts
 ```bash
-# Check all element types have prompts
-python -c "from shared.ai.summarization import PROMPTS; print(list(PROMPTS.keys()))"
-
-# Run summarization tests
-pytest tests/test_summarization.py -v
-
-# Check MCP tool outputs
-# Use magaldi MCP tools to verify new data is exposed
+source .venv/bin/activate
+python -c "from shared.ai.summarization import PROMPTS; print('Prompts:', list(PROMPTS.keys()))"
 ```
+
+### Run tests
+```bash
+pytest tests/test_summarization.py -v
+```
+
+### Use integrity check skill
+Run `/check-magaldi-integrity` to verify all element types and fields are properly exposed.
