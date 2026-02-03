@@ -1022,6 +1022,7 @@ class RedisSubfeatureLabelingJobRepository(RedisRepository):
 # MCP Analytics Redis keys
 MCP_TOOL_CALLS = "magaldi:mcp:tool_calls"
 MCP_TOOL_TRANSITIONS = "magaldi:mcp:tool_transitions"
+MCP_CONFIRMED_TRANSITIONS = "magaldi:mcp:confirmed_transitions"  # Transitions with causal links
 MCP_SESSION_PREFIX = "magaldi:mcp:session:"
 MCP_DAILY_CALLS_PREFIX = "magaldi:mcp:daily:"
 MCP_RECENT_CALLS = "magaldi:mcp:recent_calls"  # List of recent tool calls with details
@@ -1315,6 +1316,56 @@ class RedisMCPAnalyticsRepository(RedisRepository):
 
         return matrix
 
+    def get_confirmed_transitions(self) -> dict[str, dict[str, int]]:
+        """Get confirmed transition matrix (transitions with causal links).
+
+        Returns:
+            Nested dict: from_tool -> to_tool -> count
+        """
+        client = self._get_client()
+        raw_transitions = client.hgetall(MCP_CONFIRMED_TRANSITIONS)
+
+        matrix: dict[str, dict[str, int]] = {}
+        for transition_key, count in raw_transitions.items():
+            parts = transition_key.split(":", 1)
+            if len(parts) == 2:
+                from_tool, to_tool = parts
+                if from_tool not in matrix:
+                    matrix[from_tool] = {}
+                matrix[from_tool][to_tool] = int(count)
+
+        return matrix
+
+    def get_transition_comparison(self) -> list[dict[str, Any]]:
+        """Compare all transitions with confirmed transitions.
+
+        Returns:
+            List of transitions with confirmation rates.
+        """
+        all_transitions = self.get_tool_transitions()
+        confirmed = self.get_confirmed_transitions()
+
+        result = []
+        for from_tool, targets in all_transitions.items():
+            for to_tool, total_count in targets.items():
+                confirmed_count = confirmed.get(from_tool, {}).get(to_tool, 0)
+                confirmation_rate = (
+                    round(confirmed_count / total_count * 100, 1)
+                    if total_count > 0
+                    else 0.0
+                )
+                result.append({
+                    "from_tool": from_tool,
+                    "to_tool": to_tool,
+                    "total_count": total_count,
+                    "confirmed_count": confirmed_count,
+                    "confirmation_rate": confirmation_rate,
+                })
+
+        # Sort by total count descending
+        result.sort(key=lambda x: x["total_count"], reverse=True)
+        return result
+
     def clear_analytics(self) -> None:
         """Clear all analytics data.
 
@@ -1325,6 +1376,7 @@ class RedisMCPAnalyticsRepository(RedisRepository):
         # Delete main keys
         client.delete(MCP_TOOL_CALLS)
         client.delete(MCP_TOOL_TRANSITIONS)
+        client.delete(MCP_CONFIRMED_TRANSITIONS)
         client.delete(MCP_RECENT_CALLS)
 
         # Delete all session keys
@@ -1340,7 +1392,10 @@ class RedisMCPAnalyticsRepository(RedisRepository):
     # Maximum number of recent calls to keep
     MAX_RECENT_CALLS = 1000
     # Time window for causal link detection (seconds)
-    CAUSAL_LINK_WINDOW = 60
+    # 2 minutes to allow multiple follow-up calls from one search
+    CAUSAL_LINK_WINDOW = 120
+    # Number of previous calls to check for causal links
+    CAUSAL_HISTORY_LOOKBACK = 15
 
     def _extract_trackable_values(self, output: str) -> set[str]:
         """Extract values from output that could be tracked as causal links.
@@ -1449,9 +1504,11 @@ class RedisMCPAnalyticsRepository(RedisRepository):
         """
         client = self._get_client()
 
-        # Get the most recent completed call from this session
+        # Get the most recent completed calls from this session
+        # Check up to CAUSAL_HISTORY_LOOKBACK calls to find the original source
+        # This handles cases where one search leads to multiple follow-up calls
         session_history_key = f"{MCP_SESSION_PREFIX}{session_id}:history"
-        recent_calls_raw = client.lrange(session_history_key, 0, 4)  # Last 5 calls
+        recent_calls_raw = client.lrange(session_history_key, 0, self.CAUSAL_HISTORY_LOOKBACK - 1)
 
         if not recent_calls_raw:
             return None
@@ -1604,12 +1661,22 @@ class RedisMCPAnalyticsRepository(RedisRepository):
             # Trim to keep only recent calls
             client.ltrim(MCP_RECENT_CALLS, 0, self.MAX_RECENT_CALLS - 1)
 
+            # Track confirmed transitions (with causal links)
+            triggered_by = call_data.get("triggered_by")
+            if triggered_by:
+                source_tool = triggered_by.get("tool_name")
+                target_tool = call_data.get("tool_name")
+                if source_tool and target_tool:
+                    # Increment confirmed transition counter
+                    transition_key = f"{source_tool}:{target_tool}"
+                    client.hincrby(MCP_CONFIRMED_TRANSITIONS, transition_key, 1)
+
             # Add to session history for causal link detection
             # This allows subsequent calls to check this call's output
             session_history_key = f"{MCP_SESSION_PREFIX}{session_id}:history"
             client.lpush(session_history_key, json.dumps(call_data))
-            # Keep last 10 calls per session for causal detection
-            client.ltrim(session_history_key, 0, 9)
+            # Keep enough history for causal detection (CAUSAL_HISTORY_LOOKBACK + buffer)
+            client.ltrim(session_history_key, 0, 29)
             client.expire(session_history_key, self.SESSION_TTL)
 
             # Clean up session key
@@ -1702,6 +1769,17 @@ class RedisMCPAnalyticsRepository(RedisRepository):
                     except ValueError:
                         pass
 
+                # Check if callee has causal link to caller
+                triggered_by = callee.get("triggered_by")
+                is_causal = False
+                causal_match_type = None
+                causal_matched_value = None
+
+                if triggered_by and triggered_by.get("tool_name") == caller_name:
+                    is_causal = True
+                    causal_match_type = triggered_by.get("match_type")
+                    causal_matched_value = triggered_by.get("matched_value")
+
                 transitions.append(
                     {
                         "caller": caller_name,
@@ -1714,6 +1792,9 @@ class RedisMCPAnalyticsRepository(RedisRepository):
                         "caller_duration_ms": caller.get("duration_ms"),
                         "callee_duration_ms": callee.get("duration_ms"),
                         "timestamp": callee.get("start_time"),
+                        "is_causal": is_causal,
+                        "causal_match_type": causal_match_type,
+                        "causal_matched_value": causal_matched_value,
                     }
                 )
 

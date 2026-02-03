@@ -413,13 +413,15 @@ function MCPAnalysis() {
                           <tr>
                             <th>#</th>
                             <th>From -&gt; To</th>
-                            <th className="text-end">Count</th>
+                            <th className="text-end" title="Temporal transitions (within 10s)">Sequential</th>
+                            <th className="text-end" title="Confirmed causal connections (data passed between tools)">Causal</th>
                           </tr>
                         </thead>
                         <tbody>
                           {mcpAnalytics.top_transitions.map((transition, idx) => {
                             const key = `${transition.from_tool}->${transition.to_tool}`
                             const isExpanded = expandedTransition === key
+                            const hasConfirmed = transition.confirmed_count > 0
                             return (
                               <tr
                                 key={idx}
@@ -439,6 +441,18 @@ function MCPAnalysis() {
                                   {isExpanded && <i className="bi bi-chevron-down ms-2 text-primary"></i>}
                                 </td>
                                 <td className="text-end">{transition.count.toLocaleString()}</td>
+                                <td className="text-end">
+                                  {hasConfirmed ? (
+                                    <span
+                                      className="badge bg-success"
+                                      title="Confirmed causal connections (parameter or tool suggestion match)"
+                                    >
+                                      {transition.confirmed_count}
+                                    </span>
+                                  ) : (
+                                    <span className="text-muted small">-</span>
+                                  )}
+                                </td>
                               </tr>
                             )
                           })}
@@ -488,7 +502,7 @@ function MCPAnalysis() {
                                 <th style={{ minWidth: '250px' }}>Callee Input</th>
                                 <th style={{ minWidth: '120px' }}>Callee</th>
                                 <th style={{ minWidth: '250px' }}>Callee Output</th>
-                                <th style={{ minWidth: '80px' }}>Gap</th>
+                                <th style={{ minWidth: '100px' }} className="text-center">Link / Gap</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -574,12 +588,29 @@ function MCPAnalysis() {
                                       {detail.callee_output || <em className="text-muted">No output</em>}
                                     </pre>
                                   </td>
-                                  <td className="text-end align-top">
+                                  <td className="text-center align-top">
+                                    <div>
+                                      {detail.is_causal ? (
+                                        <span
+                                          className="badge bg-success mb-1"
+                                          title={detail.causal_match_type === 'parameter'
+                                            ? `Causal: parameter match${detail.causal_matched_value ? ` (${detail.causal_matched_value.substring(0, 20)}...)` : ''}`
+                                            : 'Causal: tool suggestion'}
+                                        >
+                                          <i className="bi bi-link-45deg me-1"></i>
+                                          Causal
+                                        </span>
+                                      ) : (
+                                        <span className="badge bg-secondary mb-1" title="Temporal sequence only">
+                                          Temporal
+                                        </span>
+                                      )}
+                                    </div>
                                     {detail.elapsed_ms != null ? (
-                                      <span className={detail.elapsed_ms > 1000 ? 'text-warning fw-bold' : ''}>
+                                      <span className={`small ${detail.elapsed_ms > 1000 ? 'text-warning fw-bold' : 'text-muted'}`}>
                                         {detail.elapsed_ms}ms
                                       </span>
-                                    ) : '-'}
+                                    ) : <span className="text-muted">-</span>}
                                   </td>
                                 </tr>
                               ))}

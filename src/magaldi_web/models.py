@@ -730,6 +730,8 @@ class ToolTransitionInfo(BaseModel):
     to_tool: str
     count: int
     percentage: float  # Percentage of transitions from from_tool
+    confirmed_count: int = 0  # Count of transitions with causal links
+    confirmation_rate: float = 0.0  # Percentage of transitions that are confirmed
 
 
 class ToolDurationInfo(BaseModel):
@@ -783,6 +785,9 @@ class TransitionDetailInfo(BaseModel):
     caller_duration_ms: int | None = None
     callee_duration_ms: int | None = None
     timestamp: str | None = None
+    is_causal: bool = False  # Whether this transition has a confirmed causal link
+    causal_match_type: str | None = None  # "parameter" or "tool_suggestion"
+    causal_matched_value: str | None = None  # The value that linked the calls
 
 
 class MCPTransitionDetailsResponse(BaseModel):

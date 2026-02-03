@@ -537,6 +537,8 @@ export interface ToolTransitionInfo {
   to_tool: string
   count: number
   percentage: number
+  confirmed_count: number
+  confirmation_rate: number
 }
 
 export interface ToolDurationInfo {
@@ -706,6 +708,9 @@ export interface TransitionDetailInfo {
   caller_duration_ms: number | null
   callee_duration_ms: number | null
   timestamp: string | null
+  is_causal: boolean
+  causal_match_type: string | null
+  causal_matched_value: string | null
 }
 
 export interface MCPTransitionDetailsResponse {

@@ -236,23 +236,32 @@ async def get_mcp_analytics() -> MCPAnalyticsResponse:
                 )
             )
 
-        # Get top transitions
+        # Get top transitions with confirmation data
         raw_transitions = analytics_repo.get_top_transitions(limit=20)
         transition_matrix = analytics_repo.get_tool_transitions()
+        confirmed_matrix = analytics_repo.get_confirmed_transitions()
 
         top_transitions = []
         for from_tool, to_tool, count in raw_transitions:
             # Calculate percentage of transitions from from_tool
             total_from = sum(transition_matrix.get(from_tool, {}).values())
             percentage = (count / total_from * 100) if total_from > 0 else 0.0
+            # Get confirmed count for this transition
+            confirmed_count = confirmed_matrix.get(from_tool, {}).get(to_tool, 0)
+            confirmation_rate = (confirmed_count / count * 100) if count > 0 else 0.0
             top_transitions.append(
                 ToolTransitionInfo(
                     from_tool=from_tool,
                     to_tool=to_tool,
                     count=count,
                     percentage=round(percentage, 1),
+                    confirmed_count=confirmed_count,
+                    confirmation_rate=round(confirmation_rate, 1),
                 )
             )
+
+        # Sort by confirmed count (causal) descending, then by total count
+        top_transitions.sort(key=lambda t: (t.confirmed_count, t.count), reverse=True)
 
         # Get tool durations
         duration_stats = analytics_repo.get_tool_durations()
@@ -403,9 +412,15 @@ async def get_mcp_transition_details(
                 caller_duration_ms=t.get("caller_duration_ms"),
                 callee_duration_ms=t.get("callee_duration_ms"),
                 timestamp=t.get("timestamp"),
+                is_causal=t.get("is_causal", False),
+                causal_match_type=t.get("causal_match_type"),
+                causal_matched_value=t.get("causal_matched_value"),
             )
             for t in transitions_data
         ]
+
+        # Sort so causal transitions appear first
+        transitions.sort(key=lambda t: (not t.is_causal, t.timestamp or ""), reverse=False)
 
         return MCPTransitionDetailsResponse(
             transitions=transitions,
