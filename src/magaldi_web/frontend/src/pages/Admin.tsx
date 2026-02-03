@@ -9,11 +9,25 @@ import {
   Alert,
   Table,
   Button,
-  ProgressBar,
   Form,
   InputGroup,
 } from 'react-bootstrap'
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+} from 'recharts'
 import { getHealth, getIndexStats, getDashboard, getMCPAnalytics, getMCPActivityHistory, clearMCPAnalytics } from '../api'
+
+// Chart colors
+const COLORS = ['#0d6efd', '#6610f2', '#6f42c1', '#d63384', '#dc3545', '#fd7e14', '#ffc107', '#198754', '#20c997', '#0dcaf0']
 
 function Admin() {
   const [historyDays, setHistoryDays] = useState(7)
@@ -501,151 +515,6 @@ function Admin() {
             <i className="bi bi-graph-up me-2"></i>
             MCP Tool Analytics
           </span>
-          <div>
-            <Button
-              variant="outline-secondary"
-              size="sm"
-              className="me-2"
-              onClick={() => refetchAnalytics()}
-            >
-              <i className="bi bi-arrow-clockwise"></i>
-            </Button>
-            <Button
-              variant="outline-danger"
-              size="sm"
-              onClick={handleClearAnalytics}
-            >
-              Clear
-            </Button>
-          </div>
-        </Card.Header>
-        <Card.Body>
-          {analyticsLoading ? (
-            <div className="text-center py-3">
-              <Spinner animation="border" size="sm" />
-            </div>
-          ) : !mcpAnalytics || mcpAnalytics.total_calls === 0 ? (
-            <p className="text-muted mb-0 text-center">
-              <i className="bi bi-info-circle me-2"></i>
-              No MCP tool usage data yet. Data is collected when tools are called via the MCP server.
-            </p>
-          ) : (
-            <>
-              {/* Summary Stats */}
-              <Row className="mb-4">
-                <Col md={4} className="text-center">
-                  <h3 className="text-primary">{mcpAnalytics.total_calls.toLocaleString()}</h3>
-                  <p className="text-muted mb-0">Total Calls</p>
-                </Col>
-                <Col md={4} className="text-center">
-                  <h3 className="text-info">{mcpAnalytics.unique_tools}</h3>
-                  <p className="text-muted mb-0">Unique Tools</p>
-                </Col>
-                <Col md={4} className="text-center">
-                  <h3 className="text-success">{mcpAnalytics.today_calls.toLocaleString()}</h3>
-                  <p className="text-muted mb-0">Today</p>
-                </Col>
-              </Row>
-
-              <Row>
-                {/* Tool Usage */}
-                <Col md={6}>
-                  <h6 className="text-muted mb-3">
-                    <i className="bi bi-bar-chart me-2"></i>
-                    Tool Usage
-                  </h6>
-                  {mcpAnalytics.tool_usage.length > 0 ? (
-                    <Table size="sm" className="mb-0">
-                      <thead>
-                        <tr>
-                          <th>Tool</th>
-                          <th className="text-end" style={{ width: '80px' }}>Calls</th>
-                          <th style={{ width: '150px' }}>Usage</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {mcpAnalytics.tool_usage.slice(0, 15).map((tool) => (
-                          <tr key={tool.tool_name}>
-                            <td>
-                              <code className="small">{tool.tool_name}</code>
-                            </td>
-                            <td className="text-end">{tool.call_count.toLocaleString()}</td>
-                            <td>
-                              <div className="d-flex align-items-center">
-                                <ProgressBar
-                                  now={tool.percentage}
-                                  style={{ height: '8px', flex: 1 }}
-                                  variant="primary"
-                                />
-                                <span className="ms-2 small text-muted" style={{ width: '40px' }}>
-                                  {tool.percentage}%
-                                </span>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </Table>
-                  ) : (
-                    <p className="text-muted small">No tool usage data</p>
-                  )}
-                </Col>
-
-                {/* Tool Transitions */}
-                <Col md={6}>
-                  <h6 className="text-muted mb-3">
-                    <i className="bi bi-arrow-right-circle me-2"></i>
-                    Top Tool Transitions
-                  </h6>
-                  {mcpAnalytics.top_transitions.length > 0 ? (
-                    <Table size="sm" className="mb-0">
-                      <thead>
-                        <tr>
-                          <th>From</th>
-                          <th></th>
-                          <th>To</th>
-                          <th className="text-end">Count</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {mcpAnalytics.top_transitions.slice(0, 15).map((transition, idx) => (
-                          <tr key={idx}>
-                            <td>
-                              <code className="small">{transition.from_tool}</code>
-                            </td>
-                            <td className="text-center text-muted">
-                              <i className="bi bi-arrow-right"></i>
-                            </td>
-                            <td>
-                              <code className="small">{transition.to_tool}</code>
-                            </td>
-                            <td className="text-end">
-                              {transition.count.toLocaleString()}
-                              <span className="text-muted small ms-1">
-                                ({transition.percentage}%)
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </Table>
-                  ) : (
-                    <p className="text-muted small">No transition data yet (need at least 2 consecutive tool calls)</p>
-                  )}
-                </Col>
-              </Row>
-            </>
-          )}
-        </Card.Body>
-      </Card>
-
-      {/* Activity History */}
-      <Card className="mt-4">
-        <Card.Header className="d-flex justify-content-between align-items-center">
-          <span>
-            <i className="bi bi-calendar3 me-2"></i>
-            Activity History
-          </span>
           <div className="d-flex align-items-center gap-2">
             <InputGroup size="sm" style={{ width: '140px' }}>
               <InputGroup.Text>Days</InputGroup.Text>
@@ -660,143 +529,186 @@ function Admin() {
             <Button
               variant="outline-secondary"
               size="sm"
-              onClick={() => refetchHistory()}
+              onClick={() => { refetchAnalytics(); refetchHistory(); }}
             >
               <i className="bi bi-arrow-clockwise"></i>
+            </Button>
+            <Button
+              variant="outline-danger"
+              size="sm"
+              onClick={handleClearAnalytics}
+            >
+              Clear
             </Button>
           </div>
         </Card.Header>
         <Card.Body>
-          {historyLoading ? (
+          {(analyticsLoading || historyLoading) ? (
             <div className="text-center py-3">
               <Spinner animation="border" size="sm" />
             </div>
-          ) : !activityHistory || activityHistory.daily_activity.length === 0 ? (
+          ) : !mcpAnalytics || mcpAnalytics.total_calls === 0 ? (
             <p className="text-muted mb-0 text-center">
               <i className="bi bi-info-circle me-2"></i>
-              No activity data for the selected period.
+              No MCP tool usage data yet. Data is collected when tools are called via the MCP server.
             </p>
           ) : (
             <>
-              {/* Summary */}
+              {/* Row 1: Charts */}
               <Row className="mb-4">
-                <Col md={4} className="text-center">
-                  <h3 className="text-primary">{activityHistory.total_calls.toLocaleString()}</h3>
-                  <p className="text-muted mb-0">Total Calls ({historyDays} days)</p>
+                {/* Tool Distribution Pie Chart */}
+                <Col md={6}>
+                  <h6 className="text-muted mb-3">
+                    <i className="bi bi-pie-chart me-2"></i>
+                    Tool Distribution
+                  </h6>
+                  <div style={{ height: 300 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={mcpAnalytics.tool_usage.slice(0, 8).map((tool, idx) => ({
+                            name: tool.tool_name,
+                            value: tool.call_count,
+                            fill: COLORS[idx % COLORS.length],
+                          }))}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={60}
+                          outerRadius={100}
+                          paddingAngle={2}
+                          dataKey="value"
+                          label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
+                          labelLine={false}
+                        >
+                          {mcpAnalytics.tool_usage.slice(0, 8).map((_, idx) => (
+                            <Cell key={`cell-${idx}`} fill={COLORS[idx % COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip formatter={(value: number) => value.toLocaleString()} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
                 </Col>
-                <Col md={4} className="text-center">
-                  <h3 className="text-info">
-                    {activityHistory.daily_activity.length > 0
-                      ? Math.round(activityHistory.total_calls / activityHistory.daily_activity.length)
-                      : 0}
-                  </h3>
-                  <p className="text-muted mb-0">Avg. per Day</p>
-                </Col>
-                <Col md={4} className="text-center">
-                  <h3 className="text-success">
-                    {Math.max(...activityHistory.daily_activity.map(d => d.total_calls))}
-                  </h3>
-                  <p className="text-muted mb-0">Peak Day</p>
+
+                {/* Daily Activity Line Chart */}
+                <Col md={6}>
+                  <h6 className="text-muted mb-3">
+                    <i className="bi bi-graph-up-arrow me-2"></i>
+                    Daily Activity ({historyDays} days)
+                  </h6>
+                  <div style={{ height: 300 }}>
+                    {activityHistory && activityHistory.daily_activity.length > 0 ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart
+                          data={activityHistory.daily_activity.map(day => ({
+                            date: new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                            calls: day.total_calls,
+                          }))}
+                          margin={{ top: 5, right: 20, left: 0, bottom: 5 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                          <XAxis
+                            dataKey="date"
+                            tick={{ fontSize: 11 }}
+                            interval="preserveStartEnd"
+                          />
+                          <YAxis tick={{ fontSize: 11 }} />
+                          <Tooltip
+                            formatter={(value: number) => [value.toLocaleString(), 'Calls']}
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="calls"
+                            stroke="#0d6efd"
+                            strokeWidth={2}
+                            dot={{ fill: '#0d6efd', strokeWidth: 2 }}
+                            activeDot={{ r: 6 }}
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="d-flex align-items-center justify-content-center h-100 text-muted">
+                        No activity data for this period
+                      </div>
+                    )}
+                  </div>
                 </Col>
               </Row>
 
-              {/* Daily Activity Chart (Simple Bar) */}
-              <h6 className="text-muted mb-3">
-                <i className="bi bi-bar-chart-fill me-2"></i>
-                Daily Activity
-              </h6>
-              <div className="mb-4">
-                {activityHistory.daily_activity.map((day) => {
-                  const maxCalls = Math.max(...activityHistory.daily_activity.map(d => d.total_calls))
-                  const percentage = maxCalls > 0 ? (day.total_calls / maxCalls) * 100 : 0
-                  const date = new Date(day.date)
-                  const dayLabel = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
-
-                  return (
-                    <div key={day.date} className="d-flex align-items-center mb-2">
-                      <span className="text-muted small" style={{ width: '100px' }}>
-                        {dayLabel}
-                      </span>
-                      <div className="flex-grow-1 mx-2">
-                        <ProgressBar
-                          now={percentage}
-                          style={{ height: '20px' }}
-                          variant={day.total_calls > 0 ? 'primary' : 'secondary'}
-                        />
-                      </div>
-                      <span className="text-end" style={{ width: '60px' }}>
-                        {day.total_calls.toLocaleString()}
-                      </span>
+              {/* Row 2: Tables */}
+              <Row>
+                {/* Tool Usage Table */}
+                <Col md={6}>
+                  <h6 className="text-muted mb-3">
+                    <i className="bi bi-list-ol me-2"></i>
+                    Tool Usage (Total: {mcpAnalytics.total_calls.toLocaleString()})
+                  </h6>
+                  {mcpAnalytics.tool_usage.length > 0 ? (
+                    <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                      <Table size="sm" className="mb-0" hover>
+                        <thead className="sticky-top bg-body">
+                          <tr>
+                            <th>#</th>
+                            <th>Tool</th>
+                            <th className="text-end">Calls</th>
+                            <th className="text-end">%</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {mcpAnalytics.tool_usage.map((tool, idx) => (
+                            <tr key={tool.tool_name}>
+                              <td className="text-muted">{idx + 1}</td>
+                              <td>
+                                <code className="small">{tool.tool_name}</code>
+                              </td>
+                              <td className="text-end">{tool.call_count.toLocaleString()}</td>
+                              <td className="text-end text-muted">{tool.percentage}%</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </Table>
                     </div>
-                  )
-                })}
-              </div>
+                  ) : (
+                    <p className="text-muted small">No tool usage data</p>
+                  )}
+                </Col>
 
-              {/* Top Tools per Day */}
-              <h6 className="text-muted mb-3">
-                <i className="bi bi-trophy me-2"></i>
-                Top Tools by Day
-              </h6>
-              <Table size="sm" className="mb-0">
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Total</th>
-                    <th>Top Tool</th>
-                    <th>Top 3 Tools</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {activityHistory.daily_activity
-                    .slice()
-                    .reverse()
-                    .filter(day => day.total_calls > 0)
-                    .slice(0, 10)
-                    .map((day) => {
-                      const sortedTools = Object.entries(day.tool_counts)
-                        .sort((a, b) => b[1] - a[1])
-                      const topTool = sortedTools[0]
-                      const top3 = sortedTools.slice(0, 3)
-
-                      return (
-                        <tr key={day.date}>
-                          <td>
-                            <code className="small">{day.date}</code>
-                          </td>
-                          <td>{day.total_calls}</td>
-                          <td>
-                            {topTool ? (
-                              <>
-                                <code className="small">{topTool[0]}</code>
-                                <Badge bg="secondary" className="ms-1">{topTool[1]}</Badge>
-                              </>
-                            ) : (
-                              <span className="text-muted">-</span>
-                            )}
-                          </td>
-                          <td>
-                            {top3.length > 0 ? (
-                              top3.map(([tool, count], idx) => (
-                                <span key={tool}>
-                                  {idx > 0 && ', '}
-                                  <code className="small">{tool}</code>
-                                  <span className="text-muted small ms-1">({count})</span>
-                                </span>
-                              ))
-                            ) : (
-                              <span className="text-muted">-</span>
-                            )}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                </tbody>
-              </Table>
-              {activityHistory.daily_activity.filter(d => d.total_calls > 0).length === 0 && (
-                <p className="text-muted small text-center mt-2">
-                  No tool usage recorded in this period.
-                </p>
-              )}
+                {/* Transitions Table */}
+                <Col md={6}>
+                  <h6 className="text-muted mb-3">
+                    <i className="bi bi-arrow-right-circle me-2"></i>
+                    Tool Transitions
+                  </h6>
+                  {mcpAnalytics.top_transitions.length > 0 ? (
+                    <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                      <Table size="sm" className="mb-0" hover>
+                        <thead className="sticky-top bg-body">
+                          <tr>
+                            <th>#</th>
+                            <th>From → To</th>
+                            <th className="text-end">Count</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {mcpAnalytics.top_transitions.map((transition, idx) => (
+                            <tr key={idx}>
+                              <td className="text-muted">{idx + 1}</td>
+                              <td>
+                                <code className="small">{transition.from_tool}</code>
+                                <i className="bi bi-arrow-right mx-2 text-muted"></i>
+                                <code className="small">{transition.to_tool}</code>
+                              </td>
+                              <td className="text-end">{transition.count.toLocaleString()}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </Table>
+                    </div>
+                  ) : (
+                    <p className="text-muted small">No transition data yet (need at least 2 consecutive tool calls)</p>
+                  )}
+                </Col>
+              </Row>
             </>
           )}
         </Card.Body>
