@@ -715,6 +715,13 @@ export interface MCPTransitionDetailsResponse {
   total: number
 }
 
+export interface CausalLinkInfo {
+  call_id: string | null
+  tool_name: string
+  matched_value: string | null
+  match_type: 'parameter' | 'tool_suggestion'
+}
+
 export interface RecentToolCallInfo {
   call_id: string
   tool_name: string
@@ -724,11 +731,27 @@ export interface RecentToolCallInfo {
   start_time: string | null
   end_time: string | null
   duration_ms: number | null
+  triggered_by: CausalLinkInfo | null
+  suggested_tools: string[] | null
 }
 
 export interface MCPRecentCallsResponse {
   calls: RecentToolCallInfo[]
   total: number
+}
+
+export interface CausalPairInfo {
+  source: string
+  target: string
+  count: number
+}
+
+export interface MCPCausalStatisticsResponse {
+  total_causal_links: number
+  total_calls: number
+  causal_rate: number
+  by_match_type: Record<string, number>
+  top_causal_pairs: CausalPairInfo[]
 }
 
 export async function getMCPTransitionDetails(params?: {
@@ -747,12 +770,18 @@ export async function getMCPTransitionDetails(params?: {
 export async function getMCPRecentCalls(params?: {
   limit?: number
   tool_name?: string
+  only_causal?: boolean
 }): Promise<MCPRecentCallsResponse> {
   const searchParams = new URLSearchParams()
   if (params?.limit) searchParams.set('limit', String(params.limit))
   if (params?.tool_name) searchParams.set('tool_name', params.tool_name)
+  if (params?.only_causal) searchParams.set('only_causal', 'true')
   const query = searchParams.toString() ? `?${searchParams.toString()}` : ''
   return fetchJson(`${API_BASE}/admin/mcp-analytics/recent-calls${query}`)
+}
+
+export async function getMCPCausalStatistics(): Promise<MCPCausalStatisticsResponse> {
+  return fetchJson(`${API_BASE}/admin/mcp-analytics/causal`)
 }
 
 // Browse API

@@ -30,14 +30,38 @@ import {
   clearMCPAnalytics,
   getMCPTransitionDetails,
   getMCPRecentCalls,
+  getMCPCausalStatistics,
   ToolTransitionInfo,
   TransitionDetailInfo,
   ToolUsageInfo,
   RecentToolCallInfo,
+  CausalLinkInfo,
 } from '../api'
 
 // Chart colors
 const COLORS = ['#0d6efd', '#6610f2', '#6f42c1', '#d63384', '#dc3545', '#fd7e14', '#ffc107', '#198754', '#20c997', '#0dcaf0']
+
+// Helper component for displaying causal link badge
+function CausalBadge({ link }: { link: CausalLinkInfo }) {
+  const isParameter = link.match_type === 'parameter'
+  return (
+    <span
+      className={`badge ${isParameter ? 'bg-success' : 'bg-info'} me-1`}
+      title={isParameter
+        ? `Triggered by ${link.tool_name} via parameter: ${link.matched_value}`
+        : `Triggered by ${link.tool_name} (tool suggestion)`
+      }
+    >
+      <i className={`bi ${isParameter ? 'bi-link-45deg' : 'bi-chat-dots'} me-1`}></i>
+      {link.tool_name}
+      {isParameter && link.matched_value && (
+        <code className="ms-1 text-white" style={{ fontSize: '0.7em' }}>
+          {link.matched_value.length > 20 ? link.matched_value.slice(0, 20) + '...' : link.matched_value}
+        </code>
+      )}
+    </span>
+  )
+}
 
 function MCPAnalysis() {
   const [historyDays, setHistoryDays] = useState(7)
@@ -76,6 +100,13 @@ function MCPAnalysis() {
       limit: 100,
     }),
     enabled: !!expandedTool,
+  })
+
+  // Query for causal statistics
+  const { data: causalStats } = useQuery({
+    queryKey: ['mcpCausalStats'],
+    queryFn: getMCPCausalStatistics,
+    refetchInterval: 30000,
   })
 
   const handleDaysChange = (newDays: number) => {
@@ -250,6 +281,66 @@ function MCPAnalysis() {
                   </div>
                 </Col>
               </Row>
+
+              {/* Causal Statistics Summary */}
+              {causalStats && causalStats.total_causal_links > 0 && (
+                <Row className="mb-4">
+                  <Col>
+                    <Card className="border-success">
+                      <Card.Header className="bg-success text-white py-2">
+                        <i className="bi bi-diagram-3 me-2"></i>
+                        Causal Relationships
+                        <small className="ms-2 opacity-75">
+                          ({causalStats.causal_rate}% of calls triggered by previous calls)
+                        </small>
+                      </Card.Header>
+                      <Card.Body className="py-2">
+                        <Row>
+                          <Col md={3}>
+                            <div className="text-center">
+                              <div className="fs-4 fw-bold text-success">{causalStats.total_causal_links}</div>
+                              <small className="text-muted">Causal Links</small>
+                            </div>
+                          </Col>
+                          <Col md={3}>
+                            <div className="text-center">
+                              <div className="fs-4 fw-bold text-primary">{causalStats.by_match_type.parameter || 0}</div>
+                              <small className="text-muted">
+                                <i className="bi bi-link-45deg me-1"></i>
+                                Parameter Match
+                              </small>
+                            </div>
+                          </Col>
+                          <Col md={3}>
+                            <div className="text-center">
+                              <div className="fs-4 fw-bold text-info">{causalStats.by_match_type.tool_suggestion || 0}</div>
+                              <small className="text-muted">
+                                <i className="bi bi-chat-dots me-1"></i>
+                                Tool Suggestion
+                              </small>
+                            </div>
+                          </Col>
+                          <Col md={3}>
+                            <div className="text-muted small">
+                              <strong>Top Causal Pairs:</strong>
+                              <div style={{ maxHeight: '60px', overflow: 'auto' }}>
+                                {causalStats.top_causal_pairs.slice(0, 3).map((pair, idx) => (
+                                  <div key={idx}>
+                                    <code className="small">{pair.source}</code>
+                                    <i className="bi bi-arrow-right mx-1"></i>
+                                    <code className="small">{pair.target}</code>
+                                    <span className="text-muted ms-1">({pair.count})</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </Col>
+                        </Row>
+                      </Card.Body>
+                    </Card>
+                  </Col>
+                </Row>
+              )}
 
               {/* Row 2: Tables */}
               <Row>
@@ -533,7 +624,7 @@ function MCPAnalysis() {
                             <thead className="table-dark">
                               <tr>
                                 <th style={{ minWidth: '300px' }}>Input</th>
-                                <th style={{ minWidth: '120px' }}>Tool</th>
+                                <th style={{ minWidth: '150px' }}>Tool</th>
                                 <th style={{ minWidth: '400px' }}>Output</th>
                               </tr>
                             </thead>
@@ -562,6 +653,26 @@ function MCPAnalysis() {
                                       <small className="text-muted d-block">
                                         {call.duration_ms}ms
                                       </small>
+                                    )}
+                                    {call.triggered_by && (
+                                      <div className="mt-1">
+                                        <CausalBadge link={call.triggered_by} />
+                                      </div>
+                                    )}
+                                    {call.suggested_tools && call.suggested_tools.length > 0 && (
+                                      <div className="mt-1">
+                                        <small className="text-muted d-block">Suggests:</small>
+                                        {call.suggested_tools.slice(0, 3).map((tool, i) => (
+                                          <span key={i} className="badge bg-secondary me-1" style={{ fontSize: '0.65em' }}>
+                                            {tool}
+                                          </span>
+                                        ))}
+                                        {call.suggested_tools.length > 3 && (
+                                          <span className="text-muted" style={{ fontSize: '0.65em' }}>
+                                            +{call.suggested_tools.length - 3}
+                                          </span>
+                                        )}
+                                      </div>
                                     )}
                                   </td>
                                   <td>
