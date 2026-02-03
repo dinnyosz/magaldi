@@ -163,6 +163,11 @@ def extract_php_elements(
             if node.parent and node.parent.type not in ("declaration_list", "enum_declaration_list"):
                 consts = _extract_php_global_constants(node, lines)
                 elements.extend(consts)
+        elif node.type == "expression_statement":
+            # Check for define() calls: define('CONST_NAME', value)
+            elem = _extract_php_define_constant(node, lines)
+            if elem:
+                elements.append(elem)
 
     # Log extraction stats if we have any skipped variables
     stats = reset_extraction_stats()
@@ -355,6 +360,77 @@ def _extract_php_global_constants(node: Node, lines: list[str]) -> list[Extracte
                 ))
 
     return constants
+
+
+def _extract_php_define_constant(node: Node, lines: list[str]) -> ExtractedElement | None:
+    """Extract constants defined with define() function.
+
+    Handles patterns like:
+        define('DEBUG', true);
+        define('API_URL', 'https://api.example.com');
+
+    Args:
+        node: An expression_statement node.
+        lines: Source code lines.
+
+    Returns:
+        ExtractedElement with element_type="constant" if this is a define() call, None otherwise.
+    """
+    # Look for function_call_expression child
+    call_node = None
+    for child in node.children:
+        if child.type == "function_call_expression":
+            call_node = child
+            break
+
+    if not call_node:
+        return None
+
+    # Check if it's a define() call
+    func_name = None
+    args_node = None
+    for child in call_node.children:
+        if child.type == "name":
+            func_name = get_node_text(child)
+        elif child.type == "arguments":
+            args_node = child
+
+    if func_name != "define" or not args_node:
+        return None
+
+    # Extract constant name (first argument) and value (second argument)
+    const_name = None
+    const_value = None
+    arg_index = 0
+
+    for child in args_node.children:
+        if child.type == "argument":
+            # Get the actual value inside the argument
+            for arg_child in child.children:
+                if arg_child.type in ("string", "encapsed_string"):
+                    if arg_index == 0:
+                        # First arg is the constant name - extract string content
+                        const_name = get_node_text(arg_child).strip("'\"")
+                    break
+                elif arg_child.type in ("integer", "float", "boolean", "null", "string", "array_creation_expression"):
+                    if arg_index == 1:
+                        const_value = get_node_text(arg_child)
+                    break
+            arg_index += 1
+
+    if not const_name:
+        return None
+
+    return ExtractedElement(
+        element_type="constant",
+        name=const_name,
+        line_start=node.start_point[0] + 1,
+        line_end=node.end_point[0] + 1,
+        raw_code=node.text.decode('utf-8') if node.text else "",
+        byte_offset=node.start_byte,
+        node=node,
+        signature=f"define('{const_name}'" + (f", {const_value})" if const_value else ")"),
+    )
 
 
 def _extract_php_assigned_callable(node: Node, lines: list[str]) -> ExtractedElement | None:
