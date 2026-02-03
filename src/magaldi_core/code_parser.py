@@ -204,7 +204,7 @@ class CodeElement:
     relative_path: str = ""
 
     # Element info
-    element_type: str = ""  # 'file', 'class', 'interface', 'type_alias', 'function', 'method', 'constant', 'variable', 'import'
+    element_type: str = ""  # 'file', 'class', 'interface', 'trait', 'enum', 'type_alias', 'function', 'method', 'constant', 'variable', 'import'
     name: str = ""
     language: str = ""
 
