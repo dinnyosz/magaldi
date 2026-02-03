@@ -45,6 +45,11 @@ USEFUL_FACTORIES = frozenset({
     "createContext", "createStore", "defineStore",  # React/Vue/Pinia
     "ref", "reactive", "computed",  # Vue
     "signal", "computed",  # Solid/Angular signals
+    "createSignal", "createMemo", "createEffect", "createResource",  # Solid.js
+    # Python concurrent.futures
+    "ThreadPoolExecutor", "ProcessPoolExecutor",
+    # Python asyncio primitives
+    "Queue", "LifoQueue", "PriorityQueue",
 })
 
 # Attribute-style factory calls that produce useful values
@@ -70,6 +75,22 @@ USEFUL_ATTRIBUTE_FACTORIES = frozenset({
     "React.forwardRef",
     "React.memo",
     "React.lazy",
+    # JavaScript static methods
+    "Array.from",
+    "Array.of",
+    "Object.create",
+    "Object.assign",
+    "Object.fromEntries",
+    # Python asyncio
+    "asyncio.Event",
+    "asyncio.Lock",
+    "asyncio.Semaphore",
+    "asyncio.Queue",
+    "asyncio.LifoQueue",
+    "asyncio.PriorityQueue",
+    # Python concurrent.futures
+    "concurrent.futures.ThreadPoolExecutor",
+    "concurrent.futures.ProcessPoolExecutor",
     # Rust
     "Mutex::new",
     "RwLock::new",
@@ -316,7 +337,14 @@ def is_useful_factory_call(func_name: str, value_type: str | None = None) -> tup
     """
     # Check for instance creation via AST node type (reliable, language-agnostic)
     INSTANCE_CREATION_TYPES = {"new_expression", "object_creation_expression"}
-    USEFUL_CONSTRUCTORS = {"Map", "Set", "WeakMap", "WeakSet", "RegExp", "Promise", "Error"}
+    USEFUL_CONSTRUCTORS = {
+        "Map", "Set", "WeakMap", "WeakSet", "RegExp", "Promise", "Error",
+        # Modern JS constructors
+        "EventTarget", "WeakRef", "FinalizationRegistry",
+        "AbortController", "TextEncoder", "TextDecoder",
+        "URL", "URLSearchParams", "Headers", "FormData",
+        "Blob", "File", "FileReader",
+    }
 
     if value_type in INSTANCE_CREATION_TYPES:
         # Allow useful built-in constructors

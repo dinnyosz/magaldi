@@ -46,9 +46,7 @@ from magaldi_core.extractors.php import (
     extract_php_thrown_exceptions,
 )
 from magaldi_core.extractors.python import (
-    ExtractionStats,
     PythonExtractor,
-    SkippedVariable,
     extract_python_base_classes,
     extract_python_calls,
     extract_python_class_attributes,
@@ -58,6 +56,10 @@ from magaldi_core.extractors.python import (
     extract_python_modified_attributes,
     extract_python_raised_exceptions,
     extract_python_references,
+)
+from magaldi_core.extractors.usefulness_filter import (
+    ExtractionStats,
+    SkippedVariable,
     get_extraction_stats,
     reset_extraction_stats,
 )

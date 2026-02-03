@@ -10,138 +10,18 @@ Uses SCM queries for pattern matching with Python post-processing.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
 
 from tree_sitter import Node, Tree
 
+from magaldi_core.extractors.usefulness_filter import (
+    SKIP_NAMES,
+    USEFUL_ATTRIBUTE_FACTORIES,
+    USEFUL_FACTORIES,
+    get_extraction_stats,
+    reset_extraction_stats,
+)
+
 logger = logging.getLogger(__name__)
-
-
-# =============================================================================
-# VARIABLE USEFULNESS FILTER
-# =============================================================================
-
-# Factory functions that produce useful, indexable values
-USEFUL_FACTORIES = frozenset({
-    # Enums
-    "Enum", "IntEnum", "StrEnum", "Flag", "IntFlag", "auto",
-    # Typing constructs
-    "TypeVar", "ParamSpec", "TypeVarTuple", "NewType", "TypedDict",
-    # Collections
-    "namedtuple", "NamedTuple", "defaultdict", "OrderedDict", "Counter",
-    # Regex
-    "compile",  # re.compile
-    # Logging
-    "getLogger",
-    # Threading primitives
-    "Lock", "RLock", "Semaphore", "BoundedSemaphore", "Condition", "Event", "Barrier",
-    # Paths
-    "Path", "PurePath", "PurePosixPath", "PureWindowsPath",
-    # Dataclass
-    "field",
-    # Functools
-    "partial", "lru_cache", "cache",
-})
-
-# Attribute-style factory calls that produce useful values
-USEFUL_ATTRIBUTE_FACTORIES = frozenset({
-    "re.compile",
-    "logging.getLogger",
-    "threading.Lock",
-    "threading.RLock",
-    "threading.Semaphore",
-    "threading.Condition",
-    "threading.Event",
-    "pathlib.Path",
-    "functools.partial",
-    "functools.lru_cache",
-    "collections.defaultdict",
-    "collections.OrderedDict",
-    "collections.Counter",
-    "collections.namedtuple",
-})
-
-# Short/temporary variable names to always skip
-SKIP_NAMES = frozenset({
-    "i", "j", "k", "x", "y", "z", "n", "m",
-    "_", "__", "___",
-    "self", "cls", "mcs",
-    "tmp", "temp", "ret", "res", "val", "var",
-    "e", "ex", "err", "exc",  # exception handlers
-})
-
-
-@dataclass
-class SkippedVariable:
-    """Record of a variable that was skipped by the usefulness filter."""
-
-    name: str
-    line: int
-    reason: str
-    value_type: str
-    value_preview: str
-
-
-@dataclass
-class ExtractionStats:
-    """Statistics about variable extraction for a single file."""
-
-    kept_count: int = 0
-    skipped_count: int = 0
-    skipped_variables: list[SkippedVariable] = field(default_factory=list)
-
-    def record_skip(self, name: str, line: int, reason: str, value_type: str, value_preview: str) -> None:
-        """Record a skipped variable."""
-        self.skipped_count += 1
-        self.skipped_variables.append(SkippedVariable(
-            name=name,
-            line=line,
-            reason=reason,
-            value_type=value_type,
-            value_preview=value_preview[:60] if value_preview else "",
-        ))
-
-    def record_keep(self) -> None:
-        """Record a kept variable."""
-        self.kept_count += 1
-
-    def log_summary(self, file_path: str) -> None:
-        """Log a summary of extraction stats."""
-        if self.skipped_count > 0:
-            logger.debug(
-                "Variable filter for %s: kept=%d, skipped=%d",
-                file_path, self.kept_count, self.skipped_count
-            )
-            for sv in self.skipped_variables:
-                logger.debug(
-                    "  SKIP: %s (line %d) - %s [%s] %s",
-                    sv.name, sv.line, sv.reason, sv.value_type, sv.value_preview
-                )
-
-
-# Thread-local stats for current file being parsed
-_current_stats: ExtractionStats | None = None
-
-
-def _get_extraction_stats() -> ExtractionStats:
-    """Get or create extraction stats for current parse."""
-    global _current_stats
-    if _current_stats is None:
-        _current_stats = ExtractionStats()
-    return _current_stats
-
-
-def reset_extraction_stats() -> ExtractionStats | None:
-    """Reset and return the extraction stats. Call after parsing a file."""
-    global _current_stats
-    stats = _current_stats
-    _current_stats = None
-    return stats
-
-
-def get_extraction_stats() -> ExtractionStats | None:
-    """Get current extraction stats without resetting (for inspection)."""
-    return _current_stats
 
 
 def _is_useful_assignment(
@@ -151,6 +31,9 @@ def _is_useful_assignment(
 ) -> tuple[bool, str]:
     """Determine if a variable assignment is useful for code discovery.
 
+    Uses the shared usefulness_filter module for consistent filtering across
+    all language extractors.
+
     Returns:
         Tuple of (is_useful, skip_reason). If is_useful is True, skip_reason is empty.
     """
@@ -158,7 +41,6 @@ def _is_useful_assignment(
         return False, "no_value"
 
     value_type = value_node.type
-    value_text = value_node.text.decode("utf-8") if value_node.text else ""
 
     # USEFUL: Constants by naming convention (UPPER_CASE)
     if name.isupper() and len(name) > 1:
@@ -188,11 +70,11 @@ def _is_useful_assignment(
         if func_node:
             func_text = func_node.text.decode("utf-8") if func_node.text else ""
 
-            # USEFUL: Known useful factory functions
+            # USEFUL: Known useful factory functions (from shared module)
             if func_text in USEFUL_FACTORIES:
                 return True, ""
 
-            # USEFUL: Known useful attribute factories (re.compile, logging.getLogger, etc.)
+            # USEFUL: Known useful attribute factories (from shared module)
             if func_text in USEFUL_ATTRIBUTE_FACTORIES:
                 return True, ""
 
@@ -851,12 +733,12 @@ def _extract_python_assignment(
 
     if not is_useful:
         # Record the skip for reporting
-        stats = _get_extraction_stats()
+        stats = get_extraction_stats()
         stats.record_skip(name, line_start, skip_reason, value_type, value_text)
         return None
 
     # Record that we kept this one
-    stats = _get_extraction_stats()
+    stats = get_extraction_stats()
     stats.record_keep()
 
     line_end = node.end_point[0] + 1

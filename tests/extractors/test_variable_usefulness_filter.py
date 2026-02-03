@@ -440,3 +440,177 @@ class TestRustSpecificCases:
             is_module_level=True,
         )
         assert not skip, "Arc::new should be kept"
+
+
+class TestNewUsefulPatterns:
+    """Tests for newly added useful patterns (Solid.js, modern JS, asyncio, etc.)."""
+
+    # JavaScript - Modern built-in constructors
+    def test_js_new_event_target_is_kept(self):
+        """new EventTarget() should be kept."""
+        skip, reason = should_skip_variable(
+            name="emitter",
+            value_type="new_expression",
+            func_name="EventTarget",
+            language="javascript",
+            is_module_level=True,
+        )
+        assert not skip, "new EventTarget() should be kept"
+
+    def test_js_new_weak_ref_is_kept(self):
+        """new WeakRef() should be kept."""
+        skip, reason = should_skip_variable(
+            name="ref",
+            value_type="new_expression",
+            func_name="WeakRef",
+            language="javascript",
+            is_module_level=True,
+        )
+        assert not skip, "new WeakRef() should be kept"
+
+    def test_js_new_abort_controller_is_kept(self):
+        """new AbortController() should be kept."""
+        skip, reason = should_skip_variable(
+            name="controller",
+            value_type="new_expression",
+            func_name="AbortController",
+            language="javascript",
+            is_module_level=True,
+        )
+        assert not skip, "new AbortController() should be kept"
+
+    def test_js_new_url_is_kept(self):
+        """new URL() should be kept."""
+        skip, reason = should_skip_variable(
+            name="apiUrl",
+            value_type="new_expression",
+            func_name="URL",
+            language="javascript",
+            is_module_level=True,
+        )
+        assert not skip, "new URL() should be kept"
+
+    # JavaScript - Solid.js reactive patterns
+    def test_js_create_signal_is_kept(self):
+        """createSignal() should be kept."""
+        skip, reason = should_skip_variable(
+            name="count",
+            value_type="call",
+            func_name="createSignal",
+            language="javascript",
+            is_module_level=True,
+        )
+        assert not skip, "createSignal() should be kept"
+
+    def test_js_create_memo_is_kept(self):
+        """createMemo() should be kept."""
+        skip, reason = should_skip_variable(
+            name="doubled",
+            value_type="call",
+            func_name="createMemo",
+            language="javascript",
+            is_module_level=True,
+        )
+        assert not skip, "createMemo() should be kept"
+
+    def test_js_create_effect_is_kept(self):
+        """createEffect() should be kept."""
+        skip, reason = should_skip_variable(
+            name="effect",
+            value_type="call",
+            func_name="createEffect",
+            language="javascript",
+            is_module_level=True,
+        )
+        assert not skip, "createEffect() should be kept"
+
+    # JavaScript - Static methods on built-ins
+    def test_js_array_from_is_kept(self):
+        """Array.from() should be kept."""
+        skip, reason = should_skip_variable(
+            name="items",
+            value_type="call",
+            func_name="Array.from",
+            language="javascript",
+            is_module_level=True,
+        )
+        assert not skip, "Array.from() should be kept"
+
+    def test_js_object_from_entries_is_kept(self):
+        """Object.fromEntries() should be kept."""
+        skip, reason = should_skip_variable(
+            name="obj",
+            value_type="call",
+            func_name="Object.fromEntries",
+            language="javascript",
+            is_module_level=True,
+        )
+        assert not skip, "Object.fromEntries() should be kept"
+
+    # Python - concurrent.futures
+    def test_python_thread_pool_executor_is_kept(self):
+        """ThreadPoolExecutor() should be kept."""
+        skip, reason = should_skip_variable(
+            name="pool",
+            value_type="call",
+            func_name="ThreadPoolExecutor",
+            language="python",
+            is_module_level=True,
+        )
+        assert not skip, "ThreadPoolExecutor() should be kept"
+
+    def test_python_process_pool_executor_is_kept(self):
+        """ProcessPoolExecutor() should be kept."""
+        skip, reason = should_skip_variable(
+            name="pool",
+            value_type="call",
+            func_name="ProcessPoolExecutor",
+            language="python",
+            is_module_level=True,
+        )
+        assert not skip, "ProcessPoolExecutor() should be kept"
+
+    # Python - asyncio primitives
+    def test_python_asyncio_queue_is_kept(self):
+        """asyncio.Queue() should be kept."""
+        skip, reason = should_skip_variable(
+            name="queue",
+            value_type="call",
+            func_name="asyncio.Queue",
+            language="python",
+            is_module_level=True,
+        )
+        assert not skip, "asyncio.Queue() should be kept"
+
+    def test_python_asyncio_event_is_kept(self):
+        """asyncio.Event() should be kept."""
+        skip, reason = should_skip_variable(
+            name="event",
+            value_type="call",
+            func_name="asyncio.Event",
+            language="python",
+            is_module_level=True,
+        )
+        assert not skip, "asyncio.Event() should be kept"
+
+    def test_python_asyncio_semaphore_is_kept(self):
+        """asyncio.Semaphore() should be kept."""
+        skip, reason = should_skip_variable(
+            name="sem",
+            value_type="call",
+            func_name="asyncio.Semaphore",
+            language="python",
+            is_module_level=True,
+        )
+        assert not skip, "asyncio.Semaphore() should be kept"
+
+    def test_python_concurrent_futures_qualified_is_kept(self):
+        """concurrent.futures.ThreadPoolExecutor() should be kept."""
+        skip, reason = should_skip_variable(
+            name="pool",
+            value_type="call",
+            func_name="concurrent.futures.ThreadPoolExecutor",
+            language="python",
+            is_module_level=True,
+        )
+        assert not skip, "concurrent.futures.ThreadPoolExecutor() should be kept"
