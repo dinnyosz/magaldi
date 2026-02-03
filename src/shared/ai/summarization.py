@@ -91,12 +91,14 @@ class SummarizationResult:
 # simple elements and under-describing complex ones.
 
 LINE_THRESHOLDS: dict[str, dict[str, int]] = {
-    "file":     {"tiny": 20,  "small": 50,  "medium": 200},
-    "class":    {"tiny": 10,  "small": 30,  "medium": 100},
-    "function": {"tiny": 5,   "small": 15,  "medium": 50},
-    "method":   {"tiny": 5,   "small": 15,  "medium": 50},
-    "constant": {"tiny": 1,   "small": 3,   "medium": 5},
-    "variable": {"tiny": 1,   "small": 3,   "medium": 5},
+    "file":       {"tiny": 20,  "small": 50,  "medium": 200},
+    "class":      {"tiny": 10,  "small": 30,  "medium": 100},
+    "interface":  {"tiny": 5,   "small": 15,  "medium": 50},
+    "type_alias": {"tiny": 1,   "small": 3,   "medium": 10},
+    "function":   {"tiny": 5,   "small": 15,  "medium": 50},
+    "method":     {"tiny": 5,   "small": 15,  "medium": 50},
+    "constant":   {"tiny": 1,   "small": 3,   "medium": 5},
+    "variable":   {"tiny": 1,   "small": 3,   "medium": 5},
 }
 
 SENTENCE_RANGES: dict[str, dict[str, tuple[int, int]]] = {
@@ -111,6 +113,18 @@ SENTENCE_RANGES: dict[str, dict[str, tuple[int, int]]] = {
         "small":  (2, 3),
         "medium": (3, 4),
         "large":  (5, 6),
+    },
+    "interface": {
+        "tiny":   (1, 2),
+        "small":  (2, 3),
+        "medium": (3, 4),
+        "large":  (4, 5),
+    },
+    "type_alias": {
+        "tiny":   (1, 1),
+        "small":  (1, 2),
+        "medium": (2, 2),
+        "large":  (2, 3),
     },
     "function": {
         "tiny":   (1, 2),
@@ -650,6 +664,27 @@ Do NOT list methods - those are documented separately.
 Write ONLY the {sentence_range} sentence summary. No reasoning, explanations, or bullet points.
 Start directly with what it models/does - never start with "This class...", "The X class...", or similar.""",
 
+    "interface": """You summarize interfaces for AI agents navigating codebases.
+
+For each interface, provide a {sentence_range} sentence summary answering:
+1. CONTRACT: What behavior or capability does this interface define?
+2. IMPLEMENTERS: What types of classes should implement this?
+3. METHODS: What key methods must implementers provide?
+4. USAGE: When should code depend on this interface vs a concrete class?
+
+Write ONLY the {sentence_range} sentence summary. No reasoning, explanations, or bullet points.
+Start directly with what contract it defines - never start with "This interface...", "The X interface...", or similar.""",
+
+    "type_alias": """You describe type aliases for AI agents navigating codebases.
+
+For each type alias, provide a {sentence_range} sentence description answering:
+1. MEANING: What concept or data shape does this type represent?
+2. STRUCTURE: What is the underlying type structure?
+3. USAGE: Where and why is this alias used instead of the raw type?
+
+Write ONLY the {sentence_range} sentence description. No reasoning, explanations, or bullet points.
+Start directly with what it represents - never start with "This type...", "The X type...", or similar.""",
+
     "function": """You describe functions for AI agents navigating codebases.
 
 For each function, provide a {sentence_range} sentence description answering:
@@ -712,6 +747,23 @@ Class: {class_name}
 {attributes_section}
 {collaborators_section}
 {instantiation_hints}
+
+Code:
+{code}
+{usages_section}""",
+
+    "interface": """File context: {file_summary}
+
+Interface: {name}
+{base_classes_section}
+
+Code:
+{code}
+{usages_section}""",
+
+    "type_alias": """File context: {file_summary}
+
+Type alias: {name}
 
 Code:
 {code}
@@ -813,6 +865,50 @@ Write ONLY the {sentence_range} sentence summary. No reasoning or bullet points.
 Start directly with what it models/does - never start with "This class...", "The X class...", or similar.
 
 Summary:""",
+    "interface": """Summarize this interface in {sentence_range} sentences for an AI agent.
+
+FOCUS on the interface itself. Use file context only to understand how it fits in.
+
+Answer these questions:
+1. CONTRACT: What behavior or capability does this interface define?
+2. IMPLEMENTERS: What types of classes should implement this?
+3. METHODS: What key methods must implementers provide?
+4. USAGE: When should code depend on this interface vs a concrete class?
+{base_classes_section}
+
+File context: {file_summary}
+
+Interface: {name}
+
+Code:
+{code}
+{usages_section}
+
+Write ONLY the {sentence_range} sentence summary. No reasoning or bullet points.
+Start directly with what contract it defines - never start with "This interface...", "The X interface...", or similar.
+
+Summary:""",
+    "type_alias": """Describe this type alias in {sentence_range} sentences for an AI agent.
+
+FOCUS on the type alias itself.
+
+Answer these questions:
+1. MEANING: What concept or data shape does this type represent?
+2. STRUCTURE: What is the underlying type structure?
+3. USAGE: Where and why is this alias used instead of the raw type?
+
+File context: {file_summary}
+
+Type alias: {name}
+
+Code:
+{code}
+{usages_section}
+
+Write ONLY the {sentence_range} sentence description. No reasoning or bullet points.
+Start directly with what it represents - never start with "This type...", "The X type...", or similar.
+
+Description:""",
     "function": """Describe this function in {sentence_range} sentences for an AI agent.
 
 FOCUS on the function itself. Use context only to understand its role.
@@ -1096,7 +1192,7 @@ def build_prompt(
     # Build enhanced context sections based on element type
     imports_section = _build_imports_section(element) if element_type == "file" else ""
     attributes_section = _build_attributes_section(element) if element_type == "class" else ""
-    base_classes_section = _build_base_classes_section(element) if element_type == "class" else ""
+    base_classes_section = _build_base_classes_section(element) if element_type in ("class", "interface") else ""
     collaborators_section = _build_collaborators_section(element) if element_type == "class" else ""
     instantiation_hints = _build_instantiation_hints(element) if element_type == "class" else ""
     exceptions_section = _build_exceptions_section(element) if element_type in ("function", "method") else ""
@@ -1209,7 +1305,7 @@ def build_messages(
     # Build enhanced context sections
     imports_section = _build_imports_section(element) if element_type == "file" else ""
     attributes_section = _build_attributes_section(element) if element_type == "class" else ""
-    base_classes_section = _build_base_classes_section(element) if element_type == "class" else ""
+    base_classes_section = _build_base_classes_section(element) if element_type in ("class", "interface") else ""
     collaborators_section = _build_collaborators_section(element) if element_type == "class" else ""
     instantiation_hints = _build_instantiation_hints(element) if element_type == "class" else ""
     exceptions_section = _build_exceptions_section(element) if element_type in ("function", "method") else ""
