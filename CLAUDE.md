@@ -151,7 +151,6 @@ Always ask the user first before performing destructive operations.
 ## TODOs
 
 - [ ] **LiteLLM Pydantic warning**: Check if [issue #11759](https://github.com/BerriAI/litellm/issues/11759) (Pydantic serialization) is resolved, then remove warning suppression from `src/shared/ai/llm_client.py`
-- [ ] **LiteLLM aiohttp session leak**: Check if [issue #11657](https://github.com/BerriAI/litellm/issues/11657) (Ollama embeddings leak aiohttp sessions causing "Too many open files") is resolved, then remove `DISABLE_AIOHTTP_TRANSPORT` workaround from `src/shared/ai/llm_client.py`
 - [ ] **MCP find_files returns empty for elasticsearch**: `mcp__magaldi__find_files(pattern="**/elasticsearch*.py")` returns `[]` but files exist at `src/shared/db/repositories/*.py`. Investigate why pattern matching fails - possible indexing or glob pattern issue.
 - [ ] **LiteLLM socket leak with ThreadPoolExecutor**: When processing many elements (~300+), orphaned sockets accumulate causing "Too many open files". Related to [LiteLLM issue #13220](https://github.com/BerriAI/litellm/issues/13220). Potential fix: use thread-local LLM clients instead of shared instance in `processor.py`.
 - [ ] **Redis type errors**: Fix mypy type errors in `src/shared/db/redis.py` related to async Redis client return types (`Awaitable[...] | ...` incompatibilities with `json.loads`). The Redis client methods return union types that mypy doesn't handle well.
