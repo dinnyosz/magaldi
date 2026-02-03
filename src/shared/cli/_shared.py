@@ -9,6 +9,12 @@ This module contains:
 
 from __future__ import annotations
 
+import os
+
+# Workaround for LiteLLM aiohttp session leak (issue #11657).
+# Must be set BEFORE any litellm imports anywhere in the codebase.
+os.environ.setdefault("DISABLE_AIOHTTP_TRANSPORT", "True")
+
 # Suppress warnings from LiteLLM/aiohttp before any imports
 import warnings
 warnings.filterwarnings("ignore", category=ResourceWarning, message=".*[Uu]nclosed.*")
