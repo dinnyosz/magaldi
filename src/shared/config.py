@@ -270,8 +270,8 @@ class ClusteringConfig:
     min_samples: int = 2  # Density threshold for core points
 
     # Thresholds
-    membership_threshold: float = 0.01  # Min membership score to keep
-    affinity_threshold: float = 0.001  # Min affinity for connected features
+    membership_threshold: float = 0.1  # Min membership score to keep (10%)
+    affinity_threshold: float = 0.05  # Min affinity for connected features (5%)
 
 
 @dataclass

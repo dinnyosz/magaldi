@@ -82,8 +82,8 @@ class SoftClusteringConfig:
     min_cluster_size: int = 5
     min_samples: int = 2
     metric: str = "euclidean"  # euclidean works well for normalized embeddings
-    membership_threshold: float = 0.01
-    affinity_threshold: float = 0.001
+    membership_threshold: float = 0.1  # 10% minimum membership to retain
+    affinity_threshold: float = 0.05  # 5% minimum affinity between features
 
 
 # =============================================================================

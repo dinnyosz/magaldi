@@ -79,8 +79,8 @@ class TestSoftClusteringConfig:
         assert config.min_cluster_size == 5
         assert config.min_samples == 2
         assert config.metric == "euclidean"
-        assert config.membership_threshold == 0.01
-        assert config.affinity_threshold == 0.001
+        assert config.membership_threshold == 0.1
+        assert config.affinity_threshold == 0.05
 
     def test_custom_values(self):
         """Test custom configuration values."""
