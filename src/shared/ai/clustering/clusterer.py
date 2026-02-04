@@ -52,7 +52,7 @@ class ClusterConfig:
     label_timeout: int = 30
 
     # Soft clustering options (random projection ensemble + NMF)
-    soft_clustering: bool = False  # Enable soft/overlapping memberships
+    soft_clustering: bool = True  # Enable soft/overlapping memberships
     n_projection_runs: int = 50  # Number of random projection runs
     projection_dims: int = 50  # Dimensions after projection
     n_features: int = 500  # Number of features to extract
