@@ -13,6 +13,9 @@ from magaldi_web.models import (
     ClusterMember,
     ClusterRepresentative,
     ClustersResponse,
+    FeatureConnection,
+    FeatureGraphNode,
+    FeatureGraphResponse,
     Subfeature,
     VectorMapResponse,
     VectorPoint,
@@ -323,4 +326,135 @@ async def get_clusters(
     return ClustersResponse(
         clusters=clusters,
         total_elements=len(clusters),
+    )
+
+
+@router.get("/repos/{scope}/{repository}/feature-graph", response_model=FeatureGraphResponse)
+async def get_feature_graph(
+    scope: str = Path(..., description="Repository scope"),
+    repository: str = Path(..., description="Repository name"),
+    username: str = Query(default="main", description="Username/branch"),
+    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+) -> FeatureGraphResponse:
+    """Get feature graph data for visualization.
+
+    Returns features and subfeatures as nodes, with connections between
+    features based on soft clustering affinity.
+    """
+    client = es_repo._get_client()
+
+    # Get all features with their connected_features
+    features_result = client.search(
+        index=INDEX_NAME,
+        body={
+            "size": 100,
+            "query": {
+                "bool": {
+                    "filter": [
+                        {"term": {"scope": scope}},
+                        {"term": {"repository": repository}},
+                        {"term": {"username": username}},
+                        {"term": {"element_type": "feature"}},
+                    ],
+                },
+            },
+            "_source": [
+                "element_id",
+                "hash_id",
+                "name",
+                "summary",
+                "member_count",
+                "connected_features",
+            ],
+        },
+    )
+
+    # Get all subfeatures
+    subfeatures_result = client.search(
+        index=INDEX_NAME,
+        body={
+            "size": 500,
+            "query": {
+                "bool": {
+                    "filter": [
+                        {"term": {"scope": scope}},
+                        {"term": {"repository": repository}},
+                        {"term": {"username": username}},
+                        {"term": {"element_type": "subfeature"}},
+                    ],
+                },
+            },
+            "_source": [
+                "element_id",
+                "hash_id",
+                "name",
+                "summary",
+                "member_count",
+                "parent_feature_label",
+            ],
+        },
+    )
+
+    nodes: list[FeatureGraphNode] = []
+    connections: list[FeatureConnection] = []
+    feature_label_to_id: dict[str, str] = {}
+
+    # Process features
+    feature_hits = features_result.get("hits", {}).get("hits", [])
+    for hit in feature_hits:
+        source = hit["_source"]
+        feature_id = source["element_id"]
+        label = source["name"]
+        feature_label_to_id[label] = feature_id
+
+        nodes.append(
+            FeatureGraphNode(
+                id=feature_id,
+                hash_id=source.get("hash_id"),
+                label=label,
+                node_type="feature",
+                summary=source.get("summary"),
+                member_count=source.get("member_count", 0),
+            )
+        )
+
+        # Process connected features
+        connected = source.get("connected_features", [])
+        for conn in connected:
+            # Only add connection if target feature exists and affinity is significant
+            target_label = conn.get("label", "")
+            affinity = conn.get("affinity", 0)
+            if target_label and affinity > 0:
+                connections.append(
+                    FeatureConnection(
+                        source=label,
+                        target=target_label,
+                        affinity=affinity,
+                    )
+                )
+
+    # Process subfeatures
+    subfeature_hits = subfeatures_result.get("hits", {}).get("hits", [])
+    for hit in subfeature_hits:
+        source = hit["_source"]
+        parent_label = source.get("parent_feature_label", "")
+        parent_id = feature_label_to_id.get(parent_label)
+
+        nodes.append(
+            FeatureGraphNode(
+                id=source["element_id"],
+                hash_id=source.get("hash_id"),
+                label=source["name"],
+                node_type="subfeature",
+                summary=source.get("summary"),
+                member_count=source.get("member_count", 0),
+                parent_id=parent_id,
+            )
+        )
+
+    return FeatureGraphResponse(
+        nodes=nodes,
+        connections=connections,
+        feature_count=len(feature_hits),
+        subfeature_count=len(subfeature_hits),
     )

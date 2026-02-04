@@ -923,6 +923,40 @@ class ClustersResponse(BaseModel):
 
 
 # =============================================================================
+# FEATURE GRAPH MODELS
+# =============================================================================
+
+
+class FeatureConnection(BaseModel):
+    """Connection between two features based on soft clustering affinity."""
+
+    source: str  # Feature label
+    target: str  # Connected feature label
+    affinity: float  # Connection strength (0-1)
+
+
+class FeatureGraphNode(BaseModel):
+    """A node in the feature graph (feature or subfeature)."""
+
+    id: str  # Unique ID (element_id)
+    hash_id: str | None = None
+    label: str
+    node_type: str  # "feature" or "subfeature"
+    summary: str | None = None
+    member_count: int = 0
+    parent_id: str | None = None  # For subfeatures, the parent feature ID
+
+
+class FeatureGraphResponse(BaseModel):
+    """Response for feature graph endpoint."""
+
+    nodes: list[FeatureGraphNode] = Field(default_factory=list)
+    connections: list[FeatureConnection] = Field(default_factory=list)
+    feature_count: int = 0
+    subfeature_count: int = 0
+
+
+# =============================================================================
 # GLOSSARY MODELS
 # =============================================================================
 

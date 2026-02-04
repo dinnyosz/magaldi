@@ -671,6 +671,34 @@ export async function getClusters(scope: string, repository: string, limit = 50)
   return fetchJson(`${API_BASE}/repos/${scope}/${repository}/clusters?limit=${limit}`)
 }
 
+// Feature Graph types and API
+export interface FeatureConnection {
+  source: string  // Feature label
+  target: string  // Connected feature label
+  affinity: number  // Connection strength (0-1)
+}
+
+export interface FeatureGraphNode {
+  id: string
+  hash_id: string | null
+  label: string
+  node_type: 'feature' | 'subfeature'
+  summary: string | null
+  member_count: number
+  parent_id: string | null
+}
+
+export interface FeatureGraphResponse {
+  nodes: FeatureGraphNode[]
+  connections: FeatureConnection[]
+  feature_count: number
+  subfeature_count: number
+}
+
+export async function getFeatureGraph(scope: string, repository: string): Promise<FeatureGraphResponse> {
+  return fetchJson(`${API_BASE}/repos/${scope}/${repository}/feature-graph`)
+}
+
 // Admin
 export async function getHealth(): Promise<HealthStatus> {
   return fetchJson(`${API_BASE}/admin/health`)

@@ -6,7 +6,7 @@ import Search from './pages/Search'
 import Repository from './pages/Repository'
 import Element from './pages/Element'
 import Explorer from './pages/Explorer'
-import VectorMap from './pages/VectorMap'
+import FeatureGraph from './pages/FeatureGraph'
 import Glossary from './pages/Glossary'
 import Admin from './pages/Admin'
 import MCPAnalysis from './pages/MCPAnalysis'
@@ -61,10 +61,10 @@ function App() {
               </Nav.Link>
               <Nav.Link
                 as={Link}
-                to="/vector-map"
-                active={location.pathname.startsWith('/vector-map')}
+                to="/feature-graph"
+                active={location.pathname.startsWith('/feature-graph')}
               >
-                Vector Map
+                Feature Graph
               </Nav.Link>
               <Nav.Link
                 as={Link}
@@ -105,8 +105,8 @@ function App() {
           <Route path="/repos/:scope/:repo/dependency-graph" element={<DependencyGraph />} />
           <Route path="/repos/:scope/:repo/code-health" element={<CodeHealth />} />
           <Route path="/element/:elementId" element={<Element />} />
-          <Route path="/vector-map" element={<VectorMap />} />
-          <Route path="/vector-map/:scope/:repository" element={<VectorMap />} />
+          <Route path="/feature-graph" element={<FeatureGraph />} />
+          <Route path="/feature-graph/:scope/:repository" element={<FeatureGraph />} />
           <Route path="/glossary" element={<Glossary />} />
           <Route path="/glossary/:scope/:repository" element={<Glossary />} />
           <Route path="/admin" element={<Admin />} />
