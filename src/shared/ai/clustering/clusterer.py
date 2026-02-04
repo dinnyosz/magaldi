@@ -425,10 +425,10 @@ class FeatureClusterer:
     ) -> ClusteringResult:
         """Soft clustering with overlapping memberships using HDBSCAN."""
         from shared.ai.clustering.soft_clustering import (
-            SoftClusteringConfig,
             SoftClusteringPipeline,
             SoftClusteringProgress,
         )
+        from shared.config import ClusteringConfig
 
         n_elements = len(valid_elements)
 
@@ -449,10 +449,11 @@ class FeatureClusterer:
 
         element_ids = [e["element_id"] for e in valid_elements]
 
-        # HDBSCAN soft clustering directly on embeddings
-        soft_config = SoftClusteringConfig(
+        # HDBSCAN soft clustering - use ClusteringConfig directly
+        soft_config = ClusteringConfig(
             min_cluster_size=self.config.min_cluster_size,
             min_samples=self.config.min_samples,
+            metric=self.config.metric,
             cluster_selection_method=self.config.cluster_selection_method,
             cluster_selection_epsilon=self.config.cluster_selection_epsilon,
             membership_threshold=self.config.membership_threshold,
