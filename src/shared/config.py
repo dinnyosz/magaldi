@@ -269,11 +269,11 @@ class ClusteringConfig:
     min_cluster_size: int = 3  # Minimum elements to form a cluster
     min_samples: int = 1  # Lower = less strict density requirement
     cluster_selection_method: str = "eom"  # 'eom' has less noise than 'leaf'
-    cluster_selection_epsilon: float = 0.5  # Merge clusters within this distance
+    cluster_selection_epsilon: float = 1.0  # Merge clusters within this distance
 
     # Thresholds
-    membership_threshold: float = 0.1  # Min membership score to keep (10%)
-    affinity_threshold: float = 0.15  # Min affinity for connected features (15%)
+    membership_threshold: float = 0.05  # Min membership score to keep (5%)
+    affinity_threshold: float = 0.5  # Min affinity for connected features (50%)
 
 
 @dataclass

@@ -83,9 +83,9 @@ class SoftClusteringConfig:
     min_samples: int = 1  # Lower = less strict density requirement
     metric: str = "euclidean"  # euclidean works well for normalized embeddings
     cluster_selection_method: str = "eom"  # 'eom' has less noise than 'leaf'
-    cluster_selection_epsilon: float = 0.5  # Merge clusters within this distance
-    membership_threshold: float = 0.1  # 10% minimum membership to retain
-    affinity_threshold: float = 0.15  # 15% minimum affinity between features
+    cluster_selection_epsilon: float = 1.0  # Merge clusters within this distance
+    membership_threshold: float = 0.05  # 5% minimum membership to retain (for overlap)
+    affinity_threshold: float = 0.5  # 50% minimum affinity between features
 
 
 # =============================================================================
@@ -294,9 +294,9 @@ class SoftClusteringPipeline:
             logger.warning(f"Too few samples ({n_samples}) for HDBSCAN. Returning uniform memberships.")
             return np.ones((n_samples, 1), dtype=np.float32), 1
 
-        # Adjust min_cluster_size if dataset is small
-        min_cluster_size = min(self.config.min_cluster_size, max(2, n_samples // 10))
-        min_samples = min(self.config.min_samples, min_cluster_size, n_samples)
+        # Use config values, but ensure min_samples <= min_cluster_size <= n_samples
+        min_cluster_size = min(self.config.min_cluster_size, n_samples)
+        min_samples = min(self.config.min_samples, min_cluster_size)
 
         self._clusterer = hdbscan.HDBSCAN(
             min_cluster_size=min_cluster_size,
