@@ -14,6 +14,7 @@ from magaldi_web.models import (
     CommentInfo,
     ComplexityInfo,
     ConcurrencyInfo,
+    ConnectedFeatureInfo,
     DecoratorDetailInfo,
     DocstringQualityInfo,
     ElementContext,
@@ -350,11 +351,40 @@ async def get_element_detail(
                         )
                     )
 
+        # Build connected features list from soft clustering
+        connected_features = []
+        raw_connected = source.get("connected_features", [])
+        if raw_connected:
+            # Get hash_ids for connected features
+            connected_ids = [cf.get("feature_id") for cf in raw_connected if cf.get("feature_id")]
+            connected_details: dict[str, str] = {}
+            if connected_ids:
+                conn_result = client.mget(
+                    index=INDEX_NAME,
+                    ids=connected_ids,
+                    _source=["hash_id"],
+                )
+                for doc in conn_result.get("docs", []):
+                    if doc.get("found") and doc.get("_source"):
+                        connected_details[doc["_id"]] = doc["_source"].get("hash_id")
+
+            for cf in raw_connected[:10]:  # Limit to top 10
+                feature_id = cf.get("feature_id", "")
+                connected_features.append(
+                    ConnectedFeatureInfo(
+                        feature_id=feature_id,
+                        hash_id=connected_details.get(feature_id),
+                        label=cf.get("label", ""),
+                        affinity=cf.get("affinity", 0.0),
+                    )
+                )
+
         feature_info = FeatureInfo(
             member_count=source.get("member_count", len(member_ids)),
             members=members,
             parent_feature=parent_feature,
             subfeatures=subfeatures,
+            connected_features=connected_features,
         )
 
     # Get glossary info for glossary elements

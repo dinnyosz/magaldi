@@ -933,6 +933,31 @@ function Element() {
             </Card>
           )}
 
+          {/* Connected Features - shown for features with soft clustering connections */}
+          {element.element_type === 'feature' && element.feature_info && element.feature_info.connected_features && element.feature_info.connected_features.length > 0 && (
+            <Card className="mb-4">
+              <Card.Header>
+                <i className="bi bi-diagram-3 me-2"></i>
+                Related Features ({element.feature_info.connected_features.length})
+              </Card.Header>
+              <ListGroup variant="flush">
+                {element.feature_info.connected_features.map((connected) => (
+                  <ListGroup.Item
+                    key={connected.feature_id}
+                    action
+                    as={Link}
+                    to={`/element/${encodeURIComponent(connected.hash_id || connected.feature_id)}`}
+                  >
+                    <Badge bg="info" className="me-2">
+                      <i className="bi bi-collection"></i>
+                    </Badge>
+                    <span className="fw-medium">{connected.label}</span>
+                  </ListGroup.Item>
+                ))}
+              </ListGroup>
+            </Card>
+          )}
+
           {/* Members - shown for features and subfeatures */}
           {isFeature && element.feature_info && (
             <Card className="mb-4">

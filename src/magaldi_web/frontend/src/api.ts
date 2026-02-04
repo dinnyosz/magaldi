@@ -206,11 +206,19 @@ export interface SubfeatureInfo {
   member_count: number
 }
 
+export interface ConnectedFeatureInfo {
+  feature_id: string
+  hash_id: string | null
+  label: string
+  affinity: number
+}
+
 export interface FeatureInfo {
   member_count: number
   members: FeatureMember[]
   parent_feature: ParentFeatureInfo | null
   subfeatures: SubfeatureInfo[]
+  connected_features: ConnectedFeatureInfo[]
 }
 
 export interface GlossaryFeatureAssociation {

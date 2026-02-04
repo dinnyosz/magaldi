@@ -385,6 +385,15 @@ class SubfeatureInfo(BaseModel):
     member_count: int = 0
 
 
+class ConnectedFeatureInfo(BaseModel):
+    """Info about a connected feature from soft clustering."""
+
+    feature_id: str
+    hash_id: str | None = None
+    label: str
+    affinity: float = 0.0
+
+
 class FeatureInfo(BaseModel):
     """Feature-specific information for feature/subfeature elements."""
 
@@ -392,6 +401,7 @@ class FeatureInfo(BaseModel):
     members: list[FeatureMember] = Field(default_factory=list)
     parent_feature: ParentFeatureInfo | None = None
     subfeatures: list[SubfeatureInfo] = Field(default_factory=list)
+    connected_features: list[ConnectedFeatureInfo] = Field(default_factory=list)
 
 
 class GlossaryFeatureAssociation(BaseModel):
@@ -1104,24 +1114,6 @@ class DeadCodeResponse(BaseModel):
 
     potentially_dead: list[DeadCodeItem]
     stats: dict
-
-
-class HttpRouteInfo(BaseModel):
-    """HTTP route information."""
-
-    method: str
-    path: str
-    path_params: list[str] = Field(default_factory=list)
-    framework: str | None = None
-
-
-class CliCommandInfo(BaseModel):
-    """CLI command information."""
-
-    name: str
-    full_command: str | None = None  # Full command path like "magaldi web serve"
-    options: list[dict] = Field(default_factory=list)
-    framework: str | None = None
 
 
 class EntryPointItem(BaseModel):
