@@ -610,7 +610,7 @@ class MetadataRepository:
             body={
                 "query": query,
                 "size": 1000,
-                "_source": ["element_id", field_name, "element_type", "name", "relative_path"],
+                "_source": ["element_id", field_name, "element_type", "name", "relative_path", "summary"],
             },
             scroll="2m",
         )

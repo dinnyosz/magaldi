@@ -1070,6 +1070,10 @@ Write a 6-8 sentence summary describing:
 2. How the member functions work together
 3. The key operations this sub-group provides
 
+IMPORTANT for the label: Generate specific, descriptive labels that identify WHAT the code does.
+- Good labels: "user authentication", "query building", "response parsing", "cache invalidation"
+- AVOID generic labels like: "utilities", "helpers", "processing", "handling", "operations", "functionality"
+
 Write ONLY the summary. No reasoning, explanations, or bullet points.
 Start directly with what it does - never start with "This sub-group...", "This subfeature...", or similar."""
 
@@ -1096,6 +1100,10 @@ Write a 6-8 sentence summary describing:
 1. What this specific sub-group does within the context of the parent feature
 2. How the member functions work together
 3. The key operations this sub-group provides
+
+IMPORTANT for the label: Generate specific, descriptive labels that identify WHAT the code does.
+- Good labels: "user authentication", "query building", "response parsing", "cache invalidation"
+- AVOID generic labels like: "utilities", "helpers", "processing", "handling", "operations", "functionality"
 
 Start directly with what it does - never start with "This sub-group...", "This subfeature...", or similar.
 
@@ -1476,6 +1484,7 @@ def process_subfeatures(
                     "embedding": emb,
                     "name": name,
                     "element_type": doc.get("element_type", "function"),
+                    "summary": doc.get("summary", ""),
                 })
 
         if len(elements_with_embeddings) < subcluster_config.min_cluster_size:

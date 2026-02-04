@@ -119,6 +119,35 @@ class TestClusterResult:
 
         assert result.centroid is None
 
+    def test_element_summaries(self):
+        """Test element_summaries field."""
+        result = ClusterResult(
+            cluster_id=0,
+            label="test",
+            element_ids=["id1", "id2"],
+            element_names=["func1", "func2"],
+            element_summaries={
+                "id1": "Processes user input",
+                "id2": "Validates data",
+            },
+        )
+
+        assert result.element_summaries == {
+            "id1": "Processes user input",
+            "id2": "Validates data",
+        }
+
+    def test_element_summaries_default_empty(self):
+        """Test element_summaries defaults to empty dict."""
+        result = ClusterResult(
+            cluster_id=0,
+            label="test",
+            element_ids=["id1"],
+            element_names=["func1"],
+        )
+
+        assert result.element_summaries == {}
+
 
 # =============================================================================
 # CLUSTERING RESULT TESTS

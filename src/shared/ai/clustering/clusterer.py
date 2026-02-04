@@ -149,6 +149,8 @@ class ClusterResult:
     centroid: list[float] | None = None
     # Soft clustering: connected clusters (from affinity matrix)
     connected_clusters: list[ClusterAffinity] = field(default_factory=list)
+    # Element summaries for better labeling (element_id -> summary)
+    element_summaries: dict[str, str] = field(default_factory=dict)
 
     @property
     def size(self) -> int:
@@ -253,22 +255,26 @@ class ClusteringProgressState:
 # System message is STATIC and gets cached by Ollama's KV cache.
 # User message contains VARIABLE content (function names).
 
-LABEL_SYSTEM_PROMPT = """Given function/method names from a code cluster, generate a short label (1-5 words) that describes the common feature or functionality they share.
+LABEL_SYSTEM_PROMPT = """Given function/method names and their summaries, generate a short label (1-5 words) that describes the common feature or functionality they share.
 
-Generate ONLY a short label like: "user authentication", "database query handling", "REST API endpoints", "file processing utilities", "input validation", etc.
+IMPORTANT: Generate specific, descriptive labels that identify WHAT the code does, not HOW it's organized.
+- Good labels: "user authentication", "database queries", "REST API endpoints", "file parsing", "input validation"
+- AVOID generic labels like: "utilities", "helpers", "processing", "handling", "operations", "functionality", "management"
 
 Write ONLY the label, nothing else."""
 
-LABEL_USER_PROMPT = """Function names:
-{names}"""
+LABEL_USER_PROMPT = """Functions in this cluster:
+{functions}"""
 
 # Legacy single-prompt template (kept for backwards compatibility)
-LABEL_PROMPT = """Given these function/method names from a code cluster, generate a short label (1-5 words) that describes the common feature or functionality they share.
+LABEL_PROMPT = """Given these function/method names and summaries, generate a short label (1-5 words) that describes the common feature or functionality they share.
 
-Function names:
-{names}
+Functions:
+{functions}
 
-Generate ONLY a short label like: "user authentication", "database query handling", "REST API endpoints", "file processing utilities", "input validation", etc.
+IMPORTANT: Generate specific, descriptive labels that identify WHAT the code does, not HOW it's organized.
+- Good labels: "user authentication", "database queries", "REST API endpoints", "file parsing", "input validation"
+- AVOID generic labels like: "utilities", "helpers", "processing", "handling", "operations", "functionality", "management"
 
 Label:"""
 
@@ -386,12 +392,20 @@ class FeatureClusterer:
             )
             centroid = cluster_embeddings.mean(axis=0).tolist()
 
+            # Build element summaries dict
+            elem_summaries = {
+                e["element_id"]: e.get("summary", "")
+                for e in cluster_elements
+                if e.get("summary")
+            }
+
             cluster = ClusterResult(
                 cluster_id=cluster_label,
                 label=None,  # Will be set by label_clusters
                 element_ids=[e["element_id"] for e in cluster_elements],
                 element_names=[e.get("name", "") for e in cluster_elements],
                 centroid=centroid,
+                element_summaries=elem_summaries,
             )
             clusters.append(cluster)
 
@@ -540,6 +554,13 @@ class FeatureClusterer:
                 for c in connected[:10]  # Limit to top 10 connections
             ]
 
+            # Build element summaries dict
+            elem_summaries = {
+                e["element_id"]: e.get("summary", "")
+                for e in cluster_elements
+                if e.get("summary")
+            }
+
             cluster = ClusterResult(
                 cluster_id=cluster_id,
                 label=None,  # Will be set by label_clusters
@@ -547,6 +568,7 @@ class FeatureClusterer:
                 element_names=[e.get("name", "") for e in cluster_elements],
                 centroid=centroid,
                 connected_clusters=connected_clusters,
+                element_summaries=elem_summaries,
             )
             clusters.append(cluster)
 
@@ -622,14 +644,28 @@ class FeatureClusterer:
             # Mark as running in Redis (convert numpy int64 to Python int)
             if redis_repo and scope and repository and username:
                 redis_repo.mark_running(int(cluster.cluster_id), scope, repository, username)
-            # Get sample of function names
-            names = cluster.element_names[:max_names_per_prompt]
-            names_str = "\n".join(f"- {name}" for name in names if name)
+
+            # Build function lines with names and summaries
+            func_lines = []
+            for i, elem_id in enumerate(cluster.element_ids[:max_names_per_prompt]):
+                name = cluster.element_names[i] if i < len(cluster.element_names) else ""
+                if not name:
+                    continue
+                summary = cluster.element_summaries.get(elem_id, "")
+                if summary:
+                    # Truncate long summaries to keep prompt concise
+                    if len(summary) > 150:
+                        summary = summary[:147] + "..."
+                    func_lines.append(f"- {name}(): {summary}")
+                else:
+                    func_lines.append(f"- {name}()")
+
+            functions_str = "\n".join(func_lines)
 
             # Build display name for progress
             current_name = f"cluster_{cluster.cluster_id} ({cluster.size} members)"
 
-            if not names_str:
+            if not functions_str:
                 cluster.label = f"cluster_{cluster.cluster_id}"
                 skipped += 1
                 completed += 1
@@ -649,7 +685,7 @@ class FeatureClusterer:
                 continue
 
             # Build messages optimized for prefix caching
-            user_content = LABEL_USER_PROMPT.format(names=names_str)
+            user_content = LABEL_USER_PROMPT.format(functions=functions_str)
             messages = [
                 {"role": "system", "content": LABEL_SYSTEM_PROMPT},
                 {"role": "user", "content": user_content},
