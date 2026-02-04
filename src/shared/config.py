@@ -258,6 +258,42 @@ class SearchConfig:
 
 
 @dataclass
+class ClusteringConfig:
+    """Feature clustering configuration.
+
+    Controls how functions/methods are grouped into features using
+    soft clustering algorithms.
+    """
+
+    # HDBSCAN parameters (used by both pipelines)
+    min_cluster_size: int = 5  # Minimum elements to form a cluster
+    min_samples: int = 2  # Density threshold for core points
+
+    # Pipeline selection
+    # "auto": use scalable for >= scalable_threshold elements
+    # "scalable": always use UMAP + HDBSCAN (faster, O(n log n))
+    # "standard": always use NMF (more accurate, O(n²))
+    soft_clustering_mode: str = "auto"
+    scalable_threshold: int = 1000  # Element count for auto mode
+
+    # Standard pipeline (NMF) settings
+    n_projection_runs: int = 50  # Random projection runs for cooccurrence
+    projection_dims: int = 50  # Dimensions after projection
+    n_features: int = 500  # Target features for NMF (0 = auto)
+    nmf_max_iter: int = 1000  # Max NMF iterations
+
+    # Scalable pipeline (UMAP + HDBSCAN) settings
+    pca_components: int = 0  # 0 = auto (min 100 or 90% variance)
+    umap_components: int = 50
+    umap_n_neighbors: int = 30
+    umap_min_dist: float = 0.1
+
+    # Thresholds
+    membership_threshold: float = 0.01  # Min membership score to keep
+    affinity_threshold: float = 0.001  # Min affinity for connected features
+
+
+@dataclass
 class WebConfig:
     """Web server configuration."""
 
@@ -536,6 +572,7 @@ class MagaldiConfig:
     workers: WorkersConfig = field(default_factory=WorkersConfig)
     parser: ParserConfig = field(default_factory=ParserConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
+    clustering: ClusteringConfig = field(default_factory=ClusteringConfig)
     web: WebConfig = field(default_factory=WebConfig)
     mcp: MCPConfig = field(default_factory=MCPConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)

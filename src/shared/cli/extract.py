@@ -78,8 +78,6 @@ def run_feature_extraction(
     repository: str,
     username: str,
     config: MagaldiConfig,
-    min_cluster_size: int = 5,
-    min_samples: int = 3,
     skip_labeling: bool = False,
     workers: int = 4,
     compact: bool = False,
@@ -136,11 +134,10 @@ def run_feature_extraction(
 
         console.print(f"  Found {len(elements)} functions/methods with embeddings")
 
-        # Run HDBSCAN clustering
+        # Run HDBSCAN clustering - config from magaldi.yaml
         summarize_model = config.llm.get_summarize_model()
-        cluster_config = ClusterConfig(
-            min_cluster_size=min_cluster_size,
-            min_samples=min_samples,
+        cluster_config = ClusterConfig.from_magaldi_config(
+            config=config,
             api_base=summarize_model.get_api_base(),
             labeling_model=summarize_model.name,
             provider=summarize_model.provider,
@@ -1342,15 +1339,11 @@ def run_glossary_extraction(
 @main.command("extract-features")
 @click.argument("repo_path", type=click.Path(exists=True, file_okay=False, dir_okay=True))
 @click.option("--user", "-u", required=True, help="Username/branch to extract features from")
-@click.option("--min-cluster-size", default=5, type=int, help="Minimum elements per feature (default: 5)")
-@click.option("--min-samples", default=3, type=int, help="HDBSCAN min_samples parameter (default: 3)")
 @click.option("--skip-labeling", is_flag=True, help="Skip Ollama feature labeling")
 @click.option("--workers", "-w", default=0, type=int, help="Max parallel workers (0=auto based on context tier)")
 def extract_features(
     repo_path: str,
     user: str,
-    min_cluster_size: int,
-    min_samples: int,
     skip_labeling: bool,
     workers: int,
 ) -> None:
@@ -1386,8 +1379,6 @@ def extract_features(
             repository=repository,
             username=user,
             config=config,
-            min_cluster_size=min_cluster_size,
-            min_samples=min_samples,
             skip_labeling=skip_labeling,
             workers=workers,
         )

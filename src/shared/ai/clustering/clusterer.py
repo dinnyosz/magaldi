@@ -33,7 +33,12 @@ class ClusteringError(Exception):
 
 @dataclass
 class ClusterConfig:
-    """Configuration for HDBSCAN clustering."""
+    """Configuration for HDBSCAN clustering.
+
+    Defaults here are duplicated from ClusteringConfig in shared/config.py
+    for backwards compatibility. Use from_magaldi_config() to load from
+    the central config file.
+    """
 
     # HDBSCAN parameters (used by both pipelines)
     min_cluster_size: int = 5
@@ -60,9 +65,6 @@ class ClusterConfig:
     affinity_threshold: float = 0.001  # Min affinity for connected features
 
     # Scalable soft clustering (UMAP + HDBSCAN) - auto-selects based on element count
-    # "auto": use scalable for >= 1000 elements, otherwise standard
-    # "scalable": always use scalable pipeline (faster for large datasets)
-    # "standard": always use standard NMF pipeline (more accurate for small datasets)
     soft_clustering_mode: str = "auto"
     scalable_threshold: int = 1000  # Element count threshold for auto mode
     # Scalable pipeline config
@@ -70,6 +72,52 @@ class ClusterConfig:
     umap_components: int = 50
     umap_n_neighbors: int = 30
     umap_min_dist: float = 0.1
+
+    @classmethod
+    def from_magaldi_config(
+        cls,
+        config: "MagaldiConfig",
+        api_base: str | None = None,
+        labeling_model: str | None = None,
+        provider: str | None = None,
+        # CLI overrides
+        min_cluster_size: int | None = None,
+        min_samples: int | None = None,
+    ) -> "ClusterConfig":
+        """Create ClusterConfig from MagaldiConfig.
+
+        Args:
+            config: The main Magaldi configuration.
+            api_base: Override for LLM API base (usually from summarize model).
+            labeling_model: Override for labeling model name.
+            provider: Override for LLM provider.
+            min_cluster_size: CLI override for min_cluster_size.
+            min_samples: CLI override for min_samples.
+
+        Returns:
+            ClusterConfig with values from the central config.
+        """
+        cc = config.clustering
+        return cls(
+            # From ClusteringConfig (with optional CLI overrides)
+            min_cluster_size=min_cluster_size if min_cluster_size is not None else cc.min_cluster_size,
+            min_samples=min_samples if min_samples is not None else cc.min_samples,
+            soft_clustering_mode=cc.soft_clustering_mode,
+            scalable_threshold=cc.scalable_threshold,
+            n_projection_runs=cc.n_projection_runs,
+            projection_dims=cc.projection_dims,
+            n_features=cc.n_features,
+            membership_threshold=cc.membership_threshold,
+            affinity_threshold=cc.affinity_threshold,
+            pca_components=cc.pca_components,
+            umap_components=cc.umap_components,
+            umap_n_neighbors=cc.umap_n_neighbors,
+            umap_min_dist=cc.umap_min_dist,
+            # LLM settings (passed in, typically from summarize model)
+            api_base=api_base or "http://localhost:11434",
+            labeling_model=labeling_model or "qwen3:4b-instruct",
+            provider=provider or "ollama",
+        )
 
 
 @dataclass
