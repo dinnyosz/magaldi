@@ -9,6 +9,7 @@ See plans/random_projection_ensemble_clustering.md for detailed algorithm design
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import hdbscan
@@ -18,6 +19,44 @@ from sklearn.decomposition import NMF
 from sklearn.random_projection import GaussianRandomProjection
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# PROGRESS TRACKING
+# =============================================================================
+
+
+@dataclass
+class SoftClusteringProgress:
+    """Progress state for soft clustering pipeline.
+
+    Used for CLI feedback during long-running clustering operations.
+    """
+
+    phase: str  # "projection", "nmf", "complete"
+    phase_description: str  # Human-readable description
+    current_step: int
+    total_steps: int
+    # Optional details
+    n_elements: int = 0
+    n_features: int = 0
+    cooccurrence_density: float = 0.0
+
+    @property
+    def percent(self) -> float:
+        """Completion percentage for current phase."""
+        if self.total_steps == 0:
+            return 0.0
+        return (self.current_step / self.total_steps) * 100
+
+    @property
+    def status_line(self) -> str:
+        """Formatted status line for CLI display."""
+        return f"{self.phase_description} [{self.current_step}/{self.total_steps}]"
+
+
+# Progress callback type
+ProgressCallback = Callable[[SoftClusteringProgress], None]
 
 
 # =============================================================================
@@ -148,6 +187,7 @@ class SoftClusteringPipeline:
         self,
         embeddings: np.ndarray,
         element_ids: list[str] | None = None,
+        on_progress: ProgressCallback | None = None,
     ) -> SoftClusteringResult:
         """Fit the pipeline: build cooccurrence matrix, extract soft memberships.
 
@@ -155,6 +195,7 @@ class SoftClusteringPipeline:
             embeddings: (n_elements, embedding_dim) embedding matrix.
             element_ids: Optional list of element IDs for result mapping.
                 If not provided, integer indices are used as keys.
+            on_progress: Optional callback for progress updates.
 
         Returns:
             SoftClusteringResult with element memberships and feature affinity.
@@ -190,7 +231,12 @@ class SoftClusteringPipeline:
 
         # Step 1-3: Build sparse cooccurrence matrix
         logger.info("Building cooccurrence matrix via ensemble clustering...")
-        self._cooccurrence = self._build_cooccurrence_sparse(embeddings)
+        self._cooccurrence = self._build_cooccurrence_sparse(
+            embeddings,
+            on_progress=on_progress,
+            n_elements=n_elements,
+            n_features=effective_n_features,
+        )
 
         cooccurrence_density = (
             self._cooccurrence.nnz / (n_elements * n_elements)
@@ -202,9 +248,34 @@ class SoftClusteringPipeline:
 
         # Step 4: NMF for soft memberships
         logger.info(f"Extracting memberships via NMF ({effective_n_features} features)...")
+
+        # Report NMF phase start
+        if on_progress:
+            on_progress(SoftClusteringProgress(
+                phase="nmf",
+                phase_description="NMF membership extraction",
+                current_step=0,
+                total_steps=1,
+                n_elements=n_elements,
+                n_features=effective_n_features,
+                cooccurrence_density=cooccurrence_density,
+            ))
+
         self._memberships, self._feature_affinity = self._extract_memberships(
             effective_n_features
         )
+
+        # Report NMF complete
+        if on_progress:
+            on_progress(SoftClusteringProgress(
+                phase="nmf",
+                phase_description="NMF membership extraction",
+                current_step=1,
+                total_steps=1,
+                n_elements=n_elements,
+                n_features=effective_n_features,
+                cooccurrence_density=cooccurrence_density,
+            ))
 
         # Step 5: Build element membership mapping
         element_memberships = self._build_element_memberships(element_ids)
@@ -220,6 +291,18 @@ class SoftClusteringPipeline:
             f"assigned to {len(features_with_members)} features"
         )
 
+        # Report completion
+        if on_progress:
+            on_progress(SoftClusteringProgress(
+                phase="complete",
+                phase_description="Soft clustering complete",
+                current_step=1,
+                total_steps=1,
+                n_elements=n_elements,
+                n_features=len(features_with_members),
+                cooccurrence_density=cooccurrence_density,
+            ))
+
         return SoftClusteringResult(
             element_memberships=element_memberships,
             feature_affinity=self._feature_affinity,
@@ -228,7 +311,13 @@ class SoftClusteringPipeline:
             cooccurrence_density=cooccurrence_density,
         )
 
-    def _build_cooccurrence_sparse(self, embeddings: np.ndarray) -> csr_matrix:
+    def _build_cooccurrence_sparse(
+        self,
+        embeddings: np.ndarray,
+        on_progress: ProgressCallback | None = None,
+        n_elements: int = 0,
+        n_features: int = 0,
+    ) -> csr_matrix:
         """Build sparse cooccurrence matrix from ensemble clustering.
 
         For each random projection, clusters elements with HDBSCAN and records
@@ -237,6 +326,9 @@ class SoftClusteringPipeline:
 
         Args:
             embeddings: (n_elements, embedding_dim) array.
+            on_progress: Optional progress callback.
+            n_elements: Number of elements (for progress reporting).
+            n_features: Number of features (for progress reporting).
 
         Returns:
             Sparse (n_elements, n_elements) cooccurrence probability matrix.
@@ -286,6 +378,17 @@ class SoftClusteringPipeline:
 
             if (run + 1) % 10 == 0:
                 logger.debug(f"Completed projection run {run + 1}/{self.config.n_projection_runs}")
+
+            # Report progress
+            if on_progress:
+                on_progress(SoftClusteringProgress(
+                    phase="projection",
+                    phase_description="Random projection ensemble",
+                    current_step=run + 1,
+                    total_steps=self.config.n_projection_runs,
+                    n_elements=n_elements,
+                    n_features=n_features,
+                ))
 
         # Normalize to probabilities
         cooccurrence = cooccurrence / self.config.n_projection_runs

@@ -11,6 +11,7 @@ from shared.ai.clustering.soft_clustering import (
     FeatureMembership,
     SoftClusteringConfig,
     SoftClusteringPipeline,
+    SoftClusteringProgress,
     SoftClusteringResult,
     find_optimal_n_features,
 )
@@ -19,6 +20,55 @@ from shared.ai.clustering.soft_clustering import (
 # =============================================================================
 # CONFIG TESTS
 # =============================================================================
+
+
+class TestSoftClusteringProgress:
+    """Tests for SoftClusteringProgress class."""
+
+    def test_creation(self):
+        """Test creating a progress state."""
+        progress = SoftClusteringProgress(
+            phase="projection",
+            phase_description="Random projection ensemble",
+            current_step=5,
+            total_steps=50,
+            n_elements=1000,
+            n_features=100,
+        )
+
+        assert progress.phase == "projection"
+        assert progress.current_step == 5
+        assert progress.total_steps == 50
+
+    def test_percent_property(self):
+        """Test percent calculation."""
+        progress = SoftClusteringProgress(
+            phase="projection",
+            phase_description="test",
+            current_step=25,
+            total_steps=100,
+        )
+        assert progress.percent == 25.0
+
+    def test_percent_zero_total(self):
+        """Test percent with zero total."""
+        progress = SoftClusteringProgress(
+            phase="projection",
+            phase_description="test",
+            current_step=0,
+            total_steps=0,
+        )
+        assert progress.percent == 0.0
+
+    def test_status_line(self):
+        """Test status line formatting."""
+        progress = SoftClusteringProgress(
+            phase="nmf",
+            phase_description="NMF extraction",
+            current_step=1,
+            total_steps=1,
+        )
+        assert progress.status_line == "NMF extraction [1/1]"
 
 
 class TestSoftClusteringConfig:
@@ -261,6 +311,31 @@ class TestSoftClusteringPipeline:
             diagonal = result.feature_affinity[i, i]
             row_max = result.feature_affinity[i].max()
             assert diagonal >= row_max - 1e-6, "Diagonal should be >= max in row"
+
+    def test_progress_callback(self, small_config, clustered_embeddings):
+        """Test that progress callback is invoked."""
+        progress_states = []
+
+        def on_progress(progress: SoftClusteringProgress):
+            progress_states.append(progress)
+
+        pipeline = SoftClusteringPipeline(small_config)
+        result = pipeline.fit(clustered_embeddings, on_progress=on_progress)
+
+        # Should have received progress callbacks
+        assert len(progress_states) > 0
+
+        # Should have projection phase callbacks
+        projection_phases = [p for p in progress_states if p.phase == "projection"]
+        assert len(projection_phases) >= small_config.n_projection_runs
+
+        # Should have NMF phase callbacks
+        nmf_phases = [p for p in progress_states if p.phase == "nmf"]
+        assert len(nmf_phases) >= 1
+
+        # Should have complete callback
+        complete_phases = [p for p in progress_states if p.phase == "complete"]
+        assert len(complete_phases) == 1
 
 
 class TestSoftClusteringPipelineQueries:
