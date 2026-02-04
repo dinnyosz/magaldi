@@ -245,6 +245,39 @@ def run_feature_extraction(
             f"{clustering_result.outlier_count} unclustered"
         )
 
+        # Show feature affinity stats if soft clustering was used
+        if clustering_result.is_soft_clustering and clustering_result.clusters:
+            # Count features with connections
+            features_with_connections = sum(
+                1 for c in clustering_result.clusters if c.connected_clusters
+            )
+            # Total connections
+            total_connections = sum(
+                len(c.connected_clusters) for c in clustering_result.clusters
+            )
+            # Average connections per feature
+            avg_connections = (
+                total_connections / len(clustering_result.clusters)
+                if clustering_result.clusters
+                else 0
+            )
+            # Elements with multiple memberships (soft overlap)
+            elements_with_overlap = sum(
+                1 for memberships in clustering_result.element_memberships.values()
+                if len(memberships) > 1
+            )
+            overlap_pct = (
+                elements_with_overlap / elements_in_features * 100
+                if elements_in_features > 0
+                else 0
+            )
+
+            console.print(
+                f"  Feature affinity: [cyan]{features_with_connections}[/]/{clustering_result.cluster_count} "
+                f"features connected (avg [cyan]{avg_connections:.1f}[/] connections) | "
+                f"[cyan]{elements_with_overlap}[/] elements overlap ([cyan]{overlap_pct:.0f}%[/])"
+            )
+
         if not clustering_result.clusters:
             return {
                 "cluster_count": 0,
