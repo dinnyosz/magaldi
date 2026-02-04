@@ -530,7 +530,8 @@ class SearchRepository:
                     {"term": {"scope": scope}},
                     {"term": {"repository": repository}},
                     {"term": {"username": username}},
-                    {"exists": {"field": "calls"}},
+                    # For nested fields, must use nested query with exists
+                    {"nested": {"path": "calls", "query": {"exists": {"field": "calls.name"}}}},
                 ],
             }
         }
