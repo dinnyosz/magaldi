@@ -7,6 +7,7 @@ from magaldi_mcp.tools.schemas.files import FILE_TOOLS
 from magaldi_mcp.tools.schemas.glossary import GLOSSARY_TOOLS
 from magaldi_mcp.tools.schemas.hierarchy import HIERARCHY_TOOLS
 from magaldi_mcp.tools.schemas.inspect import INSPECT_TOOLS
+from magaldi_mcp.tools.schemas.labs import LABS_TOOLS
 from magaldi_mcp.tools.schemas.meta import META_TOOLS
 from magaldi_mcp.tools.schemas.metrics import METRICS_TOOLS
 from magaldi_mcp.tools.schemas.parser_lab import PARSER_LAB_TOOLS
@@ -26,7 +27,8 @@ ALL_TOOL_SCHEMAS = (
     METRICS_TOOLS +
     HIERARCHY_TOOLS +
     META_TOOLS +
-    PARSER_LAB_TOOLS
+    PARSER_LAB_TOOLS +
+    LABS_TOOLS
 )
 
 __all__ = [
@@ -43,4 +45,5 @@ __all__ = [
     "HIERARCHY_TOOLS",
     "META_TOOLS",
     "PARSER_LAB_TOOLS",
+    "LABS_TOOLS",
 ]

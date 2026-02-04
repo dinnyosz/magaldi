@@ -5086,3 +5086,167 @@ def get_route_tree(
         "routes": routes_flat,
         "api_prefix": api_prefix,
     }
+
+
+# =============================================================================
+# LABS TOOLS
+# =============================================================================
+
+
+def mcp_self_review(
+    analytics_repo: Any,
+    context: str,
+    include_analytics: bool = True,
+    focus_tools: list[str] | None = None,
+) -> dict[str, Any]:
+    """Analyze recent magaldi tool usage to evaluate effectiveness.
+
+    Reviews the conversation context and MCP analytics data to determine:
+    1. Which magaldi tool calls were useful (information was used)
+    2. Which tool calls were not useful (results were ignored)
+    3. Suggestions for how tool responses could be improved
+
+    Args:
+        analytics_repo: MCP analytics repository instance.
+        context: The recent conversation context to analyze.
+        include_analytics: Whether to include MCP analytics data.
+        focus_tools: Optional list of specific tool names to focus on.
+
+    Returns:
+        dict with analysis results and suggestions.
+    """
+    import re
+
+    results: dict[str, Any] = {
+        "tool_calls_found": [],
+        "analysis": [],
+        "suggestions": [],
+        "analytics_summary": None,
+    }
+
+    # Extract tool calls from context
+    # Look for patterns like mcp__magaldi__tool_name or tool_name(...)
+    tool_call_pattern = r'mcp__magaldi__(\w+)|<invoke name="mcp__magaldi__(\w+)"'
+    matches = re.findall(tool_call_pattern, context)
+    tool_calls = [m[0] or m[1] for m in matches if m[0] or m[1]]
+
+    # Also look for tool result patterns
+    result_pattern = r'<result>.*?<name>mcp__magaldi__(\w+)</name>.*?<output>(.*?)</output>.*?</result>'
+    result_matches = re.findall(result_pattern, context, re.DOTALL)
+
+    # Track which tools were called and their results
+    tool_results: dict[str, list[str]] = {}
+    for tool_name, output in result_matches:
+        if tool_name not in tool_results:
+            tool_results[tool_name] = []
+        tool_results[tool_name].append(output[:500])  # Truncate long outputs
+
+    # Filter to focus_tools if specified
+    if focus_tools:
+        tool_calls = [t for t in tool_calls if t in focus_tools]
+        tool_results = {k: v for k, v in tool_results.items() if k in focus_tools}
+
+    results["tool_calls_found"] = list(set(tool_calls))
+
+    # Analyze each tool call
+    for tool_name in set(tool_calls):
+        tool_analysis = {
+            "tool": tool_name,
+            "call_count": tool_calls.count(tool_name),
+            "has_results": tool_name in tool_results,
+            "result_count": len(tool_results.get(tool_name, [])),
+            "assessment": "unknown",
+            "reasoning": "",
+        }
+
+        # Check if results appear to be used in subsequent context
+        if tool_name in tool_results:
+            outputs = tool_results[tool_name]
+            for output in outputs:
+                # Extract key values from output (element names, file paths, etc.)
+                # Check if they appear later in the context
+                element_names = re.findall(r'"name":\s*"([^"]+)"', output)
+                file_paths = re.findall(r'"file_path":\s*"([^"]+)"', output)
+                hash_ids = re.findall(r'"hash_id":\s*"([^"]+)"', output)
+
+                # Check context after the tool result
+                context_after_result = context.split(output[:100])[-1] if output[:100] in context else context
+
+                used_values = []
+                for name in element_names[:5]:  # Check first 5
+                    if name in context_after_result:
+                        used_values.append(name)
+
+                for path in file_paths[:3]:
+                    if path in context_after_result:
+                        used_values.append(path)
+
+                for hid in hash_ids[:3]:
+                    if hid in context_after_result:
+                        used_values.append(hid)
+
+                if used_values:
+                    tool_analysis["assessment"] = "useful"
+                    tool_analysis["reasoning"] = f"Results referenced later: {used_values[:3]}"
+                else:
+                    tool_analysis["assessment"] = "possibly_unused"
+                    tool_analysis["reasoning"] = "No clear evidence results were used in subsequent reasoning"
+
+        results["analysis"].append(tool_analysis)
+
+    # Generate suggestions based on analysis
+    unused_tools = [a for a in results["analysis"] if a["assessment"] == "possibly_unused"]
+    if unused_tools:
+        results["suggestions"].append({
+            "type": "unused_results",
+            "message": f"{len(unused_tools)} tool calls may not have been used effectively",
+            "tools": [t["tool"] for t in unused_tools],
+            "recommendation": "Consider: 1) Using brief=True for exploration, 2) More specific queries, 3) Requesting include_code=True only when needed",
+        })
+
+    # Check for repeated similar calls
+    call_counts = {}
+    for tool in tool_calls:
+        call_counts[tool] = call_counts.get(tool, 0) + 1
+
+    repeated = {k: v for k, v in call_counts.items() if v > 2}
+    if repeated:
+        results["suggestions"].append({
+            "type": "repeated_calls",
+            "message": f"Some tools called multiple times: {repeated}",
+            "recommendation": "Consider using batch operations (batch_get_elements) or more specific queries",
+        })
+
+    # Include analytics summary if requested and available
+    if include_analytics and analytics_repo:
+        try:
+            recent_calls = analytics_repo.get_recent_calls(limit=50)
+            tool_counts = analytics_repo.get_tool_counts()
+            causal_stats = analytics_repo.get_causal_statistics()
+
+            # Filter to magaldi tools
+            magaldi_calls = [c for c in recent_calls if c.get("tool_name", "").startswith("search_") or
+                           c.get("tool_name", "").startswith("find_") or
+                           c.get("tool_name", "").startswith("get_") or
+                           c.get("tool_name", "").startswith("list_") or
+                           c.get("tool_name", "").startswith("explain_")]
+
+            results["analytics_summary"] = {
+                "recent_magaldi_calls": len(magaldi_calls),
+                "total_tool_calls": sum(tool_counts.values()),
+                "causal_link_rate": causal_stats.get("causal_rate", 0),
+                "top_tools": dict(sorted(tool_counts.items(), key=lambda x: x[1], reverse=True)[:10]),
+            }
+
+            # Analyze causal patterns
+            if causal_stats.get("causal_rate", 0) < 0.3:
+                results["suggestions"].append({
+                    "type": "low_causality",
+                    "message": f"Low causal link rate ({causal_stats.get('causal_rate', 0):.1%}) - tool outputs may not be informing subsequent actions",
+                    "recommendation": "Tool outputs may need clearer actionable information or suggested next steps",
+                })
+
+        except Exception as e:
+            results["analytics_summary"] = {"error": str(e)}
+
+    return results

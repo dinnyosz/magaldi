@@ -46,6 +46,7 @@ from magaldi_mcp.tools_impl import (
     search_code,
     search_features,
     search_glossary,
+    mcp_self_review,
 )
 from magaldi_mcp.tools.parser_lab import (
     parser_lab_analyze,
@@ -95,6 +96,8 @@ __all__ = [
     "search_code",
     "search_features",
     "search_glossary",
+    # Labs tools
+    "mcp_self_review",
     # Parser Lab tools
     "parser_lab_analyze",
     "parser_lab_create_test",

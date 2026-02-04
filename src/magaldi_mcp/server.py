@@ -172,6 +172,7 @@ class MagaldiMCPServer:
             parser_lab_analyze,
             parser_lab_create_test,
             parser_lab_run_tests,
+            mcp_self_review,
             parser_lab_suggest_fix,
             pattern_search,
             search_code,
@@ -575,6 +576,15 @@ class MagaldiMCPServer:
                 scope=args.get("scope"),
                 repository=args.get("repository"),
                 username=args.get("username", self.default_username),
+            )
+        elif name == "mcp_self_review":
+            analytics_repo = self._get_analytics_repo()
+            return await asyncio.to_thread(
+                mcp_self_review,
+                analytics_repo,
+                context=args["context"],
+                include_analytics=args.get("include_analytics", True),
+                focus_tools=args.get("focus_tools"),
             )
         else:
             raise ValueError(f"Unknown tool: {name}")
