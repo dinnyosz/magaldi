@@ -273,8 +273,8 @@ class ClusteringConfig:
     cluster_selection_epsilon: float = 0.3  # Merge clusters within this distance
 
     # Thresholds
-    membership_threshold: float = 0.05  # Min membership score to keep (5%)
-    affinity_threshold: float = 0.2  # Min affinity for connected features (20%)
+    membership_threshold: float = 0.01  # Min membership score to keep (1%)
+    affinity_threshold: float = 0.01  # Min affinity for connected features (1%)
 
 
 @dataclass

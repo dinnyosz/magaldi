@@ -81,8 +81,8 @@ class TestClusteringConfig:
         assert config.metric == "euclidean"
         assert config.cluster_selection_method == "eom"
         assert config.cluster_selection_epsilon == 0.3
-        assert config.membership_threshold == 0.05
-        assert config.affinity_threshold == 0.2
+        assert config.membership_threshold == 0.01
+        assert config.affinity_threshold == 0.01
 
     def test_custom_values(self):
         """Test custom configuration values."""
