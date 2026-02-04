@@ -694,6 +694,7 @@ def _process_single_feature(
     worker_id: int,
     worker_status: FeatureWorkerStatus,
     on_status_change: Callable[[], None] | None = None,
+    cluster_id_to_label: dict[int, str] | None = None,
 ) -> ProcessedFeature:
     """Process a single feature: summarize -> embed -> index.
 
@@ -710,6 +711,7 @@ def _process_single_feature(
         worker_id: Worker thread ID.
         worker_status: Status tracker for workers.
         on_status_change: Optional callback when worker status changes.
+        cluster_id_to_label: Mapping of cluster IDs to their labels (for connected features).
 
     Returns:
         ProcessedFeature with timing info and success/error status.
@@ -753,6 +755,21 @@ def _process_single_feature(
         # Step 3: Index feature document
         update_status("indexing")
         feature_id = f"{scope}:{repository}:{username}:feature:{label}:{cluster.cluster_id}"
+
+        # Build connected_features from cluster.connected_clusters (from soft clustering)
+        connected_features: list[dict[str, Any]] | None = None
+        if cluster.connected_clusters and cluster_id_to_label:
+            connected_features = []
+            for conn in cluster.connected_clusters:
+                conn_label = cluster_id_to_label.get(conn.cluster_id)
+                if conn_label:
+                    conn_feature_id = f"{scope}:{repository}:{username}:feature:{conn_label}:{conn.cluster_id}"
+                    connected_features.append({
+                        "feature_id": conn_feature_id,
+                        "label": conn_label,
+                        "affinity": conn.affinity,
+                    })
+
         es_repo.index_feature(
             feature_id=feature_id,
             scope=scope,
@@ -763,6 +780,7 @@ def _process_single_feature(
             summary=summary,
             embedding=embedding,
             member_ids=cluster.element_ids,
+            connected_features=connected_features,
         )
 
         worker_status.clear(worker_id)
@@ -878,6 +896,12 @@ def process_features(
     errors: list[str] = []
     processed_features: dict[int, tuple[str, str]] = {}  # cluster_id -> (label, summary)
 
+    # Build cluster_id -> label mapping for connected features (soft clustering)
+    cluster_id_to_label: dict[int, str] = {
+        c.cluster_id: c.label or f"cluster_{c.cluster_id}"
+        for c in clusters
+    }
+
     # Worker ID pool
     available_worker_ids: list[int] = list(range(config.num_workers))
     worker_id_lock = threading.Lock()
@@ -917,6 +941,7 @@ def process_features(
                 worker_id=wid,
                 worker_status=worker_status,
                 on_status_change=on_status_change,
+                cluster_id_to_label=cluster_id_to_label,
             )
             # Mark as completed or failed in Redis based on result
             if redis_repo:

@@ -484,10 +484,12 @@ class ElasticsearchRepository:
         summary: str,
         embedding: list[float] | None,
         member_ids: list[str],
+        connected_features: list[dict[str, Any]] | None = None,
     ) -> bool:
         """Index a feature document."""
         return self._features.index_feature(
-            feature_id, scope, repository, username, cluster_id, label, summary, embedding, member_ids
+            feature_id, scope, repository, username, cluster_id, label, summary, embedding, member_ids,
+            connected_features=connected_features,
         )
 
     def index_subfeature(
