@@ -44,6 +44,11 @@ SEARCH_TOOLS = [
                     "description": "Include test elements in results. Default: true.",
                     "default": True,
                 },
+                "include_related": {
+                    "type": "boolean",
+                    "description": "Include related files that call/use found elements. Helps discover wrapper functions and usage sites. Default: true.",
+                    "default": True,
+                },
             },
             "required": ["query"],
         },

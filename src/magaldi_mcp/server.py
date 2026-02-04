@@ -198,6 +198,7 @@ class MagaldiMCPServer:
                 include_code=args.get("include_code", False),
                 brief=args.get("brief", False),
                 include_tests=args.get("include_tests", True),
+                include_related=args.get("include_related", True),
             )
         elif name == "search_features":
             return await asyncio.to_thread(
