@@ -5403,6 +5403,11 @@ def mcp_self_review(
     # ==========================================================================
 
     return {
+        "note": (
+            "These are SUGGESTIONS based on observed tool usage patterns. "
+            "Review each suggestion and decide whether it's worth implementing. "
+            "Not all deviations indicate problems - some may be expected workflow patterns."
+        ),
         "tool_sequence": [
             {
                 "tool": t.tool_name,

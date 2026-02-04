@@ -5,20 +5,23 @@ from mcp.types import Tool
 LABS_TOOLS = [
     Tool(
         name="mcp_self_review",
-        description="""MCP SELF REVIEW: Analyze recent magaldi tool usage to evaluate effectiveness.
+        description="""MCP SELF REVIEW: Analyze recent magaldi tool usage to SUGGEST improvements.
 
-Reviews the conversation context and MCP analytics data to determine:
-1. Which magaldi tool calls were useful (information was used in subsequent reasoning)
-2. Which tool calls were not useful (results were ignored or Claude deviated)
-3. Suggestions for how tool responses could be improved
+Analyzes tool call sequences to identify potential improvement opportunities:
+1. Deviation patterns - when magaldi results led to fallback to Read/Grep/Glob
+2. Query refinements - when initial search didn't find what was needed
+3. Missing information - what was searched for elsewhere after magaldi calls
 
-This helps identify:
-- Tool calls that returned too much/too little information
-- Missing fields that would have been helpful
-- Response format issues
-- Patterns in successful vs unsuccessful tool usage
+IMPORTANT: This tool provides SUGGESTIONS only. The user should review each
+suggestion and decide whether it's worth implementing. Not all patterns
+indicate problems - some may be expected workflow.
 
-Use this tool periodically during complex tasks to improve tool effectiveness.""",
+Output includes:
+- deviation_patterns: When builtin tools were used after magaldi (potential gaps)
+- usage_analysis: Which results were actually referenced later
+- improvement_suggestions: Specific, actionable ideas for magaldi enhancements
+
+Use periodically to identify magaldi improvement opportunities.""",
         inputSchema={
             "type": "object",
             "properties": {
