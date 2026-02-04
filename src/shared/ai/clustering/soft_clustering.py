@@ -464,8 +464,9 @@ class SoftClusteringPipeline:
 
         # Run NMF in batches of iterations to allow progress reporting
         # Each batch runs iter_per_batch iterations, then we continue with init='custom'
+        # Use smaller batches for more frequent progress updates
         total_iterations = self.config.nmf_max_iter
-        iter_per_batch = max(50, total_iterations // 20)  # ~20 progress updates
+        iter_per_batch = 20  # Small batches for responsive progress
         completed_iterations = 0
 
         W = None
@@ -473,31 +474,37 @@ class SoftClusteringPipeline:
         converged = False
         reconstruction_err = float('inf')
 
+        # Suppress convergence warning since we're intentionally batching
+        import warnings
+
         while completed_iterations < total_iterations and not converged:
             remaining_iters = total_iterations - completed_iterations
             batch_iters = min(iter_per_batch, remaining_iters)
 
-            if W is None:
-                # First batch - use specified init
-                W, H, n_iter = non_negative_factorization(
-                    cooccurrence_dense,
-                    n_components=n_features,
-                    init=init,
-                    max_iter=batch_iters,
-                    random_state=self.config.random_state,
-                )
-            else:
-                # Subsequent batches - continue from previous W, H
-                W, H, n_iter = non_negative_factorization(
-                    cooccurrence_dense,
-                    W=W,
-                    H=H,
-                    n_components=n_features,
-                    init="custom",
-                    update_H=True,
-                    max_iter=batch_iters,
-                    random_state=self.config.random_state,
-                )
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
+
+                if W is None:
+                    # First batch - use specified init
+                    W, H, n_iter = non_negative_factorization(
+                        cooccurrence_dense,
+                        n_components=n_features,
+                        init=init,
+                        max_iter=batch_iters,
+                        random_state=self.config.random_state,
+                    )
+                else:
+                    # Subsequent batches - continue from previous W, H
+                    W, H, n_iter = non_negative_factorization(
+                        cooccurrence_dense,
+                        W=W,
+                        H=H,
+                        n_components=n_features,
+                        init="custom",
+                        update_H=True,
+                        max_iter=batch_iters,
+                        random_state=self.config.random_state,
+                    )
 
             completed_iterations += n_iter
 

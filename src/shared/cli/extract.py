@@ -236,7 +236,7 @@ def run_feature_extraction(
             clustering_state["elapsed_seconds"] = state.elapsed_seconds
             clustering_state["eta_seconds"] = state.eta_seconds
 
-        with Live(build_clustering_display(), console=console, refresh_per_second=4) as live:
+        with Live(build_clustering_display(), console=console, refresh_per_second=10) as live:
             def update_display(state: ClusteringProgressState) -> None:
                 on_clustering_progress(state)
                 live.update(build_clustering_display())
