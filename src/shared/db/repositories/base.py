@@ -76,12 +76,66 @@ INDEX_MAPPING = {
             "content_hash": {"type": "keyword"},  # SHA256 of raw_code for element-level change detection
             "element_count": {"type": "integer"},  # Total elements in file (only on file elements)
             "indexed_at": {"type": "date"},
-            "cluster_id": {"type": "keyword"},  # Feature cluster ID
-            "cluster_label": {"type": "keyword"},  # Human-readable cluster label
+            "cluster_id": {"type": "keyword"},  # Feature cluster ID (primary, for backward compat)
+            "cluster_label": {"type": "keyword"},  # Human-readable cluster label (primary)
             "member_count": {"type": "integer"},  # Number of elements in feature (for feature docs)
             "member_ids": {"type": "keyword"},  # Element IDs of members (for feature docs)
             "parent_feature_label": {"type": "keyword"},  # Parent feature label (for subfeatures)
             "parent_feature_summary": {"type": "text"},  # Parent feature summary (for subfeatures)
+            # === SOFT CLUSTERING FIELDS ===
+            # Soft feature memberships on code elements (function, method, class)
+            "feature_memberships": {
+                "type": "nested",
+                "properties": {
+                    "feature_id": {"type": "keyword"},  # Feature element ID
+                    "label": {"type": "keyword"},  # Human-readable label
+                    "score": {"type": "float"},  # Membership probability (0-1)
+                    "is_primary": {"type": "boolean"},  # True for highest-score feature
+                },
+            },
+            # Soft subfeature memberships on code elements
+            "subfeature_memberships": {
+                "type": "nested",
+                "properties": {
+                    "subfeature_id": {"type": "keyword"},  # Subfeature element ID
+                    "label": {"type": "keyword"},  # Human-readable label
+                    "parent_feature_id": {"type": "keyword"},  # Parent feature ID
+                    "parent_feature_label": {"type": "keyword"},  # Parent feature label
+                    "score": {"type": "float"},  # Membership probability
+                    "is_primary": {"type": "boolean"},  # True for highest-score in this parent
+                },
+            },
+            # Connected features on feature documents (from feature affinity matrix)
+            "connected_features": {
+                "type": "nested",
+                "properties": {
+                    "feature_id": {"type": "keyword"},  # Connected feature ID
+                    "label": {"type": "keyword"},  # Connected feature label
+                    "affinity": {"type": "float"},  # Connection strength (0-1)
+                },
+            },
+            # Cross-feature subfeature connections on feature/subfeature documents
+            "connected_subfeatures_cross": {
+                "type": "nested",
+                "properties": {
+                    "subfeature_id": {"type": "keyword"},  # Connected subfeature ID
+                    "label": {"type": "keyword"},  # Subfeature label
+                    "parent_feature_id": {"type": "keyword"},  # Parent feature of connected subfeature
+                    "parent_feature_label": {"type": "keyword"},  # Parent feature label
+                    "affinity": {"type": "float"},  # Connection strength
+                },
+            },
+            # Connected subfeatures on subfeature documents (within same + cross-feature)
+            "connected_subfeatures": {
+                "type": "nested",
+                "properties": {
+                    "subfeature_id": {"type": "keyword"},
+                    "label": {"type": "keyword"},
+                    "parent_feature_id": {"type": "keyword"},
+                    "parent_feature_label": {"type": "keyword"},
+                    "affinity": {"type": "float"},
+                },
+            },
             "term": {"type": "keyword"},  # Glossary term
             "total_count": {"type": "integer"},  # Glossary term occurrence count
             "file_paths": {"type": "keyword"},  # Array of file paths
