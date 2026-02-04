@@ -271,7 +271,6 @@ class ClusteringConfig:
 
     # Thresholds
     membership_threshold: float = 0.1  # Min membership score to keep (10%)
-    overlap_threshold: float = 0.2  # Min secondary membership for overlap (20%)
     affinity_threshold: float = 0.15  # Min affinity for connected features (15%)
 
 
