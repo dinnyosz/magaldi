@@ -5099,12 +5099,12 @@ def mcp_self_review(
     include_analytics: bool = True,
     focus_tools: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Analyze recent magaldi tool usage to evaluate effectiveness.
+    """Analyze magaldi tool usage to identify improvement opportunities.
 
-    Reviews the conversation context and MCP analytics data to determine:
-    1. Which magaldi tool calls were useful (information was used)
-    2. Which tool calls were not useful (results were ignored)
-    3. Suggestions for how tool responses could be improved
+    Performs deep analysis of tool call sequences to find:
+    1. Deviation patterns - when magaldi results led to fallback to other tools
+    2. Missing information - what was searched for elsewhere after magaldi calls
+    3. Specific, actionable suggestions for improving magaldi tool responses
 
     Args:
         analytics_repo: MCP analytics repository instance.
@@ -5113,140 +5113,274 @@ def mcp_self_review(
         focus_tools: Optional list of specific tool names to focus on.
 
     Returns:
-        dict with analysis results and suggestions.
+        dict with sequence analysis, deviation patterns, and improvement suggestions.
     """
     import re
+    from dataclasses import dataclass
 
-    results: dict[str, Any] = {
-        "tool_calls_found": [],
-        "analysis": [],
-        "suggestions": [],
-        "analytics_summary": None,
-    }
+    @dataclass
+    class ToolCall:
+        """Represents a single tool call with its context."""
+        tool_name: str
+        params: dict[str, Any]
+        result_snippet: str
+        position: int
+        is_magaldi: bool
 
-    # Extract tool calls from context
-    # Look for patterns like mcp__magaldi__tool_name or tool_name(...)
-    tool_call_pattern = r'mcp__magaldi__(\w+)|<invoke name="mcp__magaldi__(\w+)"'
-    matches = re.findall(tool_call_pattern, context)
-    tool_calls = [m[0] or m[1] for m in matches if m[0] or m[1]]
+    # ==========================================================================
+    # STEP 1: Extract all tool calls in sequence (magaldi AND builtin)
+    # ==========================================================================
 
-    # Also look for tool result patterns
-    result_pattern = r'<result>.*?<name>mcp__magaldi__(\w+)</name>.*?<output>(.*?)</output>.*?</result>'
-    result_matches = re.findall(result_pattern, context, re.DOTALL)
+    tool_sequence: list[ToolCall] = []
 
-    # Track which tools were called and their results
+    # Pattern for magaldi tool invocations with parameters
+    # Match: <invoke name="mcp__magaldi__tool_name">..params..</invoke>
+    magaldi_invoke_pattern = r'<invoke name="mcp__magaldi__(\w+)">(.*?)</invoke>'
+
+    # Pattern for builtin tool invocations
+    builtin_invoke_pattern = r'<invoke name="(Read|Grep|Glob|Bash)">(.*?)</invoke>'
+
+    # Pattern for parameter extraction
+    param_pattern = r'<parameter name="(\w+)">([^<]*)</parameter>'
+
+    # Pattern for tool results
+    result_pattern = r'<result>\s*<name>([^<]+)</name>\s*<output>(.*?)</output>\s*</result>'
+
+    # Find all tool invocations in order
+    all_invocations: list[tuple[int, str, str, bool]] = []  # (position, tool_name, params_str, is_magaldi)
+
+    for match in re.finditer(magaldi_invoke_pattern, context, re.DOTALL):
+        all_invocations.append((match.start(), match.group(1), match.group(2), True))
+
+    for match in re.finditer(builtin_invoke_pattern, context, re.DOTALL):
+        all_invocations.append((match.start(), match.group(1), match.group(2), False))
+
+    # Sort by position to get chronological order
+    all_invocations.sort(key=lambda x: x[0])
+
+    # Extract results
     tool_results: dict[str, list[str]] = {}
-    for tool_name, output in result_matches:
+    for match in re.finditer(result_pattern, context, re.DOTALL):
+        tool_name = match.group(1).replace("mcp__magaldi__", "")
+        output = match.group(2)[:2000]  # Keep more context
         if tool_name not in tool_results:
             tool_results[tool_name] = []
-        tool_results[tool_name].append(output[:500])  # Truncate long outputs
+        tool_results[tool_name].append(output)
 
-    # Filter to focus_tools if specified
+    # Build tool sequence with parsed parameters
+    for idx, (pos, tool_name, params_str, is_magaldi) in enumerate(all_invocations):
+        params = {}
+        for param_match in re.finditer(param_pattern, params_str):
+            params[param_match.group(1)] = param_match.group(2)
+
+        result_snippet = ""
+        if tool_name in tool_results and len(tool_results[tool_name]) > 0:
+            # Pop first result for this tool
+            result_snippet = tool_results[tool_name].pop(0)
+
+        tool_sequence.append(ToolCall(
+            tool_name=tool_name,
+            params=params,
+            result_snippet=result_snippet,
+            position=idx,
+            is_magaldi=is_magaldi,
+        ))
+
+    # Filter if focus_tools specified
     if focus_tools:
-        tool_calls = [t for t in tool_calls if t in focus_tools]
-        tool_results = {k: v for k, v in tool_results.items() if k in focus_tools}
+        tool_sequence = [t for t in tool_sequence if t.tool_name in focus_tools or not t.is_magaldi]
 
-    results["tool_calls_found"] = list(set(tool_calls))
+    # ==========================================================================
+    # STEP 2: Analyze transitions and detect deviation patterns
+    # ==========================================================================
 
-    # Analyze each tool call
-    for tool_name in set(tool_calls):
-        tool_analysis = {
-            "tool": tool_name,
-            "call_count": tool_calls.count(tool_name),
-            "has_results": tool_name in tool_results,
-            "result_count": len(tool_results.get(tool_name, [])),
-            "assessment": "unknown",
-            "reasoning": "",
-        }
+    deviation_patterns: list[dict[str, Any]] = []
+    improvement_suggestions: list[dict[str, Any]] = []
 
-        # Check if results appear to be used in subsequent context
-        if tool_name in tool_results:
-            outputs = tool_results[tool_name]
-            for output in outputs:
-                # Extract key values from output (element names, file paths, etc.)
-                # Check if they appear later in the context
-                element_names = re.findall(r'"name":\s*"([^"]+)"', output)
-                file_paths = re.findall(r'"file_path":\s*"([^"]+)"', output)
-                hash_ids = re.findall(r'"hash_id":\s*"([^"]+)"', output)
+    for i in range(len(tool_sequence) - 1):
+        current = tool_sequence[i]
+        next_tool = tool_sequence[i + 1]
 
-                # Check context after the tool result
-                context_after_result = context.split(output[:100])[-1] if output[:100] in context else context
+        # Pattern 1: Magaldi search → Builtin Read/Grep (fallback pattern)
+        if current.is_magaldi and not next_tool.is_magaldi:
+            if next_tool.tool_name in ("Read", "Grep", "Glob"):
+                # What file/pattern was accessed after magaldi?
+                target = next_tool.params.get("file_path") or next_tool.params.get("pattern") or next_tool.params.get("path", "")
 
-                used_values = []
-                for name in element_names[:5]:  # Check first 5
-                    if name in context_after_result:
-                        used_values.append(name)
+                # Was this target in magaldi results?
+                target_in_results = target and target in current.result_snippet
 
-                for path in file_paths[:3]:
-                    if path in context_after_result:
-                        used_values.append(path)
+                if not target_in_results and target:
+                    deviation_patterns.append({
+                        "type": "fallback_to_builtin",
+                        "magaldi_tool": current.tool_name,
+                        "magaldi_query": current.params.get("query") or current.params.get("pattern") or current.params.get("hash_id", ""),
+                        "builtin_tool": next_tool.tool_name,
+                        "builtin_target": target,
+                        "gap": f"Magaldi {current.tool_name} didn't surface '{target}', had to use {next_tool.tool_name}",
+                    })
 
-                for hid in hash_ids[:3]:
-                    if hid in context_after_result:
-                        used_values.append(hid)
+                    # Generate specific improvement suggestion
+                    if current.tool_name == "search_code":
+                        improvement_suggestions.append({
+                            "tool": "search_code",
+                            "issue": f"Search for '{current.params.get('query', '')}' didn't include '{target}'",
+                            "suggestion": "Consider improving search relevance or expanding result set",
+                            "action": f"search_code results could suggest related files when direct matches are limited",
+                        })
 
-                if used_values:
-                    tool_analysis["assessment"] = "useful"
-                    tool_analysis["reasoning"] = f"Results referenced later: {used_values[:3]}"
-                else:
-                    tool_analysis["assessment"] = "possibly_unused"
-                    tool_analysis["reasoning"] = "No clear evidence results were used in subsequent reasoning"
+        # Pattern 2: Magaldi search → Magaldi search (refinement pattern)
+        if current.is_magaldi and next_tool.is_magaldi:
+            if current.tool_name == "search_code" and next_tool.tool_name == "search_code":
+                current_query = current.params.get("query", "")
+                next_query = next_tool.params.get("query", "")
 
-        results["analysis"].append(tool_analysis)
+                if current_query and next_query and current_query != next_query:
+                    # Queries are different - analyze why
+                    deviation_patterns.append({
+                        "type": "query_refinement",
+                        "first_query": current_query,
+                        "second_query": next_query,
+                        "gap": f"First search for '{current_query}' led to different search '{next_query}'",
+                    })
 
-    # Generate suggestions based on analysis
-    unused_tools = [a for a in results["analysis"] if a["assessment"] == "possibly_unused"]
-    if unused_tools:
-        results["suggestions"].append({
-            "type": "unused_results",
-            "message": f"{len(unused_tools)} tool calls may not have been used effectively",
-            "tools": [t["tool"] for t in unused_tools],
-            "recommendation": "Consider: 1) Using brief=True for exploration, 2) More specific queries, 3) Requesting include_code=True only when needed",
+                    # Check if second query terms appear in first results
+                    next_terms = set(next_query.lower().split())
+                    first_result_lower = current.result_snippet.lower()
+                    missing_terms = [t for t in next_terms if t not in first_result_lower and len(t) > 3]
+
+                    if missing_terms:
+                        improvement_suggestions.append({
+                            "tool": "search_code",
+                            "issue": f"Search for '{current_query}' didn't help find '{next_query}'",
+                            "suggestion": f"Results lacked terms: {missing_terms[:3]}",
+                            "action": "search_code could suggest related searches or show 'did you mean' alternatives",
+                        })
+
+        # Pattern 3: search_code → get_element (expected but frequent = needs more detail)
+        if current.is_magaldi and next_tool.is_magaldi:
+            if current.tool_name == "search_code" and next_tool.tool_name == "get_element":
+                # This is expected flow, but if search didn't have include_code=true, note it
+                if current.params.get("include_code") != "true":
+                    deviation_patterns.append({
+                        "type": "detail_needed",
+                        "from_tool": "search_code",
+                        "to_tool": "get_element",
+                        "gap": "search_code was followed by get_element - user needed more detail",
+                    })
+
+    # Pattern 4: Multiple sequential searches without get_element (exploration without finding)
+    search_streak = 0
+    for tool in tool_sequence:
+        if tool.is_magaldi and tool.tool_name == "search_code":
+            search_streak += 1
+        elif tool.is_magaldi and tool.tool_name in ("get_element", "find_usages", "get_context"):
+            search_streak = 0
+
+    if search_streak >= 3:
+        improvement_suggestions.append({
+            "tool": "search_code",
+            "issue": f"{search_streak} consecutive searches without drilling into results",
+            "suggestion": "User may be struggling to find relevant code",
+            "action": "Consider: 1) search_features for high-level exploration, 2) Improved result summaries, 3) 'Related searches' suggestions",
         })
 
-    # Check for repeated similar calls
-    call_counts = {}
-    for tool in tool_calls:
-        call_counts[tool] = call_counts.get(tool, 0) + 1
+    # ==========================================================================
+    # STEP 3: Analyze what information was actually used from results
+    # ==========================================================================
 
-    repeated = {k: v for k, v in call_counts.items() if v > 2}
-    if repeated:
-        results["suggestions"].append({
-            "type": "repeated_calls",
-            "message": f"Some tools called multiple times: {repeated}",
-            "recommendation": "Consider using batch operations (batch_get_elements) or more specific queries",
+    usage_analysis: list[dict[str, Any]] = []
+
+    for tool in tool_sequence:
+        if not tool.is_magaldi or not tool.result_snippet:
+            continue
+
+        # Find context AFTER this tool's result
+        result_pos = context.find(tool.result_snippet[:100])
+        context_after = context[result_pos + 100:] if result_pos >= 0 else ""
+
+        # Extract key identifiers from result
+        hash_ids = re.findall(r'id:([a-f0-9]{20,})', tool.result_snippet)
+        file_paths = re.findall(r'[\w/]+\.(?:py|ts|js|tsx|jsx|rs|php)', tool.result_snippet)
+        element_names = re.findall(r'\[(?:function|method|class)\]\s+(\w+)', tool.result_snippet)
+
+        used_ids = [h for h in hash_ids[:5] if h in context_after]
+        used_paths = [p for p in file_paths[:5] if p in context_after]
+        used_names = [n for n in element_names[:5] if n in context_after]
+
+        usage_analysis.append({
+            "tool": tool.tool_name,
+            "query": tool.params.get("query") or tool.params.get("hash_id") or tool.params.get("pattern", ""),
+            "results_returned": len(hash_ids) + len(element_names),
+            "results_used": len(used_ids) + len(used_paths) + len(used_names),
+            "used_items": (used_ids + used_paths + used_names)[:5],
+            "utilization": f"{len(used_ids) + len(used_names)}/{len(hash_ids) + len(element_names)}" if hash_ids or element_names else "N/A",
         })
 
-    # Include analytics summary if requested and available
+    # ==========================================================================
+    # STEP 4: Include analytics if requested
+    # ==========================================================================
+
+    analytics_summary = None
     if include_analytics and analytics_repo:
         try:
-            recent_calls = analytics_repo.get_recent_calls(limit=50)
             tool_counts = analytics_repo.get_tool_counts()
+            transitions = analytics_repo.get_tool_transitions()
             causal_stats = analytics_repo.get_causal_statistics()
 
-            # Filter to magaldi tools
-            magaldi_calls = [c for c in recent_calls if c.get("tool_name", "").startswith("search_") or
-                           c.get("tool_name", "").startswith("find_") or
-                           c.get("tool_name", "").startswith("get_") or
-                           c.get("tool_name", "").startswith("list_") or
-                           c.get("tool_name", "").startswith("explain_")]
+            # Analyze transition patterns from analytics
+            transition_insights: list[str] = []
+            for (from_tool, to_tool), count in sorted(transitions.items(), key=lambda x: -x[1])[:10]:
+                if from_tool.startswith(("search_", "find_", "get_")) and to_tool in ("Read", "Grep", "Glob"):
+                    transition_insights.append(
+                        f"{from_tool} → {to_tool}: {count}x (potential gap in {from_tool} results)"
+                    )
 
-            results["analytics_summary"] = {
-                "recent_magaldi_calls": len(magaldi_calls),
-                "total_tool_calls": sum(tool_counts.values()),
+            analytics_summary = {
+                "total_magaldi_calls": sum(v for k, v in tool_counts.items()
+                                          if k.startswith(("search_", "find_", "get_", "list_", "explain_"))),
+                "total_builtin_fallbacks": sum(v for k, v in tool_counts.items()
+                                               if k in ("Read", "Grep", "Glob")),
                 "causal_link_rate": causal_stats.get("causal_rate", 0),
-                "top_tools": dict(sorted(tool_counts.items(), key=lambda x: x[1], reverse=True)[:10]),
+                "top_transitions": transition_insights[:5],
+                "top_tools": dict(sorted(tool_counts.items(), key=lambda x: -x[1])[:10]),
             }
 
-            # Analyze causal patterns
-            if causal_stats.get("causal_rate", 0) < 0.3:
-                results["suggestions"].append({
-                    "type": "low_causality",
-                    "message": f"Low causal link rate ({causal_stats.get('causal_rate', 0):.1%}) - tool outputs may not be informing subsequent actions",
-                    "recommendation": "Tool outputs may need clearer actionable information or suggested next steps",
+            # Add analytics-based suggestions
+            fallback_rate = analytics_summary["total_builtin_fallbacks"] / max(analytics_summary["total_magaldi_calls"], 1)
+            if fallback_rate > 0.3:
+                improvement_suggestions.append({
+                    "tool": "general",
+                    "issue": f"High fallback rate to builtin tools ({fallback_rate:.0%})",
+                    "suggestion": "Magaldi tools may not be returning sufficient information",
+                    "action": "Consider: 1) Including file paths in search results, 2) Showing code snippets by default, 3) Better relevance ranking",
                 })
 
         except Exception as e:
-            results["analytics_summary"] = {"error": str(e)}
+            analytics_summary = {"error": str(e)}
 
-    return results
+    # ==========================================================================
+    # STEP 5: Build final results
+    # ==========================================================================
+
+    return {
+        "tool_sequence": [
+            {
+                "tool": t.tool_name,
+                "is_magaldi": t.is_magaldi,
+                "params": t.params,
+            }
+            for t in tool_sequence[:20]  # Limit for readability
+        ],
+        "deviation_patterns": deviation_patterns,
+        "usage_analysis": usage_analysis,
+        "improvement_suggestions": improvement_suggestions,
+        "analytics_summary": analytics_summary,
+        "summary": {
+            "total_tool_calls": len(tool_sequence),
+            "magaldi_calls": sum(1 for t in tool_sequence if t.is_magaldi),
+            "builtin_fallbacks": sum(1 for t in tool_sequence if not t.is_magaldi),
+            "deviation_count": len(deviation_patterns),
+            "suggestions_count": len(improvement_suggestions),
+        },
+    }
