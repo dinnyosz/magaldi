@@ -59,6 +59,7 @@ class ClusterConfig:
     # Soft clustering options
     soft_clustering: bool = True  # Enable soft/overlapping memberships
     membership_threshold: float = 0.1  # Min membership score to keep (10%)
+    overlap_threshold: float = 0.2  # Min secondary membership for overlap (20%)
     affinity_threshold: float = 0.15  # Min affinity for connected features (15%)
 
     @classmethod

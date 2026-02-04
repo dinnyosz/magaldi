@@ -261,10 +261,11 @@ def run_feature_extraction(
                 if clustering_result.clusters
                 else 0
             )
-            # Elements with multiple memberships (soft overlap)
+            # Elements with meaningful cross-membership (secondary >= 20%)
+            overlap_threshold = 0.2  # Match default from SoftClusteringConfig
             elements_with_overlap = sum(
                 1 for memberships in clustering_result.element_memberships.values()
-                if len(memberships) > 1
+                if len(memberships) > 1 and memberships[1].score >= overlap_threshold
             )
             overlap_pct = (
                 elements_with_overlap / elements_in_features * 100

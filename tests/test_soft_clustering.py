@@ -80,6 +80,7 @@ class TestSoftClusteringConfig:
         assert config.min_samples == 2
         assert config.metric == "euclidean"
         assert config.membership_threshold == 0.1
+        assert config.overlap_threshold == 0.2
         assert config.affinity_threshold == 0.15
 
     def test_custom_values(self):
