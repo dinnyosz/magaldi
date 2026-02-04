@@ -494,7 +494,7 @@ class FeatureClusterer:
                     label=None,  # Will be filled after labeling
                     affinity=c.affinity,
                 )
-                for c in connected[:5]  # Limit to top 5 strongest connections
+                for c in connected  # All connections above affinity_threshold
             ]
 
             # Build element summaries dict
