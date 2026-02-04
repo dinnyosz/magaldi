@@ -56,20 +56,10 @@ class ClusterConfig:
     label_max_tokens: int = 32
     label_timeout: int = 30
 
-    # Soft clustering options (random projection ensemble + NMF)
+    # Soft clustering options
     soft_clustering: bool = True  # Enable soft/overlapping memberships
-    n_projection_runs: int = 50  # Number of random projection runs
-    projection_dims: int = 50  # Dimensions after projection
-    n_features: int = 500  # Number of features to extract
     membership_threshold: float = 0.01  # Min membership score to keep
     affinity_threshold: float = 0.001  # Min affinity for connected features
-
-    # Soft clustering pipeline selection
-    # "scalable": HDBSCAN directly on embeddings (recommended)
-    # "standard": NMF (legacy, slower, has convergence issues on small datasets)
-    # "auto": scalable for >= scalable_threshold elements (legacy)
-    soft_clustering_mode: str = "scalable"
-    scalable_threshold: int = 1000  # Only used if mode="auto"
 
     @classmethod
     def from_magaldi_config(
@@ -100,11 +90,6 @@ class ClusterConfig:
             # From ClusteringConfig (with optional CLI overrides)
             min_cluster_size=min_cluster_size if min_cluster_size is not None else cc.min_cluster_size,
             min_samples=min_samples if min_samples is not None else cc.min_samples,
-            soft_clustering_mode=cc.soft_clustering_mode,
-            scalable_threshold=cc.scalable_threshold,
-            n_projection_runs=cc.n_projection_runs,
-            projection_dims=cc.projection_dims,
-            n_features=cc.n_features,
             membership_threshold=cc.membership_threshold,
             affinity_threshold=cc.affinity_threshold,
             # LLM settings (passed in, typically from summarize model)
@@ -417,33 +402,14 @@ class FeatureClusterer:
         valid_elements: list[dict[str, Any]],
         on_progress: Callable[[ClusteringProgressState], None] | None = None,
     ) -> ClusteringResult:
-        """Soft clustering with overlapping memberships.
-
-        Uses either:
-        - Standard pipeline: random projection ensemble + NMF (more accurate, O(n²))
-        - Scalable pipeline: PCA + UMAP + HDBSCAN (faster, O(n log n))
-
-        Pipeline selection based on config.soft_clustering_mode:
-        - "auto": scalable for >= config.scalable_threshold elements
-        - "scalable": always use scalable pipeline
-        - "standard": always use standard pipeline
-        """
+        """Soft clustering with overlapping memberships using HDBSCAN."""
         from shared.ai.clustering.soft_clustering import (
-            ScalableSoftClusteringConfig,
-            ScalableSoftClusteringPipeline,
             SoftClusteringConfig,
             SoftClusteringPipeline,
             SoftClusteringProgress,
         )
 
         n_elements = len(valid_elements)
-
-        # Determine which pipeline to use
-        use_scalable = False
-        if self.config.soft_clustering_mode == "scalable":
-            use_scalable = True
-        elif self.config.soft_clustering_mode == "auto":
-            use_scalable = n_elements >= self.config.scalable_threshold
 
         # Create progress adapter if callback provided
         def soft_progress_callback(progress: SoftClusteringProgress) -> None:
@@ -462,27 +428,14 @@ class FeatureClusterer:
 
         element_ids = [e["element_id"] for e in valid_elements]
 
-        if use_scalable:
-            # Use scalable pipeline (HDBSCAN directly on embeddings)
-            scalable_config = ScalableSoftClusteringConfig(
-                min_cluster_size=self.config.min_cluster_size,
-                min_samples=self.config.min_samples,
-                membership_threshold=self.config.membership_threshold,
-                affinity_threshold=self.config.affinity_threshold,
-            )
-            pipeline = ScalableSoftClusteringPipeline(scalable_config)
-        else:
-            # Use standard pipeline (random projection + NMF)
-            soft_config = SoftClusteringConfig(
-                n_projection_runs=self.config.n_projection_runs,
-                projection_dims=self.config.projection_dims,
-                min_cluster_size=self.config.min_cluster_size,
-                min_samples=self.config.min_samples,
-                n_features=self.config.n_features,
-                membership_threshold=self.config.membership_threshold,
-                affinity_threshold=self.config.affinity_threshold,
-            )
-            pipeline = SoftClusteringPipeline(soft_config)
+        # HDBSCAN soft clustering directly on embeddings
+        soft_config = SoftClusteringConfig(
+            min_cluster_size=self.config.min_cluster_size,
+            min_samples=self.config.min_samples,
+            membership_threshold=self.config.membership_threshold,
+            affinity_threshold=self.config.affinity_threshold,
+        )
+        pipeline = SoftClusteringPipeline(soft_config)
 
         # Run soft clustering
         soft_result = pipeline.fit(
@@ -627,7 +580,7 @@ class FeatureClusterer:
         def get_display_model(num_ctx: int) -> str:
             if self.config.provider == "ollama":
                 from shared.ai.ollama_models import get_tiered_model_name
-                return get_tiered_model_name(labeling_model, num_ctx)
+                return str(get_tiered_model_name(labeling_model, num_ctx))
             return labeling_model
 
         for cluster in result.clusters:

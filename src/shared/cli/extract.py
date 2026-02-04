@@ -201,19 +201,7 @@ def run_feature_extraction(
             # Phase description
             status_text = Text()
             status_text.append("  ")
-            if phase == "projection":
-                # NMF pipeline (legacy)
-                status_text.append("⚡ ", style="yellow")
-                status_text.append("Random projections", style="cyan")
-                status_text.append(f" | {clustering_state['n_elements']} elements", style="dim")
-            elif phase == "nmf":
-                # NMF pipeline (legacy)
-                status_text.append("🔬 ", style="yellow")
-                status_text.append("NMF extraction", style="cyan")
-                density = clustering_state.get("cooccurrence_density", 0)
-                if density > 0:
-                    status_text.append(f" | cooccurrence density: {density:.1%}", style="dim")
-            elif phase == "hdbscan":
+            if phase == "hdbscan":
                 status_text.append("🔬 ", style="yellow")
                 status_text.append("HDBSCAN soft clustering", style="cyan")
                 status_text.append(f" | {clustering_state['n_elements']} elements", style="dim")

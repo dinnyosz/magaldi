@@ -262,25 +262,12 @@ class ClusteringConfig:
     """Feature clustering configuration.
 
     Controls how functions/methods are grouped into features using
-    soft clustering algorithms.
+    HDBSCAN soft clustering directly on embedding vectors.
     """
 
-    # HDBSCAN parameters (used by both pipelines)
+    # HDBSCAN parameters
     min_cluster_size: int = 5  # Minimum elements to form a cluster
     min_samples: int = 2  # Density threshold for core points
-
-    # Pipeline selection
-    # "scalable": HDBSCAN directly on embeddings (recommended)
-    # "standard": NMF (legacy, slower, has convergence issues on small datasets)
-    # "auto": scalable for >= scalable_threshold elements (legacy)
-    soft_clustering_mode: str = "scalable"
-    scalable_threshold: int = 1000  # Only used if mode="auto"
-
-    # Standard pipeline (NMF) settings - only used if mode="standard"
-    n_projection_runs: int = 50  # Random projection runs for cooccurrence
-    projection_dims: int = 50  # Dimensions after projection
-    n_features: int = 500  # Target features for NMF (0 = auto)
-    nmf_max_iter: int = 1000  # Max NMF iterations
 
     # Thresholds
     membership_threshold: float = 0.01  # Min membership score to keep
