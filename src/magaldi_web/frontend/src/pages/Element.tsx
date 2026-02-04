@@ -948,10 +948,25 @@ function Element() {
                     as={Link}
                     to={`/element/${encodeURIComponent(connected.hash_id || connected.feature_id)}`}
                   >
-                    <Badge bg="info" className="me-2">
-                      <i className="bi bi-collection"></i>
-                    </Badge>
-                    <span className="fw-medium">{connected.label}</span>
+                    <div className="d-flex justify-content-between align-items-start">
+                      <div>
+                        <Badge bg="info" className="me-2">
+                          <i className="bi bi-collection"></i>
+                        </Badge>
+                        <span className="fw-medium">{connected.label}</span>
+                      </div>
+                      {connected.shared_member_count > 0 && (
+                        <Badge bg="secondary" pill>
+                          {connected.shared_member_count} shared
+                        </Badge>
+                      )}
+                    </div>
+                    {connected.common_glossary_terms.length > 0 && (
+                      <small className="d-block text-muted mt-1 ms-4">
+                        <i className="bi bi-book me-1"></i>
+                        {connected.common_glossary_terms.join(', ')}
+                      </small>
+                    )}
                   </ListGroup.Item>
                 ))}
               </ListGroup>

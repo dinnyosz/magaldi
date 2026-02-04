@@ -211,6 +211,8 @@ export interface ConnectedFeatureInfo {
   hash_id: string | null
   label: string
   affinity: number
+  shared_member_count: number
+  common_glossary_terms: string[]
 }
 
 export interface FeatureInfo {

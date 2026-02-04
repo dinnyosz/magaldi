@@ -354,28 +354,89 @@ async def get_element_detail(
         # Build connected features list from soft clustering
         connected_features = []
         raw_connected = source.get("connected_features", [])
+        current_member_ids = set(member_ids)
+
         if raw_connected:
-            # Get hash_ids for connected features
-            connected_ids = [cf.get("feature_id") for cf in raw_connected if cf.get("feature_id")]
-            connected_details: dict[str, str] = {}
+            # Get details for connected features including member_ids
+            connected_ids = [cf.get("feature_id") for cf in raw_connected[:10] if cf.get("feature_id")]
+            connected_details: dict[str, dict] = {}
             if connected_ids:
                 conn_result = client.mget(
                     index=INDEX_NAME,
                     ids=connected_ids,
-                    _source=["hash_id"],
+                    _source=["hash_id", "member_ids"],
                 )
                 for doc in conn_result.get("docs", []):
                     if doc.get("found") and doc.get("_source"):
-                        connected_details[doc["_id"]] = doc["_source"].get("hash_id")
+                        connected_details[doc["_id"]] = doc["_source"]
+
+            # Get glossary terms for the current feature
+            current_glossary_terms: set[str] = set()
+            glossary_result = client.search(
+                index=INDEX_NAME,
+                body={
+                    "size": 100,
+                    "query": {
+                        "bool": {
+                            "filter": [
+                                {"term": {"scope": source["scope"]}},
+                                {"term": {"repository": source["repository"]}},
+                                {"term": {"username": source["username"]}},
+                                {"term": {"element_type": "glossary"}},
+                                {"term": {"feature_associations.feature_id": element_id}},
+                            ]
+                        }
+                    },
+                    "_source": ["name"],
+                },
+            )
+            for hit in glossary_result.get("hits", {}).get("hits", []):
+                current_glossary_terms.add(hit["_source"].get("name", ""))
+
+            # Get glossary terms for connected features
+            connected_glossary: dict[str, set[str]] = {fid: set() for fid in connected_ids}
+            if connected_ids:
+                for conn_id in connected_ids:
+                    conn_glossary_result = client.search(
+                        index=INDEX_NAME,
+                        body={
+                            "size": 100,
+                            "query": {
+                                "bool": {
+                                    "filter": [
+                                        {"term": {"scope": source["scope"]}},
+                                        {"term": {"repository": source["repository"]}},
+                                        {"term": {"username": source["username"]}},
+                                        {"term": {"element_type": "glossary"}},
+                                        {"term": {"feature_associations.feature_id": conn_id}},
+                                    ]
+                                }
+                            },
+                            "_source": ["name"],
+                        },
+                    )
+                    for hit in conn_glossary_result.get("hits", {}).get("hits", []):
+                        connected_glossary[conn_id].add(hit["_source"].get("name", ""))
 
             for cf in raw_connected[:10]:  # Limit to top 10
                 feature_id = cf.get("feature_id", "")
+                details = connected_details.get(feature_id, {})
+                conn_member_ids = set(details.get("member_ids", []))
+
+                # Calculate shared members
+                shared_count = len(current_member_ids & conn_member_ids)
+
+                # Find common glossary terms
+                common_terms = list(current_glossary_terms & connected_glossary.get(feature_id, set()))[:5]
+
                 connected_features.append(
                     ConnectedFeatureInfo(
                         feature_id=feature_id,
-                        hash_id=connected_details.get(feature_id),
+                        hash_id=details.get("hash_id"),
                         label=cf.get("label", ""),
                         affinity=cf.get("affinity", 0.0),
+                        shared_member_count=shared_count,
+                        common_glossary_terms=common_terms,
                     )
                 )
 

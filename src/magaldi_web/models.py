@@ -392,6 +392,8 @@ class ConnectedFeatureInfo(BaseModel):
     hash_id: str | None = None
     label: str
     affinity: float = 0.0
+    shared_member_count: int = 0
+    common_glossary_terms: list[str] = Field(default_factory=list)
 
 
 class FeatureInfo(BaseModel):
