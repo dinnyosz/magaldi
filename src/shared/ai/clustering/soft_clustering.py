@@ -9,6 +9,7 @@ See plans/random_projection_ensemble_clustering.md for detailed algorithm design
 from __future__ import annotations
 
 import logging
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -447,7 +448,10 @@ class SoftClusteringPipeline:
             random_state=self.config.random_state,
         )
 
-        W = nmf.fit_transform(cooccurrence_dense)  # (n_elements, n_features)
+        # Suppress convergence warning - we accept partial convergence for speed
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
+            W = nmf.fit_transform(cooccurrence_dense)  # (n_elements, n_features)
 
         logger.debug(f"NMF reconstruction error: {nmf.reconstruction_err_:.4f}")
 
@@ -611,7 +615,9 @@ def find_optimal_n_features(
 
     for k in k_values:
         nmf = NMF(n_components=k, init="nndsvd", max_iter=max_iter, random_state=42)
-        nmf.fit_transform(cooccurrence)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
+            nmf.fit_transform(cooccurrence)
         errors.append(nmf.reconstruction_err_)
         logger.debug(f"k={k}: reconstruction error = {nmf.reconstruction_err_:.4f}")
 
