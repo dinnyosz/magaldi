@@ -1,13 +1,10 @@
-"""Soft clustering using random projection ensemble and NMF.
+"""Soft clustering for code element embeddings.
 
-Implements overlapping/soft cluster memberships for high-dimensional embeddings
-using random projections, ensemble clustering, and cooccurrence analysis.
+Implements overlapping/soft cluster memberships for high-dimensional embeddings.
 
 Two pipeline options are provided:
-1. SoftClusteringPipeline: Random projection ensemble + NMF (O(n²) cooccurrence matrix)
-2. ScalableSoftClusteringPipeline: PCA + UMAP + HDBSCAN soft clustering (O(n log n))
-
-For datasets with 5k+ elements, use ScalableSoftClusteringPipeline for better performance.
+1. SoftClusteringPipeline: Random projection ensemble + NMF (legacy, O(n²))
+2. ScalableSoftClusteringPipeline: HDBSCAN soft clustering directly on embeddings (recommended)
 
 See plans/random_projection_ensemble_clustering.md for detailed algorithm design.
 """
@@ -21,9 +18,8 @@ from dataclasses import dataclass, field
 
 import hdbscan
 import numpy as np
-import umap
 from scipy.sparse import csr_matrix, lil_matrix
-from sklearn.decomposition import NMF, PCA
+from sklearn.decomposition import NMF
 from sklearn.random_projection import GaussianRandomProjection
 
 logger = logging.getLogger(__name__)
@@ -109,42 +105,25 @@ class SoftClusteringConfig:
 
 @dataclass
 class ScalableSoftClusteringConfig:
-    """Configuration for scalable soft clustering using UMAP + HDBSCAN.
+    """Configuration for scalable soft clustering using HDBSCAN directly on embeddings.
 
-    This approach is O(n log n) vs O(n²) for the cooccurrence-based approach,
-    making it suitable for large codebases (5k-30k+ elements).
-
-    Algorithm:
-    1. PCA reduces dimensionality while preserving distances (critical for UMAP)
-    2. UMAP further reduces to clustering-friendly dimensions
-    3. HDBSCAN with soft clustering extracts memberships directly
+    Runs HDBSCAN directly on the embedding space without dimensionality reduction.
+    Modern embedding models produce well-structured vectors that don't need
+    preprocessing like PCA or UMAP.
 
     Attributes:
-        pca_components: Number of PCA components (0 = auto: min(100, 90% variance)).
-            PCA first preserves Euclidean distances that UMAP would distort.
-        umap_components: Final dimensionality for HDBSCAN clustering.
-        umap_n_neighbors: UMAP locality parameter. Higher = more global structure.
-            15-30 is typical; higher values help preserve distances.
-        umap_min_dist: UMAP minimum distance between points. Higher = less clumping.
-            0.1-0.3 typical; higher helps prevent distance distortion.
-        umap_metric: Distance metric for UMAP. 'cosine' for embeddings.
         min_cluster_size: HDBSCAN minimum cluster size.
         min_samples: HDBSCAN min_samples (density threshold).
+        metric: Distance metric for HDBSCAN. 'euclidean' works well for embeddings.
         membership_threshold: Minimum soft membership to retain.
         affinity_threshold: Minimum affinity between features to report.
-        random_state: Random seed for reproducibility.
     """
 
-    pca_components: int = 0  # 0 = auto: min(100, n_components for 90% variance)
-    umap_components: int = 50
-    umap_n_neighbors: int = 30  # Higher for better distance preservation
-    umap_min_dist: float = 0.1  # Higher to reduce clumping/distortion
-    umap_metric: str = "cosine"  # Best for embedding spaces
     min_cluster_size: int = 5
     min_samples: int = 2
+    metric: str = "euclidean"  # euclidean works well for normalized embeddings
     membership_threshold: float = 0.01
     affinity_threshold: float = 0.001
-    random_state: int = 42
 
 
 # =============================================================================
@@ -740,19 +719,16 @@ class SoftClusteringPipeline:
 
 
 class ScalableSoftClusteringPipeline:
-    """Scalable soft clustering using PCA + UMAP + HDBSCAN.
+    """Scalable soft clustering using HDBSCAN directly on embeddings.
 
-    Designed for large codebases (5k-30k+ elements) where the O(n²) cooccurrence
-    matrix approach becomes prohibitively expensive.
+    Runs HDBSCAN with soft clustering directly on the embedding vectors.
+    Modern embedding models produce well-structured vectors that work well
+    without dimensionality reduction preprocessing.
 
     Algorithm:
-    1. PCA preprocessing preserves Euclidean distances (critical before UMAP)
-    2. UMAP reduces to clustering-friendly dimensions with tuned parameters
-    3. HDBSCAN with prediction_data=True enables soft clustering
-    4. all_points_membership_vectors() extracts soft memberships directly
-
-    Complexity: O(n log n) for UMAP, O(n) for HDBSCAN
-    vs O(n²) for cooccurrence matrix construction
+    1. HDBSCAN with prediction_data=True enables soft clustering
+    2. all_points_membership_vectors() extracts soft memberships directly
+    3. Feature affinity computed from membership matrix (W^T @ W)
 
     Example:
         >>> pipeline = ScalableSoftClusteringPipeline()
@@ -769,8 +745,6 @@ class ScalableSoftClusteringPipeline:
             config: Clustering configuration. Uses defaults if not provided.
         """
         self.config = config or ScalableSoftClusteringConfig()
-        self._pca_model: PCA | None = None
-        self._umap_model: umap.UMAP | None = None
         self._clusterer: hdbscan.HDBSCAN | None = None
         self._memberships: np.ndarray | None = None
         self._feature_affinity: np.ndarray | None = None
@@ -781,7 +755,7 @@ class ScalableSoftClusteringPipeline:
         element_ids: list[str] | None = None,
         on_progress: ProgressCallback | None = None,
     ) -> SoftClusteringResult:
-        """Fit the pipeline using UMAP + HDBSCAN soft clustering.
+        """Fit the pipeline using HDBSCAN soft clustering directly on embeddings.
 
         Args:
             embeddings: (n_elements, embedding_dim) embedding matrix.
@@ -805,67 +779,11 @@ class ScalableSoftClusteringPipeline:
 
         n_elements, embedding_dim = embeddings.shape
         logger.info(
-            f"Starting scalable soft clustering: {n_elements} elements, "
+            f"Starting soft clustering: {n_elements} elements, "
             f"{embedding_dim}D embeddings"
         )
 
-        # Phase 1: PCA preprocessing
-        phase_start = time.time()
-        if on_progress:
-            on_progress(SoftClusteringProgress(
-                phase="pca",
-                phase_description="PCA dimensionality reduction",
-                current_step=0,
-                total_steps=1,
-                n_elements=n_elements,
-            ))
-
-        pca_reduced = self._apply_pca(embeddings)
-        pca_dims = pca_reduced.shape[1]
-
-        if on_progress:
-            elapsed = time.time() - phase_start
-            on_progress(SoftClusteringProgress(
-                phase="pca",
-                phase_description="PCA dimensionality reduction",
-                current_step=1,
-                total_steps=1,
-                n_elements=n_elements,
-                n_features=pca_dims,
-                elapsed_seconds=elapsed,
-            ))
-
-        logger.info(f"PCA: {embedding_dim}D → {pca_dims}D")
-
-        # Phase 2: UMAP embedding
-        umap_start = time.time()
-        if on_progress:
-            on_progress(SoftClusteringProgress(
-                phase="umap",
-                phase_description="UMAP embedding",
-                current_step=0,
-                total_steps=1,
-                n_elements=n_elements,
-            ))
-
-        umap_reduced = self._apply_umap(pca_reduced, n_elements, on_progress)
-        umap_dims = umap_reduced.shape[1]
-
-        if on_progress:
-            elapsed = time.time() - umap_start
-            on_progress(SoftClusteringProgress(
-                phase="umap",
-                phase_description="UMAP embedding",
-                current_step=1,
-                total_steps=1,
-                n_elements=n_elements,
-                n_features=umap_dims,
-                elapsed_seconds=elapsed,
-            ))
-
-        logger.info(f"UMAP: {pca_dims}D → {umap_dims}D")
-
-        # Phase 3: HDBSCAN soft clustering
+        # HDBSCAN soft clustering directly on embeddings
         hdbscan_start = time.time()
         if on_progress:
             on_progress(SoftClusteringProgress(
@@ -876,7 +794,7 @@ class ScalableSoftClusteringPipeline:
                 n_elements=n_elements,
             ))
 
-        self._memberships, n_clusters = self._apply_hdbscan_soft(umap_reduced)
+        self._memberships, n_clusters = self._apply_hdbscan_soft(embeddings)
 
         if on_progress:
             elapsed = time.time() - hdbscan_start
@@ -928,96 +846,6 @@ class ScalableSoftClusteringPipeline:
             cooccurrence_density=0.0,  # Not applicable for this approach
         )
 
-    def _apply_pca(self, embeddings: np.ndarray) -> np.ndarray:
-        """Apply PCA to preserve distances before UMAP.
-
-        PCA is critical here because:
-        1. It preserves Euclidean distances (unlike UMAP)
-        2. Reduces computational cost of UMAP
-        3. Removes noise dimensions that could confuse clustering
-
-        Args:
-            embeddings: (n_elements, embedding_dim) array.
-
-        Returns:
-            PCA-reduced embeddings.
-        """
-        n_samples, n_features = embeddings.shape
-
-        if self.config.pca_components == 0:
-            # Auto-calculate: use enough components for 90% variance, capped at 100
-            # or n_samples-1 (whichever is smaller)
-            max_components = min(100, n_samples - 1, n_features)
-            self._pca_model = PCA(
-                n_components=max_components,
-                random_state=self.config.random_state,
-            )
-            reduced = self._pca_model.fit_transform(embeddings)
-
-            # Find how many components for 90% variance
-            cumsum = np.cumsum(self._pca_model.explained_variance_ratio_)
-            n_for_90pct = np.searchsorted(cumsum, 0.90) + 1
-            n_components = min(n_for_90pct, max_components)
-
-            logger.debug(
-                f"PCA auto-selected {n_components} components "
-                f"({cumsum[n_components-1]:.1%} variance explained)"
-            )
-
-            # Return only the needed components
-            return reduced[:, :n_components]
-        else:
-            # Use specified number of components
-            n_components = min(self.config.pca_components, n_samples - 1, n_features)
-            self._pca_model = PCA(
-                n_components=n_components,
-                random_state=self.config.random_state,
-            )
-            return self._pca_model.fit_transform(embeddings)
-
-    def _apply_umap(
-        self,
-        embeddings: np.ndarray,
-        n_elements: int,
-        on_progress: ProgressCallback | None = None,
-    ) -> np.ndarray:
-        """Apply UMAP with tuned parameters for distance preservation.
-
-        UMAP parameters are tuned to minimize distance distortion:
-        - Higher n_neighbors (30) preserves more global structure
-        - Higher min_dist (0.1) prevents excessive clumping
-        - Cosine metric matches embedding space geometry
-
-        Args:
-            embeddings: PCA-reduced embeddings.
-            n_elements: Total elements (for progress).
-            on_progress: Progress callback.
-
-        Returns:
-            UMAP-reduced embeddings.
-        """
-        n_samples = embeddings.shape[0]
-
-        # Adjust n_neighbors if dataset is small
-        n_neighbors = min(self.config.umap_n_neighbors, n_samples - 1)
-
-        # Adjust target dimensions if needed
-        n_components = min(self.config.umap_components, embeddings.shape[1])
-
-        # Create UMAP with progress callback if available
-        # Note: UMAP doesn't have a native progress callback, but we can use
-        # verbose mode and parse output, or just report at start/end
-        self._umap_model = umap.UMAP(
-            n_components=n_components,
-            n_neighbors=n_neighbors,
-            min_dist=self.config.umap_min_dist,
-            metric=self.config.umap_metric,
-            random_state=self.config.random_state,
-            verbose=False,  # We manage our own progress
-        )
-
-        return self._umap_model.fit_transform(embeddings)
-
     def _apply_hdbscan_soft(
         self,
         embeddings: np.ndarray,
@@ -1028,7 +856,7 @@ class ScalableSoftClusteringPipeline:
         all_points_membership_vectors().
 
         Args:
-            embeddings: UMAP-reduced embeddings.
+            embeddings: Embedding vectors (n_samples, embedding_dim).
 
         Returns:
             Tuple of (soft_membership_matrix, n_clusters).
@@ -1042,7 +870,7 @@ class ScalableSoftClusteringPipeline:
         self._clusterer = hdbscan.HDBSCAN(
             min_cluster_size=min_cluster_size,
             min_samples=min_samples,
-            metric="euclidean",  # Euclidean works well on UMAP output
+            metric=self.config.metric,
             prediction_data=True,  # Required for soft clustering
         )
 

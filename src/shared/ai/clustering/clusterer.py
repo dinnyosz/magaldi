@@ -65,16 +65,11 @@ class ClusterConfig:
     affinity_threshold: float = 0.001  # Min affinity for connected features
 
     # Soft clustering pipeline selection
-    # "scalable": UMAP + HDBSCAN (recommended, works well for all sizes)
-    # "standard": NMF (slower, has convergence issues on small datasets)
+    # "scalable": HDBSCAN directly on embeddings (recommended)
+    # "standard": NMF (legacy, slower, has convergence issues on small datasets)
     # "auto": scalable for >= scalable_threshold elements (legacy)
     soft_clustering_mode: str = "scalable"
     scalable_threshold: int = 1000  # Only used if mode="auto"
-    # Scalable pipeline config
-    pca_components: int = 0  # 0 = auto (min 100 or 90% variance)
-    umap_components: int = 50
-    umap_n_neighbors: int = 30
-    umap_min_dist: float = 0.1
 
     @classmethod
     def from_magaldi_config(
@@ -112,10 +107,6 @@ class ClusterConfig:
             n_features=cc.n_features,
             membership_threshold=cc.membership_threshold,
             affinity_threshold=cc.affinity_threshold,
-            pca_components=cc.pca_components,
-            umap_components=cc.umap_components,
-            umap_n_neighbors=cc.umap_n_neighbors,
-            umap_min_dist=cc.umap_min_dist,
             # LLM settings (passed in, typically from summarize model)
             api_base=api_base or "http://localhost:11434",
             labeling_model=labeling_model or "qwen3:4b-instruct",
@@ -472,12 +463,8 @@ class FeatureClusterer:
         element_ids = [e["element_id"] for e in valid_elements]
 
         if use_scalable:
-            # Use scalable pipeline (PCA + UMAP + HDBSCAN)
+            # Use scalable pipeline (HDBSCAN directly on embeddings)
             scalable_config = ScalableSoftClusteringConfig(
-                pca_components=self.config.pca_components,
-                umap_components=self.config.umap_components,
-                umap_n_neighbors=self.config.umap_n_neighbors,
-                umap_min_dist=self.config.umap_min_dist,
                 min_cluster_size=self.config.min_cluster_size,
                 min_samples=self.config.min_samples,
                 membership_threshold=self.config.membership_threshold,

@@ -270,23 +270,17 @@ class ClusteringConfig:
     min_samples: int = 2  # Density threshold for core points
 
     # Pipeline selection
-    # "scalable": use UMAP + HDBSCAN (recommended, works well for all sizes)
-    # "standard": use NMF (slower, has convergence issues on small datasets)
-    # "auto": use scalable for >= scalable_threshold elements (legacy)
+    # "scalable": HDBSCAN directly on embeddings (recommended)
+    # "standard": NMF (legacy, slower, has convergence issues on small datasets)
+    # "auto": scalable for >= scalable_threshold elements (legacy)
     soft_clustering_mode: str = "scalable"
-    scalable_threshold: int = 1000  # Element count for auto mode (only used if mode="auto")
+    scalable_threshold: int = 1000  # Only used if mode="auto"
 
-    # Standard pipeline (NMF) settings
+    # Standard pipeline (NMF) settings - only used if mode="standard"
     n_projection_runs: int = 50  # Random projection runs for cooccurrence
     projection_dims: int = 50  # Dimensions after projection
     n_features: int = 500  # Target features for NMF (0 = auto)
     nmf_max_iter: int = 1000  # Max NMF iterations
-
-    # Scalable pipeline (UMAP + HDBSCAN) settings
-    pca_components: int = 0  # 0 = auto (min 100 or 90% variance)
-    umap_components: int = 50
-    umap_n_neighbors: int = 30
-    umap_min_dist: float = 0.1
 
     # Thresholds
     membership_threshold: float = 0.01  # Min membership score to keep

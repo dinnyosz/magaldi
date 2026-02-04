@@ -748,30 +748,23 @@ class TestScalableSoftClusteringConfig:
         """Test default configuration values."""
         config = ScalableSoftClusteringConfig()
 
-        assert config.pca_components == 0  # Auto
-        assert config.umap_components == 50
-        assert config.umap_n_neighbors == 30
-        assert config.umap_min_dist == 0.1
-        assert config.umap_metric == "cosine"
         assert config.min_cluster_size == 5
         assert config.min_samples == 2
+        assert config.metric == "euclidean"
         assert config.membership_threshold == 0.01
         assert config.affinity_threshold == 0.001
-        assert config.random_state == 42
 
     def test_custom_values(self):
         """Test custom configuration values."""
         config = ScalableSoftClusteringConfig(
-            pca_components=100,
-            umap_components=30,
-            umap_n_neighbors=15,
             min_cluster_size=10,
+            min_samples=3,
+            metric="cosine",
         )
 
-        assert config.pca_components == 100
-        assert config.umap_components == 30
-        assert config.umap_n_neighbors == 15
         assert config.min_cluster_size == 10
+        assert config.min_samples == 3
+        assert config.metric == "cosine"
 
 
 # =============================================================================
@@ -786,13 +779,9 @@ class TestScalableSoftClusteringPipeline:
     def small_config(self):
         """Configuration for small test datasets."""
         return ScalableSoftClusteringConfig(
-            pca_components=10,
-            umap_components=5,
-            umap_n_neighbors=5,
             min_cluster_size=3,
             min_samples=2,
             membership_threshold=0.01,
-            random_state=42,
         )
 
     @pytest.fixture
@@ -815,12 +804,12 @@ class TestScalableSoftClusteringPipeline:
         """Test initialization with default config."""
         pipeline = ScalableSoftClusteringPipeline()
         assert pipeline.config is not None
-        assert pipeline.config.umap_components == 50
+        assert pipeline.config.min_cluster_size == 5
 
     def test_init_custom_config(self, small_config):
         """Test initialization with custom config."""
         pipeline = ScalableSoftClusteringPipeline(small_config)
-        assert pipeline.config.umap_components == 5
+        assert pipeline.config.min_cluster_size == 3
 
     def test_fit_empty_embeddings(self, small_config):
         """Test fit with empty embeddings raises error."""
@@ -919,14 +908,6 @@ class TestScalableSoftClusteringPipeline:
         # Should have received progress callbacks
         assert len(progress_states) > 0
 
-        # Should have PCA phase callbacks
-        pca_phases = [p for p in progress_states if p.phase == "pca"]
-        assert len(pca_phases) >= 1
-
-        # Should have UMAP phase callbacks
-        umap_phases = [p for p in progress_states if p.phase == "umap"]
-        assert len(umap_phases) >= 1
-
         # Should have HDBSCAN phase callbacks
         hdbscan_phases = [p for p in progress_states if p.phase == "hdbscan"]
         assert len(hdbscan_phases) >= 1
@@ -945,13 +926,9 @@ class TestScalableSoftClusteringPipelineQueries:
         np.random.seed(42)
 
         config = ScalableSoftClusteringConfig(
-            pca_components=10,
-            umap_components=5,
-            umap_n_neighbors=5,
             min_cluster_size=3,
             min_samples=2,
             membership_threshold=0.01,
-            random_state=42,
         )
 
         # Create embeddings with clear structure
@@ -1010,14 +987,10 @@ class TestScalableSoftClusteringEdgeCases:
     """Tests for edge cases in scalable pipeline."""
 
     def test_small_dataset(self):
-        """Test with small dataset (fewer than n_neighbors)."""
+        """Test with small dataset."""
         config = ScalableSoftClusteringConfig(
-            pca_components=5,
-            umap_components=3,
-            umap_n_neighbors=30,  # More than n_samples
             min_cluster_size=3,
             min_samples=2,
-            random_state=42,
         )
 
         embeddings = np.random.randn(15, 20).astype(np.float32)
@@ -1027,14 +1000,11 @@ class TestScalableSoftClusteringEdgeCases:
         result = pipeline.fit(embeddings)
         assert result.n_elements == 15
 
-    def test_pca_auto_components(self):
-        """Test PCA auto-selects components for 90% variance."""
+    def test_different_metrics(self):
+        """Test with different distance metrics."""
         config = ScalableSoftClusteringConfig(
-            pca_components=0,  # Auto
-            umap_components=5,
-            umap_n_neighbors=5,
             min_cluster_size=3,
-            random_state=42,
+            metric="manhattan",  # L1 distance
         )
 
         # Create embeddings with some structure
@@ -1044,18 +1014,12 @@ class TestScalableSoftClusteringEdgeCases:
 
         result = pipeline.fit(embeddings)
         assert result.n_elements == 30
-        # PCA model should have been created
-        assert pipeline._pca_model is not None
 
     def test_high_dimensional_embeddings(self):
         """Test with high-dimensional embeddings (like real sentence transformers)."""
         config = ScalableSoftClusteringConfig(
-            pca_components=50,
-            umap_components=15,
-            umap_n_neighbors=10,
             min_cluster_size=3,
             min_samples=2,
-            random_state=42,
         )
 
         # Simulate 1024-dim embeddings
@@ -1070,12 +1034,8 @@ class TestScalableSoftClusteringEdgeCases:
     def test_no_clusters_found(self):
         """Test handling when HDBSCAN finds no clusters."""
         config = ScalableSoftClusteringConfig(
-            pca_components=5,
-            umap_components=3,
-            umap_n_neighbors=3,
             min_cluster_size=50,  # Very high - won't form clusters
             min_samples=10,
-            random_state=42,
         )
 
         embeddings = np.random.randn(20, 20).astype(np.float32)
