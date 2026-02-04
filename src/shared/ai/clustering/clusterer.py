@@ -51,6 +51,32 @@ class ClusterConfig:
     label_max_tokens: int = 32
     label_timeout: int = 30
 
+    # Soft clustering options (random projection ensemble + NMF)
+    soft_clustering: bool = False  # Enable soft/overlapping memberships
+    n_projection_runs: int = 50  # Number of random projection runs
+    projection_dims: int = 50  # Dimensions after projection
+    n_features: int = 500  # Number of features to extract
+    membership_threshold: float = 0.01  # Min membership score to keep
+    affinity_threshold: float = 0.001  # Min affinity for connected features
+
+
+@dataclass
+class ElementMembership:
+    """Soft membership of an element in a cluster/feature."""
+
+    cluster_id: int
+    score: float
+    is_primary: bool = False
+
+
+@dataclass
+class ClusterAffinity:
+    """Connection strength between two clusters."""
+
+    cluster_id: int
+    label: str | None
+    affinity: float
+
 
 @dataclass
 class ClusterResult:
@@ -61,6 +87,8 @@ class ClusterResult:
     element_ids: list[str]
     element_names: list[str]
     centroid: list[float] | None = None
+    # Soft clustering: connected clusters (from affinity matrix)
+    connected_clusters: list[ClusterAffinity] = field(default_factory=list)
 
     @property
     def size(self) -> int:
@@ -76,6 +104,10 @@ class ClusteringResult:
     outlier_count: int
     outlier_element_ids: list[str]
     total_elements: int
+    # Soft clustering: per-element memberships (element_id -> list of memberships)
+    element_memberships: dict[str, list[ElementMembership]] = field(default_factory=dict)
+    # Whether soft clustering was used
+    is_soft_clustering: bool = False
 
     @property
     def cluster_count(self) -> int:
@@ -194,7 +226,10 @@ class FeatureClusterer:
         self,
         elements: list[dict[str, Any]],
     ) -> ClusteringResult:
-        """Run HDBSCAN clustering on element embeddings.
+        """Run clustering on element embeddings.
+
+        Uses soft clustering (random projection ensemble + NMF) when
+        config.soft_clustering is True, otherwise uses standard HDBSCAN.
 
         Args:
             elements: List of dicts with element_id, embedding, name, element_type.
@@ -222,6 +257,18 @@ class FeatureClusterer:
 
         embedding_array = np.array(embeddings, dtype=np.float32)
 
+        # Use soft clustering if enabled
+        if self.config.soft_clustering:
+            return self._cluster_soft(embedding_array, valid_elements)
+
+        return self._cluster_hard(embedding_array, valid_elements)
+
+    def _cluster_hard(
+        self,
+        embedding_array: np.ndarray,
+        valid_elements: list[dict[str, Any]],
+    ) -> ClusteringResult:
+        """Standard HDBSCAN clustering with hard assignments."""
         # Run HDBSCAN
         clusterer = hdbscan.HDBSCAN(
             min_cluster_size=self.config.min_cluster_size,
@@ -269,6 +316,110 @@ class FeatureClusterer:
             outlier_count=len(outliers),
             outlier_element_ids=outliers,
             total_elements=len(valid_elements),
+            is_soft_clustering=False,
+        )
+
+    def _cluster_soft(
+        self,
+        embedding_array: np.ndarray,
+        valid_elements: list[dict[str, Any]],
+    ) -> ClusteringResult:
+        """Soft clustering with overlapping memberships.
+
+        Uses random projection ensemble + NMF to compute soft memberships.
+        Elements can belong to multiple clusters with different scores.
+        """
+        from shared.ai.clustering.soft_clustering import (
+            SoftClusteringConfig,
+            SoftClusteringPipeline,
+        )
+
+        # Create soft clustering config from our config
+        soft_config = SoftClusteringConfig(
+            n_projection_runs=self.config.n_projection_runs,
+            projection_dims=self.config.projection_dims,
+            min_cluster_size=self.config.min_cluster_size,
+            min_samples=self.config.min_samples,
+            n_features=self.config.n_features,
+            membership_threshold=self.config.membership_threshold,
+            affinity_threshold=self.config.affinity_threshold,
+        )
+
+        # Run soft clustering
+        pipeline = SoftClusteringPipeline(soft_config)
+        element_ids = [e["element_id"] for e in valid_elements]
+        soft_result = pipeline.fit(embedding_array, element_ids)
+
+        # Convert soft memberships to ClusteringResult format
+        # Group elements by their PRIMARY cluster (highest score)
+        cluster_map: dict[int, list[dict[str, Any]]] = {}
+        outliers: list[str] = []
+        element_memberships: dict[str, list[ElementMembership]] = {}
+
+        for idx, elem in enumerate(valid_elements):
+            elem_id = elem["element_id"]
+            memberships = soft_result.element_memberships.get(elem_id, [])
+
+            if not memberships:
+                # No memberships - treat as outlier
+                outliers.append(elem_id)
+                continue
+
+            # Store all soft memberships
+            element_memberships[elem_id] = [
+                ElementMembership(
+                    cluster_id=m.feature_idx,
+                    score=m.score,
+                    is_primary=m.is_primary,
+                )
+                for m in memberships
+            ]
+
+            # Primary cluster is the first (highest score)
+            primary_cluster = memberships[0].feature_idx
+            if primary_cluster not in cluster_map:
+                cluster_map[primary_cluster] = []
+            cluster_map[primary_cluster].append(elem)
+
+        # Build ClusterResult objects with connected clusters
+        clusters: list[ClusterResult] = []
+        for cluster_id, cluster_elements in sorted(cluster_map.items()):
+            # Compute centroid
+            cluster_embeddings = np.array(
+                [e["embedding"] for e in cluster_elements], dtype=np.float32
+            )
+            centroid = cluster_embeddings.mean(axis=0).tolist()
+
+            # Get connected clusters from affinity matrix
+            connected = pipeline.get_connected_features(
+                soft_result, cluster_id, min_affinity=self.config.affinity_threshold
+            )
+            connected_clusters = [
+                ClusterAffinity(
+                    cluster_id=c.feature_idx,
+                    label=None,  # Will be filled after labeling
+                    affinity=c.affinity,
+                )
+                for c in connected[:10]  # Limit to top 10 connections
+            ]
+
+            cluster = ClusterResult(
+                cluster_id=cluster_id,
+                label=None,  # Will be set by label_clusters
+                element_ids=[e["element_id"] for e in cluster_elements],
+                element_names=[e.get("name", "") for e in cluster_elements],
+                centroid=centroid,
+                connected_clusters=connected_clusters,
+            )
+            clusters.append(cluster)
+
+        return ClusteringResult(
+            clusters=clusters,
+            outlier_count=len(outliers),
+            outlier_element_ids=outliers,
+            total_elements=len(valid_elements),
+            element_memberships=element_memberships,
+            is_soft_clustering=True,
         )
 
     def label_clusters(
