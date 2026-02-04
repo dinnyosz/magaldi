@@ -275,11 +275,26 @@ def run_feature_extraction(
         assignments = []
         for cluster in clustering_result.clusters:
             for element_id in cluster.element_ids:
-                assignments.append({
+                assignment: dict[str, Any] = {
                     "element_id": element_id,
                     "cluster_id": str(cluster.cluster_id),
                     "cluster_label": cluster.label,
-                })
+                }
+
+                # Add soft memberships if available (from soft clustering)
+                if clustering_result.is_soft_clustering and element_id in clustering_result.element_memberships:
+                    memberships = clustering_result.element_memberships[element_id]
+                    assignment["feature_memberships"] = [
+                        {
+                            "feature_id": f"feature_{m.cluster_id}",
+                            "label": None,  # Will be filled after labeling
+                            "score": m.score,
+                            "is_primary": m.is_primary,
+                        }
+                        for m in memberships
+                    ]
+
+                assignments.append(assignment)
 
         # Update ES with feature assignments
         if assignments:

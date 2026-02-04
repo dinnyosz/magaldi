@@ -36,6 +36,7 @@ class FeatureRepository:
         summary: str,
         embedding: list[float] | None,
         member_ids: list[str],
+        connected_features: list[dict[str, Any]] | None = None,
     ) -> bool:
         """Index a feature document.
 
@@ -49,6 +50,8 @@ class FeatureRepository:
             summary: Generated summary of the feature.
             embedding: Embedding vector for the feature.
             member_ids: List of element IDs belonging to this feature.
+            connected_features: Optional list of connected features from soft clustering.
+                Each dict should have: feature_id, label, affinity.
 
         Returns:
             True on success.
@@ -72,6 +75,10 @@ class FeatureRepository:
 
         if embedding is not None:
             doc["summary_embedding"] = embedding
+
+        # Add soft clustering connected features
+        if connected_features:
+            doc["connected_features"] = connected_features
 
         client = self._get_client()
         client.index(index=INDEX_NAME, id=feature_id, document=doc)
@@ -176,6 +183,7 @@ class FeatureRepository:
                     "summary",
                     "member_count",
                     "member_ids",
+                    "connected_features",
                 ],
             },
         )
@@ -183,14 +191,18 @@ class FeatureRepository:
         features = []
         for hit in result.get("hits", {}).get("hits", []):
             source = hit["_source"]
-            features.append({
+            feature: dict[str, Any] = {
                 "feature_id": source.get("element_id"),
                 "hash_id": source.get("hash_id"),
                 "label": source.get("cluster_label"),
                 "summary": source.get("summary", ""),
                 "member_count": source.get("member_count", 0),
                 "member_ids": source.get("member_ids", []),
-            })
+            }
+            # Include connected features if present (soft clustering)
+            if "connected_features" in source:
+                feature["connected_features"] = source["connected_features"]
+            features.append(feature)
 
         return features
 
@@ -351,7 +363,12 @@ class FeatureRepository:
         """Bulk update cluster assignments for elements.
 
         Args:
-            assignments: List of {element_id, cluster_id, cluster_label}.
+            assignments: List of dicts with:
+                - element_id: Element ID
+                - cluster_id: Primary cluster ID (for backward compat)
+                - cluster_label: Primary cluster label (optional)
+                - feature_memberships: Optional list of soft memberships
+                    Each membership: {feature_id, label, score, is_primary}
 
         Returns:
             Number of elements updated.
@@ -370,12 +387,17 @@ class FeatureRepository:
                     "_id": assignment["element_id"],
                 }
             })
-            bulk_body.append({
-                "doc": {
-                    "cluster_id": assignment["cluster_id"],
-                    "cluster_label": assignment.get("cluster_label"),
-                }
-            })
+
+            doc: dict[str, Any] = {
+                "cluster_id": assignment["cluster_id"],
+                "cluster_label": assignment.get("cluster_label"),
+            }
+
+            # Add soft memberships if present
+            if "feature_memberships" in assignment:
+                doc["feature_memberships"] = assignment["feature_memberships"]
+
+            bulk_body.append({"doc": doc})
 
         response = client.bulk(body=bulk_body, refresh=True)
 
