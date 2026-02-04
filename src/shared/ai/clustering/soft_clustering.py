@@ -140,8 +140,8 @@ class ScalableSoftClusteringConfig:
     umap_n_neighbors: int = 30  # Higher for better distance preservation
     umap_min_dist: float = 0.1  # Higher to reduce clumping/distortion
     umap_metric: str = "cosine"  # Best for embedding spaces
-    min_cluster_size: int = 15
-    min_samples: int = 5  # Slightly higher for soft clustering quality
+    min_cluster_size: int = 5
+    min_samples: int = 2
     membership_threshold: float = 0.01
     affinity_threshold: float = 0.001
     random_state: int = 42

@@ -35,9 +35,9 @@ class ClusteringError(Exception):
 class ClusterConfig:
     """Configuration for HDBSCAN clustering."""
 
-    # HDBSCAN parameters
+    # HDBSCAN parameters (used by both pipelines)
     min_cluster_size: int = 5
-    min_samples: int = 3
+    min_samples: int = 2
 
     # Element types to cluster
     element_types: list[str] = field(default_factory=lambda: ["function", "method"])

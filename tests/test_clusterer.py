@@ -29,7 +29,7 @@ class TestClusterConfig:
         config = ClusterConfig()
 
         assert config.min_cluster_size == 5
-        assert config.min_samples == 3
+        assert config.min_samples == 2
         assert config.element_types == ["function", "method"]
         assert config.api_base == "http://localhost:11434"
         assert config.labeling_model == "qwen3:4b-instruct"

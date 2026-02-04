@@ -753,8 +753,8 @@ class TestScalableSoftClusteringConfig:
         assert config.umap_n_neighbors == 30
         assert config.umap_min_dist == 0.1
         assert config.umap_metric == "cosine"
-        assert config.min_cluster_size == 15
-        assert config.min_samples == 5
+        assert config.min_cluster_size == 5
+        assert config.min_samples == 2
         assert config.membership_threshold == 0.01
         assert config.affinity_threshold == 0.001
         assert config.random_state == 42
