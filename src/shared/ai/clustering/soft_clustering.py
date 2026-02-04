@@ -267,34 +267,13 @@ class SoftClusteringPipeline:
         logger.info(f"Extracting memberships via NMF ({effective_n_features} features)...")
         nmf_start_time = time.time()
 
-        # Report NMF phase start
-        if on_progress:
-            on_progress(SoftClusteringProgress(
-                phase="nmf",
-                phase_description="NMF membership extraction",
-                current_step=0,
-                total_steps=1,
-                n_elements=n_elements,
-                n_features=effective_n_features,
-                cooccurrence_density=cooccurrence_density,
-                elapsed_seconds=time.time() - phase_start_time,
-            ))
-
         self._memberships, self._feature_affinity = self._extract_memberships(
-            effective_n_features
+            effective_n_features,
+            on_progress=on_progress,
+            n_elements=n_elements,
+            cooccurrence_density=cooccurrence_density,
+            start_time=nmf_start_time,
         )
-
-        # Report NMF complete
-        if on_progress:
-            on_progress(SoftClusteringProgress(
-                phase="nmf",
-                phase_description="NMF membership extraction",
-                current_step=1,
-                total_steps=1,
-                n_elements=n_elements,
-                n_features=effective_n_features,
-                cooccurrence_density=cooccurrence_density,
-            ))
 
         # Step 5: Build element membership mapping
         element_memberships = self._build_element_memberships(element_ids)
@@ -437,7 +416,12 @@ class SoftClusteringPipeline:
         return cooccurrence
 
     def _extract_memberships(
-        self, n_features: int
+        self,
+        n_features: int,
+        on_progress: ProgressCallback | None = None,
+        n_elements: int = 0,
+        cooccurrence_density: float = 0.0,
+        start_time: float | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Extract soft memberships via NMF decomposition.
 
@@ -445,12 +429,22 @@ class SoftClusteringPipeline:
         Non-negativity constraint forces additive, parts-based representation,
         making each element a positive sum of feature contributions.
 
+        Uses iterative calls to non_negative_factorization with init='custom'
+        to enable progress tracking between iteration batches.
+
         Args:
             n_features: Number of features to extract.
+            on_progress: Optional progress callback.
+            n_elements: Number of elements (for progress reporting).
+            cooccurrence_density: Cooccurrence density (for progress reporting).
+            start_time: Start time for elapsed/ETA calculation.
 
         Returns:
             Tuple of (normalized_memberships, feature_affinity) matrices.
         """
+        import time
+        from sklearn.decomposition import non_negative_factorization
+
         # Convert sparse to dense for NMF
         # TODO: Consider sparse NMF variants for very large matrices
         cooccurrence_dense = self._cooccurrence.toarray()
@@ -468,24 +462,85 @@ class SoftClusteringPipeline:
             init = "random"
             logger.debug(f"Using random init for NMF (n_features={n_features} > n_samples={n_samples})")
 
-        nmf = NMF(
-            n_components=n_features,
-            init=init,
-            max_iter=self.config.nmf_max_iter,
-            random_state=self.config.random_state,
-        )
+        # Run NMF in batches of iterations to allow progress reporting
+        # Each batch runs iter_per_batch iterations, then we continue with init='custom'
+        total_iterations = self.config.nmf_max_iter
+        iter_per_batch = max(50, total_iterations // 20)  # ~20 progress updates
+        completed_iterations = 0
 
-        W = nmf.fit_transform(cooccurrence_dense)  # (n_elements, n_features)
+        W = None
+        H = None
+        converged = False
+        reconstruction_err = float('inf')
 
-        # Log if NMF didn't fully converge (n_iter_ == max_iter means it hit the limit)
-        if hasattr(nmf, 'n_iter_') and nmf.n_iter_ >= self.config.nmf_max_iter:
+        while completed_iterations < total_iterations and not converged:
+            remaining_iters = total_iterations - completed_iterations
+            batch_iters = min(iter_per_batch, remaining_iters)
+
+            if W is None:
+                # First batch - use specified init
+                W, H, n_iter = non_negative_factorization(
+                    cooccurrence_dense,
+                    n_components=n_features,
+                    init=init,
+                    max_iter=batch_iters,
+                    random_state=self.config.random_state,
+                )
+            else:
+                # Subsequent batches - continue from previous W, H
+                W, H, n_iter = non_negative_factorization(
+                    cooccurrence_dense,
+                    W=W,
+                    H=H,
+                    n_components=n_features,
+                    init="custom",
+                    update_H=True,
+                    max_iter=batch_iters,
+                    random_state=self.config.random_state,
+                )
+
+            completed_iterations += n_iter
+
+            # Check convergence (if we used fewer iterations than requested)
+            if n_iter < batch_iters:
+                converged = True
+
+            # Calculate reconstruction error
+            reconstruction_err = np.linalg.norm(cooccurrence_dense - W @ H, 'fro')
+
+            # Report progress
+            if on_progress:
+                elapsed = time.time() - start_time if start_time else 0
+                # ETA based on iterations completed
+                if completed_iterations > 0:
+                    remaining = total_iterations - completed_iterations
+                    eta = (elapsed / completed_iterations) * remaining
+                else:
+                    eta = None
+
+                on_progress(SoftClusteringProgress(
+                    phase="nmf",
+                    phase_description="NMF membership extraction",
+                    current_step=completed_iterations,
+                    total_steps=total_iterations,
+                    n_elements=n_elements,
+                    n_features=n_features,
+                    cooccurrence_density=cooccurrence_density,
+                    elapsed_seconds=elapsed,
+                    eta_seconds=eta,
+                ))
+
+        # Log convergence status
+        if converged:
+            logger.debug(f"NMF converged at iteration {completed_iterations}")
+        elif completed_iterations >= total_iterations:
             logger.warning(
-                f"NMF reached max iterations ({self.config.nmf_max_iter}). "
+                f"NMF reached max iterations ({total_iterations}). "
                 f"Consider increasing nmf_max_iter or reducing n_features. "
-                f"Reconstruction error: {nmf.reconstruction_err_:.4f}"
+                f"Reconstruction error: {reconstruction_err:.4f}"
             )
 
-        logger.debug(f"NMF reconstruction error: {nmf.reconstruction_err_:.4f}")
+        logger.debug(f"NMF reconstruction error: {reconstruction_err:.4f}")
 
         # Normalize rows to sum to 1 (proper probabilities)
         row_sums = W.sum(axis=1, keepdims=True)
