@@ -80,9 +80,10 @@ class SoftClusteringConfig:
     """
 
     min_cluster_size: int = 3  # Minimum elements to form a cluster
-    min_samples: int = 2  # Density threshold for core points
+    min_samples: int = 1  # Lower = less strict density requirement
     metric: str = "euclidean"  # euclidean works well for normalized embeddings
-    cluster_selection_method: str = "leaf"  # 'leaf' finds more granular clusters than 'eom'
+    cluster_selection_method: str = "eom"  # 'eom' has less noise than 'leaf'
+    cluster_selection_epsilon: float = 0.5  # Merge clusters within this distance
     membership_threshold: float = 0.1  # 10% minimum membership to retain
     affinity_threshold: float = 0.15  # 15% minimum affinity between features
 
@@ -302,6 +303,7 @@ class SoftClusteringPipeline:
             min_samples=min_samples,
             metric=self.config.metric,
             cluster_selection_method=self.config.cluster_selection_method,
+            cluster_selection_epsilon=self.config.cluster_selection_epsilon,
             prediction_data=True,  # Required for soft clustering
         )
 

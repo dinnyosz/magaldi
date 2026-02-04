@@ -77,9 +77,10 @@ class TestSoftClusteringConfig:
         config = SoftClusteringConfig()
 
         assert config.min_cluster_size == 3
-        assert config.min_samples == 2
+        assert config.min_samples == 1
         assert config.metric == "euclidean"
-        assert config.cluster_selection_method == "leaf"
+        assert config.cluster_selection_method == "eom"
+        assert config.cluster_selection_epsilon == 0.5
         assert config.membership_threshold == 0.1
         assert config.affinity_threshold == 0.15
 
@@ -197,7 +198,7 @@ class TestSoftClusteringPipeline:
         """Test initialization with default config."""
         pipeline = SoftClusteringPipeline()
         assert pipeline.config is not None
-        assert pipeline.config.min_cluster_size == 5
+        assert pipeline.config.min_cluster_size == 3
 
     def test_init_custom_config(self, small_config):
         """Test initialization with custom config."""
