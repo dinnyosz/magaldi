@@ -5442,12 +5442,13 @@ def mcp_self_review(
     if include_analytics and analytics_repo:
         try:
             tool_counts = analytics_repo.get_tool_counts()
-            transitions = analytics_repo.get_tool_transitions()
+            top_transitions = analytics_repo.get_top_transitions(limit=20)
             causal_stats = analytics_repo.get_causal_statistics()
 
             # Analyze transition patterns from analytics
+            # get_top_transitions returns list[tuple[from_tool, to_tool, count]]
             transition_insights: list[str] = []
-            for (from_tool, to_tool), count in sorted(transitions.items(), key=lambda x: -x[1])[:10]:
+            for from_tool, to_tool, count in top_transitions[:10]:
                 if from_tool.startswith(("search_", "find_", "get_")) and to_tool in ("Read", "Grep", "Glob"):
                     transition_insights.append(
                         f"{from_tool} → {to_tool}: {count}x (potential gap in {from_tool} results)"
