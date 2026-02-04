@@ -473,16 +473,23 @@ class SoftClusteringPipeline:
         H = None
         converged = False
         reconstruction_err = float('inf')
+        prev_reconstruction_err = float('inf')
+        convergence_tol = 1e-4  # Our own convergence check between batches
 
-        # Suppress convergence warning since we're intentionally batching
+        # Suppress sklearn's ConvergenceWarning during batch NMF
+        # Rationale: sklearn warns when n_iter==max_iter, but we INTENTIONALLY
+        # run in small batches to report progress. We check convergence ourselves
+        # by comparing reconstruction error between batches. This is a legitimate
+        # use case that sklearn doesn't support natively.
         import warnings
+        from sklearn.exceptions import ConvergenceWarning
 
         while completed_iterations < total_iterations and not converged:
             remaining_iters = total_iterations - completed_iterations
             batch_iters = min(iter_per_batch, remaining_iters)
 
             with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
+                warnings.filterwarnings("ignore", category=ConvergenceWarning)
 
                 if W is None:
                     # First batch - use specified init
@@ -508,12 +515,18 @@ class SoftClusteringPipeline:
 
             completed_iterations += n_iter
 
-            # Check convergence (if we used fewer iterations than requested)
-            if n_iter < batch_iters:
-                converged = True
-
             # Calculate reconstruction error
             reconstruction_err = np.linalg.norm(cooccurrence_dense - W @ H, 'fro')
+
+            # Check convergence: either sklearn converged early, or error improvement is minimal
+            if n_iter < batch_iters:
+                converged = True
+                logger.debug(f"NMF converged early at iteration {completed_iterations}")
+            elif prev_reconstruction_err - reconstruction_err < convergence_tol * prev_reconstruction_err:
+                converged = True
+                logger.debug(f"NMF converged at iteration {completed_iterations} (error delta below tolerance)")
+
+            prev_reconstruction_err = reconstruction_err
 
             # Report progress
             if on_progress:
