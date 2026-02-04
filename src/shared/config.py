@@ -266,8 +266,9 @@ class ClusteringConfig:
     """
 
     # HDBSCAN parameters
-    min_cluster_size: int = 5  # Minimum elements to form a cluster
+    min_cluster_size: int = 3  # Minimum elements to form a cluster
     min_samples: int = 2  # Density threshold for core points
+    cluster_selection_method: str = "leaf"  # 'leaf' finds more clusters than 'eom'
 
     # Thresholds
     membership_threshold: float = 0.1  # Min membership score to keep (10%)

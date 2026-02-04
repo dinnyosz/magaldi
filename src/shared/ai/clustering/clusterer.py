@@ -60,6 +60,7 @@ class ClusterConfig:
     soft_clustering: bool = True  # Enable soft/overlapping memberships
     membership_threshold: float = 0.1  # Min membership score to keep (10%)
     affinity_threshold: float = 0.15  # Min affinity for connected features (15%)
+    cluster_selection_method: str = "leaf"  # 'leaf' finds more clusters than 'eom'
 
     @classmethod
     def from_magaldi_config(
@@ -432,6 +433,7 @@ class FeatureClusterer:
         soft_config = SoftClusteringConfig(
             min_cluster_size=self.config.min_cluster_size,
             min_samples=self.config.min_samples,
+            cluster_selection_method=self.config.cluster_selection_method,
             membership_threshold=self.config.membership_threshold,
             affinity_threshold=self.config.affinity_threshold,
         )

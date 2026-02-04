@@ -79,9 +79,10 @@ class SoftClusteringConfig:
         affinity_threshold: Minimum affinity between features to report.
     """
 
-    min_cluster_size: int = 5
-    min_samples: int = 2
+    min_cluster_size: int = 3  # Minimum elements to form a cluster
+    min_samples: int = 2  # Density threshold for core points
     metric: str = "euclidean"  # euclidean works well for normalized embeddings
+    cluster_selection_method: str = "leaf"  # 'leaf' finds more granular clusters than 'eom'
     membership_threshold: float = 0.1  # 10% minimum membership to retain
     affinity_threshold: float = 0.15  # 15% minimum affinity between features
 
@@ -300,6 +301,7 @@ class SoftClusteringPipeline:
             min_cluster_size=min_cluster_size,
             min_samples=min_samples,
             metric=self.config.metric,
+            cluster_selection_method=self.config.cluster_selection_method,
             prediction_data=True,  # Required for soft clustering
         )
 
