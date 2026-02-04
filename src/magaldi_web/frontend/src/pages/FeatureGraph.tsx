@@ -40,7 +40,7 @@ const FEATURE_COLORS = [
 ]
 
 // Zoom thresholds for text visibility
-const LABEL_ZOOM_THRESHOLD = 1.5
+const LABEL_ZOOM_THRESHOLD = 0.5
 
 interface GraphNode extends d3.SimulationNodeDatum {
   id: string
@@ -226,15 +226,18 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
       .attr('stroke-width', 1.5)
       .attr('stroke-opacity', 0.6)
 
-    // Feature connection links (thicker, based on affinity)
+    // Feature connection links (thicker, based on affinity) - more prominent styling
+    const featureConnectionData = graphLinks.filter(l => l.linkType === 'feature-connection')
+    console.log('Feature connections:', featureConnectionData.length, featureConnectionData)
+
     const featureLinks = linkGroup.selectAll('line.feature-connection')
-      .data(graphLinks.filter(l => l.linkType === 'feature-connection'))
+      .data(featureConnectionData)
       .join('line')
       .attr('class', 'feature-connection')
-      .attr('stroke', '#64748b')
-      .attr('stroke-width', d => 1 + d.affinity * 4)
-      .attr('stroke-opacity', d => 0.3 + d.affinity * 0.4)
-      .attr('stroke-dasharray', '5,5')
+      .attr('stroke', '#f97316')  // Orange color for visibility
+      .attr('stroke-width', d => 2 + d.affinity * 6)
+      .attr('stroke-opacity', 0.7)
+      .attr('stroke-dasharray', '8,4')
 
     // Create node group
     const nodeGroup = g.append('g').attr('class', 'nodes')
@@ -279,7 +282,7 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
       .attr('font-weight', d => d.node_type === 'feature' ? 'bold' : 'normal')
       .attr('fill', '#1e293b')
       .attr('opacity', 0)
-      .text(d => d.label.length > 20 ? d.label.slice(0, 20) + '...' : d.label)
+      .text(d => d.label)
 
     // Add member count badge
     nodeElements.filter(d => d.node_type === 'feature')
@@ -441,7 +444,6 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
       <div style={{ position: 'absolute', bottom: 10, right: 10, zIndex: 10 }}>
         <Badge bg="secondary" style={{ fontSize: '0.75rem' }}>
           {zoomLevel.toFixed(1)}x
-          {zoomLevel >= LABEL_ZOOM_THRESHOLD && ' (labels visible)'}
         </Badge>
       </div>
 
@@ -617,7 +619,7 @@ function FeatureGraph() {
                 </p>
                 <p className="mb-0">
                   <i className="bi bi-zoom-in me-1"></i>
-                  Labels appear at <strong>1.5x</strong> zoom
+                  Labels appear at <strong>0.5x</strong> zoom
                 </p>
               </div>
             </Card.Body>
