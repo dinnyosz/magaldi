@@ -61,7 +61,7 @@ class ClusterConfig:
     membership_threshold: float = 0.05  # Min membership score to keep (5%)
     affinity_threshold: float = 0.5  # Min affinity for connected features (50%)
     cluster_selection_method: str = "eom"  # 'eom' has less noise than 'leaf'
-    cluster_selection_epsilon: float = 1.0  # Merge clusters within this distance
+    cluster_selection_epsilon: float = 0.3  # Merge clusters within this distance
 
     @classmethod
     def from_magaldi_config(

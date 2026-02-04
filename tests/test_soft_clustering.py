@@ -80,7 +80,7 @@ class TestSoftClusteringConfig:
         assert config.min_samples == 1
         assert config.metric == "euclidean"
         assert config.cluster_selection_method == "eom"
-        assert config.cluster_selection_epsilon == 1.0
+        assert config.cluster_selection_epsilon == 0.3
         assert config.membership_threshold == 0.05
         assert config.affinity_threshold == 0.5
 

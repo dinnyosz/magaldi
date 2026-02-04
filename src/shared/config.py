@@ -269,7 +269,7 @@ class ClusteringConfig:
     min_cluster_size: int = 3  # Minimum elements to form a cluster
     min_samples: int = 1  # Lower = less strict density requirement
     cluster_selection_method: str = "eom"  # 'eom' has less noise than 'leaf'
-    cluster_selection_epsilon: float = 1.0  # Merge clusters within this distance
+    cluster_selection_epsilon: float = 0.3  # Merge clusters within this distance
 
     # Thresholds
     membership_threshold: float = 0.05  # Min membership score to keep (5%)
