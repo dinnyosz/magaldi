@@ -343,7 +343,7 @@ async def get_feature_graph(
     """
     client = es_repo._get_client()
 
-    # Get all features with their connected_features
+    # Get all features with their connected_features and member_ids
     features_result = client.search(
         index=INDEX_NAME,
         body={
@@ -364,6 +364,7 @@ async def get_feature_graph(
                 "name",
                 "summary",
                 "member_count",
+                "member_ids",
                 "connected_features",
             ],
         },
@@ -398,14 +399,16 @@ async def get_feature_graph(
     nodes: list[FeatureGraphNode] = []
     connections: list[FeatureConnection] = []
     feature_label_to_id: dict[str, str] = {}
+    feature_label_to_members: dict[str, set[str]] = {}
 
-    # Process features
+    # Process features - first pass to collect all member_ids
     feature_hits = features_result.get("hits", {}).get("hits", [])
     for hit in feature_hits:
         source = hit["_source"]
         feature_id = source["element_id"]
         label = source["name"]
         feature_label_to_id[label] = feature_id
+        feature_label_to_members[label] = set(source.get("member_ids", []))
 
         nodes.append(
             FeatureGraphNode(
@@ -418,6 +421,12 @@ async def get_feature_graph(
             )
         )
 
+    # Second pass to build connections with shared member counts
+    for hit in feature_hits:
+        source = hit["_source"]
+        label = source["name"]
+        source_members = feature_label_to_members.get(label, set())
+
         # Process connected features
         connected = source.get("connected_features", [])
         for conn in connected:
@@ -425,11 +434,16 @@ async def get_feature_graph(
             target_label = conn.get("label", "")
             affinity = conn.get("affinity", 0)
             if target_label and affinity > 0:
+                # Calculate shared members
+                target_members = feature_label_to_members.get(target_label, set())
+                shared_count = len(source_members & target_members)
+
                 connections.append(
                     FeatureConnection(
                         source=label,
                         target=target_label,
                         affinity=affinity,
+                        shared_member_count=shared_count,
                     )
                 )
 

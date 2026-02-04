@@ -706,6 +706,7 @@ export interface FeatureConnection {
   source: string  // Feature label
   target: string  // Connected feature label
   affinity: number  // Connection strength (0-1)
+  shared_member_count: number  // Number of overlapping elements
 }
 
 export interface FeatureGraphNode {

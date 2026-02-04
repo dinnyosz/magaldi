@@ -965,6 +965,7 @@ class FeatureConnection(BaseModel):
     source: str  # Feature label
     target: str  # Connected feature label
     affinity: float  # Connection strength (0-1)
+    shared_member_count: int = 0  # Number of overlapping elements
 
 
 class FeatureGraphNode(BaseModel):

@@ -58,6 +58,7 @@ interface GraphLink extends d3.SimulationLinkDatum<GraphNode> {
   source: string | GraphNode
   target: string | GraphNode
   affinity: number
+  shared_member_count: number
   linkType: 'parent-child' | 'feature-connection'
 }
 
@@ -134,6 +135,7 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
           source: parentId,
           target: node.id,
           affinity: 1,
+          shared_member_count: 0,
           linkType: 'parent-child',
         })
       }
@@ -154,6 +156,7 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
             source: sourceId,
             target: targetId,
             affinity: conn.affinity,
+            shared_member_count: conn.shared_member_count,
             linkType: 'feature-connection',
           })
         }
@@ -226,18 +229,21 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
       .attr('stroke-width', 1.5)
       .attr('stroke-opacity', 0.6)
 
-    // Feature connection links (thicker, based on affinity) - more prominent styling
+    // Feature connection links (thicker, based on shared member count) - more prominent styling
     const featureConnectionData = graphLinks.filter(l => l.linkType === 'feature-connection')
     console.log('Feature connections:', featureConnectionData.length, featureConnectionData)
+
+    // Calculate max shared count for normalization
+    const maxShared = Math.max(1, ...featureConnectionData.map(d => d.shared_member_count))
 
     const featureLinks = linkGroup.selectAll('line.feature-connection')
       .data(featureConnectionData)
       .join('line')
       .attr('class', 'feature-connection')
       .attr('stroke', '#f97316')  // Orange color for visibility
-      .attr('stroke-width', d => 2 + d.affinity * 6)
-      .attr('stroke-opacity', 0.7)
-      .attr('stroke-dasharray', '8,4')
+      .attr('stroke-width', d => d.shared_member_count > 0 ? 2 + (d.shared_member_count / maxShared) * 8 : 1)
+      .attr('stroke-opacity', d => d.shared_member_count > 0 ? 0.8 : 0.3)
+      .attr('stroke-dasharray', d => d.shared_member_count > 0 ? 'none' : '4,4')
 
     // Create node group
     const nodeGroup = g.append('g').attr('class', 'nodes')
@@ -364,7 +370,10 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
 
         // Adjust link widths
         parentChildLinks.attr('stroke-width', 1.5 / transform.k)
-        featureLinks.attr('stroke-width', (d: GraphLink) => (1 + d.affinity * 4) / transform.k)
+        const zoomMaxShared = Math.max(1, ...featureConnectionData.map(d => d.shared_member_count))
+        featureLinks.attr('stroke-width', (d: GraphLink) =>
+          (d.shared_member_count > 0 ? 2 + (d.shared_member_count / zoomMaxShared) * 8 : 1) / transform.k
+        )
       })
 
     svg.call(zoom)
