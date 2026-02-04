@@ -778,14 +778,88 @@ plt.show()
 
 ---
 
+## Implementation Notes
+
+### Auto-Calculating n_features
+
+Instead of fixed `n_features=500`, auto-calculate based on dataset size to prevent NMF convergence issues:
+
+```python
+if self.config.n_features == 0:  # 0 = auto
+    auto_n_features = max(10, min(200, int(np.sqrt(n_elements))))
+    # 100 elements → 10 features
+    # 1000 elements → 32 features
+    # 10000 elements → 100 features
+    # 40000 elements → 200 features (capped)
+```
+
+**Why:** Large `n_features` relative to `n_elements` causes NMF convergence issues. The sqrt heuristic provides reasonable granularity while ensuring convergence.
+
+### Iterative NMF for Progress Tracking
+
+sklearn's `NMF.fit_transform()` is blocking with no progress callback. Solution: use `non_negative_factorization()` with `init='custom'` to run in iteration batches:
+
+```python
+from sklearn.decomposition import non_negative_factorization
+
+total_iterations = 1000
+iter_per_batch = 50  # ~20 progress updates
+
+W, H = None, None
+completed_iterations = 0
+
+while completed_iterations < total_iterations and not converged:
+    if W is None:
+        # First batch - use nndsvd initialization
+        W, H, n_iter = non_negative_factorization(
+            X, n_components=n_features, init="nndsvd", max_iter=iter_per_batch
+        )
+    else:
+        # Subsequent batches - continue from previous W, H
+        W, H, n_iter = non_negative_factorization(
+            X, W=W, H=H, n_components=n_features, init="custom",
+            update_H=True, max_iter=iter_per_batch
+        )
+
+    completed_iterations += n_iter
+
+    # Convergence check: if used fewer iterations than requested
+    if n_iter < iter_per_batch:
+        converged = True
+
+    # Report progress with ETA
+    elapsed = time.time() - start_time
+    eta = (elapsed / completed_iterations) * (total_iterations - completed_iterations)
+    on_progress(current=completed_iterations, total=total_iterations, eta=eta)
+```
+
+**Key insight:** `init='custom'` allows passing W and H matrices to continue optimization from where we left off, enabling progress tracking between batches.
+
+### CLI Progress Display
+
+Rich Live display with progress bar, elapsed time, and ETA:
+
+```
+  ━━━━━━━━━━━━━━━╺──────────────── 150/1000 (15%) | 12s elapsed | ~68s ETA
+  ⚡ Random projections | 1532 elements
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 850/1000 (85%) | 8s elapsed | ~2s ETA
+  🔬 NMF extraction | cooccurrence density: 4.2%
+```
+
+---
+
 ## Implementation Plan
 
 ### Phase 1: Core Algorithm
-- [ ] Implement `SoftClusteringPipeline` class
-- [ ] Add sparse cooccurrence matrix support
-- [ ] Add NMF with membership extraction
-- [ ] Add feature affinity computation
-- [ ] Unit tests with synthetic data
+- [x] Implement `SoftClusteringPipeline` class
+- [x] Add sparse cooccurrence matrix support
+- [x] Add NMF with membership extraction
+- [x] Add feature affinity computation
+- [x] Unit tests with synthetic data
+- [x] Auto-calculate n_features as sqrt(n_elements)
+- [x] Iterative NMF with progress tracking
+- [x] CLI progress display with ETA
 
 ### Phase 2: Magaldi Integration
 - [ ] Update `INDEX_MAPPING` with new fields
