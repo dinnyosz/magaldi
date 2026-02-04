@@ -1904,6 +1904,8 @@ def get_call_graph(
     scope = doc.get("scope")
     repository = doc.get("repository")
     username = doc.get("username", "main")
+    # Get actual element_id from doc (calls.resolved_id stores element_id format)
+    target_element_id = doc.get("element_id")
 
     result: dict[str, Any] = {
         "element": {
@@ -1911,7 +1913,7 @@ def get_call_graph(
             "type": element_type,
             "file": defining_file,
             "line": line_start,
-            "element_id": element_id,
+            "element_id": target_element_id,
             "hash_id": doc.get("hash_id"),
         },
         "callers": [],
@@ -1921,7 +1923,7 @@ def get_call_graph(
     # Find callers (who calls this function) using indexed call data
     if direction in ("callers", "both"):
         callers = es.find_elements_calling(
-            target_id=element_id,
+            target_id=target_element_id,
             scope=scope,
             repository=repository,
             username=username,
@@ -2000,9 +2002,12 @@ def find_callers(
     repository = repository or doc.get("repository")
     username = username or doc.get("username", "main")
 
+    # Get the actual element_id from doc (calls.resolved_id stores element_id format)
+    target_element_id = doc.get("element_id")
+
     # Find elements calling the target
     callers = es.find_elements_calling(
-        target_id=element_id,
+        target_id=target_element_id,
         scope=scope,
         repository=repository,
         username=username,
@@ -2092,9 +2097,11 @@ def find_call_chain(
     scope = scope or doc.get("scope")
     repository = repository or doc.get("repository")
     username = username or doc.get("username", "main")
+    # Get actual element_id from doc (calls.resolved_id stores element_id format)
+    root_element_id = doc.get("element_id")
 
     root_node = {
-        "element_id": element_id,
+        "element_id": root_element_id,
         "hash_id": doc.get("hash_id"),
         "name": doc.get("name"),
         "type": doc.get("element_type"),
@@ -2109,7 +2116,7 @@ def find_call_chain(
         "max_depth": max_depth,
     }
 
-    visited: set[str] = {element_id}
+    visited: set[str] = {root_element_id}
 
     def build_callers_tree(node_id: str, depth: int) -> list[dict[str, Any]]:
         """Recursively build tree of callers."""
@@ -2225,12 +2232,12 @@ def find_call_chain(
         return children
 
     if direction in ("callers", "both"):
-        result["callers"] = build_callers_tree(element_id, 0)
+        result["callers"] = build_callers_tree(root_element_id, 0)
     if direction in ("callees", "both"):
         # Reset visited for callees direction if doing both
         if direction == "both":
-            visited = {element_id}
-        result["callees"] = build_callees_tree(element_id, 0)
+            visited = {root_element_id}
+        result["callees"] = build_callees_tree(root_element_id, 0)
 
     return result
 
@@ -3450,9 +3457,12 @@ def explain_element(
     scope = doc.get("scope")
     repository = doc.get("repository")
     username = doc.get("username", "main")
+    # Get actual element_id from doc (calls.resolved_id stores element_id format)
+    target_element_id = doc.get("element_id")
 
     element_info: dict[str, Any] = {
-        "element_id": element_id,
+        "element_id": target_element_id,
+        "hash_id": doc.get("hash_id"),
         "name": name,
         "type": element_type,
         "file": relative_path,
@@ -3490,7 +3500,7 @@ def explain_element(
     # Get callers (who calls this function/method)
     if element_type in ("function", "method"):
         callers = es.find_elements_calling(
-            target_id=element_id,
+            target_id=target_element_id,
             scope=scope,
             repository=repository,
             username=username,

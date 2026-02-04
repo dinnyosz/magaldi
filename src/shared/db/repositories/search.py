@@ -405,8 +405,8 @@ class SearchRepository:
         filter_clauses: list[dict[str, Any]] = [
             # Only search elements that can have calls (functions, methods)
             {"terms": {"element_type": ["function", "method"]}},
-            # Only search elements that have the calls field (nested field exists check)
-            {"exists": {"field": "calls"}},
+            # Note: No need for {"exists": {"field": "calls"}} - the nested query
+            # in must already ensures calls exist with a matching resolved_id
         ]
 
         if scope:
