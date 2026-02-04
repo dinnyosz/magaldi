@@ -59,7 +59,7 @@ class ClusterConfig:
     # Soft clustering options
     soft_clustering: bool = True  # Enable soft/overlapping memberships
     membership_threshold: float = 0.1  # Min membership score to keep (10%)
-    affinity_threshold: float = 0.05  # Min affinity for connected features (5%)
+    affinity_threshold: float = 0.15  # Min affinity for connected features (15%)
 
     @classmethod
     def from_magaldi_config(
@@ -494,7 +494,7 @@ class FeatureClusterer:
                     label=None,  # Will be filled after labeling
                     affinity=c.affinity,
                 )
-                for c in connected[:10]  # Limit to top 10 connections
+                for c in connected[:5]  # Limit to top 5 strongest connections
             ]
 
             # Build element summaries dict
