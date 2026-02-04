@@ -5249,23 +5249,51 @@ def mcp_self_review(
                 # Was this target in magaldi results?
                 target_in_results = target and target in current.result_snippet
 
+                # Extract just the filename for readability
+                target_short = target.split("/")[-1] if "/" in target else target
+
                 if not target_in_results and target:
                     deviation_patterns.append({
                         "type": "fallback_to_builtin",
+                        "severity": "medium",
+                        "what_happened": (
+                            f"Called {current.tool_name}('{current.params.get('query', '')[:50]}'), "
+                            f"then immediately used {next_tool.tool_name} to access '{target_short}'"
+                        ),
+                        "why_this_matters": (
+                            f"The file '{target_short}' was NOT in {current.tool_name} results. "
+                            f"User had to fall back to builtin {next_tool.tool_name} to find what they needed. "
+                            "This suggests the search results were missing relevant files."
+                        ),
                         "magaldi_tool": current.tool_name,
                         "magaldi_query": current.params.get("query") or current.params.get("pattern") or current.params.get("hash_id", ""),
                         "builtin_tool": next_tool.tool_name,
                         "builtin_target": target,
-                        "gap": f"Magaldi {current.tool_name} didn't surface '{target}', had to use {next_tool.tool_name}",
+                        "potential_cause": (
+                            "Possible reasons: 1) The target file doesn't contain the search terms directly, "
+                            "2) The target CALLS/WRAPS functions that match, but isn't indexed that way, "
+                            "3) Search relevance ranking placed it too low"
+                        ),
                     })
 
                     # Generate specific improvement suggestion
                     if current.tool_name == "search_code":
                         improvement_suggestions.append({
                             "tool": "search_code",
-                            "issue": f"Search for '{current.params.get('query', '')}' didn't include '{target}'",
-                            "suggestion": "Consider improving search relevance or expanding result set",
-                            "action": f"search_code results could suggest related files when direct matches are limited",
+                            "priority": "high",
+                            "issue": f"Search for '{current.params.get('query', '')[:50]}' didn't include '{target_short}'",
+                            "observed_behavior": (
+                                f"User searched for '{current.params.get('query', '')[:50]}', got results, "
+                                f"but then had to manually Read '{target_short}' which wasn't in results."
+                            ),
+                            "suggested_improvement": (
+                                "search_code could automatically include 'related files' that call/import/wrap "
+                                "the found functions. When a function definition is found, also show files that USE it."
+                            ),
+                            "implementation_hint": (
+                                "Use find_callers() on search results to discover files that reference them. "
+                                "Add these as a 'related_files' section in the response."
+                            ),
                         })
 
         # Pattern 2: Magaldi search → Magaldi search (refinement pattern)
@@ -5276,24 +5304,49 @@ def mcp_self_review(
 
                 if current_query and next_query and current_query != next_query:
                     # Queries are different - analyze why
-                    deviation_patterns.append({
-                        "type": "query_refinement",
-                        "first_query": current_query,
-                        "second_query": next_query,
-                        "gap": f"First search for '{current_query}' led to different search '{next_query}'",
-                    })
-
                     # Check if second query terms appear in first results
                     next_terms = set(next_query.lower().split())
                     first_result_lower = current.result_snippet.lower()
                     missing_terms = [t for t in next_terms if t not in first_result_lower and len(t) > 3]
 
+                    deviation_patterns.append({
+                        "type": "query_refinement",
+                        "severity": "low",
+                        "what_happened": (
+                            f"Searched for '{current_query[:40]}', then searched again for '{next_query[:40]}'"
+                        ),
+                        "why_this_matters": (
+                            "User changed their search query, suggesting the first results didn't "
+                            "lead them to what they needed. This is normal during exploration, "
+                            "but frequent refinements may indicate relevance issues."
+                        ),
+                        "first_query": current_query,
+                        "second_query": next_query,
+                        "terms_missing_from_first_results": missing_terms[:5] if missing_terms else [],
+                        "analysis": (
+                            f"The second query contained terms {missing_terms[:3]} that weren't in first results."
+                            if missing_terms else
+                            "Query changed direction - user may have been exploring different aspects."
+                        ),
+                    })
+
                     if missing_terms:
                         improvement_suggestions.append({
                             "tool": "search_code",
-                            "issue": f"Search for '{current_query}' didn't help find '{next_query}'",
-                            "suggestion": f"Results lacked terms: {missing_terms[:3]}",
-                            "action": "search_code could suggest related searches or show 'did you mean' alternatives",
+                            "priority": "medium",
+                            "issue": f"Search for '{current_query[:40]}' didn't help find '{next_query[:40]}'",
+                            "observed_behavior": (
+                                f"First search returned results, but user immediately searched for "
+                                f"different terms: {missing_terms[:3]}. These terms weren't in first results."
+                            ),
+                            "suggested_improvement": (
+                                "search_code could show 'Related searches' or 'See also' suggestions "
+                                "based on semantic similarity to help users find related concepts."
+                            ),
+                            "implementation_hint": (
+                                "After search, use embedding similarity to find related queries/concepts "
+                                "from the glossary or feature labels. Show as 'You might also search for: ...'"
+                            ),
                         })
 
         # Pattern 3: search_code → get_element (expected but frequent = needs more detail)
@@ -5303,9 +5356,19 @@ def mcp_self_review(
                 if current.params.get("include_code") != "true":
                     deviation_patterns.append({
                         "type": "detail_needed",
+                        "severity": "info",
+                        "what_happened": (
+                            f"search_code('{current.params.get('query', '')[:40]}') was followed by "
+                            f"get_element('{next_tool.params.get('hash_id', '')[:20]}...')"
+                        ),
+                        "why_this_matters": (
+                            "This is NORMAL workflow - search found something, user wanted more detail. "
+                            "However, if this happens frequently, search results might benefit from "
+                            "including more context by default (summaries, signatures, or code snippets)."
+                        ),
                         "from_tool": "search_code",
                         "to_tool": "get_element",
-                        "gap": "search_code was followed by get_element - user needed more detail",
+                        "note": "This is expected behavior, not necessarily a problem.",
                     })
 
     # Pattern 4: Multiple sequential searches without get_element (exploration without finding)
@@ -5319,9 +5382,24 @@ def mcp_self_review(
     if search_streak >= 3:
         improvement_suggestions.append({
             "tool": "search_code",
-            "issue": f"{search_streak} consecutive searches without drilling into results",
-            "suggestion": "User may be struggling to find relevant code",
-            "action": "Consider: 1) search_features for high-level exploration, 2) Improved result summaries, 3) 'Related searches' suggestions",
+            "priority": "medium",
+            "issue": f"{search_streak} consecutive searches without drilling into any result",
+            "observed_behavior": (
+                f"User performed {search_streak} search_code calls in a row without using "
+                "get_element, find_usages, or get_context on any result. This suggests "
+                "either exploratory browsing OR difficulty finding relevant code."
+            ),
+            "suggested_improvement": (
+                "Consider these enhancements:\n"
+                "1. Suggest search_features for high-level codebase exploration\n"
+                "2. Improve result summaries to help users identify relevant matches faster\n"
+                "3. Add 'Related searches' suggestions based on query patterns\n"
+                "4. Show confidence scores to indicate result relevance"
+            ),
+            "implementation_hint": (
+                "Track search patterns in MCP analytics. When user searches repeatedly "
+                "without drilling in, proactively suggest: 'Try search_features for broader exploration'"
+            ),
         })
 
     # ==========================================================================
@@ -5402,29 +5480,64 @@ def mcp_self_review(
     # STEP 5: Build final results
     # ==========================================================================
 
+    # Build verbose summary
+    magaldi_count = sum(1 for t in tool_sequence if t.is_magaldi)
+    builtin_count = sum(1 for t in tool_sequence if not t.is_magaldi)
+    high_priority = sum(1 for s in improvement_suggestions if s.get("priority") == "high")
+    medium_priority = sum(1 for s in improvement_suggestions if s.get("priority") == "medium")
+
+    fallback_rate = builtin_count / max(magaldi_count, 1)
+
     return {
         "note": (
+            "=== MCP SELF-REVIEW RESULTS ===\n\n"
             "These are SUGGESTIONS based on observed tool usage patterns. "
-            "Review each suggestion and decide whether it's worth implementing. "
-            "Not all deviations indicate problems - some may be expected workflow patterns."
+            "Review each suggestion and decide whether it's worth implementing.\n\n"
+            "IMPORTANT: Not all deviations indicate problems!\n"
+            "- 'fallback_to_builtin' MAY indicate missing results, OR normal workflow\n"
+            "- 'query_refinement' MAY indicate relevance issues, OR natural exploration\n"
+            "- 'detail_needed' is usually EXPECTED behavior (search → get details)\n\n"
+            "Focus on HIGH priority suggestions first. Look for patterns that repeat."
         ),
+        "executive_summary": {
+            "verdict": (
+                "NEEDS ATTENTION: High fallback rate to builtin tools"
+                if fallback_rate > 0.4 else
+                "MODERATE: Some fallbacks detected, review suggestions"
+                if fallback_rate > 0.2 else
+                "GOOD: Magaldi tools handled most requests effectively"
+            ),
+            "total_tool_calls": len(tool_sequence),
+            "magaldi_calls": magaldi_count,
+            "builtin_fallbacks": builtin_count,
+            "fallback_rate": f"{fallback_rate:.0%}",
+            "fallback_interpretation": (
+                f"{builtin_count} times a builtin tool (Read/Grep/Glob) was used. "
+                f"This is {fallback_rate:.0%} of total calls. "
+                + (
+                    "High fallback rate suggests magaldi results may be missing relevant information."
+                    if fallback_rate > 0.3 else
+                    "Some fallbacks are normal - users often need full file context."
+                )
+            ),
+            "suggestions_by_priority": {
+                "high": high_priority,
+                "medium": medium_priority,
+                "total": len(improvement_suggestions),
+            },
+            "patterns_detected": len(deviation_patterns),
+        },
         "tool_sequence": [
             {
+                "step": i + 1,
                 "tool": t.tool_name,
                 "is_magaldi": t.is_magaldi,
-                "params": t.params,
+                "params": {k: v[:50] + "..." if isinstance(v, str) and len(v) > 50 else v for k, v in t.params.items()},
             }
-            for t in tool_sequence[:20]  # Limit for readability
+            for i, t in enumerate(tool_sequence[:20])
         ],
         "deviation_patterns": deviation_patterns,
         "usage_analysis": usage_analysis,
         "improvement_suggestions": improvement_suggestions,
         "analytics_summary": analytics_summary,
-        "summary": {
-            "total_tool_calls": len(tool_sequence),
-            "magaldi_calls": sum(1 for t in tool_sequence if t.is_magaldi),
-            "builtin_fallbacks": sum(1 for t in tool_sequence if not t.is_magaldi),
-            "deviation_count": len(deviation_patterns),
-            "suggestions_count": len(improvement_suggestions),
-        },
     }
