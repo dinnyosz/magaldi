@@ -165,6 +165,26 @@ class LabelingProgressState:
     ctx_size: str = ""  # Context size being used (e.g., "2K")
 
 
+@dataclass
+class ClusteringProgressState:
+    """Progress state for clustering display."""
+
+    phase: str  # "projection", "nmf", "complete"
+    phase_description: str
+    current_step: int
+    total_steps: int
+    n_elements: int = 0
+    n_features: int = 0
+    cooccurrence_density: float = 0.0
+
+    @property
+    def percent(self) -> float:
+        """Completion percentage."""
+        if self.total_steps == 0:
+            return 0.0
+        return (self.current_step / self.total_steps) * 100
+
+
 # =============================================================================
 # CLUSTER LABELING PROMPTS (Optimized for Prefix Caching)
 # =============================================================================
@@ -225,6 +245,7 @@ class FeatureClusterer:
     def cluster(
         self,
         elements: list[dict[str, Any]],
+        on_progress: Callable[[ClusteringProgressState], None] | None = None,
     ) -> ClusteringResult:
         """Run clustering on element embeddings.
 
@@ -233,6 +254,7 @@ class FeatureClusterer:
 
         Args:
             elements: List of dicts with element_id, embedding, name, element_type.
+            on_progress: Optional callback for clustering progress updates.
 
         Returns:
             ClusteringResult with clusters and outliers.
@@ -259,7 +281,7 @@ class FeatureClusterer:
 
         # Use soft clustering if enabled
         if self.config.soft_clustering:
-            return self._cluster_soft(embedding_array, valid_elements)
+            return self._cluster_soft(embedding_array, valid_elements, on_progress)
 
         return self._cluster_hard(embedding_array, valid_elements)
 
@@ -323,6 +345,7 @@ class FeatureClusterer:
         self,
         embedding_array: np.ndarray,
         valid_elements: list[dict[str, Any]],
+        on_progress: Callable[[ClusteringProgressState], None] | None = None,
     ) -> ClusteringResult:
         """Soft clustering with overlapping memberships.
 
@@ -332,6 +355,7 @@ class FeatureClusterer:
         from shared.ai.clustering.soft_clustering import (
             SoftClusteringConfig,
             SoftClusteringPipeline,
+            SoftClusteringProgress,
         )
 
         # Create soft clustering config from our config
@@ -345,10 +369,27 @@ class FeatureClusterer:
             affinity_threshold=self.config.affinity_threshold,
         )
 
+        # Create progress adapter if callback provided
+        def soft_progress_callback(progress: SoftClusteringProgress) -> None:
+            if on_progress:
+                on_progress(ClusteringProgressState(
+                    phase=progress.phase,
+                    phase_description=progress.phase_description,
+                    current_step=progress.current_step,
+                    total_steps=progress.total_steps,
+                    n_elements=progress.n_elements,
+                    n_features=progress.n_features,
+                    cooccurrence_density=progress.cooccurrence_density,
+                ))
+
         # Run soft clustering
         pipeline = SoftClusteringPipeline(soft_config)
         element_ids = [e["element_id"] for e in valid_elements]
-        soft_result = pipeline.fit(embedding_array, element_ids)
+        soft_result = pipeline.fit(
+            embedding_array,
+            element_ids,
+            on_progress=soft_progress_callback if on_progress else None,
+        )
 
         # Convert soft memberships to ClusteringResult format
         # Group elements by their PRIMARY cluster (highest score)

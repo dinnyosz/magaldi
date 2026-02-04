@@ -153,8 +153,81 @@ def run_feature_extraction(
             if "summary_embedding" in elem:
                 elem["embedding"] = elem.pop("summary_embedding")
 
-        with console.status("[bold blue]Clustering...[/]"):
-            clustering_result = clusterer.cluster(elements)
+        # Import clustering progress state
+        from shared.ai.clustering.clusterer import ClusteringProgressState
+
+        # Track clustering progress state
+        clustering_state: dict[str, Any] = {
+            "phase": "starting",
+            "phase_description": "Initializing",
+            "current_step": 0,
+            "total_steps": 0,
+            "n_elements": len(elements),
+            "n_features": 0,
+        }
+
+        def build_clustering_display() -> RenderableType:
+            """Build Rich display for clustering progress."""
+            phase = clustering_state["phase"]
+            current = clustering_state["current_step"]
+            total = clustering_state["total_steps"]
+            pct = (current / total * 100) if total > 0 else 0
+
+            # Progress bar
+            bar_width = 30
+            filled = int(bar_width * pct / 100)
+            bar = "━" * filled + "╺" + "─" * (bar_width - filled - 1) if filled < bar_width else "━" * bar_width
+
+            bar_text = Text()
+            bar_text.append("  ")
+            bar_text.append(bar[:filled], style="green")
+            if filled < bar_width:
+                bar_text.append(bar[filled:], style="dim")
+            bar_text.append(" ")
+            bar_text.append(f"{current}", style="green")
+            bar_text.append("/", style="dim")
+            bar_text.append(f"{total}", style="cyan")
+            bar_text.append(f" ({pct:.0f}%)", style="green")
+
+            # Phase description
+            status_text = Text()
+            status_text.append("  ")
+            if phase == "projection":
+                status_text.append("⚡ ", style="yellow")
+                status_text.append("Random projections", style="cyan")
+                status_text.append(f" | {clustering_state['n_elements']} elements", style="dim")
+            elif phase == "nmf":
+                status_text.append("🔬 ", style="yellow")
+                status_text.append("NMF extraction", style="cyan")
+                density = clustering_state.get("cooccurrence_density", 0)
+                if density > 0:
+                    status_text.append(f" | cooccurrence density: {density:.1%}", style="dim")
+            elif phase == "complete":
+                status_text.append("✓ ", style="green")
+                status_text.append("Clustering complete", style="green")
+                status_text.append(f" | {clustering_state['n_features']} features", style="dim")
+            else:
+                status_text.append("⏳ ", style="yellow")
+                status_text.append("Initializing...", style="cyan")
+
+            return Group(bar_text, status_text)
+
+        def on_clustering_progress(state: ClusteringProgressState) -> None:
+            """Update clustering state from callback."""
+            clustering_state["phase"] = state.phase
+            clustering_state["phase_description"] = state.phase_description
+            clustering_state["current_step"] = state.current_step
+            clustering_state["total_steps"] = state.total_steps
+            clustering_state["n_elements"] = state.n_elements
+            clustering_state["n_features"] = state.n_features
+            clustering_state["cooccurrence_density"] = state.cooccurrence_density
+
+        with Live(build_clustering_display(), console=console, refresh_per_second=4) as live:
+            def update_display(state: ClusteringProgressState) -> None:
+                on_clustering_progress(state)
+                live.update(build_clustering_display())
+
+            clustering_result = clusterer.cluster(elements, on_progress=update_display)
 
         # Calculate coverage stats
         elements_in_features = sum(c.size for c in clustering_result.clusters)
