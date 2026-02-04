@@ -35,14 +35,18 @@ class ClusteringError(Exception):
 class ClusterConfig:
     """Configuration for HDBSCAN clustering.
 
-    Defaults here are duplicated from ClusteringConfig in shared/config.py
-    for backwards compatibility. Use from_magaldi_config() to load from
-    the central config file.
+    HDBSCAN parameters default to None and are filled from ClusteringConfig
+    in __post_init__ to ensure a single source of truth.
     """
 
-    # HDBSCAN parameters (used by both pipelines)
-    min_cluster_size: int = 5
-    min_samples: int = 2
+    # HDBSCAN parameters - defaults from ClusteringConfig
+    min_cluster_size: int | None = None
+    min_samples: int | None = None
+    metric: str | None = None
+    cluster_selection_method: str | None = None
+    cluster_selection_epsilon: float | None = None
+    membership_threshold: float | None = None
+    affinity_threshold: float | None = None
 
     # Element types to cluster
     element_types: list[str] = field(default_factory=lambda: ["function", "method"])
@@ -58,10 +62,25 @@ class ClusterConfig:
 
     # Soft clustering options
     soft_clustering: bool = True  # Enable soft/overlapping memberships
-    membership_threshold: float = 0.05  # Min membership score to keep (5%)
-    affinity_threshold: float = 0.2  # Min affinity for connected features (20%)
-    cluster_selection_method: str = "eom"  # 'eom' has less noise than 'leaf'
-    cluster_selection_epsilon: float = 0.3  # Merge clusters within this distance
+
+    def __post_init__(self) -> None:
+        """Fill HDBSCAN defaults from ClusteringConfig."""
+        from shared.config import ClusteringConfig
+        defaults = ClusteringConfig()
+        if self.min_cluster_size is None:
+            self.min_cluster_size = defaults.min_cluster_size
+        if self.min_samples is None:
+            self.min_samples = defaults.min_samples
+        if self.metric is None:
+            self.metric = defaults.metric
+        if self.cluster_selection_method is None:
+            self.cluster_selection_method = defaults.cluster_selection_method
+        if self.cluster_selection_epsilon is None:
+            self.cluster_selection_epsilon = defaults.cluster_selection_epsilon
+        if self.membership_threshold is None:
+            self.membership_threshold = defaults.membership_threshold
+        if self.affinity_threshold is None:
+            self.affinity_threshold = defaults.affinity_threshold
 
     @classmethod
     def from_magaldi_config(

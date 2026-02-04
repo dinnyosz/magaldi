@@ -25,11 +25,21 @@ class TestClusterConfig:
     """Tests for ClusterConfig class."""
 
     def test_default_values(self):
-        """Test default configuration values."""
+        """Test default configuration values from ClusteringConfig."""
+        from shared.config import ClusteringConfig
+        defaults = ClusteringConfig()
         config = ClusterConfig()
 
-        assert config.min_cluster_size == 5
-        assert config.min_samples == 2
+        # HDBSCAN params should match ClusteringConfig
+        assert config.min_cluster_size == defaults.min_cluster_size
+        assert config.min_samples == defaults.min_samples
+        assert config.metric == defaults.metric
+        assert config.cluster_selection_method == defaults.cluster_selection_method
+        assert config.cluster_selection_epsilon == defaults.cluster_selection_epsilon
+        assert config.membership_threshold == defaults.membership_threshold
+        assert config.affinity_threshold == defaults.affinity_threshold
+
+        # ClusterConfig-specific defaults
         assert config.element_types == ["function", "method"]
         assert config.api_base == "http://localhost:11434"
         assert config.labeling_model == "qwen3:4b-instruct"

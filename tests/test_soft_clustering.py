@@ -8,11 +8,11 @@ import pytest
 from shared.ai.clustering.soft_clustering import (
     FeatureAffinity,
     FeatureMembership,
-    SoftClusteringConfig,
     SoftClusteringPipeline,
     SoftClusteringProgress,
     SoftClusteringResult,
 )
+from shared.config import ClusteringConfig
 
 
 # =============================================================================
@@ -69,12 +69,12 @@ class TestSoftClusteringProgress:
         assert progress.status_line == "HDBSCAN soft clustering [1/1]"
 
 
-class TestSoftClusteringConfig:
-    """Tests for SoftClusteringConfig class."""
+class TestClusteringConfig:
+    """Tests for ClusteringConfig class."""
 
     def test_default_values(self):
         """Test default configuration values."""
-        config = SoftClusteringConfig()
+        config = ClusteringConfig()
 
         assert config.min_cluster_size == 3
         assert config.min_samples == 1
@@ -86,7 +86,7 @@ class TestSoftClusteringConfig:
 
     def test_custom_values(self):
         """Test custom configuration values."""
-        config = SoftClusteringConfig(
+        config = ClusteringConfig(
             min_cluster_size=10,
             min_samples=3,
             metric="manhattan",
@@ -172,7 +172,7 @@ class TestSoftClusteringPipeline:
     @pytest.fixture
     def small_config(self):
         """Configuration for small test datasets."""
-        return SoftClusteringConfig(
+        return ClusteringConfig(
             min_cluster_size=3,
             min_samples=2,
             membership_threshold=0.01,
@@ -330,7 +330,7 @@ class TestSoftClusteringPipelineQueries:
         """Create a pre-fitted result for query tests."""
         np.random.seed(42)
 
-        config = SoftClusteringConfig(
+        config = ClusteringConfig(
             min_cluster_size=3,
             min_samples=2,
             membership_threshold=0.01,
@@ -440,7 +440,7 @@ class TestEdgeCases:
 
     def test_small_dataset(self):
         """Test with small dataset."""
-        config = SoftClusteringConfig(
+        config = ClusteringConfig(
             min_cluster_size=3,
             min_samples=2,
         )
@@ -457,7 +457,7 @@ class TestEdgeCases:
         """Test with single element (should handle gracefully)."""
         np.random.seed(42)
 
-        config = SoftClusteringConfig(
+        config = ClusteringConfig(
             min_cluster_size=2,  # Won't form clusters with 1 element
         )
 
@@ -471,7 +471,7 @@ class TestEdgeCases:
 
     def test_two_elements(self):
         """Test with two elements."""
-        config = SoftClusteringConfig(
+        config = ClusteringConfig(
             min_cluster_size=2,
         )
 
@@ -484,7 +484,7 @@ class TestEdgeCases:
 
     def test_high_threshold(self):
         """Test with high membership threshold (may result in few/no memberships)."""
-        config = SoftClusteringConfig(
+        config = ClusteringConfig(
             min_cluster_size=3,
             membership_threshold=0.99,  # Very high
         )
@@ -500,7 +500,7 @@ class TestEdgeCases:
 
     def test_identical_embeddings(self):
         """Test with all identical embeddings."""
-        config = SoftClusteringConfig(
+        config = ClusteringConfig(
             min_cluster_size=3,
         )
 
@@ -514,7 +514,7 @@ class TestEdgeCases:
 
     def test_different_metrics(self):
         """Test with different distance metrics."""
-        config = SoftClusteringConfig(
+        config = ClusteringConfig(
             min_cluster_size=3,
             metric="manhattan",  # L1 distance
         )
@@ -529,7 +529,7 @@ class TestEdgeCases:
 
     def test_high_dimensional_embeddings(self):
         """Test with high-dimensional embeddings (like real sentence transformers)."""
-        config = SoftClusteringConfig(
+        config = ClusteringConfig(
             min_cluster_size=3,
             min_samples=2,
         )
@@ -545,7 +545,7 @@ class TestEdgeCases:
 
     def test_no_clusters_found(self):
         """Test handling when HDBSCAN finds no clusters."""
-        config = SoftClusteringConfig(
+        config = ClusteringConfig(
             min_cluster_size=50,  # Very high - won't form clusters
             min_samples=10,
         )

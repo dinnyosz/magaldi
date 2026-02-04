@@ -10,9 +10,13 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import hdbscan
 import numpy as np
+
+if TYPE_CHECKING:
+    from shared.config import ClusteringConfig
 
 logger = logging.getLogger(__name__)
 
@@ -63,29 +67,6 @@ ProgressCallback = Callable[[SoftClusteringProgress], None]
 # =============================================================================
 
 
-@dataclass
-class SoftClusteringConfig:
-    """Configuration for soft clustering using HDBSCAN directly on embeddings.
-
-    Runs HDBSCAN directly on the embedding space without dimensionality reduction.
-    Modern embedding models produce well-structured vectors that don't need
-    preprocessing like PCA or UMAP.
-
-    Attributes:
-        min_cluster_size: HDBSCAN minimum cluster size.
-        min_samples: HDBSCAN min_samples (density threshold).
-        metric: Distance metric for HDBSCAN. 'euclidean' works well for embeddings.
-        membership_threshold: Minimum soft membership to retain.
-        affinity_threshold: Minimum affinity between features to report.
-    """
-
-    min_cluster_size: int = 3  # Minimum elements to form a cluster
-    min_samples: int = 1  # Lower = less strict density requirement
-    metric: str = "euclidean"  # euclidean works well for normalized embeddings
-    cluster_selection_method: str = "eom"  # 'eom' has less noise than 'leaf'
-    cluster_selection_epsilon: float = 0.3  # Merge clusters within this distance
-    membership_threshold: float = 0.05  # 5% minimum membership to retain (for overlap)
-    affinity_threshold: float = 0.2  # 20% minimum affinity between features
 
 
 # =============================================================================
@@ -165,13 +146,16 @@ class SoftClusteringPipeline:
         ...     print(f"Feature {m.feature_idx}: {m.score:.2%}")
     """
 
-    def __init__(self, config: SoftClusteringConfig | None = None):
+    def __init__(self, config: "ClusteringConfig | None" = None):
         """Initialize pipeline with configuration.
 
         Args:
             config: Clustering configuration. Uses defaults if not provided.
         """
-        self.config = config or SoftClusteringConfig()
+        if config is None:
+            from shared.config import ClusteringConfig
+            config = ClusteringConfig()
+        self.config = config
         self._clusterer: hdbscan.HDBSCAN | None = None
         self._memberships: np.ndarray | None = None
         self._feature_affinity: np.ndarray | None = None

@@ -268,6 +268,7 @@ class ClusteringConfig:
     # HDBSCAN parameters
     min_cluster_size: int = 3  # Minimum elements to form a cluster
     min_samples: int = 1  # Lower = less strict density requirement
+    metric: str = "euclidean"  # Distance metric for HDBSCAN
     cluster_selection_method: str = "eom"  # 'eom' has less noise than 'leaf'
     cluster_selection_epsilon: float = 0.3  # Merge clusters within this distance
 
