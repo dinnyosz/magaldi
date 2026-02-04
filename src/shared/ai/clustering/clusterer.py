@@ -64,9 +64,12 @@ class ClusterConfig:
     membership_threshold: float = 0.01  # Min membership score to keep
     affinity_threshold: float = 0.001  # Min affinity for connected features
 
-    # Scalable soft clustering (UMAP + HDBSCAN) - auto-selects based on element count
-    soft_clustering_mode: str = "auto"
-    scalable_threshold: int = 1000  # Element count threshold for auto mode
+    # Soft clustering pipeline selection
+    # "scalable": UMAP + HDBSCAN (recommended, works well for all sizes)
+    # "standard": NMF (slower, has convergence issues on small datasets)
+    # "auto": scalable for >= scalable_threshold elements (legacy)
+    soft_clustering_mode: str = "scalable"
+    scalable_threshold: int = 1000  # Only used if mode="auto"
     # Scalable pipeline config
     pca_components: int = 0  # 0 = auto (min 100 or 90% variance)
     umap_components: int = 50

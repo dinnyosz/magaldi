@@ -1422,15 +1422,13 @@ def process_subfeatures(
         api_key=config.api_key,
     )
 
-    # Sub-clustering config - use scalable pipeline (UMAP+HDBSCAN) for small datasets
-    # NMF is overkill for subfeatures (10-50 elements) and causes convergence warnings
+    # Sub-clustering config (uses scalable pipeline by default)
     cluster_config = ClusterConfig(
         min_cluster_size=subcluster_config.min_cluster_size,
         min_samples=subcluster_config.min_samples,
         api_base=config.api_base,
         labeling_model=config.summarize_model,
         provider=config.provider,
-        soft_clustering_mode="scalable",  # Force UMAP+HDBSCAN for subfeatures
     )
     sub_clusterer = FeatureClusterer(cluster_config)
 
