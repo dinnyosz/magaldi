@@ -59,6 +59,18 @@ class ClusterConfig:
     membership_threshold: float = 0.01  # Min membership score to keep
     affinity_threshold: float = 0.001  # Min affinity for connected features
 
+    # Scalable soft clustering (UMAP + HDBSCAN) - auto-selects based on element count
+    # "auto": use scalable for >= 3000 elements, otherwise standard
+    # "scalable": always use scalable pipeline (faster for large datasets)
+    # "standard": always use standard NMF pipeline (more accurate for small datasets)
+    soft_clustering_mode: str = "auto"
+    scalable_threshold: int = 3000  # Element count threshold for auto mode
+    # Scalable pipeline config
+    pca_components: int = 0  # 0 = auto (min 100 or 90% variance)
+    umap_components: int = 50
+    umap_n_neighbors: int = 30
+    umap_min_dist: float = 0.1
+
 
 @dataclass
 class ElementMembership:
@@ -351,25 +363,31 @@ class FeatureClusterer:
     ) -> ClusteringResult:
         """Soft clustering with overlapping memberships.
 
-        Uses random projection ensemble + NMF to compute soft memberships.
-        Elements can belong to multiple clusters with different scores.
+        Uses either:
+        - Standard pipeline: random projection ensemble + NMF (more accurate, O(n²))
+        - Scalable pipeline: PCA + UMAP + HDBSCAN (faster, O(n log n))
+
+        Pipeline selection based on config.soft_clustering_mode:
+        - "auto": scalable for >= config.scalable_threshold elements
+        - "scalable": always use scalable pipeline
+        - "standard": always use standard pipeline
         """
         from shared.ai.clustering.soft_clustering import (
+            ScalableSoftClusteringConfig,
+            ScalableSoftClusteringPipeline,
             SoftClusteringConfig,
             SoftClusteringPipeline,
             SoftClusteringProgress,
         )
 
-        # Create soft clustering config from our config
-        soft_config = SoftClusteringConfig(
-            n_projection_runs=self.config.n_projection_runs,
-            projection_dims=self.config.projection_dims,
-            min_cluster_size=self.config.min_cluster_size,
-            min_samples=self.config.min_samples,
-            n_features=self.config.n_features,
-            membership_threshold=self.config.membership_threshold,
-            affinity_threshold=self.config.affinity_threshold,
-        )
+        n_elements = len(valid_elements)
+
+        # Determine which pipeline to use
+        use_scalable = False
+        if self.config.soft_clustering_mode == "scalable":
+            use_scalable = True
+        elif self.config.soft_clustering_mode == "auto":
+            use_scalable = n_elements >= self.config.scalable_threshold
 
         # Create progress adapter if callback provided
         def soft_progress_callback(progress: SoftClusteringProgress) -> None:
@@ -386,9 +404,35 @@ class FeatureClusterer:
                     eta_seconds=progress.eta_seconds,
                 ))
 
-        # Run soft clustering
-        pipeline = SoftClusteringPipeline(soft_config)
         element_ids = [e["element_id"] for e in valid_elements]
+
+        if use_scalable:
+            # Use scalable pipeline (PCA + UMAP + HDBSCAN)
+            scalable_config = ScalableSoftClusteringConfig(
+                pca_components=self.config.pca_components,
+                umap_components=self.config.umap_components,
+                umap_n_neighbors=self.config.umap_n_neighbors,
+                umap_min_dist=self.config.umap_min_dist,
+                min_cluster_size=self.config.min_cluster_size,
+                min_samples=self.config.min_samples,
+                membership_threshold=self.config.membership_threshold,
+                affinity_threshold=self.config.affinity_threshold,
+            )
+            pipeline = ScalableSoftClusteringPipeline(scalable_config)
+        else:
+            # Use standard pipeline (random projection + NMF)
+            soft_config = SoftClusteringConfig(
+                n_projection_runs=self.config.n_projection_runs,
+                projection_dims=self.config.projection_dims,
+                min_cluster_size=self.config.min_cluster_size,
+                min_samples=self.config.min_samples,
+                n_features=self.config.n_features,
+                membership_threshold=self.config.membership_threshold,
+                affinity_threshold=self.config.affinity_threshold,
+            )
+            pipeline = SoftClusteringPipeline(soft_config)
+
+        # Run soft clustering
         soft_result = pipeline.fit(
             embedding_array,
             element_ids,

@@ -214,6 +214,18 @@ def run_feature_extraction(
                 density = clustering_state.get("cooccurrence_density", 0)
                 if density > 0:
                     status_text.append(f" | cooccurrence density: {density:.1%}", style="dim")
+            elif phase == "pca":
+                status_text.append("📐 ", style="yellow")
+                status_text.append("PCA dimensionality reduction", style="cyan")
+                status_text.append(f" | {clustering_state['n_elements']} elements", style="dim")
+            elif phase == "umap":
+                status_text.append("🗺️ ", style="yellow")
+                status_text.append("UMAP embedding", style="cyan")
+                status_text.append(f" | {clustering_state['n_elements']} elements", style="dim")
+            elif phase == "hdbscan":
+                status_text.append("🔬 ", style="yellow")
+                status_text.append("HDBSCAN soft clustering", style="cyan")
+                status_text.append(f" | {clustering_state['n_elements']} elements", style="dim")
             elif phase == "complete":
                 status_text.append("✓ ", style="green")
                 status_text.append("Clustering complete", style="green")
