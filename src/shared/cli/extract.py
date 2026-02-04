@@ -172,6 +172,8 @@ def run_feature_extraction(
             current = clustering_state["current_step"]
             total = clustering_state["total_steps"]
             pct = (current / total * 100) if total > 0 else 0
+            elapsed = clustering_state.get("elapsed_seconds", 0)
+            eta = clustering_state.get("eta_seconds")
 
             # Progress bar
             bar_width = 30
@@ -188,6 +190,16 @@ def run_feature_extraction(
             bar_text.append("/", style="dim")
             bar_text.append(f"{total}", style="cyan")
             bar_text.append(f" ({pct:.0f}%)", style="green")
+
+            # Add elapsed and ETA
+            if elapsed > 0:
+                bar_text.append(" | ", style="dim")
+                bar_text.append(format_duration(elapsed), style="cyan")
+                bar_text.append(" elapsed", style="dim")
+            if eta is not None and eta > 0:
+                bar_text.append(" | ~", style="dim")
+                bar_text.append(format_duration(eta), style="yellow")
+                bar_text.append(" ETA", style="dim")
 
             # Phase description
             status_text = Text()
@@ -221,6 +233,8 @@ def run_feature_extraction(
             clustering_state["n_elements"] = state.n_elements
             clustering_state["n_features"] = state.n_features
             clustering_state["cooccurrence_density"] = state.cooccurrence_density
+            clustering_state["elapsed_seconds"] = state.elapsed_seconds
+            clustering_state["eta_seconds"] = state.eta_seconds
 
         with Live(build_clustering_display(), console=console, refresh_per_second=4) as live:
             def update_display(state: ClusteringProgressState) -> None:

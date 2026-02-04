@@ -82,11 +82,11 @@ class TestSoftClusteringConfig:
         assert config.projection_dims == 50
         assert config.min_cluster_size == 15
         assert config.min_samples == 3
-        assert config.n_features == 500
+        assert config.n_features == 0  # 0 means auto-calculate as sqrt(n_elements)
         assert config.membership_threshold == 0.01
         assert config.cooccurrence_threshold == 0.05
         assert config.affinity_threshold == 0.001
-        assert config.nmf_max_iter == 500
+        assert config.nmf_max_iter == 1000
         assert config.random_state == 42
 
     def test_custom_values(self):

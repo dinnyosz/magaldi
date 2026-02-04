@@ -176,6 +176,8 @@ class ClusteringProgressState:
     n_elements: int = 0
     n_features: int = 0
     cooccurrence_density: float = 0.0
+    elapsed_seconds: float = 0.0
+    eta_seconds: float | None = None
 
     @property
     def percent(self) -> float:
@@ -380,6 +382,8 @@ class FeatureClusterer:
                     n_elements=progress.n_elements,
                     n_features=progress.n_features,
                     cooccurrence_density=progress.cooccurrence_density,
+                    elapsed_seconds=progress.elapsed_seconds,
+                    eta_seconds=progress.eta_seconds,
                 ))
 
         # Run soft clustering

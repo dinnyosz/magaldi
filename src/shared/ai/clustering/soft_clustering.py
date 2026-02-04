@@ -42,6 +42,9 @@ class SoftClusteringProgress:
     n_elements: int = 0
     n_features: int = 0
     cooccurrence_density: float = 0.0
+    # Timing for ETA
+    elapsed_seconds: float = 0.0
+    eta_seconds: float | None = None
 
     @property
     def percent(self) -> float:
@@ -77,7 +80,8 @@ class SoftClusteringConfig:
         min_cluster_size: HDBSCAN min_cluster_size for each projection run.
             Start with sqrt(n_elements) as a heuristic.
         n_features: Number of features (clusters) to extract via NMF.
-            Use reconstruction error elbow plot or domain knowledge.
+            If 0 (default), auto-calculated as sqrt(n_elements) capped at 200.
+            Use reconstruction error elbow plot or domain knowledge for manual tuning.
         membership_threshold: Minimum membership score to keep (filters numerical noise).
             Algorithm self-filters unrelated memberships; this handles floating point.
         cooccurrence_threshold: Minimum cooccurrence probability to store in sparse matrix.
@@ -88,11 +92,11 @@ class SoftClusteringConfig:
     projection_dims: int = 50
     min_cluster_size: int = 15
     min_samples: int = 3  # HDBSCAN min_samples
-    n_features: int = 500
+    n_features: int = 0  # 0 = auto-calculate based on dataset size
     membership_threshold: float = 0.01  # 1% - low because algorithm self-filters
     cooccurrence_threshold: float = 0.05  # 5% cooccurrence minimum
     affinity_threshold: float = 0.001  # Very low to capture weak connections
-    nmf_max_iter: int = 500
+    nmf_max_iter: int = 1000  # Increased for better convergence
     random_state: int = 42
 
 
@@ -217,18 +221,27 @@ class SoftClusteringPipeline:
             f"{self.config.n_features} features"
         )
 
-        # Adjust n_features if we have fewer elements
-        # NMF requires n_components <= min(n_samples, n_features of cooccurrence matrix)
-        # Cooccurrence is (n_elements, n_elements), so min dimension is n_elements
-        effective_n_features = min(self.config.n_features, n_elements // 2, n_elements)
-        if effective_n_features < 1:
-            effective_n_features = 1
+        # Calculate n_features if auto (0)
+        # Heuristic: sqrt(n_elements) gives reasonable granularity, capped at 200
+        if self.config.n_features == 0:
+            auto_n_features = max(10, min(200, int(np.sqrt(n_elements))))
+            logger.info(f"Auto-calculated n_features: {auto_n_features} (sqrt of {n_elements})")
+            effective_n_features = auto_n_features
+        else:
+            effective_n_features = self.config.n_features
 
-        if effective_n_features != self.config.n_features:
+        # Ensure n_features doesn't exceed what NMF can handle
+        # NMF requires n_components <= min(n_samples, n_features of cooccurrence matrix)
+        max_features = min(n_elements // 2, n_elements)
+        if effective_n_features > max_features:
             logger.warning(
-                f"Reduced n_features from {self.config.n_features} to "
-                f"{effective_n_features} due to small dataset"
+                f"Reduced n_features from {effective_n_features} to "
+                f"{max_features} due to dataset size"
             )
+            effective_n_features = max(1, max_features)
+
+        import time
+        phase_start_time = time.time()
 
         # Step 1-3: Build sparse cooccurrence matrix
         logger.info("Building cooccurrence matrix via ensemble clustering...")
@@ -237,7 +250,10 @@ class SoftClusteringPipeline:
             on_progress=on_progress,
             n_elements=n_elements,
             n_features=effective_n_features,
+            start_time=phase_start_time,
         )
+
+        projection_elapsed = time.time() - phase_start_time
 
         cooccurrence_density = (
             self._cooccurrence.nnz / (n_elements * n_elements)
@@ -249,6 +265,7 @@ class SoftClusteringPipeline:
 
         # Step 4: NMF for soft memberships
         logger.info(f"Extracting memberships via NMF ({effective_n_features} features)...")
+        nmf_start_time = time.time()
 
         # Report NMF phase start
         if on_progress:
@@ -260,6 +277,7 @@ class SoftClusteringPipeline:
                 n_elements=n_elements,
                 n_features=effective_n_features,
                 cooccurrence_density=cooccurrence_density,
+                elapsed_seconds=time.time() - phase_start_time,
             ))
 
         self._memberships, self._feature_affinity = self._extract_memberships(
@@ -318,6 +336,7 @@ class SoftClusteringPipeline:
         on_progress: ProgressCallback | None = None,
         n_elements: int = 0,
         n_features: int = 0,
+        start_time: float | None = None,
     ) -> csr_matrix:
         """Build sparse cooccurrence matrix from ensemble clustering.
 
@@ -380,15 +399,23 @@ class SoftClusteringPipeline:
             if (run + 1) % 10 == 0:
                 logger.debug(f"Completed projection run {run + 1}/{self.config.n_projection_runs}")
 
-            # Report progress
+            # Report progress with ETA
             if on_progress:
+                import time
+                elapsed = time.time() - start_time if start_time else 0
+                completed = run + 1
+                remaining = self.config.n_projection_runs - completed
+                eta = (elapsed / completed * remaining) if completed > 0 else None
+
                 on_progress(SoftClusteringProgress(
                     phase="projection",
                     phase_description="Random projection ensemble",
-                    current_step=run + 1,
+                    current_step=completed,
                     total_steps=self.config.n_projection_runs,
                     n_elements=n_elements,
                     n_features=n_features,
+                    elapsed_seconds=elapsed,
+                    eta_seconds=eta,
                 ))
 
         # Normalize to probabilities
@@ -448,10 +475,15 @@ class SoftClusteringPipeline:
             random_state=self.config.random_state,
         )
 
-        # Suppress convergence warning - we accept partial convergence for speed
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
-            W = nmf.fit_transform(cooccurrence_dense)  # (n_elements, n_features)
+        W = nmf.fit_transform(cooccurrence_dense)  # (n_elements, n_features)
+
+        # Log if NMF didn't fully converge (n_iter_ == max_iter means it hit the limit)
+        if hasattr(nmf, 'n_iter_') and nmf.n_iter_ >= self.config.nmf_max_iter:
+            logger.warning(
+                f"NMF reached max iterations ({self.config.nmf_max_iter}). "
+                f"Consider increasing nmf_max_iter or reducing n_features. "
+                f"Reconstruction error: {nmf.reconstruction_err_:.4f}"
+            )
 
         logger.debug(f"NMF reconstruction error: {nmf.reconstruction_err_:.4f}")
 
