@@ -529,3 +529,80 @@ class FeatureRepository:
         )
 
         return response.get("updated", 0)
+
+    def get_features_for_element(
+        self,
+        element_id: str,
+        scope: str | None = None,
+        repository: str | None = None,
+        username: str = "main",
+    ) -> list[dict[str, Any]]:
+        """Get all features and subfeatures that contain a specific element.
+
+        Args:
+            element_id: The element_id to search for in member_ids.
+            scope: Optional scope filter.
+            repository: Optional repository filter.
+            username: User branch (default: "main").
+
+        Returns:
+            List of features/subfeatures containing this element.
+        """
+        client = self._get_client()
+
+        filters: list[dict[str, Any]] = [
+            {"terms": {"element_type": ["feature", "subfeature"]}},
+            {"term": {"member_ids": element_id}},
+            {"term": {"username": username}},
+        ]
+
+        if scope:
+            filters.append({"term": {"scope": scope}})
+        if repository:
+            filters.append({"term": {"repository": repository}})
+
+        result = client.search(
+            index=INDEX_NAME,
+            body={
+                "query": {
+                    "bool": {
+                        "filter": filters
+                    }
+                },
+                "size": 50,
+                "sort": [{"member_count": "desc"}],
+                "_source": [
+                    "element_id",
+                    "hash_id",
+                    "element_type",
+                    "cluster_label",
+                    "summary",
+                    "member_count",
+                    "parent_feature_label",
+                    "parent_feature_summary",
+                    "scope",
+                    "repository",
+                ],
+            },
+        )
+
+        features = []
+        for hit in result.get("hits", {}).get("hits", []):
+            source = hit["_source"]
+            feature: dict[str, Any] = {
+                "feature_id": source.get("element_id"),
+                "hash_id": source.get("hash_id"),
+                "element_type": source.get("element_type"),
+                "label": source.get("cluster_label"),
+                "summary": source.get("summary", ""),
+                "member_count": source.get("member_count", 0),
+                "scope": source.get("scope"),
+                "repository": source.get("repository"),
+            }
+            # Include parent info for subfeatures
+            if source.get("element_type") == "subfeature":
+                feature["parent_feature_label"] = source.get("parent_feature_label")
+                feature["parent_feature_summary"] = source.get("parent_feature_summary")
+            features.append(feature)
+
+        return features

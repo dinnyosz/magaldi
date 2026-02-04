@@ -561,6 +561,16 @@ class ElasticsearchRepository:
         """Clear all cluster assignments for a repository."""
         return self._features.clear_cluster_assignments(scope, repository, username)
 
+    def get_features_for_element(
+        self,
+        element_id: str,
+        scope: str | None = None,
+        repository: str | None = None,
+        username: str = "main",
+    ) -> list[dict[str, Any]]:
+        """Get all features and subfeatures that contain a specific element."""
+        return self._features.get_features_for_element(element_id, scope, repository, username)
+
     # =========================================================================
     # Glossary operations (delegated to GlossaryRepository)
     # =========================================================================

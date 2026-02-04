@@ -13,7 +13,7 @@ import {
   Tabs,
 } from 'react-bootstrap'
 import ReactMarkdown from 'react-markdown'
-import { getElement, getSimilarElements, explainElement, getGlossaryTermsForFeature, type ElementDetail as _ElementDetail } from '../api'
+import { getElement, getSimilarElements, explainElement, getGlossaryTermsForFeature, getElementFeatures, type ElementDetail as _ElementDetail } from '../api'
 
 // Type configuration
 const typeConfig: Record<string, { icon: string; color: string; label: string }> = {
@@ -81,6 +81,13 @@ function Element() {
     queryKey: ['glossaryForFeature', decodedId],
     queryFn: () => getGlossaryTermsForFeature(decodedId),
     enabled: !!decodedId && !!element && ['feature', 'subfeature'].includes(element.element_type),
+  })
+
+  // Fetch connected features for code elements (not features/subfeatures/glossary themselves)
+  const { data: elementFeatures } = useQuery({
+    queryKey: ['elementFeatures', decodedId],
+    queryFn: () => getElementFeatures(decodedId),
+    enabled: !!decodedId && !!element && !['feature', 'subfeature', 'glossary'].includes(element.element_type),
   })
 
   if (isLoading) {
@@ -1307,6 +1314,54 @@ function Element() {
                   </Badge>
                 </div>
               </Card.Body>
+            </Card>
+          )}
+
+          {/* Connected Features/Subfeatures */}
+          {elementFeatures && elementFeatures.features.length > 0 && (
+            <Card className="mb-4">
+              <Card.Header>
+                <i className="bi bi-collection me-2"></i>
+                Part of Features
+                <Badge bg="secondary" className="ms-2">{elementFeatures.features.length}</Badge>
+              </Card.Header>
+              <ListGroup variant="flush">
+                {elementFeatures.features.map((feature) => {
+                  const isSubfeature = feature.element_type === 'subfeature'
+                  return (
+                    <ListGroup.Item
+                      key={feature.feature_id}
+                      action
+                      as={Link}
+                      to={`/element/${encodeURIComponent(feature.hash_id || feature.feature_id)}`}
+                    >
+                      <div className="d-flex justify-content-between align-items-start">
+                        <div className="text-truncate me-2">
+                          <Badge
+                            bg="info"
+                            className="me-1"
+                            pill
+                          >
+                            <i className={`bi ${isSubfeature ? 'bi-collection-fill' : 'bi-collection'}`}></i>
+                          </Badge>
+                          <span className="fw-medium">{feature.label}</span>
+                          {isSubfeature && feature.parent_feature_label && (
+                            <small className="text-muted ms-2">
+                              (in {feature.parent_feature_label})
+                            </small>
+                          )}
+                        </div>
+                        <Badge bg="secondary" pill>
+                          {feature.member_count}
+                        </Badge>
+                      </div>
+                      {feature.summary && (
+                        <small className="d-block text-muted text-truncate mt-1">{feature.summary}</small>
+                      )}
+                    </ListGroup.Item>
+                  )
+                })}
+              </ListGroup>
             </Card>
           )}
 

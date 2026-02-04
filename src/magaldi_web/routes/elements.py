@@ -18,6 +18,8 @@ from magaldi_web.models import (
     DocstringQualityInfo,
     ElementContext,
     ElementDetailResponse,
+    ElementFeatureInfo,
+    ElementFeaturesResponse,
     EnvVarInfo,
     FeatureInfo,
     FeatureMember,
@@ -732,4 +734,51 @@ async def get_element_detail(
         env_vars=env_vars,
         concurrency=concurrency,
         metrics_summary=metrics_summary,
+    )
+
+
+@router.get("/elements/{identifier}/features", response_model=ElementFeaturesResponse)
+async def get_element_features(
+    identifier: str = Path(..., description="Element hash_id (64-char SHA256) or element_id"),
+    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+) -> ElementFeaturesResponse:
+    """Get all features and subfeatures that contain this element."""
+    # Try hash_id first (64 hex characters), then fall back to element_id
+    source = None
+    if len(identifier) == 64 and all(c in "0123456789abcdef" for c in identifier.lower()):
+        source = es_repo.get_document_by_hash_id(identifier)
+
+    if not source:
+        source = es_repo.get_document(identifier)
+
+    if not source:
+        raise HTTPException(status_code=404, detail="Element not found")
+
+    element_id = source["element_id"]
+
+    # Get features containing this element
+    features_data = es_repo.get_features_for_element(
+        element_id=element_id,
+        scope=source.get("scope"),
+        repository=source.get("repository"),
+        username=source.get("username", "main"),
+    )
+
+    features = [
+        ElementFeatureInfo(
+            feature_id=f["feature_id"],
+            hash_id=f.get("hash_id"),
+            element_type=f["element_type"],
+            label=f["label"],
+            summary=f.get("summary"),
+            member_count=f.get("member_count", 0),
+            parent_feature_label=f.get("parent_feature_label"),
+            parent_feature_summary=f.get("parent_feature_summary"),
+        )
+        for f in features_data
+    ]
+
+    return ElementFeaturesResponse(
+        element_id=element_id,
+        features=features,
     )

@@ -414,6 +414,26 @@ class GlossaryInfo(BaseModel):
     feature_associations: list[GlossaryFeatureAssociation] = Field(default_factory=list)
 
 
+class ElementFeatureInfo(BaseModel):
+    """A feature or subfeature that contains an element."""
+
+    feature_id: str
+    hash_id: str | None = None
+    element_type: str  # "feature" or "subfeature"
+    label: str
+    summary: str | None = None
+    member_count: int = 0
+    parent_feature_label: str | None = None  # Only for subfeatures
+    parent_feature_summary: str | None = None  # Only for subfeatures
+
+
+class ElementFeaturesResponse(BaseModel):
+    """Response for getting features containing an element."""
+
+    element_id: str
+    features: list[ElementFeatureInfo] = Field(default_factory=list)
+
+
 class ClassAttributeInfo(BaseModel):
     """Information about a class attribute."""
 

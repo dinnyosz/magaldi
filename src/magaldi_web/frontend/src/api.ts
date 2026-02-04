@@ -229,6 +229,22 @@ export interface GlossaryInfo {
   feature_associations: GlossaryFeatureAssociation[]
 }
 
+export interface ElementFeatureInfo {
+  feature_id: string
+  hash_id: string | null
+  element_type: string  // "feature" or "subfeature"
+  label: string
+  summary: string | null
+  member_count: number
+  parent_feature_label: string | null  // Only for subfeatures
+  parent_feature_summary: string | null  // Only for subfeatures
+}
+
+export interface ElementFeaturesResponse {
+  element_id: string
+  features: ElementFeatureInfo[]
+}
+
 export interface ClassAttributeInfo {
   name: string
   type: string | null
@@ -642,6 +658,10 @@ export async function getElement(hashId: string): Promise<ElementDetail> {
 
 export async function getSimilarElements(hashId: string, limit = 10): Promise<SimilarElement[]> {
   return fetchJson(`${API_BASE}/elements/similar/${encodeURIComponent(hashId)}?limit=${limit}`)
+}
+
+export async function getElementFeatures(hashId: string): Promise<ElementFeaturesResponse> {
+  return fetchJson(`${API_BASE}/elements/${encodeURIComponent(hashId)}/features`)
 }
 
 // Vector visualization
