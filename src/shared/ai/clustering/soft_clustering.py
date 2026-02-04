@@ -3,6 +3,12 @@
 Implements overlapping/soft cluster memberships for high-dimensional embeddings
 using random projections, ensemble clustering, and cooccurrence analysis.
 
+Two pipeline options are provided:
+1. SoftClusteringPipeline: Random projection ensemble + NMF (O(n²) cooccurrence matrix)
+2. ScalableSoftClusteringPipeline: PCA + UMAP + HDBSCAN soft clustering (O(n log n))
+
+For datasets with 5k+ elements, use ScalableSoftClusteringPipeline for better performance.
+
 See plans/random_projection_ensemble_clustering.md for detailed algorithm design.
 """
 
@@ -15,8 +21,9 @@ from dataclasses import dataclass, field
 
 import hdbscan
 import numpy as np
+import umap
 from scipy.sparse import csr_matrix, lil_matrix
-from sklearn.decomposition import NMF
+from sklearn.decomposition import NMF, PCA
 from sklearn.random_projection import GaussianRandomProjection
 
 logger = logging.getLogger(__name__)
@@ -97,6 +104,46 @@ class SoftClusteringConfig:
     cooccurrence_threshold: float = 0.05  # 5% cooccurrence minimum
     affinity_threshold: float = 0.001  # Very low to capture weak connections
     nmf_max_iter: int = 1000  # Increased for better convergence
+    random_state: int = 42
+
+
+@dataclass
+class ScalableSoftClusteringConfig:
+    """Configuration for scalable soft clustering using UMAP + HDBSCAN.
+
+    This approach is O(n log n) vs O(n²) for the cooccurrence-based approach,
+    making it suitable for large codebases (5k-30k+ elements).
+
+    Algorithm:
+    1. PCA reduces dimensionality while preserving distances (critical for UMAP)
+    2. UMAP further reduces to clustering-friendly dimensions
+    3. HDBSCAN with soft clustering extracts memberships directly
+
+    Attributes:
+        pca_components: Number of PCA components (0 = auto: min(100, 90% variance)).
+            PCA first preserves Euclidean distances that UMAP would distort.
+        umap_components: Final dimensionality for HDBSCAN clustering.
+        umap_n_neighbors: UMAP locality parameter. Higher = more global structure.
+            15-30 is typical; higher values help preserve distances.
+        umap_min_dist: UMAP minimum distance between points. Higher = less clumping.
+            0.1-0.3 typical; higher helps prevent distance distortion.
+        umap_metric: Distance metric for UMAP. 'cosine' for embeddings.
+        min_cluster_size: HDBSCAN minimum cluster size.
+        min_samples: HDBSCAN min_samples (density threshold).
+        membership_threshold: Minimum soft membership to retain.
+        affinity_threshold: Minimum affinity between features to report.
+        random_state: Random seed for reproducibility.
+    """
+
+    pca_components: int = 0  # 0 = auto: min(100, n_components for 90% variance)
+    umap_components: int = 50
+    umap_n_neighbors: int = 30  # Higher for better distance preservation
+    umap_min_dist: float = 0.1  # Higher to reduce clumping/distortion
+    umap_metric: str = "cosine"  # Best for embedding spaces
+    min_cluster_size: int = 15
+    min_samples: int = 5  # Slightly higher for soft clustering quality
+    membership_threshold: float = 0.01
+    affinity_threshold: float = 0.001
     random_state: int = 42
 
 
@@ -675,6 +722,466 @@ class SoftClusteringPipeline:
         Returns:
             List of FeatureAffinity objects, sorted by affinity descending.
         """
+        min_affinity = min_affinity or self.config.affinity_threshold
+
+        affinities = result.feature_affinity[feature_idx]
+        connected = [
+            FeatureAffinity(feature_idx=i, affinity=float(affinities[i]))
+            for i in range(len(affinities))
+            if i != feature_idx and affinities[i] >= min_affinity
+        ]
+
+        return sorted(connected, key=lambda x: -x.affinity)
+
+
+# =============================================================================
+# SCALABLE SOFT CLUSTERING PIPELINE (UMAP + HDBSCAN)
+# =============================================================================
+
+
+class ScalableSoftClusteringPipeline:
+    """Scalable soft clustering using PCA + UMAP + HDBSCAN.
+
+    Designed for large codebases (5k-30k+ elements) where the O(n²) cooccurrence
+    matrix approach becomes prohibitively expensive.
+
+    Algorithm:
+    1. PCA preprocessing preserves Euclidean distances (critical before UMAP)
+    2. UMAP reduces to clustering-friendly dimensions with tuned parameters
+    3. HDBSCAN with prediction_data=True enables soft clustering
+    4. all_points_membership_vectors() extracts soft memberships directly
+
+    Complexity: O(n log n) for UMAP, O(n) for HDBSCAN
+    vs O(n²) for cooccurrence matrix construction
+
+    Example:
+        >>> pipeline = ScalableSoftClusteringPipeline()
+        >>> result = pipeline.fit(embeddings, element_ids)
+        >>> memberships = result.element_memberships["element_42"]
+        >>> for m in memberships:
+        ...     print(f"Feature {m.feature_idx}: {m.score:.2%}")
+    """
+
+    def __init__(self, config: ScalableSoftClusteringConfig | None = None):
+        """Initialize pipeline with configuration.
+
+        Args:
+            config: Clustering configuration. Uses defaults if not provided.
+        """
+        self.config = config or ScalableSoftClusteringConfig()
+        self._pca_model: PCA | None = None
+        self._umap_model: umap.UMAP | None = None
+        self._clusterer: hdbscan.HDBSCAN | None = None
+        self._memberships: np.ndarray | None = None
+        self._feature_affinity: np.ndarray | None = None
+
+    def fit(
+        self,
+        embeddings: np.ndarray,
+        element_ids: list[str] | None = None,
+        on_progress: ProgressCallback | None = None,
+    ) -> SoftClusteringResult:
+        """Fit the pipeline using UMAP + HDBSCAN soft clustering.
+
+        Args:
+            embeddings: (n_elements, embedding_dim) embedding matrix.
+            element_ids: Optional list of element IDs for result mapping.
+                If not provided, integer indices are used as keys.
+            on_progress: Optional callback for progress updates.
+
+        Returns:
+            SoftClusteringResult with element memberships and feature affinity.
+
+        Raises:
+            ValueError: If embeddings is empty or has wrong shape.
+        """
+        import time
+
+        if embeddings.size == 0:
+            raise ValueError("Empty embeddings array")
+
+        if embeddings.ndim != 2:
+            raise ValueError(f"Expected 2D embeddings, got {embeddings.ndim}D")
+
+        n_elements, embedding_dim = embeddings.shape
+        logger.info(
+            f"Starting scalable soft clustering: {n_elements} elements, "
+            f"{embedding_dim}D embeddings"
+        )
+
+        # Phase 1: PCA preprocessing
+        phase_start = time.time()
+        if on_progress:
+            on_progress(SoftClusteringProgress(
+                phase="pca",
+                phase_description="PCA dimensionality reduction",
+                current_step=0,
+                total_steps=1,
+                n_elements=n_elements,
+            ))
+
+        pca_reduced = self._apply_pca(embeddings)
+        pca_dims = pca_reduced.shape[1]
+
+        if on_progress:
+            elapsed = time.time() - phase_start
+            on_progress(SoftClusteringProgress(
+                phase="pca",
+                phase_description="PCA dimensionality reduction",
+                current_step=1,
+                total_steps=1,
+                n_elements=n_elements,
+                n_features=pca_dims,
+                elapsed_seconds=elapsed,
+            ))
+
+        logger.info(f"PCA: {embedding_dim}D → {pca_dims}D")
+
+        # Phase 2: UMAP embedding
+        umap_start = time.time()
+        if on_progress:
+            on_progress(SoftClusteringProgress(
+                phase="umap",
+                phase_description="UMAP embedding",
+                current_step=0,
+                total_steps=1,
+                n_elements=n_elements,
+            ))
+
+        umap_reduced = self._apply_umap(pca_reduced, n_elements, on_progress)
+        umap_dims = umap_reduced.shape[1]
+
+        if on_progress:
+            elapsed = time.time() - umap_start
+            on_progress(SoftClusteringProgress(
+                phase="umap",
+                phase_description="UMAP embedding",
+                current_step=1,
+                total_steps=1,
+                n_elements=n_elements,
+                n_features=umap_dims,
+                elapsed_seconds=elapsed,
+            ))
+
+        logger.info(f"UMAP: {pca_dims}D → {umap_dims}D")
+
+        # Phase 3: HDBSCAN soft clustering
+        hdbscan_start = time.time()
+        if on_progress:
+            on_progress(SoftClusteringProgress(
+                phase="hdbscan",
+                phase_description="HDBSCAN soft clustering",
+                current_step=0,
+                total_steps=1,
+                n_elements=n_elements,
+            ))
+
+        self._memberships, n_clusters = self._apply_hdbscan_soft(umap_reduced)
+
+        if on_progress:
+            elapsed = time.time() - hdbscan_start
+            on_progress(SoftClusteringProgress(
+                phase="hdbscan",
+                phase_description="HDBSCAN soft clustering",
+                current_step=1,
+                total_steps=1,
+                n_elements=n_elements,
+                n_features=n_clusters,
+                elapsed_seconds=elapsed,
+            ))
+
+        logger.info(f"HDBSCAN: found {n_clusters} clusters")
+
+        # Phase 4: Compute feature affinity from soft memberships
+        self._feature_affinity = self._compute_feature_affinity()
+
+        # Build element membership mapping
+        element_memberships = self._build_element_memberships(element_ids)
+
+        # Count features with members
+        features_with_members = set()
+        for memberships in element_memberships.values():
+            for m in memberships:
+                features_with_members.add(m.feature_idx)
+
+        logger.info(
+            f"Scalable soft clustering complete: {len(element_memberships)} elements "
+            f"assigned to {len(features_with_members)} features"
+        )
+
+        # Report completion
+        if on_progress:
+            on_progress(SoftClusteringProgress(
+                phase="complete",
+                phase_description="Soft clustering complete",
+                current_step=1,
+                total_steps=1,
+                n_elements=n_elements,
+                n_features=len(features_with_members),
+            ))
+
+        return SoftClusteringResult(
+            element_memberships=element_memberships,
+            feature_affinity=self._feature_affinity,
+            n_features_found=len(features_with_members),
+            n_elements=n_elements,
+            cooccurrence_density=0.0,  # Not applicable for this approach
+        )
+
+    def _apply_pca(self, embeddings: np.ndarray) -> np.ndarray:
+        """Apply PCA to preserve distances before UMAP.
+
+        PCA is critical here because:
+        1. It preserves Euclidean distances (unlike UMAP)
+        2. Reduces computational cost of UMAP
+        3. Removes noise dimensions that could confuse clustering
+
+        Args:
+            embeddings: (n_elements, embedding_dim) array.
+
+        Returns:
+            PCA-reduced embeddings.
+        """
+        n_samples, n_features = embeddings.shape
+
+        if self.config.pca_components == 0:
+            # Auto-calculate: use enough components for 90% variance, capped at 100
+            # or n_samples-1 (whichever is smaller)
+            max_components = min(100, n_samples - 1, n_features)
+            self._pca_model = PCA(
+                n_components=max_components,
+                random_state=self.config.random_state,
+            )
+            reduced = self._pca_model.fit_transform(embeddings)
+
+            # Find how many components for 90% variance
+            cumsum = np.cumsum(self._pca_model.explained_variance_ratio_)
+            n_for_90pct = np.searchsorted(cumsum, 0.90) + 1
+            n_components = min(n_for_90pct, max_components)
+
+            logger.debug(
+                f"PCA auto-selected {n_components} components "
+                f"({cumsum[n_components-1]:.1%} variance explained)"
+            )
+
+            # Return only the needed components
+            return reduced[:, :n_components]
+        else:
+            # Use specified number of components
+            n_components = min(self.config.pca_components, n_samples - 1, n_features)
+            self._pca_model = PCA(
+                n_components=n_components,
+                random_state=self.config.random_state,
+            )
+            return self._pca_model.fit_transform(embeddings)
+
+    def _apply_umap(
+        self,
+        embeddings: np.ndarray,
+        n_elements: int,
+        on_progress: ProgressCallback | None = None,
+    ) -> np.ndarray:
+        """Apply UMAP with tuned parameters for distance preservation.
+
+        UMAP parameters are tuned to minimize distance distortion:
+        - Higher n_neighbors (30) preserves more global structure
+        - Higher min_dist (0.1) prevents excessive clumping
+        - Cosine metric matches embedding space geometry
+
+        Args:
+            embeddings: PCA-reduced embeddings.
+            n_elements: Total elements (for progress).
+            on_progress: Progress callback.
+
+        Returns:
+            UMAP-reduced embeddings.
+        """
+        n_samples = embeddings.shape[0]
+
+        # Adjust n_neighbors if dataset is small
+        n_neighbors = min(self.config.umap_n_neighbors, n_samples - 1)
+
+        # Adjust target dimensions if needed
+        n_components = min(self.config.umap_components, embeddings.shape[1])
+
+        # Create UMAP with progress callback if available
+        # Note: UMAP doesn't have a native progress callback, but we can use
+        # verbose mode and parse output, or just report at start/end
+        self._umap_model = umap.UMAP(
+            n_components=n_components,
+            n_neighbors=n_neighbors,
+            min_dist=self.config.umap_min_dist,
+            metric=self.config.umap_metric,
+            random_state=self.config.random_state,
+            verbose=False,  # We manage our own progress
+        )
+
+        return self._umap_model.fit_transform(embeddings)
+
+    def _apply_hdbscan_soft(
+        self,
+        embeddings: np.ndarray,
+    ) -> tuple[np.ndarray, int]:
+        """Apply HDBSCAN with soft clustering support.
+
+        Uses prediction_data=True to enable soft clustering via
+        all_points_membership_vectors().
+
+        Args:
+            embeddings: UMAP-reduced embeddings.
+
+        Returns:
+            Tuple of (soft_membership_matrix, n_clusters).
+        """
+        n_samples = embeddings.shape[0]
+
+        # Adjust min_cluster_size if dataset is small
+        min_cluster_size = min(self.config.min_cluster_size, max(2, n_samples // 10))
+        min_samples = min(self.config.min_samples, min_cluster_size)
+
+        self._clusterer = hdbscan.HDBSCAN(
+            min_cluster_size=min_cluster_size,
+            min_samples=min_samples,
+            metric="euclidean",  # Euclidean works well on UMAP output
+            prediction_data=True,  # Required for soft clustering
+        )
+
+        # Fit the clusterer
+        self._clusterer.fit(embeddings)
+
+        # Get hard labels to count clusters
+        labels = self._clusterer.labels_
+        n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
+
+        if n_clusters == 0:
+            logger.warning("HDBSCAN found no clusters. Returning uniform memberships.")
+            # Return uniform memberships to a single "cluster"
+            return np.ones((n_samples, 1), dtype=np.float32), 1
+
+        # Extract soft memberships using all_points_membership_vectors
+        # This gives probability of each point belonging to each cluster
+        # Shape: (n_samples, n_clusters)
+        soft_memberships = hdbscan.all_points_membership_vectors(self._clusterer)
+
+        # Handle edge case where soft memberships might be empty
+        if soft_memberships.size == 0:
+            logger.warning("Empty soft memberships from HDBSCAN. Using hard labels.")
+            # Fall back to hard labels as one-hot memberships
+            soft_memberships = np.zeros((n_samples, n_clusters), dtype=np.float32)
+            for i, label in enumerate(labels):
+                if label >= 0:
+                    soft_memberships[i, label] = 1.0
+
+        logger.debug(
+            f"HDBSCAN soft memberships: {soft_memberships.shape}, "
+            f"noise points: {(labels == -1).sum()}"
+        )
+
+        return soft_memberships, n_clusters
+
+    def _compute_feature_affinity(self) -> np.ndarray:
+        """Compute feature-to-feature affinity from soft memberships.
+
+        Affinity[i,j] = sum over elements of membership_i * membership_j
+        This measures how much two features share elements.
+
+        Returns:
+            Feature affinity matrix (n_features, n_features).
+        """
+        if self._memberships is None:
+            raise ValueError("Must fit before computing affinity")
+
+        # Normalize memberships to sum to 1 per element
+        row_sums = self._memberships.sum(axis=1, keepdims=True)
+        row_sums[row_sums == 0] = 1  # Avoid division by zero
+        normalized = self._memberships / row_sums
+
+        # Affinity = W^T @ W
+        return normalized.T @ normalized
+
+    def _build_element_memberships(
+        self, element_ids: list[str] | None
+    ) -> dict[str | int, list[FeatureMembership]]:
+        """Build per-element membership lists from soft membership matrix.
+
+        Args:
+            element_ids: Optional element ID list. Uses indices if not provided.
+
+        Returns:
+            Dict mapping element ID/index to list of FeatureMembership objects.
+        """
+        if self._memberships is None:
+            raise ValueError("Must fit before building memberships")
+
+        result: dict[str | int, list[FeatureMembership]] = {}
+
+        for elem_idx in range(self._memberships.shape[0]):
+            scores = self._memberships[elem_idx]
+
+            # Normalize to probabilities
+            total = scores.sum()
+            if total > 0:
+                scores = scores / total
+
+            # Find all features above threshold
+            above_threshold = [
+                (feat_idx, float(score))
+                for feat_idx, score in enumerate(scores)
+                if score >= self.config.membership_threshold
+            ]
+
+            if not above_threshold:
+                continue
+
+            # Sort by score descending
+            above_threshold.sort(key=lambda x: -x[1])
+
+            # Build membership objects
+            memberships = [
+                FeatureMembership(
+                    feature_idx=feat_idx,
+                    score=score,
+                    is_primary=(i == 0),
+                )
+                for i, (feat_idx, score) in enumerate(above_threshold)
+            ]
+
+            key = element_ids[elem_idx] if element_ids else elem_idx
+            result[key] = memberships
+
+        return result
+
+    def get_element_memberships(
+        self, result: SoftClusteringResult, element_id: str | int
+    ) -> list[FeatureMembership]:
+        """Get soft memberships for a specific element."""
+        return result.element_memberships.get(element_id, [])
+
+    def get_feature_members(
+        self,
+        result: SoftClusteringResult,
+        feature_idx: int,
+        min_score: float | None = None,
+    ) -> list[tuple[str | int, float, bool]]:
+        """Get all elements belonging to a feature with their scores."""
+        min_score = min_score or self.config.membership_threshold
+
+        members: list[tuple[str | int, float, bool]] = []
+        for elem_id, memberships in result.element_memberships.items():
+            for m in memberships:
+                if m.feature_idx == feature_idx and m.score >= min_score:
+                    members.append((elem_id, m.score, m.is_primary))
+                    break
+
+        return sorted(members, key=lambda x: -x[1])
+
+    def get_connected_features(
+        self,
+        result: SoftClusteringResult,
+        feature_idx: int,
+        min_affinity: float | None = None,
+    ) -> list[FeatureAffinity]:
+        """Get features connected to the given feature."""
         min_affinity = min_affinity or self.config.affinity_threshold
 
         affinities = result.feature_affinity[feature_idx]

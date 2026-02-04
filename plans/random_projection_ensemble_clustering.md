@@ -860,6 +860,9 @@ Rich Live display with progress bar, elapsed time, and ETA:
 - [x] Auto-calculate n_features as sqrt(n_elements)
 - [x] Iterative NMF with progress tracking
 - [x] CLI progress display with ETA
+- [x] Scalable pipeline: `ScalableSoftClusteringPipeline` (UMAP + HDBSCAN)
+- [x] PCA preprocessing for distance preservation
+- [x] Tests for scalable pipeline
 
 ### Phase 2: Magaldi Integration
 - [ ] Update `INDEX_MAPPING` with new fields
@@ -879,6 +882,105 @@ Rich Live display with progress bar, elapsed time, and ETA:
 - [ ] Multiple feature badges on elements
 - [ ] Related features sidebar
 - [ ] Cross-feature navigation
+
+---
+
+## Scalable Pipeline: UMAP + HDBSCAN (Option D)
+
+For large codebases (5k-30k+ elements), the cooccurrence matrix approach becomes O(n²) prohibitive. The `ScalableSoftClusteringPipeline` provides an O(n log n) alternative.
+
+### Algorithm
+
+```
+Embeddings (n, 1024)
+       │
+       ▼
+    PCA (preserves distances)
+       │
+       ▼
+    UMAP (n_neighbors=30, min_dist=0.1, metric='cosine')
+       │
+       ▼
+    HDBSCAN (prediction_data=True)
+       │
+       ▼
+    all_points_membership_vectors() → Soft memberships
+       │
+       ▼
+    W^T @ W → Feature affinity matrix
+```
+
+### Key Design Decisions
+
+1. **PCA before UMAP**: UMAP distorts distances. PCA first preserves Euclidean distances that UMAP would otherwise destroy. This is critical for meaningful soft memberships.
+
+2. **Tuned UMAP parameters**:
+   - `n_neighbors=30`: Higher values preserve more global structure
+   - `min_dist=0.1`: Prevents excessive clumping that would distort cluster boundaries
+   - `metric='cosine'`: Matches the embedding space geometry
+
+3. **HDBSCAN with `prediction_data=True`**: Enables `all_points_membership_vectors()` which gives soft memberships directly without NMF.
+
+4. **No cooccurrence matrix**: Avoids O(n²) memory and computation.
+
+### Complexity
+
+| Step | Complexity | Memory |
+|------|------------|--------|
+| PCA | O(n · d²) | O(n · d) |
+| UMAP | O(n log n) | O(n · k) |
+| HDBSCAN | O(n log n) | O(n) |
+| **Total** | **O(n log n)** | **O(n)** |
+
+vs. Cooccurrence + NMF:
+| Step | Complexity | Memory |
+|------|------------|--------|
+| Cooccurrence | O(n² · r) | O(n²) |
+| NMF | O(n² · k · i) | O(n²) |
+| **Total** | **O(n²)** | **O(n²)** |
+
+### When to Use Each Pipeline
+
+| Pipeline | Elements | Use Case |
+|----------|----------|----------|
+| `SoftClusteringPipeline` | < 5,000 | More accurate, NMF-based memberships |
+| `ScalableSoftClusteringPipeline` | 5,000+ | O(n log n) scalability |
+
+### Configuration
+
+```python
+from shared.ai.clustering.soft_clustering import (
+    ScalableSoftClusteringConfig,
+    ScalableSoftClusteringPipeline,
+)
+
+config = ScalableSoftClusteringConfig(
+    pca_components=0,       # Auto: min(100, 90% variance)
+    umap_components=50,
+    umap_n_neighbors=30,    # Higher = better distance preservation
+    umap_min_dist=0.1,      # Higher = less clumping
+    umap_metric="cosine",
+    min_cluster_size=15,
+    min_samples=5,
+    membership_threshold=0.01,
+)
+
+pipeline = ScalableSoftClusteringPipeline(config)
+result = pipeline.fit(embeddings, element_ids, on_progress=callback)
+```
+
+### Progress Phases
+
+The scalable pipeline reports progress for each phase:
+
+```
+Phase 1: PCA dimensionality reduction
+Phase 2: UMAP embedding
+Phase 3: HDBSCAN soft clustering
+Phase 4: Complete
+```
+
+Each phase reports elapsed time and (where applicable) ETA.
 
 ---
 

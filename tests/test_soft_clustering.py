@@ -9,6 +9,8 @@ from scipy.sparse import csr_matrix
 from shared.ai.clustering.soft_clustering import (
     FeatureAffinity,
     FeatureMembership,
+    ScalableSoftClusteringConfig,
+    ScalableSoftClusteringPipeline,
     SoftClusteringConfig,
     SoftClusteringPipeline,
     SoftClusteringProgress,
@@ -732,3 +734,354 @@ class TestEdgeCases:
         # Should handle (all points should cluster together)
         result = pipeline.fit(embeddings)
         assert result.n_elements == 20
+
+
+# =============================================================================
+# SCALABLE SOFT CLUSTERING CONFIG TESTS
+# =============================================================================
+
+
+class TestScalableSoftClusteringConfig:
+    """Tests for ScalableSoftClusteringConfig class."""
+
+    def test_default_values(self):
+        """Test default configuration values."""
+        config = ScalableSoftClusteringConfig()
+
+        assert config.pca_components == 0  # Auto
+        assert config.umap_components == 50
+        assert config.umap_n_neighbors == 30
+        assert config.umap_min_dist == 0.1
+        assert config.umap_metric == "cosine"
+        assert config.min_cluster_size == 15
+        assert config.min_samples == 5
+        assert config.membership_threshold == 0.01
+        assert config.affinity_threshold == 0.001
+        assert config.random_state == 42
+
+    def test_custom_values(self):
+        """Test custom configuration values."""
+        config = ScalableSoftClusteringConfig(
+            pca_components=100,
+            umap_components=30,
+            umap_n_neighbors=15,
+            min_cluster_size=10,
+        )
+
+        assert config.pca_components == 100
+        assert config.umap_components == 30
+        assert config.umap_n_neighbors == 15
+        assert config.min_cluster_size == 10
+
+
+# =============================================================================
+# SCALABLE SOFT CLUSTERING PIPELINE TESTS
+# =============================================================================
+
+
+class TestScalableSoftClusteringPipeline:
+    """Tests for ScalableSoftClusteringPipeline class."""
+
+    @pytest.fixture
+    def small_config(self):
+        """Configuration for small test datasets."""
+        return ScalableSoftClusteringConfig(
+            pca_components=10,
+            umap_components=5,
+            umap_n_neighbors=5,
+            min_cluster_size=3,
+            min_samples=2,
+            membership_threshold=0.01,
+            random_state=42,
+        )
+
+    @pytest.fixture
+    def clustered_embeddings(self):
+        """Create synthetic embeddings with clear clusters."""
+        np.random.seed(42)
+
+        # Create 3 distinct clusters
+        cluster1 = np.random.randn(20, 50) + np.array([5, 0, 0] + [0] * 47)
+        cluster2 = np.random.randn(20, 50) + np.array([0, 5, 0] + [0] * 47)
+        cluster3 = np.random.randn(20, 50) + np.array([0, 0, 5] + [0] * 47)
+
+        # Add some overlap points between clusters
+        overlap = np.random.randn(10, 50) + np.array([2.5, 2.5, 0] + [0] * 47)
+
+        embeddings = np.vstack([cluster1, cluster2, cluster3, overlap])
+        return embeddings.astype(np.float32)
+
+    def test_init_default_config(self):
+        """Test initialization with default config."""
+        pipeline = ScalableSoftClusteringPipeline()
+        assert pipeline.config is not None
+        assert pipeline.config.umap_components == 50
+
+    def test_init_custom_config(self, small_config):
+        """Test initialization with custom config."""
+        pipeline = ScalableSoftClusteringPipeline(small_config)
+        assert pipeline.config.umap_components == 5
+
+    def test_fit_empty_embeddings(self, small_config):
+        """Test fit with empty embeddings raises error."""
+        pipeline = ScalableSoftClusteringPipeline(small_config)
+
+        with pytest.raises(ValueError, match="Empty embeddings"):
+            pipeline.fit(np.array([]))
+
+    def test_fit_wrong_dimensions(self, small_config):
+        """Test fit with wrong dimensions raises error."""
+        pipeline = ScalableSoftClusteringPipeline(small_config)
+
+        with pytest.raises(ValueError, match="Expected 2D"):
+            pipeline.fit(np.array([1, 2, 3]))
+
+    def test_fit_basic(self, small_config, clustered_embeddings):
+        """Test basic fit operation."""
+        pipeline = ScalableSoftClusteringPipeline(small_config)
+        result = pipeline.fit(clustered_embeddings)
+
+        assert isinstance(result, SoftClusteringResult)
+        assert result.n_elements == len(clustered_embeddings)
+        assert result.feature_affinity.shape[0] == result.feature_affinity.shape[1]
+
+    def test_fit_with_element_ids(self, small_config, clustered_embeddings):
+        """Test fit with custom element IDs."""
+        pipeline = ScalableSoftClusteringPipeline(small_config)
+        element_ids = [f"element_{i}" for i in range(len(clustered_embeddings))]
+
+        result = pipeline.fit(clustered_embeddings, element_ids)
+
+        # Check that element IDs are used as keys
+        for key in result.element_memberships.keys():
+            assert isinstance(key, str)
+            assert key.startswith("element_")
+
+    def test_fit_without_element_ids(self, small_config, clustered_embeddings):
+        """Test fit without element IDs uses integer indices."""
+        pipeline = ScalableSoftClusteringPipeline(small_config)
+        result = pipeline.fit(clustered_embeddings)
+
+        # Check that integer indices are used as keys
+        for key in result.element_memberships.keys():
+            assert isinstance(key, int)
+
+    def test_memberships_have_primary(self, small_config, clustered_embeddings):
+        """Test that each element has exactly one primary membership."""
+        pipeline = ScalableSoftClusteringPipeline(small_config)
+        result = pipeline.fit(clustered_embeddings)
+
+        for memberships in result.element_memberships.values():
+            primary_count = sum(1 for m in memberships if m.is_primary)
+            assert primary_count == 1, "Each element should have exactly one primary"
+
+    def test_memberships_sorted_by_score(self, small_config, clustered_embeddings):
+        """Test that memberships are sorted by score descending."""
+        pipeline = ScalableSoftClusteringPipeline(small_config)
+        result = pipeline.fit(clustered_embeddings)
+
+        for memberships in result.element_memberships.values():
+            scores = [m.score for m in memberships]
+            assert scores == sorted(scores, reverse=True), "Memberships should be sorted by score"
+
+    def test_primary_is_highest_score(self, small_config, clustered_embeddings):
+        """Test that primary membership has the highest score."""
+        pipeline = ScalableSoftClusteringPipeline(small_config)
+        result = pipeline.fit(clustered_embeddings)
+
+        for memberships in result.element_memberships.values():
+            if memberships:
+                assert memberships[0].is_primary, "First (highest) should be primary"
+                assert memberships[0].score >= max(m.score for m in memberships)
+
+    def test_feature_affinity_symmetric(self, small_config, clustered_embeddings):
+        """Test that feature affinity matrix is symmetric."""
+        pipeline = ScalableSoftClusteringPipeline(small_config)
+        result = pipeline.fit(clustered_embeddings)
+
+        np.testing.assert_array_almost_equal(
+            result.feature_affinity,
+            result.feature_affinity.T,
+            decimal=5,
+            err_msg="Feature affinity should be symmetric",
+        )
+
+    def test_progress_callback(self, small_config, clustered_embeddings):
+        """Test that progress callback is invoked."""
+        progress_states = []
+
+        def on_progress(progress: SoftClusteringProgress):
+            progress_states.append(progress)
+
+        pipeline = ScalableSoftClusteringPipeline(small_config)
+        result = pipeline.fit(clustered_embeddings, on_progress=on_progress)
+
+        # Should have received progress callbacks
+        assert len(progress_states) > 0
+
+        # Should have PCA phase callbacks
+        pca_phases = [p for p in progress_states if p.phase == "pca"]
+        assert len(pca_phases) >= 1
+
+        # Should have UMAP phase callbacks
+        umap_phases = [p for p in progress_states if p.phase == "umap"]
+        assert len(umap_phases) >= 1
+
+        # Should have HDBSCAN phase callbacks
+        hdbscan_phases = [p for p in progress_states if p.phase == "hdbscan"]
+        assert len(hdbscan_phases) >= 1
+
+        # Should have complete callback
+        complete_phases = [p for p in progress_states if p.phase == "complete"]
+        assert len(complete_phases) == 1
+
+
+class TestScalableSoftClusteringPipelineQueries:
+    """Tests for query methods on scalable pipeline."""
+
+    @pytest.fixture
+    def fitted_result(self):
+        """Create a pre-fitted result for query tests."""
+        np.random.seed(42)
+
+        config = ScalableSoftClusteringConfig(
+            pca_components=10,
+            umap_components=5,
+            umap_n_neighbors=5,
+            min_cluster_size=3,
+            min_samples=2,
+            membership_threshold=0.01,
+            random_state=42,
+        )
+
+        # Create embeddings with clear structure
+        embeddings = np.random.randn(50, 30).astype(np.float32)
+        element_ids = [f"elem_{i}" for i in range(50)]
+
+        pipeline = ScalableSoftClusteringPipeline(config)
+        return pipeline, pipeline.fit(embeddings, element_ids)
+
+    def test_get_element_memberships_exists(self, fitted_result):
+        """Test getting memberships for existing element."""
+        pipeline, result = fitted_result
+
+        # Find an element that has memberships
+        if result.element_memberships:
+            elem_id = list(result.element_memberships.keys())[0]
+            memberships = pipeline.get_element_memberships(result, elem_id)
+            assert len(memberships) > 0
+            assert all(isinstance(m, FeatureMembership) for m in memberships)
+
+    def test_get_element_memberships_not_exists(self, fitted_result):
+        """Test getting memberships for non-existent element."""
+        pipeline, result = fitted_result
+        memberships = pipeline.get_element_memberships(result, "nonexistent")
+        assert memberships == []
+
+    def test_get_feature_members(self, fitted_result):
+        """Test getting members of a feature."""
+        pipeline, result = fitted_result
+
+        # Find a feature that has members
+        feature_idx = 0
+        members = pipeline.get_feature_members(result, feature_idx)
+
+        # Members should be tuples of (element_id, score, is_primary)
+        for member in members:
+            assert len(member) == 3
+            elem_id, score, is_primary = member
+            assert isinstance(score, float)
+            assert isinstance(is_primary, bool)
+
+    def test_get_connected_features(self, fitted_result):
+        """Test getting connected features."""
+        pipeline, result = fitted_result
+
+        if result.feature_affinity.shape[0] > 0:
+            connected = pipeline.get_connected_features(result, 0)
+
+            # Should return FeatureAffinity objects
+            for conn in connected:
+                assert isinstance(conn, FeatureAffinity)
+                assert conn.feature_idx != 0  # Should not include self
+
+
+class TestScalableSoftClusteringEdgeCases:
+    """Tests for edge cases in scalable pipeline."""
+
+    def test_small_dataset(self):
+        """Test with small dataset (fewer than n_neighbors)."""
+        config = ScalableSoftClusteringConfig(
+            pca_components=5,
+            umap_components=3,
+            umap_n_neighbors=30,  # More than n_samples
+            min_cluster_size=3,
+            min_samples=2,
+            random_state=42,
+        )
+
+        embeddings = np.random.randn(15, 20).astype(np.float32)
+        pipeline = ScalableSoftClusteringPipeline(config)
+
+        # Should handle gracefully
+        result = pipeline.fit(embeddings)
+        assert result.n_elements == 15
+
+    def test_pca_auto_components(self):
+        """Test PCA auto-selects components for 90% variance."""
+        config = ScalableSoftClusteringConfig(
+            pca_components=0,  # Auto
+            umap_components=5,
+            umap_n_neighbors=5,
+            min_cluster_size=3,
+            random_state=42,
+        )
+
+        # Create embeddings with some structure
+        np.random.seed(42)
+        embeddings = np.random.randn(30, 100).astype(np.float32)
+        pipeline = ScalableSoftClusteringPipeline(config)
+
+        result = pipeline.fit(embeddings)
+        assert result.n_elements == 30
+        # PCA model should have been created
+        assert pipeline._pca_model is not None
+
+    def test_high_dimensional_embeddings(self):
+        """Test with high-dimensional embeddings (like real sentence transformers)."""
+        config = ScalableSoftClusteringConfig(
+            pca_components=50,
+            umap_components=15,
+            umap_n_neighbors=10,
+            min_cluster_size=3,
+            min_samples=2,
+            random_state=42,
+        )
+
+        # Simulate 1024-dim embeddings
+        np.random.seed(42)
+        embeddings = np.random.randn(50, 1024).astype(np.float32)
+        pipeline = ScalableSoftClusteringPipeline(config)
+
+        result = pipeline.fit(embeddings)
+        assert result.n_elements == 50
+        assert result.feature_affinity is not None
+
+    def test_no_clusters_found(self):
+        """Test handling when HDBSCAN finds no clusters."""
+        config = ScalableSoftClusteringConfig(
+            pca_components=5,
+            umap_components=3,
+            umap_n_neighbors=3,
+            min_cluster_size=50,  # Very high - won't form clusters
+            min_samples=10,
+            random_state=42,
+        )
+
+        embeddings = np.random.randn(20, 20).astype(np.float32)
+        pipeline = ScalableSoftClusteringPipeline(config)
+
+        # Should handle gracefully with uniform memberships
+        result = pipeline.fit(embeddings)
+        assert result.n_elements == 20
+        assert result.feature_affinity is not None
