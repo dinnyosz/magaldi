@@ -148,7 +148,17 @@ async def search(
     if request.language:
         filters.append({"term": {"language": request.language}})
     if not request.include_tests:
-        filters.append({"term": {"is_test": False}})
+        # Match documents where is_test is false OR is_test field doesn't exist
+        # (features/subfeatures don't have is_test field)
+        filters.append({
+            "bool": {
+                "should": [
+                    {"term": {"is_test": False}},
+                    {"bool": {"must_not": {"exists": {"field": "is_test"}}}},
+                ],
+                "minimum_should_match": 1,
+            }
+        })
 
     # Validate at least one search mode is enabled
     if not request.use_text_search and not request.use_vector_search:
