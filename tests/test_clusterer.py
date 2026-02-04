@@ -37,7 +37,7 @@ class TestClusterConfig:
         assert config.cluster_selection_method == defaults.cluster_selection_method
         assert config.cluster_selection_epsilon == defaults.cluster_selection_epsilon
         assert config.membership_threshold == defaults.membership_threshold
-        assert config.affinity_threshold == defaults.affinity_threshold
+        assert config.affinity_percentile == defaults.affinity_percentile
 
         # ClusterConfig-specific defaults
         assert config.element_types == ["function", "method"]

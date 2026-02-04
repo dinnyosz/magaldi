@@ -126,7 +126,7 @@ class ProcessingResult:
 
     # Counts
     elements_processed: int = 0
-    elements_skipped: int = 0  # Already in ES with same content
+    elements_skipped: int = 0  # Content unchanged and already fully processed
     elements_deleted: int = 0  # Stale elements removed (in ES but not in code)
     elements_failed: int = 0
 
@@ -735,15 +735,17 @@ class ParallelismStats:
 class ProgressState:
     """Combined state for display updates."""
 
-    total: int
-    completed: int
-    skipped: int
+    total: int  # Elements to process (excludes unchanged and non-AI)
+    completed: int  # Elements processed so far
+    skipped: int  # Elements unchanged (already processed in previous run)
     failed: int
     timing: TimingStats
     workers: WorkerStatus
     num_workers: int = 1
     recent_errors: list[tuple[str, str]] = field(default_factory=list)  # (element_name, error)
     parallelism: ParallelismStats | None = None
+    total_found: int = 0  # All elements found from parsing
+    non_ai_skipped: int = 0  # Elements that don't need AI (imports, etc.)
 
 
 @dataclass
@@ -1163,19 +1165,40 @@ def should_embed(element: CodeElement) -> bool:
     Returns:
         True if element should be embedded.
     """
-    # All code elements get embedded (imports are tracked but not embedded)
+    # All code elements get embedded (including imports for semantic search)
     if element.element_type in (
         "file", "class", "interface", "type_alias", "trait", "enum",
-        "function", "method", "constant", "variable"
+        "function", "method", "constant", "variable", "import"
     ):
         return True
 
     return False
 
 
-# Element types that should NOT go through AI processing (summarization, embedding)
-# These are tracked/stored but don't need AI-generated summaries
-_NON_AI_ELEMENT_TYPES = frozenset({"import"})
+# Element types that get handcrafted summaries (no LLM needed)
+# These still get embedded for semantic search
+_HANDCRAFTED_SUMMARY_TYPES = frozenset({"import"})
+
+
+def _generate_import_summary(element: "CodeElement") -> str:
+    """Generate a handcrafted summary for import elements.
+
+    Works across languages by using the raw code directly,
+    which the embedding model understands semantically.
+
+    Args:
+        element: An import element with raw_code.
+
+    Returns:
+        A simple summary string suitable for embedding.
+    """
+    code = (element.signature or element.raw_code or "").strip()
+    if not code:
+        return f"Imports {element.name}" if element.name else "Import statement"
+
+    # The code itself is the best description - embedding model understands it
+    # Just add context prefix for clarity
+    return f"Import: {code}"
 
 
 # =============================================================================
@@ -1628,6 +1651,9 @@ def _process_single_element(
         update_status("summarizing", model_display, ctx_display)
         if config.skip_ai:
             summary = f"{element.element_type.title()}: {element.name}"
+        elif element.element_type in _HANDCRAFTED_SUMMARY_TYPES:
+            # Use handcrafted summary (no LLM call needed)
+            summary = _generate_import_summary(element)
         else:
             api_start = time.time()
             summary = _summarize_element(element, summary_cache, llm_client, config)
@@ -1826,11 +1852,8 @@ def process_elements(
     state_none_count = 0
     state_found_count = 0
     relocated_copied = 0
+    non_ai_count = 0  # No longer used - imports now get handcrafted summaries + embeddings
     for elem in all_elements:
-        # Skip import elements - they're stored but don't need AI processing
-        if elem.element_type in _NON_AI_ELEMENT_TYPES:
-            continue
-
         state = existing_states.get(elem.element_id)
         is_relocated = False
 
@@ -1895,7 +1918,11 @@ def process_elements(
         # Element is new OR content changed OR missing summary/embeddings - needs processing
         elements_to_process.append(elem)
 
-    total = len(all_elements)
+    # Total = elements that need processing (excludes unchanged)
+    total = len(elements_to_process)
+    # Track totals for display
+    unchanged_count = result.elements_skipped
+    total_found = len(all_elements)  # All elements found from parsing
 
     # Count elements per file to identify files where ALL elements were skipped
     elements_per_file: dict[str, int] = {}
@@ -1920,23 +1947,24 @@ def process_elements(
             )
 
     if not elements_to_process:
-        # All elements unchanged - fire progress callback showing 100% complete
+        # All elements unchanged - fire progress callback showing 0/0 with skipped count
         if on_progress:
-            # Show as complete with all skipped
             if timing_stats is None:
                 timing_stats = TimingStats()
             if worker_status is None:
                 worker_status = WorkerStatus()
             progress_state = ProgressState(
-                total=total,
-                completed=total,  # All done (skipped counts as done)
-                skipped=result.elements_skipped,
+                total=0,  # Nothing to process
+                completed=0,
+                skipped=unchanged_count,  # All were unchanged
                 failed=0,
                 timing=timing_stats,
                 workers=worker_status,
                 num_workers=config.num_workers if config.num_workers > 0 else 8,
                 recent_errors=[],
                 parallelism=None,
+                total_found=total_found,
+                non_ai_skipped=non_ai_count,
             )
             on_progress(progress_state)
         return result
@@ -2016,7 +2044,7 @@ def process_elements(
     timing_stats.set_totals_by_type_tier(totals_by_type_tier)
 
     # Track completed/failed counts for progress
-    completed_count = result.elements_skipped  # Start with skipped count
+    completed_count = 0  # Only count actually processed elements
     failed_count = 0
     recent_errors: list[tuple[str, str]] = []  # Track recent errors for display
 
@@ -2166,6 +2194,8 @@ def process_elements(
                         parallelism=dependency_tracker.get_parallelism_stats(
                             max_workers, fresh_throttle
                         ),
+                        total_found=total_found,
+                        non_ai_skipped=non_ai_count,
                     )
                     on_progress(progress_state)
                 continue
@@ -2257,6 +2287,8 @@ def process_elements(
                         parallelism=dependency_tracker.get_parallelism_stats(
                             max_workers, fresh_throttle
                         ),
+                        total_found=total_found,
+                        non_ai_skipped=non_ai_count,
                     )
                     on_progress(progress_state)
 

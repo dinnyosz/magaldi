@@ -111,6 +111,7 @@ class SoftClusteringResult:
         feature_affinity: Feature-to-feature affinity matrix.
         n_features_found: Number of features with at least one member.
         n_elements: Total elements processed.
+        affinity_threshold: Computed affinity threshold (from percentile).
         cooccurrence_density: Kept for API compatibility (always 0.0).
     """
 
@@ -118,6 +119,7 @@ class SoftClusteringResult:
     feature_affinity: np.ndarray
     n_features_found: int
     n_elements: int
+    affinity_threshold: float = 0.0  # Computed from percentile
     cooccurrence_density: float = 0.0
 
 
@@ -222,7 +224,10 @@ class SoftClusteringPipeline:
         logger.info(f"HDBSCAN: found {n_clusters} clusters")
 
         # Compute feature affinity from soft memberships
-        self._feature_affinity = self._compute_feature_affinity()
+        self._feature_affinity, affinity_threshold = self._compute_feature_affinity()
+        logger.info(
+            f"Affinity threshold (p{self.config.affinity_percentile}): {affinity_threshold:.4f}"
+        )
 
         # Build element membership mapping
         element_memberships = self._build_element_memberships(element_ids)
@@ -254,6 +259,7 @@ class SoftClusteringPipeline:
             feature_affinity=self._feature_affinity,
             n_features_found=len(features_with_members),
             n_elements=n_elements,
+            affinity_threshold=affinity_threshold,
         )
 
     def _apply_hdbscan_soft(
@@ -324,14 +330,14 @@ class SoftClusteringPipeline:
 
         return soft_memberships, n_clusters
 
-    def _compute_feature_affinity(self) -> np.ndarray:
+    def _compute_feature_affinity(self) -> tuple[np.ndarray, float]:
         """Compute feature-to-feature affinity from soft memberships.
 
         Affinity[i,j] = sum over elements of membership_i * membership_j
         This measures how much two features share elements.
 
         Returns:
-            Feature affinity matrix (n_features, n_features).
+            Tuple of (affinity matrix, computed threshold from percentile).
         """
         if self._memberships is None:
             raise ValueError("Must fit before computing affinity")
@@ -343,7 +349,28 @@ class SoftClusteringPipeline:
 
         # Affinity = W^T @ W
         affinity: np.ndarray = normalized.T @ normalized
-        return affinity
+
+        # Compute percentile-based threshold from off-diagonal values
+        n_features = affinity.shape[0]
+        if n_features < 2:
+            return affinity, 0.0
+
+        # Extract upper triangle (excluding diagonal)
+        upper_tri_indices = np.triu_indices(n_features, k=1)
+        off_diagonal = affinity[upper_tri_indices]
+
+        if off_diagonal.size == 0 or off_diagonal.max() == 0:
+            return affinity, 0.0
+
+        # Compute threshold at configured percentile
+        threshold = float(np.percentile(off_diagonal, self.config.affinity_percentile))
+        logger.debug(
+            f"Affinity distribution: min={off_diagonal.min():.4f}, "
+            f"max={off_diagonal.max():.4f}, "
+            f"p{self.config.affinity_percentile}={threshold:.4f}"
+        )
+
+        return affinity, threshold
 
     def _build_element_memberships(
         self, element_ids: list[str] | None
@@ -428,7 +455,8 @@ class SoftClusteringPipeline:
         min_affinity: float | None = None,
     ) -> list[FeatureAffinity]:
         """Get features connected to the given feature."""
-        min_affinity = min_affinity or self.config.affinity_threshold
+        # Use computed threshold from result (percentile-based)
+        min_affinity = min_affinity or result.affinity_threshold
 
         affinities = result.feature_affinity[feature_idx]
         connected = [

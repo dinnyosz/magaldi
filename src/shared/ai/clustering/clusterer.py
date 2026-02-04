@@ -46,7 +46,7 @@ class ClusterConfig:
     cluster_selection_method: str | None = None
     cluster_selection_epsilon: float | None = None
     membership_threshold: float | None = None
-    affinity_threshold: float | None = None
+    affinity_percentile: float | None = None
 
     # Element types to cluster
     element_types: list[str] = field(default_factory=lambda: ["function", "method"])
@@ -79,8 +79,8 @@ class ClusterConfig:
             self.cluster_selection_epsilon = defaults.cluster_selection_epsilon
         if self.membership_threshold is None:
             self.membership_threshold = defaults.membership_threshold
-        if self.affinity_threshold is None:
-            self.affinity_threshold = defaults.affinity_threshold
+        if self.affinity_percentile is None:
+            self.affinity_percentile = defaults.affinity_percentile
 
     @classmethod
     def from_magaldi_config(
@@ -112,7 +112,7 @@ class ClusterConfig:
             min_cluster_size=min_cluster_size if min_cluster_size is not None else cc.min_cluster_size,
             min_samples=min_samples if min_samples is not None else cc.min_samples,
             membership_threshold=cc.membership_threshold,
-            affinity_threshold=cc.affinity_threshold,
+            affinity_percentile=cc.affinity_percentile,
             # LLM settings (passed in, typically from summarize model)
             api_base=api_base or "http://localhost:11434",
             labeling_model=labeling_model or "qwen3:4b-instruct",
@@ -457,7 +457,7 @@ class FeatureClusterer:
             cluster_selection_method=self.config.cluster_selection_method,
             cluster_selection_epsilon=self.config.cluster_selection_epsilon,
             membership_threshold=self.config.membership_threshold,
-            affinity_threshold=self.config.affinity_threshold,
+            affinity_percentile=self.config.affinity_percentile,
         )
         pipeline = SoftClusteringPipeline(soft_config)
 
@@ -508,17 +508,15 @@ class FeatureClusterer:
             )
             centroid = cluster_embeddings.mean(axis=0).tolist()
 
-            # Get connected clusters from affinity matrix
-            connected = pipeline.get_connected_features(
-                soft_result, cluster_id, min_affinity=self.config.affinity_threshold
-            )
+            # Get connected clusters from affinity matrix (uses computed percentile threshold)
+            connected = pipeline.get_connected_features(soft_result, cluster_id)
             connected_clusters = [
                 ClusterAffinity(
                     cluster_id=c.feature_idx,
                     label=None,  # Will be filled after labeling
                     affinity=c.affinity,
                 )
-                for c in connected  # All connections above affinity_threshold
+                for c in connected
             ]
 
             # Build element summaries dict

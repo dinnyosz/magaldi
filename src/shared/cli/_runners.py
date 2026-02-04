@@ -205,9 +205,19 @@ def run_processing(
         bar_text.append("/", style="dim")
         bar_text.append(f"{state.total}", style="cyan")
         bar_text.append(f" ({pct:.0f}%)", style="green")
+        # Show breakdown: unchanged | non-AI | failed | total found
         if state.skipped > 0:
             bar_text.append(" | ", style="dim")
             bar_text.append(f"{state.skipped} unchanged", style="dim")
+        if state.non_ai_skipped > 0:
+            bar_text.append(" | ", style="dim")
+            bar_text.append(f"{state.non_ai_skipped} imports", style="dim")
+        if state.failed > 0:
+            bar_text.append(" | ", style="dim")
+            bar_text.append(f"{state.failed} failed", style="red")
+        if state.total_found > 0:
+            bar_text.append(" | ", style="dim")
+            bar_text.append(f"{state.total_found} total", style="dim")
         bar_text.append(" | ", style="dim")
         bar_text.append(elapsed_str, style="cyan")
         bar_text.append(" elapsed", style="dim")
@@ -223,7 +233,7 @@ def run_processing(
             tier_abbrev = {2048: "2k", 4096: "4k", 8192: "8k", 16384: "16k", 32768: "32k"}
             type_abbrev = {"function": "fn", "method": "mth", "class": "cls", "file": "file", "variable": "var", "constant": "const"}
             tiers = [32768, 16384, 8192, 4096, 2048]
-            type_order = ["file", "class", "function", "method", "variable", "constant"]
+            type_order = ["file", "class", "function", "method", "variable", "constant", "import"]
 
             # Build lookup from breakdown data
             eta_data: dict[tuple[str, int], tuple[float, bool, int, int]] = {}
@@ -239,7 +249,7 @@ def run_processing(
                 eta_table.add_column(f"[{color}]{tier_abbrev.get(tier, f'{tier//1024}k')}[/]", justify="center")
 
             # Type colors for row labels
-            type_colors = {"file": "cyan", "class": "magenta", "function": "blue", "method": "green", "variable": "yellow", "constant": "red"}
+            type_colors = {"file": "cyan", "class": "magenta", "function": "blue", "method": "green", "variable": "yellow", "constant": "red", "import": "bright_black"}
 
             # Add rows for each element type that has data
             for elem_type in type_order:
@@ -316,10 +326,11 @@ def run_processing(
             "method": "green",
             "constant": "yellow",
             "variable": "red",
+            "import": "bright_black",
         }
         type_stats = state.timing.get_type_stats()
         type_parts = []
-        for t in ["file", "class", "function", "method", "constant", "variable"]:
+        for t in ["file", "class", "function", "method", "constant", "variable", "import"]:
             if t in type_stats:
                 done, tot, avg_wall, avg_summ, avg_embed = type_stats[t]
                 color = type_colors.get(t, "white")
@@ -415,7 +426,7 @@ def run_processing(
     worker_status = WorkerStatus()
     total = parsing_result.total_elements
 
-    # Initialize state
+    # Initialize state (will be replaced by processor's on_progress callback)
     current_state = ProgressState(
         total=total,
         completed=0,
@@ -424,6 +435,8 @@ def run_processing(
         timing=timing_stats,
         workers=worker_status,
         num_workers=display_workers,
+        total_found=total,
+        non_ai_skipped=0,
     )
 
     class LiveDisplay:
