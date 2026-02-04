@@ -82,7 +82,7 @@ class TestSoftClusteringConfig:
         assert config.cluster_selection_method == "eom"
         assert config.cluster_selection_epsilon == 0.3
         assert config.membership_threshold == 0.05
-        assert config.affinity_threshold == 0.5
+        assert config.affinity_threshold == 0.2
 
     def test_custom_values(self):
         """Test custom configuration values."""

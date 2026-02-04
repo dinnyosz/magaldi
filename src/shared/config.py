@@ -273,7 +273,7 @@ class ClusteringConfig:
 
     # Thresholds
     membership_threshold: float = 0.05  # Min membership score to keep (5%)
-    affinity_threshold: float = 0.5  # Min affinity for connected features (50%)
+    affinity_threshold: float = 0.2  # Min affinity for connected features (20%)
 
 
 @dataclass

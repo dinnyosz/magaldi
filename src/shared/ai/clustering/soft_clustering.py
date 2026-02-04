@@ -85,7 +85,7 @@ class SoftClusteringConfig:
     cluster_selection_method: str = "eom"  # 'eom' has less noise than 'leaf'
     cluster_selection_epsilon: float = 0.3  # Merge clusters within this distance
     membership_threshold: float = 0.05  # 5% minimum membership to retain (for overlap)
-    affinity_threshold: float = 0.5  # 50% minimum affinity between features
+    affinity_threshold: float = 0.2  # 20% minimum affinity between features
 
 
 # =============================================================================

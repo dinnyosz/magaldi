@@ -59,7 +59,7 @@ class ClusterConfig:
     # Soft clustering options
     soft_clustering: bool = True  # Enable soft/overlapping memberships
     membership_threshold: float = 0.05  # Min membership score to keep (5%)
-    affinity_threshold: float = 0.5  # Min affinity for connected features (50%)
+    affinity_threshold: float = 0.2  # Min affinity for connected features (20%)
     cluster_selection_method: str = "eom"  # 'eom' has less noise than 'leaf'
     cluster_selection_epsilon: float = 0.3  # Merge clusters within this distance
 
