@@ -423,10 +423,45 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
             : 0
           )
       })
-      .on('click', (event, d) => {
-        event.stopPropagation()
-        onNodeClick(d)
+
+    // Reset everything when mouse leaves the graph area
+    const resetHoverState = () => {
+      setHoveredNode(null)
+
+      featureLinks
+        .transition()
+        .duration(150)
+        .attr('stroke-opacity', 0.1)
+
+      nodeElements
+        .transition()
+        .duration(150)
+        .attr('opacity', 1)
+
+      nodeElements.each(function(d) {
+        d3.select(this).select('circle')
+          .transition()
+          .duration(150)
+          .attr('stroke-width', d.node_type === 'feature' ? 3 : 0)
+          .attr('r', d.radius)
       })
+
+      nodeElements.select('text.node-label')
+        .transition()
+        .duration(150)
+        .attr('opacity', zoomLevel >= LABEL_ZOOM_THRESHOLD
+          ? Math.min(1, (zoomLevel - LABEL_ZOOM_THRESHOLD) / 0.5)
+          : 0
+        )
+    }
+
+    svg.on('mouseleave', resetHoverState)
+    g.on('mouseleave', resetHoverState)
+
+    nodeElements.on('click', (event, d) => {
+      event.stopPropagation()
+      onNodeClick(d)
+    })
 
     // Update positions on simulation tick
     simulation.on('tick', () => {
