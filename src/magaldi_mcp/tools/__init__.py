@@ -10,9 +10,45 @@ Tools are organized into category modules:
 - usages: Usage and implementation finding (find_usages, find_implementations)
 - glossary: Domain term discovery (list_glossary, get_glossary_term, search_glossary)
 - patterns: Pattern-based search (pattern_search)
+- call_graph: Call graph analysis (get_call_graph, find_callers, find_call_chain, etc.)
+- dependencies: Dependency analysis (find_dependencies, find_dependents, dependency_graph)
+- quality: Code quality tools (find_complex_functions, find_security_issues, etc.)
+- design_patterns: Design pattern detection (list_patterns, find_by_pattern)
+- trees: CLI command and HTTP route trees (get_command_tree, get_route_tree)
+- analysis: Element analysis (explain_element)
+- config: Configuration generation (generate_skill, generate_config)
+- mcp_review: MCP self-review (mcp_self_review)
 """
 
 # Export tool schemas
+from magaldi_mcp.tools.schemas import ALL_TOOL_SCHEMAS
+
+# Analysis tools
+from magaldi_mcp.tools.analysis import explain_element
+
+# Call graph tools
+from magaldi_mcp.tools.call_graph import (
+    find_call_chain,
+    find_callers,
+    find_dead_code,
+    find_entry_points,
+    get_call_graph,
+)
+
+# Config tools
+from magaldi_mcp.tools.config import generate_config, generate_skill
+
+# Dependencies tools
+from magaldi_mcp.tools.dependencies import (
+    dependency_graph,
+    find_dependencies,
+    find_dependents,
+)
+
+# Design pattern tools
+from magaldi_mcp.tools.design_patterns import find_by_pattern, list_patterns
+
+# Element navigation tools
 from magaldi_mcp.tools.elements import (
     batch_get_elements,
     get_children,
@@ -20,12 +56,19 @@ from magaldi_mcp.tools.elements import (
     get_element,
     get_file_structure,
 )
+
+# File tools
 from magaldi_mcp.tools.files import find_files
+
+# Glossary tools
 from magaldi_mcp.tools.glossary import (
     get_glossary_term,
     list_glossary,
     search_glossary,
 )
+
+# MCP review tools
+from magaldi_mcp.tools.mcp_review import mcp_self_review
 
 # Parser Lab tools
 from magaldi_mcp.tools.parser_lab import (
@@ -34,49 +77,41 @@ from magaldi_mcp.tools.parser_lab import (
     parser_lab_run_tests,
     parser_lab_suggest_fix,
 )
+
+# Pattern tools
 from magaldi_mcp.tools.patterns import pattern_search
+
+# Quality tools
+from magaldi_mcp.tools.quality import (
+    find_async_code,
+    find_complex_functions,
+    find_env_usage,
+    find_security_issues,
+    find_undocumented,
+)
+
+# Repository/feature tools
 from magaldi_mcp.tools.repository import (
     get_feature_members,
     get_repo_stats,
     list_features,
     list_repos,
 )
-from magaldi_mcp.tools.schemas import ALL_TOOL_SCHEMAS
 
-# Import from new modular structure
+# Search tools
 from magaldi_mcp.tools.search import (
     find_similar,
     search_code,
     search_features,
 )
+
+# Tree tools
+from magaldi_mcp.tools.trees import get_command_tree, get_route_tree
+
+# Usage tools
 from magaldi_mcp.tools.usages import (
     find_implementations,
     find_usages,
-)
-
-# Import remaining tools from tools_impl (not yet migrated to separate modules)
-from magaldi_mcp.tools_impl import (
-    dependency_graph,
-    explain_element,
-    find_async_code,
-    find_by_pattern,
-    find_call_chain,
-    find_callers,
-    find_complex_functions,
-    find_dead_code,
-    find_dependencies,
-    find_dependents,
-    find_entry_points,
-    find_env_usage,
-    find_security_issues,
-    find_undocumented,
-    generate_config,
-    generate_skill,
-    get_call_graph,
-    get_command_tree,
-    get_route_tree,
-    list_patterns,
-    mcp_self_review,
 )
 
 __all__ = [
@@ -106,34 +141,34 @@ __all__ = [
     "search_glossary",
     # Pattern tools
     "pattern_search",
-    # Call graph tools (from tools_impl)
+    # Call graph tools
     "get_call_graph",
     "find_callers",
     "find_call_chain",
     "find_dead_code",
     "find_entry_points",
-    # Dependency tools (from tools_impl)
+    # Dependency tools
     "find_dependencies",
     "find_dependents",
     "dependency_graph",
-    # Quality tools (from tools_impl)
+    # Quality tools
     "find_complex_functions",
     "find_security_issues",
     "find_undocumented",
     "find_env_usage",
     "find_async_code",
-    # Pattern/design tools (from tools_impl)
+    # Design pattern tools
     "list_patterns",
     "find_by_pattern",
-    # Config tools (from tools_impl)
+    # Config tools
     "generate_skill",
     "generate_config",
-    # Tree tools (from tools_impl)
+    # Tree tools
     "get_command_tree",
     "get_route_tree",
-    # Analysis tools (from tools_impl)
+    # Analysis tools
     "explain_element",
-    # MCP review (from tools_impl)
+    # MCP review
     "mcp_self_review",
     # Parser Lab tools
     "parser_lab_analyze",
