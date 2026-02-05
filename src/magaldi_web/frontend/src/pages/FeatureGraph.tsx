@@ -332,6 +332,12 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
       .on('mouseenter', function(_event, d) {
         setHoveredNode(d)
 
+        // Interrupt any ongoing transitions to prevent race conditions
+        featureLinks.interrupt()
+        nodeElements.interrupt()
+        nodeElements.select('circle').interrupt()
+        nodeElements.select('text.node-label').interrupt()
+
         // Find connected node IDs
         const connectedIds = new Set<string>()
         connectedIds.add(d.id)  // Include self
@@ -387,7 +393,10 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
             return n.node_type === 'feature' ? 3 : 0  // Default
           })
 
-        // Slightly enlarge hovered node
+        // Reset all node sizes first, then enlarge hovered node
+        nodeElements.each(function(node) {
+          d3.select(this).select('circle').attr('r', node.radius)
+        })
         d3.select(this).select('circle')
           .transition()
           .duration(150)
