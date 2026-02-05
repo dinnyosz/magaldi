@@ -77,7 +77,7 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
   const [minSharedMembers, setMinSharedMembers] = useState(5)
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown>>()
   const simulationRef = useRef<d3.Simulation<GraphNode, GraphLink> | null>(null)
-  const featureLinksRef = useRef<d3.Selection<SVGLineElement, GraphLink, SVGGElement, unknown> | null>(null)
+  const featureLinksRef = useRef<d3.Selection<SVGLineElement | d3.BaseType, GraphLink, SVGGElement, unknown> | null>(null)
 
   // Process nodes and create graph data
   const { graphNodes, graphLinks } = useMemo(() => {
