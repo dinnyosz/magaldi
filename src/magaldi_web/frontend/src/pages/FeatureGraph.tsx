@@ -229,22 +229,21 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
       .attr('stroke-width', 1.5)
       .attr('stroke-opacity', 0.6)
 
-    // Feature connection links - only show connections WITH shared members (actual code overlap)
-    // Affinity-only connections (no shared members) are filtered out as they add noise
-    const featureConnectionData = graphLinks.filter(
-      l => l.linkType === 'feature-connection' && l.shared_member_count > 0
-    )
+    // Feature connection links - based on soft clustering affinity (semantic similarity)
+    // Note: shared_member_count is always 0 between different features because
+    // HDBSCAN hard clustering assigns each element to exactly one feature
+    const featureConnectionData = graphLinks.filter(l => l.linkType === 'feature-connection')
 
-    // Calculate max shared count for normalization
-    const maxShared = Math.max(1, ...featureConnectionData.map(d => d.shared_member_count))
+    // Calculate max affinity for normalization
+    const maxAffinity = Math.max(0.01, ...featureConnectionData.map(d => d.affinity))
 
     const featureLinks = linkGroup.selectAll('line.feature-connection')
       .data(featureConnectionData)
       .join('line')
       .attr('class', 'feature-connection')
       .attr('stroke', '#f97316')  // Orange color for visibility
-      .attr('stroke-width', d => 2 + (d.shared_member_count / maxShared) * 8)
-      .attr('stroke-opacity', 0.8)
+      .attr('stroke-width', d => 1 + (d.affinity / maxAffinity) * 5)
+      .attr('stroke-opacity', d => 0.3 + (d.affinity / maxAffinity) * 0.5)
 
     // Create node group
     const nodeGroup = g.append('g').attr('class', 'nodes')
@@ -371,9 +370,9 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
 
         // Adjust link widths
         parentChildLinks.attr('stroke-width', 1.5 / transform.k)
-        const zoomMaxShared = Math.max(1, ...featureConnectionData.map(d => d.shared_member_count))
+        const zoomMaxAffinity = Math.max(0.01, ...featureConnectionData.map(d => d.affinity))
         featureLinks.attr('stroke-width', (d: GraphLink) =>
-          (2 + (d.shared_member_count / zoomMaxShared) * 8) / transform.k
+          (1 + (d.affinity / zoomMaxAffinity) * 5) / transform.k
         )
       })
 
@@ -683,10 +682,10 @@ function FeatureGraph() {
                     width: 30,
                     height: 4,
                     backgroundColor: '#f97316',
-                    opacity: 0.8,
+                    opacity: 0.6,
                   }}
                 ></div>
-                <span className="small">Shared members (thicker = more overlap)</span>
+                <span className="small">Semantic similarity (thicker = higher affinity)</span>
               </div>
             </Card.Body>
           </Card>
