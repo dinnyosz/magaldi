@@ -73,8 +73,11 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
   const containerRef = useRef<HTMLDivElement>(null)
   const [zoomLevel, setZoomLevel] = useState(1)
   const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null)
+  const [showAllConnections, setShowAllConnections] = useState(false)
+  const [minSharedMembers, setMinSharedMembers] = useState(5)
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown>>()
   const simulationRef = useRef<d3.Simulation<GraphNode, GraphLink> | null>(null)
+  const featureLinksRef = useRef<d3.Selection<SVGLineElement, GraphLink, SVGGElement, unknown> | null>(null)
 
   // Process nodes and create graph data
   const { graphNodes, graphLinks } = useMemo(() => {
@@ -194,38 +197,38 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
       .attr('d', 'M 0,-5 L 10 ,0 L 0,5')
       .attr('fill', '#94a3b8')
 
-    // Create force simulation with better spacing
+    // Create force simulation - spread features evenly, cluster subfeatures with parents
     const simulation = d3.forceSimulation<GraphNode>(graphNodes)
       .force('link', d3.forceLink<GraphNode, GraphLink>(graphLinks)
         .id(d => d.id)
         .distance(d => {
-          if (d.linkType === 'parent-child') return 60
-          // Longer distances for feature connections to spread them out
-          return 250
+          if (d.linkType === 'parent-child') return 50
+          // Feature connections don't pull nodes together (visual only)
+          return 300
         })
         .strength(d => {
-          if (d.linkType === 'parent-child') return 0.7
-          // Weaker link force so nodes spread more
-          return 0.05
+          if (d.linkType === 'parent-child') return 0.8
+          // Don't use connection links for layout
+          return 0
         })
       )
       .force('charge', d3.forceManyBody()
-        // Much stronger repulsion to spread nodes apart
-        .strength(d => (d as GraphNode).node_type === 'feature' ? -800 : -200)
-        .distanceMax(500)
+        // Strong repulsion to spread nodes apart evenly
+        .strength(d => (d as GraphNode).node_type === 'feature' ? -1500 : -100)
+        .distanceMax(600)
       )
       .force('center', d3.forceCenter(width / 2, height / 2))
       .force('collision', d3.forceCollide<GraphNode>()
-        // More padding between nodes
-        .radius(d => d.radius + 30)
-        .strength(0.8)
+        // Generous padding between nodes
+        .radius(d => d.radius + 40)
+        .strength(1)
       )
-      // Add radial force to spread features in a circle
+      // Spread features in a wide ring
       .force('radial', d3.forceRadial<GraphNode>(
-        d => d.node_type === 'feature' ? 250 : 100,
+        d => d.node_type === 'feature' ? Math.min(width, height) * 0.35 : 40,
         width / 2,
         height / 2
-      ).strength(d => d.node_type === 'feature' ? 0.1 : 0.3))
+      ).strength(d => d.node_type === 'feature' ? 0.3 : 0.5))
 
     simulationRef.current = simulation
 
@@ -242,9 +245,9 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
       .attr('stroke-opacity', 0.6)
 
     // Feature connection links - based on shared soft clustering members
-    // Filter to only show significant connections (at least 2 shared members)
+    // Filter based on threshold
     const featureConnectionData = graphLinks.filter(
-      l => l.linkType === 'feature-connection' && l.shared_member_count >= 2
+      l => l.linkType === 'feature-connection' && l.shared_member_count >= minSharedMembers
     )
 
     // Calculate max shared count for normalization
@@ -256,7 +259,9 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
       .attr('class', 'feature-connection')
       .attr('stroke', '#f97316')  // Orange color for visibility
       .attr('stroke-width', d => 1.5 + (d.shared_member_count / maxShared) * 6)
-      .attr('stroke-opacity', d => 0.4 + (d.shared_member_count / maxShared) * 0.4)
+      .attr('stroke-opacity', 0)  // Start hidden, show on hover or toggle
+
+    featureLinksRef.current = featureLinks
 
     // Create node group
     const nodeGroup = g.append('g').attr('class', 'nodes')
@@ -314,7 +319,7 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
       .attr('fill', 'white')
       .text(d => d.member_count)
 
-    // Node interactions
+    // Node interactions - show connections on hover
     nodeElements
       .on('mouseenter', function(_event, d) {
         d3.select(this).select('circle')
@@ -322,6 +327,21 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
           .duration(150)
           .attr('r', d.radius * 1.2)
         setHoveredNode(d)
+
+        // Show connections for this node (unless show all is enabled)
+        if (!showAllConnections && d.node_type === 'feature') {
+          featureLinks
+            .transition()
+            .duration(150)
+            .attr('stroke-opacity', link => {
+              const sourceId = typeof link.source === 'string' ? link.source : link.source.id
+              const targetId = typeof link.target === 'string' ? link.target : link.target.id
+              if (sourceId === d.id || targetId === d.id) {
+                return 0.4 + (link.shared_member_count / maxShared) * 0.4
+              }
+              return 0
+            })
+        }
       })
       .on('mouseleave', function(_event, d) {
         d3.select(this).select('circle')
@@ -329,6 +349,14 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
           .duration(150)
           .attr('r', d.radius)
         setHoveredNode(null)
+
+        // Hide connections (unless show all is enabled)
+        if (!showAllConnections) {
+          featureLinks
+            .transition()
+            .duration(150)
+            .attr('stroke-opacity', 0)
+        }
       })
       .on('click', (event, d) => {
         event.stopPropagation()
@@ -410,7 +438,26 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
     return () => {
       simulation.stop()
     }
-  }, [graphNodes, graphLinks, onNodeClick])
+  }, [graphNodes, graphLinks, onNodeClick, showAllConnections, minSharedMembers])
+
+  // Effect to update connections visibility when toggle changes
+  useEffect(() => {
+    if (!featureLinksRef.current) return
+
+    const maxShared = Math.max(1, ...graphLinks
+      .filter(l => l.linkType === 'feature-connection')
+      .map(d => d.shared_member_count))
+
+    featureLinksRef.current
+      .transition()
+      .duration(300)
+      .attr('stroke-opacity', d => {
+        if (showAllConnections) {
+          return 0.3 + (d.shared_member_count / maxShared) * 0.4
+        }
+        return 0
+      })
+  }, [showAllConnections, graphLinks])
 
   const handleZoomIn = () => {
     if (svgRef.current && zoomRef.current) {
@@ -439,8 +486,42 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
     }
   }
 
+  // Count connections at current threshold
+  const connectionCount = graphLinks.filter(
+    l => l.linkType === 'feature-connection' && l.shared_member_count >= minSharedMembers
+  ).length
+
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative' }}>
+      {/* Connection Controls */}
+      <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 10, maxWidth: 200 }}>
+        <Card className="shadow-sm" style={{ fontSize: '0.85rem' }}>
+          <Card.Body className="p-2">
+            <Form.Check
+              type="switch"
+              id="show-connections"
+              label={<small>Show all connections</small>}
+              checked={showAllConnections}
+              onChange={(e) => setShowAllConnections(e.target.checked)}
+              className="mb-2"
+            />
+            <Form.Label className="mb-1 d-block">
+              <small>Min shared: {minSharedMembers}</small>
+            </Form.Label>
+            <Form.Range
+              min={1}
+              max={20}
+              value={minSharedMembers}
+              onChange={(e) => setMinSharedMembers(Number(e.target.value))}
+              className="mb-1"
+            />
+            <small className="text-muted d-block">
+              {connectionCount} connection{connectionCount !== 1 ? 's' : ''} shown
+            </small>
+          </Card.Body>
+        </Card>
+      </div>
+
       {/* Zoom Controls */}
       <div style={{ position: 'absolute', top: 10, right: 10, zIndex: 10 }}>
         <ButtonGroup vertical size="sm">
@@ -628,16 +709,16 @@ function FeatureGraph() {
               <hr />
               <div className="text-muted small">
                 <p className="mb-2">
+                  <i className="bi bi-cursor me-1"></i>
+                  <strong>Hover</strong> a feature to see connections
+                </p>
+                <p className="mb-2">
                   <i className="bi bi-hand-index me-1"></i>
                   <strong>Drag</strong> nodes to rearrange
                 </p>
                 <p className="mb-2">
                   <i className="bi bi-mouse me-1"></i>
                   <strong>Scroll</strong> to zoom in/out
-                </p>
-                <p className="mb-2">
-                  <i className="bi bi-arrows-move me-1"></i>
-                  <strong>Pan</strong> by dragging background
                 </p>
                 <p className="mb-0">
                   <i className="bi bi-zoom-in me-1"></i>
@@ -698,7 +779,7 @@ function FeatureGraph() {
                     opacity: 0.6,
                   }}
                 ></div>
-                <span className="small">Semantic similarity (thicker = higher affinity)</span>
+                <span className="small">Shared members (hover to see)</span>
               </div>
             </Card.Body>
           </Card>
