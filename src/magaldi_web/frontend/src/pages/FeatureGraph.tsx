@@ -74,9 +74,38 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
   const [zoomLevel, setZoomLevel] = useState(1)
   const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null)
   const [minSharedMembers, setMinSharedMembers] = useState(5)
+  const [isFullscreen, setIsFullscreen] = useState(false)
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown>>()
   const simulationRef = useRef<d3.Simulation<GraphNode, GraphLink> | null>(null)
   const featureLinksRef = useRef<d3.Selection<SVGLineElement | d3.BaseType, GraphLink, SVGGElement, unknown> | null>(null)
+
+  // Handle fullscreen toggle
+  const toggleFullscreen = useCallback(() => {
+    if (!containerRef.current) return
+
+    if (!document.fullscreenElement) {
+      containerRef.current.requestFullscreen().then(() => {
+        setIsFullscreen(true)
+      }).catch(err => {
+        console.error('Failed to enter fullscreen:', err)
+      })
+    } else {
+      document.exitFullscreen().then(() => {
+        setIsFullscreen(false)
+      }).catch(err => {
+        console.error('Failed to exit fullscreen:', err)
+      })
+    }
+  }, [])
+
+  // Listen for fullscreen changes (e.g., user presses Escape)
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement)
+    }
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
+  }, [])
 
   // Process nodes and create graph data
   const { graphNodes, graphLinks } = useMemo(() => {
@@ -627,7 +656,15 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
   ).length
 
   return (
-    <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative' }}>
+    <div
+      ref={containerRef}
+      style={{
+        width: '100%',
+        height: '100%',
+        position: 'relative',
+        backgroundColor: isFullscreen ? '#f8fafc' : 'transparent',
+      }}
+    >
       {/* Connection Controls */}
       <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 10, maxWidth: 180 }}>
         <Card className="shadow-sm" style={{ fontSize: '0.85rem' }}>
@@ -665,6 +702,11 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
           <OverlayTrigger placement="left" overlay={<Tooltip>Reset View</Tooltip>}>
             <Button variant="outline-secondary" onClick={handleReset}>
               <i className="bi bi-arrows-angle-contract"></i>
+            </Button>
+          </OverlayTrigger>
+          <OverlayTrigger placement="left" overlay={<Tooltip>{isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}</Tooltip>}>
+            <Button variant="outline-secondary" onClick={toggleFullscreen}>
+              <i className={`bi ${isFullscreen ? 'bi-fullscreen-exit' : 'bi-fullscreen'}`}></i>
             </Button>
           </OverlayTrigger>
         </ButtonGroup>
