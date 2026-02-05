@@ -12,8 +12,8 @@ from magaldi_core.processor import (
     ProgressState,
     ProcessedElement,
     _summarize_element,
-    _SummaryCache,
 )
+from magaldi_core.job_tracker import SummaryCache
 from magaldi_core.code_parser import CodeElement
 
 
@@ -1185,7 +1185,7 @@ class TestPerElementContextSize:
         )
 
         config = ProcessingConfig()
-        cache = _SummaryCache()
+        cache = SummaryCache()
         cache.add_element(element)
 
         _summarize_element(element, cache, mock_llm, config)
@@ -1207,7 +1207,7 @@ class TestPerElementContextSize:
         )
 
         config = ProcessingConfig()
-        cache = _SummaryCache()
+        cache = SummaryCache()
         cache.add_element(element)
 
         _summarize_element(element, cache, mock_llm, config)
@@ -1229,7 +1229,7 @@ class TestPerElementContextSize:
         )
 
         config = ProcessingConfig()
-        cache = _SummaryCache()
+        cache = SummaryCache()
         cache.add_element(element)
 
         _summarize_element(element, cache, mock_llm, config)
@@ -1259,7 +1259,7 @@ class TestPerElementContextSize:
         )
 
         config = ProcessingConfig()
-        cache = _SummaryCache()
+        cache = SummaryCache()
         cache.add_element(func_element)
         cache.add_element(file_element)
 
@@ -1277,7 +1277,7 @@ class TestPerElementContextSize:
         from magaldi_core.processor import (
             _process_single_element,
             WorkerStatus,
-            _SummaryCache,
+            SummaryCache,
         )
 
         mock_llm = MagicMock()
@@ -1296,7 +1296,7 @@ class TestPerElementContextSize:
 
         config = ProcessingConfig()
         config.skip_ai = True  # Skip actual LLM calls
-        cache = _SummaryCache()
+        cache = SummaryCache()
         cache.add_element(small_element)
         worker_status = WorkerStatus()
         status_updates = []
