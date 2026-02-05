@@ -498,6 +498,10 @@ def process_elements(
             # Even when not throttling, we ramp up gradually to avoid overwhelming
             throttle_limit = current_throttle.recommended_workers
 
+            # Clear post_warmup flag AFTER getting throttle_limit (not in display calls)
+            # This ensures the flag is only consumed once per warmup, for the main calculation
+            dependency_tracker.clear_post_warmup()
+
             # Get elements that are ready (parents completed)
             # DependencyTracker applies tier-specific limits internally
             # Pass throttle_limit to further reduce concurrency if needed
@@ -539,7 +543,7 @@ def process_elements(
                     )
                     fresh_throttle = dependency_tracker.compute_throttle_decision(
                         fresh_current_max, fresh_active, fresh_throughput, fresh_avg, fresh_count,
-                        fresh_avg_conc, fresh_high_load
+                        fresh_avg_conc, fresh_high_load, is_display_call=True
                     )
                     progress_state = ProgressState(
                         total=total,

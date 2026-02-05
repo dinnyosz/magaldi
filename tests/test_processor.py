@@ -1479,9 +1479,13 @@ class TestDynamicWorkerScaling:
 
         # Post-warmup should force starting at 1 worker, not jumping based on historical
         assert decision.recommended_workers == 1
-        assert "post-warmup" in decision.reason.lower() or decision.recommended_workers == 1
+        assert "post-warmup" in decision.reason.lower()
 
-        # Subsequent calls should NOT have post_warmup (flag is consumed)
+        # Flag is NOT auto-consumed - must call clear_post_warmup() explicitly
+        # (This matches processor behavior where clear is called after main throttle calc)
+        tracker.clear_post_warmup()
+
+        # Subsequent calls should NOT have post_warmup (flag was cleared)
         decision2 = tracker.compute_throttle_decision(
             current_max_runtime=0.0,
             active_workers=1,  # Now we have 1 active

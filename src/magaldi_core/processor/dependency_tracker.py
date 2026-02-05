@@ -6,10 +6,16 @@ Manages parent-child dependencies and batching strategy for optimal processing.
 from __future__ import annotations
 
 import threading
+import time
 from typing import TYPE_CHECKING
 
 from shared.ai.context_size import CONTEXT_TIERS, TIER_TIMEOUTS
-from shared.throttling import compute_throttle_decision, ThrottleDecision
+from shared.throttling import compute_throttle_decision, ThrottleDecision, RAMP_COOLDOWN_SECONDS
+
+def _log_warmup(message: str) -> None:
+    """Debug logging - disabled by default."""
+    pass
+
 
 if TYPE_CHECKING:
     from magaldi_core.code_parser import CodeElement
@@ -55,6 +61,8 @@ class DependencyTracker:
         self._warmup_task_id: str | None = None  # ID of warmup task (first task of new tier)
         self._tier_just_changed: bool = False  # True when tier changed (for throughput reset)
         self._post_warmup: bool = False  # True after warmup completes (for gradual ramp)
+        self._last_ramp_time: float = 0.0  # Last time we ramped up (for cooldown)
+        self._last_recommended_workers: int = 0  # Track to detect ramp-ups
         # Use provided workers or default
         self._max_num_workers = max_num_workers if max_num_workers else self.DEFAULT_WORKERS
         self._timeout = timeout  # Timeout for throttle calculations
@@ -291,6 +299,18 @@ class DependencyTracker:
                 return True
             return False
 
+    def clear_post_warmup(self) -> None:
+        """Clear the post_warmup flag after main throttle calculation.
+
+        Must be called ONCE per loop iteration after the main throttle decision,
+        NOT after display-only throttle calls. This ensures the flag is consumed
+        only when the throttle limit is actually applied.
+        """
+        with self._lock:
+            if self._post_warmup:
+                _log_warmup("CLEAR: post_warmup flag cleared")
+                self._post_warmup = False
+
     def get_current_tier_timeout(self) -> float:
         """Get timeout for the current tier (scales with context size)."""
         with self._lock:
@@ -314,6 +334,7 @@ class DependencyTracker:
                 self._tier_changing = False
                 self._warmup_task_id = None
                 self._post_warmup = True  # Signal for gradual ramp-up
+                _log_warmup(f"WARMUP COMPLETE: set post_warmup=True")
 
     def mark_failed(self, element_id: str) -> None:
         """Mark element as failed (won't block children)."""
@@ -375,6 +396,7 @@ class DependencyTracker:
         completion_count: int = 0,
         avg_concurrency: float = 0.0,
         avg_base_time: float = 0.0,
+        is_display_call: bool = False,
     ) -> ThrottleDecision:
         """Compute throttle decision based on base_time (normalized by concurrency).
 
@@ -389,17 +411,20 @@ class DependencyTracker:
             completion_count: Number of completions in tracking window.
             avg_concurrency: Average workers active at task start.
             avg_base_time: Average of (runtime/workers) from completions.
+            is_display_call: If True, don't apply cooldown (display only, not actual throttle).
 
         Returns:
             ThrottleDecision with recommended action.
         """
         with self._lock:
-            # Check and consume post_warmup flag
+            # Note: post_warmup is NOT consumed here - it must be explicitly cleared
+            # via clear_post_warmup() after the main throttle calculation.
+            # This prevents display calls from consuming it before the main call.
             post_warmup = self._post_warmup
             if post_warmup:
-                self._post_warmup = False  # Clear after consuming
+                _log_warmup(f"THROTTLE: post_warmup=True, active_workers={active_workers}")
 
-            return compute_throttle_decision(
+            decision = compute_throttle_decision(
                 current_max_runtime=current_max_runtime,
                 tier_timeout=self.get_current_tier_timeout(),
                 base_workers=self._max_num_workers,
@@ -411,6 +436,41 @@ class DependencyTracker:
                 avg_base_time=avg_base_time,
                 post_warmup=post_warmup,
             )
+
+            # Apply ramp cooldown: don't ramp up more than once per RAMP_COOLDOWN_SECONDS
+            # This prevents overwhelming the system when poll interval is fast (2s)
+            # Skip cooldown for display calls (they don't affect actual throttling)
+            if not is_display_call:
+                now = time.time()
+                is_ramping = decision.recommended_workers > self._last_recommended_workers
+                cooldown_elapsed = (now - self._last_ramp_time) >= RAMP_COOLDOWN_SECONDS
+
+                if is_ramping and not cooldown_elapsed:
+                    # In cooldown, hold at last recommended instead of ramping
+                    from shared.throttling import _log_throttle
+                    remaining = RAMP_COOLDOWN_SECONDS - (now - self._last_ramp_time)
+                    _log_throttle(
+                        f"RAMP COOLDOWN: want {decision.recommended_workers} but holding at "
+                        f"{self._last_recommended_workers} ({remaining:.1f}s remaining)"
+                    )
+                    decision = ThrottleDecision(
+                        should_throttle=decision.should_throttle,
+                        current_max=decision.current_max,
+                        historical_max=decision.historical_max,
+                        completed_avg=decision.completed_avg,
+                        recommended_workers=self._last_recommended_workers,
+                        reason=f"{decision.reason} (cooldown)",
+                        completion_count=decision.completion_count,
+                    )
+                elif is_ramping and cooldown_elapsed:
+                    # Ramping up, reset cooldown timer
+                    self._last_ramp_time = now
+                    self._last_recommended_workers = decision.recommended_workers
+                elif decision.recommended_workers != self._last_recommended_workers:
+                    # Scale down or other change, update tracking but no cooldown
+                    self._last_recommended_workers = decision.recommended_workers
+
+            return decision
 
     def get_tier_stats(self) -> dict[int, tuple[int, int]]:
         """Get (ready, total) counts per tier for pending elements."""

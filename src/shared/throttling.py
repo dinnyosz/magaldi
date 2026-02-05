@@ -13,7 +13,7 @@ from threading import Lock
 
 
 def _log_throttle(message: str) -> None:
-    """No-op debug logging (disabled for performance)."""
+    """Debug logging - disabled by default."""
     pass
 
 
@@ -40,6 +40,12 @@ MAX_RAMP_INCREMENT = 1
 # and provide feedback. This prevents ramping blindly based on stale data.
 # 30% gives time for contention to show before we add more workers.
 RAMP_HOLD_THRESHOLD = 0.30
+
+# Minimum seconds between ramp-up increments. Even if all metrics look good,
+# wait this long before adding another worker. This prevents overwhelming the
+# system when the poll interval is fast (e.g., 2s) and each poll would add +1.
+# 5 seconds means ramping from 1→10 takes at least 45 seconds.
+RAMP_COOLDOWN_SECONDS = 5.0
 
 
 @dataclass
