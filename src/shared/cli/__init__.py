@@ -8,9 +8,11 @@ Commands are organized in separate modules:
 - _printers: Output formatting functions
 - parse: Parse command
 - watch: Watch command (continuous file monitoring)
-- extract: Extract-features and extract-glossary commands
+- extract: Shared utilities for feature/glossary extraction
+- feature_commands: Extract-features command
+- glossary_commands: Extract-glossary command
 - web: Web server commands
-- benchmark: Benchmark-models command
+- benchmarks: Benchmark-models command (package)
 """
 
 from __future__ import annotations
@@ -18,8 +20,9 @@ from __future__ import annotations
 # Import command modules to register their commands with main
 # The import side-effect registers @main.command decorators
 from shared.cli import (
-    benchmark,  # noqa: F401
-    extract,  # noqa: F401
+    benchmarks,  # noqa: F401
+    feature_commands,  # noqa: F401
+    glossary_commands,  # noqa: F401
     parse,  # noqa: F401
     watch,  # noqa: F401
     web,  # noqa: F401
@@ -42,7 +45,8 @@ from shared.cli._runners import (
 # Import the main CLI group first
 # Re-export commonly used items
 from shared.cli._shared import check_model_availability, console, format_duration, main
-from shared.cli.extract import run_feature_extraction, run_glossary_extraction
+from shared.cli.feature_commands import run_feature_extraction
+from shared.cli.glossary_commands import run_glossary_extraction
 
 __all__ = [
     # Main CLI

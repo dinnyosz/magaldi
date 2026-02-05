@@ -111,7 +111,8 @@ def process_file_changes(
     """Process accumulated file changes through the parse pipeline."""
     from magaldi_core.change_detection import ChangeManifest, FileInfo
     from magaldi_core.code_parser import parse_files
-    from shared.cli.extract import run_feature_extraction, run_glossary_extraction
+    from shared.cli.feature_commands import run_feature_extraction
+    from shared.cli.glossary_commands import run_glossary_extraction
 
     # Build FileInfo objects for changed files
     new_or_modified = []
@@ -462,7 +463,7 @@ def watch(
 
                     # Feature extraction (if requested)
                     if features and not skip_ai and processed > 0:
-                        from shared.cli.extract import run_feature_extraction
+                        from shared.cli.feature_commands import run_feature_extraction
                         console.print("\n[bold blue]Feature Extraction[/]")
                         run_feature_extraction(
                             discovery_result.scope,
@@ -475,7 +476,7 @@ def watch(
 
                     # Glossary extraction (if requested)
                     if glossary and not skip_ai and processed > 0:
-                        from shared.cli.extract import run_glossary_extraction
+                        from shared.cli.glossary_commands import run_glossary_extraction
                         console.print("\n[bold blue]Glossary Extraction[/]")
                         run_glossary_extraction(
                             discovery_result.scope,

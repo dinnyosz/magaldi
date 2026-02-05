@@ -47,7 +47,8 @@ def _run_extraction_only(
 
     Called when --features or --glossary is specified but no code changes detected.
     """
-    from shared.cli.extract import run_feature_extraction, run_glossary_extraction
+    from shared.cli.feature_commands import run_feature_extraction
+    from shared.cli.glossary_commands import run_glossary_extraction
 
     if skip_ai:
         console.print("[yellow]Skipping extraction: --skip-ai is set[/]")
@@ -99,7 +100,8 @@ def parse(
     from magaldi_core.discovery import DiscoveryError
 
     # Import feature/glossary runners here to avoid circular imports
-    from shared.cli.extract import run_feature_extraction, run_glossary_extraction
+    from shared.cli.feature_commands import run_feature_extraction
+    from shared.cli.glossary_commands import run_glossary_extraction
 
     # Load configuration (skip validation in dry-run mode)
     config = load_config(skip_validation=dry_run)
