@@ -10,7 +10,7 @@ import time
 from typing import TYPE_CHECKING
 
 from shared.ai.context_size import CONTEXT_TIERS, TIER_TIMEOUTS
-from shared.throttling import compute_throttle_decision, ThrottleDecision, RAMP_COOLDOWN_SECONDS
+from shared.throttling import compute_throttle_decision, ThrottleDecision, get_ramp_cooldown
 
 def _log_warmup(message: str) -> None:
     """Debug logging - disabled by default."""
@@ -437,21 +437,22 @@ class DependencyTracker:
                 post_warmup=post_warmup,
             )
 
-            # Apply ramp cooldown: don't ramp up more than once per RAMP_COOLDOWN_SECONDS
-            # This prevents overwhelming the system when poll interval is fast (2s)
+            # Apply ramp cooldown: scales with context tier (2k→2s, 4k→4s, 8k→8s, etc.)
+            # Larger contexts take longer to process, so we wait longer to see impact.
             # Skip cooldown for display calls (they don't affect actual throttling)
             if not is_display_call:
                 now = time.time()
+                cooldown_seconds = get_ramp_cooldown(self._current_tier or 2048)
                 is_ramping = decision.recommended_workers > self._last_recommended_workers
-                cooldown_elapsed = (now - self._last_ramp_time) >= RAMP_COOLDOWN_SECONDS
+                cooldown_elapsed = (now - self._last_ramp_time) >= cooldown_seconds
 
                 if is_ramping and not cooldown_elapsed:
                     # In cooldown, hold at last recommended instead of ramping
                     from shared.throttling import _log_throttle
-                    remaining = RAMP_COOLDOWN_SECONDS - (now - self._last_ramp_time)
+                    remaining = cooldown_seconds - (now - self._last_ramp_time)
                     _log_throttle(
                         f"RAMP COOLDOWN: want {decision.recommended_workers} but holding at "
-                        f"{self._last_recommended_workers} ({remaining:.1f}s remaining)"
+                        f"{self._last_recommended_workers} ({remaining:.1f}s remaining, tier={self._current_tier})"
                     )
                     decision = ThrottleDecision(
                         should_throttle=decision.should_throttle,

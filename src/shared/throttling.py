@@ -41,11 +41,12 @@ MAX_RAMP_INCREMENT = 1
 # 30% gives time for contention to show before we add more workers.
 RAMP_HOLD_THRESHOLD = 0.30
 
-# Minimum seconds between ramp-up increments. Even if all metrics look good,
-# wait this long before adding another worker. This prevents overwhelming the
-# system when the poll interval is fast (e.g., 2s) and each poll would add +1.
-# 5 seconds means ramping from 1→10 takes at least 45 seconds.
-RAMP_COOLDOWN_SECONDS = 5.0
+# Ramp cooldown scales with context tier: tier / 1000 seconds.
+# 2k→2s, 4k→4s, 8k→8s, 16k→16s, 32k→32s
+# Larger contexts take longer to process, so we wait longer to see impact.
+def get_ramp_cooldown(tier: int) -> float:
+    """Get ramp cooldown in seconds based on context tier."""
+    return tier / 1000.0
 
 
 @dataclass
