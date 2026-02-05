@@ -320,20 +320,15 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
       .attr('fill', 'white')
       .text(d => d.member_count)
 
-    // Node interactions - highlight connections and connected nodes on hover
+    // Node interactions - highlight connections and dim non-connected nodes on hover
     nodeElements
       .on('mouseenter', function(_event, d) {
-        // Highlight hovered node with larger border
-        d3.select(this).select('circle')
-          .transition()
-          .duration(150)
-          .attr('r', d.radius * 1.1)
-          .attr('stroke-width', 5)
-
         setHoveredNode(d)
 
         // Find connected node IDs
         const connectedIds = new Set<string>()
+        connectedIds.add(d.id)  // Include self
+
         if (d.node_type === 'feature') {
           featureConnectionData.forEach(link => {
             const sourceId = typeof link.source === 'string' ? link.source : link.source.id
@@ -342,7 +337,7 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
             if (targetId === d.id) connectedIds.add(sourceId)
           })
 
-          // Highlight connections for this node
+          // Highlight connections for this node, dim others
           featureLinks
             .transition()
             .duration(150)
@@ -350,32 +345,46 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
               const sourceId = typeof link.source === 'string' ? link.source : link.source.id
               const targetId = typeof link.target === 'string' ? link.target : link.target.id
               if (sourceId === d.id || targetId === d.id) {
-                return 0.5 + (link.shared_member_count / maxShared) * 0.4
+                return 0.6 + (link.shared_member_count / maxShared) * 0.3
               }
-              return 0.1  // Keep others at subtle opacity
-            })
-
-          // Highlight connected nodes' borders
-          nodeElements.select('circle')
-            .transition()
-            .duration(150)
-            .attr('stroke-width', (node: unknown) => {
-              const n = node as GraphNode
-              if (n.id === d.id) return 5  // Hovered node
-              if (connectedIds.has(n.id)) return 5  // Connected nodes
-              return n.node_type === 'feature' ? 3 : 0  // Default
+              return 0.05  // Dim non-connected
             })
         }
+
+        // Dim non-connected nodes, highlight connected ones
+        nodeElements
+          .transition()
+          .duration(150)
+          .attr('opacity', (node: unknown) => {
+            const n = node as GraphNode
+            return connectedIds.has(n.id) ? 1 : 0.3
+          })
+
+        // Highlight hovered and connected nodes' borders
+        nodeElements.select('circle')
+          .transition()
+          .duration(150)
+          .attr('stroke-width', (node: unknown) => {
+            const n = node as GraphNode
+            if (n.id === d.id) return 5  // Hovered node
+            if (connectedIds.has(n.id)) return 5  // Connected nodes
+            return n.node_type === 'feature' ? 3 : 0  // Default
+          })
+
+        // Slightly enlarge hovered node
+        d3.select(this).select('circle')
+          .transition()
+          .duration(150)
+          .attr('r', d.radius * 1.1)
       })
       .on('mouseleave', function(_event, d) {
-        // Reset hovered node
+        setHoveredNode(null)
+
+        // Reset hovered node size
         d3.select(this).select('circle')
           .transition()
           .duration(150)
           .attr('r', d.radius)
-          .attr('stroke-width', d.node_type === 'feature' ? 3 : 0)
-
-        setHoveredNode(null)
 
         // Return all connections to subtle opacity
         featureLinks
@@ -383,7 +392,12 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
           .duration(150)
           .attr('stroke-opacity', 0.1)
 
-        // Reset all node borders
+        // Reset all nodes opacity and borders
+        nodeElements
+          .transition()
+          .duration(150)
+          .attr('opacity', 1)
+
         nodeElements.select('circle')
           .transition()
           .duration(150)
