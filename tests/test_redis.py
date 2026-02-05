@@ -87,7 +87,7 @@ class TestRedisRepository:
 
     def test_init_gets_config_if_not_provided(self):
         """Test that config is fetched if not provided."""
-        with patch("shared.db.redis.get_config") as mock_get_config:
+        with patch("shared.db.redis.base.get_config") as mock_get_config:
             mock_config = MagicMock()
             mock_get_config.return_value = mock_config
 
@@ -100,7 +100,7 @@ class TestRedisRepository:
         """Test that _get_client creates Redis connection."""
         repo = RedisRepository(mock_config)
 
-        with patch("shared.db.redis.redis.Redis") as mock_redis:
+        with patch("shared.db.redis.base.redis.Redis") as mock_redis:
             mock_client = MagicMock()
             mock_redis.return_value = mock_client
 
@@ -119,7 +119,7 @@ class TestRedisRepository:
         """Test that _get_client reuses existing connection."""
         repo = RedisRepository(mock_config)
 
-        with patch("shared.db.redis.redis.Redis") as mock_redis:
+        with patch("shared.db.redis.base.redis.Redis") as mock_redis:
             mock_client = MagicMock()
             mock_redis.return_value = mock_client
 

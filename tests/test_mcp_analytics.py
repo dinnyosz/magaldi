@@ -34,7 +34,7 @@ class TestRedisMCPAnalyticsRepository:
     @pytest.fixture
     def repo(self, mock_config, mock_redis_client):
         """Create repository with mocked Redis."""
-        with patch("shared.db.redis.redis.Redis", return_value=mock_redis_client):
+        with patch("shared.db.redis.base.redis.Redis", return_value=mock_redis_client):
             repo = RedisMCPAnalyticsRepository(mock_config)
             repo._client = mock_redis_client
             return repo
@@ -61,8 +61,15 @@ class TestRedisMCPAnalyticsRepository:
 
     def test_record_tool_call_tracks_transition(self, repo, mock_redis_client):
         """Test that transitions are tracked when there's a previous tool."""
-        # Simulate a previous tool in the session
-        mock_redis_client.get.return_value = "search_code"
+        import json
+        from datetime import datetime
+
+        # Simulate a previous tool in the session (JSON format with end_time)
+        prev_session_data = json.dumps({
+            "tool": "search_code",
+            "end_time": datetime.now().isoformat(),
+        })
+        mock_redis_client.get.return_value = prev_session_data
 
         repo.record_tool_call("get_element", session_id="test-session")
 
@@ -75,13 +82,17 @@ class TestRedisMCPAnalyticsRepository:
 
     def test_record_tool_call_updates_session(self, repo, mock_redis_client):
         """Test that session is updated with current tool."""
+        import json
+
         repo.record_tool_call("search_code", session_id="test-session")
 
         # Should set the session key with TTL
         mock_redis_client.setex.assert_called_once()
         args = mock_redis_client.setex.call_args[0]
         assert "test-session" in args[0]
-        assert args[2] == "search_code"
+        # Check the JSON data contains the tool
+        session_data = json.loads(args[2])
+        assert session_data["tool"] == "search_code"
 
     def test_get_tool_counts(self, repo, mock_redis_client):
         """Test getting tool counts."""
@@ -341,7 +352,7 @@ class TestCausalRelationshipTracking:
     @pytest.fixture
     def repo(self, mock_config, mock_redis_client):
         """Create repository with mocked Redis."""
-        with patch("shared.db.redis.redis.Redis", return_value=mock_redis_client):
+        with patch("shared.db.redis.base.redis.Redis", return_value=mock_redis_client):
             repo = RedisMCPAnalyticsRepository(mock_config)
             repo._client = mock_redis_client
             return repo
