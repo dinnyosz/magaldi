@@ -234,14 +234,14 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
     // Create links
     const linkGroup = g.append('g').attr('class', 'links')
 
-    // Parent-child links (thinner, solid)
+    // Parent-child links (thinner, solid, teal color)
     const parentChildLinks = linkGroup.selectAll('line.parent-child')
       .data(graphLinks.filter(l => l.linkType === 'parent-child'))
       .join('line')
       .attr('class', 'parent-child')
-      .attr('stroke', '#cbd5e1')
-      .attr('stroke-width', 1.5)
-      .attr('stroke-opacity', 0.6)
+      .attr('stroke', '#14b8a6')  // Teal color
+      .attr('stroke-width', 2)
+      .attr('stroke-opacity', 0.5)
 
     // Feature connection links - based on shared soft clustering members
     // Filter based on threshold
@@ -734,7 +734,7 @@ function FeatureGraph() {
                   style={{
                     width: 30,
                     height: 2,
-                    backgroundColor: '#cbd5e1',
+                    backgroundColor: '#14b8a6',
                   }}
                 ></div>
                 <span className="small">Parent-child link</span>
