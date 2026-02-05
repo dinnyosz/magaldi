@@ -63,6 +63,7 @@ class DependencyTracker:
         self._post_warmup: bool = False  # True after warmup completes (for gradual ramp)
         self._last_ramp_time: float = 0.0  # Last time we ramped up (for cooldown)
         self._last_recommended_workers: int = 0  # Track to detect ramp-ups
+        self._in_cooldown: bool = False  # True while in cooldown period
         # Use provided workers or default
         self._max_num_workers = max_num_workers if max_num_workers else self.DEFAULT_WORKERS
         self._timeout = timeout  # Timeout for throttle calculations
@@ -441,11 +442,18 @@ class DependencyTracker:
             # Larger contexts take longer to process, so we wait longer to see impact.
             now = time.time()
             cooldown_seconds = get_ramp_cooldown(self._current_tier or 2048)
-            is_ramping = decision.recommended_workers > self._last_recommended_workers
             cooldown_elapsed = (now - self._last_ramp_time) >= cooldown_seconds
 
+            # Check if cooldown period has ended
+            if self._in_cooldown and cooldown_elapsed:
+                self._in_cooldown = False
+
+            # Check if we want to ramp up
+            is_ramping = decision.recommended_workers > self._last_recommended_workers
+
             if is_ramping and not cooldown_elapsed:
-                # In cooldown, hold at last recommended instead of ramping
+                # Enter or stay in cooldown, hold at last recommended
+                self._in_cooldown = True
                 from shared.throttling import _log_throttle
                 remaining = cooldown_seconds - (now - self._last_ramp_time)
                 if not is_display_call:
@@ -463,14 +471,28 @@ class DependencyTracker:
                     completion_count=decision.completion_count,
                     in_cooldown=True,
                 )
-            elif not is_display_call:
+            elif self._in_cooldown:
+                # Still in cooldown period (even if not ramping right now)
+                decision = ThrottleDecision(
+                    should_throttle=decision.should_throttle,
+                    current_max=decision.current_max,
+                    historical_max=decision.historical_max,
+                    completed_avg=decision.completed_avg,
+                    recommended_workers=decision.recommended_workers,
+                    reason=decision.reason,
+                    completion_count=decision.completion_count,
+                    in_cooldown=True,
+                )
+
+            if not is_display_call:
                 # Only update timers for non-display calls
                 if is_ramping and cooldown_elapsed:
                     # Ramping up, reset cooldown timer
                     self._last_ramp_time = now
                     self._last_recommended_workers = decision.recommended_workers
+                    self._in_cooldown = True  # Start new cooldown period
                 elif decision.recommended_workers != self._last_recommended_workers:
-                    # Scale down or other change, update tracking but no cooldown
+                    # Scale down or other change, update tracking
                     self._last_recommended_workers = decision.recommended_workers
 
             return decision
