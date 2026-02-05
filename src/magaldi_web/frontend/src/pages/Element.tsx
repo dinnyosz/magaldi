@@ -14,44 +14,13 @@ import {
 } from 'react-bootstrap'
 import ReactMarkdown from 'react-markdown'
 import { getElement, getSimilarElements, explainElement, getGlossaryTermsForFeature, getElementFeatures, type ElementDetail as _ElementDetail } from '../api'
-
-// Type configuration
-const typeConfig: Record<string, { icon: string; color: string; label: string }> = {
-  file: { icon: 'bi-file-code', color: 'info', label: 'File' },
-  class: { icon: 'bi-box', color: 'purple', label: 'Class' },
-  interface: { icon: 'bi-layers', color: 'info', label: 'Interface' },
-  type_alias: { icon: 'bi-type', color: 'info', label: 'Type Alias' },
-  trait: { icon: 'bi-diagram-3', color: 'info', label: 'Trait' },
-  enum: { icon: 'bi-list-ol', color: 'warning', label: 'Enum' },
-  function: { icon: 'bi-braces', color: 'primary', label: 'Function' },
-  method: { icon: 'bi-gear', color: 'success', label: 'Method' },
-  variable: { icon: 'bi-x-diamond', color: 'secondary', label: 'Variable' },
-  constant: { icon: 'bi-hash', color: 'warning', label: 'Constant' },
-  import: { icon: 'bi-box-arrow-in-right', color: 'secondary', label: 'Import' },
-  feature: { icon: 'bi-collection', color: 'info', label: 'Feature' },
-  subfeature: { icon: 'bi-collection-fill', color: 'info', label: 'Subfeature' },
-  glossary: { icon: 'bi-book', color: 'primary', label: 'Glossary Term' },
-}
-
-function getTypeConfig(type: string) {
-  return typeConfig[type] || { icon: 'bi-dot', color: 'secondary', label: type }
-}
-
-function getTypeBadgeStyle(type: string): React.CSSProperties {
-  if (type === 'class') {
-    return { backgroundColor: '#6f42c1', color: 'white' }
-  }
-  return {}
-}
-
-// Language icons
-const languageIcons: Record<string, string> = {
-  python: 'bi-filetype-py',
-  javascript: 'bi-filetype-js',
-  typescript: 'bi-filetype-tsx',
-  php: 'bi-filetype-php',
-  rust: 'bi-filetype-rs',
-}
+import {
+  getTypeConfig,
+  getTypeBadgeStyle,
+  languageIcons,
+  SimilarElementsCard,
+  ContextCard,
+} from '../components/element'
 
 function Element() {
   const { elementId } = useParams<{ elementId: string }>()
@@ -1132,48 +1101,11 @@ function Element() {
 
         <Col lg={4}>
           {/* Context Card */}
-          {(element.context.parent || element.context.file) && (
-            <Card className="mb-4">
-              <Card.Header>
-                <i className="bi bi-diagram-2 me-2"></i>
-                Context
-              </Card.Header>
-              <ListGroup variant="flush">
-                {element.context.file && element.element_type !== 'file' && (
-                  <ListGroup.Item>
-                    <small className="text-uppercase text-muted d-block">File</small>
-                    <Link to={`/element/${encodeURIComponent(element.context.file.hash_id || element.context.file.element_id)}`}>
-                      <i className="bi bi-file-code me-1"></i>
-                      {element.context.file.name}
-                    </Link>
-                    {element.context.file.summary && (
-                      <small className="d-block text-muted mt-1">{element.context.file.summary}</small>
-                    )}
-                  </ListGroup.Item>
-                )}
-                {/* Only show parent if it's different from file (not a file type itself) */}
-                {element.context.parent && element.context.parent.element_type !== 'file' && (
-                  <ListGroup.Item>
-                    <small className="text-uppercase text-muted d-block">Parent</small>
-                    <Link to={`/element/${encodeURIComponent(element.context.parent.hash_id || element.context.parent.element_id)}`}>
-                      <Badge
-                        bg={getTypeConfig(element.context.parent.element_type).color}
-                        style={getTypeBadgeStyle(element.context.parent.element_type)}
-                        className="me-1"
-                        pill
-                      >
-                        <i className={`bi ${getTypeConfig(element.context.parent.element_type).icon}`}></i>
-                      </Badge>
-                      {element.context.parent.name}
-                    </Link>
-                    {element.context.parent.summary && (
-                      <small className="d-block text-muted mt-1">{element.context.parent.summary}</small>
-                    )}
-                  </ListGroup.Item>
-                )}
-              </ListGroup>
-            </Card>
-          )}
+          <ContextCard
+            file={element.context.file}
+            parent={element.context.parent}
+            elementType={element.element_type}
+          />
 
           {/* Glossary Terms - shown for features and subfeatures */}
           {isFeature && glossaryTerms && glossaryTerms.terms.length > 0 && (
@@ -1406,46 +1338,7 @@ function Element() {
           )}
 
           {/* Related Code */}
-          {similar && similar.length > 0 && (
-            <Card className="mb-4">
-              <Card.Header>
-                <i className="bi bi-diagram-3 me-2"></i>
-                Related Code
-              </Card.Header>
-              <ListGroup variant="flush">
-                {similar.map((sim) => {
-                  const simConfig = getTypeConfig(sim.element_type)
-                  return (
-                    <ListGroup.Item
-                      key={sim.element_id}
-                      action
-                      as={Link}
-                      to={`/element/${encodeURIComponent(sim.hash_id || sim.element_id)}`}
-                      className="d-flex justify-content-between align-items-start"
-                    >
-                      <div className="text-truncate me-2">
-                        <Badge
-                          bg={simConfig.color}
-                          style={getTypeBadgeStyle(sim.element_type)}
-                          className="me-1"
-                          pill
-                        >
-                          <i className={`bi ${simConfig.icon}`}></i>
-                        </Badge>
-                        <span>{sim.name}</span>
-                        {sim.summary && (
-                          <small className="d-block text-muted text-truncate">{sim.summary}</small>
-                        )}
-                      </div>
-                      <Badge bg="secondary" pill>
-                        {(sim.similarity * 100).toFixed(0)}%
-                      </Badge>
-                    </ListGroup.Item>
-                  )
-                })}
-              </ListGroup>
-            </Card>
-          )}
+          <SimilarElementsCard similar={similar || []} />
 
           {/* Code Metrics Card - for functions/methods */}
           {isCallable && (element.complexity || element.security_issues?.length > 0 || element.env_vars?.length > 0 || element.concurrency) && (
