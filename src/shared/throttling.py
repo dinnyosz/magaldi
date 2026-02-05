@@ -214,6 +214,7 @@ def compute_throttle_decision(
     completion_count: int = 0,
     avg_concurrency: float = 0.0,
     avg_base_time: float = 0.0,
+    post_warmup: bool = False,
 ) -> ThrottleDecision:
     """Determine if throttling should be applied.
 
@@ -235,6 +236,9 @@ def compute_throttle_decision(
         completion_count: Number of completions in window
         avg_concurrency: Average workers active at task start
         avg_base_time: Average of (runtime/workers) from completions - normalized cost
+        post_warmup: If True, just exited warmup - force gradual ramp from 1 worker
+            instead of using historical data for FRESH START. Historical data may
+            be from a different tier/model and shouldn't be trusted for initial count.
 
     Returns:
         ThrottleDecision with recommended action
@@ -372,9 +376,19 @@ def compute_throttle_decision(
                 f"active={active_workers} → immediate drop to {effective_workers}"
             )
         elif active_workers == 0:
-            _log_throttle(
-                f"FRESH START: base_time={effective_base_time:.1f}s → starting at {effective_workers} workers"
-            )
+            if post_warmup:
+                # Just came out of warmup - start at 1 and ramp gradually
+                # Historical data may be from different tier, don't trust it for initial count
+                effective_workers = 1
+                reason_suffix = ", post-warmup gradual ramp"
+                _log_throttle(
+                    f"POST WARMUP: base_time={effective_base_time:.1f}s target={target_workers} "
+                    f"→ starting at 1 worker (gradual ramp)"
+                )
+            else:
+                _log_throttle(
+                    f"FRESH START: base_time={effective_base_time:.1f}s → starting at {effective_workers} workers"
+                )
 
     if should_throttle:
         return ThrottleDecision(

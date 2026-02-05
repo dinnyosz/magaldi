@@ -242,6 +242,14 @@ class TimingStats:
         """
         return self.throughput_tracker.get_stats_with_concurrency()
 
+    def reset_throughput(self) -> None:
+        """Reset throughput tracker history.
+
+        Call this on tier/model changes since historical data from a different
+        tier isn't relevant for throttling decisions.
+        """
+        self.throughput_tracker.reset()
+
     def _get_avg_for_type_tier(
         self,
         element_type: str,

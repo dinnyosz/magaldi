@@ -1439,3 +1439,57 @@ class TestDynamicWorkerScaling:
         # Default max workers
         tracker_default = DependencyTracker([element], {element.element_id: 500})
         assert tracker_default.get_current_max_workers() == 8  # DEFAULT_WORKERS
+
+    def test_post_warmup_gradual_ramp(self):
+        """After warmup completes, throttle should recommend gradual ramp from 1."""
+        from shared.throttling import compute_throttle_decision
+
+        elements = [
+            CodeElement(
+                element_id=f"test:repo:user:file.py:function:f{i}:1",
+                element_type="function",
+                name=f"f{i}",
+                raw_code="def f(): pass",
+            )
+            for i in range(5)
+        ]
+        context_sizes = {e.element_id: 500 for e in elements}
+        tracker = DependencyTracker(elements, context_sizes, max_num_workers=8)
+
+        # Warmup phase - get 1 element
+        ready1 = tracker.get_ready_elements(max_count=20)
+        assert len(ready1) == 1
+        assert tracker.is_tier_changing()
+
+        # Complete warmup task
+        tracker.mark_complete(ready1[0].element_id)
+        assert not tracker.is_tier_changing()
+
+        # Compute throttle decision - should have post_warmup=True internally
+        # and recommend starting at 1 worker (gradual ramp)
+        decision = tracker.compute_throttle_decision(
+            current_max_runtime=0.0,
+            active_workers=0,
+            throughput=0.0,
+            avg_runtime=0.0,
+            completion_count=0,
+            avg_concurrency=0.0,
+            avg_base_time=5.0,  # Historical data that would suggest more workers
+        )
+
+        # Post-warmup should force starting at 1 worker, not jumping based on historical
+        assert decision.recommended_workers == 1
+        assert "post-warmup" in decision.reason.lower() or decision.recommended_workers == 1
+
+        # Subsequent calls should NOT have post_warmup (flag is consumed)
+        decision2 = tracker.compute_throttle_decision(
+            current_max_runtime=0.0,
+            active_workers=1,  # Now we have 1 active
+            throughput=0.0,
+            avg_runtime=0.0,
+            completion_count=0,
+            avg_concurrency=0.0,
+            avg_base_time=5.0,
+        )
+        # Should be able to ramp up now (no longer post-warmup)
+        assert "post-warmup" not in decision2.reason.lower()

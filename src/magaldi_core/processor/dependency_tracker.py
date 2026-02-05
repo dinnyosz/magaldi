@@ -53,6 +53,8 @@ class DependencyTracker:
         self._previous_tier: int | None = None  # Previous tier (to detect changes)
         self._tier_changing: bool = False  # True when switching model/tier (warmup period)
         self._warmup_task_id: str | None = None  # ID of warmup task (first task of new tier)
+        self._tier_just_changed: bool = False  # True when tier changed (for throughput reset)
+        self._post_warmup: bool = False  # True after warmup completes (for gradual ramp)
         # Use provided workers or default
         self._max_num_workers = max_num_workers if max_num_workers else self.DEFAULT_WORKERS
         self._timeout = timeout  # Timeout for throttle calculations
@@ -218,6 +220,7 @@ class DependencyTracker:
             # Set tier_changing flag for warmup (model change or tier change)
             if model_changing or tier_changing or self._current_model is None:
                 self._tier_changing = True
+                self._tier_just_changed = True  # Signal for throughput reset
 
             self._current_model = selected_model
             self._previous_tier = self._current_tier
@@ -277,6 +280,17 @@ class DependencyTracker:
         with self._lock:
             return self._tier_changing
 
+    def did_tier_just_change(self) -> bool:
+        """Check if tier just changed (for throughput reset).
+
+        Returns True once per tier change, then clears the flag.
+        """
+        with self._lock:
+            if self._tier_just_changed:
+                self._tier_just_changed = False
+                return True
+            return False
+
     def get_current_tier_timeout(self) -> float:
         """Get timeout for the current tier (scales with context size)."""
         with self._lock:
@@ -299,6 +313,7 @@ class DependencyTracker:
             if self._tier_changing and element_id == self._warmup_task_id:
                 self._tier_changing = False
                 self._warmup_task_id = None
+                self._post_warmup = True  # Signal for gradual ramp-up
 
     def mark_failed(self, element_id: str) -> None:
         """Mark element as failed (won't block children)."""
@@ -309,6 +324,7 @@ class DependencyTracker:
             if self._tier_changing and element_id == self._warmup_task_id:
                 self._tier_changing = False
                 self._warmup_task_id = None
+                self._post_warmup = True  # Signal for gradual ramp-up
 
     def is_complete(self) -> bool:
         """Check if all elements are processed."""
@@ -378,6 +394,11 @@ class DependencyTracker:
             ThrottleDecision with recommended action.
         """
         with self._lock:
+            # Check and consume post_warmup flag
+            post_warmup = self._post_warmup
+            if post_warmup:
+                self._post_warmup = False  # Clear after consuming
+
             return compute_throttle_decision(
                 current_max_runtime=current_max_runtime,
                 tier_timeout=self.get_current_tier_timeout(),
@@ -388,6 +409,7 @@ class DependencyTracker:
                 completion_count=completion_count,
                 avg_concurrency=avg_concurrency,
                 avg_base_time=avg_base_time,
+                post_warmup=post_warmup,
             )
 
     def get_tier_stats(self) -> dict[int, tuple[int, int]]:
