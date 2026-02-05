@@ -63,7 +63,6 @@ class DependencyTracker:
         self._post_warmup: bool = False  # True after warmup completes (for gradual ramp)
         self._last_ramp_time: float = 0.0  # Last time we ramped up (for cooldown)
         self._last_recommended_workers: int = 0  # Track to detect ramp-ups
-        self._in_cooldown: bool = False  # True while in cooldown period
         # Use provided workers or default
         self._max_num_workers = max_num_workers if max_num_workers else self.DEFAULT_WORKERS
         self._timeout = timeout  # Timeout for throttle calculations
@@ -440,20 +439,16 @@ class DependencyTracker:
 
             # Apply ramp cooldown: scales with context tier (2k→2s, 4k→4s, 8k→8s, etc.)
             # Larger contexts take longer to process, so we wait longer to see impact.
+            # in_cooldown = True means "we WANT more workers but can't ramp yet"
             now = time.time()
             cooldown_seconds = get_ramp_cooldown(self._current_tier or 2048)
             cooldown_elapsed = (now - self._last_ramp_time) >= cooldown_seconds
-
-            # Check if cooldown period has ended
-            if self._in_cooldown and cooldown_elapsed:
-                self._in_cooldown = False
 
             # Check if we want to ramp up
             is_ramping = decision.recommended_workers > self._last_recommended_workers
 
             if is_ramping and not cooldown_elapsed:
-                # Enter or stay in cooldown, hold at last recommended
-                self._in_cooldown = True
+                # Want to ramp but can't - this is "onhold" state
                 from shared.throttling import _log_throttle
                 remaining = cooldown_seconds - (now - self._last_ramp_time)
                 if not is_display_call:
@@ -469,20 +464,9 @@ class DependencyTracker:
                     recommended_workers=self._last_recommended_workers,
                     reason=f"{decision.reason} (cooldown)",
                     completion_count=decision.completion_count,
-                    in_cooldown=True,
+                    in_cooldown=True,  # Workers beyond limit are "onhold"
                 )
-            elif self._in_cooldown:
-                # Still in cooldown period (even if not ramping right now)
-                decision = ThrottleDecision(
-                    should_throttle=decision.should_throttle,
-                    current_max=decision.current_max,
-                    historical_max=decision.historical_max,
-                    completed_avg=decision.completed_avg,
-                    recommended_workers=decision.recommended_workers,
-                    reason=decision.reason,
-                    completion_count=decision.completion_count,
-                    in_cooldown=True,
-                )
+            # else: not ramping or cooldown elapsed - workers beyond limit are "throttled"
 
             if not is_display_call:
                 # Only update timers for non-display calls
@@ -490,7 +474,6 @@ class DependencyTracker:
                     # Ramping up, reset cooldown timer
                     self._last_ramp_time = now
                     self._last_recommended_workers = decision.recommended_workers
-                    self._in_cooldown = True  # Start new cooldown period
                 elif decision.recommended_workers != self._last_recommended_workers:
                     # Scale down or other change, update tracking
                     self._last_recommended_workers = decision.recommended_workers
