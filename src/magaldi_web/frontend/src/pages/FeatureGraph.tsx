@@ -194,26 +194,38 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
       .attr('d', 'M 0,-5 L 10 ,0 L 0,5')
       .attr('fill', '#94a3b8')
 
-    // Create force simulation
+    // Create force simulation with better spacing
     const simulation = d3.forceSimulation<GraphNode>(graphNodes)
       .force('link', d3.forceLink<GraphNode, GraphLink>(graphLinks)
         .id(d => d.id)
         .distance(d => {
-          if (d.linkType === 'parent-child') return 80
-          return 200 + (1 - d.affinity) * 100
+          if (d.linkType === 'parent-child') return 60
+          // Longer distances for feature connections to spread them out
+          return 250
         })
         .strength(d => {
-          if (d.linkType === 'parent-child') return 0.8
-          return 0.1 + d.affinity * 0.3
+          if (d.linkType === 'parent-child') return 0.7
+          // Weaker link force so nodes spread more
+          return 0.05
         })
       )
       .force('charge', d3.forceManyBody()
-        .strength(d => (d as GraphNode).node_type === 'feature' ? -400 : -100)
+        // Much stronger repulsion to spread nodes apart
+        .strength(d => (d as GraphNode).node_type === 'feature' ? -800 : -200)
+        .distanceMax(500)
       )
       .force('center', d3.forceCenter(width / 2, height / 2))
       .force('collision', d3.forceCollide<GraphNode>()
-        .radius(d => d.radius + 10)
+        // More padding between nodes
+        .radius(d => d.radius + 30)
+        .strength(0.8)
       )
+      // Add radial force to spread features in a circle
+      .force('radial', d3.forceRadial<GraphNode>(
+        d => d.node_type === 'feature' ? 250 : 100,
+        width / 2,
+        height / 2
+      ).strength(d => d.node_type === 'feature' ? 0.1 : 0.3))
 
     simulationRef.current = simulation
 
@@ -229,21 +241,22 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
       .attr('stroke-width', 1.5)
       .attr('stroke-opacity', 0.6)
 
-    // Feature connection links - based on soft clustering affinity (semantic similarity)
-    // Note: shared_member_count is always 0 between different features because
-    // HDBSCAN hard clustering assigns each element to exactly one feature
-    const featureConnectionData = graphLinks.filter(l => l.linkType === 'feature-connection')
+    // Feature connection links - based on shared soft clustering members
+    // Filter to only show significant connections (at least 2 shared members)
+    const featureConnectionData = graphLinks.filter(
+      l => l.linkType === 'feature-connection' && l.shared_member_count >= 2
+    )
 
-    // Calculate max affinity for normalization
-    const maxAffinity = Math.max(0.01, ...featureConnectionData.map(d => d.affinity))
+    // Calculate max shared count for normalization
+    const maxShared = Math.max(1, ...featureConnectionData.map(d => d.shared_member_count))
 
     const featureLinks = linkGroup.selectAll('line.feature-connection')
       .data(featureConnectionData)
       .join('line')
       .attr('class', 'feature-connection')
       .attr('stroke', '#f97316')  // Orange color for visibility
-      .attr('stroke-width', d => 1 + (d.affinity / maxAffinity) * 5)
-      .attr('stroke-opacity', d => 0.3 + (d.affinity / maxAffinity) * 0.5)
+      .attr('stroke-width', d => 1.5 + (d.shared_member_count / maxShared) * 6)
+      .attr('stroke-opacity', d => 0.4 + (d.shared_member_count / maxShared) * 0.4)
 
     // Create node group
     const nodeGroup = g.append('g').attr('class', 'nodes')
@@ -370,9 +383,9 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
 
         // Adjust link widths
         parentChildLinks.attr('stroke-width', 1.5 / transform.k)
-        const zoomMaxAffinity = Math.max(0.01, ...featureConnectionData.map(d => d.affinity))
+        const zoomMaxShared = Math.max(1, ...featureConnectionData.map(d => d.shared_member_count))
         featureLinks.attr('stroke-width', (d: GraphLink) =>
-          (1 + (d.affinity / zoomMaxAffinity) * 5) / transform.k
+          (1.5 + (d.shared_member_count / zoomMaxShared) * 6) / transform.k
         )
       })
 
