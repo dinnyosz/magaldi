@@ -252,15 +252,17 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
     // Calculate max shared count for normalization
     const maxShared = Math.max(1, ...featureConnectionData.map(d => d.shared_member_count))
 
-    const featureLinks = linkGroup.selectAll('line.feature-connection')
+    // Use curved paths instead of straight lines to avoid crossing through nodes
+    const featureLinks = linkGroup.selectAll('path.feature-connection')
       .data(featureConnectionData)
-      .join('line')
+      .join('path')
       .attr('class', 'feature-connection')
+      .attr('fill', 'none')
       .attr('stroke', '#f97316')  // Orange color for visibility
       .attr('stroke-width', d => 1.5 + (d.shared_member_count / maxShared) * 6)
       .attr('stroke-opacity', 0.1)  // Subtle hint, full opacity on hover
 
-    featureLinksRef.current = featureLinks
+    featureLinksRef.current = featureLinks as unknown as d3.Selection<SVGLineElement | d3.BaseType, GraphLink, SVGGElement, unknown>
 
     // Create node group
     const nodeGroup = g.append('g').attr('class', 'nodes')
@@ -368,11 +370,41 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
         .attr('x2', d => (d.target as GraphNode).x || 0)
         .attr('y2', d => (d.target as GraphNode).y || 0)
 
-      featureLinks
-        .attr('x1', d => (d.source as GraphNode).x || 0)
-        .attr('y1', d => (d.source as GraphNode).y || 0)
-        .attr('x2', d => (d.target as GraphNode).x || 0)
-        .attr('y2', d => (d.target as GraphNode).y || 0)
+      // Draw curved paths for feature connections
+      featureLinks.attr('d', d => {
+        const source = d.source as GraphNode
+        const target = d.target as GraphNode
+        const x1 = source.x || 0
+        const y1 = source.y || 0
+        const x2 = target.x || 0
+        const y2 = target.y || 0
+
+        // Calculate midpoint
+        const midX = (x1 + x2) / 2
+        const midY = (y1 + y2) / 2
+
+        // Calculate perpendicular offset for curve (arc outward from center)
+        const dx = x2 - x1
+        const dy = y2 - y1
+        const dist = Math.sqrt(dx * dx + dy * dy)
+
+        // Curve amount proportional to distance
+        const curveOffset = Math.min(dist * 0.2, 50)
+
+        // Perpendicular direction (normalized)
+        const perpX = -dy / dist
+        const perpY = dx / dist
+
+        // Control point offset outward from graph center
+        const centerX = width / 2
+        const centerY = height / 2
+        const toCenter = Math.sign((midX - centerX) * perpX + (midY - centerY) * perpY)
+
+        const ctrlX = midX + perpX * curveOffset * (toCenter || 1)
+        const ctrlY = midY + perpY * curveOffset * (toCenter || 1)
+
+        return `M ${x1} ${y1} Q ${ctrlX} ${ctrlY} ${x2} ${y2}`
+      })
 
       nodeElements.attr('transform', d => `translate(${d.x || 0},${d.y || 0})`)
     })
@@ -407,10 +439,10 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
           .attr('font-size', `${11 / transform.k}px`)
 
         // Adjust link widths
-        parentChildLinks.attr('stroke-width', 1.5 / transform.k)
+        parentChildLinks.attr('stroke-width', 2 / transform.k)
         const zoomMaxShared = Math.max(1, ...featureConnectionData.map(d => d.shared_member_count))
         featureLinks.attr('stroke-width', (d: GraphLink) =>
-          (1.5 + (d.shared_member_count / zoomMaxShared) * 6) / transform.k
+          (1.5 + (d.shared_member_count / zoomMaxShared) * 4) / transform.k
         )
       })
 
