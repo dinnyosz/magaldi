@@ -313,6 +313,13 @@ def run_processing(
         else:
             allowed_workers = num_workers
 
+        # Check if we're in ramp cooldown (holding back workers)
+        in_cooldown = (
+            parallelism
+            and parallelism.throttle_decision
+            and parallelism.throttle_decision.in_cooldown
+        )
+
         for wid in range(num_workers):
             if wid in workers_data:
                 elem, stage, model, ctx_size, start_time = workers_data[wid]
@@ -322,6 +329,9 @@ def run_processing(
             elif wid < allowed_workers:
                 # Worker could run but no tasks available
                 worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "", "", "")
+            elif in_cooldown:
+                # Worker is held back due to ramp cooldown
+                worker_table.add_row(f"[{wid}]", "[dim cyan]onhold[/]", "", "", "", "")
             else:
                 # Worker is throttled - not allowed to run
                 worker_table.add_row(f"[{wid}]", "[dim yellow]throttled[/]", "", "", "", "")

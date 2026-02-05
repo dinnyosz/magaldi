@@ -462,6 +462,7 @@ class DependencyTracker:
                         recommended_workers=self._last_recommended_workers,
                         reason=f"{decision.reason} (cooldown)",
                         completion_count=decision.completion_count,
+                        in_cooldown=True,
                     )
                 elif is_ramping and cooldown_elapsed:
                     # Ramping up, reset cooldown timer

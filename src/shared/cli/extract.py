@@ -198,6 +198,7 @@ def build_worker_table(
     model_col_width: int,
     columns: list[tuple[str, str, int]],
     row_builder: callable,
+    in_cooldown: bool = False,
 ) -> Table:
     """Build worker status table.
 
@@ -208,6 +209,7 @@ def build_worker_table(
         model_col_width: Width of model column.
         columns: List of (name, style, width) for columns.
         row_builder: Function(wid, workers_data) -> list of row values.
+        in_cooldown: True if workers are held back due to ramp cooldown.
 
     Returns:
         Rich Table with worker status.
@@ -228,6 +230,9 @@ def build_worker_table(
         elif wid < allowed_workers:
             idle_row = ["[dim]idle[/]"] + [""] * (len(columns) - 1)
             worker_table.add_row(f"[{wid}]", *idle_row)
+        elif in_cooldown:
+            onhold_row = ["[dim cyan]onhold[/]"] + [""] * (len(columns) - 1)
+            worker_table.add_row(f"[{wid}]", *onhold_row)
         else:
             throttled_row = ["[dim yellow]throttled[/]"] + [""] * (len(columns) - 1)
             worker_table.add_row(f"[{wid}]", *throttled_row)
