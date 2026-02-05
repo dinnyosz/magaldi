@@ -41,12 +41,12 @@ MAX_RAMP_INCREMENT = 1
 # 30% gives time for contention to show before we add more workers.
 RAMP_HOLD_THRESHOLD = 0.30
 
-# Ramp cooldown scales with context tier: tier / 1000 seconds.
+# Ramp cooldown scales with context tier: tier // 1024 seconds.
 # 2k→2s, 4k→4s, 8k→8s, 16k→16s, 32k→32s
 # Larger contexts take longer to process, so we wait longer to see impact.
 def get_ramp_cooldown(tier: int) -> float:
     """Get ramp cooldown in seconds based on context tier."""
-    return tier / 1000.0
+    return tier // 1024
 
 
 @dataclass
