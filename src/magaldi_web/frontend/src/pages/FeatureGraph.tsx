@@ -343,6 +343,7 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
       .attr('font-weight', d => d.node_type === 'feature' ? 'bold' : 'normal')
       .attr('fill', '#1e293b')
       .attr('opacity', 0)
+      .attr('pointer-events', 'none')  // Don't intercept mouse events
       .text(d => d.label)
 
     // Add member count badge
@@ -354,6 +355,7 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
       .attr('font-size', '11px')
       .attr('font-weight', 'bold')
       .attr('fill', 'white')
+      .attr('pointer-events', 'none')  // Don't intercept mouse events
       .text(d => d.member_count)
 
     // Node interactions - highlight connections and dim non-connected nodes on hover
