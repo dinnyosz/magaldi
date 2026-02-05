@@ -370,7 +370,7 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
         .attr('x2', d => (d.target as GraphNode).x || 0)
         .attr('y2', d => (d.target as GraphNode).y || 0)
 
-      // Draw curved paths for feature connections
+      // Draw curved paths for feature connections - arc outside the graph
       featureLinks.attr('d', d => {
         const source = d.source as GraphNode
         const target = d.target as GraphNode
@@ -383,25 +383,34 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
         const midX = (x1 + x2) / 2
         const midY = (y1 + y2) / 2
 
-        // Calculate perpendicular offset for curve (arc outward from center)
+        // Calculate perpendicular offset for curve
         const dx = x2 - x1
         const dy = y2 - y1
         const dist = Math.sqrt(dx * dx + dy * dy)
 
-        // Curve amount proportional to distance
-        const curveOffset = Math.min(dist * 0.2, 50)
+        if (dist < 1) return `M ${x1} ${y1} L ${x2} ${y2}`
 
         // Perpendicular direction (normalized)
         const perpX = -dy / dist
         const perpY = dx / dist
 
-        // Control point offset outward from graph center
+        // Always curve AWAY from graph center (outward)
         const centerX = width / 2
         const centerY = height / 2
-        const toCenter = Math.sign((midX - centerX) * perpX + (midY - centerY) * perpY)
 
-        const ctrlX = midX + perpX * curveOffset * (toCenter || 1)
-        const ctrlY = midY + perpY * curveOffset * (toCenter || 1)
+        // Vector from center to midpoint
+        const fromCenterX = midX - centerX
+        const fromCenterY = midY - centerY
+
+        // Determine which direction is "outward"
+        const dot = fromCenterX * perpX + fromCenterY * perpY
+        const outwardSign = dot > 0 ? 1 : -1
+
+        // Curve amount - larger curves that go well outside
+        const curveOffset = dist * 0.4 + 30
+
+        const ctrlX = midX + perpX * curveOffset * outwardSign
+        const ctrlY = midY + perpY * curveOffset * outwardSign
 
         return `M ${x1} ${y1} Q ${ctrlX} ${ctrlY} ${x2} ${y2}`
       })
