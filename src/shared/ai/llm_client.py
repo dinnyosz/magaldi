@@ -23,11 +23,14 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import logging
 import random
 import signal
 import sys
 import time
 import warnings
+
+logger = logging.getLogger(__name__)
 from dataclasses import dataclass
 from typing import Any, Callable, TypeVar
 
@@ -146,7 +149,7 @@ def cleanup_llm_sessions() -> None:
         try:
             _httpx_client.close()
         except Exception:
-            pass  # Best effort cleanup
+            logger.debug("Failed to close httpx client during cleanup", exc_info=True)
 
     # Close async aiohttp session
     if _aiohttp_session is not None and not _aiohttp_session.closed:
@@ -159,7 +162,7 @@ def cleanup_llm_sessions() -> None:
             try:
                 asyncio.run(_aiohttp_session.close())
             except Exception:
-                pass  # Best effort cleanup
+                logger.debug("Failed to close aiohttp session during cleanup", exc_info=True)
         _aiohttp_session = None
 
 
@@ -479,6 +482,7 @@ class LLMClient:
             self.generate("test", max_tokens=1, timeout=10)
             return True
         except Exception:
+            logger.debug("LLM health check failed for model %s", self.model, exc_info=True)
             return False
 
     # Models that use thinking/reasoning tags by default
@@ -747,6 +751,7 @@ class EmbeddingClient:
             self.embed("test", timeout=10)
             return True
         except Exception:
+            logger.debug("Embedding health check failed for model %s", self.model, exc_info=True)
             return False
 
     def embed(self, text: str, timeout: int = 30) -> list[float]:

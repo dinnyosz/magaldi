@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query
+
+logger = logging.getLogger(__name__)
 
 from magaldi_web.dependencies import (
     check_elasticsearch_health,
@@ -135,6 +138,7 @@ async def get_index_stats(
         doc_count = primaries.get("docs", {}).get("count", 0)
         size_bytes = primaries.get("store", {}).get("size_in_bytes", 0)
     except Exception:
+        logger.warning("Failed to get index stats", exc_info=True)
         doc_count = 0
         size_bytes = 0
 
@@ -146,6 +150,7 @@ async def get_index_stats(
         )
         with_vectors = with_vectors_result.get("count", 0)
     except Exception:
+        logger.warning("Failed to count documents with embeddings", exc_info=True)
         with_vectors = 0
 
     vector_coverage = (with_vectors / doc_count * 100) if doc_count > 0 else 0.0
@@ -291,6 +296,7 @@ async def get_mcp_analytics() -> MCPAnalyticsResponse:
 
     except Exception:
         # Return empty response if Redis is unavailable
+        logger.warning("Failed to fetch MCP analytics - Redis may be unavailable", exc_info=True)
         return MCPAnalyticsResponse(
             total_calls=0,
             unique_tools=0,
@@ -312,6 +318,7 @@ async def clear_mcp_analytics() -> dict:
         analytics_repo.clear_analytics()
         return {"status": "cleared"}
     except Exception as e:
+        logger.error("Failed to clear MCP analytics: %s", e, exc_info=True)
         return {"status": "error", "message": str(e)}
 
 
@@ -363,6 +370,7 @@ async def get_mcp_activity_history(
 
     except Exception:
         # Return empty response if Redis is unavailable
+        logger.warning("Failed to fetch MCP activity history - Redis may be unavailable", exc_info=True)
         return MCPActivityHistoryResponse(
             days=days,
             max_days=max_days,
@@ -428,6 +436,7 @@ async def get_mcp_transition_details(
         )
 
     except Exception:
+        logger.warning("Failed to fetch MCP transition details - Redis may be unavailable", exc_info=True)
         return MCPTransitionDetailsResponse(
             transitions=[],
             from_tool=from_tool,
@@ -499,6 +508,7 @@ async def get_mcp_recent_calls(
         )
 
     except Exception:
+        logger.warning("Failed to fetch recent MCP calls - Redis may be unavailable", exc_info=True)
         return MCPRecentCallsResponse(
             calls=[],
             total=0,
@@ -535,6 +545,7 @@ async def get_mcp_causal_statistics() -> MCPCausalStatisticsResponse:
         )
 
     except Exception:
+        logger.warning("Failed to fetch MCP causal statistics - Redis may be unavailable", exc_info=True)
         return MCPCausalStatisticsResponse(
             total_causal_links=0,
             total_calls=0,

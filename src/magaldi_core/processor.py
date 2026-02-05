@@ -11,9 +11,12 @@ Only indexes to ES after full processing, ensuring ES presence = completion.
 
 from __future__ import annotations
 
+import logging
 import math
 import threading
 import time
+
+logger = logging.getLogger(__name__)
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -2057,6 +2060,7 @@ def process_elements(
             redis_tracker.add_pending_jobs(elements_to_process)
         except Exception:
             # Redis unavailable - continue without tracking
+            logger.debug("Redis unavailable for job tracking, continuing without tracking", exc_info=True)
             redis_tracker = None
 
     # Worker ID pool - use configured num_workers or default
@@ -2086,7 +2090,7 @@ def process_elements(
             try:
                 redis_tracker.mark_running(element.element_id, should_embed(element))
             except Exception:
-                pass
+                logger.debug("Failed to mark element as running in Redis", exc_info=True)
         try:
             return _process_single_element(
                 element=element,
@@ -2242,7 +2246,8 @@ def process_elements(
                         try:
                             redis_tracker.mark_completed(element.element_id, was_embedded)
                         except Exception:
-                            pass  # Don't fail processing if Redis update fails
+                            # Don't fail processing if Redis update fails
+                            logger.debug("Failed to mark element as completed in Redis", exc_info=True)
                 else:
                     dependency_tracker.mark_failed(element.element_id)
                     result.elements_failed += 1
@@ -2261,7 +2266,7 @@ def process_elements(
                         try:
                             redis_tracker.mark_failed(element.element_id, processed.error or "Unknown", was_embedded)
                         except Exception:
-                            pass
+                            logger.debug("Failed to mark element as failed in Redis", exc_info=True)
 
                 # Report progress with throttle info
                 if on_progress:
@@ -2305,7 +2310,7 @@ def process_elements(
             try:
                 redis_tracker.close()
             except Exception:
-                pass
+                logger.debug("Failed to close Redis tracker on interrupt", exc_info=True)
         # Re-raise so CLI can handle the wait message and exit
         raise
     else:
@@ -2317,6 +2322,6 @@ def process_elements(
         try:
             redis_tracker.close()
         except Exception:
-            pass
+            logger.debug("Failed to close Redis tracker", exc_info=True)
 
     return result

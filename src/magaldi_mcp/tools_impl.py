@@ -6,10 +6,13 @@ plus tool-specific parameters, and returns a dict or list result.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 from shared.ai.embedding import CodeEmbeddingClient
 from shared.db.elasticsearch import ElasticsearchRepository
@@ -42,6 +45,7 @@ def _auto_detect_repo_config() -> tuple[str | None, str | None]:
                 if scope:
                     return scope, repository
             except (yaml.YAMLError, OSError):
+                logger.debug("Failed to read magaldi.yaml from %s", directory, exc_info=True)
                 continue
 
     return None, None
@@ -129,7 +133,7 @@ def search_code(
                 size=limit,
             )
         except Exception:
-            pass  # Fall through to keyword search
+            logger.debug("Vector search failed, falling back to keyword search", exc_info=True)
 
     # Fallback to keyword search if vector search failed or unavailable
     if not results:
@@ -218,7 +222,7 @@ def search_code(
                                 "caller_line": caller.get("line_start"),
                             })
                 except Exception:
-                    pass  # Callers lookup is optional enhancement
+                    logger.debug("Callers lookup failed for result", exc_info=True)
 
     response: dict[str, Any] = {
         "code_results": code_results[:limit],
@@ -282,7 +286,7 @@ def search_features(
                 size=limit,
             )
         except Exception:
-            pass  # Fall through to keyword search
+            logger.debug("Vector search for features failed, falling back to keyword search", exc_info=True)
 
     # Fallback to keyword search if vector search failed or unavailable
     if not results:
