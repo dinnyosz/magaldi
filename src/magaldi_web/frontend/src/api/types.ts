@@ -1,8 +1,10 @@
 /**
- * API client for Magaldi backend
+ * API type definitions for Magaldi backend
  */
 
-const API_BASE = '/api/v1'
+// =============================================================================
+// Dashboard Types
+// =============================================================================
 
 export interface DashboardStats {
   stats: {
@@ -59,6 +61,10 @@ export interface DashboardStats {
   }
 }
 
+// =============================================================================
+// Search Types
+// =============================================================================
+
 export interface SearchRequest {
   query: string
   scope?: string
@@ -84,7 +90,7 @@ export interface SearchResult {
   relevance_pct: number
   text_score: number | null
   vector_score: number | null
-  combined_score: number | null  // Sum of enabled scores, used for sorting
+  combined_score: number | null
   code_snippet?: string
 }
 
@@ -117,6 +123,10 @@ export interface SearchSummaryResponse {
   error: string | null
 }
 
+// =============================================================================
+// Repository Types
+// =============================================================================
+
 export interface FileTreeNode {
   name: string
   path: string
@@ -147,6 +157,23 @@ export interface FileDetailResponse {
   language: string
   elements: FileElement[]
 }
+
+export interface RepoListItem {
+  scope: string
+  name: string
+  file_count: number
+  element_count: number
+  languages: string[]
+}
+
+export interface RepoListResponse {
+  repos: RepoListItem[]
+  total: number
+}
+
+// =============================================================================
+// Element Types
+// =============================================================================
 
 export interface ElementDetailChild {
   element_id: string
@@ -242,12 +269,12 @@ export interface GlossaryInfo {
 export interface ElementFeatureInfo {
   feature_id: string
   hash_id: string | null
-  element_type: string  // "feature" or "subfeature"
+  element_type: string
   label: string
   summary: string | null
   member_count: number
-  parent_feature_label: string | null  // Only for subfeatures
-  parent_feature_summary: string | null  // Only for subfeatures
+  parent_feature_label: string | null
+  parent_feature_summary: string | null
 }
 
 export interface ElementFeaturesResponse {
@@ -270,12 +297,11 @@ export interface ElementImportInfo {
 }
 
 export interface DecoratorDetailInfo {
-  name: string  // e.g., "router.get", "click.option"
-  args: string | null  // e.g., '"/users/{id}"', '"--verbose"'
-  full: string | null  // e.g., 'router.get("/users/{id}")'
+  name: string
+  args: string | null
+  full: string | null
 }
 
-// Code metrics types
 export interface ComplexityInfo {
   cyclomatic: number
   nesting_depth: number
@@ -316,7 +342,6 @@ export interface ConcurrencyInfo {
   patterns: string[]
 }
 
-// Extended code intelligence types
 export interface TypeAnnotationInfo {
   name: string
   kind: string
@@ -377,6 +402,20 @@ export interface MetricsSummaryInfo {
   security_by_severity: Record<string, number>
 }
 
+export interface HttpRouteInfo {
+  method: string
+  path: string
+  path_params: string[]
+  framework: string | null
+}
+
+export interface CliCommandInfo {
+  name: string
+  full_command: string | null
+  options: Array<{ name: string; type: string | null; required: boolean }>
+  framework: string | null
+}
+
 export interface ElementDetail {
   element_id: string
   hash_id: string | null
@@ -396,38 +435,27 @@ export interface ElementDetail {
   is_async: boolean
   is_test: boolean
   indexed_at: string | null
-  // Enhanced context for classes
   base_classes: string[]
   class_attributes: ClassAttributeInfo[]
-  // Enhanced context for functions/methods
   return_type: string | null
   parameters: ParameterInfo[]
   exceptions_raised: string[]
   attributes_modified: string[]
-  // For file elements
   imports: ElementImportInfo[]
   element_count: number | null
-  // Type annotations
   type_annotations: TypeAnnotationInfo[]
-  // Pattern detection
   detected_patterns: string[]
   pattern_confidence: Record<string, number>
-  // Documentation artifacts
   todos: TodoInfo[]
   section_markers: SectionMarkerInfo[]
   associated_comments: CommentInfo[]
-  // API surface
   http_routes: HttpRouteInfo[]
   cli_commands: CliCommandInfo[]
-  // Purity and side effects
   purity: PurityInfo | null
   side_effects: SideEffectInfo[]
   mutated_state: string[]
-  // API surface
   is_public_api: boolean
-  // Variable context
   context_usages: string[]
-  // Context and relationships
   context: {
     file: ElementDetailFile | null
     parent: ElementDetailParent | null
@@ -440,14 +468,12 @@ export interface ElementDetail {
   }
   feature_info: FeatureInfo | null
   glossary_info: GlossaryInfo | null
-  // Code metrics (for functions/methods)
   complexity: ComplexityInfo | null
   code_metrics: CodeMetricsInfo | null
   docstring_quality: DocstringQualityInfo | null
   security_issues: SecurityIssueInfo[]
   env_vars: EnvVarInfo[]
   concurrency: ConcurrencyInfo | null
-  // Aggregated metrics (for files/classes)
   metrics_summary: MetricsSummaryInfo | null
 }
 
@@ -461,6 +487,10 @@ export interface SimilarElement {
   summary: string | null
   similarity: number
 }
+
+// =============================================================================
+// Visualization Types
+// =============================================================================
 
 export interface VectorPoint {
   x: number
@@ -518,6 +548,34 @@ export interface ClustersResponse {
   total_elements: number
 }
 
+export interface FeatureConnection {
+  source: string
+  target: string
+  affinity: number
+  shared_member_count: number
+}
+
+export interface FeatureGraphNode {
+  id: string
+  hash_id: string | null
+  label: string
+  node_type: 'feature' | 'subfeature'
+  summary: string | null
+  member_count: number
+  parent_id: string | null
+}
+
+export interface FeatureGraphResponse {
+  nodes: FeatureGraphNode[]
+  connections: FeatureConnection[]
+  feature_count: number
+  subfeature_count: number
+}
+
+// =============================================================================
+// Admin Types
+// =============================================================================
+
 export interface ServiceHealth {
   status: string
   latency_ms: number | null
@@ -551,7 +609,6 @@ export interface IndexStats {
   vector_coverage_pct: number
 }
 
-// MCP Analytics types
 export interface ToolUsageInfo {
   tool_name: string
   call_count: number
@@ -585,7 +642,7 @@ export interface MCPAnalyticsResponse {
 }
 
 export interface DailyActivityItem {
-  date: string // YYYY-MM-DD
+  date: string
   total_calls: number
   tool_counts: Record<string, number>
 }
@@ -597,165 +654,6 @@ export interface MCPActivityHistoryResponse {
   total_calls: number
 }
 
-// API functions
-
-async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
-  })
-  if (!response.ok) {
-    throw new Error(`API error: ${response.status} ${response.statusText}`)
-  }
-  return response.json()
-}
-
-// Dashboard
-export async function getDashboard(): Promise<DashboardStats> {
-  return fetchJson<DashboardStats>(`${API_BASE}/dashboard`)
-}
-
-// Search
-export async function search(params: SearchRequest): Promise<SearchResponse> {
-  return fetchJson<SearchResponse>(`${API_BASE}/search`, {
-    method: 'POST',
-    body: JSON.stringify(params),
-  })
-}
-
-export async function generateSearchSummary(params: SearchSummaryRequest): Promise<SearchSummaryResponse> {
-  return fetchJson<SearchSummaryResponse>(`${API_BASE}/search/summary`, {
-    method: 'POST',
-    body: JSON.stringify(params),
-  })
-}
-
-// Repositories
-export interface RepoListItem {
-  scope: string
-  name: string
-  file_count: number
-  element_count: number
-  languages: string[]
-}
-
-interface RepoListResponse {
-  repos: RepoListItem[]
-  total: number
-}
-
-export async function getRepositories(): Promise<RepoListItem[]> {
-  const response = await fetchJson<RepoListResponse>(`${API_BASE}/repos`)
-  return response.repos
-}
-
-export async function getFileTree(scope: string, repository: string): Promise<FileTreeResponse> {
-  return fetchJson(`${API_BASE}/repos/${scope}/${repository}/tree`)
-}
-
-export async function getFileDetail(scope: string, repository: string, filePath: string): Promise<FileDetailResponse> {
-  const encodedPath = encodeURIComponent(filePath)
-  return fetchJson(`${API_BASE}/repos/${scope}/${repository}/files/${encodedPath}`)
-}
-
-// Elements
-export async function getElement(hashId: string): Promise<ElementDetail> {
-  return fetchJson(`${API_BASE}/elements/${encodeURIComponent(hashId)}`)
-}
-
-export async function getSimilarElements(hashId: string, limit = 10): Promise<SimilarElement[]> {
-  return fetchJson(`${API_BASE}/elements/similar/${encodeURIComponent(hashId)}?limit=${limit}`)
-}
-
-export async function getElementFeatures(hashId: string): Promise<ElementFeaturesResponse> {
-  return fetchJson(`${API_BASE}/elements/${encodeURIComponent(hashId)}/features`)
-}
-
-// Vector visualization
-export async function getVectorMap(
-  scope: string,
-  repository: string,
-  options?: {
-    element_types?: string[]
-    dimensions?: number
-    algorithm?: 'umap' | 'tsne'
-    limit?: number
-  }
-): Promise<VectorMapResponse> {
-  const params = new URLSearchParams()
-  if (options?.element_types) {
-    options.element_types.forEach(t => params.append('element_types', t))
-  }
-  if (options?.dimensions) params.set('dimensions', String(options.dimensions))
-  if (options?.algorithm) params.set('algorithm', options.algorithm)
-  if (options?.limit) params.set('limit', String(options.limit))
-
-  const query = params.toString() ? `?${params.toString()}` : ''
-  return fetchJson(`${API_BASE}/repos/${scope}/${repository}/vector-map${query}`)
-}
-
-export async function getClusters(scope: string, repository: string, limit = 50): Promise<ClustersResponse> {
-  return fetchJson(`${API_BASE}/repos/${scope}/${repository}/clusters?limit=${limit}`)
-}
-
-// Feature Graph types and API
-export interface FeatureConnection {
-  source: string  // Feature label
-  target: string  // Connected feature label
-  affinity: number  // Connection strength (0-1)
-  shared_member_count: number  // Number of overlapping elements
-}
-
-export interface FeatureGraphNode {
-  id: string
-  hash_id: string | null
-  label: string
-  node_type: 'feature' | 'subfeature'
-  summary: string | null
-  member_count: number
-  parent_id: string | null
-}
-
-export interface FeatureGraphResponse {
-  nodes: FeatureGraphNode[]
-  connections: FeatureConnection[]
-  feature_count: number
-  subfeature_count: number
-}
-
-export async function getFeatureGraph(scope: string, repository: string): Promise<FeatureGraphResponse> {
-  return fetchJson(`${API_BASE}/repos/${scope}/${repository}/feature-graph`)
-}
-
-// Admin
-export async function getHealth(): Promise<HealthStatus> {
-  return fetchJson(`${API_BASE}/admin/health`)
-}
-
-export async function getJobs(): Promise<JobStatsResponse> {
-  return fetchJson(`${API_BASE}/admin/jobs`)
-}
-
-export async function getIndexStats(): Promise<IndexStats> {
-  return fetchJson(`${API_BASE}/admin/index-stats`)
-}
-
-export async function getMCPAnalytics(): Promise<MCPAnalyticsResponse> {
-  return fetchJson(`${API_BASE}/admin/mcp-analytics`)
-}
-
-export async function getMCPActivityHistory(days: number = 7): Promise<MCPActivityHistoryResponse> {
-  return fetchJson(`${API_BASE}/admin/mcp-analytics/history?days=${days}`)
-}
-
-export async function clearMCPAnalytics(): Promise<{ status: string; message?: string }> {
-  return fetchJson(`${API_BASE}/admin/mcp-analytics/clear`, { method: 'POST' })
-}
-
-// MCP Transition Details types
 export interface TransitionDetailInfo {
   caller: string
   caller_input: string | null
@@ -819,37 +717,9 @@ export interface MCPCausalStatisticsResponse {
   top_causal_pairs: CausalPairInfo[]
 }
 
-export async function getMCPTransitionDetails(params?: {
-  from_tool?: string
-  to_tool?: string
-  limit?: number
-}): Promise<MCPTransitionDetailsResponse> {
-  const searchParams = new URLSearchParams()
-  if (params?.from_tool) searchParams.set('from_tool', params.from_tool)
-  if (params?.to_tool) searchParams.set('to_tool', params.to_tool)
-  if (params?.limit) searchParams.set('limit', String(params.limit))
-  const query = searchParams.toString() ? `?${searchParams.toString()}` : ''
-  return fetchJson(`${API_BASE}/admin/mcp-analytics/transition-details${query}`)
-}
-
-export async function getMCPRecentCalls(params?: {
-  limit?: number
-  tool_name?: string
-  only_causal?: boolean
-}): Promise<MCPRecentCallsResponse> {
-  const searchParams = new URLSearchParams()
-  if (params?.limit) searchParams.set('limit', String(params.limit))
-  if (params?.tool_name) searchParams.set('tool_name', params.tool_name)
-  if (params?.only_causal) searchParams.set('only_causal', 'true')
-  const query = searchParams.toString() ? `?${searchParams.toString()}` : ''
-  return fetchJson(`${API_BASE}/admin/mcp-analytics/recent-calls${query}`)
-}
-
-export async function getMCPCausalStatistics(): Promise<MCPCausalStatisticsResponse> {
-  return fetchJson(`${API_BASE}/admin/mcp-analytics/causal`)
-}
-
-// Browse API
+// =============================================================================
+// Browse Types
+// =============================================================================
 
 export interface BrowseFilters {
   scopes: string[]
@@ -893,10 +763,8 @@ export interface BrowseElement {
   has_docstring: boolean
   decorators: string[]
   level: number
-  // For features
   member_count?: number
   subfeatures?: BrowseSubfeature[]
-  // For glossary
   total_count?: number
   feature_count?: number
 }
@@ -931,53 +799,6 @@ export interface ElementChildren {
     is_async: boolean
   }>>
   total_children: number
-}
-
-export async function getBrowseFilters(): Promise<BrowseFilters> {
-  return fetchJson(`${API_BASE}/browse/filters`)
-}
-
-export async function browseElements(params: {
-  scope?: string
-  repository?: string
-  username?: string
-  element_type?: string
-  parent_id?: string
-  language?: string
-  page?: number
-  limit?: number
-}): Promise<BrowseResponse> {
-  const searchParams = new URLSearchParams()
-  if (params.scope) searchParams.set('scope', params.scope)
-  if (params.repository) searchParams.set('repository', params.repository)
-  if (params.username) searchParams.set('username', params.username)
-  if (params.element_type) searchParams.set('element_type', params.element_type)
-  if (params.parent_id) searchParams.set('parent_id', params.parent_id)
-  if (params.language) searchParams.set('language', params.language)
-  if (params.page) searchParams.set('page', String(params.page))
-  if (params.limit) searchParams.set('limit', String(params.limit))
-
-  const query = searchParams.toString() ? `?${searchParams.toString()}` : ''
-  return fetchJson(`${API_BASE}/browse/elements${query}`)
-}
-
-export async function getBrowseStats(params: {
-  scope?: string
-  repository?: string
-  username?: string
-}): Promise<BrowseStats> {
-  const searchParams = new URLSearchParams()
-  if (params.scope) searchParams.set('scope', params.scope)
-  if (params.repository) searchParams.set('repository', params.repository)
-  if (params.username) searchParams.set('username', params.username)
-
-  const query = searchParams.toString() ? `?${searchParams.toString()}` : ''
-  return fetchJson(`${API_BASE}/browse/stats${query}`)
-}
-
-export async function getElementChildren(hashId: string, username?: string): Promise<ElementChildren> {
-  const params = username ? `?username=${username}` : ''
-  return fetchJson(`${API_BASE}/browse/element/${encodeURIComponent(hashId)}/children${params}`)
 }
 
 export interface CallGraphEntry {
@@ -1021,18 +842,10 @@ export interface ElementDetailsResponse {
   error?: string
 }
 
-export async function getElementDetails(
-  hashId: string,
-  options?: { includeCallGraph?: boolean; username?: string }
-): Promise<ElementDetailsResponse> {
-  const params = new URLSearchParams()
-  if (options?.includeCallGraph) params.set('include_call_graph', 'true')
-  if (options?.username) params.set('username', options.username)
-  const query = params.toString() ? `?${params.toString()}` : ''
-  return fetchJson(`${API_BASE}/browse/element/${encodeURIComponent(hashId)}/details${query}`)
-}
-
+// =============================================================================
 // Glossary Types
+// =============================================================================
+
 export interface GlossaryTermSummary {
   term: string
   hash_id: string | null
@@ -1064,39 +877,8 @@ export interface GlossaryListResponse {
   total: number
 }
 
-// Glossary API Functions
-export async function getGlossaryTerms(
-  scope: string,
-  repository: string,
-  minCount: number = 1
-): Promise<GlossaryListResponse> {
-  return fetchJson(`${API_BASE}/repos/${scope}/${repository}/glossary?min_count=${minCount}`)
-}
-
-export async function getGlossaryTerm(
-  scope: string,
-  repository: string,
-  term: string
-): Promise<GlossaryTermDetail> {
-  return fetchJson(`${API_BASE}/repos/${scope}/${repository}/glossary/${encodeURIComponent(term)}`)
-}
-
-export async function searchGlossaryTerms(
-  scope: string,
-  repository: string,
-  query: string
-): Promise<GlossaryListResponse> {
-  return fetchJson(`${API_BASE}/repos/${scope}/${repository}/glossary/search/${encodeURIComponent(query)}`)
-}
-
-export async function getGlossaryTermsForFeature(
-  featureId: string
-): Promise<GlossaryListResponse> {
-  return fetchJson(`${API_BASE}/glossary/by-feature/${encodeURIComponent(featureId)}`)
-}
-
 // =============================================================================
-// Analysis API Types
+// Analysis Types
 // =============================================================================
 
 export interface CallerInfo {
@@ -1186,20 +968,6 @@ export interface DeadCodeResponse {
     called: number
     potentially_dead: number
   }
-}
-
-export interface HttpRouteInfo {
-  method: string
-  path: string
-  path_params: string[]
-  framework: string | null
-}
-
-export interface CliCommandInfo {
-  name: string
-  full_command: string | null  // Full command path like "magaldi web serve"
-  options: Array<{ name: string; type: string | null; required: boolean }>
-  framework: string | null
 }
 
 export interface EntryPointItem {
@@ -1318,94 +1086,7 @@ export interface ExplainElementResponse {
 }
 
 // =============================================================================
-// Analysis API Functions
-// =============================================================================
-
-export async function getElementCallers(
-  hashId: string,
-  options?: { limit?: number; include_tests?: boolean }
-): Promise<CallGraphResponse> {
-  const params = new URLSearchParams()
-  if (options?.limit) params.set('limit', String(options.limit))
-  if (options?.include_tests !== undefined) params.set('include_tests', String(options.include_tests))
-  const query = params.toString() ? `?${params.toString()}` : ''
-  return fetchJson(`${API_BASE}/analysis/callers/${encodeURIComponent(hashId)}${query}`)
-}
-
-export async function getCallChain(
-  hashId: string,
-  options?: { direction?: 'callers' | 'callees' | 'both'; max_depth?: number }
-): Promise<CallChainResponse> {
-  const params = new URLSearchParams()
-  if (options?.direction) params.set('direction', options.direction)
-  if (options?.max_depth) params.set('max_depth', String(options.max_depth))
-  const query = params.toString() ? `?${params.toString()}` : ''
-  return fetchJson(`${API_BASE}/analysis/call-chain/${encodeURIComponent(hashId)}${query}`)
-}
-
-export async function getDeadCode(
-  scope: string,
-  repository: string,
-  options?: { username?: string; include_tests?: boolean }
-): Promise<DeadCodeResponse> {
-  const params = new URLSearchParams()
-  params.set('scope', scope)
-  params.set('repository', repository)
-  if (options?.username) params.set('username', options.username)
-  if (options?.include_tests !== undefined) params.set('include_tests', String(options.include_tests))
-  return fetchJson(`${API_BASE}/analysis/dead-code?${params.toString()}`)
-}
-
-export async function getEntryPoints(
-  scope: string,
-  repository: string,
-  username?: string
-): Promise<EntryPointsResponse> {
-  const params = new URLSearchParams()
-  params.set('scope', scope)
-  params.set('repository', repository)
-  if (username) params.set('username', username)
-  return fetchJson(`${API_BASE}/analysis/entry-points?${params.toString()}`)
-}
-
-export async function getFileDependencies(hashId: string): Promise<DependenciesResponse> {
-  return fetchJson(`${API_BASE}/analysis/dependencies/${encodeURIComponent(hashId)}`)
-}
-
-export async function getModuleDependents(
-  module: string,
-  scope: string,
-  repository: string,
-  options?: { username?: string; limit?: number }
-): Promise<DependentsResponse> {
-  const params = new URLSearchParams()
-  params.set('module', module)
-  params.set('scope', scope)
-  params.set('repository', repository)
-  if (options?.username) params.set('username', options.username)
-  if (options?.limit) params.set('limit', String(options.limit))
-  return fetchJson(`${API_BASE}/analysis/dependents?${params.toString()}`)
-}
-
-export async function getDependencyGraph(
-  scope: string,
-  repository: string,
-  options?: { username?: string; internal_only?: boolean }
-): Promise<DependencyGraphResponse> {
-  const params = new URLSearchParams()
-  params.set('scope', scope)
-  params.set('repository', repository)
-  if (options?.username) params.set('username', options.username)
-  if (options?.internal_only !== undefined) params.set('internal_only', String(options.internal_only))
-  return fetchJson(`${API_BASE}/analysis/dependency-graph?${params.toString()}`)
-}
-
-export async function explainElement(hashId: string): Promise<ExplainElementResponse> {
-  return fetchJson(`${API_BASE}/analysis/explain/${encodeURIComponent(hashId)}`)
-}
-
-// =============================================================================
-// Code Metrics API Types
+// Code Metrics Types
 // =============================================================================
 
 export interface ComplexFunctionItem {
@@ -1509,74 +1190,4 @@ export interface AsyncCodeResponse {
   count: number
   pattern_filter: string
   by_pattern: Record<string, number>
-}
-
-// =============================================================================
-// Code Metrics API Functions
-// =============================================================================
-
-export async function getComplexFunctions(
-  scope: string,
-  repository: string,
-  options?: { min_complexity?: number; limit?: number; include_tests?: boolean }
-): Promise<ComplexFunctionsResponse> {
-  const params = new URLSearchParams()
-  params.set('scope', scope)
-  params.set('repository', repository)
-  if (options?.min_complexity) params.set('min_complexity', String(options.min_complexity))
-  if (options?.limit) params.set('limit', String(options.limit))
-  if (options?.include_tests !== undefined) params.set('include_tests', String(options.include_tests))
-  return fetchJson(`${API_BASE}/analysis/complexity?${params.toString()}`)
-}
-
-export async function getSecurityIssues(
-  scope: string,
-  repository: string,
-  options?: { severity?: string; limit?: number }
-): Promise<SecurityIssuesResponse> {
-  const params = new URLSearchParams()
-  params.set('scope', scope)
-  params.set('repository', repository)
-  if (options?.severity) params.set('severity', options.severity)
-  if (options?.limit) params.set('limit', String(options.limit))
-  return fetchJson(`${API_BASE}/analysis/security-issues?${params.toString()}`)
-}
-
-export async function getUndocumentedFunctions(
-  scope: string,
-  repository: string,
-  options?: { max_coverage?: number; limit?: number; include_tests?: boolean }
-): Promise<UndocumentedResponse> {
-  const params = new URLSearchParams()
-  params.set('scope', scope)
-  params.set('repository', repository)
-  if (options?.max_coverage !== undefined) params.set('max_coverage', String(options.max_coverage))
-  if (options?.limit) params.set('limit', String(options.limit))
-  if (options?.include_tests !== undefined) params.set('include_tests', String(options.include_tests))
-  return fetchJson(`${API_BASE}/analysis/documentation-coverage?${params.toString()}`)
-}
-
-export async function getEnvUsage(
-  scope: string,
-  repository: string,
-  options?: { limit?: number }
-): Promise<EnvUsageResponse> {
-  const params = new URLSearchParams()
-  params.set('scope', scope)
-  params.set('repository', repository)
-  if (options?.limit) params.set('limit', String(options.limit))
-  return fetchJson(`${API_BASE}/analysis/env-usage?${params.toString()}`)
-}
-
-export async function getAsyncCode(
-  scope: string,
-  repository: string,
-  options?: { pattern?: string; limit?: number }
-): Promise<AsyncCodeResponse> {
-  const params = new URLSearchParams()
-  params.set('scope', scope)
-  params.set('repository', repository)
-  if (options?.pattern) params.set('pattern', options.pattern)
-  if (options?.limit) params.set('limit', String(options.limit))
-  return fetchJson(`${API_BASE}/analysis/concurrency?${params.toString()}`)
 }
