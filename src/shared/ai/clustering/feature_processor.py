@@ -117,8 +117,8 @@ class FeatureTimingStats:
     count_by_tier: dict[int, int] = field(default_factory=dict)
     totals_by_tier: dict[int, int] = field(default_factory=dict)
 
-    # Throughput tracker for throttling
-    throughput_tracker: "ThroughputTracker" = field(default_factory=lambda: ThroughputTracker())
+    # Throughput tracker for throttling (5 min window like other processors)
+    throughput_tracker: "ThroughputTracker" = field(default_factory=lambda: ThroughputTracker(window_seconds=300.0))
 
     def set_totals_by_tier(self, totals: dict[int, int]) -> None:
         """Set total counts by tier for ETA calculation."""
