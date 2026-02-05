@@ -360,6 +360,15 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
             return connectedIds.has(n.id) ? 1 : 0.3
           })
 
+        // Show labels for connected nodes
+        nodeElements.select('text.node-label')
+          .transition()
+          .duration(150)
+          .attr('opacity', (node: unknown) => {
+            const n = node as GraphNode
+            return connectedIds.has(n.id) ? 1 : 0
+          })
+
         // Highlight hovered and connected nodes' borders
         nodeElements.select('circle')
           .transition()
@@ -403,6 +412,15 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
           .duration(150)
           .attr('stroke-width', (node: unknown) =>
             (node as GraphNode).node_type === 'feature' ? 3 : 0
+          )
+
+        // Hide labels (unless zoom level shows them)
+        nodeElements.select('text.node-label')
+          .transition()
+          .duration(150)
+          .attr('opacity', zoomLevel >= LABEL_ZOOM_THRESHOLD
+            ? Math.min(1, (zoomLevel - LABEL_ZOOM_THRESHOLD) / 0.5)
+            : 0
           )
       })
       .on('click', (event, d) => {
