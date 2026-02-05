@@ -5,6 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import TYPE_CHECKING, Generator
 
+from shared.cli._shared import validate_llm_url
 from shared.config import MagaldiConfig, get_config, load_config
 from shared.db.elasticsearch import ElasticsearchRepository
 
@@ -53,17 +54,20 @@ async def check_llm_health(config: MagaldiConfig) -> dict:
 
     for name, model in config.llm.models.items():
         try:
+            validated_url = validate_llm_url(model.url)
             if model.provider == "ollama":
-                response = requests.get(f"{model.url}/api/tags", timeout=5)
+                response = requests.get(f"{validated_url}/api/tags", timeout=5)
                 if response.ok:
                     results[name] = {"status": "healthy", "provider": "ollama"}
                 else:
                     results[name] = {"status": "unhealthy", "error": f"HTTP {response.status_code}"}
             elif model.provider == "llamacpp":
-                response = requests.get(f"{model.url.rstrip('/')}/v1/models", timeout=5)
+                response = requests.get(f"{validated_url}/v1/models", timeout=5)
                 results[name] = {"status": "healthy", "provider": "llamacpp"}
             else:
                 results[name] = {"status": "unknown", "provider": model.provider}
+        except ValueError as e:
+            results[name] = {"status": "unhealthy", "error": f"Invalid URL: {e}"}
         except Exception as e:
             results[name] = {"status": "unhealthy", "error": str(e)}
 

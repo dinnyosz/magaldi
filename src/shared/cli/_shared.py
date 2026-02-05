@@ -69,6 +69,40 @@ def format_duration(seconds: float) -> str:
     return f"{minutes}:{secs:02d}"
 
 
+def validate_llm_url(url: str) -> str:
+    """Validate and normalize LLM server URL.
+
+    Ensures URL has valid http/https scheme and no suspicious characters.
+    Returns the validated URL with trailing slash removed.
+
+    Args:
+        url: The URL to validate.
+
+    Returns:
+        Normalized URL.
+
+    Raises:
+        ValueError: If URL is invalid or has unsafe scheme.
+    """
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Invalid URL scheme: {parsed.scheme}. Only http/https allowed.")
+
+    if not parsed.netloc:
+        raise ValueError(f"Invalid URL: missing host in {url}")
+
+    # Check for suspicious characters that might indicate injection attempts
+    suspicious_chars = ["\n", "\r", "\t", " ", "<", ">", '"', "'", ";", "&", "|"]
+    for char in suspicious_chars:
+        if char in url:
+            raise ValueError(f"Invalid URL: contains suspicious character {repr(char)}")
+
+    return url.rstrip("/")
+
+
 def get_model_column_width(config: "MagaldiConfig") -> int:
     """Calculate the optimal width for model name columns in CLI displays.
 
@@ -131,14 +165,15 @@ def check_model_availability(config: "MagaldiConfig", skip_ai: bool) -> list[str
         if url in ollama_models_cache:
             return ollama_models_cache[url]
         try:
-            response = requests.get(f"{url.rstrip('/')}/api/tags", timeout=5)
+            validated_url = validate_llm_url(url)
+            response = requests.get(f"{validated_url}/api/tags", timeout=5)
             response.raise_for_status()
             models = {m.get("name") for m in response.json().get("models", [])}
             ollama_models_cache[url] = models
             return models
         except requests.exceptions.ConnectionError:
             return None
-        except Exception:
+        except (ValueError, Exception):
             return None
 
     def model_in_ollama(model_name: str, available: set[str]) -> bool:
