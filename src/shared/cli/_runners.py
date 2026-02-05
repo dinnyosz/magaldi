@@ -188,7 +188,15 @@ def run_processing(
         """Build Rich display from progress state."""
         # Progress info
         pct = (state.completed / state.total * 100) if state.total > 0 else 0
-        eta = state.timing.eta_seconds(state.completed, state.total, state.num_workers)
+        # Use actual allowed workers for ETA (accounts for throttling)
+        parallelism = state.parallelism
+        if parallelism and parallelism.tier_changing:
+            effective_workers = 1
+        elif parallelism and parallelism.throttle_decision:
+            effective_workers = parallelism.throttle_decision.recommended_workers
+        else:
+            effective_workers = state.num_workers
+        eta = state.timing.eta_seconds(state.completed, state.total, effective_workers)
         elapsed_str = format_duration(state.timing.elapsed)
 
         # Build visual progress bar

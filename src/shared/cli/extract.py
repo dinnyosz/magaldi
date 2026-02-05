@@ -464,7 +464,9 @@ def run_feature_extraction(
         def build_feature_display(state: FeatureProgressState, num_workers: int) -> RenderableType:
             """Build Rich display for feature processing progress."""
             pct = (state.completed / state.total * 100) if state.total > 0 else 0
-            eta = state.timing.eta_seconds(state.completed, state.total, state.num_workers)
+            # Use actual allowed workers for ETA (accounts for throttling)
+            effective_workers = state.allowed_workers if state.allowed_workers > 0 else state.num_workers
+            eta = state.timing.eta_seconds(state.completed, state.total, effective_workers)
             elapsed_str = format_duration(state.timing.elapsed)
 
             # Progress bar
@@ -733,7 +735,9 @@ def run_feature_extraction(
             def build_subfeature_display(state: SubfeatureProgressState, num_workers: int) -> RenderableType:
                 """Build Rich display for subfeature processing progress (matches Phase 5)."""
                 pct = (state.completed / state.total * 100) if state.total > 0 else 0
-                eta = state.timing.eta_seconds(state.completed, state.total, state.num_workers)
+                # Use actual allowed workers for ETA (accounts for throttling)
+                effective_workers = state.allowed_workers if state.allowed_workers > 0 else state.num_workers
+                eta = state.timing.eta_seconds(state.completed, state.total, effective_workers)
                 elapsed_str = format_duration(state.timing.elapsed)
 
                 # Header (plain text like Phase 5)
@@ -1090,7 +1094,9 @@ def run_glossary_extraction(
 
             # Progress info
             pct = (state.completed / state.total * 100) if state.total > 0 else 0
-            eta = state.timing.eta_seconds(state.completed, state.total, state.num_workers)
+            # Use actual allowed workers for ETA (accounts for throttling)
+            effective_workers = state.allowed_workers if state.allowed_workers > 0 else state.num_workers
+            eta = state.timing.eta_seconds(state.completed, state.total, effective_workers)
             elapsed_str = format_duration(state.timing.elapsed)
 
             # Build visual progress bar
