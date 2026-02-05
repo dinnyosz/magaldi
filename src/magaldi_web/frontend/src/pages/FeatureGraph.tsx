@@ -229,9 +229,11 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
       .attr('stroke-width', 1.5)
       .attr('stroke-opacity', 0.6)
 
-    // Feature connection links (thicker, based on shared member count) - more prominent styling
-    const featureConnectionData = graphLinks.filter(l => l.linkType === 'feature-connection')
-    console.log('Feature connections:', featureConnectionData.length, featureConnectionData)
+    // Feature connection links - only show connections WITH shared members (actual code overlap)
+    // Affinity-only connections (no shared members) are filtered out as they add noise
+    const featureConnectionData = graphLinks.filter(
+      l => l.linkType === 'feature-connection' && l.shared_member_count > 0
+    )
 
     // Calculate max shared count for normalization
     const maxShared = Math.max(1, ...featureConnectionData.map(d => d.shared_member_count))
@@ -241,9 +243,8 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
       .join('line')
       .attr('class', 'feature-connection')
       .attr('stroke', '#f97316')  // Orange color for visibility
-      .attr('stroke-width', d => d.shared_member_count > 0 ? 2 + (d.shared_member_count / maxShared) * 8 : 1)
-      .attr('stroke-opacity', d => d.shared_member_count > 0 ? 0.8 : 0.3)
-      .attr('stroke-dasharray', d => d.shared_member_count > 0 ? 'none' : '4,4')
+      .attr('stroke-width', d => 2 + (d.shared_member_count / maxShared) * 8)
+      .attr('stroke-opacity', 0.8)
 
     // Create node group
     const nodeGroup = g.append('g').attr('class', 'nodes')
@@ -372,7 +373,7 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
         parentChildLinks.attr('stroke-width', 1.5 / transform.k)
         const zoomMaxShared = Math.max(1, ...featureConnectionData.map(d => d.shared_member_count))
         featureLinks.attr('stroke-width', (d: GraphLink) =>
-          (d.shared_member_count > 0 ? 2 + (d.shared_member_count / zoomMaxShared) * 8 : 1) / transform.k
+          (2 + (d.shared_member_count / zoomMaxShared) * 8) / transform.k
         )
       })
 
@@ -681,11 +682,11 @@ function FeatureGraph() {
                   style={{
                     width: 30,
                     height: 4,
-                    backgroundColor: '#64748b',
-                    opacity: 0.7,
+                    backgroundColor: '#f97316',
+                    opacity: 0.8,
                   }}
                 ></div>
-                <span className="small">Feature connection (thicker = stronger)</span>
+                <span className="small">Shared members (thicker = more overlap)</span>
               </div>
             </Card.Body>
           </Card>
