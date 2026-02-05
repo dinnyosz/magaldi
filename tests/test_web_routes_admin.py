@@ -171,8 +171,13 @@ class TestGetJobStats:
     """Tests for GET /admin/jobs endpoint."""
 
     def test_get_job_stats_returns_zeros(self, client, mock_es_repo):
-        """Test that job stats returns zeros (placeholder)."""
-        response = client.get("/admin/jobs")
+        """Test that job stats returns zeros when Redis is empty."""
+        mock_stats = {
+            "summarization": {"pending": 0, "running": 0, "completed": 0, "failed": 0},
+            "embedding": {"pending": 0, "running": 0, "completed": 0, "failed": 0},
+        }
+        with patch("magaldi_web.routes.admin.get_job_queue_totals", return_value=mock_stats):
+            response = client.get("/admin/jobs")
 
         assert response.status_code == 200
         data = response.json()
@@ -181,6 +186,24 @@ class TestGetJobStats:
         assert data["summarization"]["completed"] == 0
         assert data["summarization"]["failed"] == 0
         assert data["embedding"]["pending"] == 0
+
+    def test_get_job_stats_returns_counts(self, client, mock_es_repo):
+        """Test that job stats returns actual counts from Redis."""
+        mock_stats = {
+            "summarization": {"pending": 5, "running": 2, "completed": 10, "failed": 1},
+            "embedding": {"pending": 3, "running": 1, "completed": 8, "failed": 0},
+        }
+        with patch("magaldi_web.routes.admin.get_job_queue_totals", return_value=mock_stats):
+            response = client.get("/admin/jobs")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["summarization"]["pending"] == 5
+        assert data["summarization"]["running"] == 2
+        assert data["summarization"]["completed"] == 10
+        assert data["summarization"]["failed"] == 1
+        assert data["embedding"]["pending"] == 3
+        assert data["embedding"]["failed"] == 0
 
 
 # =============================================================================
@@ -283,11 +306,16 @@ class TestGetAdminOverview:
         mock_client.count.return_value = {"count": 400}
 
         mock_config = MagicMock()
+        mock_job_stats = {
+            "summarization": {"pending": 0, "running": 0, "completed": 0, "failed": 0},
+            "embedding": {"pending": 0, "running": 0, "completed": 0, "failed": 0},
+        }
 
         with patch("magaldi_web.routes.admin.get_cached_config", return_value=mock_config), \
              patch("magaldi_web.routes.admin.check_elasticsearch_health") as mock_es_health, \
              patch("magaldi_web.routes.admin.check_llm_health") as mock_llm_health, \
-             patch("magaldi_web.routes.admin.check_redis_health") as mock_redis_health:
+             patch("magaldi_web.routes.admin.check_redis_health") as mock_redis_health, \
+             patch("magaldi_web.routes.admin.get_job_queue_totals", return_value=mock_job_stats):
 
             mock_es_health.return_value = {"status": "healthy"}
             mock_llm_health.return_value = {"status": "healthy"}
@@ -313,16 +341,26 @@ class TestRetryFailedJobs:
 
     def test_retry_summarization_jobs(self, client):
         """Test retrying summarization jobs."""
-        response = client.post("/admin/jobs/retry?job_type=summarization")
+        with patch("magaldi_web.routes.admin.retry_failed_jobs_in_redis", return_value=0):
+            response = client.post("/admin/jobs/retry?job_type=summarization")
 
         assert response.status_code == 200
         data = response.json()
         assert data["jobs_reset"] == 0
-        assert "not yet implemented" in data["message"]
+
+    def test_retry_summarization_jobs_resets_failed(self, client):
+        """Test that retry actually resets failed jobs."""
+        with patch("magaldi_web.routes.admin.retry_failed_jobs_in_redis", return_value=5):
+            response = client.post("/admin/jobs/retry?job_type=summarization")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["jobs_reset"] == 5
 
     def test_retry_embedding_jobs(self, client):
         """Test retrying embedding jobs."""
-        response = client.post("/admin/jobs/retry?job_type=embedding")
+        with patch("magaldi_web.routes.admin.retry_failed_jobs_in_redis", return_value=0):
+            response = client.post("/admin/jobs/retry?job_type=embedding")
 
         assert response.status_code == 200
         data = response.json()

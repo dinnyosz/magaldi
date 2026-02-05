@@ -97,6 +97,119 @@ async def check_redis_health(config: MagaldiConfig) -> dict:
         return {"status": "unhealthy", "error": str(e)}
 
 
+async def get_job_queue_totals(config: MagaldiConfig) -> dict:
+    """Get aggregated job queue totals for admin dashboard.
+
+    Returns totals for summarization and embedding job queues with
+    pending, running, completed, and failed counts.
+    """
+    import json
+
+    import redis
+
+    result = {
+        "summarization": {"pending": 0, "running": 0, "completed": 0, "failed": 0},
+        "embedding": {"pending": 0, "running": 0, "completed": 0, "failed": 0},
+    }
+
+    try:
+        r = redis.Redis(
+            host=config.redis.host,
+            port=config.redis.port,
+            db=config.redis.db,
+            decode_responses=True,
+            socket_timeout=5,
+        )
+
+        # Count summarization jobs by status
+        for jobs_key in r.scan_iter("magaldi:summarization:jobs:*"):
+            for job_data in r.hvals(jobs_key):
+                try:
+                    job = json.loads(job_data)
+                    status = job.get("status", "pending")
+                    if status in result["summarization"]:
+                        result["summarization"][status] += 1
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+        # Count summarization running jobs from the running set
+        for running_key in r.scan_iter("magaldi:summarization:running:*"):
+            result["summarization"]["running"] += r.scard(running_key)
+
+        # Count embedding jobs by status
+        for jobs_key in r.scan_iter("magaldi:embedding:jobs:*"):
+            for job_data in r.hvals(jobs_key):
+                try:
+                    job = json.loads(job_data)
+                    status = job.get("status", "pending")
+                    if status in result["embedding"]:
+                        result["embedding"][status] += 1
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+        # Count embedding running jobs from the running set
+        for running_key in r.scan_iter("magaldi:embedding:running:*"):
+            result["embedding"]["running"] += r.scard(running_key)
+
+        r.close()
+    except Exception:
+        pass  # Return zeros on error
+
+    return result
+
+
+async def retry_failed_jobs_in_redis(config: MagaldiConfig, job_type: str) -> int:
+    """Reset failed jobs back to pending status.
+
+    Args:
+        config: Magaldi configuration.
+        job_type: Either 'summarization' or 'embedding'.
+
+    Returns:
+        Number of jobs reset.
+    """
+    import json
+
+    import redis
+
+    if job_type not in ("summarization", "embedding"):
+        return 0
+
+    reset_count = 0
+
+    try:
+        r = redis.Redis(
+            host=config.redis.host,
+            port=config.redis.port,
+            db=config.redis.db,
+            decode_responses=True,
+            socket_timeout=5,
+        )
+
+        pattern = f"magaldi:{job_type}:jobs:*"
+        for jobs_key in r.scan_iter(pattern):
+            # Get all jobs in this hash
+            all_jobs = r.hgetall(jobs_key)
+            for element_id, job_data_str in all_jobs.items():
+                try:
+                    job = json.loads(job_data_str)
+                    if job.get("status") == "failed":
+                        # Reset to pending
+                        job["status"] = "pending"
+                        job["error_message"] = None
+                        # Keep retry_count for debugging
+                        r.hset(jobs_key, element_id, json.dumps(job))
+                        reset_count += 1
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+        r.close()
+    except Exception:
+        pass  # Return current count on error
+
+    return reset_count
+
+
 async def get_redis_queue_stats(config: MagaldiConfig) -> dict:
     """Get Redis queue statistics by scanning job keys.
 

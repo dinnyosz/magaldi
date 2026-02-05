@@ -16,6 +16,8 @@ from magaldi_web.dependencies import (
     check_redis_health,
     get_cached_config,
     get_es_repository,
+    get_job_queue_totals,
+    retry_failed_jobs_in_redis,
 )
 from magaldi_web.models import (
     AdminOverviewResponse,
@@ -97,27 +99,23 @@ async def get_health(
 
 
 @router.get("/admin/jobs", response_model=JobStatsResponse)
-async def get_job_stats(
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
-) -> JobStatsResponse:
-    """Get job queue statistics.
+async def get_job_stats() -> JobStatsResponse:
+    """Get job queue statistics from Redis."""
+    config = get_cached_config()
+    stats = await get_job_queue_totals(config)
 
-    Note: Currently returns zeros as job tracking is via Redis.
-    TODO: Implement Redis-based job stats retrieval.
-    """
-    # TODO: Get actual job stats from Redis
     return JobStatsResponse(
         summarization=QueueStats(
-            pending=0,
-            running=0,
-            completed=0,
-            failed=0,
+            pending=stats["summarization"]["pending"],
+            running=stats["summarization"]["running"],
+            completed=stats["summarization"]["completed"],
+            failed=stats["summarization"]["failed"],
         ),
         embedding=QueueStats(
-            pending=0,
-            running=0,
-            completed=0,
-            failed=0,
+            pending=stats["embedding"]["pending"],
+            running=stats["embedding"]["running"],
+            completed=stats["embedding"]["completed"],
+            failed=stats["embedding"]["failed"],
         ),
     )
 
@@ -171,14 +169,15 @@ async def get_admin_overview(
 ) -> AdminOverviewResponse:
     """Get complete admin overview."""
     health = await get_health(es_repo)
-    jobs = await get_job_stats(es_repo)
+    jobs = await get_job_stats()
     index_stats = await get_index_stats(es_repo)
 
     return AdminOverviewResponse(
         health=health,
         jobs=jobs,
         index_stats=index_stats,
-        recent_activity=[],  # TODO: Implement activity logging
+        # Activity logging requires dedicated infrastructure - use MCP analytics endpoints instead
+        recent_activity=[],
     )
 
 
@@ -186,18 +185,20 @@ async def get_admin_overview(
 async def retry_failed_jobs(
     job_type: str,
 ) -> dict:
-    """Retry failed jobs.
+    """Retry failed jobs by resetting their status to pending.
 
     Args:
         job_type: Either 'summarization' or 'embedding'
 
-    Note: Currently a placeholder. TODO: Implement Redis-based job retry.
+    Returns:
+        Number of jobs reset.
     """
     if job_type not in ("summarization", "embedding"):
         return {"error": "Invalid job type", "jobs_reset": 0}
 
-    # TODO: Implement actual retry logic via Redis
-    return {"jobs_reset": 0, "message": "Job retry not yet implemented"}
+    config = get_cached_config()
+    reset_count = await retry_failed_jobs_in_redis(config, job_type)
+    return {"jobs_reset": reset_count}
 
 
 @router.post("/admin/index/refresh")
