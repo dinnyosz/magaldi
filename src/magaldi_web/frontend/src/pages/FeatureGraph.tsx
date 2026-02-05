@@ -549,16 +549,14 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
           : 0
         labels.attr('opacity', labelOpacity)
 
-        // Adjust node radius for zoom (keep visual size constant)
-        const scaleFactor = 1 / Math.sqrt(transform.k)
-        nodeElements.selectAll('circle')
-          .attr('r', (d: unknown) => (d as GraphNode).radius * scaleFactor)
+        // Don't scale node radius - let them naturally get smaller when zoomed out
+        // This ensures accurate hit detection at all zoom levels
 
         nodeElements.selectAll('text.node-label')
-          .attr('dy', (d: unknown) => (d as GraphNode).radius * scaleFactor + 14 / transform.k)
+          .attr('dy', (d: unknown) => (d as GraphNode).radius + 14)
           .attr('font-size', (d: unknown) => {
             const base = (d as GraphNode).node_type === 'feature' ? 12 : 10
-            return `${base / transform.k}px`
+            return `${base}px`
           })
 
         nodeElements.selectAll('text.member-count')
