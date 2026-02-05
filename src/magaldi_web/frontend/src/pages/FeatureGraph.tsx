@@ -73,7 +73,6 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
   const containerRef = useRef<HTMLDivElement>(null)
   const [zoomLevel, setZoomLevel] = useState(1)
   const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null)
-  const [showAllConnections, setShowAllConnections] = useState(false)
   const [minSharedMembers, setMinSharedMembers] = useState(5)
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown>>()
   const simulationRef = useRef<d3.Simulation<GraphNode, GraphLink> | null>(null)
@@ -259,7 +258,7 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
       .attr('class', 'feature-connection')
       .attr('stroke', '#f97316')  // Orange color for visibility
       .attr('stroke-width', d => 1.5 + (d.shared_member_count / maxShared) * 6)
-      .attr('stroke-opacity', 0)  // Start hidden, show on hover or toggle
+      .attr('stroke-opacity', 0.1)  // Subtle hint, full opacity on hover
 
     featureLinksRef.current = featureLinks
 
@@ -319,7 +318,7 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
       .attr('fill', 'white')
       .text(d => d.member_count)
 
-    // Node interactions - show connections on hover
+    // Node interactions - highlight connections on hover
     nodeElements
       .on('mouseenter', function(_event, d) {
         d3.select(this).select('circle')
@@ -328,8 +327,8 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
           .attr('r', d.radius * 1.2)
         setHoveredNode(d)
 
-        // Show connections for this node (unless show all is enabled)
-        if (!showAllConnections && d.node_type === 'feature') {
+        // Highlight connections for this node
+        if (d.node_type === 'feature') {
           featureLinks
             .transition()
             .duration(150)
@@ -337,9 +336,9 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
               const sourceId = typeof link.source === 'string' ? link.source : link.source.id
               const targetId = typeof link.target === 'string' ? link.target : link.target.id
               if (sourceId === d.id || targetId === d.id) {
-                return 0.4 + (link.shared_member_count / maxShared) * 0.4
+                return 0.5 + (link.shared_member_count / maxShared) * 0.4
               }
-              return 0
+              return 0.1  // Keep others at subtle opacity
             })
         }
       })
@@ -350,13 +349,11 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
           .attr('r', d.radius)
         setHoveredNode(null)
 
-        // Hide connections (unless show all is enabled)
-        if (!showAllConnections) {
-          featureLinks
-            .transition()
-            .duration(150)
-            .attr('stroke-opacity', 0)
-        }
+        // Return all connections to subtle opacity
+        featureLinks
+          .transition()
+          .duration(150)
+          .attr('stroke-opacity', 0.1)
       })
       .on('click', (event, d) => {
         event.stopPropagation()
@@ -438,26 +435,7 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
     return () => {
       simulation.stop()
     }
-  }, [graphNodes, graphLinks, onNodeClick, showAllConnections, minSharedMembers])
-
-  // Effect to update connections visibility when toggle changes
-  useEffect(() => {
-    if (!featureLinksRef.current) return
-
-    const maxShared = Math.max(1, ...graphLinks
-      .filter(l => l.linkType === 'feature-connection')
-      .map(d => d.shared_member_count))
-
-    featureLinksRef.current
-      .transition()
-      .duration(300)
-      .attr('stroke-opacity', d => {
-        if (showAllConnections) {
-          return 0.3 + (d.shared_member_count / maxShared) * 0.4
-        }
-        return 0
-      })
-  }, [showAllConnections, graphLinks])
+  }, [graphNodes, graphLinks, onNodeClick, minSharedMembers])
 
   const handleZoomIn = () => {
     if (svgRef.current && zoomRef.current) {
@@ -494,19 +472,11 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative' }}>
       {/* Connection Controls */}
-      <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 10, maxWidth: 200 }}>
+      <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 10, maxWidth: 180 }}>
         <Card className="shadow-sm" style={{ fontSize: '0.85rem' }}>
           <Card.Body className="p-2">
-            <Form.Check
-              type="switch"
-              id="show-connections"
-              label={<small>Show all connections</small>}
-              checked={showAllConnections}
-              onChange={(e) => setShowAllConnections(e.target.checked)}
-              className="mb-2"
-            />
             <Form.Label className="mb-1 d-block">
-              <small>Min shared: {minSharedMembers}</small>
+              <small>Min shared members: {minSharedMembers}</small>
             </Form.Label>
             <Form.Range
               min={1}
@@ -516,7 +486,7 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
               className="mb-1"
             />
             <small className="text-muted d-block">
-              {connectionCount} connection{connectionCount !== 1 ? 's' : ''} shown
+              {connectionCount} connections
             </small>
           </Card.Body>
         </Card>
