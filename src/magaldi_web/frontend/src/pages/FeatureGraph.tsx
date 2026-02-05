@@ -287,6 +287,13 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
           if (!event.active) simulation.alphaTarget(0)
           d.fx = null
           d.fy = null
+          // Reset labels - get current zoom from SVG transform
+          const currentTransform = d3.zoomTransform(svg.node()!)
+          const currentZoom = currentTransform.k
+          labels.attr('opacity', currentZoom >= LABEL_ZOOM_THRESHOLD
+            ? Math.min(1, (currentZoom - LABEL_ZOOM_THRESHOLD) / 0.5)
+            : 0
+          )
         })
       )
 
