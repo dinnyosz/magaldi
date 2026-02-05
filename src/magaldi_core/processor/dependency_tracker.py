@@ -448,7 +448,7 @@ class DependencyTracker:
             is_ramping = decision.recommended_workers > self._last_recommended_workers
 
             if is_ramping and not cooldown_elapsed:
-                # Want to ramp but can't - this is "onhold" state
+                # Want to ramp but can't due to cooldown - hold at current level
                 from shared.throttling import _log_throttle
                 remaining = cooldown_seconds - (now - self._last_ramp_time)
                 if not is_display_call:
@@ -464,9 +464,7 @@ class DependencyTracker:
                     recommended_workers=self._last_recommended_workers,
                     reason=f"{decision.reason} (cooldown)",
                     completion_count=decision.completion_count,
-                    in_cooldown=True,  # Workers beyond limit are "onhold"
                 )
-            # else: not ramping or cooldown elapsed - workers beyond limit are "throttled"
 
             if not is_display_call:
                 # Only update timers for non-display calls

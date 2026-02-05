@@ -60,7 +60,6 @@ class ThrottleDecision:
     recommended_workers: int  # Suggested worker count
     reason: str
     completion_count: int = 0  # Number of completions used for completed_avg
-    in_cooldown: bool = False  # True if holding due to ramp cooldown
 
 
 class ThroughputTracker:
