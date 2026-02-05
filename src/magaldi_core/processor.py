@@ -1232,16 +1232,18 @@ class RedisJobTracker:
 
     def clear_queues(self) -> None:
         """Clear all Redis queue keys for this scope/repository/username."""
+        from shared.db.redis import JobType, KeyType, _make_key
+
         client = self._sum_repo._get_client()
 
         # Keys to delete for summarization and embedding
         keys_to_delete = [
-            f"magaldi:summarization:jobs:{self._scope}:{self._repository}:{self._username}",
-            f"magaldi:summarization:running:{self._scope}:{self._repository}:{self._username}",
-            f"magaldi:summarization:queue:{self._scope}:{self._repository}:{self._username}",
-            f"magaldi:embedding:jobs:{self._scope}:{self._repository}:{self._username}",
-            f"magaldi:embedding:running:{self._scope}:{self._repository}:{self._username}",
-            f"magaldi:embedding:queue:{self._scope}:{self._repository}:{self._username}",
+            _make_key(JobType.SUMMARIZATION, KeyType.JOBS, self._scope, self._repository, self._username),
+            _make_key(JobType.SUMMARIZATION, KeyType.RUNNING, self._scope, self._repository, self._username),
+            _make_key(JobType.SUMMARIZATION, KeyType.QUEUE, self._scope, self._repository, self._username),
+            _make_key(JobType.EMBEDDING, KeyType.JOBS, self._scope, self._repository, self._username),
+            _make_key(JobType.EMBEDDING, KeyType.RUNNING, self._scope, self._repository, self._username),
+            _make_key(JobType.EMBEDDING, KeyType.QUEUE, self._scope, self._repository, self._username),
         ]
 
         for key in keys_to_delete:
@@ -1272,11 +1274,13 @@ class RedisJobTracker:
 
     def mark_running(self, element_id: str, was_embedded: bool = True) -> None:
         """Mark element as running in Redis."""
+        from shared.db.redis import JobType, KeyType, _make_key
+
         with self._lock:
             # Update job status to running and add to running set
             client = self._sum_repo._get_client()
-            jobs_key = f"magaldi:summarization:jobs:{self._scope}:{self._repository}:{self._username}"
-            running_key = f"magaldi:summarization:running:{self._scope}:{self._repository}:{self._username}"
+            jobs_key = _make_key(JobType.SUMMARIZATION, KeyType.JOBS, self._scope, self._repository, self._username)
+            running_key = _make_key(JobType.SUMMARIZATION, KeyType.RUNNING, self._scope, self._repository, self._username)
 
             # Update status in job hash
             import json
@@ -1288,8 +1292,8 @@ class RedisJobTracker:
                 client.sadd(running_key, element_id)
 
             if was_embedded:
-                emb_jobs_key = f"magaldi:embedding:jobs:{self._scope}:{self._repository}:{self._username}"
-                emb_running_key = f"magaldi:embedding:running:{self._scope}:{self._repository}:{self._username}"
+                emb_jobs_key = _make_key(JobType.EMBEDDING, KeyType.JOBS, self._scope, self._repository, self._username)
+                emb_running_key = _make_key(JobType.EMBEDDING, KeyType.RUNNING, self._scope, self._repository, self._username)
                 emb_data = client.hget(emb_jobs_key, element_id)
                 if emb_data:
                     emb_job = json.loads(emb_data)

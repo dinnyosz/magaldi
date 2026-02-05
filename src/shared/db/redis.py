@@ -14,8 +14,50 @@ import redis
 
 from shared.config import MagaldiConfig, get_config
 
-# Redis key prefixes with scope/repository/username isolation
+# =============================================================================
+# REDIS KEY FACTORY
+# =============================================================================
+# Centralized key generation for all job types.
 # Format: magaldi:{job_type}:{key_type}:{scope}:{repository}:{username}
+
+
+class JobType:
+    """Job type constants for Redis key generation."""
+
+    SUMMARIZATION = "summarization"
+    EMBEDDING = "embedding"
+    FEATURE = "feature"
+    LABELING = "labeling"
+    SUBFEATURE = "subfeature"
+    SUBFEATURE_LABELING = "subfeature_labeling"
+
+
+class KeyType:
+    """Key type constants for Redis key generation."""
+
+    QUEUE = "queue"
+    RUNNING = "running"
+    JOBS = "jobs"
+
+
+def _make_key(job_type: str, key_type: str, scope: str, repository: str, username: str) -> str:
+    """Generate a Redis key for a job type and key type.
+
+    Args:
+        job_type: One of JobType constants (summarization, embedding, etc.)
+        key_type: One of KeyType constants (queue, running, jobs)
+        scope: Repository scope.
+        repository: Repository name.
+        username: User who owns this job.
+
+    Returns:
+        Formatted Redis key string.
+    """
+    return f"magaldi:{job_type}:{key_type}:{scope}:{repository}:{username}"
+
+
+# Legacy constants for backwards compatibility
+# These are used by existing code that imports them directly
 SUMMARIZATION_QUEUE = "magaldi:summarization:queue:{scope}:{repository}:{username}"
 SUMMARIZATION_RUNNING = "magaldi:summarization:running:{scope}:{repository}:{username}"
 SUMMARIZATION_JOBS = "magaldi:summarization:jobs:{scope}:{repository}:{username}"
@@ -42,7 +84,10 @@ SUBFEATURE_LABELING_JOBS = "magaldi:subfeature_labeling:jobs:{scope}:{repository
 
 
 def _key(template: str, scope: str, repository: str, username: str) -> str:
-    """Format a key template with scope, repository, and username."""
+    """Format a key template with scope, repository, and username.
+
+    DEPRECATED: Use _make_key() for new code.
+    """
     return template.format(scope=scope, repository=repository, username=username)
 
 

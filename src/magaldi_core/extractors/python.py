@@ -13,6 +13,21 @@ import logging
 
 from tree_sitter import Node, Tree
 
+from magaldi_core.extractors.base import (
+    BaseExtractor,
+    get_child_by_field,
+    get_children_by_type,
+    get_node_text,
+    walk_tree,
+)
+from magaldi_core.extractors.types import (
+    DecoratorInfo,
+    ExtractedCall,
+    ExtractedElement,
+    ExtractedImport,
+    ExtractedReference,
+    ParameterInfo,
+)
 from magaldi_core.extractors.usefulness_filter import (
     SKIP_NAMES,
     USEFUL_ATTRIBUTE_FACTORIES,
@@ -20,6 +35,7 @@ from magaldi_core.extractors.usefulness_filter import (
     get_extraction_stats,
     reset_extraction_stats,
 )
+from magaldi_core.query_runner import QUERIES_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -114,22 +130,6 @@ def _is_useful_assignment(
 
     return False, "local_variable"
 
-from magaldi_core.extractors.base import (
-    BaseExtractor,
-    get_child_by_field,
-    get_children_by_type,
-    get_node_text,
-    walk_tree,
-)
-from magaldi_core.extractors.types import (
-    DecoratorInfo,
-    ExtractedCall,
-    ExtractedElement,
-    ExtractedImport,
-    ExtractedReference,
-    ParameterInfo,
-)
-from magaldi_core.query_runner import QUERIES_DIR
 
 # =============================================================================
 # PYTHON EXTRACTOR CLASS
