@@ -2031,8 +2031,11 @@ def process_elements(
     timing_stats.set_totals_by_type(totals_by_type)
 
     # Count elements by (type, tier) for tier-aware ETA
+    # Exclude handcrafted summary types (imports) - they don't use LLM and have no model-based timing
     totals_by_type_tier: dict[tuple[str, int], int] = {}
     for elem in elements_to_process:
+        if elem.element_type in _HANDCRAFTED_SUMMARY_TYPES:
+            continue  # Skip - these don't use LLM summarization
         ctx_size = element_context_sizes.get(elem.element_id, 2048)
         # Snap to standard tier
         tier = 2048
@@ -2218,18 +2221,20 @@ def process_elements(
                 avg_workers = min(allowed_at_start, allowed_at_end)
 
                 # Record timing with element type, tier, and avg_workers (for throughput)
-                timing_stats.record(
-                    processed.wall_time,
-                    processed.summarize_time,
-                    processed.embed_time,
-                    element.element_type,
-                    was_embedded=should_embed(element),
-                    summary_embed_time=processed.summary_embed_time,
-                    code_embed_time=processed.code_embed_time,
-                    tier=element_tier,
-                    avg_workers=avg_workers,
-                )
-                timing_stats.record_task_runtime(processed.wall_time, avg_workers)
+                # Skip handcrafted types (imports) - they don't use LLM and aren't in ETA
+                if element.element_type not in _HANDCRAFTED_SUMMARY_TYPES:
+                    timing_stats.record(
+                        processed.wall_time,
+                        processed.summarize_time,
+                        processed.embed_time,
+                        element.element_type,
+                        was_embedded=should_embed(element),
+                        summary_embed_time=processed.summary_embed_time,
+                        code_embed_time=processed.code_embed_time,
+                        tier=element_tier,
+                        avg_workers=avg_workers,
+                    )
+                    timing_stats.record_task_runtime(processed.wall_time, avg_workers)
 
                 was_embedded = should_embed(element)
                 if processed.success:
