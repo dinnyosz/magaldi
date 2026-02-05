@@ -606,3 +606,123 @@ class FeatureRepository:
             features.append(feature)
 
         return features
+
+    def update_element_feature_memberships(
+        self,
+        scope: str,
+        repository: str,
+        username: str,
+        cluster_id_to_feature: dict[str, tuple[str, str]],
+    ) -> int:
+        """Update element feature_memberships with proper feature_ids and labels.
+
+        After features are summarized/labeled, this updates the placeholder
+        feature_memberships on elements with actual feature IDs and labels.
+
+        Args:
+            scope: Repository scope.
+            repository: Repository name.
+            username: Username/branch.
+            cluster_id_to_feature: Mapping of cluster_id -> (feature_id, label).
+
+        Returns:
+            Number of elements updated.
+        """
+        if not cluster_id_to_feature:
+            return 0
+
+        client = self._get_client()
+
+        # Query elements with feature_memberships in this repo
+        result = client.search(
+            index=INDEX_NAME,
+            body={
+                "query": {
+                    "bool": {
+                        "filter": [
+                            {"term": {"scope": scope}},
+                            {"term": {"repository": repository}},
+                            {"term": {"username": username}},
+                            {"exists": {"field": "feature_memberships"}},
+                        ]
+                    }
+                },
+                "size": 10000,
+                "_source": ["element_id", "feature_memberships"],
+            },
+            scroll="2m",
+        )
+
+        bulk_body: list[dict[str, Any]] = []
+        scroll_id = result.get("_scroll_id")
+
+        try:
+            while True:
+                hits = result.get("hits", {}).get("hits", [])
+                if not hits:
+                    break
+
+                for hit in hits:
+                    source = hit["_source"]
+                    element_id = source["element_id"]
+                    memberships = source.get("feature_memberships", [])
+
+                    # Update memberships with proper feature_id and label
+                    updated_memberships = []
+                    for m in memberships:
+                        # Extract cluster_id from placeholder like "feature_48"
+                        placeholder_id = m.get("feature_id", "")
+                        if placeholder_id.startswith("feature_"):
+                            cluster_id = placeholder_id.replace("feature_", "")
+                        else:
+                            cluster_id = placeholder_id
+
+                        if cluster_id in cluster_id_to_feature:
+                            feature_id, label = cluster_id_to_feature[cluster_id]
+                            updated_memberships.append({
+                                "feature_id": feature_id,
+                                "label": label,
+                                "score": m.get("score", 0),
+                                "is_primary": m.get("is_primary", False),
+                            })
+                        else:
+                            # Keep original if no mapping found
+                            updated_memberships.append(m)
+
+                    # Add to bulk update
+                    bulk_body.append({
+                        "update": {
+                            "_index": INDEX_NAME,
+                            "_id": element_id,
+                        }
+                    })
+                    bulk_body.append({
+                        "doc": {"feature_memberships": updated_memberships}
+                    })
+
+                # Get next batch
+                if scroll_id:
+                    result = client.scroll(scroll_id=scroll_id, scroll="2m")
+                else:
+                    break
+
+        finally:
+            if scroll_id:
+                try:
+                    client.clear_scroll(scroll_id=scroll_id)
+                except Exception:
+                    pass
+
+        if not bulk_body:
+            return 0
+
+        # Execute bulk update
+        response = client.bulk(body=bulk_body, refresh=True)
+
+        # Count successful updates
+        updated = 0
+        for item in response.get("items", []):
+            if item.get("update", {}).get("result") in ["updated", "noop"]:
+                updated += 1
+
+        return updated

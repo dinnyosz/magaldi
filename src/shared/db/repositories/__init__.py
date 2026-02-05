@@ -571,6 +571,18 @@ class ElasticsearchRepository:
         """Get all features and subfeatures that contain a specific element."""
         return self._features.get_features_for_element(element_id, scope, repository, username)
 
+    def update_element_feature_memberships(
+        self,
+        scope: str,
+        repository: str,
+        username: str,
+        cluster_id_to_feature: dict[str, tuple[str, str]],
+    ) -> int:
+        """Update element feature_memberships with proper feature_ids and labels."""
+        return self._features.update_element_feature_memberships(
+            scope, repository, username, cluster_id_to_feature
+        )
+
     # =========================================================================
     # Glossary operations (delegated to GlossaryRepository)
     # =========================================================================

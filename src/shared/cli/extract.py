@@ -635,6 +635,25 @@ def run_feature_extraction(
 
         # Process sub-features for large clusters (>20 members)
         processed_features = proc_result.get("processed_features", {})
+
+        # Update element feature_memberships with proper feature_ids and labels
+        # (they were saved with placeholders before feature summarization)
+        cluster_id_to_feature: dict[str, tuple[str, str]] = {}
+        for cluster in clustering_result.clusters:
+            cluster_id = str(cluster.cluster_id)
+            if cluster_id in processed_features:
+                pf = processed_features[cluster_id]
+                label = pf.get("label", cluster.label or f"cluster_{cluster_id}")
+                feature_id = f"{scope}:{repository}:{username}:feature:{label}:{cluster_id}"
+                cluster_id_to_feature[cluster_id] = (feature_id, label)
+
+        if cluster_id_to_feature:
+            with console.status("[bold blue]Updating element feature memberships...[/]"):
+                updated = es_repo.update_element_feature_memberships(
+                    scope, repository, username, cluster_id_to_feature
+                )
+            console.print(f"  Updated [green]{updated}[/] elements with feature labels")
+
         large_cluster_count = sum(
             1 for c in clustering_result.clusters
             if c.size > 20
