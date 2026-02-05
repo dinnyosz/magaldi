@@ -418,7 +418,7 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
         .attr('x2', d => (d.target as GraphNode).x || 0)
         .attr('y2', d => (d.target as GraphNode).y || 0)
 
-      // Draw curved paths for feature connections - arc outside the graph
+      // Draw curved paths for feature connections - gentle curves that bundle together
       featureLinks.attr('d', d => {
         const source = d.source as GraphNode
         const target = d.target as GraphNode
@@ -454,8 +454,8 @@ function FeatureGraphVisualization({ nodes, connections, onNodeClick }: FeatureG
         const dot = fromCenterX * perpX + fromCenterY * perpY
         const outwardSign = dot > 0 ? 1 : -1
 
-        // Curve amount - larger curves that go well outside
-        const curveOffset = dist * 0.4 + 30
+        // Smaller curve amount - keeps edges bundled closer
+        const curveOffset = dist * 0.15
 
         const ctrlX = midX + perpX * curveOffset * outwardSign
         const ctrlY = midY + perpY * curveOffset * outwardSign
