@@ -2,7 +2,7 @@
 
 from mcp.types import Tool
 
-from magaldi_mcp.tools.schemas._annotations import READONLY_ANNOTATIONS
+from magaldi_mcp.tools.schemas._annotations import OUTPUT_CONTROL_PROPERTIES, READONLY_ANNOTATIONS
 
 SEARCH_TOOLS = [
     Tool(
@@ -48,6 +48,7 @@ SEARCH_TOOLS = [
                     "description": "Include related files that call/use found elements. Default: true.",
                     "default": True,
                 },
+                **OUTPUT_CONTROL_PROPERTIES,
             },
             "required": ["query"],
         },
@@ -76,6 +77,7 @@ SEARCH_TOOLS = [
                     "description": "Minimum percentage of members containing the term (0-100)",
                     "default": 0,
                 },
+                **OUTPUT_CONTROL_PROPERTIES,
             },
             "required": ["query"],
         },

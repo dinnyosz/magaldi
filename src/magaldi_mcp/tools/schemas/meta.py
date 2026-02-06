@@ -2,7 +2,11 @@
 
 from mcp.types import Tool
 
-from magaldi_mcp.tools.schemas._annotations import READONLY_ANNOTATIONS, WRITE_ANNOTATIONS
+from magaldi_mcp.tools.schemas._annotations import (
+    OUTPUT_CONTROL_PROPERTIES,
+    READONLY_ANNOTATIONS,
+    WRITE_ANNOTATIONS,
+)
 
 META_TOOLS = [
     Tool(
@@ -62,6 +66,7 @@ META_TOOLS = [
             "type": "object",
             "properties": {
                 "hash_id": {"type": "string", "description": "Element ID to explain (hash_id)"},
+                **OUTPUT_CONTROL_PROPERTIES,
             },
             "required": ["hash_id"],
         },

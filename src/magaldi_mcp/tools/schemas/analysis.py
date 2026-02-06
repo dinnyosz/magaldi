@@ -2,7 +2,7 @@
 
 from mcp.types import Tool
 
-from magaldi_mcp.tools.schemas._annotations import READONLY_ANNOTATIONS
+from magaldi_mcp.tools.schemas._annotations import OUTPUT_CONTROL_PROPERTIES, READONLY_ANNOTATIONS
 
 ANALYSIS_TOOLS = [
     Tool(
@@ -34,6 +34,7 @@ ANALYSIS_TOOLS = [
                 "glob": {"type": "string", "description": "File filter (e.g., '*.py')"},
                 "limit": {"type": "integer", "default": 50},
                 "include_tests": {"type": "boolean", "default": True},
+                **OUTPUT_CONTROL_PROPERTIES,
             },
             "required": ["pattern", "mode"],
         },
@@ -48,6 +49,7 @@ ANALYSIS_TOOLS = [
             "properties": {
                 "hash_id": {"type": "string", "description": "Element ID (hash_id from search results)"},
                 "limit": {"type": "integer", "default": 30},
+                **OUTPUT_CONTROL_PROPERTIES,
             },
             "required": ["hash_id"],
         },
@@ -96,6 +98,7 @@ ANALYSIS_TOOLS = [
                 "username": {"type": "string", "description": "Filter by username branch"},
                 "limit": {"type": "integer", "default": 30, "description": "Max results"},
                 "include_tests": {"type": "boolean", "default": True, "description": "Include test functions"},
+                **OUTPUT_CONTROL_PROPERTIES,
             },
             "required": ["hash_id"],
         },
@@ -119,6 +122,7 @@ ANALYSIS_TOOLS = [
                 "scope": {"type": "string", "description": "Filter by scope"},
                 "repository": {"type": "string", "description": "Filter by repository"},
                 "username": {"type": "string", "description": "Filter by username branch"},
+                **OUTPUT_CONTROL_PROPERTIES,
             },
             "required": ["hash_id"],
         },
@@ -135,6 +139,7 @@ ANALYSIS_TOOLS = [
                 "repository": {"type": "string", "description": "Repository name"},
                 "username": {"type": "string", "description": "Username branch"},
                 "include_tests": {"type": "boolean", "default": False, "description": "Include test functions in check"},
+                **OUTPUT_CONTROL_PROPERTIES,
             },
             "required": [],
         },
@@ -150,6 +155,7 @@ ANALYSIS_TOOLS = [
                 "scope": {"type": "string", "description": "Repository scope"},
                 "repository": {"type": "string", "description": "Repository name"},
                 "username": {"type": "string", "description": "Username branch"},
+                **OUTPUT_CONTROL_PROPERTIES,
             },
             "required": [],
         },

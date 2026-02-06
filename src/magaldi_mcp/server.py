@@ -17,6 +17,7 @@ from mcp.types import TextContent, Tool
 
 from magaldi_mcp.formatters import format_result
 from magaldi_mcp.tools.schemas import ALL_TOOL_SCHEMAS
+from magaldi_mcp.tools.schemas._annotations import TOOLS_WITH_OUTPUT_CONTROL
 from shared.ai.embedding import CodeEmbeddingClient
 from shared.config import get_config, load_config
 from shared.db.elasticsearch import ElasticsearchRepository
@@ -116,12 +117,27 @@ class MagaldiMCPServer:
         @self.server.call_tool()
         async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             """Handle tool calls."""
+            # Extract output control params before passing to tool
+            max_tokens = arguments.pop("max_tokens", None) if name in TOOLS_WITH_OUTPUT_CONTROL else None
+            filename = arguments.pop("filename", None) if name in TOOLS_WITH_OUTPUT_CONTROL else None
+
             # Record analytics before execution (with input args)
             self._record_tool_call(name, arguments)
 
             try:
                 result = await self._handle_tool(name, arguments)
                 formatted_result = format_result(result)
+
+                # Apply output control: filename takes precedence over max_tokens
+                if filename:
+                    formatted_result = _apply_filename(
+                        formatted_result, filename, name, result,
+                    )
+                elif max_tokens:
+                    formatted_result = _apply_max_tokens(
+                        formatted_result, max_tokens,
+                    )
+
                 # Record end time and output for analytics
                 self._record_tool_end(formatted_result)
                 return [TextContent(type="text", text=formatted_result)]
@@ -611,6 +627,120 @@ def _format_result(result: Any) -> str:
     """
     formatted: str = format_result(result)
     return formatted
+
+
+def _estimate_tokens(text: str) -> int:
+    """Estimate token count (1 token ~= 4 chars)."""
+    return len(text) // 4
+
+
+def _apply_max_tokens(formatted: str, max_tokens: int) -> str:
+    """Truncate formatted output to fit within a token budget.
+
+    Drops trailing result blocks (separated by blank lines) to stay within budget.
+    Each kept result is complete - nothing is cut mid-result.
+    """
+    if _estimate_tokens(formatted) <= max_tokens:
+        return formatted
+
+    # Split on double-newlines to find result boundaries
+    blocks = formatted.split("\n\n")
+    if len(blocks) <= 1:
+        # Single block or no structure - truncate by chars
+        char_budget = max_tokens * 4
+        if len(formatted) > char_budget:
+            return formatted[:char_budget] + f"\n\n... truncated (token budget: {max_tokens})"
+        return formatted
+
+    # Keep adding blocks until we exceed the budget
+    kept: list[str] = []
+    total_chars = 0
+    char_budget = max_tokens * 4
+
+    for block in blocks:
+        # +2 for the "\n\n" separator
+        block_cost = len(block) + (2 if kept else 0)
+        if total_chars + block_cost > char_budget and kept:
+            break
+        kept.append(block)
+        total_chars += block_cost
+
+    dropped = len(blocks) - len(kept)
+    result = "\n\n".join(kept)
+    if dropped > 0:
+        result += f"\n\n... {dropped} more blocks available (token budget: {max_tokens})"
+    return result
+
+
+def _apply_filename(
+    formatted: str,
+    filename: str,
+    tool_name: str,
+    raw_result: Any,
+) -> str:
+    """Save formatted output to file and return a summary.
+
+    Returns a short summary so the agent can decide whether to read the file.
+    """
+    from pathlib import Path
+
+    path = Path(filename)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(formatted, encoding="utf-8")
+
+    # Build a useful summary
+    summary = _generate_file_summary(tool_name, raw_result, filename, formatted)
+    return summary
+
+
+def _generate_file_summary(
+    tool_name: str,
+    result: Any,
+    filename: str,
+    formatted: str,
+) -> str:
+    """Generate a tool-specific summary when results are saved to file."""
+    token_count = _estimate_tokens(formatted)
+    lines: list[str] = []
+
+    if isinstance(result, list):
+        count = len(result)
+        # Show top 2-3 names as preview
+        preview_names = []
+        for item in result[:3]:
+            if isinstance(item, dict):
+                name = item.get("name") or item.get("element_name") or item.get("term", "")
+                if name:
+                    preview_names.append(name)
+        lines.append(f"{count} results saved to `{filename}` (~{token_count} tokens).")
+        if preview_names:
+            lines.append(f"Top matches: {', '.join(preview_names)}")
+
+    elif isinstance(result, dict):
+        if "element" in result:
+            # explain_element style
+            el = result["element"]
+            name = el.get("name", "unknown") if isinstance(el, dict) else "unknown"
+            callers = result.get("callers", [])
+            callees = result.get("callees", [])
+            lines.append(f"Element `{name}` details saved to `{filename}` (~{token_count} tokens).")
+            lines.append(f"Callers: {len(callers)}, Callees: {len(callees)}")
+        elif "potentially_dead" in result:
+            # find_dead_code
+            dead = result.get("potentially_dead", [])
+            lines.append(f"{len(dead)} potentially dead functions saved to `{filename}` (~{token_count} tokens).")
+        elif "code_results" in result or "test_results" in result:
+            # grouped search / find_callers
+            code_n = len(result.get("code_results", []))
+            test_n = len(result.get("test_results", []))
+            lines.append(f"{code_n + test_n} results ({code_n} code, {test_n} test) saved to `{filename}` (~{token_count} tokens).")
+        else:
+            lines.append(f"Results saved to `{filename}` (~{token_count} tokens).")
+    else:
+        lines.append(f"Results saved to `{filename}` (~{token_count} tokens).")
+
+    lines.append("Use Read tool to inspect.")
+    return "\n".join(lines)
 
 
 def run_server() -> None:
