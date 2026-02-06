@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from magaldi_core.discovery import SUPPORTED_EXTENSIONS, SUPPORTED_FILENAMES
 from magaldi_core.extractors.types import ExtractedElement
 from magaldi_core.tree_sitter_manager import get_manager
 
@@ -36,37 +37,46 @@ def _check_magaldi_scope() -> None:
 # LANGUAGE DETECTION
 # =============================================================================
 
-EXTENSION_TO_LANGUAGE = {
-    ".py": "python",
-    ".js": "javascript",
-    ".ts": "typescript",
-    ".tsx": "tsx",
-    ".jsx": "javascript",
-    ".php": "php",
-    ".rs": "rust",
-    ".md": "markdown",
-    ".yaml": "yaml",
-    ".yml": "yaml",
-    ".toml": "toml",
-    ".txt": "text",
-    ".nfo": "text",
+# Shebang patterns for detecting language from code snippets
+_SHEBANG_PATTERNS: dict[str, str] = {
+    "bash": "bash",
+    "sh": "bash",
+    "zsh": "bash",
+    "python": "python",
+    "node": "javascript",
+    "ruby": "ruby",
+    "perl": "perl",
+    "php": "php",
 }
 
 
 def _detect_language(file_path: str | None, code: str | None) -> str | None:
-    """Detect language from file path or code content."""
+    """Detect language from file path or code content.
+
+    Uses SUPPORTED_EXTENSIONS and SUPPORTED_FILENAMES from discovery.py
+    so new languages only need to be added in one place.
+    """
     if file_path:
         path = Path(file_path)
         ext = path.suffix.lower()
-        lang = EXTENSION_TO_LANGUAGE.get(ext)
+        lang = SUPPORTED_EXTENSIONS.get(ext)
         if lang:
             return lang
-        # Dockerfile has no extension — match by filename
-        if path.name == "Dockerfile" or path.name.startswith("Dockerfile."):
-            return "dockerfile"
+        # Check filename match (e.g., Dockerfile, Dockerfile.prod)
+        name = path.name
+        for pattern, lang in SUPPORTED_FILENAMES.items():
+            if name == pattern or name.startswith(f"{pattern}."):
+                return lang
         return None
 
     if code:
+        # Check shebang line first
+        first_line = code.split("\n", 1)[0].strip()
+        if first_line.startswith("#!"):
+            for token, lang in _SHEBANG_PATTERNS.items():
+                if token in first_line:
+                    return lang
+
         # Simple heuristics for language detection from code
         if "def " in code and "import " in code:
             return "python"
@@ -220,6 +230,10 @@ def _find_uncaptured_nodes(
     }
 
     target_types = interesting_types.get(language, set())
+
+    # For languages without known interesting types, skip gap analysis
+    if not target_types:
+        return gaps
 
     def check_node(n: Any) -> None:
         if n.type in target_types:
@@ -559,20 +573,24 @@ class Test{class_name}:
 
 
 def _get_extension(language: str) -> str:
-    """Get file extension for a language."""
-    return {
-        "python": "py",
-        "javascript": "js",
-        "typescript": "ts",
-        "tsx": "tsx",
-        "php": "php",
-        "rust": "rs",
-        "markdown": "md",
-        "yaml": "yaml",
-        "toml": "toml",
-        "dockerfile": "dockerfile",
-        "text": "txt",
-    }.get(language, "txt")
+    """Get file extension for a language.
+
+    Derives the mapping from SUPPORTED_EXTENSIONS by inverting it.
+    First extension per language wins (e.g., .py for python, not .pyw).
+    Falls back to SUPPORTED_FILENAMES for extensionless languages like dockerfile.
+    """
+    # Build reverse lookup: language → extension (without leading dot)
+    lang_to_ext: dict[str, str] = {}
+    for ext, lang in SUPPORTED_EXTENSIONS.items():
+        if lang not in lang_to_ext:
+            lang_to_ext[lang] = ext.lstrip(".")
+
+    # Add filename-based languages (e.g., dockerfile)
+    for filename, lang in SUPPORTED_FILENAMES.items():
+        if lang not in lang_to_ext:
+            lang_to_ext[lang] = filename.lower()
+
+    return lang_to_ext.get(language, "txt")
 
 
 # =============================================================================
