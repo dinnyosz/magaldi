@@ -483,6 +483,7 @@ export interface ElementDetail {
   concurrency: ConcurrencyInfo | null
   metrics_summary: MetricsSummaryInfo | null
   document_sections: DocumentSectionInfo[]
+  semantic_related: { element_id: string; hash_id: string; score: number }[]
 }
 
 export interface SimilarElement {

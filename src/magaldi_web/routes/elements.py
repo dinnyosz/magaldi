@@ -840,6 +840,7 @@ async def get_element_detail(
         concurrency=concurrency,
         metrics_summary=metrics_summary,
         document_sections=document_sections,
+        semantic_related=source.get("semantic_related", []),
     )
 
 

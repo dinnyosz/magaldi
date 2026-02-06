@@ -705,6 +705,8 @@ class ElementDetailResponse(BaseModel):
     metrics_summary: MetricsSummaryInfo | None = None
     # Document structure (for markdown/doc file elements)
     document_sections: list[DocumentSectionInfo] = Field(default_factory=list)
+    # Pre-computed semantic relationships (for functions/methods)
+    semantic_related: list[dict] = Field(default_factory=list)
 
 
 # =============================================================================
