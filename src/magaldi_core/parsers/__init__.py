@@ -20,6 +20,7 @@ from magaldi_core.parsers.base import (
     find_variable_usages,
     generate_element_id,
 )
+from magaldi_core.parsers.bash import BashParser
 from magaldi_core.parsers.dockerfile import DockerfileParser
 from magaldi_core.parsers.javascript import JavaScriptParser
 from magaldi_core.parsers.markdown import MarkdownParser
@@ -42,6 +43,7 @@ __all__ = [
     "find_variable_usages",
     "generate_element_id",
     # Language-specific parsers
+    "BashParser",
     "DockerfileParser",
     "JavaScriptParser",
     "MarkdownParser",

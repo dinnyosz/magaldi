@@ -44,6 +44,8 @@ SUPPORTED_EXTENSIONS: dict[str, str] = {
     ".toml": "toml",
     ".txt": "text",
     ".nfo": "text",
+    ".sh": "bash",
+    ".bash": "bash",
 }
 
 # Filenames (without extension) that map to a language

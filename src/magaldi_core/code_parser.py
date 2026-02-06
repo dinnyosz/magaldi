@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 # Re-export classes from parsers package for backward compatibility
 from magaldi_core.parsers import (
+    BashParser,
     Call,
     CodeElement,
     DockerfileParser,
@@ -303,6 +304,7 @@ PARSERS: dict[str, TreeSitterParser | PlainTextParser] = {
     "yaml": YamlParser(),
     "toml": TomlParser(),
     "dockerfile": DockerfileParser(),
+    "bash": BashParser(),
     "text": PlainTextParser(),
 }
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import tree_sitter_bash as ts_bash
 import tree_sitter_dockerfile as ts_dockerfile
 import tree_sitter_javascript as ts_javascript
 import tree_sitter_markdown as ts_markdown
@@ -143,6 +144,7 @@ class TreeSitterManager:
         "yaml": (ts_yaml, "language"),
         "toml": (ts_toml, "language"),
         "dockerfile": (ts_dockerfile, "language"),
+        "bash": (ts_bash, "language"),
     }
 
     def __init__(self) -> None:
@@ -217,6 +219,9 @@ class TreeSitterManager:
         elif language == "dockerfile":
             from magaldi_core.extractors.dockerfile import DockerfileExtractor
             extractor = DockerfileExtractor()
+        elif language == "bash":
+            from magaldi_core.extractors.bash import BashExtractor
+            extractor = BashExtractor()
 
         if extractor:
             self._extractors[language] = extractor
