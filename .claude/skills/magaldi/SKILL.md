@@ -271,6 +271,33 @@ mcp__magaldi__explain_element(element_id="...")  # Complete element overview
 | `list_repos` | All indexed repos |
 | `get_repo_stats` | Repository statistics |
 
+## Token-Saving Parameters
+
+High-volume tools support `max_tokens` and `filename` for output control:
+
+```
+# Limit response size (drops trailing results to fit budget)
+mcp__magaldi__search_code(query="auth", max_tokens=500)
+
+# Save full results to file, get summary inline
+mcp__magaldi__find_dead_code(filename="/tmp/dead_code.md")
+```
+
+**Supported tools:** search_code, search_features, find_usages, pattern_search,
+find_callers, find_call_chain, explain_element, find_dead_code, find_entry_points.
+
+## Subagent Delegation
+
+**Delegate to Explore subagent when:**
+- Multi-step workflows (search -> inspect -> find_usages)
+- Exploratory queries with unknown result count
+- Results won't be directly referenced in the next action
+
+**Call inline when:**
+- Single-call lookups with known hash_id (get_element, get_context)
+- Quick searches expected to return <5 results
+- Results needed for the immediate next action
+
 ## Remember
 
 The index has already done the hard work:
