@@ -1,15 +1,22 @@
-"""Cross-file call resolution (Phase 2).
+"""Cross-file call resolution.
 
 This module resolves function/method calls that reference elements in other files,
-using import information and Elasticsearch lookups.
+using import information, type annotations, and embedding similarity.
 
-Phase 1 (at parse time) resolves:
+Strategy 1-2 (at parse time, in parsers/base.py):
 - Same-file bare function calls
 - Self-method calls (self.method(), this.method(), $this->method())
 
-Phase 2 (this module) resolves:
+Strategy 3-5 (this module, resolve_all_calls):
 - Import-based calls (from utils import process; process())
 - Module method calls (import utils; utils.process())
+- Type-annotated calls (es: ElasticsearchRepository; es.get_document())
+
+Strategy 6 (this module, resolve_calls_by_embedding):
+- Embedding similarity for remaining untyped calls with receiver
+
+Semantic relationships (compute_semantic_relationships):
+- Pre-compute top-K similar functions for each element via vector similarity
 """
 
 from __future__ import annotations
@@ -463,3 +470,327 @@ def _find_element_in_file(
             return doc.get("element_id")
 
     return None
+
+
+# =============================================================================
+# Strategy 6: Embedding-based call resolution
+# =============================================================================
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    """Cosine similarity between two L2-normalized vectors (= dot product)."""
+    return sum(x * y for x, y in zip(a, b))
+
+
+def _merge_candidates(
+    user_candidates: list[dict],
+    main_candidates: list[dict],
+) -> list[dict]:
+    """Merge candidates from user and main, user version wins on duplicates."""
+    seen: dict[str, dict] = {}
+    # Add main first so user overwrites
+    for c in main_candidates:
+        key = f"{c.get('relative_path')}:{c.get('name')}:{c.get('element_type')}"
+        seen[key] = c
+    for c in user_candidates:
+        key = f"{c.get('relative_path')}:{c.get('name')}:{c.get('element_type')}"
+        seen[key] = c  # user wins
+    return list(seen.values())
+
+
+def resolve_calls_by_embedding(
+    es: ElasticsearchRepository,
+    scope: str,
+    repository: str,
+    username: str = "main",
+    similarity_threshold: float = 0.7,
+) -> tuple[int, int, int]:
+    """Strategy 6: Resolve untyped calls using embedding similarity.
+
+    For calls with a receiver but no type annotation, finds candidate
+    functions/methods by name, then uses embedding cosine similarity
+    to pick the best match when multiple candidates exist.
+
+    Queries both the user's index and "main" to get a complete view,
+    with user's elements taking priority.
+
+    Args:
+        es: Elasticsearch repository instance.
+        scope: Repository scope.
+        repository: Repository name.
+        username: Username branch.
+        similarity_threshold: Minimum cosine similarity to accept a match.
+
+    Returns:
+        Tuple of (total_processed, single_match_resolved, embedding_resolved).
+    """
+    total_processed = 0
+    single_resolved = 0
+    embedding_resolved = 0
+
+    # Cache: call name -> merged candidate list
+    name_cache: dict[str, list[dict]] = {}
+    # Cache: element_id -> summary_embedding
+    embedding_cache: dict[str, list[float] | None] = {}
+
+    # Get all elements with calls
+    elements = es.find_all_elements_with_calls(scope, repository, username)
+    # Also get main's elements if user is not main
+    if username != "main":
+        main_elements = es.find_all_elements_with_calls(scope, repository, "main")
+        # Merge: user elements win on duplicates
+        elem_map: dict[str, dict] = {}
+        for e in main_elements:
+            elem_map[e.get("element_id", "")] = e
+        for e in elements:
+            elem_map[e.get("element_id", "")] = e
+        elements = list(elem_map.values())
+
+    logger.info(f"Embedding resolution: found {len(elements)} elements with calls")
+
+    for elem in elements:
+        element_id = elem.get("element_id", "")
+        calls = elem.get("calls", [])
+        updated = False
+
+        for call in calls:
+            if call.get("resolved_id"):
+                continue
+
+            category = call.get("category", "unknown")
+            if category not in ("untyped", "unknown"):
+                continue
+
+            receiver = call.get("receiver")
+            if receiver is None:
+                continue  # Bare calls too ambiguous
+
+            name = call.get("name")
+            if not name:
+                continue
+
+            total_processed += 1
+
+            # Find candidates (cached by name)
+            if name not in name_cache:
+                candidates = es.find_candidates_by_name(
+                    name, scope, repository, username
+                )
+                if username != "main":
+                    main_candidates = es.find_candidates_by_name(
+                        name, scope, repository, "main"
+                    )
+                    candidates = _merge_candidates(candidates, main_candidates)
+                name_cache[name] = candidates
+
+            candidates = name_cache[name]
+
+            if not candidates:
+                continue
+
+            if len(candidates) == 1:
+                # Single candidate — resolve directly
+                call["resolved_id"] = candidates[0].get("element_id")
+                call["category"] = "embedding_resolved"
+                single_resolved += 1
+                updated = True
+                continue
+
+            # Multiple candidates — use embedding similarity
+            # Get caller's embedding (cached)
+            if element_id not in embedding_cache:
+                caller_embedding = es.get_embedding(element_id, "summary")
+                embedding_cache[element_id] = caller_embedding
+            caller_embedding = embedding_cache[element_id]
+
+            if not caller_embedding:
+                continue  # Caller has no embedding
+
+            best_score = -1.0
+            best_candidate_id = None
+
+            for candidate in candidates:
+                candidate_embedding = candidate.get("summary_embedding")
+                if not candidate_embedding:
+                    continue
+
+                score = _cosine_similarity(caller_embedding, candidate_embedding)
+                if score > best_score:
+                    best_score = score
+                    best_candidate_id = candidate.get("element_id")
+
+            if best_score >= similarity_threshold and best_candidate_id:
+                call["resolved_id"] = best_candidate_id
+                call["category"] = "embedding_resolved"
+                embedding_resolved += 1
+                updated = True
+
+        if updated:
+            es.store_calls(element_id, calls)
+
+    total_resolved = single_resolved + embedding_resolved
+    logger.info(
+        f"Embedding resolution: resolved {total_resolved}/{total_processed} calls "
+        f"({single_resolved} single match, {embedding_resolved} via similarity)"
+    )
+    return total_processed, single_resolved, embedding_resolved
+
+
+# =============================================================================
+# Semantic relationship computation
+# =============================================================================
+
+
+def compute_semantic_relationships(
+    es: ElasticsearchRepository,
+    scope: str,
+    repository: str,
+    username: str = "main",
+    top_k: int = 10,
+    min_score: float = 0.5,
+) -> tuple[int, int]:
+    """Pre-compute semantic relationships for all functions/methods.
+
+    For each function/method with an embedding, finds the top-K most similar
+    elements by vector similarity and stores them on the element.
+
+    Queries both user and main indices for a complete view.
+
+    Args:
+        es: Elasticsearch repository instance.
+        scope: Repository scope.
+        repository: Repository name.
+        username: Username branch.
+        top_k: Number of similar elements to store per element.
+        min_score: Minimum similarity score to include.
+
+    Returns:
+        Tuple of (elements_processed, total_relationships_stored).
+    """
+    elements_processed = 0
+    total_relationships = 0
+
+    # Get all functions/methods with embeddings
+    # Search both user and main for complete coverage
+    all_elements = es.search_by_vector(
+        embedding=[0.0] * 1024,  # Dummy — we'll iterate differently
+        scope=scope,
+        repository=repository,
+        username=username if username == "main" else None,  # None = no user filter
+        element_types=["function", "method"],
+        size=10000,
+        min_score=0.0,
+        embedding_type="summary",
+    )
+
+    # That approach won't work well (dummy vector). Let's use a match_all query instead.
+    # We need a dedicated method or use a text search with broad match.
+    # Actually, let's iterate through elements that have summary_embedding using
+    # the existing find_all_elements_with_calls pattern but for all functions.
+
+    # Use search_by_text with a broad query to get all functions/methods
+    # Better: query all functions/methods directly
+    from shared.db.repositories.base import INDEX_NAME
+
+    client = es._get_client()
+
+    # Build query for all functions/methods in the repo
+    filter_clauses: list[dict] = [
+        {"term": {"scope": scope}},
+        {"term": {"repository": repository}},
+        {"terms": {"element_type": ["function", "method"]}},
+        {"exists": {"field": "summary_embedding"}},
+    ]
+
+    # Query both user and main
+    if username and username != "main":
+        filter_clauses.append({
+            "bool": {
+                "should": [
+                    {"term": {"username": username}},
+                    {"term": {"username": "main"}},
+                ],
+                "minimum_should_match": 1,
+            }
+        })
+    else:
+        filter_clauses.append({"term": {"username": "main"}})
+
+    result = client.search(
+        index=INDEX_NAME,
+        body={
+            "query": {"bool": {"filter": filter_clauses}},
+            "size": 10000,
+            "_source": [
+                "element_id",
+                "hash_id",
+                "username",
+                "name",
+                "element_type",
+                "relative_path",
+                "summary_embedding",
+            ],
+        },
+    )
+
+    all_elements = [hit["_source"] for hit in result.get("hits", {}).get("hits", [])]
+
+    # Deduplicate: user version wins over main
+    if username and username != "main":
+        seen: dict[str, dict] = {}
+        for elem in all_elements:
+            key = f"{elem.get('relative_path')}:{elem.get('name')}:{elem.get('element_type')}"
+            existing = seen.get(key)
+            if existing is None:
+                seen[key] = elem
+            elif elem.get("username") == username:
+                seen[key] = elem  # user wins
+        all_elements = list(seen.values())
+
+    logger.info(f"Semantic relationships: processing {len(all_elements)} elements")
+
+    for elem in all_elements:
+        element_id = elem.get("element_id")
+        embedding = elem.get("summary_embedding")
+
+        if not element_id or not embedding:
+            continue
+
+        # Find similar elements via vector search (searches both user + main)
+        similar = es.search_by_vector(
+            embedding=embedding,
+            scope=scope,
+            repository=repository,
+            username=None,  # Search all users for complete coverage
+            element_types=["function", "method"],
+            size=top_k + 5,  # Extra to account for self + filtering
+            min_score=min_score,
+            embedding_type="summary",
+        )
+
+        # Filter out self and build relationship list
+        related: list[dict] = []
+        for s in similar:
+            s_id = s.get("element_id")
+            if s_id == element_id:
+                continue
+            score = s.get("_score", 0.0)
+            related.append({
+                "element_id": s_id,
+                "hash_id": s.get("hash_id", ""),
+                "score": round(score, 4),
+            })
+            if len(related) >= top_k:
+                break
+
+        if related:
+            es.store_semantic_related(element_id, related)
+            total_relationships += len(related)
+
+        elements_processed += 1
+
+    logger.info(
+        f"Semantic relationships: {total_relationships} relationships "
+        f"stored across {elements_processed} elements"
+    )
+    return elements_processed, total_relationships

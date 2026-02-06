@@ -625,7 +625,85 @@ username=args.get("username", self.default_username),
 
 ---
 
-## 11. Report Format
+## 11. Multi-User Query Merging (MCP Queries)
+
+All MCP/ES queries that filter by `username` MUST query BOTH the current user AND the default `"main"` user, with user results ranked higher.
+
+### Why
+
+Users only have **local changes** indexed (partial parse). The `"main"` branch has the full repository. Queries must merge both to show a complete view, with the user's version taking priority when the same element exists in both.
+
+### Rules
+
+1. **Query both**: Use `should` clause with `[{"term": {"username": current_user}}, {"term": {"username": "main"}}]` instead of a single `term` filter
+2. **Boost user results**: Apply a `boost` to the current user's term to rank their results higher
+3. **Deduplicate**: When the same element (by `relative_path` + `name` + `element_type`) exists in both user and main, keep only the user's version
+4. **Fallback**: If `username == "main"`, skip the merge logic (no duplication needed)
+
+### Pattern
+
+```python
+# BAD - only sees user's partial index
+filter_clauses.append({"term": {"username": username}})
+
+# GOOD - sees user overlay + main, user ranked higher
+if username and username != "main":
+    filter_clauses.append({
+        "bool": {
+            "should": [
+                {"term": {"username": {"value": username, "boost": 2.0}}},
+                {"term": {"username": "main"}},
+            ],
+            "minimum_should_match": 1,
+        }
+    })
+else:
+    filter_clauses.append({"term": {"username": "main"}})
+```
+
+### Deduplication Pattern
+
+After fetching results, deduplicate by keeping user version over main:
+
+```python
+def _deduplicate_user_main(results: list[dict], username: str) -> list[dict]:
+    """Keep user's version when same element exists in both user and main."""
+    if not username or username == "main":
+        return results
+    seen: dict[str, dict] = {}  # key -> best result
+    for r in results:
+        key = f"{r.get('relative_path')}:{r.get('name')}:{r.get('element_type')}"
+        existing = seen.get(key)
+        if existing is None:
+            seen[key] = r
+        elif r.get("username") == username:
+            seen[key] = r  # user version wins
+    return list(seen.values())
+```
+
+### Verification
+
+```bash
+# Check for single-user username filters in MCP-facing queries
+grep -n '"term": {"username":' src/shared/db/repositories/search.py
+grep -n '"term": {"username":' src/magaldi_core/call_resolution.py
+```
+
+### Report Format
+
+```markdown
+### Multi-User Query Issues
+
+**Single-user filter (should merge user+main):**
+- [ ] `{method_name}` in `{file}` line {N}: Uses single `term` username filter
+
+**Missing deduplication:**
+- [ ] `{method_name}` queries both users but doesn't deduplicate results
+```
+
+---
+
+## 12. Report Format
 
 After verification, produce:
 
