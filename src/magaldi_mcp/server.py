@@ -185,10 +185,10 @@ class MagaldiMCPServer:
             list_glossary,
             list_patterns,
             list_repos,
+            mcp_self_review,
             parser_lab_analyze,
             parser_lab_create_test,
             parser_lab_run_tests,
-            mcp_self_review,
             parser_lab_suggest_fix,
             pattern_search,
             search_code,
@@ -694,7 +694,7 @@ def _apply_filename(
 
 
 def _generate_file_summary(
-    tool_name: str,
+    _tool_name: str,
     result: Any,
     filename: str,
     formatted: str,
