@@ -35,6 +35,11 @@ class ElementDetailsFormatter(ResultFormatter):
             for s in result['document_sections']:
                 indent = "  " * s.get("level", 1)
                 lines.append(f"    {indent}{s.get('title')} (L{s.get('line_start')}-{s.get('line_end')})")
+        if result.get('semantic_related'):
+            lines.append(f"  Semantically Related ({len(result['semantic_related'])}):")
+            for r in result['semantic_related']:
+                score_pct = int(r.get('score', 0) * 100)
+                lines.append(f"    {r.get('hash_id', r.get('element_id', '?'))} - {score_pct}% similar")
         if result.get('code'):
             lines.append(f"  Code:\n{result['code']}")
         return "\n".join(lines)

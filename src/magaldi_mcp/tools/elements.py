@@ -250,6 +250,10 @@ def get_element(
     if doc.get("document_sections"):
         result["document_sections"] = doc["document_sections"]
 
+    # Pre-computed semantic relationships (for functions/methods)
+    if doc.get("semantic_related"):
+        result["semantic_related"] = doc["semantic_related"]
+
     if include_code:
         result["code"] = doc.get("raw_code", "")
 

@@ -74,7 +74,8 @@ ANALYSIS_TOOLS = [
     Tool(
         name="get_call_graph",
         description="Get callers and callees for a function. "
-        "Pre-computed from indexed code for instant dependency analysis.",
+        "Pre-computed from indexed code for instant dependency analysis. "
+        "Also includes semantically related functions when available.",
         inputSchema={
             "type": "object",
             "properties": {
