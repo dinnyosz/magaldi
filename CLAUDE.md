@@ -103,7 +103,7 @@ All design documents are in `plans/`:
 
 ## Supported Languages
 
-Python, JavaScript, TypeScript, PHP, Rust (via Tree-sitter grammars)
+Python, JavaScript, TypeScript, PHP, Rust, Bash (via Tree-sitter grammars)
 
 ## Configuration
 
