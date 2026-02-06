@@ -227,6 +227,12 @@ def _find_uncaptured_nodes(
             "workdir_instruction",
             "label_instruction",
         },
+        "bash": {
+            "function_definition",
+            "variable_assignment",
+            "declaration_command",
+            "command",
+        },
     }
 
     target_types = interesting_types.get(language, set())

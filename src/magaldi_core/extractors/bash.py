@@ -118,11 +118,13 @@ def _extract_declaration(node: Node, lines: list[str]) -> ExtractedElement | Non
     has_readonly_flag = False
 
     for child in node.children:
-        if child.type == "word":
+        # Keywords like readonly/export/declare/local have their own node types
+        if child.type in ("readonly", "export", "declare", "typeset", "local"):
+            keyword = child.type
+        elif child.type == "word":
             text = get_node_text(child)
-            if text in ("readonly", "export", "declare", "typeset"):
-                keyword = text
-            elif text.startswith("-") and "r" in text:
+            # declare/typeset flags like -r, -a, -A
+            if text.startswith("-") and "r" in text:
                 has_readonly_flag = True
 
     if keyword == "local":
