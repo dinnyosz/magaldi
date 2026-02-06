@@ -337,7 +337,7 @@ class TestEnumerateLanguages:
         result = enumerate_languages(tmp_path, config)
 
         assert "python" in result
-        assert "markdown" not in result
+        assert "markdown" in result  # .md is now a supported extension
         assert "json" not in result
 
 
