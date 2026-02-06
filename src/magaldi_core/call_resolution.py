@@ -670,26 +670,7 @@ def compute_semantic_relationships(
     elements_processed = 0
     total_relationships = 0
 
-    # Get all functions/methods with embeddings
-    # Search both user and main for complete coverage
-    all_elements = es.search_by_vector(
-        embedding=[0.0] * 1024,  # Dummy — we'll iterate differently
-        scope=scope,
-        repository=repository,
-        username=username if username == "main" else None,  # None = no user filter
-        element_types=["function", "method"],
-        size=10000,
-        min_score=0.0,
-        embedding_type="summary",
-    )
-
-    # That approach won't work well (dummy vector). Let's use a match_all query instead.
-    # We need a dedicated method or use a text search with broad match.
-    # Actually, let's iterate through elements that have summary_embedding using
-    # the existing find_all_elements_with_calls pattern but for all functions.
-
-    # Use search_by_text with a broad query to get all functions/methods
-    # Better: query all functions/methods directly
+    # Get all functions/methods with embeddings via direct ES query
     from shared.db.repositories.base import INDEX_NAME
 
     client = es._get_client()
