@@ -2,14 +2,13 @@
 
 from mcp.types import Tool
 
+from magaldi_mcp.tools.schemas._annotations import READONLY_ANNOTATIONS
+
 SEARCH_TOOLS = [
     Tool(
         name="search_code",
-        description="FIND CODE: Search for functions, classes, methods by what they do. "
-        "Uses pre-indexed semantic embeddings - finds 'login' when you search 'authentication'. "
-        "Returns AI summaries so you understand code without reading it. "
-        "Use include_code=true to see implementation. Use brief=true for exploration. "
-        "USE THIS instead of grepping for keywords.",
+        description="Semantic search for functions, classes, methods by what they do. "
+        "Returns AI summaries so you understand code without reading it.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -46,19 +45,18 @@ SEARCH_TOOLS = [
                 },
                 "include_related": {
                     "type": "boolean",
-                    "description": "Include related files that call/use found elements. Helps discover wrapper functions and usage sites. Default: true.",
+                    "description": "Include related files that call/use found elements. Default: true.",
                     "default": True,
                 },
             },
             "required": ["query"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="search_features",
-        description="FIND CAPABILITIES: Search for high-level features (groups of related functions). "
-        "Pre-clustered by AI - 'authentication' returns all auth-related functions grouped together. "
-        "Use to understand what the codebase CAN DO, not just specific implementations. "
-        "Then use get_feature_members to see the actual code.",
+        description="Search for high-level features (groups of related functions). "
+        "Returns pre-clustered capabilities in the codebase.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -81,11 +79,11 @@ SEARCH_TOOLS = [
             },
             "required": ["query"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="find_similar",
-        description="FIND RELATED CODE: Given an element ID, find similar implementations. "
-        "Finds related patterns or alternative approaches.",
+        description="Given an element ID, find similar implementations and related patterns.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -100,5 +98,6 @@ SEARCH_TOOLS = [
             },
             "required": ["hash_id"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
 ]

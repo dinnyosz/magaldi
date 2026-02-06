@@ -2,12 +2,13 @@
 
 from mcp.types import Tool
 
+from magaldi_mcp.tools.schemas._annotations import READONLY_ANNOTATIONS
+
 FEATURE_TOOLS = [
     Tool(
         name="list_features",
-        description="LIST ALL FEATURES: See all extracted features/capabilities in a repo. "
-        "Use to get a high-level understanding of what the codebase does. "
-        "Then use get_feature_members to see the actual code.",
+        description="List all extracted features/capabilities in a repo. "
+        "Use get_feature_members to see actual code in each feature.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -21,11 +22,11 @@ FEATURE_TOOLS = [
             },
             "required": ["scope", "repository"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="get_feature_members",
-        description="FEATURE DETAILS: Get all functions that belong to a feature. "
-        "Shows the actual implementations grouped under a feature.",
+        description="Get all functions that belong to a feature.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -33,5 +34,6 @@ FEATURE_TOOLS = [
             },
             "required": ["feature_id"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
 ]

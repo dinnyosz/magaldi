@@ -2,12 +2,13 @@
 
 from mcp.types import Tool
 
+from magaldi_mcp.tools.schemas._annotations import READONLY_ANNOTATIONS
+
 HIERARCHY_TOOLS = [
     Tool(
         name="get_command_tree",
-        description="CLI COMMAND TREE: Get hierarchical structure of CLI commands (Click, Typer, etc.) "
-        "with their full invocation paths like 'magaldi web serve'. Use this to understand CLI structure, "
-        "document commands, or navigate to specific command handlers.",
+        description="Get hierarchical structure of CLI commands (Click, Typer, etc.) "
+        "with full invocation paths.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -17,12 +18,12 @@ HIERARCHY_TOOLS = [
             },
             "required": ["scope", "repository"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="get_route_tree",
-        description="HTTP ROUTE TREE: Get hierarchical structure of HTTP routes (FastAPI, Flask, etc.) "
-        "grouped by router module with full URL paths like '/api/v1/users/{id}'. Use this to understand "
-        "API structure, document endpoints, or navigate to specific route handlers.",
+        description="Get hierarchical structure of HTTP routes (FastAPI, Flask, etc.) "
+        "grouped by router module with full URL paths.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -32,5 +33,6 @@ HIERARCHY_TOOLS = [
             },
             "required": ["scope", "repository"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
 ]

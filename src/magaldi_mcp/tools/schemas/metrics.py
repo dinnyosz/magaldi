@@ -2,11 +2,13 @@
 
 from mcp.types import Tool
 
+from magaldi_mcp.tools.schemas._annotations import READONLY_ANNOTATIONS
+
 METRICS_TOOLS = [
     Tool(
         name="find_complex_functions",
-        description="FIND COMPLEX: Find functions/methods with high cyclomatic complexity. "
-        "Use for identifying code that may need refactoring or additional testing.",
+        description="Find functions/methods with high cyclomatic complexity. "
+        "Use for identifying code needing refactoring or additional testing.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -23,11 +25,11 @@ METRICS_TOOLS = [
             },
             "required": ["scope", "repository"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="find_security_issues",
-        description="FIND SECURITY: Find potential security issues in code. "
-        "Detects hardcoded secrets, SQL injection, command injection, etc. "
+        description="Find potential security issues (hardcoded secrets, SQL injection, etc). "
         "Use for security audits and code review.",
         inputSchema={
             "type": "object",
@@ -49,10 +51,11 @@ METRICS_TOOLS = [
             },
             "required": ["scope", "repository"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="find_undocumented",
-        description="FIND UNDOCUMENTED: Find functions/methods missing documentation. "
+        description="Find functions/methods missing documentation. "
         "Use for improving code documentation coverage.",
         inputSchema={
             "type": "object",
@@ -75,11 +78,12 @@ METRICS_TOOLS = [
             },
             "required": ["scope", "repository"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="find_env_usage",
-        description="FIND ENV VARS: Find environment variable usage across the codebase. "
-        "Use for understanding configuration dependencies and deployment requirements.",
+        description="Find environment variable usage across the codebase. "
+        "Use for understanding configuration dependencies.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -94,12 +98,12 @@ METRICS_TOOLS = [
             },
             "required": ["scope", "repository"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="find_async_code",
-        description="FIND ASYNC: Find async/concurrent code patterns. "
-        "Detects async functions, threading, multiprocessing, locks. "
-        "Use for understanding concurrency patterns in the codebase.",
+        description="Find async/concurrent code patterns (async functions, threading, locks). "
+        "Use for understanding concurrency patterns.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -117,5 +121,6 @@ METRICS_TOOLS = [
             },
             "required": ["scope", "repository"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
 ]

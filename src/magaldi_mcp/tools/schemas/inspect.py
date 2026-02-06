@@ -2,11 +2,13 @@
 
 from mcp.types import Tool
 
+from magaldi_mcp.tools.schemas._annotations import READONLY_ANNOTATIONS
+
 INSPECT_TOOLS = [
     Tool(
         name="get_element",
-        description="INSPECT ELEMENT: Get details of a specific element by ID. "
-        "Use include_code=true to see source code. Use brief=false for full details.",
+        description="Get details of a specific element by ID. "
+        "Use include_code=true to see source code.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -20,10 +22,11 @@ INSPECT_TOOLS = [
             },
             "required": ["hash_id"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="batch_get_elements",
-        description="INSPECT MULTIPLE: Get several elements at once by their IDs. "
+        description="Get several elements at once by their IDs. "
         "More efficient than multiple get_element calls.",
         inputSchema={
             "type": "object",
@@ -37,11 +40,11 @@ INSPECT_TOOLS = [
             },
             "required": ["hash_ids"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="get_context",
-        description="UNDERSTAND CONTEXT: See where an element fits - its parent class, "
-        "siblings, and children. Use to understand code structure around a function.",
+        description="See where an element fits - its parent class, siblings, and children.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -51,11 +54,11 @@ INSPECT_TOOLS = [
             },
             "required": ["hash_id"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="get_children",
-        description="LIST CHILDREN: Get all child elements (methods in a class, etc). "
-        "Use to explore what a class contains.",
+        description="Get all child elements (methods in a class, etc).",
         inputSchema={
             "type": "object",
             "properties": {
@@ -63,5 +66,6 @@ INSPECT_TOOLS = [
             },
             "required": ["hash_id"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
 ]

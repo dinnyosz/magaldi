@@ -2,12 +2,13 @@
 
 from mcp.types import Tool
 
+from magaldi_mcp.tools.schemas._annotations import READONLY_ANNOTATIONS
+
 ANALYSIS_TOOLS = [
     Tool(
         name="pattern_search",
-        description="PATTERN SEARCH: ES-native pattern matching on code. "
-        "Three modes: regexp (Lucene syntax), wildcard (* and ?), proximity (terms near each other). "
-        "USE THIS instead of built-in Grep for pattern matching.",
+        description="ES-native pattern matching on code. "
+        "Three modes: regexp (Lucene syntax), wildcard (* and ?), proximity (terms near each other).",
         inputSchema={
             "type": "object",
             "properties": {
@@ -36,12 +37,12 @@ ANALYSIS_TOOLS = [
             },
             "required": ["pattern", "mode"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="find_usages",
-        description="FIND USAGES: Find where a function/class/method is called or referenced. "
-        "USE THIS instead of grepping for 'functionName(' - automatically filters definitions, "
-        "includes context lines, and understands code structure.",
+        description="Find where a function/class/method is called or referenced. "
+        "Automatically filters definitions and includes context.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -50,11 +51,11 @@ ANALYSIS_TOOLS = [
             },
             "required": ["hash_id"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="find_implementations",
-        description="FIND IMPLEMENTATIONS: Find classes that inherit from or implement a protocol/base class. "
-        "USE THIS instead of grepping for 'class.*BaseClass' - understands inheritance patterns.",
+        description="Find classes that inherit from or implement a protocol/base class.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -66,11 +67,12 @@ ANALYSIS_TOOLS = [
             },
             "required": [],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="get_call_graph",
-        description="CALL GRAPH: Get callers (who calls this) and callees (what it calls) for a function. "
-        "Pre-computed from indexed code - instant dependency analysis for refactoring impact.",
+        description="Get callers and callees for a function. "
+        "Pre-computed from indexed code for instant dependency analysis.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -79,11 +81,12 @@ ANALYSIS_TOOLS = [
             },
             "required": ["hash_id"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="find_callers",
-        description="FIND CALLERS: Find all functions that call a given function/method. "
-        "Uses indexed call data for instant results. Returns callers grouped by code/tests.",
+        description="Find all functions that call a given function/method. "
+        "Returns callers grouped by code/tests.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -96,11 +99,11 @@ ANALYSIS_TOOLS = [
             },
             "required": ["hash_id"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="find_call_chain",
-        description="CALL CHAIN: Trace call chains from an element. "
-        "Shows what a function calls (callees) or what calls it (callers) recursively. "
+        description="Trace call chains from an element recursively. "
         "Use for impact analysis before refactoring.",
         inputSchema={
             "type": "object",
@@ -119,12 +122,12 @@ ANALYSIS_TOOLS = [
             },
             "required": ["hash_id"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="find_dead_code",
-        description="DEAD CODE: Find functions/methods that are never called. "
-        "Excludes entry points (routes, CLI commands), magic methods, and main functions. "
-        "Use for codebase cleanup. Use find_callers to verify before deleting.",
+        description="Find functions/methods that are never called. "
+        "Excludes entry points, magic methods, and main functions.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -135,11 +138,11 @@ ANALYSIS_TOOLS = [
             },
             "required": [],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="find_entry_points",
-        description="ENTRY POINTS: Find HTTP handlers, CLI commands, test fixtures, main functions. "
-        "Detects entry points by decorator patterns (@route, @command, @fixture) and naming. "
+        description="Find HTTP handlers, CLI commands, test fixtures, and main functions. "
         "Returns grouped by type.",
         inputSchema={
             "type": "object",
@@ -150,5 +153,6 @@ ANALYSIS_TOOLS = [
             },
             "required": [],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
 ]

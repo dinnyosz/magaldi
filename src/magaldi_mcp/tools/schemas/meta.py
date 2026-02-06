@@ -2,10 +2,12 @@
 
 from mcp.types import Tool
 
+from magaldi_mcp.tools.schemas._annotations import READONLY_ANNOTATIONS, WRITE_ANNOTATIONS
+
 META_TOOLS = [
     Tool(
         name="list_repos",
-        description="LIST REPOSITORIES: See all indexed codebases.",
+        description="List all indexed codebases.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -13,10 +15,11 @@ META_TOOLS = [
             },
             "required": [],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="get_repo_stats",
-        description="REPO OVERVIEW: Get statistics (element counts, languages, etc).",
+        description="Get repository statistics (element counts, languages, etc).",
         inputSchema={
             "type": "object",
             "properties": {
@@ -25,13 +28,12 @@ META_TOOLS = [
             },
             "required": [],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="generate_skill",
-        description="GENERATE SKILL: Create a SKILL.md file that teaches LLMs how to use this MCP effectively. "
-        "The skill file documents best practices, workflows, and anti-patterns for token-efficient code discovery. "
-        "BEFORE CALLING: Ask the user (1) scope: project or global? (defaults to MCP installation type), "
-        "and (2) whether to add magaldi tools to allowed tools (recommended: yes).",
+        description="Create a SKILL.md file that teaches LLMs how to use this MCP. "
+        "Ask the user for scope (project/global) and whether to add allowed tools.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -50,13 +52,12 @@ META_TOOLS = [
             },
             "required": [],
         },
+        annotations=WRITE_ANNOTATIONS,
     ),
     Tool(
         name="explain_element",
-        description="EXPLAIN ELEMENT: Comprehensive overview of a code element. "
-        "Returns element details (name, type, signature, summary), callers (top 5), "
-        "callees (all direct calls), imports (if file), similar code (top 3), and parent context. "
-        "Use to understand any element in one call.",
+        description="Comprehensive overview of a code element in one call. "
+        "Returns details, callers, callees, imports, similar code, and parent context.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -64,13 +65,12 @@ META_TOOLS = [
             },
             "required": ["hash_id"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="generate_config",
-        description="GENERATE CONFIG: Create a magaldi.yaml config file for a repository. "
-        "Auto-detects repository name from directory and scope from parent directory. "
-        "Creates the config at the repository root (not in .magaldi/). "
-        "Use this before indexing a new repository.",
+        description="Create a magaldi.yaml config file for a repository. "
+        "Auto-detects repository name and scope from directory structure.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -89,5 +89,6 @@ META_TOOLS = [
             },
             "required": ["repo_path"],
         },
+        annotations=WRITE_ANNOTATIONS,
     ),
 ]

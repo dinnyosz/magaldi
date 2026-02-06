@@ -2,13 +2,13 @@
 
 from mcp.types import Tool
 
+from magaldi_mcp.tools.schemas._annotations import READONLY_ANNOTATIONS
+
 DEPENDENCY_TOOLS = [
     Tool(
         name="find_dependencies",
-        description="FIND DEPENDENCIES: Get imports for a file. "
-        "Shows what a file depends on - both internal (from within the repo) "
-        "and external (third-party packages) imports. "
-        "Use find_dependents for the reverse (who imports this).",
+        description="Get imports for a file (internal and external). "
+        "Use find_dependents for the reverse.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -20,13 +20,12 @@ DEPENDENCY_TOOLS = [
             },
             "required": [],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="find_dependents",
-        description="FIND DEPENDENTS: Find files that import a module. "
-        "Shows what depends on a given module - useful for impact analysis "
-        "before making changes to a module. "
-        "Use find_dependencies for the reverse (what does this import).",
+        description="Find files that import a module. "
+        "Useful for impact analysis before changing a module.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -38,12 +37,12 @@ DEPENDENCY_TOOLS = [
             },
             "required": ["module", "scope", "repository"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="dependency_graph",
-        description="DEPENDENCY GRAPH: Build a module-level dependency graph. "
-        "Creates a directed graph of module dependencies within the repository. "
-        "Useful for understanding code architecture and detecting circular dependencies.",
+        description="Build a module-level dependency graph. "
+        "Useful for understanding architecture and detecting circular dependencies.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -54,5 +53,6 @@ DEPENDENCY_TOOLS = [
             },
             "required": ["scope", "repository"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
 ]

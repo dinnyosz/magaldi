@@ -2,13 +2,12 @@
 
 from mcp.types import Tool
 
+from magaldi_mcp.tools.schemas._annotations import READONLY_ANNOTATIONS
+
 FILE_TOOLS = [
     Tool(
         name="find_files",
-        description="FIND FILES: Search for files by glob pattern. "
-        "USE THIS instead of built-in Glob - searches indexed codebase. "
-        "Discovers file structure (e.g., '**/*.py', 'src/**/*.ts'). "
-        "Then use get_file_structure to see what's inside a file.",
+        description="Search for files by glob pattern in the indexed codebase.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -19,11 +18,11 @@ FILE_TOOLS = [
             },
             "required": ["pattern"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="get_file_structure",
-        description="FILE OVERVIEW: Get the structure of a file (classes, functions, methods, imports). "
-        "Use to understand what's in a file without reading it.",
+        description="Get the structure of a file (classes, functions, methods, imports) without reading it.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -33,5 +32,6 @@ FILE_TOOLS = [
             },
             "required": ["file_path"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
 ]

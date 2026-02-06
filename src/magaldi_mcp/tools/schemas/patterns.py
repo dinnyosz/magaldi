@@ -2,12 +2,12 @@
 
 from mcp.types import Tool
 
+from magaldi_mcp.tools.schemas._annotations import READONLY_ANNOTATIONS
+
 PATTERN_TOOLS = [
     Tool(
         name="list_patterns",
-        description="LIST PATTERNS: Show all detected design patterns in a repository. "
-        "Returns pattern types (singleton, builder, factory, repository) with counts and example classes. "
-        "Then use find_by_pattern to get all instances of a specific pattern.",
+        description="Show all detected design patterns in a repository (singleton, builder, factory, etc).",
         inputSchema={
             "type": "object",
             "properties": {
@@ -17,11 +17,11 @@ PATTERN_TOOLS = [
             },
             "required": ["scope", "repository"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="find_by_pattern",
-        description="FIND BY PATTERN: Find all classes implementing a specific design pattern. "
-        "Supports: singleton, builder, factory, repository.",
+        description="Find all classes implementing a specific design pattern.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -42,5 +42,6 @@ PATTERN_TOOLS = [
             },
             "required": ["pattern", "scope", "repository"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
 ]

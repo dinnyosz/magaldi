@@ -2,13 +2,12 @@
 
 from mcp.types import Tool
 
+from magaldi_mcp.tools.schemas._annotations import READONLY_ANNOTATIONS
+
 GLOSSARY_TOOLS = [
     Tool(
         name="list_glossary",
-        description="LIST GLOSSARY: List all glossary terms for a repository. "
-        "Shows domain concepts extracted from code element names. "
-        "Use to discover what terminology exists in the codebase. "
-        "Then use get_glossary_term for details or search_features to find related features.",
+        description="List all glossary terms (domain concepts extracted from code element names).",
         inputSchema={
             "type": "object",
             "properties": {
@@ -18,11 +17,11 @@ GLOSSARY_TOOLS = [
             },
             "required": [],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="get_glossary_term",
-        description="GET GLOSSARY TERM: Get full details for a specific glossary term. "
-        "Shows element IDs, file paths, and feature associations for the term.",
+        description="Get full details for a specific glossary term (element IDs, file paths, features).",
         inputSchema={
             "type": "object",
             "properties": {
@@ -32,11 +31,11 @@ GLOSSARY_TOOLS = [
             },
             "required": ["term"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="search_glossary",
-        description="SEARCH GLOSSARY: Search glossary terms by partial match. "
-        "Use to find all terms related to a concept (e.g., 'user' matches 'user', 'username').",
+        description="Search glossary terms by partial match (e.g., 'user' matches 'user', 'username').",
         inputSchema={
             "type": "object",
             "properties": {
@@ -46,5 +45,6 @@ GLOSSARY_TOOLS = [
             },
             "required": ["query"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
 ]

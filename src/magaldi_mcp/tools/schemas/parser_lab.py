@@ -6,16 +6,14 @@ analyzing, and improving the parser's extraction capabilities.
 
 from mcp.types import Tool
 
+from magaldi_mcp.tools.schemas._annotations import READONLY_ANNOTATIONS, WRITE_ANNOTATIONS
+
 PARSER_LAB_TOOLS = [
     Tool(
         name="parser_lab_analyze",
-        description=(
-            "PARSER LAB: Analyze parsing of code from any source. "
-            "Parse a file, code snippet, or fetch examples via Context7 query. "
-            "Returns extracted elements, AST summary, and gap analysis. "
-            "Use debug=true for full AST tree. "
-            "RESTRICTED: Only available when working on magaldi/magaldi."
-        ),
+        description="Analyze parsing of code from a file, snippet, or Context7 query. "
+        "Returns extracted elements, AST summary, and gap analysis. "
+        "Restricted to magaldi/magaldi.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -44,16 +42,13 @@ PARSER_LAB_TOOLS = [
             },
             "required": [],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="parser_lab_create_test",
-        description=(
-            "PARSER LAB: Create a test case for expected parsing behavior. "
-            "Generates a pytest test file in tests/extractors/ that validates "
-            "the parser extracts the expected elements from the given code. "
-            "Use TDD: create the test BEFORE fixing the parser. "
-            "RESTRICTED: Only available when working on magaldi/magaldi."
-        ),
+        description="Create a pytest test case for expected parsing behavior. "
+        "Use TDD: create the test BEFORE fixing the parser. "
+        "Restricted to magaldi/magaldi.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -127,15 +122,12 @@ PARSER_LAB_TOOLS = [
             },
             "required": ["name", "language", "code", "expected"],
         },
+        annotations=WRITE_ANNOTATIONS,
     ),
     Tool(
         name="parser_lab_run_tests",
-        description=(
-            "PARSER LAB: Run parser tests. "
-            "Executes pytest on parser/extractor tests and returns structured results. "
-            "Use filter to run specific tests (e.g., 'test_python_drf'). "
-            "RESTRICTED: Only available when working on magaldi/magaldi."
-        ),
+        description="Run parser/extractor tests and return structured results. "
+        "Restricted to magaldi/magaldi.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -151,15 +143,12 @@ PARSER_LAB_TOOLS = [
             },
             "required": [],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
     Tool(
         name="parser_lab_suggest_fix",
-        description=(
-            "PARSER LAB: Suggest extractor modifications to fix a parsing gap. "
-            "Given a description of what's missing and the language, suggests "
-            "which files to modify and provides code hints. "
-            "RESTRICTED: Only available when working on magaldi/magaldi."
-        ),
+        description="Suggest extractor modifications to fix a parsing gap. "
+        "Restricted to magaldi/magaldi.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -179,5 +168,6 @@ PARSER_LAB_TOOLS = [
             },
             "required": ["gap_description", "language"],
         },
+        annotations=READONLY_ANNOTATIONS,
     ),
 ]
