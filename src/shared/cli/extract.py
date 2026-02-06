@@ -422,7 +422,7 @@ def run_feature_extraction(
     workers: int = 4,
     compact: bool = False,
 ) -> dict | None:
-    """Run Phase 5: Feature Extraction.
+    """Run Phase 6: Feature Extraction.
 
     This is a re-export for backward compatibility.
     The actual implementation is in feature_commands.py.

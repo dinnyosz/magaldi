@@ -109,13 +109,11 @@ def run_processing(
     dry_run: bool,
     skip_ai: bool,
     workers: int,
-    skip_resolve: bool = False,
     compact: bool = False,
 ) -> tuple[int, int, int, float, float, float, float, "TimingStats | None", list[tuple[str, str]], int]:
     """Run unified processing: summarize -> embed -> index.
 
     Args:
-        skip_resolve: If True, skip the call resolution phase.
         compact: If True, hide worker table in display (for watch mode).
 
     Returns:
@@ -489,27 +487,6 @@ def run_processing(
     api_processed = result.elements_processed - result.elements_skipped
     avg_wall = elapsed / api_processed if api_processed > 0 else 0.0
 
-    # Full call resolution: resolve ALL calls using imports and type annotations
-    # This runs even for partial parsing to ensure call graphs are complete
-    if not skip_resolve:
-        from magaldi_core.call_resolution import resolve_all_calls
-
-        console.print("\n  [bold]Call Resolution[/]")
-        try:
-            total_calls, import_resolved, type_resolved = resolve_all_calls(
-                es_repo,
-                manifest.scope,
-                manifest.repository,
-                manifest.username,
-            )
-            total_resolved = import_resolved + type_resolved
-            console.print(f"  Full pass: {total_resolved}/{total_calls} resolved")
-            console.print(f"    via imports: {import_resolved}, via type annotations: {type_resolved}")
-        except Exception as e:
-            console.print(f"  [yellow]Warning: Call resolution failed: {e}[/]")
-    else:
-        console.print("\n  [dim]Call resolution skipped (--skip-resolve)[/]")
-
     # Total deleted = from deleted files + stale elements from modified files
     total_deleted = deleted_from_files + result.elements_deleted
     return (result.elements_processed, result.elements_skipped, result.indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, result.failed_elements, total_deleted)
@@ -660,3 +637,69 @@ def run_hierarchy_extraction(
     ref_result = rel_repo.bulk_index_external_refs(all_external_refs)
 
     return (rel_result["indexed"], ref_result["indexed"])
+
+
+def run_call_resolution(
+    es_repo: "ElasticsearchRepository",
+    scope: str,
+    repository: str,
+    username: str,
+    skip_resolve: bool = False,
+    console: "Console | None" = None,
+) -> None:
+    """Run Phase 5: Call Resolution (static + embedding + semantic relationships).
+
+    Args:
+        es_repo: Elasticsearch repository instance.
+        scope: Repository scope.
+        repository: Repository name.
+        username: Username/branch.
+        skip_resolve: If True, skip call resolution (but still compute semantic relationships).
+        console: Rich console for output.
+    """
+    from rich.console import Console
+
+    if console is None:
+        console = Console()
+
+    if not skip_resolve:
+        from magaldi_core.call_resolution import resolve_all_calls
+
+        console.print("\n  [bold]Static Call Resolution[/]")
+        try:
+            total_calls, import_resolved, type_resolved = resolve_all_calls(
+                es_repo, scope, repository, username,
+            )
+            total_resolved = import_resolved + type_resolved
+            console.print(f"  Full pass: {total_resolved}/{total_calls} resolved")
+            console.print(f"    via imports: {import_resolved}, via type annotations: {type_resolved}")
+        except Exception as e:
+            console.print(f"  [yellow]Warning: Static call resolution failed: {e}[/]")
+
+        # Embedding-based resolution for remaining untyped calls
+        from magaldi_core.call_resolution import resolve_calls_by_embedding
+
+        console.print("\n  [bold]Embedding Call Resolution[/]")
+        try:
+            total_processed, single_resolved, embedding_resolved = resolve_calls_by_embedding(
+                es_repo, scope, repository, username,
+            )
+            total_resolved = single_resolved + embedding_resolved
+            console.print(f"  Resolved: {total_resolved}/{total_processed} untyped calls")
+            console.print(f"    single match: {single_resolved}, via similarity: {embedding_resolved}")
+        except Exception as e:
+            console.print(f"  [yellow]Warning: Embedding call resolution failed: {e}[/]")
+    else:
+        console.print("\n  [dim]Call resolution skipped (--skip-resolve)[/]")
+
+    # Semantic relationships always run (independent of call resolution)
+    from magaldi_core.call_resolution import compute_semantic_relationships
+
+    console.print("\n  [bold]Semantic Relationships[/]")
+    try:
+        elements_processed, total_relationships = compute_semantic_relationships(
+            es_repo, scope, repository, username,
+        )
+        console.print(f"  Processed {elements_processed} elements, stored {total_relationships} relationships")
+    except Exception as e:
+        console.print(f"  [yellow]Warning: Semantic relationships failed: {e}[/]")

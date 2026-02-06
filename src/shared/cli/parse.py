@@ -20,6 +20,7 @@ from shared.cli._printers import (
     print_summary,
 )
 from shared.cli._runners import (
+    run_call_resolution,
     run_change_detection,
     run_discovery,
     run_hierarchy_extraction,
@@ -162,7 +163,7 @@ def parse(
         # Phase 4: Processing (summarize -> embed -> index)
         console.print("\n[bold blue]Phase 4:[/] Processing")
         processed, skipped, indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, failed_elements, deleted = run_processing(
-            parsing_result, manifest, config, dry_run, skip_ai, workers, skip_resolve
+            parsing_result, manifest, config, dry_run, skip_ai, workers
         )
         print_processing_result(processed, skipped, indexed, skip_ai, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, workers, deleted)
         # Display errors if any
@@ -197,9 +198,21 @@ def parse(
             except Exception as e:
                 console.print(f"  [yellow]Warning: Hierarchy extraction failed: {e}[/]")
 
-        # Phase 5: Feature Extraction (opt-in with --features)
+        # Phase 5: Call Resolution (static + embedding + semantic relationships)
+        if not dry_run and indexed > 0:
+            console.print("\n[bold blue]Phase 5:[/] Call Resolution")
+            run_call_resolution(
+                es_repo,
+                discovery_result.scope,
+                discovery_result.repository,
+                user,
+                skip_resolve=skip_resolve,
+                console=console,
+            )
+
+        # Phase 6: Feature Extraction (opt-in with --features)
         if features and not skip_ai and not dry_run and processed > 0:
-            console.print("\n[bold blue]Phase 5:[/] Feature Extraction")
+            console.print("\n[bold blue]Phase 6:[/] Feature Extraction")
             feature_result = run_feature_extraction(
                 discovery_result.scope,
                 discovery_result.repository,
@@ -210,9 +223,9 @@ def parse(
             if feature_result:
                 print_feature_result(feature_result)
 
-        # Phase 6: Glossary Extraction (opt-in with --glossary)
+        # Phase 7: Glossary Extraction (opt-in with --glossary)
         if glossary and not skip_ai and not dry_run and processed > 0:
-            console.print("\n[bold blue]Phase 6:[/] Glossary Extraction")
+            console.print("\n[bold blue]Phase 7:[/] Glossary Extraction")
             run_glossary_extraction(
                 scope=discovery_result.scope,
                 repository=discovery_result.repository,

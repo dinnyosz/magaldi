@@ -236,10 +236,24 @@ def process_file_changes(
         file_hashes[fi.relative_path] = fi.hash
 
     processed, skipped, indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, failed_elements, deleted = run_processing(
-        parsing_result, manifest, config, dry_run=False, skip_ai=skip_ai, workers=workers, skip_resolve=skip_resolve, compact=True
+        parsing_result, manifest, config, dry_run=False, skip_ai=skip_ai, workers=workers, compact=True
     )
 
     console.print(f"  Processed {processed} elements, indexed {indexed}")
+
+    # Call Resolution
+    if indexed > 0:
+        from shared.cli._runners import run_call_resolution
+        from shared.db.elasticsearch import ElasticsearchRepository
+        es_repo = ElasticsearchRepository(config)
+        run_call_resolution(
+            es_repo,
+            discovery_result.scope,
+            discovery_result.repository,
+            user,
+            skip_resolve=skip_resolve,
+            console=console,
+        )
 
     # Feature extraction (if requested and we processed elements)
     if features and not skip_ai and processed > 0:
@@ -438,7 +452,7 @@ def watch(
                     # Phase 4: Processing
                     console.print("\n[bold blue]Processing[/]")
                     processed, skipped, indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, failed_elements, deleted = run_processing(
-                        parsing_result, manifest, config, dry_run=False, skip_ai=skip_ai, workers=workers, skip_resolve=skip_resolve, compact=True
+                        parsing_result, manifest, config, dry_run=False, skip_ai=skip_ai, workers=workers, compact=True
                     )
                     print_processing_result(processed, skipped, indexed, skip_ai, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, workers, deleted)
 
@@ -460,6 +474,17 @@ def watch(
                                 console.print(f"  Indexed {rel_indexed} relationships, {ref_indexed} external refs")
                         except Exception as e:
                             console.print(f"  [yellow]Warning: Hierarchy extraction failed: {e}[/]")
+
+                        # Call Resolution
+                        from shared.cli._runners import run_call_resolution
+                        run_call_resolution(
+                            es_repo,
+                            discovery_result.scope,
+                            discovery_result.repository,
+                            user,
+                            skip_resolve=skip_resolve,
+                            console=console,
+                        )
 
                     # Feature extraction (if requested)
                     if features and not skip_ai and processed > 0:

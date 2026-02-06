@@ -45,7 +45,7 @@ def run_feature_extraction(
     workers: int = 4,
     compact: bool = False,
 ) -> dict | None:
-    """Run Phase 5: Feature Extraction.
+    """Run Phase 6: Feature Extraction.
 
     Args:
         compact: If True, hide worker table in display (for watch mode).
