@@ -12,9 +12,9 @@ HIERARCHY_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "scope": {"type": "string", "description": "Repository scope (required)"},
-                "repository": {"type": "string", "description": "Repository name (required)"},
-                "username": {"type": "string", "description": "User branch (defaults to 'main')"},
+                "scope": {"type": "string"},
+                "repository": {"type": "string"},
+                "username": {"type": "string", "description": "User branch"},
             },
             "required": ["scope", "repository"],
         },
@@ -27,9 +27,9 @@ HIERARCHY_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "scope": {"type": "string", "description": "Repository scope (required)"},
-                "repository": {"type": "string", "description": "Repository name (required)"},
-                "username": {"type": "string", "description": "User branch (defaults to 'main')"},
+                "scope": {"type": "string"},
+                "repository": {"type": "string"},
+                "username": {"type": "string", "description": "User branch"},
             },
             "required": ["scope", "repository"],
         },

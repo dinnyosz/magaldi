@@ -12,9 +12,9 @@ METRICS_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "scope": {"type": "string", "description": "Repository scope (required)"},
-                "repository": {"type": "string", "description": "Repository name (required)"},
-                "username": {"type": "string", "description": "Username branch"},
+                "scope": {"type": "string"},
+                "repository": {"type": "string"},
+                "username": {"type": "string", "description": "User branch"},
                 "min_complexity": {
                     "type": "integer",
                     "default": 10,
@@ -34,9 +34,9 @@ METRICS_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "scope": {"type": "string", "description": "Repository scope (required)"},
-                "repository": {"type": "string", "description": "Repository name (required)"},
-                "username": {"type": "string", "description": "Username branch"},
+                "scope": {"type": "string"},
+                "repository": {"type": "string"},
+                "username": {"type": "string", "description": "User branch"},
                 "severity": {
                     "type": "string",
                     "enum": ["critical", "high", "medium", "low", "info", "all"],
@@ -60,9 +60,9 @@ METRICS_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "scope": {"type": "string", "description": "Repository scope (required)"},
-                "repository": {"type": "string", "description": "Repository name (required)"},
-                "username": {"type": "string", "description": "Username branch"},
+                "scope": {"type": "string"},
+                "repository": {"type": "string"},
+                "username": {"type": "string", "description": "User branch"},
                 "max_coverage": {
                     "type": "number",
                     "default": 0.5,
@@ -87,12 +87,12 @@ METRICS_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "scope": {"type": "string", "description": "Repository scope (required)"},
-                "repository": {"type": "string", "description": "Repository name (required)"},
-                "username": {"type": "string", "description": "Username branch"},
+                "scope": {"type": "string"},
+                "repository": {"type": "string"},
+                "username": {"type": "string", "description": "User branch"},
                 "env_name": {
                     "type": "string",
-                    "description": "Filter by specific env var name (optional)",
+                    "description": "Filter by specific env var name",
                 },
                 "limit": {"type": "integer", "default": 50},
             },
@@ -107,9 +107,9 @@ METRICS_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "scope": {"type": "string", "description": "Repository scope (required)"},
-                "repository": {"type": "string", "description": "Repository name (required)"},
-                "username": {"type": "string", "description": "Username branch"},
+                "scope": {"type": "string"},
+                "repository": {"type": "string"},
+                "username": {"type": "string", "description": "User branch"},
                 "pattern": {
                     "type": "string",
                     "enum": ["async", "threading", "locking", "all"],

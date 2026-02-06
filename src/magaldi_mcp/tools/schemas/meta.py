@@ -83,14 +83,8 @@ META_TOOLS = [
                     "type": "string",
                     "description": "Path to the repository root directory",
                 },
-                "scope": {
-                    "type": "string",
-                    "description": "Override auto-detected scope (optional)",
-                },
-                "repository": {
-                    "type": "string",
-                    "description": "Override auto-detected repository name (optional)",
-                },
+                "scope": {"type": "string", "description": "Override auto-detected scope"},
+                "repository": {"type": "string", "description": "Override auto-detected name"},
             },
             "required": ["repo_path"],
         },

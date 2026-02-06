@@ -11,8 +11,8 @@ PATTERN_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "scope": {"type": "string", "description": "Repository scope (required)"},
-                "repository": {"type": "string", "description": "Repository name (required)"},
+                "scope": {"type": "string"},
+                "repository": {"type": "string"},
                 "username": {"type": "string", "description": "User branch"},
             },
             "required": ["scope", "repository"],
@@ -30,8 +30,8 @@ PATTERN_TOOLS = [
                     "enum": ["singleton", "builder", "factory", "repository"],
                     "description": "Pattern type to search for",
                 },
-                "scope": {"type": "string", "description": "Repository scope (required)"},
-                "repository": {"type": "string", "description": "Repository name (required)"},
+                "scope": {"type": "string"},
+                "repository": {"type": "string"},
                 "username": {"type": "string", "description": "User branch"},
                 "min_confidence": {
                     "type": "number",

@@ -11,8 +11,8 @@ GLOSSARY_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "scope": {"type": "string", "description": "Filter by scope"},
-                "repository": {"type": "string", "description": "Filter by repo"},
+                "scope": {"type": "string"},
+                "repository": {"type": "string"},
                 "min_count": {"type": "integer", "default": 1, "description": "Minimum occurrence count"},
             },
             "required": [],
