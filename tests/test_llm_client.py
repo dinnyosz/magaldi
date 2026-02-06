@@ -97,7 +97,7 @@ class TestEmbeddingConfig:
         """Test default embedding configuration values."""
         config = EmbeddingConfig()
 
-        assert config.model == "ollama/snowflake-arctic-embed2"
+        assert config.model == "ollama/qwen3-embedding:0.6b"
         assert config.api_base is None
         assert config.api_key is None
         assert config.dimensions == 1024
@@ -120,11 +120,11 @@ class TestEmbeddingConfig:
         """Test creating config from Ollama URL."""
         config = EmbeddingConfig.from_ollama_url(
             url="http://localhost:11434",
-            model="snowflake-arctic-embed2",
+            model="qwen3-embedding:0.6b",
             dimensions=1024,
         )
 
-        assert config.model == "ollama/snowflake-arctic-embed2"
+        assert config.model == "ollama/qwen3-embedding:0.6b"
         assert config.api_base == "http://localhost:11434"
         assert config.dimensions == 1024
 
@@ -343,11 +343,11 @@ class TestEmbeddingClient:
     def test_init_with_ollama_model(self):
         """Test initialization with Ollama model."""
         client = EmbeddingClient(
-            model="ollama/snowflake-arctic-embed2",
+            model="ollama/qwen3-embedding:0.6b",
             api_base="http://localhost:11434",
         )
 
-        assert client.model == "ollama/snowflake-arctic-embed2"
+        assert client.model == "ollama/qwen3-embedding:0.6b"
         assert client.api_base == "http://localhost:11434"
         assert client.provider == "ollama"
 
@@ -369,11 +369,11 @@ class TestEmbeddingClient:
         """Test creating client for Ollama provider."""
         client = EmbeddingClient.from_ollama(
             url="http://localhost:11434",
-            model="snowflake-arctic-embed2",
+            model="qwen3-embedding:0.6b",
             dimensions=1024,
         )
 
-        assert client.model == "ollama/snowflake-arctic-embed2"
+        assert client.model == "ollama/qwen3-embedding:0.6b"
         assert client.api_base == "http://localhost:11434"
         assert client.dimensions == 1024
 
@@ -583,12 +583,12 @@ class TestFactoryFunctions:
         """Test creating embedding client from legacy config."""
         client = create_embedding_client_from_config(
             ollama_url="http://localhost:11434",
-            model="snowflake-arctic-embed2",
+            model="qwen3-embedding:0.6b",
             dimensions=1024,
         )
 
         assert isinstance(client, EmbeddingClient)
-        assert client.model == "ollama/snowflake-arctic-embed2"
+        assert client.model == "ollama/qwen3-embedding:0.6b"
         assert client.api_base == "http://localhost:11434"
         assert client.dimensions == 1024
 
@@ -596,7 +596,7 @@ class TestFactoryFunctions:
         """Test creating embedding client with default dimensions."""
         client = create_embedding_client_from_config(
             ollama_url="http://localhost:11434",
-            model="snowflake-arctic-embed2",
+            model="qwen3-embedding:0.6b",
         )
 
         assert client.dimensions == 1024

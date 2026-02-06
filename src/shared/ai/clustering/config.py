@@ -29,7 +29,7 @@ class FeatureProcessingConfig:
     """Configuration for feature processing."""
 
     summarize_model: str = "qwen3:4b-instruct"
-    embed_model: str = "snowflake-arctic-embed2"
+    embed_model: str = "qwen3-embedding:0.6b"
     api_base: str = "http://localhost:11434"  # API base URL (for Ollama or custom endpoints)
     provider: str = "ollama"  # LLM provider: ollama, openai, anthropic, etc.
     api_key: str | None = None  # API key for cloud providers

@@ -115,7 +115,7 @@ class TestFeatureProcessingConfig:
         config = FeatureProcessingConfig()
 
         assert config.summarize_model == "qwen3:4b-instruct"
-        assert config.embed_model == "snowflake-arctic-embed2"
+        assert config.embed_model == "qwen3-embedding:0.6b"
         assert config.api_base == "http://localhost:11434"
         assert config.provider == "ollama"
         assert config.num_workers == 4

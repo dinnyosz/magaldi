@@ -305,7 +305,7 @@ class TestProcessingConfig:
         assert config.summarize_model.name == "qwen3:4b-instruct"
         assert config.summarize_model.provider == "llamacpp"
         assert config.summarize_model_small.name == "qwen3:1.7b"
-        assert config.embed_model.name == "snowflake-arctic-embed2"
+        assert config.embed_model.name == "qwen3-embedding:0.6b"
         assert config.embed_model.provider == "ollama"
         assert config.skip_ai is False
         assert config.num_workers == 0  # 0 = auto (use tier-based defaults)

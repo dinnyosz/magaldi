@@ -56,7 +56,7 @@ Say this to Claude Code:
 | Component | Choice | Rationale |
 |-----------|--------|-----------|
 | Summarization Model | qwen2.5-coder:7b | Best benchmarks, Apache 2.0 license |
-| Embedding Model | snowflake-arctic-embed2 | 8K context, 1024 dims for large codebases |
+| Embedding Model | qwen3-embedding:0.6b | 32K context, 1024 dims, MTEB #1 |
 | Database | Percona MySQL 8.0 | Multi-writer, ACID, familiar tooling |
 | Vector Store | Elasticsearch 8.11.0 | Hybrid search, dense_vector support |
 | Parser | Tree-sitter | Multi-language, fault-tolerant, fast |

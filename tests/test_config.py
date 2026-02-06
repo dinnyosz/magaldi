@@ -107,13 +107,13 @@ class TestLLMConfigDefaults:
     def test_default_embed_model_reference(self):
         """Test that embed_model is a reference key to named model."""
         config = LLMConfig()
-        assert config.embed_model == "arctic-embed"
+        assert config.embed_model == "qwen3-embed"
 
     def test_default_embed_model_name(self):
         """Test that the referenced embed model has correct name."""
         config = LLMConfig()
         model = config.get_embed_model()
-        assert model.name == "snowflake-arctic-embed2"
+        assert model.name == "qwen3-embedding:0.6b"
 
     def test_default_embed_dimensions(self):
         """Test that embed model has correct dimensions."""
@@ -275,24 +275,17 @@ class TestPriorityChain:
 class TestValidation:
     """Test configuration validation."""
 
-    def test_invalid_embed_dimensions_raises_error(self, clean_env):
-        """Invalid embed dimensions for snowflake model should raise ConfigurationError."""
-        from shared.config import _validate_config, ModelConfig
+    def test_invalid_embed_model_reference_raises_error(self, clean_env):
+        """Invalid embed_model reference should raise ConfigurationError."""
+        from shared.config import _validate_config
 
-        # Load config and manually set invalid dimensions on the embed model
         config = load_config(FIXTURES_DIR / "valid.yaml", skip_validation=True)
-        # Replace the embed model with one that has snowflake name but wrong dimensions
-        config.llm.models["test-embed"] = ModelConfig(
-            name="snowflake-arctic-embed2",
-            provider="ollama",
-            url="http://localhost:11434",
-            dimensions=512,  # Wrong for snowflake-arctic-embed2
-        )
+        config.llm.embed_model = "nonexistent-model"
 
         with pytest.raises(ConfigurationError) as exc_info:
             _validate_config(config)
 
-        assert "embed_dimensions" in str(exc_info.value).lower()
+        assert "embed_model" in str(exc_info.value).lower()
 
     def test_valid_config_passes_validation(self, clean_env):
         """Valid config should not raise."""

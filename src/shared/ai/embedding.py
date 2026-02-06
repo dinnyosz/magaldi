@@ -42,13 +42,13 @@ class EmbeddingConfig:
 
     # LLM settings (supports any LiteLLM provider)
     ollama_url: str = "http://localhost:11434"  # For Ollama provider
-    model: str = "snowflake-arctic-embed2"
+    model: str = "qwen3-embedding:0.6b"
     provider: str = "ollama"  # ollama, openai, etc.
     api_key: str | None = None  # For cloud providers
 
     # Vector settings
     dimensions: int = 1024
-    max_context: int = 8192
+    max_context: int = 32768
 
     # Worker settings
     batch_size: int = 20
@@ -105,7 +105,7 @@ class CodeEmbeddingClient:
         Args:
             url: API base URL (for Ollama: "http://localhost:11434",
                  for llamacpp: "http://localhost:8080/v1")
-            model: Model name (e.g., "snowflake-arctic-embed2", "text-embedding-3-small")
+            model: Model name (e.g., "qwen3-embedding:0.6b", "text-embedding-3-small")
             provider: Embedding provider (ollama, llamacpp, openai, etc.)
             api_key: API key for cloud providers
             dimensions: Expected embedding dimensions

@@ -127,14 +127,14 @@ class LLMConfig:
               name: qwen3:1.7b
               provider: llamacpp
               url: http://localhost:8080
-            arctic:
-              name: snowflake-arctic-embed2
+            qwen3-embed:
+              name: "qwen3-embedding:0.6b"
               provider: ollama
               url: http://localhost:11434
 
           summarize_model: qwen3-4b
           summarize_model_small: qwen3-small
-          embed_model: arctic
+          embed_model: qwen3-embed
     """
 
     # Named model configurations
@@ -150,8 +150,8 @@ class LLMConfig:
             provider="ollama",
             url="http://localhost:11434",
         ),
-        "arctic-embed": ModelConfig(
-            name="snowflake-arctic-embed2",
+        "qwen3-embed": ModelConfig(
+            name="qwen3-embedding:0.6b",
             provider="ollama",
             url="http://localhost:11434",
             dimensions=1024,
@@ -161,14 +161,14 @@ class LLMConfig:
     # Which models to use for each purpose (reference by name)
     summarize_model: str = "qwen3-4b"
     summarize_model_small: str = "qwen3-small"
-    embed_model: str = "arctic-embed"
+    embed_model: str = "qwen3-embed"
 
     # Generation settings (defaults, can be overridden per-model)
     summarize_temperature: float = 0.2
     summarize_top_p: float = 0.95
     summarize_max_tokens: int = 512
     summarize_context_window: int = 8192
-    embed_context_window: int = 8192
+    embed_context_window: int = 32768
 
     # Context size for aggregation tasks (features, glossary)
     # Uses fixed large context since input size depends on cluster size
@@ -859,13 +859,7 @@ def _validate_config(config: MagaldiConfig) -> None:
         errors.append(f"Invalid summarize_model_small reference: {e}")
 
     try:
-        embed_model = config.llm.get_embed_model()
-        # Consistency check for snowflake model
-        if embed_model.name == "snowflake-arctic-embed2" and config.llm.embed_dimensions != 1024:
-            errors.append(
-                f"snowflake-arctic-embed2 requires embed_dimensions=1024, "
-                f"got {config.llm.embed_dimensions}"
-            )
+        config.llm.get_embed_model()
     except KeyError as e:
         errors.append(f"Invalid embed_model reference: {e}")
 

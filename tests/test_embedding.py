@@ -33,9 +33,9 @@ from shared.ai.embedding import (
 def config() -> EmbeddingConfig:
     return EmbeddingConfig(
         ollama_url="http://localhost:11434",
-        model="snowflake-arctic-embed2",
+        model="qwen3-embedding:0.6b",
         dimensions=1024,
-        max_context=8192,
+        max_context=32768,
     )
 
 
@@ -139,7 +139,7 @@ class TestCodeEmbeddingClient:
 
     def test_verify_model_returns_true_when_available(self):
         """Test model verification returns True when model is available."""
-        client = CodeEmbeddingClient("http://localhost:11434", "snowflake-arctic-embed2")
+        client = CodeEmbeddingClient("http://localhost:11434", "qwen3-embedding:0.6b")
         # Mock the internal client
         client._client = MagicMock()
         client._client.verify_model.return_value = True
@@ -615,9 +615,9 @@ class TestEmbeddingConfig:
     def test_default_values(self):
         config = EmbeddingConfig()
 
-        assert config.model == "snowflake-arctic-embed2"
+        assert config.model == "qwen3-embedding:0.6b"
         assert config.dimensions == 1024
-        assert config.max_context == 8192
+        assert config.max_context == 32768
 
     def test_custom_values(self):
         config = EmbeddingConfig(

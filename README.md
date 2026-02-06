@@ -44,7 +44,7 @@ source .venv/bin/activate
 
 # Pull Ollama models (if using local Ollama)
 ollama pull qwen2.5-coder:7b
-ollama pull snowflake-arctic-embed2
+ollama pull qwen3-embedding:0.6b
 
 # Run tests to verify installation
 .venv/bin/pytest tests/ -v
@@ -237,7 +237,7 @@ docker compose logs elasticsearch # View logs
 **Ollama Models:**
 ```bash
 ollama pull qwen2.5-coder:7b          # Summarization model
-ollama pull snowflake-arctic-embed2   # Embedding model
+ollama pull qwen3-embedding:0.6b   # Embedding model
 ollama list                           # List installed models
 ```
 
@@ -274,7 +274,7 @@ ollama list                           # List installed models
 | Storage & Search | Elasticsearch 8.11.0 |
 | Job Queues | Redis |
 | ES Dashboard | Kibana 8.11.0 |
-| AI Models | Ollama (qwen2.5-coder:7b, snowflake-arctic-embed2) |
+| AI Models | Ollama (qwen2.5-coder:7b, qwen3-embedding:0.6b) |
 | Web Framework | FastAPI |
 | MCP | Python MCP SDK |
 
@@ -331,7 +331,7 @@ curl http://localhost:11434/api/tags
 
 # Pull models manually
 ollama pull qwen2.5-coder:7b
-ollama pull snowflake-arctic-embed2
+ollama pull qwen3-embedding:0.6b
 ```
 
 ### Ollama Performance Tuning

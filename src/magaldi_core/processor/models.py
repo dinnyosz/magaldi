@@ -55,7 +55,7 @@ def _default_embed_model() -> "ModelConfig":
     """Create default embed model config."""
     from shared.config import ModelConfig
     return ModelConfig(
-        name="snowflake-arctic-embed2", provider="ollama", url="http://localhost:11434", dimensions=1024
+        name="qwen3-embedding:0.6b", provider="ollama", url="http://localhost:11434", dimensions=1024
     )
 
 

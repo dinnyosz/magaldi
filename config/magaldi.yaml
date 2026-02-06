@@ -46,9 +46,9 @@ ollama:
   summarize_context_window: 8192
 
   # Embedding model
-  embed_model: snowflake-arctic-embed2
+  embed_model: "qwen3-embedding:0.6b"
   embed_dimensions: 1024
-  embed_context_window: 8192
+  embed_context_window: 32768
 
 # =============================================================================
 # WORKER POOLS

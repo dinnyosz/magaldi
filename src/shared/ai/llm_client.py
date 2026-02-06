@@ -11,7 +11,7 @@ Usage:
     response = llm.generate("Explain this code...")
 
     # Embeddings
-    embed = EmbeddingClient(model="ollama/snowflake-arctic-embed2")
+    embed = EmbeddingClient(model="ollama/qwen3-embedding:0.6b")
     vector = embed.embed("Some text to embed")
 
     # Cleanup on shutdown (optional but recommended)
@@ -371,9 +371,9 @@ class EmbeddingConfig:
 
     # Model identifier
     # Examples:
-    #   - "ollama/snowflake-arctic-embed2"
+    #   - "ollama/qwen3-embedding:0.6b"
     #   - "text-embedding-3-small"
-    model: str = "ollama/snowflake-arctic-embed2"
+    model: str = "ollama/qwen3-embedding:0.6b"
 
     # API configuration
     api_base: str | None = None
@@ -679,7 +679,7 @@ class EmbeddingClient:
     """Unified embedding client using LiteLLM.
 
     Supports multiple providers:
-    - Ollama: model="ollama/snowflake-arctic-embed2", api_base="http://localhost:11434"
+    - Ollama: model="ollama/qwen3-embedding:0.6b", api_base="http://localhost:11434"
     - OpenAI: model="text-embedding-3-small", api_key="sk-..."
     - And many more (see LiteLLM docs)
     """

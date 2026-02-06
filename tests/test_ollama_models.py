@@ -70,7 +70,7 @@ class TestIsTieredModel:
         """Base model names should not be detected as tiered."""
         assert is_tiered_model("qwen3:4b-instruct") is False
         assert is_tiered_model("llama3.1:8b") is False
-        assert is_tiered_model("snowflake-arctic-embed2") is False
+        assert is_tiered_model("qwen3-embedding:0.6b") is False
 
     def test_returns_false_for_similar_suffix(self):
         """Similar but non-tier suffixes should not match."""
