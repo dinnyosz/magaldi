@@ -45,6 +45,17 @@ class CallGraphFormatter(ResultFormatter):
                     lines.append(f"  {receiver}{c.get('name')}() @ line {c.get('line')} (unresolved)")
             lines.append("")
 
+        if result.get("semantic_related"):
+            lines.append(f"Semantically Related ({len(result['semantic_related'])}):")
+            for r in result["semantic_related"]:
+                loc = f"{r.get('file')}:{r.get('line')}" if r.get('file') else "?"
+                score_pct = int(r.get('score', 0) * 100)
+                lines.append(f"  [{r.get('type', '?')}] {r.get('name')} ({loc}) - {score_pct}% similar")
+                if r.get('summary'):
+                    summary = r['summary'][:100] + "..." if len(r.get('summary', '')) > 100 else r.get('summary', '')
+                    lines.append(f"    {summary}")
+            lines.append("")
+
         return "\n".join(lines)
 
 

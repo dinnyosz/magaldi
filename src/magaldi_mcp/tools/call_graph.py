@@ -95,6 +95,29 @@ def get_call_graph(
                     callee_entry["summary"] = resolved_doc.get("summary", "")
             result["callees"].append(callee_entry)
 
+    # Include pre-computed semantic relationships if available
+    semantic_related = doc.get("semantic_related", [])
+    if semantic_related:
+        related_list: list[dict[str, Any]] = []
+        for rel in semantic_related:
+            rel_id = rel.get("element_id")
+            if not rel_id:
+                continue
+            rel_doc = es.get_document(rel_id)
+            if rel_doc:
+                related_list.append({
+                    "element_id": rel_id,
+                    "hash_id": rel.get("hash_id", rel_doc.get("hash_id", "")),
+                    "name": rel_doc.get("name"),
+                    "type": rel_doc.get("element_type"),
+                    "file": rel_doc.get("relative_path"),
+                    "line": rel_doc.get("line_start"),
+                    "summary": rel_doc.get("summary", ""),
+                    "score": rel.get("score", 0.0),
+                })
+        if related_list:
+            result["semantic_related"] = related_list
+
     return result
 
 
