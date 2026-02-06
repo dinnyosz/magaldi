@@ -604,3 +604,62 @@ class SearchRepository:
         )
 
         return [hit["_source"] for hit in result.get("hits", {}).get("hits", [])]
+
+    def find_candidates_by_name(
+        self,
+        name: str,
+        scope: str,
+        repository: str,
+        username: str = "main",
+        element_types: list[str] | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Find all elements with a given name across the repo.
+
+        Used for embedding-based call resolution to find candidate targets.
+
+        Args:
+            name: Exact element name to search for.
+            scope: Repository scope.
+            repository: Repository name.
+            username: Username branch.
+            element_types: Filter by element types (default: function, method).
+            limit: Maximum results to return.
+
+        Returns:
+            List of element documents with element_id and summary_embedding.
+        """
+        if element_types is None:
+            element_types = ["function", "method"]
+
+        query: dict[str, Any] = {
+            "bool": {
+                "must": [
+                    {"term": {"name": name}},
+                    {"term": {"scope": scope}},
+                    {"term": {"repository": repository}},
+                    {"term": {"username": username}},
+                    {"terms": {"element_type": element_types}},
+                ],
+            }
+        }
+
+        client = self._get_client()
+        result = client.search(
+            index=INDEX_NAME,
+            body={
+                "query": query,
+                "size": limit,
+                "_source": [
+                    "element_id",
+                    "hash_id",
+                    "summary_embedding",
+                    "name",
+                    "element_type",
+                    "relative_path",
+                    "line_start",
+                ],
+            },
+        )
+
+        return [hit["_source"] for hit in result.get("hits", {}).get("hits", [])]

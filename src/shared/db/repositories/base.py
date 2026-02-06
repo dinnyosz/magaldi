@@ -175,6 +175,15 @@ INDEX_MAPPING = {
                     "resolved_id": {"type": "keyword"}, # Resolved element ID (or null)
                 },
             },
+            # Pre-computed semantic relationships (top-K similar elements)
+            "semantic_related": {
+                "type": "nested",
+                "properties": {
+                    "element_id": {"type": "keyword"},
+                    "hash_id": {"type": "keyword"},
+                    "score": {"type": "float"},
+                },
+            },
             # Enhanced context fields (extracted during parsing)
             # For classes: instance attributes from __init__
             "class_attributes": {

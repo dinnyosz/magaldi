@@ -226,6 +226,10 @@ class ElasticsearchRepository:
         """Store calls for a function/method element."""
         return self._metadata.store_calls(element_id, calls)
 
+    def store_semantic_related(self, element_id: str, related: list[dict]) -> bool:
+        """Store pre-computed semantic relationships for an element."""
+        return self._metadata.store_semantic_related(element_id, related)
+
     def get_imports(self, element_id: str) -> list[dict]:
         """Get imports for a file element."""
         return self._metadata.get_imports(element_id)
@@ -467,6 +471,20 @@ class ElasticsearchRepository:
         """Find elements that have calls without resolved_id."""
         return self._search.find_elements_with_unresolved_calls(
             scope, repository, username, limit
+        )
+
+    def find_candidates_by_name(
+        self,
+        name: str,
+        scope: str,
+        repository: str,
+        username: str = "main",
+        element_types: list[str] | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        """Find all elements with a given name across the repo."""
+        return self._search.find_candidates_by_name(
+            name, scope, repository, username, element_types, limit
         )
 
     # =========================================================================

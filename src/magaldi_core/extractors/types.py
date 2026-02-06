@@ -108,6 +108,7 @@ class CallCategory:
     UNTYPED = "untyped"  # Method call on object without type info
     DYNAMIC = "dynamic"  # Dynamically determined (getattr, etc.)
     UNKNOWN = "unknown"  # Default/fallback
+    EMBEDDING_RESOLVED = "embedding_resolved"  # Resolved via embedding similarity (probable)
 
 
 @dataclass

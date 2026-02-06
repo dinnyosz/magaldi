@@ -302,6 +302,27 @@ class MetadataRepository:
         except NotFoundError:
             return False
 
+    def store_semantic_related(self, element_id: str, related: list[dict]) -> bool:
+        """Store pre-computed semantic relationships for an element.
+
+        Args:
+            element_id: Element ID to update.
+            related: List of dicts with keys: element_id, hash_id, score.
+
+        Returns:
+            True on success, False if element not found.
+        """
+        try:
+            client = self._get_client()
+            client.update(
+                index=INDEX_NAME,
+                id=element_id,
+                body={"doc": {"semantic_related": related}},
+            )
+            return True
+        except NotFoundError:
+            return False
+
     def get_imports(self, element_id: str) -> list[dict]:
         """Get imports for a file element.
 
