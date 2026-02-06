@@ -400,6 +400,10 @@ class InMemoryEmbeddingStore:
 def estimate_tokens(text: str) -> int:
     """Estimate token count (rough approximation).
 
+    Uses conservative estimate of ~2 chars per token. Code averages ~3 chars/token,
+    but markdown/yaml/text with T5/sentencepiece tokenizers average ~1.5-2 chars/token.
+    Being conservative prevents exceeding model context limits.
+
     Args:
         text: Input text.
 
@@ -408,8 +412,7 @@ def estimate_tokens(text: str) -> int:
     """
     if not text:
         return 0
-    # Average: 1 token ~= 3 characters for code
-    return len(text) // 3
+    return len(text) // 2
 
 
 def validate_context_length(text: str, max_tokens: int = 8000) -> str:
