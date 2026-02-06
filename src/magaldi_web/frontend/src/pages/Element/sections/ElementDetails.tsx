@@ -552,7 +552,7 @@ export function ElementDetails({ element }: Props) {
               Document Structure ({element.document_sections.length})
             </small>
             <div
-              className="bg-light p-2 rounded"
+              className="border rounded p-2"
               style={{ maxHeight: '200px', overflowY: 'auto' }}
             >
               {element.document_sections.map((section, i) => (
@@ -564,8 +564,8 @@ export function ElementDetails({ element }: Props) {
                   <Badge bg="secondary" className="me-2">
                     H{section.level}
                   </Badge>
-                  <span>{section.title}</span>
-                  <small className="text-muted ms-auto">
+                  <span className="text-body">{section.title}</span>
+                  <small className="text-body-secondary ms-auto text-nowrap ms-2">
                     L{section.line_start}-{section.line_end}
                   </small>
                 </div>
