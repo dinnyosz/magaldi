@@ -20,10 +20,15 @@ from magaldi_core.parsers.base import (
     find_variable_usages,
     generate_element_id,
 )
+from magaldi_core.parsers.dockerfile import DockerfileParser
 from magaldi_core.parsers.javascript import JavaScriptParser
+from magaldi_core.parsers.markdown import MarkdownParser
 from magaldi_core.parsers.php import PhpParser
+from magaldi_core.parsers.plaintext import PlainTextParser
 from magaldi_core.parsers.python import PythonParser
 from magaldi_core.parsers.rust import RustParser
+from magaldi_core.parsers.toml_lang import TomlParser
+from magaldi_core.parsers.yaml_lang import YamlParser
 
 __all__ = [
     # Base classes and utilities
@@ -37,8 +42,13 @@ __all__ = [
     "find_variable_usages",
     "generate_element_id",
     # Language-specific parsers
+    "DockerfileParser",
     "JavaScriptParser",
+    "MarkdownParser",
     "PhpParser",
+    "PlainTextParser",
     "PythonParser",
     "RustParser",
+    "TomlParser",
+    "YamlParser",
 ]

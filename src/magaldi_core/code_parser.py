@@ -25,12 +25,17 @@ from typing import TYPE_CHECKING
 from magaldi_core.parsers import (
     Call,
     CodeElement,
+    DockerfileParser,
     Import,
     JavaScriptParser,
+    MarkdownParser,
     PhpParser,
+    PlainTextParser,
     PythonParser,
     RustParser,
+    TomlParser,
     TreeSitterParser,
+    YamlParser,
     generate_element_id,
 )
 from magaldi_core.tree_sitter_manager import (
@@ -287,17 +292,22 @@ class ParsingResult:
 # =============================================================================
 
 
-PARSERS: dict[str, TreeSitterParser] = {
+PARSERS: dict[str, TreeSitterParser | PlainTextParser] = {
     "python": PythonParser(),
     "javascript": JavaScriptParser("javascript"),
     "typescript": JavaScriptParser("typescript"),
     "tsx": JavaScriptParser("tsx"),
     "php": PhpParser(),
     "rust": RustParser(),
+    "markdown": MarkdownParser(),
+    "yaml": YamlParser(),
+    "toml": TomlParser(),
+    "dockerfile": DockerfileParser(),
+    "text": PlainTextParser(),
 }
 
 
-def get_parser(language: str) -> TreeSitterParser | None:
+def get_parser(language: str) -> TreeSitterParser | PlainTextParser | None:
     """Get parser for language."""
     return PARSERS.get(language)
 
