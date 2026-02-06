@@ -255,6 +255,16 @@ INDEX_MAPPING = {
                     "position": {"type": "keyword"},
                 },
             },
+            # Document structure (for markdown/doc file elements)
+            "document_sections": {
+                "type": "nested",
+                "properties": {
+                    "title": {"type": "text", "fields": {"keyword": {"type": "keyword"}}},
+                    "level": {"type": "integer"},
+                    "line_start": {"type": "integer"},
+                    "line_end": {"type": "integer"},
+                },
+            },
             # API Surface
             "is_public_api": {"type": "boolean"},
             "http_routes": {

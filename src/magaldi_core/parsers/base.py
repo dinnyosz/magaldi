@@ -147,6 +147,10 @@ class CodeElement:
     env_vars: list[dict[str, Any]] = field(default_factory=list)
     concurrency: dict[str, Any] | None = None  # {is_async, uses_locks, patterns}
 
+    # Document structure (for markdown/doc file elements)
+    document_sections: list[dict[str, Any]] = field(default_factory=list)
+    # Each: {title: str, level: int, line_start: int, line_end: int}
+
     # Roll-up statistics (for file and class elements)
     metrics_summary: dict[str, Any] | None = None  # Aggregated from child elements
 

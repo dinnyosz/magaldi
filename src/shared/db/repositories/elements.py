@@ -140,6 +140,8 @@ class ElementRepository:
             doc["concurrency"] = element.concurrency
         if element.metrics_summary:
             doc["metrics_summary"] = element.metrics_summary
+        if element.document_sections:
+            doc["document_sections"] = element.document_sections
 
         client = self._get_client()
         client.index(index=INDEX_NAME, id=element.element_id, document=doc)
