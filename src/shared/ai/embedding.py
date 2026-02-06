@@ -397,35 +397,50 @@ class InMemoryEmbeddingStore:
 # =============================================================================
 
 
-def estimate_tokens(text: str) -> int:
-    """Estimate token count (rough approximation).
+CODE_LANGUAGES = {"python", "javascript", "typescript", "tsx", "php", "rust"}
 
-    Uses conservative estimate of ~2 chars per token. Code averages ~3 chars/token,
-    but markdown/yaml/text with T5/sentencepiece tokenizers average ~1.5-2 chars/token.
-    Being conservative prevents exceeding model context limits.
+
+def estimate_tokens(text: str, chars_per_token: int = 2) -> int:
+    """Estimate token count (rough approximation).
 
     Args:
         text: Input text.
+        chars_per_token: Average characters per token. Code languages average ~3,
+            markdown/yaml/text with T5/sentencepiece tokenizers average ~2.
 
     Returns:
         Estimated token count.
     """
     if not text:
         return 0
-    return len(text) // 2
+    return len(text) // chars_per_token
 
 
-def validate_context_length(text: str, max_tokens: int = 8000) -> str:
+def chars_per_token_for_language(language: str | None) -> int:
+    """Return the appropriate chars-per-token ratio for a language.
+
+    Code languages (Python, JS, etc.) average ~3 chars/token.
+    Non-code content (markdown, yaml, text) averages ~2 chars/token.
+    """
+    if language and language in CODE_LANGUAGES:
+        return 3
+    return 2
+
+
+def validate_context_length(
+    text: str, max_tokens: int = 8000, chars_per_token: int = 2
+) -> str:
     """Ensure text fits within model context.
 
     Args:
         text: Input text.
         max_tokens: Maximum allowed tokens.
+        chars_per_token: Average characters per token for estimation.
 
     Returns:
         Original or truncated text.
     """
-    estimated = estimate_tokens(text)
+    estimated = estimate_tokens(text, chars_per_token)
 
     if estimated <= max_tokens:
         return text
@@ -436,7 +451,7 @@ def validate_context_length(text: str, max_tokens: int = 8000) -> str:
     token_count = 0
 
     for line in lines:
-        line_tokens = estimate_tokens(line)
+        line_tokens = estimate_tokens(line, chars_per_token)
         if token_count + line_tokens <= max_tokens * 0.9:
             truncated.append(line)
             token_count += line_tokens
@@ -585,7 +600,8 @@ def build_summary_embedding_text(
             parts.append(f"Summary: {summary}")
 
     text = "\n".join(parts)
-    return validate_context_length(text, max_tokens)
+    cpt = chars_per_token_for_language(element.language)
+    return validate_context_length(text, max_tokens, chars_per_token=cpt)
 
 
 # Backwards compatibility alias
@@ -623,7 +639,8 @@ def build_code_embedding_text(
         parts.append(element.raw_code)
 
     text = "\n".join(parts)
-    return validate_context_length(text, max_tokens)
+    cpt = chars_per_token_for_language(element.language)
+    return validate_context_length(text, max_tokens, chars_per_token=cpt)
 
 
 # =============================================================================
