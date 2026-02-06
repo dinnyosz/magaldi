@@ -542,6 +542,38 @@ export function ElementDetails({ element }: Props) {
           </div>
         )}
 
+      {/* Document Sections - for markdown/doc file elements */}
+      {element.element_type === 'file' &&
+        element.document_sections &&
+        element.document_sections.length > 0 && (
+          <div className="mb-3">
+            <small className="text-uppercase text-muted fw-bold d-block mb-1">
+              <i className="bi bi-list-nested me-1"></i>
+              Document Structure ({element.document_sections.length})
+            </small>
+            <div
+              className="bg-light p-2 rounded"
+              style={{ maxHeight: '200px', overflowY: 'auto' }}
+            >
+              {element.document_sections.map((section, i) => (
+                <div
+                  key={i}
+                  className="d-flex align-items-center py-1"
+                  style={{ paddingLeft: `${(section.level - 1) * 16}px` }}
+                >
+                  <Badge bg="secondary" className="me-2">
+                    H{section.level}
+                  </Badge>
+                  <span>{section.title}</span>
+                  <small className="text-muted ms-auto">
+                    L{section.line_start}-{section.line_end}
+                  </small>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
       {/* Code */}
       {element.raw_code && (
         <div>

@@ -365,6 +365,13 @@ export interface SectionMarkerInfo {
   style: string
 }
 
+export interface DocumentSectionInfo {
+  title: string
+  level: number
+  line_start: number
+  line_end: number
+}
+
 export interface CommentInfo {
   text: string
   line: number
@@ -475,6 +482,7 @@ export interface ElementDetail {
   env_vars: EnvVarInfo[]
   concurrency: ConcurrencyInfo | null
   metrics_summary: MetricsSummaryInfo | null
+  document_sections: DocumentSectionInfo[]
 }
 
 export interface SimilarElement {

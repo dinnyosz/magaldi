@@ -36,4 +36,9 @@ export const languageIcons: Record<string, string> = {
   typescript: 'bi-filetype-tsx',
   php: 'bi-filetype-php',
   rust: 'bi-filetype-rs',
+  markdown: 'bi-filetype-md',
+  yaml: 'bi-filetype-yml',
+  toml: 'bi-file-earmark-text',
+  dockerfile: 'bi-filetype-doc',
+  text: 'bi-file-text',
 }

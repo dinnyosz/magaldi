@@ -570,6 +570,15 @@ class SectionMarkerInfo(BaseModel):
     style: str
 
 
+class DocumentSectionInfo(BaseModel):
+    """A document section heading (for markdown/doc files)."""
+
+    title: str
+    level: int
+    line_start: int
+    line_end: int
+
+
 class CommentInfo(BaseModel):
     """A comment associated with a code element."""
 
@@ -694,6 +703,8 @@ class ElementDetailResponse(BaseModel):
     concurrency: ConcurrencyInfo | None = None
     # Aggregated metrics (for files/classes)
     metrics_summary: MetricsSummaryInfo | None = None
+    # Document structure (for markdown/doc file elements)
+    document_sections: list[DocumentSectionInfo] = Field(default_factory=list)
 
 
 # =============================================================================
@@ -1082,8 +1093,8 @@ class CallChainNode(BaseModel):
     file_path: str | None = None
     line: int | None = None
     summary: str | None = None
-    callers: list["CallChainNode"] = Field(default_factory=list)
-    callees: list["CallChainNode"] = Field(default_factory=list)
+    callers: list[CallChainNode] = Field(default_factory=list)
+    callees: list[CallChainNode] = Field(default_factory=list)
     cycle: bool = False
     unresolved: bool = False
     missing: bool = False

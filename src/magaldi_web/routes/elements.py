@@ -17,6 +17,7 @@ from magaldi_web.models import (
     ConnectedFeatureInfo,
     DecoratorDetailInfo,
     DocstringQualityInfo,
+    DocumentSectionInfo,
     ElementContext,
     ElementDetailResponse,
     ElementFeatureInfo,
@@ -43,7 +44,7 @@ from magaldi_web.models import (
     TodoInfo,
     TypeAnnotationInfo,
 )
-from shared.db.elasticsearch import ElasticsearchRepository, INDEX_NAME
+from shared.db.elasticsearch import INDEX_NAME, ElasticsearchRepository
 
 router = APIRouter()
 
@@ -692,6 +693,19 @@ async def get_element_detail(
             )
         )
 
+    # Document sections (for markdown/doc files)
+    document_sections = []
+    raw_doc_sections = source.get("document_sections", [])
+    for ds in raw_doc_sections:
+        document_sections.append(
+            DocumentSectionInfo(
+                title=ds.get("title", ""),
+                level=ds.get("level", 1),
+                line_start=ds.get("line_start", 0),
+                line_end=ds.get("line_end", 0),
+            )
+        )
+
     # Associated comments
     associated_comments = []
     raw_comments = source.get("associated_comments", [])
@@ -825,6 +839,7 @@ async def get_element_detail(
         env_vars=env_vars,
         concurrency=concurrency,
         metrics_summary=metrics_summary,
+        document_sections=document_sections,
     )
 
 
