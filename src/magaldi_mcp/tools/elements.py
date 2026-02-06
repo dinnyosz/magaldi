@@ -246,6 +246,10 @@ def get_element(
     if doc.get("metrics_summary"):
         result["metrics_summary"] = doc["metrics_summary"]
 
+    # Document structure (for markdown/doc file elements)
+    if doc.get("document_sections"):
+        result["document_sections"] = doc["document_sections"]
+
     if include_code:
         result["code"] = doc.get("raw_code", "")
 

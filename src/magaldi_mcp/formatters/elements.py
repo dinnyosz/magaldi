@@ -30,6 +30,11 @@ class ElementDetailsFormatter(ResultFormatter):
             lines.append(f"  Signature: {result['signature']}")
         if result.get('summary'):
             lines.append(f"  Summary: {result['summary']}")
+        if result.get('document_sections'):
+            lines.append("  Sections:")
+            for s in result['document_sections']:
+                indent = "  " * s.get("level", 1)
+                lines.append(f"    {indent}{s.get('title')} (L{s.get('line_start')}-{s.get('line_end')})")
         if result.get('code'):
             lines.append(f"  Code:\n{result['code']}")
         return "\n".join(lines)
