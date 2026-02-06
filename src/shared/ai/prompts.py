@@ -298,7 +298,7 @@ Start with what it imports - never start with "This import...", "The import...",
 USER_PROMPTS = {
     "file": """Language: {language}
 File: {file_path}
-{imports_section}
+{imports_section}{document_sections_section}
 
 Code:
 {code}""",
@@ -413,7 +413,7 @@ Answer these questions:
 3. ARCHITECTURE: What design patterns or abstractions does it use? (e.g., factory, repository, decorator, event-driven)
 4. DISCOVERY: When should an agent look here? What questions or tasks lead to this file?
 5. DEPENDENCIES: What external modules or systems does this integrate with?
-{imports_section}
+{imports_section}{document_sections_section}
 
 Do NOT list individual classes/functions - those are documented separately.
 
@@ -772,6 +772,20 @@ def build_usage_examples(element: "CodeElement") -> str:
     return "\nUsage examples:\n" + "\n".join(f"- {u}" for u in examples)
 
 
+def build_document_sections_section(element: "CodeElement") -> str:
+    """Build document sections section for file prompt.
+
+    Shows heading structure for markdown/doc files so the LLM
+    understands the document organization.
+    """
+    if not element.document_sections:
+        return ""
+
+    headings = element.document_sections[:10]  # Limit to 10
+    lines = [f"{'  ' * (h['level'] - 1)}- {h['title']}" for h in headings]
+    return "\nDocument structure:\n" + "\n".join(lines)
+
+
 # =============================================================================
 # CODE TRUNCATION
 # =============================================================================
@@ -872,6 +886,7 @@ def build_prompt(
 
     # Build enhanced context sections based on element type
     imports_section = build_imports_section(element) if element_type == "file" else ""
+    document_sections_section = build_document_sections_section(element) if element_type == "file" else ""
     attributes_section = build_attributes_section(element) if element_type == "class" else ""
     base_classes_section = build_base_classes_section(element) if element_type in ("class", "interface", "trait") else ""
     collaborators_section = build_collaborators_section(element) if element_type == "class" else ""
@@ -902,6 +917,7 @@ def build_prompt(
         sentence_range=sentence_range,
         # Enhanced context sections
         imports_section=imports_section,
+        document_sections_section=document_sections_section,
         attributes_section=attributes_section,
         base_classes_section=base_classes_section,
         collaborators_section=collaborators_section,
@@ -985,6 +1001,7 @@ def build_messages(
 
     # Build enhanced context sections
     imports_section = build_imports_section(element) if element_type == "file" else ""
+    document_sections_section = build_document_sections_section(element) if element_type == "file" else ""
     attributes_section = build_attributes_section(element) if element_type == "class" else ""
     base_classes_section = build_base_classes_section(element) if element_type in ("class", "interface", "trait") else ""
     collaborators_section = build_collaborators_section(element) if element_type == "class" else ""
@@ -1015,6 +1032,7 @@ def build_messages(
         code=code,
         usages_section=usages_section,
         imports_section=imports_section,
+        document_sections_section=document_sections_section,
         attributes_section=attributes_section,
         base_classes_section=base_classes_section,
         collaborators_section=collaborators_section,
