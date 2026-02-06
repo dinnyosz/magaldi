@@ -22,6 +22,7 @@ from magaldi_core.discovery import (
     SUPPORTED_EXTENSIONS,
     DiscoveryResult,
     RepoConfig,
+    _detect_file_language,
     _is_excluded_dir,
     _is_excluded_file,
 )
@@ -185,13 +186,12 @@ def enumerate_files(
             if file_path.is_symlink():
                 continue
 
-            # Check extension
-            ext = file_path.suffix.lower()
-            if ext not in SUPPORTED_EXTENSIONS:
+            # Check extension or filename
+            language = _detect_file_language(file_path)
+            if language is None:
                 continue
 
             relative_path = file_path.relative_to(repo_path)
-            language = SUPPORTED_EXTENSIONS[ext]
 
             files.append(
                 FileInfo(

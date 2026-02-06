@@ -13,11 +13,15 @@ from __future__ import annotations
 
 from typing import Any
 
+import tree_sitter_dockerfile as ts_dockerfile
 import tree_sitter_javascript as ts_javascript
+import tree_sitter_markdown as ts_markdown
 import tree_sitter_php as ts_php
 import tree_sitter_python as ts_python
 import tree_sitter_rust as ts_rust
+import tree_sitter_toml as ts_toml
 import tree_sitter_typescript as ts_typescript
+import tree_sitter_yaml as ts_yaml
 from tree_sitter import Language, Parser, Tree
 
 from magaldi_core.analysis.api_detection import (
@@ -135,6 +139,10 @@ class TreeSitterManager:
         "tsx": (ts_typescript, "language_tsx"),
         "php": (ts_php, "language_php"),
         "rust": (ts_rust, "language"),
+        "markdown": (ts_markdown, "language"),
+        "yaml": (ts_yaml, "language"),
+        "toml": (ts_toml, "language"),
+        "dockerfile": (ts_dockerfile, "language"),
     }
 
     def __init__(self) -> None:
@@ -197,6 +205,18 @@ class TreeSitterManager:
             extractor = PHPExtractor()
         elif language == "rust":
             extractor = RustExtractor()
+        elif language == "markdown":
+            from magaldi_core.extractors.markdown import MarkdownExtractor
+            extractor = MarkdownExtractor()
+        elif language == "yaml":
+            from magaldi_core.extractors.yaml_lang import YamlExtractor
+            extractor = YamlExtractor()
+        elif language == "toml":
+            from magaldi_core.extractors.toml_lang import TomlExtractor
+            extractor = TomlExtractor()
+        elif language == "dockerfile":
+            from magaldi_core.extractors.dockerfile import DockerfileExtractor
+            extractor = DockerfileExtractor()
 
         if extractor:
             self._extractors[language] = extractor

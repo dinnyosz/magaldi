@@ -38,6 +38,17 @@ SUPPORTED_EXTENSIONS: dict[str, str] = {
     ".tsx": "tsx",
     ".php": "php",
     ".rs": "rust",
+    ".md": "markdown",
+    ".yaml": "yaml",
+    ".yml": "yaml",
+    ".toml": "toml",
+    ".txt": "text",
+    ".nfo": "text",
+}
+
+# Filenames (without extension) that map to a language
+SUPPORTED_FILENAMES: dict[str, str] = {
+    "Dockerfile": "dockerfile",
 }
 
 DEFAULT_EXCLUDE_DIRECTORIES: list[str] = [
@@ -281,6 +292,25 @@ def resolve_username(cli_user: str | None, config: RepoConfig) -> str:
 # =============================================================================
 
 
+def _detect_file_language(file_path: Path) -> str | None:
+    """Detect language from file extension or filename.
+
+    Checks SUPPORTED_EXTENSIONS first, then SUPPORTED_FILENAMES for
+    extensionless files like Dockerfile.
+    """
+    ext = file_path.suffix.lower()
+    if ext in SUPPORTED_EXTENSIONS:
+        return SUPPORTED_EXTENSIONS[ext]
+
+    # Check filename match (e.g., Dockerfile, Dockerfile.prod)
+    name = file_path.name
+    for pattern, lang in SUPPORTED_FILENAMES.items():
+        if name == pattern or name.startswith(f"{pattern}."):
+            return lang
+
+    return None
+
+
 def enumerate_languages(
     repo_path: Path,
     config: RepoConfig,
@@ -297,12 +327,9 @@ def enumerate_languages(
     stats: dict[str, LanguageStats] = {}
 
     for file_path in _walk_files(repo_path, config):
-        ext = file_path.suffix.lower()
-
-        if ext not in SUPPORTED_EXTENSIONS:
+        language = _detect_file_language(file_path)
+        if language is None:
             continue
-
-        language = SUPPORTED_EXTENSIONS[ext]
         line_count = _count_lines(file_path)
 
         if language not in stats:
