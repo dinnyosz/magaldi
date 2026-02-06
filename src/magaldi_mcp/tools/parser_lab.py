@@ -44,14 +44,27 @@ EXTENSION_TO_LANGUAGE = {
     ".jsx": "javascript",
     ".php": "php",
     ".rs": "rust",
+    ".md": "markdown",
+    ".yaml": "yaml",
+    ".yml": "yaml",
+    ".toml": "toml",
+    ".txt": "text",
+    ".nfo": "text",
 }
 
 
 def _detect_language(file_path: str | None, code: str | None) -> str | None:
     """Detect language from file path or code content."""
     if file_path:
-        ext = Path(file_path).suffix.lower()
-        return EXTENSION_TO_LANGUAGE.get(ext)
+        path = Path(file_path)
+        ext = path.suffix.lower()
+        lang = EXTENSION_TO_LANGUAGE.get(ext)
+        if lang:
+            return lang
+        # Dockerfile has no extension — match by filename
+        if path.name == "Dockerfile" or path.name.startswith("Dockerfile."):
+            return "dockerfile"
+        return None
 
     if code:
         # Simple heuristics for language detection from code
@@ -63,6 +76,14 @@ def _detect_language(file_path: str | None, code: str | None) -> str | None:
             return "rust"
         if "<?php" in code or "$this->" in code:
             return "php"
+        if code.lstrip().startswith("---") or re.match(r"^\w+:\s", code):
+            return "yaml"
+        if code.lstrip().startswith("# ") or code.lstrip().startswith("## "):
+            return "markdown"
+        if re.match(r"^\[[\w.]+\]", code.lstrip()):
+            return "toml"
+        if code.lstrip().upper().startswith("FROM "):
+            return "dockerfile"
 
     return None
 
@@ -172,6 +193,30 @@ def _find_uncaptured_nodes(
             "call_expression",
             "use_declaration",
         },
+        "markdown": {
+            "atx_heading",
+            "setext_heading",
+        },
+        "yaml": {
+            "block_mapping_pair",
+        },
+        "toml": {
+            "table",
+            "pair",
+        },
+        "dockerfile": {
+            "from_instruction",
+            "run_instruction",
+            "env_instruction",
+            "expose_instruction",
+            "copy_instruction",
+            "add_instruction",
+            "entrypoint_instruction",
+            "cmd_instruction",
+            "arg_instruction",
+            "workdir_instruction",
+            "label_instruction",
+        },
     }
 
     target_types = interesting_types.get(language, set())
@@ -263,6 +308,16 @@ def parser_lab_analyze(
         if not language:
             return {"error": "Could not detect language. Please specify explicitly."}
 
+    # Handle plain text (no tree-sitter grammar)
+    if language == "text":
+        return {
+            "language": "text",
+            "source_lines": len(code.split("\n")),
+            "elements": [],
+            "element_count": 0,
+            "note": "Plain text files have no tree-sitter grammar. Only a file-level element is created during parsing.",
+        }
+
     # Get manager and parse
     manager = get_manager()
 
@@ -276,8 +331,12 @@ def parser_lab_analyze(
     extractor = manager.get_extractor(language)
     lines = code.split("\n")
     elements: list[ExtractedElement] = []
+    document_sections: list[dict] = []
     if extractor:
         elements = extractor.extract_elements(tree, lines)
+        # Markdown stores sections as metadata, not elements
+        if hasattr(extractor, "extract_sections"):
+            document_sections = extractor.extract_sections(tree, lines)
 
     # Build AST summary
     ast_summary = ASTSummary()
@@ -293,17 +352,21 @@ def parser_lab_analyze(
         query_results["error"] = str(e)
 
     # Find gaps (nodes not captured by extractor)
+    # Skip gap analysis for markdown — headings are captured via document_sections
     captured_ranges: set[tuple[int, int]] = set()
     for elem in elements:
         if elem.node:
             captured_ranges.add((elem.node.start_byte, elem.node.end_byte))
 
-    gaps = _find_uncaptured_nodes(tree.root_node, captured_ranges, language)
+    gaps = _find_uncaptured_nodes(tree.root_node, captured_ranges, language) if not document_sections else []
 
     # Extract framework-specific patterns
     framework_patterns: dict[str, Any] = {}
     if language == "php":
-        from magaldi_core.extractors.patterns.php.slim import extract_slim_routes, extract_slim_route_groups
+        from magaldi_core.extractors.patterns.php.slim import (
+            extract_slim_route_groups,
+            extract_slim_routes,
+        )
         slim_routes = extract_slim_routes(tree, lines)
         slim_groups = extract_slim_route_groups(tree, lines)
         if slim_routes or slim_groups:
@@ -368,6 +431,10 @@ def parser_lab_analyze(
     # Add framework patterns if any were detected
     if framework_patterns:
         result["framework_patterns"] = framework_patterns
+
+    # Add document sections for markdown
+    if document_sections:
+        result["document_sections"] = document_sections
 
     if debug:
         # Include AST tree representation
@@ -500,6 +567,11 @@ def _get_extension(language: str) -> str:
         "tsx": "tsx",
         "php": "php",
         "rust": "rs",
+        "markdown": "md",
+        "yaml": "yaml",
+        "toml": "toml",
+        "dockerfile": "dockerfile",
+        "text": "txt",
     }.get(language, "txt")
 
 
