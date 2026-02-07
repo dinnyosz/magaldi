@@ -1,28 +1,27 @@
 """Tests for the embedding module (Phase 6)."""
 
 import math
-from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from magaldi_core.code_parser import CodeElement
+from magaldi_core.parsers.base import Call
 from shared.ai.embedding import (
+    CodeEmbeddingClient,
     EmbeddingConfig,
     EmbeddingResult,
     InMemoryEmbeddingJobRepository,
     InMemoryEmbeddingStore,
-    CodeEmbeddingClient,
+    build_code_embedding_text,
     build_embedding_text,
     build_summary_embedding_text,
-    build_code_embedding_text,
     estimate_tokens,
     normalize_vector,
     process_embedding_job,
     validate_context_length,
     validate_vector,
 )
-
 
 # =============================================================================
 # FIXTURES
@@ -330,6 +329,44 @@ class TestBuildSummaryEmbeddingText:
         text = build_summary_embedding_text(method_element, embedding_store)
 
         assert "Get user by ID" in text
+
+    def test_includes_outbound_calls(
+        self, embedding_store: InMemoryEmbeddingStore
+    ):
+        element = CodeElement(
+            element_id="scope:repo:main:src/app.py:function:process:50",
+            scope="scope",
+            repository="repo",
+            username="main",
+            relative_path="src/app.py",
+            element_type="function",
+            name="process",
+            language="python",
+            line_start=50,
+            line_end=70,
+            level=2,
+            calls=[
+                Call(name="validate", receiver="self", line=55),
+                Call(name="save", receiver="db", line=60),
+                Call(name="log", receiver=None, line=65),
+                # Duplicate should be deduplicated
+                Call(name="validate", receiver="self", line=68),
+            ],
+        )
+        embedding_store.store_element(element)
+
+        text = build_summary_embedding_text(element, embedding_store)
+
+        assert "Calls: self.validate, db.save, log" in text
+
+    def test_no_calls_line_when_empty(
+        self, method_element: CodeElement, embedding_store: InMemoryEmbeddingStore
+    ):
+        embedding_store.store_element(method_element)
+
+        text = build_summary_embedding_text(method_element, embedding_store)
+
+        assert "Calls:" not in text
 
 
 class TestBuildCodeEmbeddingText:
