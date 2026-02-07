@@ -18,6 +18,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import gc
 import logging
 import random
 import statistics
@@ -127,6 +128,18 @@ def _connect() -> Any:
 def _verify_embedding_model() -> Any:
     """Create embedding client and verify model is available."""
     from shared.ai.embedding import CodeEmbeddingClient
+
+    # Disable litellm's internal caching to reduce memory usage.
+    # Without this, litellm caches all response objects (including
+    # full embedding vectors), causing memory to balloon to 30+ GB
+    # across ~2000 embedding calls.
+    try:
+        import litellm
+
+        litellm.cache = None
+        litellm.suppress_debug_info = True
+    except ImportError:
+        pass
 
     client = CodeEmbeddingClient(
         url="http://localhost:11434",
@@ -1060,9 +1073,12 @@ def run_benchmark(
         console.print(f"    Cached siblings for {len(sibling_names_cache)} elements")
 
     # Phase 5 + 6: Build texts, embed, evaluate per variant
+    # Use a global text→vector cache to avoid re-embedding identical texts
+    # across variants (e.g. elements with no calls/params produce same text)
     console.print("\n[bold]Phase 5+6:[/] Building passport texts + embedding + evaluating...")
     results: list[VariantResult] = []
     neg_id_list = list(neg_ids)
+    text_vector_cache: dict[str, list[float]] = {}
 
     for variant in variants:
         console.print(f"\n  [bold]{variant}[/]...")
@@ -1079,20 +1095,37 @@ def run_benchmark(
                 sibling_names_cache,
             )
 
-        # Embed all
-        ordered_ids = list(texts_by_id.keys())
-        ordered_texts = [texts_by_id[eid] for eid in ordered_ids]
+        # Split into cached (already embedded) and new (need embedding)
+        new_texts: list[str] = []
+        new_ids: list[str] = []
+        cached_count = 0
+        for eid in texts_by_id:
+            text = texts_by_id[eid]
+            if text in text_vector_cache:
+                cached_count += 1
+            else:
+                new_texts.append(text)
+                new_ids.append(eid)
 
-        console.print(f"    Embedding {len(ordered_texts)} texts...")
+        # Embed only new texts
         t0 = time.monotonic()
-        vectors = _embed_all(embed_client, ordered_texts, batch_size)
+        if new_texts:
+            console.print(
+                f"    Embedding {len(new_texts)} texts "
+                f"({cached_count} cached from prior variants)..."
+            )
+            new_vectors = _embed_all(embed_client, new_texts, batch_size)
+            for text, vec in zip(new_texts, new_vectors):
+                text_vector_cache[text] = vec
+        else:
+            console.print(f"    All {cached_count} texts cached from prior variants")
         embed_time = time.monotonic() - t0
-        console.print(f"    Embedded in {embed_time:.1f}s")
+        console.print(f"    Done in {embed_time:.1f}s")
 
-        # Map embeddings
+        # Map embeddings from cache
         embeddings: dict[str, list[float]] = {}
-        for eid, vec in zip(ordered_ids, vectors):
-            embeddings[eid] = vec
+        for eid, text in texts_by_id.items():
+            embeddings[eid] = text_vector_cache[text]
 
         # Evaluate
         result = _evaluate_variant(variant, pairs, embeddings, neg_id_list)
@@ -1102,6 +1135,10 @@ def run_benchmark(
             f"    MRR={result.mrr:.4f} | Hit@1={result.hit_at_1:.3f} | "
             f"Sep={result.separation:.4f}"
         )
+
+        # Free per-variant data to reduce memory pressure
+        del texts_by_id, embeddings
+        gc.collect()
 
     # Phase 7: Report
     console.print("\n[bold]Phase 7:[/] Results")
