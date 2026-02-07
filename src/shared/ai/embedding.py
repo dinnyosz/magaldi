@@ -509,6 +509,25 @@ def validate_vector(vector: list[float], expected_dims: int) -> bool:
 # =============================================================================
 
 
+def _format_calls_text(calls: list[Any]) -> str | None:
+    """Format calls into a deduplicated comma-separated string.
+
+    Args:
+        calls: List of Call objects with .name and .receiver attributes.
+
+    Returns:
+        Formatted string like "Flask, app.run, setup" or None if no calls.
+    """
+    seen: set[str] = set()
+    call_names: list[str] = []
+    for call in calls:
+        key = f"{call.receiver}.{call.name}" if call.receiver else call.name
+        if key not in seen:
+            seen.add(key)
+            call_names.append(key)
+    return ", ".join(call_names) if call_names else None
+
+
 def build_summary_embedding_text(
     element: CodeElement,
     embedding_store: EmbeddingStore,
@@ -536,6 +555,12 @@ def build_summary_embedding_text(
         parts.append(f"Language: {element.language}")
         summary = embedding_store.get_summary(element.element_id)
         parts.append(f"Summary: {summary or 'No summary available'}")
+
+        # Top-level calls (e.g., app = Flask(__name__), setup(), register_routes())
+        if element.calls:
+            calls_text = _format_calls_text(element.calls)
+            if calls_text:
+                parts.append(f"Calls: {calls_text}")
 
     elif element.element_type == "class":
         # Include file context
@@ -579,15 +604,9 @@ def build_summary_embedding_text(
         # Outbound call names improve caller→callee embedding similarity
         # by +7.3% MRR (validated via passport embedding benchmark)
         if element.calls:
-            seen: set[str] = set()
-            call_names: list[str] = []
-            for call in element.calls:
-                key = f"{call.receiver}.{call.name}" if call.receiver else call.name
-                if key not in seen:
-                    seen.add(key)
-                    call_names.append(key)
-            if call_names:
-                parts.append(f"Calls: {', '.join(call_names)}")
+            calls_text = _format_calls_text(element.calls)
+            if calls_text:
+                parts.append(f"Calls: {calls_text}")
 
     elif element.element_type in ("variable", "constant"):
         # Variables and constants get hierarchical context
