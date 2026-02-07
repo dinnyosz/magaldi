@@ -9,9 +9,7 @@ This module handles extraction of function/method calls from within Python funct
 
 from __future__ import annotations
 
-from tree_sitter import Node
-
-from tree_sitter import Tree
+from tree_sitter import Node, Tree
 
 from magaldi_core.extractors.base import (
     get_child_by_field,
