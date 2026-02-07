@@ -22,6 +22,7 @@ from magaldi_core.tree_sitter_manager import (
     ExtractedElement,
     extract_javascript_base_class,
     extract_javascript_calls,
+    extract_top_level_javascript_calls,
     extract_javascript_class_fields,
     extract_javascript_class_members,
     extract_javascript_elements,
@@ -72,6 +73,13 @@ class JavaScriptParser(TreeSitterParser):
                 line=imp.line,
             )
             for imp in extracted_imports
+        ]
+
+        # Extract top-level calls and populate on file element
+        top_level_calls = extract_top_level_javascript_calls(tree)
+        file_element.calls = [
+            Call(name=c.name, receiver=c.receiver, line=c.line)
+            for c in top_level_calls
         ]
 
         # Convert ExtractedElements to CodeElements

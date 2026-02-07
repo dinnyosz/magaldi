@@ -23,6 +23,7 @@ from magaldi_core.parsers.base import (
 from magaldi_core.tree_sitter_manager import (
     ExtractedElement,
     extract_rust_calls,
+    extract_top_level_rust_calls,
     extract_rust_elements,
     extract_rust_impl_members,
     extract_rust_impl_traits,
@@ -69,6 +70,13 @@ class RustParser(TreeSitterParser):
         file_element.imports = [
             Import(name=imp.name, module=imp.module, alias=imp.alias, line=imp.line)
             for imp in extracted_imports
+        ]
+
+        # Extract top-level calls and populate on file element
+        top_level_calls = extract_top_level_rust_calls(tree)
+        file_element.calls = [
+            Call(name=c.name, receiver=c.receiver, line=c.line)
+            for c in top_level_calls
         ]
 
         # Convert ExtractedElements to CodeElements

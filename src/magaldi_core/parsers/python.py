@@ -38,6 +38,7 @@ from magaldi_core.tree_sitter_manager import (
     extract_comments,
     extract_python_base_classes,
     extract_python_calls,
+    extract_top_level_python_calls,
     extract_python_class_attributes,
     extract_python_class_members,
     extract_python_elements,
@@ -92,6 +93,13 @@ class PythonParser(TreeSitterParser):
                 line=imp.line,
             )
             for imp in extracted_imports
+        ]
+
+        # Extract top-level calls and populate on file element
+        top_level_calls = extract_top_level_python_calls(tree)
+        file_element.calls = [
+            Call(name=c.name, receiver=c.receiver, line=c.line)
+            for c in top_level_calls
         ]
 
         # Convert ExtractedElements to CodeElements
