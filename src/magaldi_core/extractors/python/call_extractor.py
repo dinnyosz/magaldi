@@ -11,12 +11,22 @@ from __future__ import annotations
 
 from tree_sitter import Node
 
+from tree_sitter import Tree
+
 from magaldi_core.extractors.base import (
     get_child_by_field,
     get_node_text,
+    walk_top_level,
     walk_tree,
 )
 from magaldi_core.extractors.types import ExtractedCall
+
+# Node types that define function/class scopes in Python
+_PYTHON_SCOPE_TYPES = frozenset({
+    "function_definition",
+    "class_definition",
+    "decorated_definition",
+})
 
 
 def extract_python_calls(function_node: Node) -> list[ExtractedCall]:
@@ -101,6 +111,34 @@ def _extract_python_call(node: Node) -> list[ExtractedCall]:
                     receiver = get_node_text(obj_node)
 
             calls.append(ExtractedCall(name=method_name, receiver=receiver, line=line))
+
+    return calls
+
+
+def extract_top_level_python_calls(tree: Tree) -> list[ExtractedCall]:
+    """Extract function/method calls from the top level of a Python module.
+
+    Walks file-scope statements (skipping function/class definition subtrees)
+    and collects calls using the same extraction logic as function-body calls.
+
+    Args:
+        tree: A parsed tree-sitter Tree for a Python file.
+
+    Returns:
+        List of extracted calls found at module scope.
+    """
+    calls: list[ExtractedCall] = []
+    seen: set[tuple[str, str | None, int]] = set()
+
+    for node in walk_top_level(tree.root_node, _PYTHON_SCOPE_TYPES):
+        if node.type == "call":
+            extracted = _extract_python_call(node)
+            if extracted:
+                for call in extracted:
+                    key = (call.name, call.receiver, call.line)
+                    if key not in seen:
+                        seen.add(key)
+                        calls.append(call)
 
     return calls
 

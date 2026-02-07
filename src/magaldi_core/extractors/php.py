@@ -15,6 +15,7 @@ from magaldi_core.extractors.base import (
     BaseExtractor,
     get_child_by_field,
     get_node_text,
+    walk_top_level,
     walk_tree,
 )
 from magaldi_core.extractors.types import (
@@ -957,6 +958,7 @@ __all__ = [
     "extract_php_enum_members",
     "extract_php_imports",
     "extract_php_calls",
+    "extract_top_level_php_calls",
     "extract_php_class_properties",
     "extract_php_base_class",
     "extract_php_thrown_exceptions",
@@ -1029,6 +1031,89 @@ def extract_php_calls(function_node: Node) -> list[ExtractedCall]:
                     method_name = get_node_text(child)
 
             # Try getting method name differently
+            if not method_name:
+                for i, child in enumerate(node.children):
+                    if child.type == "::" and i + 1 < len(node.children):
+                        next_child = node.children[i + 1]
+                        if next_child.type == "name":
+                            method_name = get_node_text(next_child)
+
+            if method_name:
+                key = (method_name, receiver, line)
+                if key not in seen:
+                    seen.add(key)
+                    calls.append(ExtractedCall(name=method_name, receiver=receiver, line=line))
+
+    return calls
+
+
+# Node types that define function/class scopes in PHP
+_PHP_SCOPE_TYPES = frozenset({
+    "function_definition",
+    "class_declaration",
+    "interface_declaration",
+    "trait_declaration",
+    "enum_declaration",
+    "method_declaration",
+})
+
+
+def extract_top_level_php_calls(tree: Tree) -> list[ExtractedCall]:
+    """Extract function/method calls from the top level of a PHP file.
+
+    Walks file-scope statements (skipping function/class definition subtrees)
+    and collects calls using the same extraction logic as function-body calls.
+
+    Args:
+        tree: A parsed tree-sitter Tree for a PHP file.
+
+    Returns:
+        List of extracted calls found at file scope.
+    """
+    calls: list[ExtractedCall] = []
+    seen: set[tuple[str, str | None, int]] = set()
+
+    for node in walk_top_level(tree.root_node, _PHP_SCOPE_TYPES):
+        if node.type == "function_call_expression":
+            func_node = node.children[0] if node.children else None
+            if func_node and func_node.type == "name":
+                name = get_node_text(func_node)
+                line = node.start_point[0] + 1
+                key = (name, None, line)
+                if key not in seen:
+                    seen.add(key)
+                    calls.append(ExtractedCall(name=name, receiver=None, line=line))
+
+        elif node.type == "member_call_expression":
+            line = node.start_point[0] + 1
+            receiver = None
+            method_name = None
+
+            for child in node.children:
+                if child.type == "variable_name":
+                    for vn_child in child.children:
+                        if vn_child.type == "name":
+                            receiver = get_node_text(vn_child)
+                elif child.type == "name":
+                    method_name = get_node_text(child)
+
+            if method_name:
+                key = (method_name, receiver, line)
+                if key not in seen:
+                    seen.add(key)
+                    calls.append(ExtractedCall(name=method_name, receiver=receiver, line=line))
+
+        elif node.type == "scoped_call_expression":
+            line = node.start_point[0] + 1
+            receiver = None
+            method_name = None
+
+            for child in node.children:
+                if child.type in ("name", "qualified_name", "relative_scope"):
+                    receiver = get_node_text(child)
+                elif child.type == "name" and receiver:
+                    method_name = get_node_text(child)
+
             if not method_name:
                 for i, child in enumerate(node.children):
                     if child.type == "::" and i + 1 < len(node.children):

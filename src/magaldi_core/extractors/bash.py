@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from tree_sitter import Node, Tree
 
-from magaldi_core.extractors.base import get_children_by_type, get_node_text, walk_tree
+from magaldi_core.extractors.base import get_children_by_type, get_node_text, walk_top_level, walk_tree
 from magaldi_core.extractors.types import ExtractedCall, ExtractedElement, ExtractedImport
 
 # Shell builtins that should not be recorded as calls
@@ -283,3 +283,62 @@ def _is_inside_nested_function(node: Node, body: Node) -> bool:
             return True
         parent = parent.parent
     return False
+
+
+# Node types that define function scopes in Bash
+_BASH_SCOPE_TYPES = frozenset({
+    "function_definition",
+})
+
+
+def extract_top_level_bash_calls(tree: Tree) -> list[ExtractedCall]:
+    """Extract command calls from the top level of a Bash script.
+
+    Walks file-scope statements (skipping function definition subtrees)
+    and collects command calls, excluding shell builtins.
+
+    Args:
+        tree: A parsed tree-sitter Tree for a Bash file.
+
+    Returns:
+        List of extracted calls found at file scope.
+    """
+    calls: list[ExtractedCall] = []
+    seen: set[tuple[str, int]] = set()
+
+    for node in walk_top_level(tree.root_node, _BASH_SCOPE_TYPES):
+        if node.type != "command":
+            continue
+
+        cmd_name_node = None
+        for child in node.children:
+            if child.type == "command_name":
+                cmd_name_node = child
+                break
+
+        if not cmd_name_node:
+            continue
+
+        word_nodes = get_children_by_type(cmd_name_node, "word")
+        if not word_nodes:
+            continue
+
+        cmd_name = get_node_text(word_nodes[0])
+
+        # Skip builtins and source/. (imports)
+        if cmd_name in _BASH_BUILTINS or cmd_name in ("source", "."):
+            continue
+
+        line = node.start_point[0] + 1
+        key = (cmd_name, line)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        calls.append(ExtractedCall(
+            name=cmd_name,
+            receiver=None,
+            line=line,
+        ))
+
+    return calls

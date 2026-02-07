@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from magaldi_core.extractors.javascript.call_extractor import (
     extract_javascript_calls,
+    extract_top_level_javascript_calls,
 )
 from magaldi_core.extractors.javascript.context_extractor import (
     extract_javascript_base_class,
@@ -47,6 +48,7 @@ __all__ = [
     "extract_javascript_references",
     # Call extraction
     "extract_javascript_calls",
+    "extract_top_level_javascript_calls",
     # Context extraction
     "extract_javascript_class_fields",
     "extract_javascript_base_class",

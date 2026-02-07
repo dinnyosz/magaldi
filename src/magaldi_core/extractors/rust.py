@@ -13,6 +13,7 @@ from magaldi_core.extractors.base import (
     BaseExtractor,
     get_child_by_field,
     get_node_text,
+    walk_top_level,
     walk_tree,
 )
 from magaldi_core.extractors.types import (
@@ -934,6 +935,73 @@ def extract_rust_calls(function_node: Node) -> list[ExtractedCall]:
 
                 elif func_node.type == "scoped_identifier":
                     # Static/associated call: Type::method()
+                    text = get_node_text(func_node)
+                    if "::" in text:
+                        parts = text.split("::")
+                        receiver = parts[0] if len(parts) > 1 else None
+                        method = parts[-1]
+                        key = (method, receiver, line)
+                        if key not in seen:
+                            seen.add(key)
+                            calls.append(ExtractedCall(name=method, receiver=receiver, line=line))
+
+    return calls
+
+
+# Node types that define function/class scopes in Rust
+_RUST_SCOPE_TYPES = frozenset({
+    "function_item",
+    "impl_item",
+    "struct_item",
+    "enum_item",
+    "trait_item",
+})
+
+
+def extract_top_level_rust_calls(tree: Tree) -> list[ExtractedCall]:
+    """Extract function/method calls from the top level of a Rust module.
+
+    Walks file-scope statements (skipping function/impl/struct subtrees)
+    and collects calls using the same extraction logic as function-body calls.
+
+    Args:
+        tree: A parsed tree-sitter Tree for a Rust file.
+
+    Returns:
+        List of extracted calls found at module scope.
+    """
+    calls: list[ExtractedCall] = []
+    seen: set[tuple[str, str | None, int]] = set()
+
+    for node in walk_top_level(tree.root_node, _RUST_SCOPE_TYPES):
+        if node.type == "call_expression":
+            func_node = node.children[0] if node.children else None
+            line = node.start_point[0] + 1
+
+            if func_node:
+                if func_node.type == "identifier":
+                    name = get_node_text(func_node)
+                    key = (name, None, line)
+                    if key not in seen:
+                        seen.add(key)
+                        calls.append(ExtractedCall(name=name, receiver=None, line=line))
+
+                elif func_node.type == "field_expression":
+                    receiver = None
+                    method = None
+                    for fe_child in func_node.children:
+                        if fe_child.type == "identifier":
+                            receiver = get_node_text(fe_child)
+                        elif fe_child.type == "field_identifier":
+                            method = get_node_text(fe_child)
+
+                    if method:
+                        key = (method, receiver, line)
+                        if key not in seen:
+                            seen.add(key)
+                            calls.append(ExtractedCall(name=method, receiver=receiver, line=line))
+
+                elif func_node.type == "scoped_identifier":
                     text = get_node_text(func_node)
                     if "::" in text:
                         parts = text.split("::")

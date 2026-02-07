@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from magaldi_core.extractors.python.call_extractor import (
     extract_python_calls,
+    extract_top_level_python_calls,
 )
 from magaldi_core.extractors.python.context_extractor import (
     extract_python_base_classes,
@@ -47,6 +48,7 @@ __all__ = [
     "extract_python_references",
     # Call extraction
     "extract_python_calls",
+    "extract_top_level_python_calls",
     # Context extraction
     "extract_python_class_attributes",
     "extract_python_base_classes",

@@ -59,6 +59,7 @@ from magaldi_core.extractors.javascript import (
     extract_javascript_modified_properties,
     extract_javascript_references,
     extract_javascript_thrown_exceptions,
+    extract_top_level_javascript_calls,
 )
 from magaldi_core.extractors.php import (
     PHPExtractor,
@@ -70,6 +71,7 @@ from magaldi_core.extractors.php import (
     extract_php_imports,
     extract_php_modified_properties,
     extract_php_thrown_exceptions,
+    extract_top_level_php_calls,
 )
 from magaldi_core.extractors.python import (
     PythonExtractor,
@@ -82,6 +84,7 @@ from magaldi_core.extractors.python import (
     extract_python_modified_attributes,
     extract_python_raised_exceptions,
     extract_python_references,
+    extract_top_level_python_calls,
 )
 from magaldi_core.extractors.rust import (
     RustExtractor,
@@ -93,6 +96,7 @@ from magaldi_core.extractors.rust import (
     extract_rust_modified_fields,
     extract_rust_panics,
     extract_rust_struct_fields,
+    extract_top_level_rust_calls,
 )
 from magaldi_core.extractors.types import (
     CliCommand,
@@ -372,6 +376,7 @@ __all__ = [
     "extract_python_imports",
     "extract_python_references",
     "extract_python_calls",
+    "extract_top_level_python_calls",
     "extract_python_class_attributes",
     "extract_python_base_classes",
     "extract_python_raised_exceptions",
@@ -382,6 +387,7 @@ __all__ = [
     "extract_javascript_imports",
     "extract_javascript_references",
     "extract_javascript_calls",
+    "extract_top_level_javascript_calls",
     "extract_javascript_class_fields",
     "extract_javascript_base_class",
     "extract_javascript_thrown_exceptions",
@@ -391,6 +397,7 @@ __all__ = [
     "extract_php_class_members",
     "extract_php_imports",
     "extract_php_calls",
+    "extract_top_level_php_calls",
     "extract_php_class_properties",
     "extract_php_base_class",
     "extract_php_thrown_exceptions",
@@ -400,6 +407,7 @@ __all__ = [
     "extract_rust_impl_members",
     "extract_rust_imports",
     "extract_rust_calls",
+    "extract_top_level_rust_calls",
     "extract_rust_struct_fields",
     "extract_rust_impl_traits",
     "extract_rust_panics",

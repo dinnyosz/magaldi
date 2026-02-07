@@ -35,6 +35,26 @@ def walk_tree(node: Node) -> Iterator[Node]:
         yield from walk_tree(child)
 
 
+def walk_top_level(root: Node, skip_types: set[str]) -> Iterator[Node]:
+    """Walk nodes at file scope, skipping function/class definition subtrees.
+
+    This yields all descendant nodes from top-level statements while skipping
+    entire subtrees rooted at nodes whose type is in `skip_types`. Useful for
+    extracting calls that happen at module scope (e.g., ``app = Flask(__name__)``).
+
+    Args:
+        root: The root node of the tree (tree.root_node).
+        skip_types: Node types to skip entirely (e.g., function/class defs).
+
+    Yields:
+        Nodes from top-level statements (excluding skipped subtrees).
+    """
+    for child in root.children:
+        if child.type in skip_types:
+            continue
+        yield from walk_tree(child)
+
+
 def find_nodes(root: Node, node_type: str) -> Iterator[Node]:
     """Find all nodes of a specific type."""
 
