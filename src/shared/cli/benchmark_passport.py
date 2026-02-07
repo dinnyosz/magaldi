@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """Benchmark semantic passport embedding formats for call resolution.
 
-Compares 7 different "passport" text formats for code element embeddings,
-measuring how well each format's cosine similarity predicts actual
-caller→callee relationships (ground truth from statically resolved calls).
+Compares passport text formats for code element embeddings by measuring
+how well each format's cosine similarity predicts actual caller→callee
+relationships (ground truth from statically resolved calls).
+
+Every variant starts with the current production baseline (from
+build_summary_embedding_text) and adds structural metadata on top.
 
 Usage:
     magaldi-tools passport-benchmark
     magaldi-tools passport-benchmark --scope magaldi --repository magaldi
     magaldi-tools passport-benchmark --n-callers 100 --n-negatives 500
-    magaldi-tools passport-benchmark --variants full_passport,calls_fingerprint
+    magaldi-tools passport-benchmark --variants plus_calls,plus_full
 """
 
 from __future__ import annotations
@@ -39,13 +42,13 @@ console = Console()
 GROUND_TRUTH_CATEGORIES = {"resolved", "import_resolved", "type_resolvable", "unknown"}
 
 ALL_VARIANT_NAMES = [
-    "baseline_summary",
-    "name_only",
-    "signature_only",
-    "calls_fingerprint",
-    "full_passport",
-    "passport_with_imports",
-    "passport_with_siblings",
+    "baseline",
+    "plus_calls",
+    "plus_params",
+    "plus_calls_params",
+    "plus_full",
+    "plus_imports",
+    "plus_siblings",
 ]
 
 # ES index
@@ -415,87 +418,101 @@ def _format_calls(doc: dict) -> str:
 def build_passport_text(
     variant: str,
     doc: dict,
+    file_summaries_cache: dict[str, str],
+    class_summaries_cache: dict[str, str],
     file_imports_cache: dict[str, list[dict]],
     sibling_names_cache: dict[str, list[str]],
 ) -> str:
-    """Build passport text for a given variant and document."""
+    """Build passport text for a given variant and document.
+
+    Every variant starts with the baseline (replicating build_summary_embedding_text
+    for function/method) then adds structural metadata on top.
+    """
     name = doc.get("name", "?")
     sig = doc.get("signature", "")
-    return_type = doc.get("return_type", "")
-    params_str = _format_params(doc)
-    calls_str = _format_calls(doc)
-    decorators = doc.get("decorators", [])
-    patterns = doc.get("detected_patterns", [])
     summary = doc.get("summary", "")
     docstring = doc.get("docstring", "")
-    breadcrumbs = _build_breadcrumbs(doc)
+    rel_path = doc.get("relative_path", "")
+    parent_id = doc.get("parent_id", "")
     element_id = doc.get("element_id", "")
 
-    if variant == "name_only":
-        return name
+    # === Baseline: replicates build_summary_embedding_text for function/method ===
+    parts: list[str] = [f"File: {rel_path}"]
 
-    if variant == "signature_only":
-        parts = [name]
-        if sig:
-            parts.append(f"Signature: {sig}")
-        if return_type:
-            parts.append(f"Returns: {return_type}")
-        if params_str:
-            parts.append(f"Params: {params_str}")
+    file_summary = file_summaries_cache.get(rel_path, "")
+    if file_summary:
+        parts.append(f"File context: {file_summary}")
+
+    # Class context for methods (parent is a class)
+    if parent_id:
+        id_parts = parent_id.split(":")
+        if len(id_parts) >= 6 and id_parts[4] == "class":
+            class_summary = class_summaries_cache.get(parent_id, "")
+            if class_summary:
+                parts.append(f"Class context: {class_summary}")
+
+    parts.append(f"Function: {name}")
+
+    if summary:
+        parts.append(f"Summary: {summary}")
+    if sig:
+        parts.append(f"Signature: {sig}")
+    if docstring:
+        ds = docstring[:500]
+        if len(docstring) > 500:
+            ds += "..."
+        parts.append(f"Docstring: {ds}")
+
+    if variant == "baseline":
         return "\n".join(parts)
 
-    if variant == "baseline_summary":
-        # Replicate build_summary_embedding_text for function/method
-        parts = [f"File: {doc.get('relative_path', '')}"]
-        # We don't have file/class summaries in our doc pool, so skip context
-        parts.append(f"Function: {name}")
-        if summary:
-            parts.append(f"Summary: {summary}")
-        if sig:
-            parts.append(f"Signature: {sig}")
-        if docstring:
-            ds = docstring[:500]
-            if len(docstring) > 500:
-                ds += "..."
-            parts.append(f"Docstring: {ds}")
-        return "\n".join(parts)
+    # === Additions on top of baseline ===
+    params_str = _format_params(doc)
+    calls_str = _format_calls(doc)
+    return_type = doc.get("return_type", "")
+    decorators = doc.get("decorators", [])
+    patterns = doc.get("detected_patterns", [])
+    breadcrumbs = _build_breadcrumbs(doc)
 
-    if variant == "calls_fingerprint":
-        parts = [name]
-        if sig:
-            parts.append(f"Signature: {sig}")
+    if variant == "plus_calls":
         if calls_str:
             parts.append(f"Calls: {calls_str}")
         return "\n".join(parts)
 
-    # full_passport (base for variants 5, 6, 7)
-    parts = [name]
-    if breadcrumbs:
-        parts.append(f"Location: {breadcrumbs}")
-    if sig:
-        parts.append(f"Signature: {sig}")
+    if variant == "plus_params":
+        if params_str:
+            parts.append(f"Params: {params_str}")
+        if return_type:
+            parts.append(f"Returns: {return_type}")
+        return "\n".join(parts)
+
+    if variant == "plus_calls_params":
+        if calls_str:
+            parts.append(f"Calls: {calls_str}")
+        if params_str:
+            parts.append(f"Params: {params_str}")
+        if return_type:
+            parts.append(f"Returns: {return_type}")
+        return "\n".join(parts)
+
+    # plus_full base (also used by plus_imports and plus_siblings)
+    if calls_str:
+        parts.append(f"Calls: {calls_str}")
     if params_str:
         parts.append(f"Params: {params_str}")
     if return_type:
         parts.append(f"Returns: {return_type}")
-    if calls_str:
-        parts.append(f"Calls: {calls_str}")
+    if breadcrumbs:
+        parts.append(f"Location: {breadcrumbs}")
     if decorators:
         parts.append(f"Decorators: {', '.join(decorators)}")
     if patterns:
         parts.append(f"Patterns: {', '.join(patterns)}")
-    if summary:
-        # Use first sentence only for brevity
-        brief = summary.split(". ")[0]
-        if not brief.endswith("."):
-            brief += "."
-        parts.append(f"Summary: {brief}")
 
-    if variant == "full_passport":
+    if variant == "plus_full":
         return "\n".join(parts)
 
-    if variant == "passport_with_imports":
-        rel_path = doc.get("relative_path", "")
+    if variant == "plus_imports":
         imports = file_imports_cache.get(rel_path, [])
         if imports:
             modules = list({imp.get("module", "") for imp in imports if imp.get("module")})
@@ -503,18 +520,87 @@ def build_passport_text(
                 parts.append(f"Imports: {', '.join(sorted(modules))}")
         return "\n".join(parts)
 
-    if variant == "passport_with_siblings":
+    if variant == "plus_siblings":
         siblings = sibling_names_cache.get(element_id, [])
         if siblings:
             parts.append(f"Siblings: {', '.join(siblings)}")
         return "\n".join(parts)
 
-    return name  # fallback
+    return "\n".join(parts)  # fallback
 
 
 # ---------------------------------------------------------------------------
-# Context caches: file imports & sibling names
+# Context caches: parent summaries, file imports & sibling names
 # ---------------------------------------------------------------------------
+
+
+def _build_parent_summaries_cache(
+    client: Any,
+    docs: dict[str, dict],
+    scope: str,
+    repository: str,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Build caches for file and class summaries (needed for baseline).
+
+    Returns:
+        (file_summaries, class_summaries) where:
+        - file_summaries maps relative_path -> file summary text
+        - class_summaries maps class_element_id -> class summary text
+    """
+    # --- File summaries ---
+    file_summaries: dict[str, str] = {}
+    paths = {doc.get("relative_path", "") for doc in docs.values() if doc.get("relative_path")}
+
+    file_ids: list[str] = []
+    path_by_id: dict[str, str] = {}
+    for path in paths:
+        file_name = Path(path).name
+        file_id = f"{scope}:{repository}:main:{path}:file:{file_name}:1"
+        file_ids.append(file_id)
+        path_by_id[file_id] = path
+
+    if file_ids:
+        for i in range(0, len(file_ids), 500):
+            chunk = file_ids[i : i + 500]
+            response = client.mget(
+                index=INDEX_NAME,
+                ids=chunk,
+                _source=["summary"],
+            )
+            for doc in response.get("docs", []):
+                if doc.get("found"):
+                    eid = doc["_id"]
+                    summary = doc["_source"].get("summary", "")
+                    if eid in path_by_id and summary:
+                        file_summaries[path_by_id[eid]] = summary
+
+    # --- Class summaries ---
+    class_summaries: dict[str, str] = {}
+    class_ids: set[str] = set()
+    for doc in docs.values():
+        parent_id = doc.get("parent_id", "")
+        if parent_id:
+            id_parts = parent_id.split(":")
+            if len(id_parts) >= 6 and id_parts[4] == "class":
+                class_ids.add(parent_id)
+
+    if class_ids:
+        class_id_list = list(class_ids)
+        for i in range(0, len(class_id_list), 500):
+            chunk = class_id_list[i : i + 500]
+            response = client.mget(
+                index=INDEX_NAME,
+                ids=chunk,
+                _source=["summary"],
+            )
+            for doc in response.get("docs", []):
+                if doc.get("found"):
+                    eid = doc["_id"]
+                    summary = doc["_source"].get("summary", "")
+                    if summary:
+                        class_summaries[eid] = summary
+
+    return file_summaries, class_summaries
 
 
 def _build_file_imports_cache(
@@ -808,26 +894,29 @@ def _save_markdown(
         "1. Which variant has the highest MRR? That's the best passport format.",
         "2. Is Separation > 0.15? Below that, the format can't reliably distinguish"
         " true calls from noise.",
-        "3. Compare `baseline_summary` (current production format) against passport variants"
-        " - is there improvement?",
-        "4. Do `passport_with_imports` or `passport_with_siblings` improve over `full_passport`?"
+        "3. Do any `plus_*` variants beat `baseline`? If so, that metadata improves"
+        " embedding quality.",
+        "4. Do `plus_imports` or `plus_siblings` improve over `plus_full`?"
         " If not, the extra context adds noise.",
         "5. Check error analysis: are worst pairs cross-domain calls (expected hard)"
         " or same-module calls (unexpected failure)?",
         "",
         "## Variant Descriptions",
         "",
+        "All variants start with the **baseline** (current production format from"
+        " `build_summary_embedding_text`): file path + file context summary +"
+        " class context summary + function name + LLM summary + signature + docstring.",
+        "",
         "| Variant | Content |",
         "|---------|---------|",
-        "| `baseline_summary` | Current production format: file path + LLM summary"
-        " + signature + docstring |",
-        "| `name_only` | Just the function name (lower bound) |",
-        "| `signature_only` | Name + signature + return type + param types |",
-        "| `calls_fingerprint` | Name + signature + outbound call names |",
-        "| `full_passport` | Name + breadcrumbs + signature + params + returns"
-        " + calls + decorators + patterns + brief summary |",
-        "| `passport_with_imports` | full_passport + file-level import module names |",
-        "| `passport_with_siblings` | full_passport + sibling function names (same parent) |",
+        "| `baseline` | Current production format (no additions) |",
+        "| `plus_calls` | baseline + outbound call names |",
+        "| `plus_params` | baseline + typed parameter list + return type |",
+        "| `plus_calls_params` | baseline + calls + typed params + return type |",
+        "| `plus_full` | baseline + calls + params + returns + location breadcrumbs"
+        " + decorators + detected patterns |",
+        "| `plus_imports` | plus_full + file-level import module names |",
+        "| `plus_siblings` | plus_full + sibling function names (same parent) |",
         "",
         "## Results",
         "",
@@ -871,10 +960,11 @@ def _save_markdown(
         "## Next Steps",
         "",
         "Based on these results, consider:",
-        "- If a passport variant beats `baseline_summary`, implement it in"
+        "- If a `plus_*` variant beats `baseline`, add that metadata to"
         " `src/shared/ai/embedding.py:build_summary_embedding_text()`",
-        "- If `calls_fingerprint` has high separation but low MRR, the call names help"
-        " discrimination but hurt ranking (too specific)",
+        "- If `plus_calls` improves MRR, outbound call names help the embedding"
+        " model understand function relationships",
+        "- If `plus_params` helps, typed signatures provide useful structural signal",
         "- If adding imports/siblings doesn't help, the embedding model may not leverage"
         " that context effectively",
         "- Re-run with `--n-callers 200 --n-negatives 1000` for more statistically"
@@ -941,9 +1031,19 @@ def run_benchmark(
     docs = _fetch_documents(client, all_ids)
     console.print(f"  Fetched {len(docs)} documents")
 
+    # Build parent summaries cache (needed for baseline in all variants)
+    console.print("  Building parent summaries cache...")
+    file_summaries_cache, class_summaries_cache = _build_parent_summaries_cache(
+        client, docs, scope, repository
+    )
+    console.print(
+        f"    Cached {len(file_summaries_cache)} file summaries, "
+        f"{len(class_summaries_cache)} class summaries"
+    )
+
     # Check which variants need extra context
-    needs_imports = "passport_with_imports" in variants
-    needs_siblings = "passport_with_siblings" in variants
+    needs_imports = "plus_imports" in variants
+    needs_siblings = "plus_siblings" in variants
 
     # Build context caches
     file_imports_cache: dict[str, list[dict]] = {}
@@ -971,7 +1071,12 @@ def run_benchmark(
         texts_by_id: dict[str, str] = {}
         for eid, doc in docs.items():
             texts_by_id[eid] = build_passport_text(
-                variant, doc, file_imports_cache, sibling_names_cache
+                variant,
+                doc,
+                file_summaries_cache,
+                class_summaries_cache,
+                file_imports_cache,
+                sibling_names_cache,
             )
 
         # Embed all

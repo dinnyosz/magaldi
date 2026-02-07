@@ -66,6 +66,25 @@ def sample_doc_no_optional() -> dict:
 
 
 @pytest.fixture
+def file_summaries() -> dict[str, str]:
+    """File summaries cache."""
+    return {
+        "src/shared/ai/embedding.py": "Code embedding client and text builders.",
+        "src/utils.py": "Utility functions.",
+    }
+
+
+@pytest.fixture
+def class_summaries() -> dict[str, str]:
+    """Class summaries cache."""
+    return {
+        "magaldi:magaldi:main:src/shared/ai/embedding.py:class:CodeEmbeddingClient:85": (
+            "Manages embedding generation via Ollama."
+        ),
+    }
+
+
+@pytest.fixture
 def ground_truth_pairs() -> list[GroundTruthPair]:
     return [
         GroundTruthPair(caller_id="caller_a", callee_id="callee_x", call_name="foo"),
@@ -130,95 +149,198 @@ class TestHelpers:
 
 
 class TestBuildPassportText:
-    def test_name_only(self, sample_doc: dict) -> None:
-        text = build_passport_text("name_only", sample_doc, {}, {})
-        assert text == "embed_single"
+    """All variants start with baseline then add metadata."""
 
-    def test_signature_only(self, sample_doc: dict) -> None:
-        text = build_passport_text("signature_only", sample_doc, {}, {})
-        assert "embed_single" in text
-        assert "Signature:" in text
-        assert "Returns: list[float]" in text
-        assert "Params:" in text
-
-    def test_signature_only_minimal(self, sample_doc_no_optional: dict) -> None:
-        text = build_passport_text("signature_only", sample_doc_no_optional, {}, {})
-        assert text == "helper"
-
-    def test_baseline_summary(self, sample_doc: dict) -> None:
-        text = build_passport_text("baseline_summary", sample_doc, {}, {})
+    def test_baseline_has_file_and_function(self, sample_doc: dict) -> None:
+        text = build_passport_text("baseline", sample_doc, {}, {}, {}, {})
         assert "File: src/shared/ai/embedding.py" in text
         assert "Function: embed_single" in text
         assert "Summary:" in text
         assert "Signature:" in text
         assert "Docstring:" in text
 
-    def test_baseline_summary_truncates_long_docstring(self) -> None:
+    def test_baseline_includes_file_context(
+        self, sample_doc: dict, file_summaries: dict, class_summaries: dict
+    ) -> None:
+        text = build_passport_text(
+            "baseline", sample_doc, file_summaries, class_summaries, {}, {}
+        )
+        assert "File context: Code embedding client" in text
+
+    def test_baseline_includes_class_context(
+        self, sample_doc: dict, file_summaries: dict, class_summaries: dict
+    ) -> None:
+        text = build_passport_text(
+            "baseline", sample_doc, file_summaries, class_summaries, {}, {}
+        )
+        assert "Class context: Manages embedding generation" in text
+
+    def test_baseline_no_class_context_for_non_method(
+        self, sample_doc_no_optional: dict, file_summaries: dict
+    ) -> None:
+        text = build_passport_text(
+            "baseline", sample_doc_no_optional, file_summaries, {}, {}, {}
+        )
+        assert "Class context:" not in text
+
+    def test_baseline_truncates_long_docstring(self) -> None:
         doc = {
             "element_id": "x",
             "name": "func",
             "relative_path": "a.py",
             "docstring": "x" * 600,
         }
-        text = build_passport_text("baseline_summary", doc, {}, {})
+        text = build_passport_text("baseline", doc, {}, {}, {}, {})
         assert "..." in text
 
-    def test_calls_fingerprint(self, sample_doc: dict) -> None:
-        text = build_passport_text("calls_fingerprint", sample_doc, {}, {})
-        assert "embed_single" in text
+    def test_plus_calls_adds_calls(
+        self, sample_doc: dict, file_summaries: dict, class_summaries: dict
+    ) -> None:
+        text = build_passport_text(
+            "plus_calls", sample_doc, file_summaries, class_summaries, {}, {}
+        )
+        # Should have baseline content
+        assert "File: src/shared/ai/embedding.py" in text
+        assert "Function: embed_single" in text
+        # Plus calls
         assert "Calls:" in text
         assert "self._client.embed" in text
 
-    def test_full_passport(self, sample_doc: dict) -> None:
-        text = build_passport_text("full_passport", sample_doc, {}, {})
-        assert "embed_single" in text
-        assert "Location:" in text
-        assert "Signature:" in text
+    def test_plus_calls_without_calls(self, sample_doc_no_optional: dict) -> None:
+        text = build_passport_text("plus_calls", sample_doc_no_optional, {}, {}, {}, {})
+        assert "Calls:" not in text
+
+    def test_plus_params_adds_params_and_returns(
+        self, sample_doc: dict, file_summaries: dict, class_summaries: dict
+    ) -> None:
+        text = build_passport_text(
+            "plus_params", sample_doc, file_summaries, class_summaries, {}, {}
+        )
+        assert "Params:" in text
+        assert "text: str" in text
+        assert "Returns: list[float]" in text
+        # Should NOT have calls
+        assert "Calls:" not in text
+
+    def test_plus_calls_params_adds_both(
+        self, sample_doc: dict, file_summaries: dict, class_summaries: dict
+    ) -> None:
+        text = build_passport_text(
+            "plus_calls_params", sample_doc, file_summaries, class_summaries, {}, {}
+        )
+        assert "Calls:" in text
         assert "Params:" in text
         assert "Returns:" in text
-        assert "Calls:" in text
-        assert "Summary:" in text
-        # Summary should be first sentence only
-        assert "Generates a vector embedding for a single text input." in text
-        assert "Delegates to" not in text  # second sentence trimmed
 
-    def test_passport_with_imports(self, sample_doc: dict) -> None:
+    def test_plus_full_adds_all_structural(
+        self, sample_doc: dict, file_summaries: dict, class_summaries: dict
+    ) -> None:
+        text = build_passport_text(
+            "plus_full", sample_doc, file_summaries, class_summaries, {}, {}
+        )
+        assert "Calls:" in text
+        assert "Params:" in text
+        assert "Returns:" in text
+        assert "Location:" in text
+        # No decorators/patterns since empty in sample_doc
+        assert "Decorators:" not in text
+
+    def test_plus_full_with_decorators_and_patterns(self) -> None:
+        doc = {
+            "element_id": "x:x:main:f.py:function:foo:1",
+            "name": "foo",
+            "relative_path": "f.py",
+            "decorators": ["@staticmethod"],
+            "detected_patterns": ["factory"],
+            "calls": [{"name": "bar", "receiver": None}],
+        }
+        text = build_passport_text("plus_full", doc, {}, {}, {}, {})
+        assert "Decorators: @staticmethod" in text
+        assert "Patterns: factory" in text
+
+    def test_plus_imports_adds_imports(
+        self, sample_doc: dict, file_summaries: dict, class_summaries: dict
+    ) -> None:
         imports_cache = {
             "src/shared/ai/embedding.py": [
                 {"name": "CodeElement", "module": "magaldi_core.code_parser"},
                 {"name": "EmbeddingClient", "module": "shared.ai.llm_client"},
             ]
         }
-        text = build_passport_text("passport_with_imports", sample_doc, imports_cache, {})
+        text = build_passport_text(
+            "plus_imports",
+            sample_doc,
+            file_summaries,
+            class_summaries,
+            imports_cache,
+            {},
+        )
         assert "Imports:" in text
         assert "magaldi_core.code_parser" in text
         assert "shared.ai.llm_client" in text
+        # Should also have plus_full content
+        assert "Calls:" in text
 
-    def test_passport_with_imports_no_imports(self, sample_doc: dict) -> None:
-        text = build_passport_text("passport_with_imports", sample_doc, {}, {})
+    def test_plus_imports_no_imports(self, sample_doc: dict) -> None:
+        text = build_passport_text("plus_imports", sample_doc, {}, {}, {}, {})
         assert "Imports:" not in text
 
-    def test_passport_with_siblings(self, sample_doc: dict) -> None:
-        siblings_cache = {
-            sample_doc["element_id"]: ["embed_batch", "verify_model"]
-        }
-        text = build_passport_text("passport_with_siblings", sample_doc, {}, siblings_cache)
+    def test_plus_siblings_adds_siblings(
+        self, sample_doc: dict, file_summaries: dict, class_summaries: dict
+    ) -> None:
+        siblings_cache = {sample_doc["element_id"]: ["embed_batch", "verify_model"]}
+        text = build_passport_text(
+            "plus_siblings",
+            sample_doc,
+            file_summaries,
+            class_summaries,
+            {},
+            siblings_cache,
+        )
         assert "Siblings:" in text
         assert "embed_batch" in text
         assert "verify_model" in text
 
-    def test_passport_with_siblings_no_siblings(self, sample_doc: dict) -> None:
-        text = build_passport_text("passport_with_siblings", sample_doc, {}, {})
+    def test_plus_siblings_no_siblings(self, sample_doc: dict) -> None:
+        text = build_passport_text("plus_siblings", sample_doc, {}, {}, {}, {})
         assert "Siblings:" not in text
 
-    def test_unknown_variant_returns_name(self, sample_doc: dict) -> None:
-        text = build_passport_text("nonexistent_variant", sample_doc, {}, {})
-        assert text == "embed_single"
+    def test_unknown_variant_still_returns_baseline(self, sample_doc: dict) -> None:
+        text = build_passport_text("nonexistent_variant", sample_doc, {}, {}, {}, {})
+        # Should still get baseline content (fallback)
+        assert "File: src/shared/ai/embedding.py" in text
+        assert "Function: embed_single" in text
 
     def test_all_variants_produce_nonempty(self, sample_doc: dict) -> None:
         for variant in ALL_VARIANT_NAMES:
-            text = build_passport_text(variant, sample_doc, {}, {})
+            text = build_passport_text(variant, sample_doc, {}, {}, {}, {})
             assert len(text) > 0, f"Variant {variant} produced empty text"
+
+    def test_all_variants_contain_baseline(self, sample_doc: dict) -> None:
+        """Every variant should contain the baseline content."""
+        baseline = build_passport_text("baseline", sample_doc, {}, {}, {}, {})
+        for variant in ALL_VARIANT_NAMES:
+            text = build_passport_text(variant, sample_doc, {}, {}, {}, {})
+            assert baseline in text, (
+                f"Variant {variant} doesn't contain baseline"
+            )
+
+    def test_plus_variants_are_supersets(
+        self, sample_doc: dict, file_summaries: dict, class_summaries: dict
+    ) -> None:
+        """Each plus variant should be a superset of the baseline."""
+        baseline = build_passport_text(
+            "baseline", sample_doc, file_summaries, class_summaries, {}, {}
+        )
+        for variant in ALL_VARIANT_NAMES:
+            if variant == "baseline":
+                continue
+            text = build_passport_text(
+                variant, sample_doc, file_summaries, class_summaries, {}, {}
+            )
+            assert text.startswith(baseline) or baseline in text, (
+                f"Variant {variant} is not a superset of baseline"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -328,10 +450,10 @@ class TestEvaluateVariant:
 class TestSaveMarkdown:
     def test_creates_file_with_results(self) -> None:
         results = [
-            VariantResult(name="variant_a", mrr=0.8, hit_at_1=0.7, hit_at_3=0.85,
+            VariantResult(name="baseline", mrr=0.8, hit_at_1=0.7, hit_at_3=0.85,
                           hit_at_5=0.9, mean_pos_sim=0.6, mean_neg_sim=0.3,
                           separation=0.3, embed_time_s=5.0),
-            VariantResult(name="variant_b", mrr=0.5, hit_at_1=0.4, hit_at_3=0.6,
+            VariantResult(name="plus_calls", mrr=0.5, hit_at_1=0.4, hit_at_3=0.6,
                           hit_at_5=0.7, mean_pos_sim=0.5, mean_neg_sim=0.35,
                           separation=0.15, embed_time_s=3.0),
         ]
@@ -340,10 +462,10 @@ class TestSaveMarkdown:
                                   n_callers=50, seed=42, output_dir=tmpdir)
             content = Path(path).read_text()
             assert "# Semantic Passport Embedding Benchmark" in content
-            assert "variant_a" in content
-            assert "variant_b" in content
+            assert "baseline" in content
+            assert "plus_calls" in content
             assert "0.8000" in content  # MRR for best
-            assert "**Best variant:** `variant_a`" in content
+            assert "**Best variant:** `baseline`" in content
             # Analysis hints should be present
             assert "How to Read the Results" in content
             assert "Variant Descriptions" in content
@@ -352,7 +474,7 @@ class TestSaveMarkdown:
     def test_includes_error_analysis(self) -> None:
         results = [
             VariantResult(
-                name="test_v",
+                name="baseline",
                 mrr=0.5,
                 worst_pairs=[
                     {"caller_id": "s:r:m:f.py:function:foo:1",
@@ -376,6 +498,15 @@ class TestSaveMarkdown:
             nested_dir = str(Path(tmpdir) / "deep" / "nested")
             path = _save_markdown(results, 1, 1, 1, 42, nested_dir)
             assert Path(path).exists()
+
+    def test_variant_descriptions_reference_baseline(self) -> None:
+        results = [VariantResult(name="baseline", mrr=0.5)]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _save_markdown(results, 1, 1, 1, 42, tmpdir)
+            content = Path(path).read_text()
+            assert "build_summary_embedding_text" in content
+            assert "plus_calls" in content
+            assert "plus_full" in content
 
 
 # ---------------------------------------------------------------------------
