@@ -1,5 +1,5 @@
 # Minimal test configuration - only required fields
 # All other fields should use defaults
 
-elasticsearch:
+search_backend:
   host: localhost

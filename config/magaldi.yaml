@@ -15,7 +15,8 @@ mysql:
   pool_size: 10
   pool_timeout: 30
 
-elasticsearch:
+search_backend:
+  type: opensearch
   host: localhost
   port: 9200
   scheme: http

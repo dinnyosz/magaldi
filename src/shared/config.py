@@ -14,7 +14,7 @@ Usage:
 
     # In any module
     config = get_config()
-    print(config.elasticsearch.host)
+    print(config.search_backend.host)
 """
 
 from __future__ import annotations
@@ -40,9 +40,10 @@ class ConfigurationError(Exception):
 
 
 @dataclass
-class ElasticsearchConfig:
-    """Elasticsearch configuration."""
+class SearchBackendConfig:
+    """Search backend configuration (OpenSearch or Elasticsearch)."""
 
+    type: str = "opensearch"  # "opensearch" or "elasticsearch"
     host: str = "localhost"
     port: int = 9200
     scheme: str = "http"
@@ -550,7 +551,7 @@ class BenchmarkConfig:
 class MagaldiConfig:
     """Root configuration object containing all sections."""
 
-    elasticsearch: ElasticsearchConfig = field(default_factory=ElasticsearchConfig)
+    search_backend: SearchBackendConfig = field(default_factory=SearchBackendConfig)
     redis: RedisConfig = field(default_factory=RedisConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     workers: WorkersConfig = field(default_factory=WorkersConfig)
@@ -718,7 +719,8 @@ def _merge_config(config: MagaldiConfig, file_config: dict[str, Any]) -> Magaldi
         Config with file values merged in.
     """
     section_mapping = {
-        "elasticsearch": config.elasticsearch,
+        "search_backend": config.search_backend,
+        "elasticsearch": config.search_backend,  # backward compat alias
         "redis": config.redis,
         "parser": config.parser,
         "search": config.search,
@@ -800,13 +802,21 @@ def _apply_env_overrides(config: MagaldiConfig) -> MagaldiConfig:
     """
     # Define mappings: env_var -> (section_attr, key, converter)
     env_mappings: dict[str, tuple[str, str] | tuple[str, str, type]] = {
-        # Elasticsearch
-        "MAGALDI_ELASTICSEARCH_HOST": ("elasticsearch", "host"),
-        "MAGALDI_ELASTICSEARCH_PORT": ("elasticsearch", "port", int),
-        "MAGALDI_ELASTICSEARCH_SCHEME": ("elasticsearch", "scheme"),
-        "MAGALDI_ELASTICSEARCH_INDEX": ("elasticsearch", "index"),
-        "MAGALDI_ELASTICSEARCH_TIMEOUT": ("elasticsearch", "timeout", int),
-        "MAGALDI_ELASTICSEARCH_BULK_TIMEOUT": ("elasticsearch", "bulk_timeout", int),
+        # Search backend (new names)
+        "MAGALDI_SEARCH_TYPE": ("search_backend", "type"),
+        "MAGALDI_SEARCH_HOST": ("search_backend", "host"),
+        "MAGALDI_SEARCH_PORT": ("search_backend", "port", int),
+        "MAGALDI_SEARCH_SCHEME": ("search_backend", "scheme"),
+        "MAGALDI_SEARCH_INDEX": ("search_backend", "index"),
+        "MAGALDI_SEARCH_TIMEOUT": ("search_backend", "timeout", int),
+        "MAGALDI_SEARCH_BULK_TIMEOUT": ("search_backend", "bulk_timeout", int),
+        # Backward compat: old ELASTICSEARCH env vars still work
+        "MAGALDI_ELASTICSEARCH_HOST": ("search_backend", "host"),
+        "MAGALDI_ELASTICSEARCH_PORT": ("search_backend", "port", int),
+        "MAGALDI_ELASTICSEARCH_SCHEME": ("search_backend", "scheme"),
+        "MAGALDI_ELASTICSEARCH_INDEX": ("search_backend", "index"),
+        "MAGALDI_ELASTICSEARCH_TIMEOUT": ("search_backend", "timeout", int),
+        "MAGALDI_ELASTICSEARCH_BULK_TIMEOUT": ("search_backend", "bulk_timeout", int),
         # Redis
         "MAGALDI_REDIS_HOST": ("redis", "host"),
         "MAGALDI_REDIS_PORT": ("redis", "port", int),
@@ -864,8 +874,8 @@ def _validate_config(config: MagaldiConfig) -> None:
         errors.append(f"Invalid embed_model reference: {e}")
 
     # Port range checks
-    if not (1 <= config.elasticsearch.port <= 65535):
-        errors.append(f"Elasticsearch port must be between 1 and 65535, got {config.elasticsearch.port}")
+    if not (1 <= config.search_backend.port <= 65535):
+        errors.append(f"Search backend port must be between 1 and 65535, got {config.search_backend.port}")
 
     if not (1 <= config.redis.port <= 65535):
         errors.append(f"Redis port must be between 1 and 65535, got {config.redis.port}")

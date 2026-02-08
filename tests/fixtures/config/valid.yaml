@@ -1,6 +1,7 @@
 # Valid test configuration with all sections
 
-elasticsearch:
+search_backend:
+  type: opensearch
   host: testhost
   port: 9200
   scheme: http
