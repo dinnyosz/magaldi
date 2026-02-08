@@ -20,9 +20,9 @@ from magaldi_mcp.tools import (
 class TestFindDependencies:
     """Tests for find_dependencies function."""
 
-    def test_find_dependencies_by_element_id(self, mock_es_repo):
+    def test_find_dependencies_by_element_id(self, mock_repo):
         """Test find_dependencies returns imports for a file element."""
-        mock_es_repo.get_document.return_value = {
+        mock_repo.get_document.return_value = {
             "element_id": "scope:repo:main:src/app.py:file:app.py:1",
             "name": "app.py",
             "element_type": "file",
@@ -31,14 +31,14 @@ class TestFindDependencies:
             "repository": "repo",
             "username": "main",
         }
-        mock_es_repo.get_imports.return_value = [
+        mock_repo.get_imports.return_value = [
             {"name": "helper", "module": "utils", "alias": None, "line": 1},
             {"name": "requests", "module": "requests", "alias": None, "line": 2},
             {"name": "config", "module": ".config", "alias": None, "line": 3},
         ]
 
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         # Return file paths for internal import detection
         mock_client.search.return_value = {
             "hits": {
@@ -51,7 +51,7 @@ class TestFindDependencies:
         }
 
         result = find_dependencies(
-            es=mock_es_repo,
+            es=mock_repo,
             element_id="scope:repo:main:src/app.py:file:app.py:1",
         )
 
@@ -61,10 +61,10 @@ class TestFindDependencies:
         assert "stats" in result
         assert result["stats"]["total"] == 3
 
-    def test_find_dependencies_by_file_path(self, mock_es_repo):
+    def test_find_dependencies_by_file_path(self, mock_repo):
         """Test find_dependencies with file_path parameter."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
 
         # First call: find file element
         # Second call: get file paths for internal import detection
@@ -102,12 +102,12 @@ class TestFindDependencies:
                 }
 
         mock_client.search.side_effect = search_side_effect
-        mock_es_repo.get_imports.return_value = [
+        mock_repo.get_imports.return_value = [
             {"name": "os", "module": "os", "alias": None, "line": 1},
         ]
 
         result = find_dependencies(
-            es=mock_es_repo,
+            es=mock_repo,
             file_path="utils.py",
             scope="scope",
             repository="repo",
@@ -116,9 +116,9 @@ class TestFindDependencies:
         assert "external_imports" in result
         assert len(result["external_imports"]) == 1
 
-    def test_find_dependencies_classifies_relative_imports_as_internal(self, mock_es_repo):
+    def test_find_dependencies_classifies_relative_imports_as_internal(self, mock_repo):
         """Test that relative imports (starting with .) are classified as internal."""
-        mock_es_repo.get_document.return_value = {
+        mock_repo.get_document.return_value = {
             "element_id": "scope:repo:main:src/app.py:file:app.py:1",
             "name": "app.py",
             "element_type": "file",
@@ -126,17 +126,17 @@ class TestFindDependencies:
             "scope": "scope",
             "repository": "repo",
         }
-        mock_es_repo.get_imports.return_value = [
+        mock_repo.get_imports.return_value = [
             {"name": "config", "module": ".config", "alias": None, "line": 1},
             {"name": "utils", "module": "..shared.utils", "alias": None, "line": 2},
         ]
 
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"hits": {"hits": []}}
 
         result = find_dependencies(
-            es=mock_es_repo,
+            es=mock_repo,
             element_id="scope:repo:main:src/app.py:file:app.py:1",
         )
 
@@ -144,26 +144,26 @@ class TestFindDependencies:
         assert len(result["internal_imports"]) == 2
         assert len(result["external_imports"]) == 0
 
-    def test_find_dependencies_requires_file_path_or_element_id(self, mock_es_repo):
+    def test_find_dependencies_requires_file_path_or_element_id(self, mock_repo):
         """Test find_dependencies raises when neither file_path nor element_id provided."""
         with pytest.raises(ValueError, match="Either file_path or element_id required"):
-            find_dependencies(es=mock_es_repo)
+            find_dependencies(es=mock_repo)
 
-    def test_find_dependencies_element_not_found(self, mock_es_repo):
+    def test_find_dependencies_element_not_found(self, mock_repo):
         """Test find_dependencies raises when element not found."""
-        mock_es_repo.get_document.return_value = None
+        mock_repo.get_document.return_value = None
 
         with pytest.raises(ValueError, match="Element not found"):
-            find_dependencies(es=mock_es_repo, element_id="nonexistent")
+            find_dependencies(es=mock_repo, element_id="nonexistent")
 
-    def test_find_dependencies_requires_scope_repo_for_file_path(self, mock_es_repo):
+    def test_find_dependencies_requires_scope_repo_for_file_path(self, mock_repo):
         """Test find_dependencies requires scope/repository when using file_path."""
         with pytest.raises(ValueError, match="scope and repository required"):
-            find_dependencies(es=mock_es_repo, file_path="utils.py")
+            find_dependencies(es=mock_repo, file_path="utils.py")
 
-    def test_find_dependencies_rejects_non_file_elements(self, mock_es_repo):
+    def test_find_dependencies_rejects_non_file_elements(self, mock_repo):
         """Test find_dependencies raises when element is not a file."""
-        mock_es_repo.get_document.return_value = {
+        mock_repo.get_document.return_value = {
             "element_id": "scope:repo:main:utils.py:function:helper:10",
             "name": "helper",
             "element_type": "function",
@@ -171,7 +171,7 @@ class TestFindDependencies:
 
         with pytest.raises(ValueError, match="Element is not a file"):
             find_dependencies(
-                es=mock_es_repo, element_id="scope:repo:main:utils.py:function:helper:10"
+                es=mock_repo, element_id="scope:repo:main:utils.py:function:helper:10"
             )
 
 
@@ -187,9 +187,9 @@ class TestFindDependencies:
 class TestFindDependents:
     """Tests for find_dependents function."""
 
-    def test_find_dependents_returns_files_importing_module(self, mock_es_repo):
+    def test_find_dependents_returns_files_importing_module(self, mock_repo):
         """Test find_dependents returns files that import a module."""
-        mock_es_repo.find_elements_importing.return_value = [
+        mock_repo.find_elements_importing.return_value = [
             {
                 "element_id": "scope:repo:main:app.py:file:app.py:1",
                 "relative_path": "app.py",
@@ -203,7 +203,7 @@ class TestFindDependents:
         ]
 
         result = find_dependents(
-            es=mock_es_repo,
+            es=mock_repo,
             module="utils",
             scope="scope",
             repository="repo",
@@ -217,12 +217,12 @@ class TestFindDependents:
         assert result["dependents"][0]["file"] == "app.py"
         assert result["dependents"][1]["file"] == "cli.py"
 
-    def test_find_dependents_empty_results(self, mock_es_repo):
+    def test_find_dependents_empty_results(self, mock_repo):
         """Test find_dependents with no dependents."""
-        mock_es_repo.find_elements_importing.return_value = []
+        mock_repo.find_elements_importing.return_value = []
 
         result = find_dependents(
-            es=mock_es_repo,
+            es=mock_repo,
             module="nonexistent_module",
             scope="scope",
             repository="repo",
@@ -231,19 +231,19 @@ class TestFindDependents:
         assert result["total"] == 0
         assert result["dependents"] == []
 
-    def test_find_dependents_respects_limit(self, mock_es_repo):
+    def test_find_dependents_respects_limit(self, mock_repo):
         """Test find_dependents passes limit to ES."""
-        mock_es_repo.find_elements_importing.return_value = []
+        mock_repo.find_elements_importing.return_value = []
 
         result = find_dependents(
-            es=mock_es_repo,
+            es=mock_repo,
             module="utils",
             scope="scope",
             repository="repo",
             limit=10,
         )
 
-        mock_es_repo.find_elements_importing.assert_called_once_with(
+        mock_repo.find_elements_importing.assert_called_once_with(
             module="utils",
             scope="scope",
             repository="repo",
@@ -264,10 +264,10 @@ class TestFindDependents:
 class TestDependencyGraph:
     """Tests for dependency_graph function."""
 
-    def test_dependency_graph_builds_nodes_and_edges(self, mock_es_repo):
+    def test_dependency_graph_builds_nodes_and_edges(self, mock_repo):
         """Test dependency_graph builds nodes and edges."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {
             "hits": {
                 "hits": [
@@ -292,7 +292,7 @@ class TestDependencyGraph:
         }
 
         result = dependency_graph(
-            es=mock_es_repo,
+            es=mock_repo,
             scope="scope",
             repository="repo",
         )
@@ -305,10 +305,10 @@ class TestDependencyGraph:
         assert "app.py" in result["nodes"]
         assert "utils.py" in result["nodes"]
 
-    def test_dependency_graph_detects_cycles(self, mock_es_repo):
+    def test_dependency_graph_detects_cycles(self, mock_repo):
         """Test dependency_graph detects circular dependencies."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {
             "hits": {
                 "hits": [
@@ -335,7 +335,7 @@ class TestDependencyGraph:
         }
 
         result = dependency_graph(
-            es=mock_es_repo,
+            es=mock_repo,
             scope="scope",
             repository="repo",
         )
@@ -343,10 +343,10 @@ class TestDependencyGraph:
         assert result["stats"]["has_cycles"] is True
         assert len(result["cycles"]) >= 1
 
-    def test_dependency_graph_no_cycles(self, mock_es_repo):
+    def test_dependency_graph_no_cycles(self, mock_repo):
         """Test dependency_graph with no circular dependencies."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {
             "hits": {
                 "hits": [
@@ -371,7 +371,7 @@ class TestDependencyGraph:
         }
 
         result = dependency_graph(
-            es=mock_es_repo,
+            es=mock_repo,
             scope="scope",
             repository="repo",
         )
@@ -379,10 +379,10 @@ class TestDependencyGraph:
         assert result["stats"]["has_cycles"] is False
         assert len(result["cycles"]) == 0
 
-    def test_dependency_graph_handles_relative_imports(self, mock_es_repo):
+    def test_dependency_graph_handles_relative_imports(self, mock_repo):
         """Test dependency_graph resolves relative imports."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {
             "hits": {
                 "hits": [
@@ -407,7 +407,7 @@ class TestDependencyGraph:
         }
 
         result = dependency_graph(
-            es=mock_es_repo,
+            es=mock_repo,
             scope="scope",
             repository="repo",
         )
@@ -421,14 +421,14 @@ class TestDependencyGraph:
                 break
         assert found_edge
 
-    def test_dependency_graph_empty_repo(self, mock_es_repo):
+    def test_dependency_graph_empty_repo(self, mock_repo):
         """Test dependency_graph with empty repository."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"hits": {"hits": []}}
 
         result = dependency_graph(
-            es=mock_es_repo,
+            es=mock_repo,
             scope="scope",
             repository="repo",
         )
@@ -438,10 +438,10 @@ class TestDependencyGraph:
         assert result["cycles"] == []
         assert result["stats"]["node_count"] == 0
 
-    def test_dependency_graph_internal_only(self, mock_es_repo):
+    def test_dependency_graph_internal_only(self, mock_repo):
         """Test dependency_graph filters external imports when internal_only=True."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {
             "hits": {
                 "hits": [
@@ -467,7 +467,7 @@ class TestDependencyGraph:
         }
 
         result = dependency_graph(
-            es=mock_es_repo,
+            es=mock_repo,
             scope="scope",
             repository="repo",
             internal_only=True,

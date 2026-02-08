@@ -29,7 +29,7 @@ class TestRunGlossaryExtraction:
         return config
 
     @pytest.fixture
-    def mock_es_repo(self):
+    def mock_repo(self):
         """Create a mock Elasticsearch repository."""
         repo = MagicMock()
         repo.get_features.return_value = [
@@ -82,7 +82,7 @@ class TestRunGlossaryExtraction:
         self,
         mock_extract,
         mock_config,
-        mock_es_repo,
+        mock_repo,
         sample_glossary_items,
     ):
         """Test that features and subfeatures are fetched and combined."""
@@ -95,12 +95,12 @@ class TestRunGlossaryExtraction:
             repository="repo",
             username="main",
             config=mock_config,
-            es_repo=mock_es_repo,
+            repo=mock_repo,
         )
 
         # Verify features and subfeatures were fetched
-        mock_es_repo.get_features.assert_called_once_with("test", "repo", "main")
-        mock_es_repo.get_subfeatures.assert_called_once_with("test", "repo", "main")
+        mock_repo.get_features.assert_called_once_with("test", "repo", "main")
+        mock_repo.get_subfeatures.assert_called_once_with("test", "repo", "main")
 
         # Verify extract was called with combined list (2 features + 1 subfeature)
         mock_extract.assert_called_once()
@@ -117,7 +117,7 @@ class TestRunGlossaryExtraction:
         self,
         mock_extract,
         mock_config,
-        mock_es_repo,
+        mock_repo,
         sample_glossary_items,
     ):
         """Test that incremental indexing params are passed to the extractor."""
@@ -130,7 +130,7 @@ class TestRunGlossaryExtraction:
             repository="repo",
             username="main",
             config=mock_config,
-            es_repo=mock_es_repo,
+            repo=mock_repo,
         )
 
         # Verify extractor was called with incremental indexing params
@@ -138,7 +138,7 @@ class TestRunGlossaryExtraction:
         call_kwargs = mock_extract.call_args.kwargs
 
         # Indexing now happens inside the extractor, so verify params are passed
-        assert call_kwargs["es_repo"] == mock_es_repo
+        assert call_kwargs["repo"] == mock_repo
         assert call_kwargs["scope"] == "test"
         assert call_kwargs["repository"] == "repo"
         assert call_kwargs["username"] == "main"
@@ -148,32 +148,32 @@ class TestRunGlossaryExtraction:
         self,
         mock_extract,
         mock_config,
-        mock_es_repo,
+        mock_repo,
     ):
         """Test that None is returned when no features exist."""
         from shared.cli import run_glossary_extraction
 
-        mock_es_repo.get_features.return_value = []
-        mock_es_repo.get_subfeatures.return_value = []
+        mock_repo.get_features.return_value = []
+        mock_repo.get_subfeatures.return_value = []
 
         result = run_glossary_extraction(
             scope="test",
             repository="repo",
             username="main",
             config=mock_config,
-            es_repo=mock_es_repo,
+            repo=mock_repo,
         )
 
         assert result is None
         mock_extract.assert_not_called()
-        mock_es_repo.index_glossary.assert_not_called()
+        mock_repo.index_glossary.assert_not_called()
 
     @patch("shared.ai.glossary.ai_extractor.extract_glossary_from_features_concurrent")
     def test_returns_zero_terms_when_ai_extracts_nothing(
         self,
         mock_extract,
         mock_config,
-        mock_es_repo,
+        mock_repo,
     ):
         """Test handling when AI extraction returns no glossary items."""
         from shared.cli import run_glossary_extraction
@@ -185,82 +185,82 @@ class TestRunGlossaryExtraction:
             repository="repo",
             username="main",
             config=mock_config,
-            es_repo=mock_es_repo,
+            repo=mock_repo,
         )
 
         assert result["terms_count"] == 0
-        mock_es_repo.index_glossary.assert_not_called()
+        mock_repo.index_glossary.assert_not_called()
 
     @patch("shared.ai.glossary.ai_extractor.extract_glossary_from_features_concurrent")
     def test_deletes_existing_glossary_before_indexing(
         self,
         mock_extract,
         mock_config,
-        mock_es_repo,
+        mock_repo,
         sample_glossary_items,
     ):
         """Test that existing glossary is deleted before new entries are indexed."""
         from shared.cli import run_glossary_extraction
 
         mock_extract.return_value = sample_glossary_items
-        mock_es_repo.delete_glossary.return_value = 5  # Simulating 5 deleted entries
+        mock_repo.delete_glossary.return_value = 5  # Simulating 5 deleted entries
 
         run_glossary_extraction(
             scope="test",
             repository="repo",
             username="main",
             config=mock_config,
-            es_repo=mock_es_repo,
+            repo=mock_repo,
         )
 
-        mock_es_repo.delete_glossary.assert_called_once_with("test", "repo", "main")
+        mock_repo.delete_glossary.assert_called_once_with("test", "repo", "main")
 
     @patch("shared.ai.glossary.ai_extractor.extract_glossary_from_features_concurrent")
-    @patch("shared.db.elasticsearch.ElasticsearchRepository")
-    def test_creates_es_repo_if_not_provided(
+    @patch("shared.db.store.Repository")
+    def test_creates_repo_if_not_provided(
         self,
-        mock_es_repo_class,
+        mock_repo_class,
         _mock_extract,
         mock_config,
     ):
-        """Test that ElasticsearchRepository is created when not provided."""
+        """Test that Repository is created when not provided."""
         from shared.cli import run_glossary_extraction
 
-        mock_es_instance = MagicMock()
-        mock_es_instance.get_features.return_value = []
-        mock_es_instance.get_subfeatures.return_value = []
-        mock_es_repo_class.return_value = mock_es_instance
+        mock_repo_instance = MagicMock()
+        mock_repo_instance.get_features.return_value = []
+        mock_repo_instance.get_subfeatures.return_value = []
+        mock_repo_class.return_value = mock_repo_instance
 
         run_glossary_extraction(
             scope="test",
             repository="repo",
             username="main",
             config=mock_config,
-            es_repo=None,
+            repo=None,
         )
 
-        mock_es_repo_class.assert_called_once_with(mock_config)
-        mock_es_instance.close.assert_called_once()
+        mock_repo_class.assert_called_once_with(mock_config)
+        mock_repo_instance.close.assert_called_once()
 
     @patch("shared.ai.glossary.ai_extractor.extract_glossary_from_features_concurrent")
-    def test_does_not_close_provided_es_repo(
+    def test_does_not_close_provided_repo(
         self,
         _mock_extract,
         mock_config,
-        mock_es_repo,
+        mock_repo,
     ):
         """Test that provided ES repo is not closed."""
         from shared.cli import run_glossary_extraction
 
-        mock_es_repo.get_features.return_value = []
-        mock_es_repo.get_subfeatures.return_value = []
+        mock_repo.get_features.return_value = []
+        mock_repo.get_subfeatures.return_value = []
 
         run_glossary_extraction(
             scope="test",
             repository="repo",
             username="main",
             config=mock_config,
-            es_repo=mock_es_repo,
+            repo=mock_repo,
         )
 
-        mock_es_repo.close.assert_not_called()
+        mock_repo.close.assert_not_called()

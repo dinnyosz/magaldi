@@ -17,7 +17,7 @@ from magaldi_mcp.server import MagaldiMCPServer, _format_result
 
 
 @pytest.fixture
-def mock_es_repo():
+def mock_repo():
     """Create a mock Elasticsearch repository."""
     repo = MagicMock()
     repo.search_by_vector.return_value = []
@@ -37,7 +37,7 @@ def mock_embed_client():
 
 
 @pytest.fixture
-def server(mock_es_repo, mock_embed_client):
+def server(mock_repo, mock_embed_client):
     """Create a MagaldiMCPServer with mocked dependencies."""
     mock_config = MagicMock()
     mock_config.llm = MagicMock()
@@ -49,7 +49,7 @@ def server(mock_es_repo, mock_embed_client):
 
     with patch("magaldi_mcp.server.get_config", return_value=mock_config):
         server = MagaldiMCPServer(default_username="test-user")
-        server.es_repo = mock_es_repo
+        server.repo = mock_repo
         server.embed_client = mock_embed_client
         return server
 
@@ -75,10 +75,10 @@ class TestMagaldiMCPServerInit:
             server = MagaldiMCPServer(default_username="custom-user")
             assert server.default_username == "custom-user"
 
-    def test_get_es_creates_repo_lazily(self, server):
+    def test_get_es_creatrepo_lazily(self, server):
         """Test that _get_es creates the ES repo lazily."""
-        server.es_repo = None
-        with patch("magaldi_mcp.server.ElasticsearchRepository") as mock_es:
+        server.repo = None
+        with patch("magaldi_mcp.server.Repository") as mock_es:
             mock_es.return_value = MagicMock()
             result = server._get_es()
             assert result is not None
@@ -102,9 +102,9 @@ class TestSearchCodeTool:
     """Tests for search_code tool."""
 
     @pytest.mark.asyncio
-    async def test_search_code_returns_results(self, server, mock_es_repo):
+    async def test_search_code_returns_results(self, server, mock_repo):
         """Test search_code tool returns results."""
-        mock_es_repo.search_by_vector.return_value = [
+        mock_repo.search_by_vector.return_value = [
             {
                 "element_id": "scope:repo:user:file.py:function:test:1",
                 "name": "test",
@@ -125,9 +125,9 @@ class TestSearchCodeTool:
         assert len(result["code_results"]) >= 1
 
     @pytest.mark.asyncio
-    async def test_search_code_with_filters(self, server, mock_es_repo):
+    async def test_search_code_with_filters(self, server, mock_repo):
         """Test search_code tool with element type filter."""
-        mock_es_repo.search_by_vector.return_value = []
+        mock_repo.search_by_vector.return_value = []
 
         result = await server._handle_tool(
             "search_code",
@@ -144,9 +144,9 @@ class TestGetElementTool:
     """Tests for get_element tool."""
 
     @pytest.mark.asyncio
-    async def test_get_element_returns_element(self, server, mock_es_repo):
+    async def test_get_element_returns_element(self, server, mock_repo):
         """Test get_element tool returns element details."""
-        mock_es_repo.get_document.return_value = {
+        mock_repo.get_document.return_value = {
             "element_id": "scope:repo:user:file.py:function:test:1",
             "name": "test",
             "element_type": "function",
@@ -166,9 +166,9 @@ class TestGetElementTool:
         assert result["name"] == "test"
 
     @pytest.mark.asyncio
-    async def test_get_element_not_found(self, server, mock_es_repo):
+    async def test_get_element_not_found(self, server, mock_repo):
         """Test get_element tool when element not found."""
-        mock_es_repo.get_document.return_value = None
+        mock_repo.get_document.return_value = None
 
         with pytest.raises(ValueError, match="Element not found"):
             await server._handle_tool(
@@ -181,9 +181,9 @@ class TestListReposTool:
     """Tests for list_repos tool."""
 
     @pytest.mark.asyncio
-    async def test_list_repos_returns_repos(self, server, mock_es_repo):
+    async def test_list_repos_returns_repos(self, server, mock_repo):
         """Test list_repos tool returns repository list."""
-        mock_es_repo.get_indexed_repositories.return_value = [
+        mock_repo.get_indexed_repositories.return_value = [
             {"scope": "magaldi", "repository": "magaldi", "element_count": 100}
         ]
 
@@ -320,9 +320,9 @@ class TestSearchFeaturesTool:
     """Tests for search_features tool."""
 
     @pytest.mark.asyncio
-    async def test_search_features_returns_results(self, server, mock_es_repo):
+    async def test_search_features_returns_results(self, server, mock_repo):
         """Test search_features tool returns results."""
-        mock_es_repo.search_features_by_vector.return_value = [
+        mock_repo.search_features_by_vector.return_value = [
             {
                 "feature_id": "feature:auth:1",
                 "label": "Authentication",
@@ -340,13 +340,13 @@ class TestFindSimilarTool:
     """Tests for find_similar tool."""
 
     @pytest.mark.asyncio
-    async def test_find_similar_returns_results(self, server, mock_es_repo):
+    async def test_find_similar_returns_results(self, server, mock_repo):
         """Test find_similar tool returns similar elements grouped by is_test."""
-        mock_es_repo.get_document.return_value = {
+        mock_repo.get_document.return_value = {
             "element_id": "scope:repo:user:file.py:function:test:1",
             "summary_embedding": [0.1] * 1024,
         }
-        mock_es_repo.search_by_vector.return_value = [
+        mock_repo.search_by_vector.return_value = [
             {
                 "element_id": "scope:repo:user:file2.py:function:similar:1",
                 "name": "similar",
@@ -370,15 +370,15 @@ class TestGetContextTool:
     """Tests for get_context tool."""
 
     @pytest.mark.asyncio
-    async def test_get_context_returns_context(self, server, mock_es_repo):
+    async def test_get_context_returns_context(self, server, mock_repo):
         """Test get_context tool returns element context."""
-        mock_es_repo.get_document.return_value = {
+        mock_repo.get_document.return_value = {
             "element_id": "scope:repo:user:file.py:function:test:1",
             "name": "test",
             "element_type": "function",
             "parent_id": "scope:repo:user:file.py:class:MyClass:1",
         }
-        mock_es_repo.get_elements_by_parent.return_value = []
+        mock_repo.get_elements_by_parent.return_value = []
 
         result = await server._handle_tool(
             "get_context",
@@ -392,9 +392,9 @@ class TestGetFileStructureTool:
     """Tests for get_file_structure tool."""
 
     @pytest.mark.asyncio
-    async def test_get_file_structure_returns_structure(self, server, mock_es_repo):
+    async def test_get_file_structure_returns_structure(self, server, mock_repo):
         """Test get_file_structure tool returns file structure."""
-        mock_es_repo.search.return_value = {
+        mock_repo.search.return_value = {
             "hits": {
                 "hits": [
                     {"_source": {"element_id": "scope:repo:user:file.py:file:file.py:0", "element_type": "file"}},
@@ -415,12 +415,12 @@ class TestListFeaturesTool:
     """Tests for list_features tool."""
 
     @pytest.mark.asyncio
-    async def test_list_features_returns_features(self, server, mock_es_repo):
+    async def test_list_features_returns_features(self, server, mock_repo):
         """Test list_features tool returns feature list."""
-        mock_es_repo.get_features.return_value = [
+        mock_repo.get_features.return_value = [
             {"feature_id": "f1", "label": "Auth", "member_count": 5}
         ]
-        mock_es_repo.get_subfeatures.return_value = []
+        mock_repo.get_subfeatures.return_value = []
 
         result = await server._handle_tool(
             "list_features",
@@ -434,9 +434,9 @@ class TestGetRepoStatsTool:
     """Tests for get_repo_stats tool."""
 
     @pytest.mark.asyncio
-    async def test_get_repo_stats_returns_stats(self, server, mock_es_repo):
+    async def test_get_repo_stats_returns_stats(self, server, mock_repo):
         """Test get_repo_stats tool returns statistics."""
-        mock_es_repo.get_repository_stats.return_value = {
+        mock_repo.get_repository_stats.return_value = {
             "total_elements": 100,
             "total_lines": 5000,
             "elements_by_type": {"function": 50, "class": 20},
@@ -454,9 +454,9 @@ class TestGetChildrenTool:
     """Tests for get_children tool."""
 
     @pytest.mark.asyncio
-    async def test_get_children_returns_children(self, server, mock_es_repo):
+    async def test_get_children_returns_children(self, server, mock_repo):
         """Test get_children tool returns child elements."""
-        mock_es_repo.get_elements_by_parent.return_value = [
+        mock_repo.get_elements_by_parent.return_value = [
             {"element_id": "scope:repo:user:file.py:method:child:5", "name": "child"}
         ]
 
@@ -472,10 +472,10 @@ class TestGetFeatureMembersTool:
     """Tests for get_feature_members tool."""
 
     @pytest.mark.asyncio
-    async def test_get_feature_members_returns_members(self, server, mock_es_repo):
+    async def test_get_feature_members_returns_members(self, server, mock_repo):
         """Test get_feature_members tool returns feature members with glossary terms."""
         # The tool first gets the feature document, then fetches members
-        mock_es_repo.get_document.side_effect = [
+        mock_repo.get_document.side_effect = [
             # First call: get feature document
             {
                 "feature_id": "feature:auth:1",
@@ -486,7 +486,7 @@ class TestGetFeatureMembersTool:
             # Third call: get second member
             {"element_id": "elem2", "name": "auth_logout", "element_type": "function"},
         ]
-        mock_es_repo.get_glossary_terms.return_value = []
+        mock_repo.get_glossary_terms.return_value = []
 
         result = await server._handle_tool(
             "get_feature_members",
@@ -503,9 +503,9 @@ class TestBatchGetElementsTool:
     """Tests for batch_get_elements tool."""
 
     @pytest.mark.asyncio
-    async def test_batch_get_elements_returns_elements(self, server, mock_es_repo):
+    async def test_batch_get_elements_returns_elements(self, server, mock_repo):
         """Test batch_get_elements tool returns multiple elements."""
-        mock_es_repo.get_documents.return_value = [
+        mock_repo.get_documents.return_value = [
             {"element_id": "id1", "name": "elem1"},
             {"element_id": "id2", "name": "elem2"},
         ]
@@ -522,9 +522,9 @@ class TestFindFilesTool:
     """Tests for find_files tool."""
 
     @pytest.mark.asyncio
-    async def test_find_files_returns_files(self, server, mock_es_repo):
+    async def test_find_files_returns_files(self, server, mock_repo):
         """Test find_files tool returns matching files."""
-        mock_es_repo.find_files_by_glob.return_value = [
+        mock_repo.find_files_by_glob.return_value = [
             {"path": "src/main.py", "size": 1000}
         ]
 
@@ -540,17 +540,17 @@ class TestFindUsagesTool:
     """Tests for find_usages tool."""
 
     @pytest.mark.asyncio
-    async def test_find_usages_returns_usages(self, server, mock_es_repo):
+    async def test_find_usages_returns_usages(self, server, mock_repo):
         """Test find_usages tool returns usage locations."""
         # The tool first gets the element document to find its name
-        mock_es_repo.get_document.return_value = {
+        mock_repo.get_document.return_value = {
             "element_id": "scope:repo:user:file.py:function:test:1",
             "name": "test",
             "element_type": "function",
             "relative_path": "file.py",
             "line_start": 1,
         }
-        mock_es_repo.grep_code.return_value = {
+        mock_repo.grep_code.return_value = {
             "matches": [
                 {"file": "caller.py", "line": 10, "content": "result = test()"}
             ],
@@ -569,9 +569,9 @@ class TestFindImplementationsTool:
     """Tests for find_implementations tool."""
 
     @pytest.mark.asyncio
-    async def test_find_implementations_returns_implementations(self, server, mock_es_repo):
+    async def test_find_implementations_returns_implementations(self, server, mock_repo):
         """Test find_implementations tool returns implementing classes."""
-        mock_es_repo.find_implementations.return_value = [
+        mock_repo.find_implementations.return_value = [
             {"class_name": "MyImpl", "file": "impl.py", "line": 1}
         ]
 
@@ -587,15 +587,15 @@ class TestGetCallGraphTool:
     """Tests for get_call_graph tool."""
 
     @pytest.mark.asyncio
-    async def test_get_call_graph_returns_graph(self, server, mock_es_repo):
+    async def test_get_call_graph_returns_graph(self, server, mock_repo):
         """Test get_call_graph tool returns call graph."""
-        mock_es_repo.get_document.return_value = {
+        mock_repo.get_document.return_value = {
             "element_id": "scope:repo:user:file.py:function:test:1",
             "name": "test",
             "element_type": "function",
             "calls": ["helper"],
         }
-        mock_es_repo.grep_code.return_value = {"matches": [], "total_matches": 0}
+        mock_repo.grep_code.return_value = {"matches": [], "total_matches": 0}
 
         result = await server._handle_tool(
             "get_call_graph",
@@ -1027,7 +1027,7 @@ class TestFormatResultFallback:
 class TestLazyInitialization:
     """Tests for lazy initialization of clients."""
 
-    def test_get_es_returns_same_instance(self, server, mock_es_repo):
+    def test_get_es_returns_same_instance(self, server, mock_repo):
         """Test that _get_es returns the same instance on subsequent calls."""
         result1 = server._get_es()
         result2 = server._get_es()
@@ -1080,9 +1080,9 @@ class TestCallToolErrorHandling:
             await server._handle_tool("nonexistent_tool", {})
 
     @pytest.mark.asyncio
-    async def test_handle_tool_propagates_errors(self, server, mock_es_repo):
+    async def test_handle_tool_propagates_errors(self, server, mock_repo):
         """Test that _handle_tool propagates errors from tools."""
-        mock_es_repo.get_document.return_value = None
+        mock_repo.get_document.return_value = None
 
         with pytest.raises(ValueError, match="Element not found"):
             await server._handle_tool(
@@ -1137,9 +1137,9 @@ class TestPatternSearchTool:
         assert "mode" in schema["required"]
 
     @pytest.mark.asyncio
-    async def test_pattern_search_returns_results(self, server, mock_es_repo):
+    async def test_pattern_search_returns_results(self, server, mock_repo):
         """Test pattern_search tool returns results."""
-        mock_es_repo.search_by_regexp.return_value = [
+        mock_repo.search_by_regexp.return_value = [
             {
                 "element_id": "scope:repo:user:file.py:function:test:1",
                 "name": "test",
@@ -1259,14 +1259,14 @@ def integration_config():
     """Load config for ES connection in integration tests."""
     import os
 
-    from shared.config import ElasticsearchConfig, MagaldiConfig, reset_config
+    from shared.config import SearchBackendConfig, MagaldiConfig, reset_config
 
     # Reset config singleton
     reset_config()
 
     # Create config directly with known good values for integration tests
     return MagaldiConfig(
-        elasticsearch=ElasticsearchConfig(
+        search_backend=SearchBackendConfig(
             host=os.environ.get("MAGALDI_ELASTICSEARCH_HOST", "localhost"),
             port=int(os.environ.get("MAGALDI_ELASTICSEARCH_PORT", "9200")),
             scheme=os.environ.get("MAGALDI_ELASTICSEARCH_SCHEME", "http"),
@@ -1275,11 +1275,11 @@ def integration_config():
 
 
 @pytest.fixture
-def es_repo(integration_config):
+def repo(integration_config):
     """Create ES repository and clean up test data."""
-    from shared.db.elasticsearch import INDEX_NAME, ElasticsearchRepository
+    from shared.db.store import INDEX_NAME, Repository
 
-    repo = ElasticsearchRepository(integration_config)
+    repo = Repository(integration_config)
 
     # Delete test documents before test
     try:
@@ -1315,10 +1315,10 @@ class TestPatternTools:
     """Integration tests for pattern detection MCP tools."""
 
     @pytest.fixture
-    def es_with_patterns(self, es_repo):
+    def es_with_patterns(self, repo):
         """Set up ES with classes having patterns."""
         from magaldi_core.code_parser import CodeElement
-        from shared.db.elasticsearch import INDEX_NAME
+        from shared.db.store import INDEX_NAME
 
         # Index a repository class
         elem = CodeElement(
@@ -1335,7 +1335,7 @@ class TestPatternTools:
         )
         elem.detected_patterns = ["repository"]
         elem.pattern_confidence = {"repository": 0.8}
-        es_repo.index_element(elem)
+        repo.index_element(elem)
 
         # Index a singleton class
         singleton_elem = CodeElement(
@@ -1352,11 +1352,11 @@ class TestPatternTools:
         )
         singleton_elem.detected_patterns = ["singleton"]
         singleton_elem.pattern_confidence = {"singleton": 0.9}
-        es_repo.index_element(singleton_elem)
+        repo.index_element(singleton_elem)
 
         # Refresh index
-        es_repo._get_client().indices.refresh(index=INDEX_NAME)
-        return es_repo
+        repo._get_client().indices.refresh(index=INDEX_NAME)
+        return repo
 
     def test_list_patterns_returns_all_patterns(self, es_with_patterns):
         """Test list_patterns returns all pattern types found."""

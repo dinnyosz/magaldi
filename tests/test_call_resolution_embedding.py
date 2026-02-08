@@ -518,7 +518,7 @@ class TestGetCallGraphSemanticRelated:
     """Tests for semantic_related in get_call_graph MCP tool."""
 
     @pytest.fixture
-    def mock_es_repo(self):
+    def mock_repo(self):
         """Create a mock ES repo for MCP tool tests."""
         es = MagicMock()
         es.get_document.return_value = None
@@ -527,9 +527,9 @@ class TestGetCallGraphSemanticRelated:
         es.get_calls.return_value = []
         return es
 
-    def test_includes_semantic_related_when_data_exists(self, mock_es_repo):
+    def test_includes_semantic_related_when_data_exists(self, mock_repo):
         """get_call_graph includes semantic_related when data exists on element."""
-        mock_es_repo.get_document.return_value = {
+        mock_repo.get_document.return_value = {
             "element_id": "func1",
             "hash_id": "h1",
             "name": "my_func",
@@ -548,7 +548,7 @@ class TestGetCallGraphSemanticRelated:
         # Mock the resolution of related elements
         def get_document_side_effect(eid):
             docs = {
-                "func1": mock_es_repo.get_document.return_value,
+                "func1": mock_repo.get_document.return_value,
                 "rel1": {
                     "element_id": "rel1",
                     "hash_id": "rh1",
@@ -570,14 +570,14 @@ class TestGetCallGraphSemanticRelated:
             }
             return docs.get(eid)
 
-        mock_es_repo.get_document.side_effect = get_document_side_effect
-        mock_es_repo.get_document_by_id_or_hash.side_effect = get_document_side_effect
+        mock_repo.get_document.side_effect = get_document_side_effect
+        mock_repo.get_document_by_id_or_hash.side_effect = get_document_side_effect
 
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"hits": {"hits": []}}
 
-        result = get_call_graph(es=mock_es_repo, element_id="func1")
+        result = get_call_graph(es=mock_repo, element_id="func1")
 
         assert "semantic_related" in result
         assert len(result["semantic_related"]) == 2
@@ -585,9 +585,9 @@ class TestGetCallGraphSemanticRelated:
         assert result["semantic_related"][0]["score"] == 0.85
         assert result["semantic_related"][1]["name"] == "another_func"
 
-    def test_no_semantic_related_when_empty(self, mock_es_repo):
+    def test_no_semantic_related_when_empty(self, mock_repo):
         """get_call_graph works fine when no semantic data exists."""
-        mock_es_repo.get_document.return_value = {
+        mock_repo.get_document.return_value = {
             "element_id": "func1",
             "hash_id": "h1",
             "name": "my_func",
@@ -600,10 +600,10 @@ class TestGetCallGraphSemanticRelated:
         }
 
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"hits": {"hits": []}}
 
-        result = get_call_graph(es=mock_es_repo, element_id="func1")
+        result = get_call_graph(es=mock_repo, element_id="func1")
 
         assert "semantic_related" not in result
 

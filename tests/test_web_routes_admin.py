@@ -25,7 +25,7 @@ def app():
 
 
 @pytest.fixture
-def mock_es_repo():
+def mock_repo():
     """Create a mock Elasticsearch repository."""
     repo = MagicMock()
     mock_client = MagicMock()
@@ -34,14 +34,14 @@ def mock_es_repo():
 
 
 @pytest.fixture
-def client(app, mock_es_repo):
+def client(app, mock_repo):
     """Create a test client with mocked dependencies."""
-    from magaldi_web.dependencies import get_es_repository
+    from magaldi_web.dependencies import get_repository
 
-    def get_mock_es_repo():
-        yield mock_es_repo
+    def get_mock_repo():
+        yield mock_repo
 
-    app.dependency_overrides[get_es_repository] = get_mock_es_repo
+    app.dependency_overrides[get_repository] = get_mock_repo
     return TestClient(app)
 
 
@@ -88,10 +88,10 @@ class TestFormatBytes:
 class TestGetHealth:
     """Tests for GET /admin/health endpoint."""
 
-    def test_get_health_all_healthy(self, client, mock_es_repo):
+    def test_get_health_all_healthy(self, client, mock_repo):
         """Test health check when all services are healthy."""
         # Mock ES health
-        mock_client = mock_es_repo._get_client.return_value
+        mock_client = mock_repo._get_client.return_value
         mock_client.cluster.health.return_value = {
             "status": "green",
             "number_of_nodes": 3,
@@ -105,11 +105,11 @@ class TestGetHealth:
         mock_config.redis.url = "redis://localhost:6379"
 
         with patch("magaldi_web.routes.admin.get_cached_config", return_value=mock_config), \
-             patch("magaldi_web.routes.admin.check_elasticsearch_health") as mock_es_health, \
+             patch("magaldi_web.routes.admin.check_search_health") as mock_search_health, \
              patch("magaldi_web.routes.admin.check_llm_health") as mock_llm_health, \
              patch("magaldi_web.routes.admin.check_redis_health") as mock_redis_health:
 
-            mock_es_health.return_value = {
+            mock_search_health.return_value = {
                 "status": "healthy",
                 "cluster_status": "green",
                 "number_of_nodes": 3,
@@ -126,23 +126,23 @@ class TestGetHealth:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["elasticsearch"]["status"] == "healthy"
+        assert data["search"]["status"] == "healthy"
         assert data["llm"]["status"] == "healthy"
         assert data["redis"]["status"] == "healthy"
-        assert "latency_ms" in data["elasticsearch"]
+        assert "latency_ms" in data["search"]
         assert "latency_ms" in data["llm"]
         assert "latency_ms" in data["redis"]
 
-    def test_get_health_includes_details(self, client, mock_es_repo):
+    def test_get_health_includes_details(self, client, mock_repo):
         """Test that health check includes service details."""
         mock_config = MagicMock()
 
         with patch("magaldi_web.routes.admin.get_cached_config", return_value=mock_config), \
-             patch("magaldi_web.routes.admin.check_elasticsearch_health") as mock_es_health, \
+             patch("magaldi_web.routes.admin.check_search_health") as mock_search_health, \
              patch("magaldi_web.routes.admin.check_llm_health") as mock_llm_health, \
              patch("magaldi_web.routes.admin.check_redis_health") as mock_redis_health:
 
-            mock_es_health.return_value = {
+            mock_search_health.return_value = {
                 "status": "healthy",
                 "cluster_status": "yellow",
                 "number_of_nodes": 1,
@@ -157,8 +157,8 @@ class TestGetHealth:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["elasticsearch"]["details"]["cluster_status"] == "yellow"
-        assert data["elasticsearch"]["details"]["nodes"] == 1
+        assert data["search"]["details"]["cluster_status"] == "yellow"
+        assert data["search"]["details"]["nodes"] == 1
         assert "llama3" in data["llm"]["details"]["models"]
 
 
@@ -170,7 +170,7 @@ class TestGetHealth:
 class TestGetJobStats:
     """Tests for GET /admin/jobs endpoint."""
 
-    def test_get_job_stats_returns_zeros(self, client, mock_es_repo):
+    def test_get_job_stats_returns_zeros(self, client, mock_repo):
         """Test that job stats returns zeros when Redis is empty."""
         mock_stats = {
             "summarization": {"pending": 0, "running": 0, "completed": 0, "failed": 0},
@@ -187,7 +187,7 @@ class TestGetJobStats:
         assert data["summarization"]["failed"] == 0
         assert data["embedding"]["pending"] == 0
 
-    def test_get_job_stats_returns_counts(self, client, mock_es_repo):
+    def test_get_job_stats_returns_counts(self, client, mock_repo):
         """Test that job stats returns actual counts from Redis."""
         mock_stats = {
             "summarization": {"pending": 5, "running": 2, "completed": 10, "failed": 1},
@@ -214,11 +214,11 @@ class TestGetJobStats:
 class TestGetIndexStats:
     """Tests for GET /admin/index-stats endpoint."""
 
-    def test_get_index_stats_success(self, client, mock_es_repo):
+    def test_get_index_stats_success(self, client, mock_repo):
         """Test getting index statistics."""
-        from shared.db.elasticsearch import INDEX_NAME
+        from shared.db.store import INDEX_NAME
 
-        mock_client = mock_es_repo._get_client.return_value
+        mock_client = mock_repo._get_client.return_value
         mock_client.indices.stats.return_value = {
             "indices": {
                 INDEX_NAME: {
@@ -240,9 +240,9 @@ class TestGetIndexStats:
         assert data["vector_coverage_pct"] == 80.0
         assert "50.0 MB" in data["size_human"]
 
-    def test_get_index_stats_handles_missing_index(self, client, mock_es_repo):
+    def test_get_index_stats_handles_missing_index(self, client, mock_repo):
         """Test graceful handling when index doesn't exist."""
-        mock_client = mock_es_repo._get_client.return_value
+        mock_client = mock_repo._get_client.return_value
         mock_client.indices.stats.side_effect = Exception("Index not found")
         mock_client.count.side_effect = Exception("Index not found")
 
@@ -254,11 +254,11 @@ class TestGetIndexStats:
         assert data["with_vectors"] == 0
         assert data["vector_coverage_pct"] == 0.0
 
-    def test_get_index_stats_zero_docs(self, client, mock_es_repo):
+    def test_get_index_stats_zero_docs(self, client, mock_repo):
         """Test index stats when there are no documents."""
-        from shared.db.elasticsearch import INDEX_NAME
+        from shared.db.store import INDEX_NAME
 
-        mock_client = mock_es_repo._get_client.return_value
+        mock_client = mock_repo._get_client.return_value
         mock_client.indices.stats.return_value = {
             "indices": {
                 INDEX_NAME: {
@@ -287,11 +287,11 @@ class TestGetIndexStats:
 class TestGetAdminOverview:
     """Tests for GET /admin/overview endpoint."""
 
-    def test_get_admin_overview_returns_all_data(self, client, mock_es_repo):
+    def test_get_admin_overview_returns_all_data(self, client, mock_repo):
         """Test that admin overview returns all combined data."""
-        from shared.db.elasticsearch import INDEX_NAME
+        from shared.db.store import INDEX_NAME
 
-        mock_client = mock_es_repo._get_client.return_value
+        mock_client = mock_repo._get_client.return_value
         mock_client.cluster.health.return_value = {"status": "green", "number_of_nodes": 3}
         mock_client.indices.stats.return_value = {
             "indices": {
@@ -312,12 +312,12 @@ class TestGetAdminOverview:
         }
 
         with patch("magaldi_web.routes.admin.get_cached_config", return_value=mock_config), \
-             patch("magaldi_web.routes.admin.check_elasticsearch_health") as mock_es_health, \
+             patch("magaldi_web.routes.admin.check_search_health") as mock_search_health, \
              patch("magaldi_web.routes.admin.check_llm_health") as mock_llm_health, \
              patch("magaldi_web.routes.admin.check_redis_health") as mock_redis_health, \
              patch("magaldi_web.routes.admin.get_job_queue_totals", return_value=mock_job_stats):
 
-            mock_es_health.return_value = {"status": "healthy"}
+            mock_search_health.return_value = {"status": "healthy"}
             mock_llm_health.return_value = {"status": "healthy"}
             mock_redis_health.return_value = {"status": "healthy"}
 
@@ -384,9 +384,9 @@ class TestRetryFailedJobs:
 class TestRefreshIndex:
     """Tests for POST /admin/index/refresh endpoint."""
 
-    def test_refresh_index_success(self, client, mock_es_repo):
+    def test_refresh_index_success(self, client, mock_repo):
         """Test refreshing the index."""
-        mock_client = mock_es_repo._get_client.return_value
+        mock_client = mock_repo._get_client.return_value
         mock_client.indices.refresh.return_value = {}
 
         response = client.post("/admin/index/refresh")

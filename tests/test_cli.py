@@ -814,10 +814,10 @@ class TestPhaseRunners:
         assert result == mock_parsing_result
 
     @patch("magaldi_core.processor.process_elements")
-    @patch("shared.db.elasticsearch.ElasticsearchRepository", create=True)
+    @patch("shared.db.store.Repository", create=True)
     def test_run_processing_dry_run(
         self,
-        mock_es_repo_class,
+        mock_repo_class,
         mock_process_elements,
         mock_parsing_result,
         mock_change_manifest,

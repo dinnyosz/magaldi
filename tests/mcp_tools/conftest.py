@@ -8,8 +8,8 @@ import pytest
 
 
 @pytest.fixture
-def mock_es_repo():
-    """Create a mock Elasticsearch repository."""
+def mock_repo():
+    """Create a mock repository."""
     repo = MagicMock()
     repo.search_by_vector.return_value = []
     repo.get_document.return_value = None

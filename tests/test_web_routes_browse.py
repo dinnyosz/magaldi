@@ -17,23 +17,23 @@ from magaldi_web.routes.browse import router
 
 
 @pytest.fixture
-def mock_es_repo():
+def mock_repo():
     """Create a mock Elasticsearch repository."""
     return MagicMock()
 
 
 @pytest.fixture
-def client(mock_es_repo):
+def client(mock_repo):
     """Create test client with mocked dependencies."""
     app = FastAPI()
     app.include_router(router)
 
-    from magaldi_web.dependencies import get_es_repository
+    from magaldi_web.dependencies import get_repository
 
-    def get_mock_es_repo():
-        yield mock_es_repo
+    def get_mock_repo():
+        yield mock_repo
 
-    app.dependency_overrides[get_es_repository] = get_mock_es_repo
+    app.dependency_overrides[get_repository] = get_mock_repo
     return TestClient(app)
 
 
@@ -45,10 +45,10 @@ def client(mock_es_repo):
 class TestBrowseElements:
     """Tests for GET /browse/elements."""
 
-    def test_returns_empty_list_when_no_elements(self, client, mock_es_repo):
+    def test_returns_empty_list_when_no_elements(self, client, mock_repo):
         """Test returns empty list when no elements exist."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
 
         response = client.get("/browse/elements")
@@ -59,10 +59,10 @@ class TestBrowseElements:
         assert data["total"] == 0
         assert data["page"] == 1
 
-    def test_returns_elements_with_pagination(self, client, mock_es_repo):
+    def test_returns_elements_with_pagination(self, client, mock_repo):
         """Test returns elements with pagination info."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {
             "hits": {
                 "total": {"value": 100},
@@ -104,10 +104,10 @@ class TestBrowseElements:
         assert data["limit"] == 10
         assert data["total_pages"] == 10
 
-    def test_filters_by_scope(self, client, mock_es_repo):
+    def test_filters_by_scope(self, client, mock_repo):
         """Test filters by scope."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
 
         response = client.get("/browse/elements?scope=github")
@@ -121,10 +121,10 @@ class TestBrowseElements:
         assert len(scope_filters) == 1
         assert scope_filters[0]["term"]["scope"] == "github"
 
-    def test_filters_by_repository(self, client, mock_es_repo):
+    def test_filters_by_repository(self, client, mock_repo):
         """Test filters by repository."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
 
         response = client.get("/browse/elements?repository=myproject")
@@ -136,10 +136,10 @@ class TestBrowseElements:
         repo_filters = [f for f in filters if "repository" in f.get("term", {})]
         assert len(repo_filters) == 1
 
-    def test_filters_by_element_type(self, client, mock_es_repo):
+    def test_filters_by_element_type(self, client, mock_repo):
         """Test filters by element type."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
 
         response = client.get("/browse/elements?element_type=function")
@@ -151,10 +151,10 @@ class TestBrowseElements:
         type_filters = [f for f in filters if "element_type" in f.get("term", {})]
         assert len(type_filters) == 1
 
-    def test_filters_by_language(self, client, mock_es_repo):
+    def test_filters_by_language(self, client, mock_repo):
         """Test filters by language."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
 
         response = client.get("/browse/elements?language=python")
@@ -166,10 +166,10 @@ class TestBrowseElements:
         lang_filters = [f for f in filters if "language" in f.get("term", {})]
         assert len(lang_filters) == 1
 
-    def test_filters_by_parent_id(self, client, mock_es_repo):
+    def test_filters_by_parent_id(self, client, mock_repo):
         """Test filters by parent_id."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
 
         response = client.get("/browse/elements?parent_id=parent123")
@@ -181,10 +181,10 @@ class TestBrowseElements:
         parent_filters = [f for f in filters if "parent_id" in f.get("term", {})]
         assert len(parent_filters) == 1
 
-    def test_includes_user_branch_in_filter(self, client, mock_es_repo):
+    def test_includes_user_branch_in_filter(self, client, mock_repo):
         """Test includes user branch along with main in filter."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
 
         response = client.get("/browse/elements?username=developer")
@@ -198,10 +198,10 @@ class TestBrowseElements:
         assert "main" in username_filters[0]["terms"]["username"]
         assert "developer" in username_filters[0]["terms"]["username"]
 
-    def test_resolves_parent_info(self, client, mock_es_repo):
+    def test_resolves_parent_info(self, client, mock_repo):
         """Test resolves parent info for container."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {
             "hits": {
                 "total": {"value": 1},
@@ -243,10 +243,10 @@ class TestBrowseElements:
         assert data["elements"][0]["container"]["name"] == "MyClass"
         assert data["elements"][0]["container"]["element_type"] == "class"
 
-    def test_handles_unfound_parent(self, client, mock_es_repo):
+    def test_handles_unfound_parent(self, client, mock_repo):
         """Test handles unfound parent gracefully."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {
             "hits": {
                 "total": {"value": 1},
@@ -285,13 +285,13 @@ class TestBrowseElements:
 class TestGetElementChildren:
     """Tests for GET /browse/element/{hash_id}/children."""
 
-    def test_returns_children_grouped_by_type(self, client, mock_es_repo):
+    def test_returns_children_grouped_by_type(self, client, mock_repo):
         """Test returns children grouped by type."""
-        mock_es_repo.get_document_by_hash_id.return_value = {
+        mock_repo.get_document_by_hash_id.return_value = {
             "element_id": "parent_id",
         }
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {
             "hits": {
                 "hits": [
@@ -333,9 +333,9 @@ class TestGetElementChildren:
         assert len(data["children"]["variable"]) == 1
         assert data["total_children"] == 3
 
-    def test_returns_error_when_element_not_found(self, client, mock_es_repo):
+    def test_returns_error_when_element_not_found(self, client, mock_repo):
         """Test returns error when element not found."""
-        mock_es_repo.get_document_by_hash_id.return_value = None
+        mock_repo.get_document_by_hash_id.return_value = None
 
         response = client.get("/browse/element/nonexistent/children")
 
@@ -346,11 +346,11 @@ class TestGetElementChildren:
         assert data["children"] == {}
         assert data["total_children"] == 0
 
-    def test_orders_types_logically(self, client, mock_es_repo):
+    def test_orders_types_logically(self, client, mock_repo):
         """Test orders types in logical order."""
-        mock_es_repo.get_document_by_hash_id.return_value = {"element_id": "parent_id"}
+        mock_repo.get_document_by_hash_id.return_value = {"element_id": "parent_id"}
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {
             "hits": {
                 "hits": [
@@ -379,10 +379,10 @@ class TestGetElementChildren:
 class TestGetBrowseFilters:
     """Tests for GET /browse/filters."""
 
-    def test_returns_all_filter_options(self, client, mock_es_repo):
+    def test_returns_all_filter_options(self, client, mock_repo):
         """Test returns all filter options."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {
             "aggregations": {
                 "scopes": {"buckets": [{"key": "github"}, {"key": "gitlab"}]},
@@ -409,10 +409,10 @@ class TestGetBrowseFilters:
         assert data["languages"] == ["python", "javascript"]
         assert data["usernames"] == ["main", "developer"]
 
-    def test_handles_empty_aggregations(self, client, mock_es_repo):
+    def test_handles_empty_aggregations(self, client, mock_repo):
         """Test handles empty aggregations."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"aggregations": {}}
 
         response = client.get("/browse/filters")
@@ -434,10 +434,10 @@ class TestGetBrowseFilters:
 class TestGetBrowseStats:
     """Tests for GET /browse/stats."""
 
-    def test_returns_stats(self, client, mock_es_repo):
+    def test_returns_stats(self, client, mock_repo):
         """Test returns element statistics."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {
             "aggregations": {
                 "by_type": {
@@ -466,10 +466,10 @@ class TestGetBrowseStats:
         assert data["language_counts"]["python"] == 150
         assert data["total"] == 200
 
-    def test_filters_by_scope_and_repo(self, client, mock_es_repo):
+    def test_filters_by_scope_and_repo(self, client, mock_repo):
         """Test filters by scope and repository."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {
             "aggregations": {
                 "by_type": {"buckets": []},
@@ -497,9 +497,9 @@ class TestGetBrowseStats:
 class TestGetElementDetails:
     """Tests for GET /browse/element/{hash_id}/details."""
 
-    def test_returns_element_details(self, client, mock_es_repo):
+    def test_returns_element_details(self, client, mock_repo):
         """Test returns element details."""
-        mock_es_repo.get_document_by_hash_id.return_value = {
+        mock_repo.get_document_by_hash_id.return_value = {
             "element_id": "id1",
             "hash_id": "h1",
             "name": "my_function",
@@ -514,7 +514,7 @@ class TestGetElementDetails:
             "scope": "scope",
         }
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.count.return_value = {"count": 0}
 
         response = client.get("/browse/element/hash123/details")
@@ -527,9 +527,9 @@ class TestGetElementDetails:
         assert data["containers"] == []
         assert data["child_count"] == 0
 
-    def test_returns_error_when_not_found(self, client, mock_es_repo):
+    def test_returns_error_when_not_found(self, client, mock_repo):
         """Test returns error when element not found."""
-        mock_es_repo.get_document_by_hash_id.return_value = None
+        mock_repo.get_document_by_hash_id.return_value = None
 
         response = client.get("/browse/element/nonexistent/details")
 
@@ -537,9 +537,9 @@ class TestGetElementDetails:
         data = response.json()
         assert data["error"] == "Element not found"
 
-    def test_builds_container_chain(self, client, mock_es_repo):
+    def test_builds_container_chain(self, client, mock_repo):
         """Test builds container chain from parent to file."""
-        mock_es_repo.get_document_by_hash_id.return_value = {
+        mock_repo.get_document_by_hash_id.return_value = {
             "element_id": "method_id",
             "name": "method1",
             "element_type": "method",
@@ -549,7 +549,7 @@ class TestGetElementDetails:
             "scope": "scope",
         }
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
 
         # First call: get parent (class)
         # Second call: get grandparent (file)
@@ -593,9 +593,9 @@ class TestGetElementDetails:
         assert data["containers"][0]["element_type"] == "class"
         assert data["containers"][1]["name"] == "file.py"
 
-    def test_includes_call_graph_when_requested(self, client, mock_es_repo):
+    def test_includes_call_graph_when_requested(self, client, mock_repo):
         """Test includes call graph when requested."""
-        mock_es_repo.get_document_by_hash_id.return_value = {
+        mock_repo.get_document_by_hash_id.return_value = {
             "element_id": "func_id",
             "name": "my_function",
             "element_type": "function",
@@ -605,7 +605,7 @@ class TestGetElementDetails:
             "scope": "scope",
         }
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.count.return_value = {"count": 0}
 
         # Search for callers
@@ -661,9 +661,9 @@ class TestGetElementDetails:
         assert len(data["callees"]) == 1
         assert data["callees"][0]["name"] == "other_func"
 
-    def test_skips_call_graph_for_non_functions(self, client, mock_es_repo):
+    def test_skips_call_graph_for_non_functions(self, client, mock_repo):
         """Test skips call graph for non-function elements."""
-        mock_es_repo.get_document_by_hash_id.return_value = {
+        mock_repo.get_document_by_hash_id.return_value = {
             "element_id": "class_id",
             "name": "MyClass",
             "element_type": "class",
@@ -672,7 +672,7 @@ class TestGetElementDetails:
             "scope": "scope",
         }
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.count.return_value = {"count": 0}
 
         response = client.get("/browse/element/hash123/details?include_call_graph=true")
@@ -682,9 +682,9 @@ class TestGetElementDetails:
         assert "callers" not in data
         assert "callees" not in data
 
-    def test_handles_parent_lookup_error(self, client, mock_es_repo):
+    def test_handles_parent_lookup_error(self, client, mock_repo):
         """Test handles error when looking up parent."""
-        mock_es_repo.get_document_by_hash_id.return_value = {
+        mock_repo.get_document_by_hash_id.return_value = {
             "element_id": "id1",
             "name": "func1",
             "element_type": "function",
@@ -694,7 +694,7 @@ class TestGetElementDetails:
             "scope": "scope",
         }
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.get.side_effect = Exception("Not found")
         mock_client.count.return_value = {"count": 0}
 
@@ -705,9 +705,9 @@ class TestGetElementDetails:
         # Should not crash, containers should be empty
         assert data["containers"] == []
 
-    def test_counts_children(self, client, mock_es_repo):
+    def test_counts_children(self, client, mock_repo):
         """Test counts children correctly."""
-        mock_es_repo.get_document_by_hash_id.return_value = {
+        mock_repo.get_document_by_hash_id.return_value = {
             "element_id": "class_id",
             "name": "MyClass",
             "element_type": "class",
@@ -716,7 +716,7 @@ class TestGetElementDetails:
             "scope": "scope",
         }
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.count.return_value = {"count": 5}
 
         response = client.get("/browse/element/hash123/details")

@@ -65,7 +65,7 @@ class TestGetFileStatesWithIncompleteElements:
 
     def test_incomplete_file_gets_null_hash(self) -> None:
         """Files with incomplete elements should have file_hash=None."""
-        from shared.db.elasticsearch import ElasticsearchFileStateRepository
+        from shared.db.store import ElasticsearchFileStateRepository
 
         repo = ElasticsearchFileStateRepository.__new__(ElasticsearchFileStateRepository)
         repo._es = MagicMock()
@@ -104,7 +104,7 @@ class TestGetFileStatesWithIncompleteElements:
 
     def test_complete_files_keep_hash(self) -> None:
         """Files with all embeddings complete should keep their file_hash."""
-        from shared.db.elasticsearch import ElasticsearchFileStateRepository
+        from shared.db.store import ElasticsearchFileStateRepository
 
         repo = ElasticsearchFileStateRepository.__new__(ElasticsearchFileStateRepository)
         repo._es = MagicMock()
@@ -122,7 +122,7 @@ class TestGetFileStatesWithIncompleteElements:
 
     def test_no_file_states_returns_empty(self) -> None:
         """Empty repo should return empty states."""
-        from shared.db.elasticsearch import ElasticsearchFileStateRepository
+        from shared.db.store import ElasticsearchFileStateRepository
 
         repo = ElasticsearchFileStateRepository.__new__(ElasticsearchFileStateRepository)
         repo._es = MagicMock()

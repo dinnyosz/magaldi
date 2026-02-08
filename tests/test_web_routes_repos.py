@@ -17,23 +17,23 @@ from magaldi_web.routes.repos import router
 
 
 @pytest.fixture
-def mock_es_repo():
+def mock_repo():
     """Create a mock Elasticsearch repository."""
     return MagicMock()
 
 
 @pytest.fixture
-def client(mock_es_repo):
+def client(mock_repo):
     """Create test client with mocked dependencies."""
     app = FastAPI()
     app.include_router(router)
 
-    from magaldi_web.dependencies import get_es_repository
+    from magaldi_web.dependencies import get_repository
 
-    def get_mock_es_repo():
-        yield mock_es_repo
+    def get_mock_repo():
+        yield mock_repo
 
-    app.dependency_overrides[get_es_repository] = get_mock_es_repo
+    app.dependency_overrides[get_repository] = get_mock_repo
     return TestClient(app)
 
 
@@ -45,10 +45,10 @@ def client(mock_es_repo):
 class TestListRepos:
     """Tests for GET /repos."""
 
-    def test_returns_empty_list_when_no_repos(self, client, mock_es_repo):
+    def test_returns_empty_list_when_no_repos(self, client, mock_repo):
         """Test returns empty list when no repositories exist."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {
             "aggregations": {"repos": {"buckets": []}}
         }
@@ -60,10 +60,10 @@ class TestListRepos:
         assert data["repos"] == []
         assert data["total"] == 0
 
-    def test_returns_repos_list(self, client, mock_es_repo):
+    def test_returns_repos_list(self, client, mock_repo):
         """Test returns list of repositories."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {
             "aggregations": {
                 "repos": {
@@ -107,10 +107,10 @@ class TestListRepos:
         assert data["repos"][1]["name"] == "project2"
         assert data["repos"][1]["languages"] == ["rust"]
 
-    def test_handles_missing_aggregations(self, client, mock_es_repo):
+    def test_handles_missing_aggregations(self, client, mock_repo):
         """Test handles missing aggregations gracefully."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {}
 
         response = client.get("/repos")
@@ -120,10 +120,10 @@ class TestListRepos:
         assert data["repos"] == []
         assert data["total"] == 0
 
-    def test_handles_missing_file_count(self, client, mock_es_repo):
+    def test_handles_missing_file_count(self, client, mock_repo):
         """Test handles missing file_count in bucket."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {
             "aggregations": {
                 "repos": {
@@ -153,10 +153,10 @@ class TestListRepos:
 class TestGetRepoDetail:
     """Tests for GET /repos/{scope}/{repository}."""
 
-    def test_returns_repo_detail(self, client, mock_es_repo):
+    def test_returns_repo_detail(self, client, mock_repo):
         """Test returns repository detail successfully."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
 
         # First call: repo stats
         # Second call: active users
@@ -201,10 +201,10 @@ class TestGetRepoDetail:
         assert data["active_users"][0]["username"] == "developer1"
         assert data["active_users"][0]["files_modified"] == 3
 
-    def test_returns_404_when_not_found(self, client, mock_es_repo):
+    def test_returns_404_when_not_found(self, client, mock_repo):
         """Test returns 404 when repository not found."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {
             "hits": {"total": {"value": 0}},
             "aggregations": {},
@@ -215,10 +215,10 @@ class TestGetRepoDetail:
         assert response.status_code == 404
         assert "Repository not found" in response.json()["detail"]
 
-    def test_handles_repo_with_no_active_users(self, client, mock_es_repo):
+    def test_handlrepo_with_no_active_users(self, client, mock_repo):
         """Test handles repo with no active users."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
 
         call_count = [0]
 
@@ -252,10 +252,10 @@ class TestGetRepoDetail:
 class TestGetFileTree:
     """Tests for GET /repos/{scope}/{repository}/tree."""
 
-    def test_returns_empty_tree(self, client, mock_es_repo):
+    def test_returns_empty_tree(self, client, mock_repo):
         """Test returns empty tree when no files."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"hits": {"hits": []}}
 
         response = client.get("/repos/github/project/tree")
@@ -266,10 +266,10 @@ class TestGetFileTree:
         assert data["scope"] == "github"
         assert data["repository"] == "project"
 
-    def test_returns_flat_file_list(self, client, mock_es_repo):
+    def test_returns_flat_file_list(self, client, mock_repo):
         """Test returns flat file list (no subdirectories)."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {
             "hits": {
                 "hits": [
@@ -300,10 +300,10 @@ class TestGetFileTree:
         assert data["tree"][0]["path"] == "main.py"
         assert data["tree"][0]["language"] == "python"
 
-    def test_returns_nested_tree(self, client, mock_es_repo):
+    def test_returns_nested_tree(self, client, mock_repo):
         """Test returns nested directory tree."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {
             "hits": {
                 "hits": [
@@ -340,10 +340,10 @@ class TestGetFileTree:
         assert "src" in dir_names
         assert "tests" in dir_names
 
-    def test_sorts_directories_before_files(self, client, mock_es_repo):
+    def test_sorts_directories_before_files(self, client, mock_repo):
         """Test directories are sorted before files."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {
             "hits": {
                 "hits": [
@@ -366,10 +366,10 @@ class TestGetFileTree:
         assert data["tree"][2]["type"] == "file"
         assert data["tree"][2]["name"] == "zzz.py"
 
-    def test_accepts_username_parameter(self, client, mock_es_repo):
+    def test_accepts_username_parameter(self, client, mock_repo):
         """Test accepts username query parameter."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"hits": {"hits": []}}
 
         response = client.get("/repos/github/project/tree?username=developer")
@@ -391,10 +391,10 @@ class TestGetFileTree:
 class TestGetFileDetail:
     """Tests for GET /repos/{scope}/{repository}/files/{file_path}."""
 
-    def test_returns_file_detail(self, client, mock_es_repo):
+    def test_returns_file_detail(self, client, mock_repo):
         """Test returns file detail successfully."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
 
         call_count = [0]
 
@@ -477,10 +477,10 @@ class TestGetFileDetail:
         assert len(data["contributors"]) == 2
         assert data["contributors"][0]["username"] == "dev1"
 
-    def test_returns_404_when_file_not_found(self, client, mock_es_repo):
+    def test_returns_404_when_file_not_found(self, client, mock_repo):
         """Test returns 404 when file not found."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"hits": {"hits": []}}
 
         response = client.get("/repos/github/project/files/nonexistent.py")
@@ -488,10 +488,10 @@ class TestGetFileDetail:
         assert response.status_code == 404
         assert "File not found" in response.json()["detail"]
 
-    def test_counts_element_types(self, client, mock_es_repo):
+    def test_counts_element_types(self, client, mock_repo):
         """Test correctly counts different element types."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
 
         call_count = [0]
 
@@ -533,10 +533,10 @@ class TestGetFileDetail:
         assert data["stats"]["methods"] == 3
         assert data["stats"]["variables"] == 1
 
-    def test_handles_file_with_no_elements(self, client, mock_es_repo):
+    def test_handles_file_with_no_elements(self, client, mock_repo):
         """Test handles file with no code elements."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
 
         call_count = [0]
 
@@ -565,10 +565,10 @@ class TestGetFileDetail:
         assert data["stats"]["classes"] == 0
         assert data["stats"]["functions"] == 0
 
-    def test_accepts_username_parameter(self, client, mock_es_repo):
+    def test_accepts_username_parameter(self, client, mock_repo):
         """Test accepts username query parameter."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"hits": {"hits": []}}
 
         response = client.get("/repos/github/project/files/main.py?username=dev")
@@ -581,10 +581,10 @@ class TestGetFileDetail:
         usernames = [f["term"]["username"] for f in filters if "username" in f.get("term", {})]
         assert "dev" in usernames
 
-    def test_handles_missing_optional_fields(self, client, mock_es_repo):
+    def test_handles_missing_optional_fields(self, client, mock_repo):
         """Test handles missing optional fields."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
 
         call_count = [0]
 
@@ -613,10 +613,10 @@ class TestGetFileDetail:
         assert data["file"]["summary"] is None
         assert data["file"]["line_count"] == 0
 
-    def test_handles_nested_file_path(self, client, mock_es_repo):
+    def test_handles_nested_file_path(self, client, mock_repo):
         """Test handles deeply nested file paths."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
 
         call_count = [0]
 

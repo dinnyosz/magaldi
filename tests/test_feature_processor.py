@@ -50,7 +50,7 @@ def feature_config():
 
 
 @pytest.fixture
-def mock_es_repo():
+def mock_repo():
     """Create a mock Elasticsearch repository."""
     repo = MagicMock()
     repo.get_summaries_batch.return_value = {}
@@ -733,7 +733,7 @@ class TestProcessSingleFeature:
     def test_successful_processing(
         self,
         sample_cluster,
-        mock_es_repo,
+        mock_repo,
         mock_llm_client,
         mock_embed_client,
         feature_config,
@@ -754,7 +754,7 @@ class TestProcessSingleFeature:
                 scope="test_scope",
                 repository="test_repo",
                 username="test_user",
-                es_repo=mock_es_repo,
+                repo=mock_repo,
                 llm_client=mock_llm_client,
                 embed_client=mock_embed_client,
                 config=feature_config,
@@ -765,12 +765,12 @@ class TestProcessSingleFeature:
         assert result.success is True
         assert result.summarize_time > 0 or result.summarize_time == 0  # May be very fast
         assert result.error is None
-        mock_es_repo.index_feature.assert_called_once()
+        mock_repo.index_feature.assert_called_once()
 
     def test_processing_error_handling(
         self,
         sample_cluster,
-        mock_es_repo,
+        mock_repo,
         mock_llm_client,
         mock_embed_client,
         feature_config,
@@ -785,7 +785,7 @@ class TestProcessSingleFeature:
             scope="test_scope",
             repository="test_repo",
             username="test_user",
-            es_repo=mock_es_repo,
+            repo=mock_repo,
             llm_client=mock_llm_client,
             embed_client=mock_embed_client,
             config=feature_config,
@@ -799,7 +799,7 @@ class TestProcessSingleFeature:
     def test_worker_status_updates(
         self,
         sample_cluster,
-        mock_es_repo,
+        mock_repo,
         mock_llm_client,
         mock_embed_client,
         feature_config,
@@ -817,7 +817,7 @@ class TestProcessSingleFeature:
             scope="test_scope",
             repository="test_repo",
             username="test_user",
-            es_repo=mock_es_repo,
+            repo=mock_repo,
             llm_client=mock_llm_client,
             embed_client=mock_embed_client,
             config=feature_config,
@@ -838,7 +838,7 @@ class TestProcessSingleFeature:
 class TestProcessFeatures:
     """Tests for process_features function."""
 
-    def test_returns_empty_for_no_clusters(self, mock_es_repo):
+    def test_returns_empty_for_no_clusters(self, mock_repo):
         """Test that empty result is returned when no clusters."""
         clustering_result = ClusteringResult(
             clusters=[],
@@ -852,13 +852,13 @@ class TestProcessFeatures:
             scope="test_scope",
             repository="test_repo",
             username="test_user",
-            es_repo=mock_es_repo,
+            repo=mock_repo,
         )
 
         assert result == {"processed": 0, "failed": 0}
 
     def test_processes_clusters_successfully(
-        self, sample_clustering_result, mock_es_repo
+        self, sample_clustering_result, mock_repo
     ):
         """Test successful processing of clusters."""
         mock_llm = MagicMock()
@@ -879,15 +879,15 @@ class TestProcessFeatures:
                 scope="test_scope",
                 repository="test_repo",
                 username="test_user",
-                es_repo=mock_es_repo,
+                repo=mock_repo,
             )
 
         assert result["processed"] == 1
         assert result["failed"] == 0
-        mock_es_repo.delete_features.assert_called_once()
-        mock_es_repo.index_feature.assert_called_once()
+        mock_repo.delete_features.assert_called_once()
+        mock_repo.index_feature.assert_called_once()
 
-    def test_progress_callback_is_called(self, sample_clustering_result, mock_es_repo):
+    def test_progress_callback_is_called(self, sample_clustering_result, mock_repo):
         """Test that progress callback is invoked."""
         progress_states = []
 
@@ -912,7 +912,7 @@ class TestProcessFeatures:
                 scope="test_scope",
                 repository="test_repo",
                 username="test_user",
-                es_repo=mock_es_repo,
+                repo=mock_repo,
                 on_progress=on_progress,
             )
 
@@ -923,7 +923,7 @@ class TestProcessFeatures:
 class TestProcessSubfeatures:
     """Tests for process_subfeatures function."""
 
-    def test_returns_empty_for_small_clusters(self, mock_es_repo):
+    def test_returns_empty_for_small_clusters(self, mock_repo):
         """Test that no subfeatures are created for small clusters."""
         # Create a small cluster (less than min_members_for_subclustering)
         small_cluster = ClusterResult(
@@ -945,7 +945,7 @@ class TestProcessSubfeatures:
             scope="test_scope",
             repository="test_repo",
             username="test_user",
-            es_repo=mock_es_repo,
+            repo=mock_repo,
         )
 
         assert result["subfeatures_created"] == 0
@@ -963,7 +963,7 @@ class TestProcessSingleSubfeature:
     def test_successful_subfeature_processing(
         self,
         sample_cluster,
-        mock_es_repo,
+        mock_repo,
         mock_llm_client,
         mock_embed_client,
         feature_config,
@@ -983,7 +983,7 @@ class TestProcessSingleSubfeature:
             scope="test_scope",
             repository="test_repo",
             username="test_user",
-            es_repo=mock_es_repo,
+            repo=mock_repo,
             llm_client=mock_llm_client,
             embed_client=mock_embed_client,
             config=feature_config,
@@ -993,12 +993,12 @@ class TestProcessSingleSubfeature:
 
         assert result.success is True
         assert result.parent_label == "parent"
-        mock_es_repo.index_subfeature.assert_called_once()
+        mock_repo.index_subfeature.assert_called_once()
 
     def test_subfeature_processing_error(
         self,
         sample_cluster,
-        mock_es_repo,
+        mock_repo,
         mock_llm_client,
         mock_embed_client,
         feature_config,
@@ -1019,7 +1019,7 @@ class TestProcessSingleSubfeature:
             scope="test_scope",
             repository="test_repo",
             username="test_user",
-            es_repo=mock_es_repo,
+            repo=mock_repo,
             llm_client=mock_llm_client,
             embed_client=mock_embed_client,
             config=feature_config,

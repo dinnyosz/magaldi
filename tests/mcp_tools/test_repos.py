@@ -21,23 +21,23 @@ from magaldi_mcp.tools import (
 class TestListRepos:
     """Tests for list_repos function."""
 
-    def test_list_repos_returns_repos(self, mock_es_repo):
+    def test_list_repos_returns_repos(self, mock_repo):
         """Test list_repos returns repository list."""
-        mock_es_repo.get_indexed_repositories.return_value = [
+        mock_repo.get_indexed_repositories.return_value = [
             {"scope": "magaldi", "repository": "magaldi", "element_count": 100}
         ]
 
-        result = list_repos(es=mock_es_repo)
+        result = list_repos(es=mock_repo)
 
         assert isinstance(result, list)
         assert len(result) == 1
         assert result[0]["scope"] == "magaldi"
 
-    def test_list_repos_with_scope_filter(self, mock_es_repo):
+    def test_list_repos_with_scope_filter(self, mock_repo):
         """Test list_repos with scope filter."""
-        mock_es_repo.get_indexed_repositories.return_value = []
+        mock_repo.get_indexed_repositories.return_value = []
 
-        result = list_repos(es=mock_es_repo, scope="test-scope")
+        result = list_repos(es=mock_repo, scope="test-scope")
 
         assert isinstance(result, list)
 
@@ -54,15 +54,15 @@ class TestListRepos:
 class TestFindFiles:
     """Tests for find_files function."""
 
-    def test_find_files_returns_matching_files(self, mock_es_repo):
+    def test_find_files_returns_matching_files(self, mock_repo):
         """Test find_files returns matching files."""
-        mock_es_repo.find_files.return_value = [
+        mock_repo.find_files.return_value = [
             {"relative_path": "src/main.py", "element_id": "id1"},
             {"relative_path": "src/utils.py", "element_id": "id2"},
         ]
 
         result = find_files(
-            es=mock_es_repo,
+            es=mock_repo,
             pattern="**/*.py",
         )
 
@@ -81,10 +81,10 @@ class TestFindFiles:
 class TestFindFilesExtended:
     """Extended tests for find_files function."""
 
-    def test_find_files_with_glob_pattern(self, mock_es_repo):
+    def test_find_files_with_glob_pattern(self, mock_repo):
         """Test find_files filters by glob pattern."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {
             "hits": {
                 "hits": [
@@ -117,7 +117,7 @@ class TestFindFilesExtended:
         }
 
         result = find_files(
-            es=mock_es_repo,
+            es=mock_repo,
             pattern="**/*.py",
         )
 
@@ -137,9 +137,9 @@ class TestFindFilesExtended:
 class TestGetRepoStats:
     """Tests for get_repo_stats function."""
 
-    def test_get_repo_stats_returns_stats(self, mock_es_repo):
+    def test_get_repo_stats_returns_stats(self, mock_repo):
         """Test get_repo_stats returns repository statistics."""
-        mock_es_repo.get_repository_stats.return_value = {
+        mock_repo.get_repository_stats.return_value = {
             "total_elements": 100,
             "files": 10,
             "classes": 20,
@@ -147,7 +147,7 @@ class TestGetRepoStats:
         }
 
         result = get_repo_stats(
-            es=mock_es_repo,
+            es=mock_repo,
             scope="test-scope",
             repository="test-repo",
         )
@@ -168,10 +168,10 @@ class TestGetRepoStats:
 class TestGetFileStructure:
     """Tests for get_file_structure function."""
 
-    def test_get_file_structure_returns_tree(self, mock_es_repo):
+    def test_get_file_structure_returns_tree(self, mock_repo):
         """Test get_file_structure returns proper tree structure."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
 
         # First search: find file element
         # Second search: find all elements in file
@@ -228,7 +228,7 @@ class TestGetFileStructure:
         mock_client.search.side_effect = search_side_effect
 
         result = get_file_structure(
-            es=mock_es_repo,
+            es=mock_repo,
             scope="github",
             repository="repo",
             file_path="test.py",
@@ -239,15 +239,15 @@ class TestGetFileStructure:
         assert result["stats"]["classes"] == 1
         assert result["stats"]["functions"] == 1
 
-    def test_get_file_structure_file_not_found(self, mock_es_repo):
+    def test_get_file_structure_file_not_found(self, mock_repo):
         """Test get_file_structure raises when file not found."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"hits": {"hits": []}}
 
         with pytest.raises(ValueError, match="File not found"):
             get_file_structure(
-                es=mock_es_repo,
+                es=mock_repo,
                 scope="github",
                 repository="repo",
                 file_path="nonexistent.py",

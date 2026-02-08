@@ -17,33 +17,33 @@ from magaldi_web.routes.elements import router
 
 
 @pytest.fixture
-def mock_es_repo():
+def mock_repo():
     """Create a mock Elasticsearch repository."""
     return MagicMock()
 
 
 @pytest.fixture
-def app(mock_es_repo):
+def app(mock_repo):
     """Create FastAPI app with mocked dependencies."""
     app = FastAPI()
     app.include_router(router)
 
-    def get_mock_es_repo():
-        yield mock_es_repo
+    def get_mock_repo():
+        yield mock_repo
 
-    app.dependency_overrides["magaldi_web.dependencies.get_es_repository"] = get_mock_es_repo
+    app.dependency_overrides["magaldi_web.dependencies.get_repository"] = get_mock_repo
     return app
 
 
 @pytest.fixture
-def client(app, mock_es_repo):
+def client(app, mock_repo):
     """Create test client."""
-    from magaldi_web.dependencies import get_es_repository
+    from magaldi_web.dependencies import get_repository
 
-    def get_mock_es_repo():
-        yield mock_es_repo
+    def get_mock_repo():
+        yield mock_repo
 
-    app.dependency_overrides[get_es_repository] = get_mock_es_repo
+    app.dependency_overrides[get_repository] = get_mock_repo
     return TestClient(app)
 
 
@@ -82,12 +82,12 @@ def sample_element():
 class TestGetSimilarElements:
     """Tests for GET /elements/similar/{hash_id}."""
 
-    def test_returns_similar_elements(self, client, mock_es_repo, sample_element):
+    def test_returns_similar_elements(self, client, mock_repo, sample_element):
         """Test returns similar elements successfully."""
-        mock_es_repo.get_document_by_hash_id.return_value = sample_element
+        mock_repo.get_document_by_hash_id.return_value = sample_element
 
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {
             "hits": {
                 "hits": [
@@ -129,33 +129,33 @@ class TestGetSimilarElements:
         assert data[1]["name"] == "similar2"
         assert data[1]["similarity"] == 0.85
 
-    def test_returns_404_when_element_not_found(self, client, mock_es_repo):
+    def test_returns_404_when_element_not_found(self, client, mock_repo):
         """Test returns 404 when element not found."""
-        mock_es_repo.get_document_by_hash_id.return_value = None
-        mock_es_repo.get_document.return_value = None
+        mock_repo.get_document_by_hash_id.return_value = None
+        mock_repo.get_document.return_value = None
 
         response = client.get(f"/elements/similar/{'a' * 64}")
 
         assert response.status_code == 404
         assert "Element not found" in response.json()["detail"]
 
-    def test_returns_400_when_no_summary_embedding(self, client, mock_es_repo, sample_element):
+    def test_returns_400_when_no_summary_embedding(self, client, mock_repo, sample_element):
         """Test returns 400 when element has no summary_embedding."""
         element_without_summary_embedding = sample_element.copy()
         del element_without_summary_embedding["summary_embedding"]
-        mock_es_repo.get_document_by_hash_id.return_value = element_without_summary_embedding
+        mock_repo.get_document_by_hash_id.return_value = element_without_summary_embedding
 
         response = client.get(f"/elements/similar/{'a' * 64}")
 
         assert response.status_code == 400
         assert "no embedding" in response.json()["detail"]
 
-    def test_excludes_self_from_results(self, client, mock_es_repo, sample_element):
+    def test_excludes_self_from_results(self, client, mock_repo, sample_element):
         """Test excludes the queried element from results."""
-        mock_es_repo.get_document_by_hash_id.return_value = sample_element
+        mock_repo.get_document_by_hash_id.return_value = sample_element
 
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         # Include self in results
         mock_client.search.return_value = {
             "hits": {
@@ -194,12 +194,12 @@ class TestGetSimilarElements:
         assert len(data) == 1
         assert data[0]["name"] == "other"
 
-    def test_respects_limit_parameter(self, client, mock_es_repo, sample_element):
+    def test_respects_limit_parameter(self, client, mock_repo, sample_element):
         """Test respects the limit parameter."""
-        mock_es_repo.get_document_by_hash_id.return_value = sample_element
+        mock_repo.get_document_by_hash_id.return_value = sample_element
 
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         # Return more results than limit
         mock_client.search.return_value = {
             "hits": {
@@ -226,12 +226,12 @@ class TestGetSimilarElements:
         data = response.json()
         assert len(data) == 2
 
-    def test_handles_empty_results(self, client, mock_es_repo, sample_element):
+    def test_handles_empty_results(self, client, mock_repo, sample_element):
         """Test handles no similar elements."""
-        mock_es_repo.get_document_by_hash_id.return_value = sample_element
+        mock_repo.get_document_by_hash_id.return_value = sample_element
 
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"hits": {"hits": []}}
 
         response = client.get(f"/elements/similar/{'a' * 64}")
@@ -248,12 +248,12 @@ class TestGetSimilarElements:
 class TestGetElementDetail:
     """Tests for GET /elements/{hash_id}."""
 
-    def test_returns_element_detail(self, client, mock_es_repo, sample_element):
+    def test_returns_element_detail(self, client, mock_repo, sample_element):
         """Test returns element detail successfully."""
-        mock_es_repo.get_document_by_hash_id.return_value = sample_element
+        mock_repo.get_document_by_hash_id.return_value = sample_element
 
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
 
         # Mock all search calls
         mock_client.search.return_value = {"hits": {"hits": []}}
@@ -269,22 +269,22 @@ class TestGetElementDetail:
         assert data["summary"] == "A test function"
         assert data["decorators"] == ["@pytest.fixture"]
 
-    def test_returns_404_when_not_found(self, client, mock_es_repo):
+    def test_returns_404_when_not_found(self, client, mock_repo):
         """Test returns 404 when element not found."""
-        mock_es_repo.get_document_by_hash_id.return_value = None
-        mock_es_repo.get_document.return_value = None
+        mock_repo.get_document_by_hash_id.return_value = None
+        mock_repo.get_document.return_value = None
 
         response = client.get(f"/elements/{'a' * 64}")
 
         assert response.status_code == 404
         assert "Element not found" in response.json()["detail"]
 
-    def test_includes_file_context(self, client, mock_es_repo, sample_element):
+    def test_includes_file_context(self, client, mock_repo, sample_element):
         """Test includes file context for non-file elements."""
-        mock_es_repo.get_document_by_hash_id.return_value = sample_element
+        mock_repo.get_document_by_hash_id.return_value = sample_element
 
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
 
         def search_side_effect(**kwargs):
             body = kwargs.get("body", {})
@@ -321,12 +321,12 @@ class TestGetElementDetail:
         assert data["context"]["file"]["name"] == "file.py"
         assert data["context"]["file"]["summary"] == "File summary"
 
-    def test_includes_parent_context(self, client, mock_es_repo, sample_element):
+    def test_includes_parent_context(self, client, mock_repo, sample_element):
         """Test includes parent context when element has parent."""
-        mock_es_repo.get_document_by_hash_id.return_value = sample_element
+        mock_repo.get_document_by_hash_id.return_value = sample_element
 
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
 
         def search_side_effect(**kwargs):
             body = kwargs.get("body", {})
@@ -361,12 +361,12 @@ class TestGetElementDetail:
         assert data["context"]["parent"]["name"] == "TestClass"
         assert data["context"]["parent"]["element_type"] == "class"
 
-    def test_includes_children(self, client, mock_es_repo, sample_element):
+    def test_includes_children(self, client, mock_repo, sample_element):
         """Test includes children elements."""
-        mock_es_repo.get_document_by_hash_id.return_value = sample_element
+        mock_repo.get_document_by_hash_id.return_value = sample_element
 
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
 
         def search_side_effect(**kwargs):
             body = kwargs.get("body", {})
@@ -415,12 +415,12 @@ class TestGetElementDetail:
         assert data["context"]["children"][0]["name"] == "child1"
         assert data["context"]["children"][1]["name"] == "child2"
 
-    def test_includes_siblings(self, client, mock_es_repo, sample_element):
+    def test_includes_siblings(self, client, mock_repo, sample_element):
         """Test includes sibling elements when element has parent."""
-        mock_es_repo.get_document_by_hash_id.return_value = sample_element
+        mock_repo.get_document_by_hash_id.return_value = sample_element
 
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
 
         def search_side_effect(**kwargs):
             body = kwargs.get("body", {})
@@ -457,14 +457,14 @@ class TestGetElementDetail:
         assert len(data["context"]["siblings"]) == 1
         assert data["context"]["siblings"][0]["name"] == "sibling1"
 
-    def test_handles_invalid_decorators_json(self, client, mock_es_repo, sample_element):
+    def test_handles_invalid_decorators_json(self, client, mock_repo, sample_element):
         """Test handles invalid JSON in decorators field."""
         element_with_bad_decorators = sample_element.copy()
         element_with_bad_decorators["decorators"] = "not valid json"
-        mock_es_repo.get_document_by_hash_id.return_value = element_with_bad_decorators
+        mock_repo.get_document_by_hash_id.return_value = element_with_bad_decorators
 
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"hits": {"hits": []}}
 
         response = client.get(f"/elements/{'a' * 64}")
@@ -473,14 +473,14 @@ class TestGetElementDetail:
         data = response.json()
         assert data["decorators"] == []
 
-    def test_handles_null_decorators(self, client, mock_es_repo, sample_element):
+    def test_handles_null_decorators(self, client, mock_repo, sample_element):
         """Test handles null decorators field."""
         element_without_decorators = sample_element.copy()
         element_without_decorators["decorators"] = None
-        mock_es_repo.get_document_by_hash_id.return_value = element_without_decorators
+        mock_repo.get_document_by_hash_id.return_value = element_without_decorators
 
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"hits": {"hits": []}}
 
         response = client.get(f"/elements/{'a' * 64}")
@@ -489,15 +489,15 @@ class TestGetElementDetail:
         data = response.json()
         assert data["decorators"] == []
 
-    def test_skips_file_context_for_file_elements(self, client, mock_es_repo, sample_element):
+    def test_skips_file_context_for_file_elements(self, client, mock_repo, sample_element):
         """Test skips file context lookup for file type elements."""
         file_element = sample_element.copy()
         file_element["element_type"] = "file"
         file_element["parent_id"] = None
-        mock_es_repo.get_document_by_hash_id.return_value = file_element
+        mock_repo.get_document_by_hash_id.return_value = file_element
 
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"hits": {"hits": []}}
 
         response = client.get(f"/elements/{'a' * 64}")
@@ -507,14 +507,14 @@ class TestGetElementDetail:
         # File context should be None for file elements
         assert data["context"]["file"] is None
 
-    def test_handles_element_without_parent(self, client, mock_es_repo, sample_element):
+    def test_handles_element_without_parent(self, client, mock_repo, sample_element):
         """Test handles element without parent."""
         element_no_parent = sample_element.copy()
         element_no_parent["parent_id"] = None
-        mock_es_repo.get_document_by_hash_id.return_value = element_no_parent
+        mock_repo.get_document_by_hash_id.return_value = element_no_parent
 
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"hits": {"hits": []}}
 
         response = client.get(f"/elements/{'a' * 64}")
@@ -524,12 +524,12 @@ class TestGetElementDetail:
         assert data["context"]["parent"] is None
         assert data["context"]["siblings"] == []
 
-    def test_includes_repository_info(self, client, mock_es_repo, sample_element):
+    def test_includrepository_info(self, client, mock_repo, sample_element):
         """Test includes repository info in response."""
-        mock_es_repo.get_document_by_hash_id.return_value = sample_element
+        mock_repo.get_document_by_hash_id.return_value = sample_element
 
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"hits": {"hits": []}}
 
         response = client.get(f"/elements/{'a' * 64}")
@@ -539,7 +539,7 @@ class TestGetElementDetail:
         assert data["repository"]["scope"] == "scope"
         assert data["repository"]["name"] == "repo"
 
-    def test_handles_missing_optional_fields(self, client, mock_es_repo):
+    def test_handles_missing_optional_fields(self, client, mock_repo):
         """Test handles missing optional fields in element."""
         minimal_element = {
             "element_id": "scope:repo:user:file.py:function:test:10",
@@ -551,10 +551,10 @@ class TestGetElementDetail:
             "relative_path": "file.py",
             "line_start": 10,
         }
-        mock_es_repo.get_document_by_hash_id.return_value = minimal_element
+        mock_repo.get_document_by_hash_id.return_value = minimal_element
 
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"hits": {"hits": []}}
 
         response = client.get(f"/elements/{'a' * 64}")

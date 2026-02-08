@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from magaldi_web.app import create_app
-from magaldi_web.dependencies import get_es_repository
+from magaldi_web.dependencies import get_repository
 from shared.config import MagaldiConfig
 
 
@@ -22,27 +22,27 @@ from shared.config import MagaldiConfig
 
 
 @pytest.fixture
-def mock_es_client():
+def mock_client():
     """Create a mock Elasticsearch client."""
     mock = MagicMock()
     return mock
 
 
 @pytest.fixture
-def mock_es_repo(mock_es_client):
+def mock_repo(mock_client):
     """Create a mock Elasticsearch repository."""
     mock = MagicMock()
-    mock._get_client.return_value = mock_es_client
+    mock._get_client.return_value = mock_client
     return mock
 
 
 @pytest.fixture
-def app(test_config: MagaldiConfig, mock_es_repo: MagicMock):
+def app(test_config: MagaldiConfig, mock_repo: MagicMock):
     """Create a test FastAPI application with mocked dependencies."""
     app = create_app(test_config)
 
     # Override the ES repository dependency
-    app.dependency_overrides[get_es_repository] = lambda: mock_es_repo
+    app.dependency_overrides[get_repository] = lambda: mock_repo
 
     return app
 
@@ -62,11 +62,11 @@ class TestDashboardEndpoint:
     """Tests for the /api/v1/dashboard endpoint."""
 
     def test_dashboard_returns_stats(
-        self, client: TestClient, mock_es_repo: MagicMock, mock_es_client: MagicMock
+        self, client: TestClient, mock_repo: MagicMock, mock_client: MagicMock
     ):
         """Test that dashboard returns repository statistics."""
         # Mock two search calls: repos aggregation and type aggregation
-        mock_es_client.search.side_effect = [
+        mock_client.search.side_effect = [
             # First call: repos aggregation
             {
                 "aggregations": {
@@ -104,12 +104,12 @@ class TestDashboardEndpoint:
             },
         ]
 
-        with patch("magaldi_web.routes.dashboard.check_elasticsearch_health") as mock_es_health, \
+        with patch("magaldi_web.routes.dashboard.check_search_health") as mock_search_health, \
              patch("magaldi_web.routes.dashboard.check_llm_health") as mock_llm_health, \
              patch("magaldi_web.routes.dashboard.check_redis_health") as mock_redis_health, \
              patch("magaldi_web.routes.dashboard.get_redis_queue_stats") as mock_queue_stats:
 
-            mock_es_health.return_value = {"status": "healthy"}
+            mock_search_health.return_value = {"status": "healthy"}
             mock_llm_health.return_value = {"status": "healthy"}
             mock_redis_health.return_value = {"status": "healthy"}
             mock_queue_stats.return_value = {
@@ -136,10 +136,10 @@ class TestDashboardEndpoint:
         assert data["queue_status"]["total_pending"] == 0
 
     def test_dashboard_empty_index(
-        self, client: TestClient, mock_es_repo: MagicMock, mock_es_client: MagicMock
+        self, client: TestClient, mock_repo: MagicMock, mock_client: MagicMock
     ):
         """Test dashboard with empty Elasticsearch index."""
-        mock_es_client.search.side_effect = [
+        mock_client.search.side_effect = [
             # First call: repos aggregation
             {
                 "aggregations": {
@@ -155,12 +155,12 @@ class TestDashboardEndpoint:
             },
         ]
 
-        with patch("magaldi_web.routes.dashboard.check_elasticsearch_health") as mock_es_health, \
+        with patch("magaldi_web.routes.dashboard.check_search_health") as mock_search_health, \
              patch("magaldi_web.routes.dashboard.check_llm_health") as mock_llm_health, \
              patch("magaldi_web.routes.dashboard.check_redis_health") as mock_redis_health, \
              patch("magaldi_web.routes.dashboard.get_redis_queue_stats") as mock_queue_stats:
 
-            mock_es_health.return_value = {"status": "healthy"}
+            mock_search_health.return_value = {"status": "healthy"}
             mock_llm_health.return_value = {"status": "healthy"}
             mock_redis_health.return_value = {"status": "healthy"}
             mock_queue_stats.return_value = {
@@ -187,10 +187,10 @@ class TestSearchEndpoint:
     """Tests for the /api/v1/search endpoint."""
 
     def test_search_returns_results(
-        self, client: TestClient, mock_es_repo: MagicMock, mock_es_client: MagicMock
+        self, client: TestClient, mock_repo: MagicMock, mock_client: MagicMock
     ):
         """Test that search returns matching results."""
-        mock_es_client.search.return_value = {
+        mock_client.search.return_value = {
             "took": 10,
             "hits": {
                 "total": {"value": 2},
@@ -249,10 +249,10 @@ class TestSearchEndpoint:
         assert data["took_ms"] == 10
 
     def test_search_with_filters(
-        self, client: TestClient, mock_es_repo: MagicMock, mock_es_client: MagicMock
+        self, client: TestClient, mock_repo: MagicMock, mock_client: MagicMock
     ):
         """Test search with scope, repository, and type filters."""
-        mock_es_client.search.return_value = {
+        mock_client.search.return_value = {
             "took": 5,
             "hits": {"total": {"value": 0}, "max_score": None, "hits": []},
         }
@@ -286,7 +286,7 @@ class TestVectorMapEndpoints:
     """Tests for the /api/v1/repos/{scope}/{repo}/vector-map endpoint."""
 
     def test_get_vector_map(
-        self, client: TestClient, mock_es_repo: MagicMock, mock_es_client: MagicMock
+        self, client: TestClient, mock_repo: MagicMock, mock_client: MagicMock
     ):
         """Test getting vector map coordinates."""
         # Create mock embeddings for 10 elements
@@ -304,7 +304,7 @@ class TestVectorMapEndpoints:
                 }
             })
 
-        mock_es_client.search.return_value = {
+        mock_client.search.return_value = {
             "hits": {"hits": mock_hits}
         }
 
@@ -329,10 +329,10 @@ class TestVectorMapEndpoints:
             assert "name" in point
 
     def test_get_vector_map_empty(
-        self, client: TestClient, mock_es_repo: MagicMock, mock_es_client: MagicMock
+        self, client: TestClient, mock_repo: MagicMock, mock_client: MagicMock
     ):
         """Test vector map with no elements."""
-        mock_es_client.search.return_value = {
+        mock_client.search.return_value = {
             "hits": {"hits": []}
         }
 
@@ -353,10 +353,10 @@ class TestClustersEndpoint:
     """Tests for the /api/v1/repos/{scope}/{repo}/clusters endpoint."""
 
     def test_get_clusters(
-        self, client: TestClient, mock_es_repo: MagicMock, mock_es_client: MagicMock
+        self, client: TestClient, mock_repo: MagicMock, mock_client: MagicMock
     ):
         """Test getting HDBSCAN feature clusters."""
-        mock_es_client.search.return_value = {
+        mock_client.search.return_value = {
             "hits": {
                 "hits": [
                     {
@@ -398,10 +398,10 @@ class TestClustersEndpoint:
         assert cluster["representative"]["name"] == "Authentication"
 
     def test_get_clusters_empty(
-        self, client: TestClient, mock_es_repo: MagicMock, mock_es_client: MagicMock
+        self, client: TestClient, mock_repo: MagicMock, mock_client: MagicMock
     ):
         """Test clusters endpoint with no features."""
-        mock_es_client.search.return_value = {
+        mock_client.search.return_value = {
             "hits": {"hits": []}
         }
 
@@ -469,10 +469,10 @@ class TestBrowseEndpoints:
     """Tests for /api/v1/browse/* endpoints."""
 
     def test_browse_elements(
-        self, client: TestClient, mock_es_repo: MagicMock, mock_es_client: MagicMock
+        self, client: TestClient, mock_repo: MagicMock, mock_client: MagicMock
     ):
         """Test browsing code elements."""
-        mock_es_client.search.return_value = {
+        mock_client.search.return_value = {
             "hits": {
                 "total": {"value": 2},
                 "hits": [
@@ -515,10 +515,10 @@ class TestBrowseEndpoints:
         assert data["total"] == 2
 
     def test_browse_elements_with_filters(
-        self, client: TestClient, mock_es_repo: MagicMock, mock_es_client: MagicMock
+        self, client: TestClient, mock_repo: MagicMock, mock_client: MagicMock
     ):
         """Test browsing elements with type filter."""
-        mock_es_client.search.return_value = {
+        mock_client.search.return_value = {
             "hits": {"total": {"value": 0}, "hits": []}
         }
 
@@ -544,10 +544,10 @@ class TestReposEndpoints:
     """Tests for /api/v1/repos/* endpoints."""
 
     def test_list_repositories(
-        self, client: TestClient, mock_es_repo: MagicMock, mock_es_client: MagicMock
+        self, client: TestClient, mock_repo: MagicMock, mock_client: MagicMock
     ):
         """Test listing all repositories."""
-        mock_es_client.search.return_value = {
+        mock_client.search.return_value = {
             "aggregations": {
                 "repos": {
                     "buckets": [
@@ -568,10 +568,10 @@ class TestReposEndpoints:
         assert "repos" in data
 
     def test_get_repository(
-        self, client: TestClient, mock_es_repo: MagicMock, mock_es_client: MagicMock
+        self, client: TestClient, mock_repo: MagicMock, mock_client: MagicMock
     ):
         """Test getting a specific repository."""
-        mock_es_client.search.return_value = {
+        mock_client.search.return_value = {
             "aggregations": {
                 "by_type": {
                     "buckets": [
@@ -605,14 +605,14 @@ class TestAdminEndpoints:
     """Tests for /api/v1/admin/* endpoints."""
 
     def test_health_check(
-        self, client: TestClient, mock_es_repo: MagicMock
+        self, client: TestClient, mock_repo: MagicMock
     ):
         """Test health check endpoint."""
-        with patch("magaldi_web.routes.admin.check_elasticsearch_health") as mock_es_health, \
+        with patch("magaldi_web.routes.admin.check_search_health") as mock_search_health, \
              patch("magaldi_web.routes.admin.check_llm_health") as mock_llm_health, \
              patch("magaldi_web.routes.admin.check_redis_health") as mock_redis_health:
 
-            mock_es_health.return_value = {"status": "healthy", "cluster": "test"}
+            mock_search_health.return_value = {"status": "healthy", "cluster": "test"}
             mock_llm_health.return_value = {"status": "healthy", "model": "test"}
             mock_redis_health.return_value = {"status": "healthy"}
 
@@ -620,6 +620,6 @@ class TestAdminEndpoints:
 
         assert response.status_code == 200
         data = response.json()
-        assert "elasticsearch" in data
+        assert "search" in data
         assert "llm" in data
         assert "redis" in data

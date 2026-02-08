@@ -7,7 +7,7 @@ import pytest
 
 from shared.config import (
     ConfigurationError,
-    ElasticsearchConfig,
+    SearchBackendConfig,
     LLMConfig,
     LoggingConfig,
     MagaldiConfig,
@@ -62,27 +62,27 @@ def clean_env():
 # =============================================================================
 
 
-class TestElasticsearchConfigDefaults:
-    """Test ElasticsearchConfig dataclass defaults."""
+class TestSearchBackendConfigDefaults:
+    """Test SearchBackendConfig dataclass defaults."""
 
     def test_default_url(self):
-        config = ElasticsearchConfig()
+        config = SearchBackendConfig()
         assert config.url == "http://localhost:9200"
 
     def test_default_index(self):
-        config = ElasticsearchConfig()
+        config = SearchBackendConfig()
         assert config.index == "magaldi_code_elements"
 
     def test_default_timeout(self):
-        config = ElasticsearchConfig()
+        config = SearchBackendConfig()
         assert config.timeout == 30
 
     def test_default_retry_on_timeout(self):
-        config = ElasticsearchConfig()
+        config = SearchBackendConfig()
         assert config.retry_on_timeout is True
 
     def test_default_max_retries(self):
-        config = ElasticsearchConfig()
+        config = SearchBackendConfig()
         assert config.max_retries == 3
 
 
@@ -163,9 +163,9 @@ class TestLoadFromFile:
         """Load a fully specified config file."""
         config = load_config(FIXTURES_DIR / "valid.yaml")
 
-        assert config.elasticsearch.host == "testhost"
-        assert config.elasticsearch.port == 9200
-        assert config.elasticsearch.url == "http://testhost:9200"
+        assert config.search_backend.host == "testhost"
+        assert config.search_backend.port == 9200
+        assert config.search_backend.url == "http://testhost:9200"
         # summarize_model is now a reference key
         assert config.llm.summarize_model == "test-model"
         # The actual model name is accessed via get_summarize_model()
@@ -178,18 +178,18 @@ class TestLoadFromFile:
         config = load_config(FIXTURES_DIR / "minimal.yaml")
 
         # Specified value
-        assert config.elasticsearch.host == "localhost"
+        assert config.search_backend.host == "localhost"
 
         # Default values
-        assert config.elasticsearch.port == 9200
-        assert config.elasticsearch.url == "http://localhost:9200"
+        assert config.search_backend.port == 9200
+        assert config.search_backend.url == "http://localhost:9200"
 
     def test_load_nonexistent_file_uses_defaults(self, clean_env):
         """Loading nonexistent file should use defaults."""
         config = load_config("/nonexistent/path/config.yaml")
 
         # Should use default values
-        assert config.elasticsearch.host == "localhost"
+        assert config.search_backend.host == "localhost"
         assert config.redis.host == "localhost"
 
     def test_load_caches_config(self, clean_env):
@@ -212,10 +212,10 @@ class TestEnvOverrides:
         os.environ["MAGALDI_ELASTICSEARCH_PORT"] = "9201"
         os.environ["MAGALDI_ELASTICSEARCH_SCHEME"] = "https"
         config = load_config(FIXTURES_DIR / "minimal.yaml")
-        assert config.elasticsearch.host == "eshost"
-        assert config.elasticsearch.port == 9201
-        assert config.elasticsearch.scheme == "https"
-        assert config.elasticsearch.url == "https://eshost:9201"
+        assert config.search_backend.host == "eshost"
+        assert config.search_backend.port == 9201
+        assert config.search_backend.scheme == "https"
+        assert config.search_backend.url == "https://eshost:9201"
 
     def test_env_overrides_llm_model_reference(self, clean_env):
         """Test environment overrides for LLM model references."""
@@ -250,21 +250,21 @@ class TestPriorityChain:
         config = load_config(FIXTURES_DIR / "valid.yaml")
 
         # File says "testhost", env says "env-host"
-        assert config.elasticsearch.host == "env-host"
+        assert config.search_backend.host == "env-host"
 
     def test_file_overrides_defaults(self, clean_env):
         """File should override default values."""
         config = load_config(FIXTURES_DIR / "valid.yaml")
 
         # Default is "localhost", file says "testhost"
-        assert config.elasticsearch.host == "testhost"
+        assert config.search_backend.host == "testhost"
 
     def test_defaults_used_when_not_specified(self, clean_env):
         """Defaults should be used when not specified anywhere."""
         config = load_config(FIXTURES_DIR / "minimal.yaml")
 
         # Not in file, not in env, should be default
-        assert config.elasticsearch.timeout == 30
+        assert config.search_backend.timeout == 30
 
 
 # =============================================================================
@@ -342,13 +342,13 @@ class TestResetConfig:
         """Should be able to load a different config after reset."""
         load_config(FIXTURES_DIR / "valid.yaml")
         config1 = get_config()
-        assert config1.elasticsearch.host == "testhost"
+        assert config1.search_backend.host == "testhost"
 
         reset_config()
 
         load_config(FIXTURES_DIR / "minimal.yaml")
         config2 = get_config()
-        assert config2.elasticsearch.host == "localhost"  # Default
+        assert config2.search_backend.host == "localhost"  # Default
 
 
 # =============================================================================
@@ -363,7 +363,7 @@ class TestMagaldiConfigRoot:
         """MagaldiConfig should have all expected sections."""
         config = load_config(FIXTURES_DIR / "valid.yaml")
 
-        assert hasattr(config, "elasticsearch")
+        assert hasattr(config, "search_backend")
         assert hasattr(config, "redis")
         assert hasattr(config, "llm")
         assert hasattr(config, "workers")
@@ -378,7 +378,7 @@ class TestMagaldiConfigRoot:
         """Each section should be the correct type."""
         config = load_config(FIXTURES_DIR / "valid.yaml")
 
-        assert isinstance(config.elasticsearch, ElasticsearchConfig)
+        assert isinstance(config.search_backend, SearchBackendConfig)
         assert isinstance(config.llm, LLMConfig)
         assert isinstance(config.workers, WorkersConfig)
         assert isinstance(config.parser, ParserConfig)

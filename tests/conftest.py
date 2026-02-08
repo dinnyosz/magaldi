@@ -10,7 +10,7 @@ import pytest
 
 from shared import config as config_module
 from shared.config import (
-    ElasticsearchConfig,
+    SearchBackendConfig,
     LLMConfig,
     LoggingConfig,
     MagaldiConfig,
@@ -50,9 +50,9 @@ def reset_global_config() -> Generator[None, None, None]:
 
 
 @pytest.fixture
-def test_elasticsearch_config() -> ElasticsearchConfig:
+def test_search_config() -> SearchBackendConfig:
     """Provide a test Elasticsearch configuration."""
-    return ElasticsearchConfig(
+    return SearchBackendConfig(
         host="localhost",
         port=9200,
         scheme="http",
@@ -119,13 +119,13 @@ def test_workers_config() -> WorkersConfig:
 
 @pytest.fixture
 def test_config(
-    test_elasticsearch_config: ElasticsearchConfig,
+    test_search_config: SearchBackendConfig,
     test_llm_config: LLMConfig,
     test_workers_config: WorkersConfig,
 ) -> MagaldiConfig:
     """Provide a complete test configuration."""
     return MagaldiConfig(
-        elasticsearch=test_elasticsearch_config,
+        search_backend=test_search_config,
         llm=test_llm_config,
         workers=test_workers_config,
         parser=ParserConfig(
@@ -202,7 +202,7 @@ def temp_config_file(tmp_path: Path) -> Generator[Path, None, None]:
     config_file = tmp_path / "magaldi.yaml"
     config_file.write_text(
         """
-elasticsearch:
+search_backend:
   host: temphost
   port: 9200
 """

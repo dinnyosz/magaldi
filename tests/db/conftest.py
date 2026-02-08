@@ -1,6 +1,6 @@
-"""Shared fixtures for Elasticsearch integration tests.
+"""Shared fixtures for search backend integration tests.
 
-These tests require a running Elasticsearch instance (via Docker).
+These tests require a running search backend instance (via Docker).
 Run with: pytest -m integration tests/db/
 """
 
@@ -11,36 +11,36 @@ import os
 import pytest
 
 from magaldi_core.code_parser import CodeElement
-from shared.config import ElasticsearchConfig, MagaldiConfig, reset_config
-from shared.db.elasticsearch import INDEX_NAME
+from shared.config import SearchBackendConfig, MagaldiConfig, reset_config
+from shared.db.store import INDEX_NAME
 
 
-# Skip all tests in this directory if Elasticsearch is not available
+# Skip all tests in this directory if search backend is not available
 pytestmark = pytest.mark.integration
 
 
 @pytest.fixture(scope="function")
 def config():
-    """Load config for ES connection."""
+    """Load config for search backend connection."""
     # Reset config singleton
     reset_config()
 
     # Create config directly with known good values for integration tests
     return MagaldiConfig(
-        elasticsearch=ElasticsearchConfig(
-            host=os.environ.get("MAGALDI_ELASTICSEARCH_HOST", "localhost"),
-            port=int(os.environ.get("MAGALDI_ELASTICSEARCH_PORT", "9200")),
-            scheme=os.environ.get("MAGALDI_ELASTICSEARCH_SCHEME", "http"),
+        search_backend=SearchBackendConfig(
+            host=os.environ.get("MAGALDI_SEARCH_HOST", "localhost"),
+            port=int(os.environ.get("MAGALDI_SEARCH_PORT", "9200")),
+            scheme=os.environ.get("MAGALDI_SEARCH_SCHEME", "http"),
         ),
     )
 
 
 @pytest.fixture
-def es_repo(config):
-    """Create ES repository and clean up test data."""
-    from shared.db.elasticsearch import ElasticsearchRepository
+def repo(config):
+    """Create repository and clean up test data."""
+    from shared.db.store import Repository
 
-    repo = ElasticsearchRepository(config)
+    repo = Repository(config)
 
     # Delete test documents before test
     try:

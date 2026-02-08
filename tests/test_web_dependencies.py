@@ -8,11 +8,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from magaldi_web.dependencies import (
-    check_elasticsearch_health,
+    check_search_health,
     check_llm_health,
     check_redis_health,
     get_cached_config,
-    get_es_repository,
+    get_repository,
     get_redis_queue_stats,
 )
 
@@ -66,27 +66,27 @@ class TestGetCachedConfig:
 
 
 class TestGetEsRepository:
-    """Tests for get_es_repository generator."""
+    """Tests for get_repository generator."""
 
     def test_yields_repository(self, test_config):
-        """Test yields an ElasticsearchRepository."""
+        """Test yields an Repository."""
         mock_repo = MagicMock()
         with (
             patch("magaldi_web.dependencies.get_cached_config", return_value=test_config),
-            patch("magaldi_web.dependencies.ElasticsearchRepository", return_value=mock_repo),
+            patch("magaldi_web.dependencies.Repository", return_value=mock_repo),
         ):
-            gen = get_es_repository()
+            gen = get_repository()
             repo = next(gen)
             assert repo == mock_repo
 
-    def test_closes_repository_on_exit(self, test_config):
+    def test_closrepository_on_exit(self, test_config):
         """Test closes repository when generator exits."""
         mock_repo = MagicMock()
         with (
             patch("magaldi_web.dependencies.get_cached_config", return_value=test_config),
-            patch("magaldi_web.dependencies.ElasticsearchRepository", return_value=mock_repo),
+            patch("magaldi_web.dependencies.Repository", return_value=mock_repo),
         ):
-            gen = get_es_repository()
+            gen = get_repository()
             next(gen)
             # Exhaust the generator
             try:
@@ -95,14 +95,14 @@ class TestGetEsRepository:
                 pass
             mock_repo.close.assert_called_once()
 
-    def test_closes_repository_on_exception(self, test_config):
+    def test_closrepository_on_exception(self, test_config):
         """Test closes repository even when exception occurs."""
         mock_repo = MagicMock()
         with (
             patch("magaldi_web.dependencies.get_cached_config", return_value=test_config),
-            patch("magaldi_web.dependencies.ElasticsearchRepository", return_value=mock_repo),
+            patch("magaldi_web.dependencies.Repository", return_value=mock_repo),
         ):
-            gen = get_es_repository()
+            gen = get_repository()
             next(gen)
             # Simulate exception and cleanup
             gen.close()
@@ -115,7 +115,7 @@ class TestGetEsRepository:
 
 
 class TestCheckElasticsearchHealth:
-    """Tests for check_elasticsearch_health function."""
+    """Tests for check_search_health function."""
 
     @pytest.mark.asyncio
     async def test_healthy_cluster(self):
@@ -128,7 +128,7 @@ class TestCheckElasticsearchHealth:
         }
         mock_repo._get_client.return_value = mock_client
 
-        result = await check_elasticsearch_health(mock_repo)
+        result = await check_search_health(mock_repo)
 
         assert result["status"] == "healthy"
         assert result["cluster_status"] == "green"
@@ -140,7 +140,7 @@ class TestCheckElasticsearchHealth:
         mock_repo = MagicMock()
         mock_repo._get_client.side_effect = Exception("Connection refused")
 
-        result = await check_elasticsearch_health(mock_repo)
+        result = await check_search_health(mock_repo)
 
         assert result["status"] == "unhealthy"
         assert "Connection refused" in result["error"]
@@ -153,7 +153,7 @@ class TestCheckElasticsearchHealth:
         mock_client.cluster.health.return_value = {}
         mock_repo._get_client.return_value = mock_client
 
-        result = await check_elasticsearch_health(mock_repo)
+        result = await check_search_health(mock_repo)
 
         assert result["status"] == "healthy"
         assert result["cluster_status"] == "unknown"

@@ -173,7 +173,7 @@ class TestForceClean:
     def test_force_clean_deletes_existing_data(self, cli_runner: CliRunner):
         """Test that --force-clean deletes existing indexed data."""
         from shared.config import load_config, reset_config
-        from shared.db.elasticsearch import ElasticsearchRepository
+        from shared.db.store import Repository
 
         # First run: index some data as main
         result1 = cli_runner.invoke(
@@ -193,21 +193,21 @@ class TestForceClean:
         # Cleanup
         reset_config()
         config = load_config()
-        es_repo = ElasticsearchRepository(config)
-        es_repo.delete_by_repository("test-scope", "valid-repo", "main")
-        es_repo.close()
+        repo = Repository(config)
+        repo.delete_by_repository("test-scope", "valid-repo", "main")
+        repo.close()
 
     def test_force_clean_without_existing_data(self, cli_runner: CliRunner):
         """Test --force-clean when no data exists (fresh start)."""
         from shared.config import load_config, reset_config
-        from shared.db.elasticsearch import ElasticsearchRepository
+        from shared.db.store import Repository
 
         # Clean up any existing data first
         reset_config()
         config = load_config()
-        es_repo = ElasticsearchRepository(config)
-        es_repo.delete_by_repository("test-scope", "valid-repo", "main")
-        es_repo.close()
+        repo = Repository(config)
+        repo.delete_by_repository("test-scope", "valid-repo", "main")
+        repo.close()
         reset_config()
 
         result = cli_runner.invoke(
@@ -223,9 +223,9 @@ class TestForceClean:
         # Cleanup
         reset_config()
         config = load_config()
-        es_repo = ElasticsearchRepository(config)
-        es_repo.delete_by_repository("test-scope", "valid-repo", "main")
-        es_repo.close()
+        repo = Repository(config)
+        repo.delete_by_repository("test-scope", "valid-repo", "main")
+        repo.close()
 
     def test_force_clean_ignored_in_dry_run(self, cli_runner: CliRunner):
         """Test that --force-clean is ignored in dry-run mode."""
@@ -243,10 +243,10 @@ class TestForceClean:
 class TestElasticsearchIndexing:
     """Tests for Elasticsearch indexing. Requires Elasticsearch."""
 
-    def test_elements_indexed_to_elasticsearch(self, cli_runner: CliRunner):
+    def test_elements_indexed_to_search_backend(self, cli_runner: CliRunner):
         """Test that elements are indexed to Elasticsearch."""
         from shared.config import load_config, reset_config
-        from shared.db.elasticsearch import ElasticsearchRepository
+        from shared.db.store import Repository
 
         # Run parsing as main user with --force-clean to ensure fresh indexing
         result = cli_runner.invoke(
@@ -257,15 +257,15 @@ class TestElasticsearchIndexing:
         # Verify elements in ES
         reset_config()
         config = load_config()
-        es_repo = ElasticsearchRepository(config)
+        repo = Repository(config)
 
         try:
             # Refresh the index to make sure all documents are searchable
-            from shared.db.elasticsearch import INDEX_NAME
-            es_repo._get_client().indices.refresh(index=INDEX_NAME)
+            from shared.db.store import INDEX_NAME
+            repo._get_client().indices.refresh(index=INDEX_NAME)
 
             # Search for indexed elements using a broad query
-            results = es_repo.search_by_text(
+            results = repo.search_by_text(
                 query="hello OR add OR format",  # Matches function names in fixtures
                 scope="test-scope",
                 repository="valid-repo",
@@ -282,8 +282,8 @@ class TestElasticsearchIndexing:
 
         finally:
             # Cleanup
-            es_repo.delete_by_repository("test-scope", "valid-repo", "main")
-            es_repo.close()
+            repo.delete_by_repository("test-scope", "valid-repo", "main")
+            repo.close()
 
 
 @pytest.mark.integration
@@ -293,7 +293,7 @@ class TestParallelProcessing:
     def test_workers_process_in_parallel(self, cli_runner: CliRunner):
         """Test that multiple workers process elements."""
         from shared.config import load_config, reset_config
-        from shared.db.elasticsearch import ElasticsearchRepository
+        from shared.db.store import Repository
 
         # Run with 4 workers as main user
         result = cli_runner.invoke(
@@ -308,14 +308,14 @@ class TestParallelProcessing:
         # Cleanup
         reset_config()
         config = load_config()
-        es_repo = ElasticsearchRepository(config)
-        es_repo.delete_by_repository("test-scope", "valid-repo", "main")
-        es_repo.close()
+        repo = Repository(config)
+        repo.delete_by_repository("test-scope", "valid-repo", "main")
+        repo.close()
 
     def test_single_worker_mode(self, cli_runner: CliRunner):
         """Test processing with a single worker."""
         from shared.config import load_config, reset_config
-        from shared.db.elasticsearch import ElasticsearchRepository
+        from shared.db.store import Repository
 
         result = cli_runner.invoke(
             main,
@@ -327,9 +327,9 @@ class TestParallelProcessing:
         # Cleanup
         reset_config()
         config = load_config()
-        es_repo = ElasticsearchRepository(config)
-        es_repo.delete_by_repository("test-scope", "valid-repo", "main")
-        es_repo.close()
+        repo = Repository(config)
+        repo.delete_by_repository("test-scope", "valid-repo", "main")
+        repo.close()
 
 
 # =============================================================================

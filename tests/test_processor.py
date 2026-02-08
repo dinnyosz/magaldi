@@ -934,7 +934,7 @@ class TestIndexElementImportsAndCalls:
             summary_embedding=None,
             code_embedding=None,
             caller_embedding=None,
-            es_repo=mock_es,
+            repo=mock_es,
         )
 
         assert result is True
@@ -981,7 +981,7 @@ class TestIndexElementImportsAndCalls:
             summary_embedding=None,
             code_embedding=None,
             caller_embedding=None,
-            es_repo=mock_es,
+            repo=mock_es,
         )
 
         assert result is True
@@ -1031,7 +1031,7 @@ class TestIndexElementImportsAndCalls:
             summary_embedding=None,
             code_embedding=None,
             caller_embedding=None,
-            es_repo=mock_es,
+            repo=mock_es,
         )
 
         assert result is True
@@ -1068,7 +1068,7 @@ class TestIndexElementImportsAndCalls:
             summary_embedding=None,
             code_embedding=None,
             caller_embedding=None,
-            es_repo=mock_es,
+            repo=mock_es,
         )
 
         # store_imports should NOT be called when imports is empty
@@ -1099,7 +1099,7 @@ class TestIndexElementImportsAndCalls:
             summary_embedding=None,
             code_embedding=None,
             caller_embedding=None,
-            es_repo=mock_es,
+            repo=mock_es,
         )
 
         # store_calls should NOT be called when calls is empty
@@ -1131,7 +1131,7 @@ class TestIndexElementImportsAndCalls:
             summary_embedding=None,
             code_embedding=None,
             caller_embedding=None,
-            es_repo=mock_es,
+            repo=mock_es,
         )
 
         # store_calls should NOT be called for class elements
@@ -1163,7 +1163,7 @@ class TestIndexElementImportsAndCalls:
             summary_embedding=None,
             code_embedding=None,
             caller_embedding=None,
-            es_repo=mock_es,
+            repo=mock_es,
         )
 
         # store_imports should NOT be called for non-file elements
@@ -1319,7 +1319,7 @@ class TestPerElementContextSize:
             config=config,
             file_hashes={},
             element_counts={},
-            es_repo=mock_es,
+            repo=mock_es,
             worker_id=0,
             worker_status=worker_status,
             on_status_change=on_status_change,

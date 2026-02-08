@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 
 from magaldi_core.code_parser import CodeElement
-from shared.db.elasticsearch import INDEX_NAME
+from shared.db.store import INDEX_NAME
 
 pytestmark = pytest.mark.integration
 
@@ -21,7 +21,7 @@ pytestmark = pytest.mark.integration
 class TestImportsAndCalls:
     """Tests for storing and retrieving imports and calls."""
 
-    def test_store_and_get_imports(self, es_repo, sample_element):
+    def test_store_and_get_imports(self, repo, sample_element):
         """Test storing and retrieving imports for a file element."""
         # Create a file element for imports
         file_elem = CodeElement(
@@ -37,8 +37,8 @@ class TestImportsAndCalls:
             line_end=100,
             level=0,
         )
-        es_repo.index_element(file_elem)
-        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo.index_element(file_elem)
+        repo._get_client().indices.refresh(index=INDEX_NAME)
 
         imports = [
             {"name": "os", "module": "os", "alias": None, "line": 1},
@@ -47,40 +47,40 @@ class TestImportsAndCalls:
             {"name": "numpy", "module": "numpy", "alias": "np", "line": 4},
         ]
 
-        result = es_repo.store_imports(file_elem.element_id, imports)
+        result = repo.store_imports(file_elem.element_id, imports)
         assert result is True
 
-        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices.refresh(index=INDEX_NAME)
 
-        retrieved = es_repo.get_imports(file_elem.element_id)
+        retrieved = repo.get_imports(file_elem.element_id)
         assert len(retrieved) == 4
         assert retrieved[0]["name"] == "os"
         assert retrieved[0]["module"] == "os"
         assert retrieved[3]["alias"] == "np"
 
-    def test_store_imports_nonexistent_element(self, es_repo):
+    def test_store_imports_nonexistent_element(self, repo):
         """Test storing imports for nonexistent element returns False."""
         imports = [{"name": "os", "module": "os", "alias": None, "line": 1}]
-        result = es_repo.store_imports("nonexistent-id", imports)
+        result = repo.store_imports("nonexistent-id", imports)
         assert result is False
 
-    def test_get_imports_nonexistent_element(self, es_repo):
+    def test_get_imports_nonexistent_element(self, repo):
         """Test getting imports for nonexistent element returns empty list."""
-        result = es_repo.get_imports("nonexistent-id")
+        result = repo.get_imports("nonexistent-id")
         assert result == []
 
-    def test_get_imports_element_without_imports(self, es_repo, sample_element):
+    def test_get_imports_element_without_imports(self, repo, sample_element):
         """Test getting imports for element without imports returns empty list."""
-        es_repo.index_element(sample_element)
-        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo.index_element(sample_element)
+        repo._get_client().indices.refresh(index=INDEX_NAME)
 
-        result = es_repo.get_imports(sample_element.element_id)
+        result = repo.get_imports(sample_element.element_id)
         assert result == []
 
-    def test_store_and_get_calls(self, es_repo, sample_element):
+    def test_store_and_get_calls(self, repo, sample_element):
         """Test storing and retrieving calls for a function element."""
-        es_repo.index_element(sample_element)
-        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo.index_element(sample_element)
+        repo._get_client().indices.refresh(index=INDEX_NAME)
 
         calls = [
             {"name": "print", "receiver": None, "line": 15, "resolved_id": None},
@@ -98,61 +98,61 @@ class TestImportsAndCalls:
             },
         ]
 
-        result = es_repo.store_calls(sample_element.element_id, calls)
+        result = repo.store_calls(sample_element.element_id, calls)
         assert result is True
 
-        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices.refresh(index=INDEX_NAME)
 
-        retrieved = es_repo.get_calls(sample_element.element_id)
+        retrieved = repo.get_calls(sample_element.element_id)
         assert len(retrieved) == 3
         assert retrieved[0]["name"] == "print"
         assert retrieved[0]["receiver"] is None
         assert retrieved[1]["receiver"] == "data"
         assert retrieved[2]["resolved_id"] == "test-es:test-repo:main:src/app.py:method:helper:50"
 
-    def test_store_calls_nonexistent_element(self, es_repo):
+    def test_store_calls_nonexistent_element(self, repo):
         """Test storing calls for nonexistent element returns False."""
         calls = [{"name": "print", "receiver": None, "line": 1, "resolved_id": None}]
-        result = es_repo.store_calls("nonexistent-id", calls)
+        result = repo.store_calls("nonexistent-id", calls)
         assert result is False
 
-    def test_get_calls_nonexistent_element(self, es_repo):
+    def test_get_calls_nonexistent_element(self, repo):
         """Test getting calls for nonexistent element returns empty list."""
-        result = es_repo.get_calls("nonexistent-id")
+        result = repo.get_calls("nonexistent-id")
         assert result == []
 
-    def test_get_calls_element_without_calls(self, es_repo, sample_element):
+    def test_get_calls_element_without_calls(self, repo, sample_element):
         """Test getting calls for element without calls returns empty list."""
-        es_repo.index_element(sample_element)
-        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo.index_element(sample_element)
+        repo._get_client().indices.refresh(index=INDEX_NAME)
 
-        result = es_repo.get_calls(sample_element.element_id)
+        result = repo.get_calls(sample_element.element_id)
         assert result == []
 
-    def test_store_empty_imports(self, es_repo, sample_element):
+    def test_store_empty_imports(self, repo, sample_element):
         """Test storing empty imports list."""
-        es_repo.index_element(sample_element)
-        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo.index_element(sample_element)
+        repo._get_client().indices.refresh(index=INDEX_NAME)
 
-        result = es_repo.store_imports(sample_element.element_id, [])
+        result = repo.store_imports(sample_element.element_id, [])
         assert result is True
 
-        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices.refresh(index=INDEX_NAME)
 
-        retrieved = es_repo.get_imports(sample_element.element_id)
+        retrieved = repo.get_imports(sample_element.element_id)
         assert retrieved == []
 
-    def test_store_empty_calls(self, es_repo, sample_element):
+    def test_store_empty_calls(self, repo, sample_element):
         """Test storing empty calls list."""
-        es_repo.index_element(sample_element)
-        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo.index_element(sample_element)
+        repo._get_client().indices.refresh(index=INDEX_NAME)
 
-        result = es_repo.store_calls(sample_element.element_id, [])
+        result = repo.store_calls(sample_element.element_id, [])
         assert result is True
 
-        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices.refresh(index=INDEX_NAME)
 
-        retrieved = es_repo.get_calls(sample_element.element_id)
+        retrieved = repo.get_calls(sample_element.element_id)
         assert retrieved == []
 
 
@@ -165,7 +165,7 @@ class TestFindElementsCalling:
     """Tests for finding elements that call a target."""
 
     @pytest.fixture
-    def elements_with_calls(self, es_repo):
+    def elements_with_calls(self, repo):
         """Create elements with call relationships."""
         target_id = "test-calls:repo:main:src/utils.py:function:helper:10"
 
@@ -183,7 +183,7 @@ class TestFindElementsCalling:
             line_end=20,
             level=2,
         )
-        es_repo.index_element(target)
+        repo.index_element(target)
 
         # Caller 1
         caller1 = CodeElement(
@@ -199,8 +199,8 @@ class TestFindElementsCalling:
             line_end=30,
             level=2,
         )
-        es_repo.index_element(caller1)
-        es_repo.store_calls(
+        repo.index_element(caller1)
+        repo.store_calls(
             caller1.element_id,
             [{"name": "helper", "receiver": None, "line": 15, "resolved_id": target_id}],
         )
@@ -219,8 +219,8 @@ class TestFindElementsCalling:
             line_end=80,
             level=2,
         )
-        es_repo.index_element(caller2)
-        es_repo.store_calls(
+        repo.index_element(caller2)
+        repo.store_calls(
             caller2.element_id,
             [
                 {"name": "helper", "receiver": None, "line": 60, "resolved_id": target_id},
@@ -242,59 +242,59 @@ class TestFindElementsCalling:
             line_end=10,
             level=2,
         )
-        es_repo.index_element(non_caller)
-        es_repo.store_calls(
+        repo.index_element(non_caller)
+        repo.store_calls(
             non_caller.element_id,
             [{"name": "bar", "receiver": None, "line": 5, "resolved_id": "other-target"}],
         )
 
-        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices.refresh(index=INDEX_NAME)
         return target_id
 
-    def test_find_elements_calling(self, es_repo, elements_with_calls):
+    def test_find_elements_calling(self, repo, elements_with_calls):
         """Test finding elements that call a target."""
         target_id = elements_with_calls
 
-        results = es_repo.find_elements_calling(target_id)
+        results = repo.find_elements_calling(target_id)
 
         assert len(results) == 2
         names = {r["name"] for r in results}
         assert names == {"main", "process"}
 
-    def test_find_elements_calling_with_scope_filter(self, es_repo, elements_with_calls):
+    def test_find_elements_calling_with_scope_filter(self, repo, elements_with_calls):
         """Test finding callers with scope filter."""
         target_id = elements_with_calls
 
         # Matching scope
-        results = es_repo.find_elements_calling(target_id, scope="test-calls")
+        results = repo.find_elements_calling(target_id, scope="test-calls")
         assert len(results) == 2
 
         # Non-matching scope
-        results = es_repo.find_elements_calling(target_id, scope="other-scope")
+        results = repo.find_elements_calling(target_id, scope="other-scope")
         assert len(results) == 0
 
-    def test_find_elements_calling_with_repository_filter(self, es_repo, elements_with_calls):
+    def test_find_elements_calling_with_repository_filter(self, repo, elements_with_calls):
         """Test finding callers with repository filter."""
         target_id = elements_with_calls
 
         # Matching repository
-        results = es_repo.find_elements_calling(target_id, repository="repo")
+        results = repo.find_elements_calling(target_id, repository="repo")
         assert len(results) == 2
 
         # Non-matching repository
-        results = es_repo.find_elements_calling(target_id, repository="other-repo")
+        results = repo.find_elements_calling(target_id, repository="other-repo")
         assert len(results) == 0
 
-    def test_find_elements_calling_no_callers(self, es_repo, elements_with_calls):
+    def test_find_elements_calling_no_callers(self, repo, elements_with_calls):
         """Test finding callers for target with no callers."""
-        results = es_repo.find_elements_calling("nonexistent-target")
+        results = repo.find_elements_calling("nonexistent-target")
         assert len(results) == 0
 
-    def test_find_elements_calling_with_limit(self, es_repo, elements_with_calls):
+    def test_find_elements_calling_with_limit(self, repo, elements_with_calls):
         """Test finding callers with limit."""
         target_id = elements_with_calls
 
-        results = es_repo.find_elements_calling(target_id, limit=1)
+        results = repo.find_elements_calling(target_id, limit=1)
         assert len(results) == 1
 
 
@@ -307,7 +307,7 @@ class TestFindElementsImporting:
     """Tests for finding elements that import a module."""
 
     @pytest.fixture
-    def elements_with_imports(self, es_repo):
+    def elements_with_imports(self, repo):
         """Create file elements with imports."""
         # File 1 imports os and json
         file1 = CodeElement(
@@ -323,8 +323,8 @@ class TestFindElementsImporting:
             line_end=100,
             level=0,
         )
-        es_repo.index_element(file1)
-        es_repo.store_imports(
+        repo.index_element(file1)
+        repo.store_imports(
             file1.element_id,
             [
                 {"name": "os", "module": "os", "alias": None, "line": 1},
@@ -346,8 +346,8 @@ class TestFindElementsImporting:
             line_end=50,
             level=0,
         )
-        es_repo.index_element(file2)
-        es_repo.store_imports(
+        repo.index_element(file2)
+        repo.store_imports(
             file2.element_id,
             [
                 {"name": "os", "module": "os", "alias": None, "line": 1},
@@ -369,54 +369,54 @@ class TestFindElementsImporting:
             line_end=80,
             level=0,
         )
-        es_repo.index_element(file3)
-        es_repo.store_imports(
+        repo.index_element(file3)
+        repo.store_imports(
             file3.element_id,
             [{"name": "re", "module": "re", "alias": None, "line": 1}],
         )
 
-        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices.refresh(index=INDEX_NAME)
 
-    def test_find_elements_importing(self, es_repo, elements_with_imports):
+    def test_find_elements_importing(self, repo, elements_with_imports):
         """Test finding elements that import a module."""
         # Both app.py and utils.py import os (filter by scope to avoid other test data)
-        results = es_repo.find_elements_importing("os", scope="test-imports")
+        results = repo.find_elements_importing("os", scope="test-imports")
         assert len(results) == 2
         names = {r["name"] for r in results}
         assert names == {"app.py", "utils.py"}
 
-    def test_find_elements_importing_single_importer(self, es_repo, elements_with_imports):
+    def test_find_elements_importing_single_importer(self, repo, elements_with_imports):
         """Test finding elements when only one imports the module."""
-        results = es_repo.find_elements_importing("json", scope="test-imports")
+        results = repo.find_elements_importing("json", scope="test-imports")
         assert len(results) == 1
         assert results[0]["name"] == "app.py"
 
-    def test_find_elements_importing_with_scope_filter(self, es_repo, elements_with_imports):
+    def test_find_elements_importing_with_scope_filter(self, repo, elements_with_imports):
         """Test finding importers with scope filter."""
         # Matching scope
-        results = es_repo.find_elements_importing("os", scope="test-imports")
+        results = repo.find_elements_importing("os", scope="test-imports")
         assert len(results) == 2
 
         # Non-matching scope
-        results = es_repo.find_elements_importing("os", scope="other-scope")
+        results = repo.find_elements_importing("os", scope="other-scope")
         assert len(results) == 0
 
-    def test_find_elements_importing_with_repository_filter(self, es_repo, elements_with_imports):
+    def test_find_elements_importing_with_repository_filter(self, repo, elements_with_imports):
         """Test finding importers with repository filter."""
         # Matching repository
-        results = es_repo.find_elements_importing("os", repository="repo")
+        results = repo.find_elements_importing("os", repository="repo")
         assert len(results) == 2
 
         # Non-matching repository
-        results = es_repo.find_elements_importing("os", repository="other-repo")
+        results = repo.find_elements_importing("os", repository="other-repo")
         assert len(results) == 0
 
-    def test_find_elements_importing_no_importers(self, es_repo, elements_with_imports):
+    def test_find_elements_importing_no_importers(self, repo, elements_with_imports):
         """Test finding importers for module no one imports."""
-        results = es_repo.find_elements_importing("nonexistent_module")
+        results = repo.find_elements_importing("nonexistent_module")
         assert len(results) == 0
 
-    def test_find_elements_importing_with_limit(self, es_repo, elements_with_imports):
+    def test_find_elements_importing_with_limit(self, repo, elements_with_imports):
         """Test finding importers with limit."""
-        results = es_repo.find_elements_importing("os", limit=1)
+        results = repo.find_elements_importing("os", limit=1)
         assert len(results) == 1

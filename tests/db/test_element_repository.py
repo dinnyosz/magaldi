@@ -8,28 +8,28 @@ from __future__ import annotations
 import pytest
 
 from magaldi_core.code_parser import CodeElement
-from shared.db.elasticsearch import INDEX_NAME
+from shared.db.store import INDEX_NAME
 
 pytestmark = pytest.mark.integration
 
 
-class TestElasticsearchRepository:
+class TestRepository:
     """Tests for basic ES repository operations."""
 
-    def test_index_creates_index_if_missing(self, es_repo):
+    def test_index_creates_index_if_missing(self, repo):
         """Test that indexing creates the index if it doesn't exist."""
-        client = es_repo._get_client()
+        client = repo._get_client()
         assert client.indices.exists(index=INDEX_NAME)
 
-    def test_index_and_get_element(self, es_repo, sample_element):
+    def test_index_and_get_element(self, repo, sample_element):
         """Test indexing and retrieving an element."""
-        result = es_repo.index_element(sample_element)
+        result = repo.index_element(sample_element)
         assert result is True
 
         # ES needs a refresh to make the document searchable
-        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices.refresh(index=INDEX_NAME)
 
-        doc = es_repo.get_document(sample_element.element_id)
+        doc = repo.get_document(sample_element.element_id)
 
         assert doc is not None
         assert doc["element_id"] == sample_element.element_id
@@ -37,21 +37,21 @@ class TestElasticsearchRepository:
         assert doc["element_type"] == "function"
         assert doc["language"] == "python"
 
-    def test_get_nonexistent_document(self, es_repo):
+    def test_get_nonexistent_document(self, repo):
         """Test getting a document that doesn't exist."""
-        doc = es_repo.get_document("nonexistent-element-id")
+        doc = repo.get_document("nonexistent-element-id")
         assert doc is None
 
-    def test_delete_by_file(self, es_repo, multiple_elements):
+    def test_delete_by_file(self, repo, multiple_elements):
         """Test deleting all documents for a file."""
         # Index elements
         for elem in multiple_elements:
-            es_repo.index_element(elem)
+            repo.index_element(elem)
 
-        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices.refresh(index=INDEX_NAME)
 
         # Delete elements from utils.py
-        count = es_repo.delete_by_file(
+        count = repo.delete_by_file(
             "test-es", "test-repo", "main", "src/utils.py"
         )
 
@@ -59,41 +59,41 @@ class TestElasticsearchRepository:
         assert count == 3
 
         # Verify deletion
-        es_repo._get_client().indices.refresh(index=INDEX_NAME)
-        doc = es_repo.get_document(multiple_elements[1].element_id)
+        repo._get_client().indices.refresh(index=INDEX_NAME)
+        doc = repo.get_document(multiple_elements[1].element_id)
         assert doc is None
 
         # User class should still exist
-        doc = es_repo.get_document(multiple_elements[3].element_id)
+        doc = repo.get_document(multiple_elements[3].element_id)
         assert doc is not None
 
-    def test_delete_by_repository(self, es_repo, multiple_elements):
+    def test_delete_by_repository(self, repo, multiple_elements):
         """Test deleting all documents for a repository/user combination."""
         # Index elements
         for elem in multiple_elements:
-            es_repo.index_element(elem)
+            repo.index_element(elem)
 
-        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices.refresh(index=INDEX_NAME)
 
         # Verify elements exist before deletion
-        doc = es_repo.get_document(multiple_elements[0].element_id)
+        doc = repo.get_document(multiple_elements[0].element_id)
         assert doc is not None
-        doc = es_repo.get_document(multiple_elements[3].element_id)
+        doc = repo.get_document(multiple_elements[3].element_id)
         assert doc is not None
 
         # Delete all elements for test-es:test-repo:main
-        count = es_repo.delete_by_repository("test-es", "test-repo", "main")
+        count = repo.delete_by_repository("test-es", "test-repo", "main")
 
         # Should delete all 4 elements
         assert count == 4
 
         # Verify all documents are deleted
-        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices.refresh(index=INDEX_NAME)
         for elem in multiple_elements:
-            doc = es_repo.get_document(elem.element_id)
+            doc = repo.get_document(elem.element_id)
             assert doc is None
 
-    def test_delete_by_repository_only_deletes_matching(self, es_repo):
+    def test_delete_by_repository_only_deletes_matching(self, repo):
         """Test that delete_by_repository only deletes matching scope/repo/user."""
         # Create elements for different repos/users
         elem1 = CodeElement(
@@ -136,51 +136,51 @@ class TestElasticsearchRepository:
             level=2,
         )
 
-        es_repo.index_element(elem1)
-        es_repo.index_element(elem2)
-        es_repo.index_element(elem3)
-        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo.index_element(elem1)
+        repo.index_element(elem2)
+        repo.index_element(elem3)
+        repo._get_client().indices.refresh(index=INDEX_NAME)
 
         # Delete only repo-a:user1
-        count = es_repo.delete_by_repository("test-del", "repo-a", "user1")
+        count = repo.delete_by_repository("test-del", "repo-a", "user1")
         assert count == 1
 
-        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices.refresh(index=INDEX_NAME)
 
         # elem1 should be deleted
-        assert es_repo.get_document(elem1.element_id) is None
+        assert repo.get_document(elem1.element_id) is None
 
         # elem2 (different user) and elem3 (different repo) should still exist
-        assert es_repo.get_document(elem2.element_id) is not None
-        assert es_repo.get_document(elem3.element_id) is not None
+        assert repo.get_document(elem2.element_id) is not None
+        assert repo.get_document(elem3.element_id) is not None
 
         # Cleanup
-        es_repo.delete_by_repository("test-del", "repo-a", "user2")
-        es_repo.delete_by_repository("test-del", "repo-b", "user1")
+        repo.delete_by_repository("test-del", "repo-a", "user2")
+        repo.delete_by_repository("test-del", "repo-b", "user1")
 
 
 class TestIsTestIndexing:
     """Tests for is_test field indexing."""
 
-    def test_indexes_is_test_field(self, es_repo, sample_element):
+    def test_indexes_is_test_field(self, repo, sample_element):
         """Test that is_test field is indexed."""
         sample_element.is_test = True
-        es_repo.index_element(sample_element)
+        repo.index_element(sample_element)
 
-        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices.refresh(index=INDEX_NAME)
 
-        doc = es_repo.get_document(sample_element.element_id)
+        doc = repo.get_document(sample_element.element_id)
         assert doc is not None
         assert doc.get("is_test") is True
 
-    def test_is_test_defaults_to_false(self, es_repo, sample_element):
+    def test_is_test_defaults_to_false(self, repo, sample_element):
         """Test that is_test defaults to False."""
         sample_element.is_test = False
-        es_repo.index_element(sample_element)
+        repo.index_element(sample_element)
 
-        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices.refresh(index=INDEX_NAME)
 
-        doc = es_repo.get_document(sample_element.element_id)
+        doc = repo.get_document(sample_element.element_id)
         assert doc is not None
         assert doc.get("is_test") is False
 
@@ -190,12 +190,12 @@ class TestInterruptedRunDetection:
 
     def test_incomplete_file_detected_when_element_count_mismatch(self, config):
         """Test that files with mismatched element_count are detected as incomplete."""
-        from shared.db.elasticsearch import (
+        from shared.db.store import (
             ElasticsearchFileStateRepository,
-            ElasticsearchRepository,
+            Repository,
         )
 
-        es_repo = ElasticsearchRepository(config)
+        repo = Repository(config)
         file_state_repo = ElasticsearchFileStateRepository(config)
 
         scope = "test-interrupted"
@@ -219,7 +219,7 @@ class TestInterruptedRunDetection:
             line_end=100,
             level=0,
         )
-        es_repo.index_element(file_elem, file_hash=file_hash, element_count=4)
+        repo.index_element(file_elem, file_hash=file_hash, element_count=4)
 
         # Create only 2 child elements (3 total with FILE), but expected 4
         func1 = CodeElement(
@@ -235,7 +235,7 @@ class TestInterruptedRunDetection:
             line_end=20,
             level=2,
         )
-        es_repo.index_element(func1, file_hash=file_hash)
+        repo.index_element(func1, file_hash=file_hash)
 
         func2 = CodeElement(
             element_id=f"{scope}:{repo}:{username}:{file_path}:function:func2:25",
@@ -250,9 +250,9 @@ class TestInterruptedRunDetection:
             line_end=35,
             level=2,
         )
-        es_repo.index_element(func2, file_hash=file_hash)
+        repo.index_element(func2, file_hash=file_hash)
 
-        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices.refresh(index=INDEX_NAME)
 
         # Get file states - incomplete file should have file_hash=None
         file_states = file_state_repo.get_file_states(scope, repo, username)
@@ -264,18 +264,18 @@ class TestInterruptedRunDetection:
         assert state.file_hash is None
 
         # Cleanup
-        es_repo.delete_by_file(scope, repo, username, file_path)
-        es_repo.close()
+        repo.delete_by_file(scope, repo, username, file_path)
+        repo.close()
         file_state_repo.close()
 
     def test_complete_file_has_valid_hash(self, config):
         """Test that files with matching element_count are detected as complete."""
-        from shared.db.elasticsearch import (
+        from shared.db.store import (
             ElasticsearchFileStateRepository,
-            ElasticsearchRepository,
+            Repository,
         )
 
-        es_repo = ElasticsearchRepository(config)
+        repo = Repository(config)
         file_state_repo = ElasticsearchFileStateRepository(config)
 
         scope = "test-complete"
@@ -298,7 +298,7 @@ class TestInterruptedRunDetection:
             line_end=50,
             level=0,
         )
-        es_repo.index_element(file_elem, file_hash=file_hash, element_count=3)
+        repo.index_element(file_elem, file_hash=file_hash, element_count=3)
 
         # Create exactly 2 child elements (3 total with FILE, matching element_count)
         func1 = CodeElement(
@@ -314,7 +314,7 @@ class TestInterruptedRunDetection:
             line_end=20,
             level=2,
         )
-        es_repo.index_element(func1, file_hash=file_hash)
+        repo.index_element(func1, file_hash=file_hash)
 
         func2 = CodeElement(
             element_id=f"{scope}:{repo}:{username}:{file_path}:function:func2:25",
@@ -329,9 +329,9 @@ class TestInterruptedRunDetection:
             line_end=35,
             level=2,
         )
-        es_repo.index_element(func2, file_hash=file_hash)
+        repo.index_element(func2, file_hash=file_hash)
 
-        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices.refresh(index=INDEX_NAME)
 
         # Get file states - complete file should have valid file_hash
         file_states = file_state_repo.get_file_states(scope, repo, username)
@@ -343,8 +343,8 @@ class TestInterruptedRunDetection:
         assert state.file_hash == file_hash
 
         # Cleanup
-        es_repo.delete_by_file(scope, repo, username, file_path)
-        es_repo.close()
+        repo.delete_by_file(scope, repo, username, file_path)
+        repo.close()
         file_state_repo.close()
 
 
@@ -353,12 +353,12 @@ class TestOldDataHandling:
 
     def test_old_data_without_element_count_treated_as_incomplete(self, config):
         """Test that files without element_count (old data) are treated as incomplete."""
-        from shared.db.elasticsearch import (
+        from shared.db.store import (
             ElasticsearchFileStateRepository,
-            ElasticsearchRepository,
+            Repository,
         )
 
-        es_repo = ElasticsearchRepository(config)
+        repo = Repository(config)
         file_state_repo = ElasticsearchFileStateRepository(config)
 
         scope = "test-old-data"
@@ -382,9 +382,9 @@ class TestOldDataHandling:
             level=0,
         )
         # Index without element_count
-        es_repo.index_element(file_elem, file_hash=file_hash, element_count=None)
+        repo.index_element(file_elem, file_hash=file_hash, element_count=None)
 
-        es_repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices.refresh(index=INDEX_NAME)
 
         # Get file states - old data should be treated as incomplete
         file_states = file_state_repo.get_file_states(scope, repo, username)
@@ -396,6 +396,6 @@ class TestOldDataHandling:
         assert state.file_hash is None
 
         # Cleanup
-        es_repo.delete_by_file(scope, repo, username, file_path)
-        es_repo.close()
+        repo.delete_by_file(scope, repo, username, file_path)
+        repo.close()
         file_state_repo.close()

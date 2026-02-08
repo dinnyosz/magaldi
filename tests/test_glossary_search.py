@@ -1,4 +1,4 @@
-"""Tests for glossary Elasticsearch operations."""
+"""Tests for glossary search operations."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from shared.db.elasticsearch import INDEX_NAME, ElasticsearchRepository
+from shared.db.store import INDEX_NAME, Repository
 
 # =============================================================================
 # FIXTURES
@@ -17,26 +17,26 @@ from shared.db.elasticsearch import INDEX_NAME, ElasticsearchRepository
 def mock_config():
     """Create a mock configuration."""
     config = MagicMock()
-    config.elasticsearch.host = "localhost"
-    config.elasticsearch.port = 9200
-    config.elasticsearch.scheme = "http"
+    config.search_backend.host = "localhost"
+    config.search_backend.port = 9200
+    config.search_backend.scheme = "http"
     return config
 
 
 @pytest.fixture
-def mock_es_client():
-    """Create a mock Elasticsearch client."""
+def mock_client():
+    """Create a mock search client."""
     client = MagicMock()
     client.indices.exists.return_value = True
     return client
 
 
 @pytest.fixture
-def mock_repo(mock_config, mock_es_client):
+def mock_repo(mock_config, mock_client):
     """Create repository with mocked ES client."""
-    with patch("shared.db.repositories.base.Elasticsearch", return_value=mock_es_client):
-        repo = ElasticsearchRepository(mock_config)
-        repo._base._client = mock_es_client
+    with patch("shared.db.backends.factory.create_client", return_value=mock_client):
+        repo = Repository(mock_config)
+        repo._base._client = mock_client
         return repo
 
 
@@ -48,7 +48,7 @@ def mock_repo(mock_config, mock_es_client):
 class TestIndexGlossary:
     """Tests for index_glossary method."""
 
-    def test_indexes_glossary_entry(self, mock_repo, mock_es_client):
+    def test_indexes_glossary_entry(self, mock_repo, mock_client):
         """Test indexing a glossary entry."""
         result = mock_repo.index_glossary(
             glossary_id="scope:repo:main:glossary:user",
@@ -62,8 +62,8 @@ class TestIndexGlossary:
         )
 
         assert result is True
-        mock_es_client.index.assert_called_once()
-        call_kwargs = mock_es_client.index.call_args[1]
+        mock_client.index.assert_called_once()
+        call_kwargs = mock_client.index.call_args[1]
         doc = call_kwargs["document"]
 
         assert doc["term"] == "user"
@@ -79,7 +79,7 @@ class TestIndexGlossary:
         assert "indexed_at" in doc
         assert "hash_id" in doc
 
-    def test_indexes_with_empty_lists(self, mock_repo, mock_es_client):
+    def test_indexes_with_empty_lists(self, mock_repo, mock_client):
         """Test indexing a glossary entry with empty element_ids and file_paths."""
         result = mock_repo.index_glossary(
             glossary_id="scope:repo:main:glossary:empty_term",
@@ -93,13 +93,13 @@ class TestIndexGlossary:
         )
 
         assert result is True
-        call_kwargs = mock_es_client.index.call_args[1]
+        call_kwargs = mock_client.index.call_args[1]
         doc = call_kwargs["document"]
         assert doc["element_ids"] == []
         assert doc["file_paths"] == []
         assert doc["total_count"] == 0
 
-    def test_indexes_glossary_with_description(self, mock_repo, mock_es_client):
+    def test_indexes_glossary_with_description(self, mock_repo, mock_client):
         """Test that description field is indexed."""
         mock_repo.index_glossary(
             glossary_id="test:repo:main:glossary:user",
@@ -113,11 +113,11 @@ class TestIndexGlossary:
             description="A person who uses the system",
         )
 
-        call_args = mock_es_client.index.call_args
+        call_args = mock_client.index.call_args
         body = call_args[1]["document"]
         assert body["description"] == "A person who uses the system"
 
-    def test_indexes_glossary_with_empty_description_by_default(self, mock_repo, mock_es_client):
+    def test_indexes_glossary_with_empty_description_by_default(self, mock_repo, mock_client):
         """Test that description defaults to empty string."""
         mock_repo.index_glossary(
             glossary_id="test:repo:main:glossary:user",
@@ -130,7 +130,7 @@ class TestIndexGlossary:
             file_paths=["path/to/file.py"],
         )
 
-        call_args = mock_es_client.index.call_args
+        call_args = mock_client.index.call_args
         body = call_args[1]["document"]
         assert body["description"] == ""
 
@@ -143,9 +143,9 @@ class TestIndexGlossary:
 class TestGetGlossaryTerms:
     """Tests for get_glossary_terms method."""
 
-    def test_returns_all_glossary_terms(self, mock_repo, mock_es_client):
+    def test_returns_all_glossary_terms(self, mock_repo, mock_client):
         """Test getting all glossary terms for a repo."""
-        mock_es_client.search.return_value = {
+        mock_client.search.return_value = {
             "hits": {
                 "hits": [
                     {
@@ -185,14 +185,14 @@ class TestGetGlossaryTerms:
         assert result[1]["total_count"] == 5
 
         # Verify search query
-        mock_es_client.search.assert_called_once()
-        call_kwargs = mock_es_client.search.call_args[1]
+        mock_client.search.assert_called_once()
+        call_kwargs = mock_client.search.call_args[1]
         assert call_kwargs["index"] == INDEX_NAME
         assert call_kwargs["size"] == 1000
 
-    def test_returns_empty_list_when_no_terms(self, mock_repo, mock_es_client):
+    def test_returns_empty_list_when_no_terms(self, mock_repo, mock_client):
         """Test returns empty list when no glossary terms exist."""
-        mock_es_client.search.return_value = {"hits": {"hits": []}}
+        mock_client.search.return_value = {"hits": {"hits": []}}
 
         result = mock_repo.get_glossary_terms(
             scope="scope",
@@ -202,9 +202,9 @@ class TestGetGlossaryTerms:
 
         assert result == []
 
-    def test_filters_by_min_count(self, mock_repo, mock_es_client):
+    def test_filters_by_min_count(self, mock_repo, mock_client):
         """Test filtering by minimum count."""
-        mock_es_client.search.return_value = {"hits": {"hits": []}}
+        mock_client.search.return_value = {"hits": {"hits": []}}
 
         mock_repo.get_glossary_terms(
             scope="scope",
@@ -213,16 +213,16 @@ class TestGetGlossaryTerms:
             min_count=5,
         )
 
-        call_kwargs = mock_es_client.search.call_args[1]
+        call_kwargs = mock_client.search.call_args[1]
         query = call_kwargs["query"]
         # Check that min_count filter is in the query
         range_filter = next((m for m in query["bool"]["must"] if "range" in m), None)
         assert range_filter is not None
         assert range_filter["range"]["total_count"]["gte"] == 5
 
-    def test_returns_description_field(self, mock_repo, mock_es_client):
+    def test_returns_description_field(self, mock_repo, mock_client):
         """Test that description field is returned."""
-        mock_es_client.search.return_value = {
+        mock_client.search.return_value = {
             "hits": {
                 "hits": [
                     {
@@ -249,9 +249,9 @@ class TestGetGlossaryTerms:
         assert len(result) == 1
         assert result[0]["description"] == "A person who uses the system"
 
-    def test_returns_empty_description_when_missing(self, mock_repo, mock_es_client):
+    def test_returns_empty_description_when_missing(self, mock_repo, mock_client):
         """Test that description defaults to empty string when not in source."""
-        mock_es_client.search.return_value = {
+        mock_client.search.return_value = {
             "hits": {
                 "hits": [
                     {
@@ -286,9 +286,9 @@ class TestGetGlossaryTerms:
 class TestGetGlossaryTerm:
     """Tests for get_glossary_term method."""
 
-    def test_returns_specific_term(self, mock_repo, mock_es_client):
+    def test_returns_specific_term(self, mock_repo, mock_client):
         """Test getting a specific glossary term."""
-        mock_es_client.get.return_value = {
+        mock_client.get.return_value = {
             "found": True,
             "_source": {
                 "term": "user",
@@ -312,9 +312,9 @@ class TestGetGlossaryTerm:
         assert len(result["element_ids"]) == 2
         assert result["feature_associations"] == [{"feature_id": "feat1"}]
 
-    def test_returns_none_when_term_not_found(self, mock_repo, mock_es_client):
+    def test_returns_none_when_term_not_found(self, mock_repo, mock_client):
         """Test returns None when term doesn't exist."""
-        mock_es_client.get.return_value = {"found": False}
+        mock_client.get.return_value = {"found": False}
 
         result = mock_repo.get_glossary_term(
             scope="scope",
@@ -325,9 +325,9 @@ class TestGetGlossaryTerm:
 
         assert result is None
 
-    def test_returns_none_on_exception(self, mock_repo, mock_es_client):
+    def test_returns_none_on_exception(self, mock_repo, mock_client):
         """Test returns None when exception occurs."""
-        mock_es_client.get.side_effect = Exception("ES error")
+        mock_client.get.side_effect = Exception("ES error")
 
         result = mock_repo.get_glossary_term(
             scope="scope",
@@ -338,9 +338,9 @@ class TestGetGlossaryTerm:
 
         assert result is None
 
-    def test_returns_description_field(self, mock_repo, mock_es_client):
+    def test_returns_description_field(self, mock_repo, mock_client):
         """Test that description field is returned."""
-        mock_es_client.get.return_value = {
+        mock_client.get.return_value = {
             "found": True,
             "_source": {
                 "term": "user",
@@ -362,9 +362,9 @@ class TestGetGlossaryTerm:
         assert result is not None
         assert result["description"] == "A person who uses the system"
 
-    def test_returns_empty_description_when_missing(self, mock_repo, mock_es_client):
+    def test_returns_empty_description_when_missing(self, mock_repo, mock_client):
         """Test that description defaults to empty string when not in source."""
-        mock_es_client.get.return_value = {
+        mock_client.get.return_value = {
             "found": True,
             "_source": {
                 "term": "user",
@@ -394,9 +394,9 @@ class TestGetGlossaryTerm:
 class TestSearchGlossary:
     """Tests for search_glossary method."""
 
-    def test_searches_by_partial_match(self, mock_repo, mock_es_client):
+    def test_searches_by_partial_match(self, mock_repo, mock_client):
         """Test searching glossary terms by partial match."""
-        mock_es_client.search.return_value = {
+        mock_client.search.return_value = {
             "hits": {
                 "hits": [
                     {
@@ -429,15 +429,15 @@ class TestSearchGlossary:
         assert result[1]["term"] == "user_profile"
 
         # Verify wildcard query is used
-        call_kwargs = mock_es_client.search.call_args[1]
+        call_kwargs = mock_client.search.call_args[1]
         query = call_kwargs["query"]
         wildcard_filter = next((m for m in query["bool"]["must"] if "wildcard" in m), None)
         assert wildcard_filter is not None
         assert "*user*" in wildcard_filter["wildcard"]["term"]
 
-    def test_returns_description_field(self, mock_repo, mock_es_client):
+    def test_returns_description_field(self, mock_repo, mock_client):
         """Test that description field is returned in search results."""
-        mock_es_client.search.return_value = {
+        mock_client.search.return_value = {
             "hits": {
                 "hits": [
                     {
@@ -462,9 +462,9 @@ class TestSearchGlossary:
         assert len(result) == 1
         assert result[0]["description"] == "A person who uses the system"
 
-    def test_returns_empty_description_when_missing(self, mock_repo, mock_es_client):
+    def test_returns_empty_description_when_missing(self, mock_repo, mock_client):
         """Test that description defaults to empty string when not in source."""
-        mock_es_client.search.return_value = {
+        mock_client.search.return_value = {
             "hits": {
                 "hits": [
                     {
@@ -497,7 +497,7 @@ class TestSearchGlossary:
 class TestUpdateGlossaryFeatureAssociations:
     """Tests for update_glossary_feature_associations method."""
 
-    def test_updates_feature_associations(self, mock_repo, mock_es_client):
+    def test_updates_feature_associations(self, mock_repo, mock_client):
         """Test updating feature associations on glossary entry."""
         associations = [
             {
@@ -515,13 +515,13 @@ class TestUpdateGlossaryFeatureAssociations:
         )
 
         assert result is True
-        mock_es_client.update.assert_called_once()
-        call_kwargs = mock_es_client.update.call_args[1]
+        mock_client.update.assert_called_once()
+        call_kwargs = mock_client.update.call_args[1]
         assert call_kwargs["id"] == "scope:repo:main:glossary:user"
         assert call_kwargs["doc"]["feature_associations"] == associations
         assert "updated_at" in call_kwargs["doc"]
 
-    def test_updates_with_empty_associations(self, mock_repo, mock_es_client):
+    def test_updates_with_empty_associations(self, mock_repo, mock_client):
         """Test clearing feature associations."""
         result = mock_repo.update_glossary_feature_associations(
             glossary_id="scope:repo:main:glossary:user",
@@ -529,10 +529,10 @@ class TestUpdateGlossaryFeatureAssociations:
         )
 
         assert result is True
-        call_kwargs = mock_es_client.update.call_args[1]
+        call_kwargs = mock_client.update.call_args[1]
         assert call_kwargs["doc"]["feature_associations"] == []
 
-    def test_updates_with_multiple_associations(self, mock_repo, mock_es_client):
+    def test_updates_with_multiple_associations(self, mock_repo, mock_client):
         """Test updating with multiple feature associations."""
         associations = [
             {
@@ -557,7 +557,7 @@ class TestUpdateGlossaryFeatureAssociations:
         )
 
         assert result is True
-        call_kwargs = mock_es_client.update.call_args[1]
+        call_kwargs = mock_client.update.call_args[1]
         assert len(call_kwargs["doc"]["feature_associations"]) == 2
 
 
@@ -569,9 +569,9 @@ class TestUpdateGlossaryFeatureAssociations:
 class TestDeleteGlossary:
     """Tests for delete_glossary method."""
 
-    def test_deletes_all_glossary_entries(self, mock_repo, mock_es_client):
+    def test_deletes_all_glossary_entries(self, mock_repo, mock_client):
         """Test deleting all glossary entries for a repo."""
-        mock_es_client.delete_by_query.return_value = {"deleted": 10}
+        mock_client.delete_by_query.return_value = {"deleted": 10}
 
         result = mock_repo.delete_glossary(
             scope="scope",
@@ -580,14 +580,14 @@ class TestDeleteGlossary:
         )
 
         assert result == 10
-        mock_es_client.delete_by_query.assert_called_once()
-        call_kwargs = mock_es_client.delete_by_query.call_args[1]
+        mock_client.delete_by_query.assert_called_once()
+        call_kwargs = mock_client.delete_by_query.call_args[1]
         query = call_kwargs["query"]
         assert {"term": {"element_type": "glossary"}} in query["bool"]["must"]
 
-    def test_returns_zero_when_nothing_to_delete(self, mock_repo, mock_es_client):
+    def test_returns_zero_when_nothing_to_delete(self, mock_repo, mock_client):
         """Test returns zero when no glossary entries to delete."""
-        mock_es_client.delete_by_query.return_value = {"deleted": 0}
+        mock_client.delete_by_query.return_value = {"deleted": 0}
 
         result = mock_repo.delete_glossary(
             scope="scope",

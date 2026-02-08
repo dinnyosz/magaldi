@@ -19,10 +19,10 @@ from magaldi_mcp.tools import (
 class TestListPatterns:
     """Tests for list_patterns function."""
 
-    def test_list_patterns_returns_pattern_summary(self, mock_es_repo):
+    def test_list_patterns_returns_pattern_summary(self, mock_repo):
         """Test list_patterns returns pattern counts and examples."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
 
         # First call: aggregation query returns pattern counts
         agg_response = {
@@ -78,7 +78,7 @@ class TestListPatterns:
         mock_client.search.side_effect = [agg_response, singleton_examples, factory_examples]
 
         result = list_patterns(
-            es=mock_es_repo,
+            es=mock_repo,
             scope="scope",
             repository="repo",
         )
@@ -95,14 +95,14 @@ class TestListPatterns:
         assert patterns["singleton"]["count"] == 1
         assert patterns["factory"]["count"] == 2
 
-    def test_list_patterns_no_patterns_found(self, mock_es_repo):
+    def test_list_patterns_no_patterns_found(self, mock_repo):
         """Test list_patterns when no patterns exist."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"hits": {"hits": []}}
 
         result = list_patterns(
-            es=mock_es_repo,
+            es=mock_repo,
             scope="scope",
             repository="repo",
         )
@@ -110,14 +110,14 @@ class TestListPatterns:
         assert result["patterns"] == []
         assert result["total_classes_with_patterns"] == 0
 
-    def test_list_patterns_with_username(self, mock_es_repo):
+    def test_list_patterns_with_username(self, mock_repo):
         """Test list_patterns filters by username."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"hits": {"hits": []}}
 
         list_patterns(
-            es=mock_es_repo,
+            es=mock_repo,
             scope="scope",
             repository="repo",
             username="testuser",
@@ -140,10 +140,10 @@ class TestListPatterns:
 class TestFindByPattern:
     """Tests for find_by_pattern function."""
 
-    def test_find_by_pattern_returns_matching_classes(self, mock_es_repo):
+    def test_find_by_pattern_returns_matching_classes(self, mock_repo):
         """Test find_by_pattern returns classes with matching pattern."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {
             "hits": {
                 "hits": [
@@ -176,7 +176,7 @@ class TestFindByPattern:
         }
 
         result = find_by_pattern(
-            es=mock_es_repo,
+            es=mock_repo,
             pattern="singleton",
             scope="scope",
             repository="repo",
@@ -188,10 +188,10 @@ class TestFindByPattern:
         assert result["classes"][0]["name"] == "DatabaseConnection"
         assert result["classes"][0]["confidence"] == 0.95
 
-    def test_find_by_pattern_filters_by_min_confidence(self, mock_es_repo):
+    def test_find_by_pattern_filters_by_min_confidence(self, mock_repo):
         """Test find_by_pattern filters by minimum confidence."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {
             "hits": {
                 "hits": [
@@ -222,7 +222,7 @@ class TestFindByPattern:
         }
 
         result = find_by_pattern(
-            es=mock_es_repo,
+            es=mock_repo,
             pattern="singleton",
             scope="scope",
             repository="repo",
@@ -232,14 +232,14 @@ class TestFindByPattern:
         assert len(result["classes"]) == 1
         assert result["classes"][0]["name"] == "HighConfidence"
 
-    def test_find_by_pattern_no_matches(self, mock_es_repo):
+    def test_find_by_pattern_no_matches(self, mock_repo):
         """Test find_by_pattern when no classes match."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"hits": {"hits": []}}
 
         result = find_by_pattern(
-            es=mock_es_repo,
+            es=mock_repo,
             pattern="builder",
             scope="scope",
             repository="repo",
@@ -248,10 +248,10 @@ class TestFindByPattern:
         assert result["classes"] == []
         assert result["count"] == 0
 
-    def test_find_by_pattern_with_limit(self, mock_es_repo):
+    def test_find_by_pattern_with_limit(self, mock_repo):
         """Test find_by_pattern respects limit parameter."""
         mock_client = MagicMock()
-        mock_es_repo._get_client.return_value = mock_client
+        mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {
             "hits": {
                 "hits": [
@@ -272,7 +272,7 @@ class TestFindByPattern:
         }
 
         result = find_by_pattern(
-            es=mock_es_repo,
+            es=mock_repo,
             pattern="factory",
             scope="scope",
             repository="repo",

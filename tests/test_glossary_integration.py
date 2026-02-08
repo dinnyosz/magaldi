@@ -18,7 +18,7 @@ class TestMCPToolsIntegration:
     """Integration tests for MCP tools with glossary data."""
 
     @pytest.fixture
-    def mock_es_with_glossary(self):
+    def mock_repo_with_glossary(self):
         """Mock ES repository with glossary data."""
         es = MagicMock()
 
@@ -58,10 +58,10 @@ class TestMCPToolsIntegration:
 
         return es
 
-    def test_list_glossary_returns_all_terms(self, mock_es_with_glossary):
+    def test_list_glossary_returns_all_terms(self, mock_repo_with_glossary):
         """list_glossary returns all glossary terms for repository."""
         result = list_glossary(
-            mock_es_with_glossary,
+            mock_repo_with_glossary,
             scope="test",
             repository="repo",
             username="main",
@@ -72,10 +72,10 @@ class TestMCPToolsIntegration:
         assert "user" in terms
         assert "email" in terms
 
-    def test_get_glossary_term_returns_details(self, mock_es_with_glossary):
+    def test_get_glossary_term_returns_details(self, mock_repo_with_glossary):
         """get_glossary_term returns full term details with associations."""
         result = get_glossary_term(
-            mock_es_with_glossary,
+            mock_repo_with_glossary,
             scope="test",
             repository="repo",
             term="user",
@@ -87,10 +87,10 @@ class TestMCPToolsIntegration:
         assert result["total_count"] == 5
         assert len(result["feature_associations"]) == 2
 
-    def test_search_glossary_finds_matching_terms(self, mock_es_with_glossary):
+    def test_search_glossary_finds_matching_terms(self, mock_repo_with_glossary):
         """search_glossary finds terms by partial match."""
         result = search_glossary(
-            mock_es_with_glossary,
+            mock_repo_with_glossary,
             scope="test",
             repository="repo",
             query="us",
@@ -100,10 +100,10 @@ class TestMCPToolsIntegration:
         assert len(result) == 1
         assert result[0]["term"] == "user"
 
-    def test_get_feature_members_includes_glossary_terms(self, mock_es_with_glossary):
+    def test_get_feature_members_includes_glossary_terms(self, mock_repo_with_glossary):
         """get_feature_members includes associated glossary terms."""
         # Setup feature document
-        mock_es_with_glossary.get_document.side_effect = [
+        mock_repo_with_glossary.get_document.side_effect = [
             # Feature document
             {"member_ids": ["e1", "e2"]},
             # First member
@@ -125,7 +125,7 @@ class TestMCPToolsIntegration:
         ]
 
         # Setup glossary terms - only terms associated with this feature
-        mock_es_with_glossary.get_glossary_terms.return_value = [
+        mock_repo_with_glossary.get_glossary_terms.return_value = [
             {
                 "term": "user",
                 "total_count": 5,
@@ -136,7 +136,7 @@ class TestMCPToolsIntegration:
         ]
 
         result = get_feature_members(
-            mock_es_with_glossary,
+            mock_repo_with_glossary,
             feature_id="test:repo:main:feature:1",
         )
 
@@ -144,11 +144,11 @@ class TestMCPToolsIntegration:
         assert "glossary_terms" in result
         assert len(result["members"]) == 2
 
-    def test_search_features_with_glossary_term_filter(self, mock_es_with_glossary):
+    def test_search_features_with_glossary_term_filter(self, mock_repo_with_glossary):
         """search_features can filter by glossary term."""
         # Setup search results
-        mock_es_with_glossary.search_by_vector.return_value = []
-        mock_es_with_glossary.search_by_keyword.return_value = [
+        mock_repo_with_glossary.search_by_vector.return_value = []
+        mock_repo_with_glossary.search_by_keyword.return_value = [
             {
                 "element_id": "f1",
                 "cluster_label": "Auth",
@@ -159,7 +159,7 @@ class TestMCPToolsIntegration:
         ]
 
         # Setup glossary term with feature associations
-        mock_es_with_glossary.get_glossary_term.return_value = {
+        mock_repo_with_glossary.get_glossary_term.return_value = {
             "term": "user",
             "feature_associations": [
                 {"feature_id": "f1", "percentage": 75.0},
@@ -167,7 +167,7 @@ class TestMCPToolsIntegration:
         }
 
         result = search_features(
-            mock_es_with_glossary,
+            mock_repo_with_glossary,
             embed_client=None,
             query="authentication",
             scope="test",

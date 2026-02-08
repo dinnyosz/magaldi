@@ -12,7 +12,7 @@ from magaldi_mcp.server import MagaldiMCPServer
 
 
 @pytest.fixture
-def mock_es_repo():
+def mock_repo():
     """Create a mock Elasticsearch repository."""
     repo = MagicMock()
     repo.get_glossary_terms.return_value = []
@@ -22,7 +22,7 @@ def mock_es_repo():
 
 
 @pytest.fixture
-def server(mock_es_repo):
+def server(mock_repo):
     """Create a MagaldiMCPServer with mocked dependencies."""
     mock_config = MagicMock()
     mock_config.llm = MagicMock()
@@ -34,7 +34,7 @@ def server(mock_es_repo):
 
     with patch("magaldi_mcp.server.get_config", return_value=mock_config):
         server = MagaldiMCPServer(default_username="main")
-        server.es_repo = mock_es_repo
+        server.repo = mock_repo
         return server
 
 
@@ -62,9 +62,9 @@ class TestListGlossaryTool:
     """Tests for list_glossary tool handler."""
 
     @pytest.mark.asyncio
-    async def test_list_glossary_returns_terms(self, server, mock_es_repo):
+    async def test_list_glossary_returns_terms(self, server, mock_repo):
         """Test list_glossary tool returns glossary terms."""
-        mock_es_repo.get_glossary_terms.return_value = [
+        mock_repo.get_glossary_terms.return_value = [
             {"term": "user", "total_count": 5, "description": "User-related code"},
             {"term": "email", "total_count": 3, "description": "Email handling"},
         ]
@@ -78,7 +78,7 @@ class TestListGlossaryTool:
         assert len(result) == 2
         assert result[0]["term"] == "user"
         assert result[0]["description"] == "User-related code"
-        mock_es_repo.get_glossary_terms.assert_called_once_with(
+        mock_repo.get_glossary_terms.assert_called_once_with(
             scope="test",
             repository="repo",
             username="main",
@@ -86,9 +86,9 @@ class TestListGlossaryTool:
         )
 
     @pytest.mark.asyncio
-    async def test_list_glossary_with_min_count(self, server, mock_es_repo):
+    async def test_list_glossary_with_min_count(self, server, mock_repo):
         """Test list_glossary tool with min_count filter."""
-        mock_es_repo.get_glossary_terms.return_value = [
+        mock_repo.get_glossary_terms.return_value = [
             {"term": "user", "total_count": 5},
         ]
 
@@ -97,7 +97,7 @@ class TestListGlossaryTool:
             {"scope": "test", "repository": "repo", "min_count": 3},
         )
 
-        mock_es_repo.get_glossary_terms.assert_called_once_with(
+        mock_repo.get_glossary_terms.assert_called_once_with(
             scope="test",
             repository="repo",
             username="main",
@@ -105,16 +105,16 @@ class TestListGlossaryTool:
         )
 
     @pytest.mark.asyncio
-    async def test_list_glossary_with_custom_username(self, server, mock_es_repo):
+    async def test_list_glossary_with_custom_username(self, server, mock_repo):
         """Test list_glossary tool with custom username."""
-        mock_es_repo.get_glossary_terms.return_value = []
+        mock_repo.get_glossary_terms.return_value = []
 
         await server._handle_tool(
             "list_glossary",
             {"scope": "test", "repository": "repo", "username": "custom"},
         )
 
-        mock_es_repo.get_glossary_terms.assert_called_once_with(
+        mock_repo.get_glossary_terms.assert_called_once_with(
             scope="test",
             repository="repo",
             username="custom",
@@ -126,9 +126,9 @@ class TestGetGlossaryTermTool:
     """Tests for get_glossary_term tool handler."""
 
     @pytest.mark.asyncio
-    async def test_get_glossary_term_returns_term(self, server, mock_es_repo):
+    async def test_get_glossary_term_returns_term(self, server, mock_repo):
         """Test get_glossary_term tool returns term details."""
-        mock_es_repo.get_glossary_term.return_value = {
+        mock_repo.get_glossary_term.return_value = {
             "term": "user",
             "total_count": 5,
             "element_ids": ["id1", "id2"],
@@ -145,7 +145,7 @@ class TestGetGlossaryTermTool:
         assert result["term"] == "user"
         assert result["total_count"] == 5
         assert result["description"] == "Code related to user management and authentication"
-        mock_es_repo.get_glossary_term.assert_called_once_with(
+        mock_repo.get_glossary_term.assert_called_once_with(
             scope="test",
             repository="repo",
             term="user",
@@ -153,9 +153,9 @@ class TestGetGlossaryTermTool:
         )
 
     @pytest.mark.asyncio
-    async def test_get_glossary_term_not_found(self, server, mock_es_repo):
+    async def test_get_glossary_term_not_found(self, server, mock_repo):
         """Test get_glossary_term returns None when term not found."""
-        mock_es_repo.get_glossary_term.return_value = None
+        mock_repo.get_glossary_term.return_value = None
 
         result = await server._handle_tool(
             "get_glossary_term",
@@ -165,16 +165,16 @@ class TestGetGlossaryTermTool:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_get_glossary_term_with_custom_username(self, server, mock_es_repo):
+    async def test_get_glossary_term_with_custom_username(self, server, mock_repo):
         """Test get_glossary_term tool with custom username."""
-        mock_es_repo.get_glossary_term.return_value = {"term": "user", "total_count": 1}
+        mock_repo.get_glossary_term.return_value = {"term": "user", "total_count": 1}
 
         await server._handle_tool(
             "get_glossary_term",
             {"scope": "test", "repository": "repo", "term": "user", "username": "custom"},
         )
 
-        mock_es_repo.get_glossary_term.assert_called_once_with(
+        mock_repo.get_glossary_term.assert_called_once_with(
             scope="test",
             repository="repo",
             term="user",
@@ -186,9 +186,9 @@ class TestSearchGlossaryTool:
     """Tests for search_glossary tool handler."""
 
     @pytest.mark.asyncio
-    async def test_search_glossary_returns_matches(self, server, mock_es_repo):
+    async def test_search_glossary_returns_matches(self, server, mock_repo):
         """Test search_glossary tool returns matching terms."""
-        mock_es_repo.search_glossary.return_value = [
+        mock_repo.search_glossary.return_value = [
             {"term": "user", "total_count": 5, "description": "User management"},
             {"term": "username", "total_count": 3, "description": "Username handling"},
         ]
@@ -202,7 +202,7 @@ class TestSearchGlossaryTool:
         assert len(result) == 2
         assert result[0]["description"] == "User management"
         assert result[1]["description"] == "Username handling"
-        mock_es_repo.search_glossary.assert_called_once_with(
+        mock_repo.search_glossary.assert_called_once_with(
             scope="test",
             repository="repo",
             query="user",
@@ -210,9 +210,9 @@ class TestSearchGlossaryTool:
         )
 
     @pytest.mark.asyncio
-    async def test_search_glossary_no_matches(self, server, mock_es_repo):
+    async def test_search_glossary_no_matches(self, server, mock_repo):
         """Test search_glossary returns empty list when no matches."""
-        mock_es_repo.search_glossary.return_value = []
+        mock_repo.search_glossary.return_value = []
 
         result = await server._handle_tool(
             "search_glossary",
@@ -222,16 +222,16 @@ class TestSearchGlossaryTool:
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_search_glossary_with_custom_username(self, server, mock_es_repo):
+    async def test_search_glossary_with_custom_username(self, server, mock_repo):
         """Test search_glossary tool with custom username."""
-        mock_es_repo.search_glossary.return_value = []
+        mock_repo.search_glossary.return_value = []
 
         await server._handle_tool(
             "search_glossary",
             {"scope": "test", "repository": "repo", "query": "test", "username": "custom"},
         )
 
-        mock_es_repo.search_glossary.assert_called_once_with(
+        mock_repo.search_glossary.assert_called_once_with(
             scope="test",
             repository="repo",
             query="test",

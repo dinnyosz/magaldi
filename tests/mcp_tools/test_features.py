@@ -20,9 +20,9 @@ from magaldi_mcp.tools import (
 class TestSearchFeatures:
     """Tests for search_features function."""
 
-    def test_search_features_returns_results(self, mock_es_repo, mock_embed_client):
+    def test_search_features_returns_results(self, mock_repo, mock_embed_client):
         """Test search_features returns formatted results."""
-        mock_es_repo.search_by_vector.return_value = [
+        mock_repo.search_by_vector.return_value = [
             {
                 "element_id": "feature1",
                 "name": "authentication",
@@ -34,7 +34,7 @@ class TestSearchFeatures:
         ]
 
         result = search_features(
-            es=mock_es_repo,
+            es=mock_repo,
             embed_client=mock_embed_client,
             query="authentication",
         )
@@ -44,9 +44,9 @@ class TestSearchFeatures:
         assert result[0]["label"] == "authentication"
         assert result[0]["type"] == "feature"
 
-    def test_search_features_falls_back_to_keyword(self, mock_es_repo):
+    def test_search_features_falls_back_to_keyword(self, mock_repo):
         """Test search_features falls back to keyword search."""
-        mock_es_repo.search_by_keyword.return_value = [
+        mock_repo.search_by_keyword.return_value = [
             {
                 "element_id": "feature1",
                 "name": "auth",
@@ -56,16 +56,16 @@ class TestSearchFeatures:
         ]
 
         result = search_features(
-            es=mock_es_repo,
+            es=mock_repo,
             embed_client=None,
             query="auth",
         )
 
         assert isinstance(result, list)
 
-    def test_search_features_includes_subfeature_parent_info(self, mock_es_repo, mock_embed_client):
+    def test_search_features_includes_subfeature_parent_info(self, mock_repo, mock_embed_client):
         """Test search_features includes parent info for subfeatures."""
-        mock_es_repo.search_by_vector.return_value = [
+        mock_repo.search_by_vector.return_value = [
             {
                 "element_id": "subfeature1",
                 "name": "token_validation",
@@ -78,7 +78,7 @@ class TestSearchFeatures:
         ]
 
         result = search_features(
-            es=mock_es_repo,
+            es=mock_repo,
             embed_client=mock_embed_client,
             query="token",
         )
@@ -222,17 +222,17 @@ class TestSearchFeaturesGlossaryFilter:
 class TestListFeatures:
     """Tests for list_features function."""
 
-    def test_list_features_returns_combined_list(self, mock_es_repo):
+    def test_list_features_returns_combined_list(self, mock_repo):
         """Test list_features combines features and subfeatures."""
-        mock_es_repo.get_features.return_value = [
+        mock_repo.get_features.return_value = [
             {"label": "auth", "member_count": 10},
         ]
-        mock_es_repo.get_subfeatures.return_value = [
+        mock_repo.get_subfeatures.return_value = [
             {"label": "token", "member_count": 3},
         ]
 
         result = list_features(
-            es=mock_es_repo,
+            es=mock_repo,
             scope="github",
             repository="repo",
         )
@@ -256,9 +256,9 @@ class TestListFeatures:
 class TestGetFeatureMembers:
     """Tests for get_feature_members function."""
 
-    def test_get_feature_members_returns_members(self, mock_es_repo):
+    def test_get_feature_members_returns_members(self, mock_repo):
         """Test get_feature_members returns member elements."""
-        mock_es_repo.get_document.side_effect = [
+        mock_repo.get_document.side_effect = [
             # Feature document
             {
                 "element_id": "feature1",
@@ -283,9 +283,9 @@ class TestGetFeatureMembers:
                 "line_start": 20,
             },
         ]
-        mock_es_repo.get_glossary_terms.return_value = []
+        mock_repo.get_glossary_terms.return_value = []
 
-        result = get_feature_members(es=mock_es_repo, feature_id="feature1")
+        result = get_feature_members(es=mock_repo, feature_id="feature1")
 
         assert "members" in result
         assert "glossary_terms" in result
@@ -293,22 +293,22 @@ class TestGetFeatureMembers:
         assert result["members"][0]["name"] == "login"
         assert result["members"][1]["name"] == "logout"
 
-    def test_get_feature_members_not_found(self, mock_es_repo):
+    def test_get_feature_members_not_found(self, mock_repo):
         """Test get_feature_members raises when feature not found."""
-        mock_es_repo.get_document.return_value = None
+        mock_repo.get_document.return_value = None
 
         with pytest.raises(ValueError, match="not found"):
-            get_feature_members(es=mock_es_repo, feature_id="nonexistent")
+            get_feature_members(es=mock_repo, feature_id="nonexistent")
 
-    def test_get_feature_members_empty(self, mock_es_repo):
+    def test_get_feature_members_empty(self, mock_repo):
         """Test get_feature_members with no members."""
-        mock_es_repo.get_document.return_value = {
+        mock_repo.get_document.return_value = {
             "element_id": "feature1",
             "name": "empty_feature",
             "member_ids": [],
         }
 
-        result = get_feature_members(es=mock_es_repo, feature_id="feature1")
+        result = get_feature_members(es=mock_repo, feature_id="feature1")
 
         assert result == {"members": [], "glossary_terms": []}
 
