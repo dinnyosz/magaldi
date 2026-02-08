@@ -208,6 +208,10 @@ class ElasticsearchRepository:
         """Store code embedding."""
         return self._metadata.store_code_embedding(element_id, embedding)
 
+    def store_caller_embedding(self, element_id: str, embedding: list[float]) -> bool:
+        """Store caller embedding."""
+        return self._metadata.store_caller_embedding(element_id, embedding)
+
     def get_embedding(
         self, element_id: str, embedding_type: str = "summary"
     ) -> list[float] | None:
