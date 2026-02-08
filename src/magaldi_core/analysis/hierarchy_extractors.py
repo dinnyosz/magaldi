@@ -587,7 +587,7 @@ class RouteHierarchyExtractor:
 
 
 def elements_to_route_info(es_docs: list[dict[str, Any]]) -> list[RouteElementInfo]:
-    """Convert Elasticsearch documents to RouteElementInfo objects."""
+    """Convert Search documents to RouteElementInfo objects."""
     result = []
     for doc in es_docs:
         # Handle both _source wrapper and direct doc
@@ -617,7 +617,7 @@ def elements_to_route_info(es_docs: list[dict[str, Any]]) -> list[RouteElementIn
 
 
 def elements_to_element_info(es_docs: list[dict[str, Any]]) -> list[ElementInfo]:
-    """Convert Elasticsearch documents to ElementInfo objects."""
+    """Convert Search documents to ElementInfo objects."""
     result = []
     for doc in es_docs:
         # Handle both _source wrapper and direct doc

@@ -19,7 +19,7 @@ def get_command_tree(
     with their full invocation paths like "magaldi web serve".
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         scope: Repository scope (required).
         repository: Repository name (required).
         username: User branch (defaults to "main").
@@ -185,7 +185,7 @@ def get_route_tree(
     with their full URL paths like "/api/v1/users/{id}".
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         scope: Repository scope (required).
         repository: Repository name (required).
         username: User branch (defaults to "main").

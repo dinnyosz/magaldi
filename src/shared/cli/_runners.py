@@ -506,7 +506,7 @@ def run_hierarchy_extraction(
         scope: Repository scope
         repository: Repository name
         username: Username/branch
-        repo: Elasticsearch repository instance
+        repo: Search repository instance
         cli_entry_point: CLI entry point name (e.g., "magaldi")
         api_prefix: API URL prefix for route hierarchy (e.g., "/api/v1")
 
@@ -650,7 +650,7 @@ def run_call_resolution(
     """Run Phase 5: Call Resolution (static + embedding + semantic relationships).
 
     Args:
-        repo: Elasticsearch repository instance.
+        repo: Search repository instance.
         scope: Repository scope.
         repository: Repository name.
         username: Username/branch.

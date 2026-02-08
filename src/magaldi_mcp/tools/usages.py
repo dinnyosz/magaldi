@@ -20,10 +20,10 @@ def find_usages(
 ) -> list[dict[str, Any]]:
     """Find where an element is used/called/referenced.
 
-    Searches indexed code in Elasticsearch using regexp search - no filesystem access needed.
+    Searches indexed code in search backend using regexp search - no filesystem access needed.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         element_id: Element to find usages of.
         limit: Maximum usages to return.
 
@@ -140,10 +140,10 @@ def find_implementations(
 ) -> list[dict[str, Any]]:
     """Find classes that implement/inherit from a protocol or base class.
 
-    Searches indexed code in Elasticsearch using regexp search - no filesystem access needed.
+    Searches indexed code in search backend using regexp search - no filesystem access needed.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         element_id: Element ID of the protocol/base class.
         class_name: Or just the class name to search for.
         scope: Filter by scope.

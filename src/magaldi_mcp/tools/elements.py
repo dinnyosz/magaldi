@@ -103,7 +103,7 @@ def get_element(
     """Get details of a code element.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         element_id: Element ID.
         include_code: Include raw source code.
         brief: Return only core fields (default True). Set False for full details.
@@ -269,7 +269,7 @@ def get_context(
     """Get hierarchical context for an element.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         element_id: Element ID.
         include_siblings: Include sibling elements.
         include_children: Include child elements.
@@ -365,7 +365,7 @@ def get_children(
     """Get child elements of a parent.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         element_id: Parent element ID.
 
     Returns:
@@ -395,7 +395,7 @@ def batch_get_elements(
     """Get multiple elements by ID in one call.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         element_ids: List of element IDs.
         include_code: Include source code.
 
@@ -433,7 +433,7 @@ def get_file_structure(
     """Get structure of a file (classes, functions, methods, imports).
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         scope: Repository scope (auto-detected from magaldi.yaml if not provided).
         repository: Repository name (auto-detected from magaldi.yaml if not provided).
         file_path: Relative file path.

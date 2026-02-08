@@ -29,7 +29,7 @@ def pattern_search(
     - proximity: Terms near each other (e.g., "add column Model")
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         pattern: Search pattern (syntax depends on mode).
         mode: One of "regexp", "wildcard", "proximity".
         scope: Filter by scope (auto-detected from magaldi.yaml if not provided).

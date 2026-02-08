@@ -18,7 +18,7 @@ class FeatureRepository:
         self._base = base
 
     def _get_client(self) -> Any:
-        """Get Elasticsearch client from base."""
+        """Get search client from base."""
         return self._base._get_client()
 
     def _get_bulk_timeout(self) -> int:

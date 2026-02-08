@@ -120,7 +120,7 @@ def _connect() -> Any:
     # Quick connectivity check
     client = es._get_client()
     if not client.ping():
-        console.print("[red]Error:[/] Cannot connect to Elasticsearch")
+        console.print("[red]Error:[/] Cannot connect to search backend")
         sys.exit(1)
     return es
 

@@ -124,7 +124,7 @@ async def get_job_stats() -> JobStatsResponse:
 async def get_index_stats(
     repo: Repository = Depends(get_repository),
 ) -> IndexStatsResponse:
-    """Get Elasticsearch index statistics."""
+    """Get Search index statistics."""
     client = repo._get_client()
 
     # Get index stats
@@ -205,7 +205,7 @@ async def retry_failed_jobs(
 async def refresh_index(
     repo: Repository = Depends(get_repository),
 ) -> dict:
-    """Refresh the Elasticsearch index."""
+    """Refresh the Search index."""
     client = repo._get_client()
     client.indices.refresh(index=INDEX_NAME)
     return {"status": "refreshed"}

@@ -212,7 +212,7 @@ def _index_element(
     file_hash: str | None = None,
     element_count: int | None = None,
 ) -> bool:
-    """Index element to Elasticsearch with summary and all embeddings.
+    """Index element to search backend with summary and all embeddings.
 
     Args:
         element: Element to index.
@@ -220,7 +220,7 @@ def _index_element(
         summary_embedding: Summary embedding vector (or None if not embedded).
         code_embedding: Code embedding vector (or None if not embedded).
         caller_embedding: Caller embedding vector (or None if not embedded).
-        repo: Elasticsearch repository.
+        repo: Search repository.
         file_hash: File hash for all elements.
         element_count: Total element count in file (only for file-level elements).
 
@@ -289,7 +289,7 @@ def _process_single_element(
         config: Processing configuration.
         file_hashes: Optional dict mapping relative_path to file hash.
         element_counts: Optional dict mapping relative_path to element count.
-        repo: Elasticsearch repository for indexing.
+        repo: Search repository for indexing.
         worker_id: Worker thread ID.
         worker_status: Status tracker for workers.
         on_status_change: Optional callback when worker status changes.

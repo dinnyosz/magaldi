@@ -20,7 +20,7 @@ def find_complex_functions(
     """Find functions/methods with high cyclomatic complexity.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         scope: Repository scope (required).
         repository: Repository name (required).
         username: User branch (defaults to "main").
@@ -104,7 +104,7 @@ def find_security_issues(
     """Find potential security issues in code.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         scope: Repository scope (required).
         repository: Repository name (required).
         username: User branch (defaults to "main").
@@ -224,7 +224,7 @@ def find_undocumented(
     """Find functions/methods missing documentation.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         scope: Repository scope (required).
         repository: Repository name (required).
         username: User branch (defaults to "main").
@@ -316,7 +316,7 @@ def find_env_usage(
     """Find environment variable usage across the codebase.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         scope: Repository scope (required).
         repository: Repository name (required).
         username: User branch (defaults to "main").
@@ -420,7 +420,7 @@ def find_async_code(
     """Find async/concurrent code patterns.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         scope: Repository scope (required).
         repository: Repository name (required).
         username: User branch (defaults to "main").

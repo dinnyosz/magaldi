@@ -14,10 +14,10 @@ def get_call_graph(
 ) -> dict[str, Any]:
     """Get callers and/or callees of a function/method.
 
-    Analyzes indexed code in Elasticsearch - no filesystem access needed.
+    Analyzes indexed code in search backend - no filesystem access needed.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         element_id: Function/method element ID.
         direction: 'callers', 'callees', or 'both'.
 
@@ -135,7 +135,7 @@ def find_callers(
     Uses indexed call data to find callers via calls.resolved_id.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         element_id: Target element ID to find callers of.
         scope: Filter by scope.
         repository: Filter by repository.
@@ -227,7 +227,7 @@ def find_call_chain(
     """Trace call chains from an element.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         element_id: Starting element ID.
         direction: "callees" (what does it call), "callers" (what calls it),
                    or "both".
@@ -596,7 +596,7 @@ def find_dead_code(
     - Magic methods (__init__, __str__, etc.)
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         scope: Repository scope (required).
         repository: Repository name (required).
         username: User branch (defaults to "main").
@@ -734,7 +734,7 @@ def find_entry_points(
     - Called externally with no internal callers
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         scope: Repository scope (required).
         repository: Repository name (required).
         username: User branch (defaults to "main").

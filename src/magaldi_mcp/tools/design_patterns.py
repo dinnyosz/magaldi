@@ -20,7 +20,7 @@ def list_patterns(
     counts and example classes.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         scope: Repository scope (required).
         repository: Repository name (required).
         username: User branch.
@@ -123,7 +123,7 @@ def find_by_pattern(
     Supports: singleton, builder, factory, repository.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         pattern: Pattern type to search for.
         scope: Repository scope (required).
         repository: Repository name (required).

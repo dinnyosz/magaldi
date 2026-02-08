@@ -10,7 +10,7 @@ Strategy 1-2 (at parse time, in parsers/base.py):
 Strategy 3-5 (this module, resolve_all_calls):
 - Import-based calls (from utils import process; process())
 - Module method calls (import utils; utils.process())
-- Type-annotated calls (repo: Repository; es.get_document())
+- Type-annotated calls (repo: Repository; repo.get_document())
 
 Strategy 6 (this module, resolve_calls_by_embedding):
 - Embedding similarity for remaining untyped calls with receiver
@@ -56,7 +56,7 @@ def resolve_all_calls(
     type_resolved = 0
 
     # Get ALL elements with calls (not just unresolved)
-    elements = es.find_all_elements_with_calls(scope, repository, username)
+    elements = repo.find_all_elements_with_calls(scope, repository, username)
     logger.info(f"Full resolution: found {len(elements)} elements with calls")
 
     for elem in elements:
@@ -72,7 +72,7 @@ def resolve_all_calls(
                     param_types[p["name"]] = p["type"]
 
         # Get file's imports
-        file_imports = es.get_file_imports(relative_path, scope, repository, username)
+        file_imports = repo.get_file_imports(relative_path, scope, repository, username)
         import_map = _build_import_map(file_imports) if file_imports else {}
 
         calls = elem.get("calls", [])
@@ -92,7 +92,7 @@ def resolve_all_calls(
             if receiver is None and name in import_map:
                 import_info = import_map[name]
                 resolved_id = _lookup_element_by_import(
-                    es, import_info, name, scope, repository, username
+                    repo, import_info, name, scope, repository, username
                 )
                 if resolved_id:
                     import_resolved += 1
@@ -101,7 +101,7 @@ def resolve_all_calls(
             elif receiver and receiver in import_map:
                 import_info = import_map[receiver]
                 resolved_id = _lookup_element_by_import(
-                    es, import_info, name, scope, repository, username
+                    repo, import_info, name, scope, repository, username
                 )
                 if resolved_id:
                     import_resolved += 1
@@ -110,7 +110,7 @@ def resolve_all_calls(
             elif receiver and category == "type_resolvable" and receiver in param_types:
                 type_name = param_types[receiver]
                 resolved_id = _lookup_method_by_type(
-                    es, type_name, name, scope, repository, username
+                    repo, type_name, name, scope, repository, username
                 )
                 if resolved_id:
                     type_resolved += 1
@@ -122,7 +122,7 @@ def resolve_all_calls(
                 updated = True
 
         if updated:
-            es.store_calls(element_id, calls)
+            repo.store_calls(element_id, calls)
 
     total_resolved = import_resolved + type_resolved
     logger.info(
@@ -160,7 +160,7 @@ def resolve_cross_file_calls(
     type_resolved = 0
 
     # Get all elements with unresolved calls
-    elements = es.find_elements_with_unresolved_calls(scope, repository, username)
+    elements = repo.find_elements_with_unresolved_calls(scope, repository, username)
     logger.info(f"Found {len(elements)} elements with unresolved calls")
 
     for elem in elements:
@@ -176,7 +176,7 @@ def resolve_cross_file_calls(
                     param_types[p["name"]] = p["type"]
 
         # Get file's imports
-        file_imports = es.get_file_imports(relative_path, scope, repository, username)
+        file_imports = repo.get_file_imports(relative_path, scope, repository, username)
         import_map = _build_import_map(file_imports) if file_imports else {}
 
         calls = elem.get("calls", [])
@@ -198,7 +198,7 @@ def resolve_cross_file_calls(
             if receiver is None and name in import_map:
                 import_info = import_map[name]
                 resolved_id = _lookup_element_by_import(
-                    es, import_info, name, scope, repository, username
+                    repo, import_info, name, scope, repository, username
                 )
                 if resolved_id:
                     import_resolved += 1
@@ -208,17 +208,17 @@ def resolve_cross_file_calls(
             elif receiver and receiver in import_map:
                 import_info = import_map[receiver]
                 resolved_id = _lookup_element_by_import(
-                    es, import_info, name, scope, repository, username
+                    repo, import_info, name, scope, repository, username
                 )
                 if resolved_id:
                     import_resolved += 1
 
             # Strategy 5: Type-annotated method call
-            # e.g., def foo(repo: Repository): es.get_document()
+            # e.g., def foo(repo: Repository): repo.get_document()
             elif receiver and category == "type_resolvable" and receiver in param_types:
                 type_name = param_types[receiver]
                 resolved_id = _lookup_method_by_type(
-                    es, type_name, name, scope, repository, username
+                    repo, type_name, name, scope, repository, username
                 )
                 if resolved_id:
                     type_resolved += 1
@@ -229,7 +229,7 @@ def resolve_cross_file_calls(
                 updated = True
 
         if updated:
-            es.store_calls(element_id, calls)
+            repo.store_calls(element_id, calls)
 
     total_resolved = import_resolved + type_resolved
     logger.info(
@@ -297,7 +297,7 @@ def _lookup_element_by_import(
     for file_path in possible_paths:
         # Look for function with this name in the file
         element_id = _find_element_in_file(
-            es, file_path, element_name, scope, repository, username
+            repo, file_path, element_name, scope, repository, username
         )
         if element_id:
             return element_id
@@ -403,7 +403,7 @@ def _lookup_method_by_type(
         base_type = base_type.split(".")[-1]
 
     # Look up the class by name (without path since we only have the type name)
-    class_doc = es.get_document_by_name_only(
+    class_doc = repo.get_document_by_name_only(
         name=base_type,
         element_type="class",
         scope=scope,
@@ -419,7 +419,7 @@ def _lookup_method_by_type(
         return None
 
     # Look up the method on this class
-    method_doc = es.get_method_by_class(
+    method_doc = repo.get_method_by_class(
         class_id=class_id,
         method_name=method_name,
         scope=scope,
@@ -458,7 +458,7 @@ def _find_element_in_file(
     for elem_type in ["function", "class"]:
         # We don't know the exact line number, so we need to search
         # Try to find by querying
-        doc = es.get_document_by_name(
+        doc = repo.get_document_by_name(
             name=element_name,
             element_type=elem_type,
             relative_path=file_path,
@@ -534,10 +534,10 @@ def resolve_calls_by_embedding(
     embedding_cache: dict[str, list[float] | None] = {}
 
     # Get all elements with calls
-    elements = es.find_all_elements_with_calls(scope, repository, username)
+    elements = repo.find_all_elements_with_calls(scope, repository, username)
     # Also get main's elements if user is not main
     if username != "main":
-        main_elements = es.find_all_elements_with_calls(scope, repository, "main")
+        main_elements = repo.find_all_elements_with_calls(scope, repository, "main")
         # Merge: user elements win on duplicates
         elem_map: dict[str, dict] = {}
         for e in main_elements:
@@ -573,11 +573,11 @@ def resolve_calls_by_embedding(
 
             # Find candidates (cached by name)
             if name not in name_cache:
-                candidates = es.find_candidates_by_name(
+                candidates = repo.find_candidates_by_name(
                     name, scope, repository, username
                 )
                 if username != "main":
-                    main_candidates = es.find_candidates_by_name(
+                    main_candidates = repo.find_candidates_by_name(
                         name, scope, repository, "main"
                     )
                     candidates = _merge_candidates(candidates, main_candidates)
@@ -599,7 +599,7 @@ def resolve_calls_by_embedding(
             # Multiple candidates — use embedding similarity
             # Get caller's embedding (cached) — uses caller_embedding for asymmetric matching
             if element_id not in embedding_cache:
-                caller_embedding = es.get_embedding(element_id, "caller")
+                caller_embedding = repo.get_embedding(element_id, "caller")
                 embedding_cache[element_id] = caller_embedding
             caller_embedding = embedding_cache[element_id]
 
@@ -626,7 +626,7 @@ def resolve_calls_by_embedding(
                 updated = True
 
         if updated:
-            es.store_calls(element_id, calls)
+            repo.store_calls(element_id, calls)
 
     total_resolved = single_resolved + embedding_resolved
     logger.info(
@@ -673,7 +673,7 @@ def compute_semantic_relationships(
     # Get all functions/methods with embeddings via direct ES query
     from shared.db.repositories.base import INDEX_NAME
 
-    client = es._get_client()
+    client = repo._get_client()
 
     # Build query for all functions/methods in the repo
     filter_clauses: list[dict] = [
@@ -738,7 +738,7 @@ def compute_semantic_relationships(
             continue
 
         # Find similar elements via vector search (searches both user + main)
-        similar = es.search_by_vector(
+        similar = repo.search_by_vector(
             embedding=embedding,
             scope=scope,
             repository=repository,
@@ -765,7 +765,7 @@ def compute_semantic_relationships(
                 break
 
         if related:
-            es.store_semantic_related(element_id, related)
+            repo.store_semantic_related(element_id, related)
             total_relationships += len(related)
 
         elements_processed += 1

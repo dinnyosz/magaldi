@@ -204,7 +204,7 @@ class SearchRepository:
         size: int = 50,
         include_tests: bool = True,
     ) -> list[dict[str, Any]]:
-        """Search raw_code field using Elasticsearch regexp query.
+        """Search raw_code field using regexp query.
 
         Uses Lucene regexp syntax (not Python re). Key differences:
         - . matches any character (no need to escape)
@@ -277,7 +277,7 @@ class SearchRepository:
         size: int = 50,
         include_tests: bool = True,
     ) -> list[dict[str, Any]]:
-        """Search raw_code field using Elasticsearch wildcard query.
+        """Search raw_code field using wildcard query.
 
         Wildcard syntax:
         - * matches zero or more characters

@@ -33,7 +33,7 @@ def search_code(
     Tries vector search first, falls back to keyword search if Ollama unavailable.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         embed_client: Embedding client for query (optional, falls back to keyword).
         query: Natural language search query.
         scope: Filter by scope.
@@ -193,7 +193,7 @@ def search_features(
     Tries vector search first, falls back to keyword search if Ollama unavailable.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         embed_client: Embedding client for query (optional, falls back to keyword).
         query: Search query for features.
         scope: Filter by scope.
@@ -283,7 +283,7 @@ def find_similar(
     """Find code elements similar to a given element.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         element_id: Source element ID.
         limit: Maximum results.
         same_repo_only: Only search within same repository.

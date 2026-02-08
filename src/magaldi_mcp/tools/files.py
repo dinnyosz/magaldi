@@ -19,10 +19,10 @@ def find_files(
 ) -> list[dict[str, Any]]:
     """Find indexed files by glob pattern.
 
-    Searches file elements in Elasticsearch - no filesystem access needed.
+    Searches file elements in search backend - no filesystem access needed.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         pattern: Glob pattern (e.g., '**/*.py', 'src/**/*.ts').
         scope: Filter by scope.
         repository: Filter by repository.

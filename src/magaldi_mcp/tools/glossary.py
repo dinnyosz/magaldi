@@ -22,7 +22,7 @@ def list_glossary(
     (e.g., 'user', 'email', 'order') that appear across the codebase.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         scope: Repository scope (auto-detected from magaldi.yaml if not provided).
         repository: Repository name (auto-detected from magaldi.yaml if not provided).
         username: User branch (default: main).
@@ -61,7 +61,7 @@ def get_glossary_term(
     """Get full details for a specific glossary term.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         scope: Repository scope (auto-detected from magaldi.yaml if not provided).
         repository: Repository name (auto-detected from magaldi.yaml if not provided).
         term: The glossary term to retrieve.
@@ -107,7 +107,7 @@ def search_glossary(
     searching 'user' might return 'user', 'username', 'userid'.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         scope: Repository scope (auto-detected from magaldi.yaml if not provided).
         repository: Repository name (auto-detected from magaldi.yaml if not provided).
         query: Partial term to search for.

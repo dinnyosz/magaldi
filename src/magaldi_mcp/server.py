@@ -50,7 +50,7 @@ class MagaldiMCPServer:
         self._register_tools()
 
     def _get_es(self) -> Repository:
-        """Get or create Elasticsearch repository."""
+        """Get or create Search repository."""
         if self.repo is None:
             self.repo = Repository(self.config)
         return self.repo

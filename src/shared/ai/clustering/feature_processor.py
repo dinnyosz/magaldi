@@ -488,7 +488,7 @@ def _process_single_feature(
         scope: Repository scope.
         repository: Repository name.
         username: Username/branch.
-        repo: Elasticsearch repository.
+        repo: Search repository.
         llm_client: LLM client for summarization.
         embed_client: Embedding client.
         config: Processing configuration.
@@ -610,7 +610,7 @@ def process_features(
         scope: Repository scope.
         repository: Repository name.
         username: Username/branch.
-        repo: Elasticsearch repository.
+        repo: Search repository.
         config: Processing configuration.
         on_progress: Optional callback for progress updates.
         on_status_change: Optional callback when worker status changes.

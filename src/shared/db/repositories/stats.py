@@ -17,7 +17,7 @@ class StatsRepository:
         self._base = base
 
     def _get_client(self) -> Any:
-        """Get Elasticsearch client from base."""
+        """Get search client from base."""
         return self._base._get_client()
 
     def get_indexed_repositories(

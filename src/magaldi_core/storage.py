@@ -1,8 +1,8 @@
-"""Phase 4: Storage - Persist elements to Elasticsearch.
+"""Phase 4: Storage - Persist elements to search backend.
 
 This module handles:
 1. Handle deletions - Remove old elements before inserting new
-2. Index to Elasticsearch - All elements with summaries and embeddings
+2. Index to search backend - All elements with summaries and embeddings
 """
 
 from __future__ import annotations
@@ -623,7 +623,7 @@ def store_storage_result(
         result.files_stored = files_stored
         result.elements_stored = elements_stored
 
-        # 4.3 Index to Elasticsearch (with file_hash for change detection)
+        # 4.3 Index to search backend (with file_hash for change detection)
         result.elements_indexed = index_elements(
             parsing_result.parsed_files, search_repo, on_progress
         )

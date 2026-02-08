@@ -22,7 +22,7 @@ def explain_element(
     - Parent context (class or file)
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         element_id: Element ID to explain.
 
     Returns:

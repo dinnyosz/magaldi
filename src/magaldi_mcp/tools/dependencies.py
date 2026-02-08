@@ -52,7 +52,7 @@ def find_dependencies(
     and external (third-party packages) imports.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         file_path: Relative file path (e.g., "src/utils.py").
         element_id: Or provide file element ID directly.
         scope: Filter by scope (required if using file_path).
@@ -195,7 +195,7 @@ def find_dependents(
     before making changes to a module.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         module: Module name to search for (e.g., "utils", "shared.config", "./utils").
         scope: Repository scope (required).
         repository: Repository name (required).
@@ -250,7 +250,7 @@ def dependency_graph(
     Useful for understanding code architecture and detecting circular dependencies.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         scope: Repository scope (required).
         repository: Repository name (required).
         username: User branch (defaults to "main").

@@ -16,7 +16,7 @@ def list_repos(
     """List all indexed repositories.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         scope: Filter by scope.
 
     Returns:
@@ -35,7 +35,7 @@ def list_features(
     """List all features and subfeatures for a repository.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         scope: Repository scope.
         repository: Repository name.
         username: User branch.
@@ -75,7 +75,7 @@ def get_repo_stats(
     """Get statistics for a repository.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         scope: Repository scope (auto-detected from magaldi.yaml if not provided).
         repository: Repository name (auto-detected from magaldi.yaml if not provided).
         username: User branch.
@@ -100,7 +100,7 @@ def get_feature_members(
     """Get all members of a feature or subfeature cluster.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Search repository.
         feature_id: Feature or subfeature ID.
 
     Returns:

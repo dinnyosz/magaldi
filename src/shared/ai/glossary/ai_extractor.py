@@ -841,7 +841,7 @@ def extract_glossary_from_features_concurrent(
         worker_status: Shared worker status tracker.
         timing_stats: Shared timing statistics.
         on_phase_change: Callback when phase changes (phase name).
-        repo: Optional Elasticsearch repository for incremental indexing.
+        repo: Optional Search repository for incremental indexing.
         scope: Scope for indexing (required if repo provided).
         repository: Repository name for indexing (required if repo provided).
         username: Username for indexing (required if repo provided).

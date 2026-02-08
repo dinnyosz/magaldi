@@ -106,7 +106,7 @@ def process_elements(
         scope: Repository scope.
         repository: Repository name.
         username: Username/branch.
-        repo: Elasticsearch repository for indexing.
+        repo: Search repository for indexing.
         config: Processing configuration.
         on_progress: Optional callback(ProgressState) for progress updates.
         file_hashes: Optional dict mapping relative_path to file hash.

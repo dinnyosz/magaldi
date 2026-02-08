@@ -564,7 +564,7 @@ def process_subfeatures(
         scope: Repository scope.
         repository: Repository name.
         username: Username/branch.
-        repo: Elasticsearch repository.
+        repo: Search repository.
         config: Feature processing configuration.
         subcluster_config: Sub-clustering configuration.
         on_progress: Optional callback for processing progress updates.
