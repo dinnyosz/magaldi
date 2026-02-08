@@ -599,6 +599,58 @@ class MetadataRepository:
 
         return result.get("updated", 0) > 0
 
+    def find_files_with_incomplete_elements(
+        self,
+        scope: str,
+        repository: str,
+        username: str,
+    ) -> list[str]:
+        """Find file paths that have elements missing required embeddings.
+
+        Returns file paths where at least one element has summary_embedding
+        but is missing caller_embedding. These files need re-processing.
+
+        Args:
+            scope: Repository scope.
+            repository: Repository name.
+            username: Username/branch.
+
+        Returns:
+            List of relative file paths with incomplete elements.
+        """
+        client = self._get_client()
+
+        result = client.search(
+            index=INDEX_NAME,
+            body={
+                "size": 0,
+                "query": {
+                    "bool": {
+                        "filter": [
+                            {"term": {"scope": scope}},
+                            {"term": {"repository": repository}},
+                            {"term": {"username": username}},
+                            {"exists": {"field": "summary_embedding"}},
+                        ],
+                        "must_not": [
+                            {"exists": {"field": "caller_embedding"}},
+                        ],
+                    }
+                },
+                "aggs": {
+                    "files": {
+                        "terms": {
+                            "field": "relative_path",
+                            "size": 10000,
+                        }
+                    }
+                },
+            },
+        )
+
+        buckets = result.get("aggregations", {}).get("files", {}).get("buckets", [])
+        return [bucket["key"] for bucket in buckets]
+
     def get_all_embeddings(
         self,
         scope: str,

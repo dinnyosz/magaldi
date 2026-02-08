@@ -37,13 +37,21 @@ class ElasticsearchFileStateRepository:
 
         Returns dict mapping relative_path to DBFileState-like dict.
 
-        IMPORTANT: Verifies completeness - if expected element_count doesn't match
-        actual count of elements with that file_hash, returns None for file_hash
-        so the file will be treated as needing reprocessing.
+        IMPORTANT: Verifies completeness - returns None for file_hash when:
+        - Expected element_count doesn't match actual count (parser drift)
+        - Any element in the file is missing required embeddings (migration)
+        This causes change detection to treat the file as needing reprocessing.
         """
         from magaldi_core.change_detection import DBFileState
 
         es_states = self._es.get_file_states(scope, repository, username)
+
+        # Find files with elements missing required embeddings (e.g. after
+        # adding caller_embedding). These need full re-processing.
+        incomplete_paths = set(
+            self._es.find_files_with_incomplete_elements(scope, repository, username)
+        )
+
         result = {}
 
         for path, state in es_states.items():
@@ -63,6 +71,10 @@ class ElasticsearchFileStateRepository:
                         scope, repository, username, path, actual_count
                     )
                     element_count = actual_count
+
+            # Force re-processing for files with incomplete elements
+            if path in incomplete_paths:
+                file_hash = None
 
             result[path] = DBFileState(
                 relative_path=path,

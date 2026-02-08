@@ -212,6 +212,12 @@ class ElasticsearchRepository:
         """Store caller embedding."""
         return self._metadata.store_caller_embedding(element_id, embedding)
 
+    def find_files_with_incomplete_elements(
+        self, scope: str, repository: str, username: str
+    ) -> list[str]:
+        """Find files with elements missing required embeddings."""
+        return self._metadata.find_files_with_incomplete_elements(scope, repository, username)
+
     def get_embedding(
         self, element_id: str, embedding_type: str = "summary"
     ) -> list[float] | None:
