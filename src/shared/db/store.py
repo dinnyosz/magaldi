@@ -1,9 +1,9 @@
-"""Elasticsearch repository implementation for Magaldi.
+"""Repository facade and specialized stores for Magaldi.
 
 Handles indexing of code elements and storage of embedding vectors.
 
-This module re-exports the refactored ElasticsearchRepository from
-the repositories subpackage for backward compatibility.
+This module re-exports the Repository from the repositories subpackage
+and provides FileStateRepository and EmbeddingStore.
 """
 
 from __future__ import annotations
@@ -17,17 +17,17 @@ from shared.config import MagaldiConfig
 from shared.db.repositories import (
     INDEX_MAPPING,
     INDEX_NAME,
-    ElasticsearchBase,
-    ElasticsearchRepository,
+    Repository,
+    RepositoryBase,
     generate_hash_id,
 )
 
 
-class ElasticsearchFileStateRepository:
-    """Elasticsearch-based file state repository for change detection."""
+class FileStateRepository:
+    """File state repository for change detection."""
 
     def __init__(self, config: MagaldiConfig | None = None):
-        self._es = ElasticsearchRepository(config)
+        self._repo = Repository(config)
         self._config = config
 
     def get_file_states(
@@ -44,30 +44,30 @@ class ElasticsearchFileStateRepository:
         """
         from magaldi_core.change_detection import DBFileState
 
-        es_states = self._es.get_file_states(scope, repository, username)
+        states = self._repo.get_file_states(scope, repository, username)
 
         # Find files with elements missing required embeddings (e.g. after
         # adding caller_embedding). These need full re-processing.
         incomplete_paths = set(
-            self._es.find_files_with_incomplete_elements(scope, repository, username)
+            self._repo.find_files_with_incomplete_elements(scope, repository, username)
         )
 
         result = {}
 
-        for path, state in es_states.items():
+        for path, state in states.items():
             file_hash = state.get("file_hash")
             element_count = state.get("element_count")
 
-            # If element count mismatches, update it to match actual count in ES.
+            # If element count mismatches, update it to match actual count.
             # This handles cases where parser changes altered element extraction
             # without changing file content. File hash is the source of truth.
             if file_hash and element_count is not None:
-                actual_count = self._es.count_elements_by_path(
+                actual_count = self._repo.count_elements_by_path(
                     scope, repository, username, path
                 )
                 if actual_count != element_count:
                     # Update the stored element_count to match reality
-                    self._es.update_file_element_count(
+                    self._repo.update_file_element_count(
                         scope, repository, username, path, actual_count
                     )
                     element_count = actual_count
@@ -87,15 +87,15 @@ class ElasticsearchFileStateRepository:
 
     def main_branch_exists(self, scope: str, repository: str) -> bool:
         """Check if main branch has been parsed."""
-        return self._es.main_branch_exists(scope, repository)
+        return self._repo.main_branch_exists(scope, repository)
 
     def close(self) -> None:
-        """Close ES connection."""
-        self._es.close()
+        """Close connection."""
+        self._repo.close()
 
 
-class ElasticsearchEmbeddingStore(ElasticsearchRepository):
-    """Elasticsearch-backed embedding store (ES only, no MySQL)."""
+class EmbeddingStore(Repository):
+    """Embedding store backed by the search backend."""
 
     def __init__(self, config: MagaldiConfig | None = None):
         super().__init__(config)
@@ -104,12 +104,12 @@ class ElasticsearchEmbeddingStore(ElasticsearchRepository):
         self._elements_cache: dict[str, CodeElement] = {}
 
     def store_element(self, element: CodeElement, file_hash: str | None = None) -> None:
-        """Store a code element (index to ES)."""
+        """Store a code element."""
         self._elements_cache[element.element_id] = element
         self.index_element(element, file_hash=file_hash)
 
     def get_element(self, element_id: str) -> CodeElement | None:
-        """Get element by ID (from cache or reconstruct from ES)."""
+        """Get element by ID (from cache or reconstruct from store)."""
         if element_id in self._elements_cache:
             return self._elements_cache[element_id]
 
@@ -140,20 +140,20 @@ class ElasticsearchEmbeddingStore(ElasticsearchRepository):
         )
 
     def get_summary(self, element_id: str) -> str | None:
-        """Get summary from ES."""
+        """Get summary for an element."""
         doc = self.get_document(element_id)
         if doc:
             return doc.get("summary")
         return None
 
     def get_file_summary(self, element: CodeElement) -> str | None:
-        """Get file summary from ES."""
+        """Get file summary."""
         # Build file element ID
         file_id = f"{element.scope}:{element.repository}:{element.username}:{element.relative_path}:file:{element.relative_path.split('/')[-1]}:1"
         return self.get_summary(file_id)
 
     def get_class_summary(self, element: CodeElement) -> str | None:
-        """Get class summary from ES (via parent_id chain)."""
+        """Get class summary (via parent_id chain)."""
         if element.parent_id:
             parent_doc = self.get_document(element.parent_id)
             if parent_doc and parent_doc.get("element_type") == "class":
@@ -178,8 +178,17 @@ class ElasticsearchEmbeddingStore(ElasticsearchRepository):
         return summaries
 
 
-# Export all public names for backward compatibility
+# Backward-compatible aliases
+ElasticsearchRepository = Repository
+ElasticsearchBase = RepositoryBase
+ElasticsearchFileStateRepository = FileStateRepository
+ElasticsearchEmbeddingStore = EmbeddingStore
+
 __all__ = [
+    "Repository",
+    "RepositoryBase",
+    "FileStateRepository",
+    "EmbeddingStore",
     "ElasticsearchRepository",
     "ElasticsearchBase",
     "ElasticsearchFileStateRepository",
