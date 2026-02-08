@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from shared.db.elasticsearch import ElasticsearchRepository
+from shared.db.store import Repository
 
 from ._utils import _resolve_scope_repo
 
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 def _find_file_element(
-    es: ElasticsearchRepository,
+    es: Repository,
     scope: str,
     repository: str,
     username: str,
@@ -44,7 +44,7 @@ def _find_file_element(
 
 
 def _find_children(
-    es: ElasticsearchRepository,
+    es: Repository,
     parent_id: str,
 ) -> list[dict[str, Any]]:
     """Find all children of an element."""
@@ -62,7 +62,7 @@ def _find_children(
 
 
 def _find_elements_in_file(
-    es: ElasticsearchRepository,
+    es: Repository,
     scope: str,
     repository: str,
     username: str,
@@ -95,7 +95,7 @@ def _find_elements_in_file(
 
 
 def get_element(
-    es: ElasticsearchRepository,
+    es: Repository,
     element_id: str,
     include_code: bool = False,
     brief: bool = True,
@@ -261,7 +261,7 @@ def get_element(
 
 
 def get_context(
-    es: ElasticsearchRepository,
+    es: Repository,
     element_id: str,
     include_siblings: bool = False,
     include_children: bool = True,
@@ -359,7 +359,7 @@ def get_context(
 
 
 def get_children(
-    es: ElasticsearchRepository,
+    es: Repository,
     element_id: str,
 ) -> list[dict[str, Any]]:
     """Get child elements of a parent.
@@ -388,7 +388,7 @@ def get_children(
 
 
 def batch_get_elements(
-    es: ElasticsearchRepository,
+    es: Repository,
     element_ids: list[str],
     include_code: bool = False,
 ) -> list[dict[str, Any]]:
@@ -424,7 +424,7 @@ def batch_get_elements(
 
 
 def get_file_structure(
-    es: ElasticsearchRepository,
+    es: Repository,
     scope: str | None = None,
     repository: str | None = None,
     file_path: str = "",

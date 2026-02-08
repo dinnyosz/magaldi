@@ -180,11 +180,11 @@ def process_file_changes(
 
     # Handle deleted files first (no parsing needed)
     if deleted_infos:
-        from shared.db.elasticsearch import ElasticsearchRepository
-        es_repo = ElasticsearchRepository(config)
+        from shared.db.store import Repository
+        repo = Repository(config)
         total_deleted = 0
         for file_info in deleted_infos:
-            count = es_repo.delete_by_file(
+            count = repo.delete_by_file(
                 discovery_result.scope, discovery_result.repository, user, file_info.relative_path
             )
             if count > 0:
@@ -244,10 +244,10 @@ def process_file_changes(
     # Call Resolution
     if indexed > 0:
         from shared.cli._runners import run_call_resolution
-        from shared.db.elasticsearch import ElasticsearchRepository
-        es_repo = ElasticsearchRepository(config)
+        from shared.db.store import Repository
+        repo = Repository(config)
         run_call_resolution(
-            es_repo,
+            repo,
             discovery_result.scope,
             discovery_result.repository,
             user,
@@ -458,8 +458,8 @@ def watch(
 
                     # Hierarchy Extraction
                     if indexed > 0:
-                        from shared.db.elasticsearch import ElasticsearchRepository
-                        es_repo = ElasticsearchRepository(config)
+                        from shared.db.store import Repository
+                        repo = Repository(config)
                         console.print("\n  [bold]Hierarchy Extraction[/]")
                         try:
                             cli_entry_point = discovery_result.repository
@@ -467,7 +467,7 @@ def watch(
                                 discovery_result.scope,
                                 discovery_result.repository,
                                 user,
-                                es_repo,
+                                repo,
                                 cli_entry_point=cli_entry_point,
                             )
                             if rel_indexed > 0 or ref_indexed > 0:
@@ -478,7 +478,7 @@ def watch(
                         # Call Resolution
                         from shared.cli._runners import run_call_resolution
                         run_call_resolution(
-                            es_repo,
+                            repo,
                             discovery_result.scope,
                             discovery_result.repository,
                             user,

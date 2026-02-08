@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from shared.db.elasticsearch import ElasticsearchRepository
+from shared.db.store import Repository
 from shared.db.repositories.base import INDEX_NAME
 
 
 def find_complex_functions(
-    es: ElasticsearchRepository,
+    es: Repository,
     scope: str,
     repository: str,
     username: str | None = None,
@@ -93,7 +93,7 @@ def find_complex_functions(
 
 
 def find_security_issues(
-    es: ElasticsearchRepository,
+    es: Repository,
     scope: str,
     repository: str,
     username: str | None = None,
@@ -212,7 +212,7 @@ def find_security_issues(
 
 
 def find_undocumented(
-    es: ElasticsearchRepository,
+    es: Repository,
     scope: str,
     repository: str,
     username: str | None = None,
@@ -306,7 +306,7 @@ def find_undocumented(
 
 
 def find_env_usage(
-    es: ElasticsearchRepository,
+    es: Repository,
     scope: str,
     repository: str,
     username: str | None = None,
@@ -409,7 +409,7 @@ def find_env_usage(
 
 
 def find_async_code(
-    es: ElasticsearchRepository,
+    es: Repository,
     scope: str,
     repository: str,
     username: str | None = None,

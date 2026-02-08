@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
-from magaldi_web.dependencies import get_es_repository
+from magaldi_web.dependencies import get_repository
 from magaldi_web.models import (
     AsyncCodeItem,
     AsyncCodeResponse,
@@ -33,7 +33,7 @@ from magaldi_web.models import (
     UndocumentedItem,
     UndocumentedResponse,
 )
-from shared.db.elasticsearch import ElasticsearchRepository
+from shared.db.store import Repository
 
 router = APIRouter()
 
@@ -48,10 +48,10 @@ async def get_element_callers(
     hash_id: str = Path(..., description="Element hash ID"),
     limit: int = Query(default=30, ge=1, le=100),
     include_tests: bool = Query(default=True),
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> CallGraphResponse:
     """Get callers and callees for an element."""
-    source = es_repo.get_document_by_hash_id(hash_id)
+    source = repo.get_document_by_hash_id(hash_id)
     if not source:
         raise HTTPException(status_code=404, detail="Element not found")
 
@@ -71,7 +71,7 @@ async def get_element_callers(
 
     # Get callers
     callers: list[CallerInfo] = []
-    caller_results = es_repo.find_elements_calling(
+    caller_results = repo.find_elements_calling(
         target_id=element_id,
         scope=scope,
         repository=repository,
@@ -96,7 +96,7 @@ async def get_element_callers(
 
     # Get callees
     callees: list[CalleeInfo] = []
-    calls = es_repo.get_calls(element_id)
+    calls = repo.get_calls(element_id)
     for call in calls:
         callee_entry = CalleeInfo(
             name=call.get("name"),
@@ -105,7 +105,7 @@ async def get_element_callers(
         )
         resolved_id = call.get("resolved_id")
         if resolved_id:
-            resolved_doc = es_repo.get_document(resolved_id)
+            resolved_doc = repo.get_document(resolved_id)
             if resolved_doc:
                 callee_entry.element_id = resolved_id
                 callee_entry.hash_id = resolved_doc.get("hash_id")
@@ -123,19 +123,19 @@ async def get_call_chain(
     hash_id: str = Path(..., description="Element hash ID"),
     direction: str = Query(default="both", pattern="^(callers|callees|both)$"),
     max_depth: int = Query(default=3, ge=1, le=5),
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> CallChainResponse:
     """Get call chain for an element."""
     from magaldi_mcp.tools import find_call_chain
 
-    source = es_repo.get_document_by_hash_id(hash_id)
+    source = repo.get_document_by_hash_id(hash_id)
     if not source:
         raise HTTPException(status_code=404, detail="Element not found")
 
     element_id = source["element_id"]
 
     result = find_call_chain(
-        es=es_repo,
+        es=repo,
         element_id=element_id,
         direction=direction,
         max_depth=max_depth,
@@ -175,13 +175,13 @@ async def get_dead_code(
     repository: str = Query(..., description="Repository name"),
     username: str = Query(default="main"),
     include_tests: bool = Query(default=False),
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> DeadCodeResponse:
     """Find potentially dead code."""
     from magaldi_mcp.tools import find_dead_code
 
     result = find_dead_code(
-        es=es_repo,
+        es=repo,
         scope=scope,
         repository=repository,
         username=username,
@@ -210,13 +210,13 @@ async def get_entry_points(
     scope: str = Query(..., description="Repository scope"),
     repository: str = Query(..., description="Repository name"),
     username: str = Query(default="main"),
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> EntryPointsResponse:
     """Find entry points (HTTP handlers, CLI commands, etc.)."""
     from magaldi_mcp.tools import find_entry_points, get_command_tree
 
     result = find_entry_points(
-        es=es_repo,
+        es=repo,
         scope=scope,
         repository=repository,
         username=username,
@@ -224,7 +224,7 @@ async def get_entry_points(
 
     # Get command tree to lookup full command paths
     command_tree = get_command_tree(
-        es=es_repo,
+        es=repo,
         scope=scope,
         repository=repository,
         username=username,
@@ -301,12 +301,12 @@ async def get_entry_points(
 @router.get("/analysis/dependencies/{hash_id}", response_model=DependenciesResponse)
 async def get_dependencies(
     hash_id: str = Path(..., description="File element hash ID"),
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> DependenciesResponse:
     """Get imports for a file element."""
     from magaldi_mcp.tools import find_dependencies
 
-    source = es_repo.get_document_by_hash_id(hash_id)
+    source = repo.get_document_by_hash_id(hash_id)
     if not source:
         raise HTTPException(status_code=404, detail="Element not found")
 
@@ -316,7 +316,7 @@ async def get_dependencies(
     element_id = source["element_id"]
 
     result = find_dependencies(
-        es=es_repo,
+        es=repo,
         element_id=element_id,
     )
 
@@ -347,13 +347,13 @@ async def get_dependents(
     repository: str = Query(..., description="Repository name"),
     username: str = Query(default="main"),
     limit: int = Query(default=50, ge=1, le=200),
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> DependentsResponse:
     """Find files that import a module."""
     from magaldi_mcp.tools import find_dependents
 
     result = find_dependents(
-        es=es_repo,
+        es=repo,
         module=module,
         scope=scope,
         repository=repository,
@@ -384,13 +384,13 @@ async def get_dependency_graph(
     repository: str = Query(..., description="Repository name"),
     username: str = Query(default="main"),
     internal_only: bool = Query(default=True),
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> DependencyGraphResponse:
     """Get module dependency graph."""
     from magaldi_mcp.tools import dependency_graph
 
     result = dependency_graph(
-        es=es_repo,
+        es=repo,
         scope=scope,
         repository=repository,
         username=username,
@@ -413,18 +413,18 @@ async def get_dependency_graph(
 @router.get("/analysis/explain/{hash_id}", response_model=ExplainElementResponse)
 async def explain_element(
     hash_id: str = Path(..., description="Element hash ID"),
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> ExplainElementResponse:
     """Get comprehensive explanation of an element."""
     from magaldi_mcp.tools import explain_element as explain_element_tool
 
-    source = es_repo.get_document_by_hash_id(hash_id)
+    source = repo.get_document_by_hash_id(hash_id)
     if not source:
         raise HTTPException(status_code=404, detail="Element not found")
 
     element_id = source["element_id"]
 
-    result = explain_element_tool(es=es_repo, element_id=element_id)
+    result = explain_element_tool(es=repo, element_id=element_id)
 
     # Convert callers
     callers = [
@@ -512,13 +512,13 @@ async def get_complex_functions(
     min_complexity: int = Query(default=10, ge=1),
     limit: int = Query(default=20, ge=1, le=100),
     include_tests: bool = Query(default=False),
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> ComplexFunctionsResponse:
     """Find functions with high cyclomatic complexity."""
     from magaldi_mcp.tools import find_complex_functions
 
     result = find_complex_functions(
-        es=es_repo,
+        es=repo,
         scope=scope,
         repository=repository,
         username=username,
@@ -560,13 +560,13 @@ async def get_security_issues(
     severity: str = Query(default="high"),
     kind: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> SecurityIssuesResponse:
     """Find potential security issues in code."""
     from magaldi_mcp.tools import find_security_issues
 
     result = find_security_issues(
-        es=es_repo,
+        es=repo,
         scope=scope,
         repository=repository,
         username=username,
@@ -608,13 +608,13 @@ async def get_undocumented_functions(
     public_only: bool = Query(default=True),
     limit: int = Query(default=30, ge=1, le=100),
     include_tests: bool = Query(default=False),
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> UndocumentedResponse:
     """Find functions missing documentation."""
     from magaldi_mcp.tools import find_undocumented
 
     result = find_undocumented(
-        es=es_repo,
+        es=repo,
         scope=scope,
         repository=repository,
         username=username,
@@ -657,13 +657,13 @@ async def get_env_usage(
     username: str = Query(default="main"),
     env_name: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> EnvUsageResponse:
     """Find environment variable usage."""
     from magaldi_mcp.tools import find_env_usage
 
     result = find_env_usage(
-        es=es_repo,
+        es=repo,
         scope=scope,
         repository=repository,
         username=username,
@@ -702,13 +702,13 @@ async def get_async_code(
     pattern: str = Query(default="all"),
     limit: int = Query(default=30, ge=1, le=100),
     include_tests: bool = Query(default=False),
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> AsyncCodeResponse:
     """Find async/concurrent code patterns."""
     from magaldi_mcp.tools import find_async_code
 
     result = find_async_code(
-        es=es_repo,
+        es=repo,
         scope=scope,
         repository=repository,
         username=username,

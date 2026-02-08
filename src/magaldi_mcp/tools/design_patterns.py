@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from shared.db.elasticsearch import ElasticsearchRepository
+from shared.db.store import Repository
 from shared.db.repositories.base import INDEX_NAME
 
 
 def list_patterns(
-    es: ElasticsearchRepository,
+    es: Repository,
     scope: str,
     repository: str,
     username: str = "main",
@@ -110,7 +110,7 @@ def list_patterns(
 
 
 def find_by_pattern(
-    es: ElasticsearchRepository,
+    es: Repository,
     pattern: str,
     scope: str,
     repository: str,

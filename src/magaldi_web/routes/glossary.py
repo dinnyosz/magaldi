@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
-from magaldi_web.dependencies import get_es_repository
+from magaldi_web.dependencies import get_repository
 from magaldi_web.models import (
     FeatureAssociationSummary,
     GlossaryListResponse,
     GlossaryTermResponse,
     GlossaryTermSummary,
 )
-from shared.db.elasticsearch import ElasticsearchRepository
+from shared.db.store import Repository
 
 router = APIRouter()
 
@@ -22,11 +22,11 @@ async def list_glossary_terms(
     repository: str = Path(..., description="Repository name"),
     username: str = Query(default="main", description="Username/branch"),
     min_count: int = Query(default=1, ge=1, description="Minimum occurrence count"),
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> GlossaryListResponse:
     """List all glossary terms for a repository."""
     # get_glossary_terms already filters by min_count and sorts by count descending
-    terms = es_repo.get_glossary_terms(scope, repository, username, min_count)
+    terms = repo.get_glossary_terms(scope, repository, username, min_count)
 
     return GlossaryListResponse(
         terms=[
@@ -52,10 +52,10 @@ async def get_glossary_term(
     repository: str = Path(..., description="Repository name"),
     term: str = Path(..., description="Glossary term"),
     username: str = Query(default="main", description="Username/branch"),
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> GlossaryTermResponse:
     """Get detailed information about a glossary term."""
-    entry = es_repo.get_glossary_term(scope, repository, term, username)
+    entry = repo.get_glossary_term(scope, repository, term, username)
 
     if not entry:
         raise HTTPException(status_code=404, detail=f"Glossary term '{term}' not found")
@@ -88,10 +88,10 @@ async def search_glossary_terms(
     repository: str = Path(..., description="Repository name"),
     query: str = Path(..., description="Search query (partial match)"),
     username: str = Query(default="main", description="Username/branch"),
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> GlossaryListResponse:
     """Search glossary terms by partial match."""
-    terms = es_repo.search_glossary(scope, repository, query, username)
+    terms = repo.search_glossary(scope, repository, query, username)
 
     return GlossaryListResponse(
         terms=[
@@ -115,10 +115,10 @@ async def search_glossary_terms(
 )
 async def get_glossary_terms_for_feature(
     feature_id: str = Path(..., description="Feature or subfeature element_id"),
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> GlossaryListResponse:
     """Get glossary terms extracted from a specific feature/subfeature."""
-    terms = es_repo.get_glossary_terms_for_feature(feature_id)
+    terms = repo.get_glossary_terms_for_feature(feature_id)
 
     return GlossaryListResponse(
         terms=[

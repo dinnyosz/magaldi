@@ -23,7 +23,7 @@ from shared.config import load_config
 
 if TYPE_CHECKING:
     from shared.config import MagaldiConfig
-    from shared.db.elasticsearch import ElasticsearchRepository
+    from shared.db.store import Repository
 
 
 # =============================================================================
@@ -36,7 +36,7 @@ def run_glossary_extraction(
     repository: str,
     username: str,
     config: MagaldiConfig,
-    es_repo: ElasticsearchRepository | None = None,
+    repo: Repository | None = None,
     workers: int = 8,
     compact: bool = False,
 ) -> dict | None:
@@ -47,7 +47,7 @@ def run_glossary_extraction(
         repository: Repository name.
         username: Username/branch.
         config: Magaldi configuration.
-        es_repo: Optional ES repository (creates one if not provided).
+        repo: Optional ES repository (creates one if not provided).
         workers: Number of concurrent workers.
         compact: If True, hide worker table in display (for watch mode).
 
@@ -65,17 +65,17 @@ def run_glossary_extraction(
         GlossaryWorkerStatus,
         extract_glossary_from_features_concurrent,
     )
-    from shared.db.elasticsearch import ElasticsearchRepository
+    from shared.db.store import Repository
 
-    own_es_repo = es_repo is None
-    if es_repo is None:
-        es_repo = ElasticsearchRepository(config)
+    own_repo = repo is None
+    if repo is None:
+        repo = Repository(config)
 
     try:
         # Fetch features and subfeatures
         with console.status("[bold blue]Fetching features...[/]"):
-            features = es_repo.get_features(scope, repository, username)
-            subfeatures = es_repo.get_subfeatures(scope, repository, username)
+            features = repo.get_features(scope, repository, username)
+            subfeatures = repo.get_subfeatures(scope, repository, username)
 
         all_features = features + subfeatures
 
@@ -87,7 +87,7 @@ def run_glossary_extraction(
 
         # Delete existing glossary entries BEFORE extraction (fresh start)
         with console.status("[bold blue]Clearing existing glossary...[/]"):
-            deleted = es_repo.delete_glossary(scope, repository, username)
+            deleted = repo.delete_glossary(scope, repository, username)
             if deleted > 0:
                 console.print(f"  Deleted {deleted} existing entries")
 
@@ -355,7 +355,7 @@ def run_glossary_extraction(
                 timing_stats=timing_stats,
                 on_phase_change=on_phase_change,
                 # Incremental indexing - items are indexed as they complete in Phase 2
-                es_repo=es_repo,
+                repo=repo,
                 scope=scope,
                 repository=repository,
                 username=username,
@@ -380,8 +380,8 @@ def run_glossary_extraction(
         }
 
     finally:
-        if own_es_repo:
-            es_repo.close()
+        if own_repo:
+            repo.close()
 
 
 # =============================================================================

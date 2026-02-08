@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
-from magaldi_web.dependencies import get_es_repository
+from magaldi_web.dependencies import get_repository
 from magaldi_web.models import (
     CallInfo,
     ChildInfo,
@@ -44,7 +44,7 @@ from magaldi_web.models import (
     TodoInfo,
     TypeAnnotationInfo,
 )
-from shared.db.elasticsearch import INDEX_NAME, ElasticsearchRepository
+from shared.db.store import INDEX_NAME, Repository
 
 router = APIRouter()
 
@@ -53,16 +53,16 @@ router = APIRouter()
 async def get_similar_elements(
     identifier: str = Path(..., description="Element hash_id (64-char SHA256) or element_id"),
     limit: int = Query(default=10, ge=1, le=50),
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> list[dict]:
     """Find similar elements using vector similarity."""
     # Try hash_id first (64 hex characters), then fall back to element_id
     source = None
     if len(identifier) == 64 and all(c in "0123456789abcdef" for c in identifier.lower()):
-        source = es_repo.get_document_by_hash_id(identifier)
+        source = repo.get_document_by_hash_id(identifier)
 
     if not source:
-        source = es_repo.get_document(identifier)
+        source = repo.get_document(identifier)
 
     if not source:
         raise HTTPException(status_code=404, detail="Element not found")
@@ -74,7 +74,7 @@ async def get_similar_elements(
         raise HTTPException(status_code=400, detail="Element has no embedding")
 
     # Find similar elements
-    client = es_repo._get_client()
+    client = repo._get_client()
     similar_result = client.search(
         index=INDEX_NAME,
         body={
@@ -136,23 +136,23 @@ async def get_similar_elements(
 @router.get("/elements/{identifier}", response_model=ElementDetailResponse)
 async def get_element_detail(
     identifier: str = Path(..., description="Element hash_id (64-char SHA256) or element_id"),
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> ElementDetailResponse:
     """Get detailed information about a code element."""
     # Try hash_id first (64 hex characters), then fall back to element_id
     source = None
     if len(identifier) == 64 and all(c in "0123456789abcdef" for c in identifier.lower()):
-        source = es_repo.get_document_by_hash_id(identifier)
+        source = repo.get_document_by_hash_id(identifier)
 
     if not source:
         # Try as element_id
-        source = es_repo.get_document(identifier)
+        source = repo.get_document(identifier)
 
     if not source:
         raise HTTPException(status_code=404, detail="Element not found")
 
     element_id = source["element_id"]
-    client = es_repo._get_client()
+    client = repo._get_client()
 
     # Get file context (only for code elements that have a relative_path)
     file_context = None
@@ -847,16 +847,16 @@ async def get_element_detail(
 @router.get("/elements/{identifier}/features", response_model=ElementFeaturesResponse)
 async def get_element_features(
     identifier: str = Path(..., description="Element hash_id (64-char SHA256) or element_id"),
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> ElementFeaturesResponse:
     """Get all features and subfeatures that contain this element."""
     # Try hash_id first (64 hex characters), then fall back to element_id
     source = None
     if len(identifier) == 64 and all(c in "0123456789abcdef" for c in identifier.lower()):
-        source = es_repo.get_document_by_hash_id(identifier)
+        source = repo.get_document_by_hash_id(identifier)
 
     if not source:
-        source = es_repo.get_document(identifier)
+        source = repo.get_document(identifier)
 
     if not source:
         raise HTTPException(status_code=404, detail="Element not found")
@@ -864,7 +864,7 @@ async def get_element_features(
     element_id = source["element_id"]
 
     # Get features containing this element
-    features_data = es_repo.get_features_for_element(
+    features_data = repo.get_features_for_element(
         element_id=element_id,
         scope=source.get("scope"),
         repository=source.get("repository"),

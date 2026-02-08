@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from magaldi_core.job_tracker import SummaryCache
     from shared.ai.embedding import CodeEmbeddingClient
     from shared.ai.summarization import SummarizationLLMClient
-    from shared.db.elasticsearch import ElasticsearchRepository
+    from shared.db.store import Repository
     from .status import WorkerStatus
 
 
@@ -208,7 +208,7 @@ def _index_element(
     summary_embedding: list[float] | None,
     code_embedding: list[float] | None,
     caller_embedding: list[float] | None,
-    es_repo: "ElasticsearchRepository",
+    repo: "Repository",
     file_hash: str | None = None,
     element_count: int | None = None,
 ) -> bool:
@@ -220,7 +220,7 @@ def _index_element(
         summary_embedding: Summary embedding vector (or None if not embedded).
         code_embedding: Code embedding vector (or None if not embedded).
         caller_embedding: Caller embedding vector (or None if not embedded).
-        es_repo: Elasticsearch repository.
+        repo: Elasticsearch repository.
         file_hash: File hash for all elements.
         element_count: Total element count in file (only for file-level elements).
 
@@ -228,18 +228,18 @@ def _index_element(
         True on success.
     """
     # Index the element
-    es_repo.index_element(element, indexed_at=datetime.now(), file_hash=file_hash, element_count=element_count)
+    repo.index_element(element, indexed_at=datetime.now(), file_hash=file_hash, element_count=element_count)
 
     # Store summary
-    es_repo.store_summary(element.element_id, summary)
+    repo.store_summary(element.element_id, summary)
 
     # Store embeddings if present (using type-specific methods)
     if summary_embedding is not None:
-        es_repo.store_summary_embedding(element.element_id, summary_embedding)
+        repo.store_summary_embedding(element.element_id, summary_embedding)
     if code_embedding is not None:
-        es_repo.store_code_embedding(element.element_id, code_embedding)
+        repo.store_code_embedding(element.element_id, code_embedding)
     if caller_embedding is not None:
-        es_repo.store_caller_embedding(element.element_id, caller_embedding)
+        repo.store_caller_embedding(element.element_id, caller_embedding)
 
     # Store imports for file elements
     if element.element_type == "file" and element.imports:
@@ -247,7 +247,7 @@ def _index_element(
             {"name": imp.name, "module": imp.module, "alias": imp.alias, "line": imp.line}
             for imp in element.imports
         ]
-        es_repo.store_imports(element.element_id, imports_data)
+        repo.store_imports(element.element_id, imports_data)
 
     # Store calls for function/method/file elements
     if element.element_type in ("function", "method", "file") and element.calls:
@@ -261,7 +261,7 @@ def _index_element(
             }
             for call in element.calls
         ]
-        es_repo.store_calls(element.element_id, calls_data)
+        repo.store_calls(element.element_id, calls_data)
 
     return True
 
@@ -274,7 +274,7 @@ def _process_single_element(
     config: ProcessingConfig,
     file_hashes: dict[str, str] | None,
     element_counts: dict[str, int] | None,
-    es_repo: "ElasticsearchRepository",
+    repo: "Repository",
     worker_id: int,
     worker_status: "WorkerStatus",
     on_status_change: Callable[[], None] | None = None,
@@ -289,7 +289,7 @@ def _process_single_element(
         config: Processing configuration.
         file_hashes: Optional dict mapping relative_path to file hash.
         element_counts: Optional dict mapping relative_path to element count.
-        es_repo: Elasticsearch repository for indexing.
+        repo: Elasticsearch repository for indexing.
         worker_id: Worker thread ID.
         worker_status: Status tracker for workers.
         on_status_change: Optional callback when worker status changes.
@@ -396,7 +396,7 @@ def _process_single_element(
         if element.element_type == "file" and element_counts:
             element_count = element_counts.get(element.relative_path)
 
-        _index_element(element, summary, summary_embedding, code_embedding, caller_embedding, es_repo, file_hash, element_count)
+        _index_element(element, summary, summary_embedding, code_embedding, caller_embedding, repo, file_hash, element_count)
 
         worker_status.clear(worker_id)
         wall_time = time.time() - start_wall

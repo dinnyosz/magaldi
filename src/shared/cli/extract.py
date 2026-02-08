@@ -444,7 +444,7 @@ def run_glossary_extraction(
     repository: str,
     username: str,
     config: MagaldiConfig,
-    es_repo: Any = None,
+    repo: Any = None,
     workers: int = 8,
     compact: bool = False,
 ) -> dict | None:
@@ -459,7 +459,7 @@ def run_glossary_extraction(
         repository=repository,
         username=username,
         config=config,
-        es_repo=es_repo,
+        repo=repo,
         workers=workers,
         compact=compact,
     )

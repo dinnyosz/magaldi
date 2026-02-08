@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from magaldi_core.discovery import DiscoveryResult
     from magaldi_core.processor import ProgressState, TimingStats
     from shared.config import MagaldiConfig
-    from shared.db.elasticsearch import ElasticsearchRepository
+    from shared.db.store import Repository
 
 
 def run_discovery(repo_path: str, username: str, skip_tests: bool = False) -> "DiscoveryResult":
@@ -55,8 +55,8 @@ def run_change_detection(
     if dry_run:
         file_state_repo = InMemoryFileStateRepository()
     else:
-        from shared.db.elasticsearch import ElasticsearchFileStateRepository
-        file_state_repo = ElasticsearchFileStateRepository(config)
+        from shared.db.store import FileStateRepository
+        file_state_repo = FileStateRepository(config)
 
     total_files = discovery_result.total_files
 
@@ -132,9 +132,9 @@ def run_processing(
         console.print(f"  [dim]Dry run: would process {total} elements[/]")
         return (0, 0, 0, 0.0, 0.0, 0.0, 0.0, None, [], 0)
 
-    from shared.db.elasticsearch import ElasticsearchRepository
+    from shared.db.store import Repository
 
-    es_repo = ElasticsearchRepository(config)
+    repo = Repository(config)
 
     # Handle deleted files: remove elements for files that no longer exist on disk
     # Note: Modified files are handled by process_elements' smart delete (compares
@@ -142,7 +142,7 @@ def run_processing(
     deleted_from_files = 0
     if manifest.deleted_files:
         for file_info in manifest.deleted_files:
-            count = es_repo.delete_by_file(
+            count = repo.delete_by_file(
                 manifest.scope, manifest.repository, manifest.username, file_info.relative_path
             )
             deleted_from_files += count
@@ -464,7 +464,7 @@ def run_processing(
             manifest.scope,
             manifest.repository,
             manifest.username,
-            es_repo,
+            repo,
             proc_config,
             on_progress,
             file_hashes,
@@ -496,7 +496,7 @@ def run_hierarchy_extraction(
     scope: str,
     repository: str,
     username: str,
-    es_repo: "ElasticsearchRepository",
+    repo: "Repository",
     cli_entry_point: str | None = None,
     api_prefix: str = "/api/v1",
 ) -> tuple[int, int]:
@@ -506,7 +506,7 @@ def run_hierarchy_extraction(
         scope: Repository scope
         repository: Repository name
         username: Username/branch
-        es_repo: Elasticsearch repository instance
+        repo: Elasticsearch repository instance
         cli_entry_point: CLI entry point name (e.g., "magaldi")
         api_prefix: API URL prefix for route hierarchy (e.g., "/api/v1")
 
@@ -521,7 +521,7 @@ def run_hierarchy_extraction(
     )
     from shared.db.repositories.relationships import RelationshipsRepository
 
-    client = es_repo._get_client()
+    client = repo._get_client()
     all_relationships = []
     all_external_refs = []
 
@@ -625,8 +625,8 @@ def run_hierarchy_extraction(
     if not all_relationships and not all_external_refs:
         return (0, 0)
 
-    # Store in relationships index (use same config as es_repo)
-    rel_repo = RelationshipsRepository(es_repo.config)
+    # Store in relationships index (use same config as repo)
+    rel_repo = RelationshipsRepository(repo.config)
 
     # Delete existing relationships for this user before re-indexing
     rel_repo.delete_relationships_for_user(scope, repository, username)
@@ -640,7 +640,7 @@ def run_hierarchy_extraction(
 
 
 def run_call_resolution(
-    es_repo: "ElasticsearchRepository",
+    repo: "Repository",
     scope: str,
     repository: str,
     username: str,
@@ -650,7 +650,7 @@ def run_call_resolution(
     """Run Phase 5: Call Resolution (static + embedding + semantic relationships).
 
     Args:
-        es_repo: Elasticsearch repository instance.
+        repo: Elasticsearch repository instance.
         scope: Repository scope.
         repository: Repository name.
         username: Username/branch.
@@ -668,7 +668,7 @@ def run_call_resolution(
         console.print("\n  [bold]Static Call Resolution[/]")
         try:
             total_calls, import_resolved, type_resolved = resolve_all_calls(
-                es_repo, scope, repository, username,
+                repo, scope, repository, username,
             )
             total_resolved = import_resolved + type_resolved
             console.print(f"  Full pass: {total_resolved}/{total_calls} resolved")
@@ -682,7 +682,7 @@ def run_call_resolution(
         console.print("\n  [bold]Embedding Call Resolution[/]")
         try:
             total_processed, single_resolved, embedding_resolved = resolve_calls_by_embedding(
-                es_repo, scope, repository, username,
+                repo, scope, repository, username,
             )
             total_resolved = single_resolved + embedding_resolved
             console.print(f"  Resolved: {total_resolved}/{total_processed} untyped calls")
@@ -698,7 +698,7 @@ def run_call_resolution(
     console.print("\n  [bold]Semantic Relationships[/]")
     try:
         elements_processed, total_relationships = compute_semantic_relationships(
-            es_repo, scope, repository, username,
+            repo, scope, repository, username,
         )
         console.print(f"  Processed {elements_processed} elements, stored {total_relationships} relationships")
     except Exception as e:

@@ -113,10 +113,10 @@ def _auto_detect_repo() -> tuple[str, str]:
 def _connect() -> Any:
     """Create ES repository and verify connectivity."""
     from shared.config import load_config
-    from shared.db.repositories import ElasticsearchRepository
+    from shared.db.repositories import Repository
 
     config = load_config(skip_validation=True)
-    es = ElasticsearchRepository(config)
+    es = Repository(config)
     # Quick connectivity check
     client = es._get_client()
     if not client.ping():

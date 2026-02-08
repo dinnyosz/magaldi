@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from shared.db.elasticsearch import ElasticsearchRepository
+from shared.db.store import Repository
 
 
 def explain_element(
-    es: ElasticsearchRepository,
+    es: Repository,
     element_id: str,
 ) -> dict[str, Any]:
     """Comprehensive overview of a code element.

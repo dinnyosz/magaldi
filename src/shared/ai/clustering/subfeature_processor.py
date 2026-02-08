@@ -24,7 +24,7 @@ from shared.ai.embedding import (
     validate_vector,
 )
 from shared.ai.summarization import SummarizationLLMClient
-from shared.db.elasticsearch import ElasticsearchRepository
+from shared.db.store import Repository
 from shared.parallel_processor import ThrottleContext, ThrottleDisplayInfo, run_throttled_tier
 from shared.throttling import ThroughputTracker
 
@@ -432,7 +432,7 @@ def _process_single_subfeature(
     scope: str,
     repository: str,
     username: str,
-    es_repo: ElasticsearchRepository,
+    repo: Repository,
     llm_client: SummarizationLLMClient,
     embed_client: CodeEmbeddingClient,
     config: FeatureProcessingConfig,
@@ -497,7 +497,7 @@ def _process_single_subfeature(
         subfeature_id = f"{scope}:{repository}:{username}:subfeature:{work_item.parent_label}:{sub_label}:{work_item.sub_cluster.cluster_id}"
 
         # Index subfeature
-        es_repo.index_subfeature(
+        repo.index_subfeature(
             subfeature_id=subfeature_id,
             scope=scope,
             repository=repository,
@@ -544,7 +544,7 @@ def process_subfeatures(
     scope: str,
     repository: str,
     username: str,
-    es_repo: ElasticsearchRepository,
+    repo: Repository,
     config: FeatureProcessingConfig | None = None,
     subcluster_config: SubClusterConfig | None = None,
     on_progress: Callable[[SubfeatureProgressState], None] | None = None,
@@ -564,7 +564,7 @@ def process_subfeatures(
         scope: Repository scope.
         repository: Repository name.
         username: Username/branch.
-        es_repo: Elasticsearch repository.
+        repo: Elasticsearch repository.
         config: Feature processing configuration.
         subcluster_config: Sub-clustering configuration.
         on_progress: Optional callback for processing progress updates.
@@ -593,7 +593,7 @@ def process_subfeatures(
         return {"subfeatures_created": 0, "parent_features_processed": 0, "errors": []}
 
     # Delete existing subfeatures
-    es_repo.delete_subfeatures(scope, repository, username)
+    repo.delete_subfeatures(scope, repository, username)
 
     # Initialize Redis job tracking if config provided
     redis_repo = None
@@ -672,7 +672,7 @@ def process_subfeatures(
             ))
 
         # Fetch embeddings for cluster members
-        member_docs = es_repo.get_documents_batch(cluster.element_ids)
+        member_docs = repo.get_documents_batch(cluster.element_ids)
         elements_with_embeddings = []
 
         for element_id in cluster.element_ids:
@@ -729,7 +729,7 @@ def process_subfeatures(
             all_sub_member_ids = []
             for sub_cluster in sub_result.clusters:
                 all_sub_member_ids.extend(sub_cluster.element_ids)
-            member_summaries = es_repo.get_summaries_batch(all_sub_member_ids)
+            member_summaries = repo.get_summaries_batch(all_sub_member_ids)
 
             # Add each sub-cluster to the work queue
             for sub_cluster in sub_result.clusters:
@@ -824,7 +824,7 @@ def process_subfeatures(
                 scope=scope,
                 repository=repository,
                 username=username,
-                es_repo=es_repo,
+                repo=repo,
                 llm_client=llm_client,
                 embed_client=embed_client,
                 config=config,

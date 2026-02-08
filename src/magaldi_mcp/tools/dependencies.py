@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from shared.db.elasticsearch import ElasticsearchRepository
+from shared.db.store import Repository
 
 
 def _find_file_element(
-    es: ElasticsearchRepository,
+    es: Repository,
     scope: str,
     repository: str,
     username: str,
@@ -39,7 +39,7 @@ def _find_file_element(
 
 
 def find_dependencies(
-    es: ElasticsearchRepository,
+    es: Repository,
     file_path: str | None = None,
     element_id: str | None = None,
     scope: str | None = None,
@@ -182,7 +182,7 @@ def find_dependencies(
 
 
 def find_dependents(
-    es: ElasticsearchRepository,
+    es: Repository,
     module: str,
     scope: str,
     repository: str,
@@ -238,7 +238,7 @@ def find_dependents(
 
 
 def dependency_graph(
-    es: ElasticsearchRepository,
+    es: Repository,
     scope: str,
     repository: str,
     username: str | None = None,

@@ -7,7 +7,7 @@ import math
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from magaldi_web.dependencies import get_cached_config, get_es_repository
+from magaldi_web.dependencies import get_cached_config, get_repository
 
 logger = logging.getLogger(__name__)
 from magaldi_web.models import (
@@ -17,7 +17,7 @@ from magaldi_web.models import (
     SearchSummaryRequest,
     SearchSummaryResponse,
 )
-from shared.db.elasticsearch import ElasticsearchRepository, INDEX_NAME
+from shared.db.store import INDEX_NAME, Repository
 
 router = APIRouter()
 
@@ -123,11 +123,11 @@ Answer:"""
 @router.post("/search", response_model=SearchResponse)
 async def search(
     request: SearchRequest,
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> SearchResponse:
     """Perform semantic code search."""
     config = get_cached_config()
-    client = es_repo._get_client()
+    client = repo._get_client()
 
     # Build filters
     filters = []
@@ -359,10 +359,10 @@ async def search(
 
 @router.get("/search/filters")
 async def get_search_filters(
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> dict:
     """Get available filter options for search."""
-    client = es_repo._get_client()
+    client = repo._get_client()
 
     result = client.search(
         index=INDEX_NAME,

@@ -55,7 +55,7 @@ export interface DashboardStats {
     total_running: number
   }
   health: {
-    elasticsearch: { status: string; details?: Record<string, unknown> }
+    search: { status: string; details?: Record<string, unknown> }
     llm: { status: string; details?: Record<string, unknown> }
     redis: { status: string; details?: Record<string, unknown> }
   }
@@ -592,7 +592,7 @@ export interface ServiceHealth {
 }
 
 export interface HealthStatus {
-  elasticsearch: ServiceHealth
+  search: ServiceHealth
   llm: ServiceHealth
   redis: ServiceHealth
 }

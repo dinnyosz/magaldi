@@ -72,14 +72,14 @@ def run_feature_extraction(
         process_features,
         process_subfeatures,
     )
-    from shared.db.elasticsearch import ElasticsearchRepository
+    from shared.db.store import Repository
 
-    es_repo = ElasticsearchRepository(config)
+    repo = Repository(config)
 
     try:
         # Fetch embeddings for functions/methods only
         with console.status("[bold blue]Fetching embeddings...[/]"):
-            elements = es_repo.get_all_embeddings(
+            elements = repo.get_all_embeddings(
                 scope=scope,
                 repository=repository,
                 username=username,
@@ -172,7 +172,7 @@ def run_feature_extraction(
             )
 
         # Clear existing feature assignments
-        es_repo.clear_cluster_assignments(scope, repository, username)
+        repo.clear_cluster_assignments(scope, repository, username)
 
         # Build assignments for ES update
         assignments = []
@@ -202,14 +202,14 @@ def run_feature_extraction(
         # Update ES with feature assignments
         if assignments:
             with console.status("[bold blue]Saving cluster assignments...[/]"):
-                es_repo.update_cluster_assignments(assignments)
+                repo.update_cluster_assignments(assignments)
 
         # Process features: summarize -> embed -> index (with progress)
         # Fetch member summaries for tier estimation
         all_member_ids = []
         for cluster in clustering_result.clusters:
             all_member_ids.extend(cluster.element_ids)
-        member_summaries = es_repo.get_summaries_batch(all_member_ids)
+        member_summaries = repo.get_summaries_batch(all_member_ids)
 
         # Display tier distribution before processing
         from shared.ai.clustering.feature_processor import (
@@ -343,7 +343,7 @@ def run_feature_extraction(
                 scope=scope,
                 repository=repository,
                 username=username,
-                es_repo=es_repo,
+                repo=repo,
                 config=proc_config,
                 on_progress=on_progress,
                 on_status_change=on_status_change,
@@ -368,7 +368,7 @@ def run_feature_extraction(
 
         if cluster_id_to_feature:
             with console.status("[bold blue]Updating element feature memberships...[/]"):
-                updated = es_repo.update_element_feature_memberships(
+                updated = repo.update_element_feature_memberships(
                     scope, repository, username, cluster_id_to_feature
                 )
             console.print(f"  Updated [green]{updated}[/] elements with feature labels")
@@ -590,7 +590,7 @@ def run_feature_extraction(
                     scope=scope,
                     repository=repository,
                     username=username,
-                    es_repo=es_repo,
+                    repo=repo,
                     config=proc_config,
                     subcluster_config=SubClusterConfig(),
                     on_progress=on_sub_progress,
@@ -630,7 +630,7 @@ def run_feature_extraction(
         }
 
     finally:
-        es_repo.close()
+        repo.close()
 
 
 # =============================================================================

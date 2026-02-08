@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from shared.db.elasticsearch import ElasticsearchRepository
+from shared.db.store import Repository
 
 from ._utils import _resolve_scope_repo
 
 
 def find_files(
-    es: ElasticsearchRepository,
+    es: Repository,
     pattern: str,
     scope: str | None = None,
     repository: str | None = None,

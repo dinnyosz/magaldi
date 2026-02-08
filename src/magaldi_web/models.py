@@ -23,7 +23,7 @@ class ServiceHealth(BaseModel):
 class HealthStatus(BaseModel):
     """Overall system health status."""
 
-    elasticsearch: ServiceHealth
+    search: ServiceHealth
     llm: ServiceHealth
     redis: ServiceHealth
 

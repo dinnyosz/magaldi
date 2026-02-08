@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from shared.db.elasticsearch import ElasticsearchRepository
+from shared.db.store import Repository
 
 
 def get_command_tree(
-    es: ElasticsearchRepository,
+    es: Repository,
     scope: str,
     repository: str,
     username: str | None = None,
@@ -174,7 +174,7 @@ def get_command_tree(
 
 
 def get_route_tree(
-    es: ElasticsearchRepository,
+    es: Repository,
     scope: str,
     repository: str,
     username: str | None = None,

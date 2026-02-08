@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from shared.db.elasticsearch import ElasticsearchRepository
+from shared.db.store import Repository
 
 from ._utils import _resolve_scope_repo
 
 
 def list_glossary(
-    es: ElasticsearchRepository,
+    es: Repository,
     scope: str | None = None,
     repository: str | None = None,
     username: str = "main",
@@ -52,7 +52,7 @@ def list_glossary(
 
 
 def get_glossary_term(
-    es: ElasticsearchRepository,
+    es: Repository,
     scope: str | None = None,
     repository: str | None = None,
     term: str = "",
@@ -95,7 +95,7 @@ def get_glossary_term(
 
 
 def search_glossary(
-    es: ElasticsearchRepository,
+    es: Repository,
     scope: str | None = None,
     repository: str | None = None,
     query: str = "",

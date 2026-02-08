@@ -10,7 +10,7 @@ Strategy 1-2 (at parse time, in parsers/base.py):
 Strategy 3-5 (this module, resolve_all_calls):
 - Import-based calls (from utils import process; process())
 - Module method calls (import utils; utils.process())
-- Type-annotated calls (es: ElasticsearchRepository; es.get_document())
+- Type-annotated calls (repo: Repository; es.get_document())
 
 Strategy 6 (this module, resolve_calls_by_embedding):
 - Embedding similarity for remaining untyped calls with receiver
@@ -25,13 +25,13 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from shared.db.repositories import ElasticsearchRepository
+    from shared.db.repositories import Repository
 
 logger = logging.getLogger(__name__)
 
 
 def resolve_all_calls(
-    es: ElasticsearchRepository,
+    repo: Repository,
     scope: str,
     repository: str,
     username: str = "main",
@@ -43,7 +43,7 @@ def resolve_all_calls(
     to handle renamed/moved functions.
 
     Args:
-        es: Elasticsearch repository instance.
+        repo: Repository instance.
         scope: Repository scope.
         repository: Repository name.
         username: Username branch.
@@ -133,7 +133,7 @@ def resolve_all_calls(
 
 
 def resolve_cross_file_calls(
-    es: ElasticsearchRepository,
+    repo: Repository,
     scope: str,
     repository: str,
     username: str = "main",
@@ -147,7 +147,7 @@ def resolve_cross_file_calls(
     to ensure call graphs are complete.
 
     Args:
-        es: Elasticsearch repository instance.
+        repo: Repository instance.
         scope: Repository scope.
         repository: Repository name.
         username: Username branch.
@@ -214,7 +214,7 @@ def resolve_cross_file_calls(
                     import_resolved += 1
 
             # Strategy 5: Type-annotated method call
-            # e.g., def foo(es: ElasticsearchRepository): es.get_document()
+            # e.g., def foo(repo: Repository): es.get_document()
             elif receiver and category == "type_resolvable" and receiver in param_types:
                 type_name = param_types[receiver]
                 resolved_id = _lookup_method_by_type(
@@ -258,7 +258,7 @@ def _build_import_map(imports: list[dict]) -> dict[str, dict]:
 
 
 def _lookup_element_by_import(
-    es: ElasticsearchRepository,
+    repo: Repository,
     import_info: dict,
     element_name: str,
     scope: str,
@@ -268,7 +268,7 @@ def _lookup_element_by_import(
     """Look up element ID for an imported name.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Repository.
         import_info: Import dict with module info.
         element_name: Name of the element to find.
         scope: Repository scope.
@@ -373,7 +373,7 @@ def _module_to_file_paths(module: str) -> list[str]:
 
 
 def _lookup_method_by_type(
-    es: ElasticsearchRepository,
+    repo: Repository,
     type_name: str,
     method_name: str,
     scope: str,
@@ -382,11 +382,11 @@ def _lookup_method_by_type(
 ) -> str | None:
     """Look up a method by the type of its receiver.
 
-    Resolves calls like `es.get_document()` when `es: ElasticsearchRepository`.
+    Resolves calls like `es.get_document()` when `repo: Repository`.
 
     Args:
-        es: Elasticsearch repository.
-        type_name: Type annotation of the receiver (e.g., "ElasticsearchRepository").
+        repo: Repository.
+        type_name: Type annotation of the receiver (e.g., "Repository").
         method_name: Name of the method to find.
         scope: Repository scope.
         repository: Repository name.
@@ -398,7 +398,7 @@ def _lookup_method_by_type(
     # Strip generic parameters (e.g., "list[str]" -> "list")
     base_type = type_name.split("[")[0].strip()
 
-    # Handle qualified names (e.g., "db.ElasticsearchRepository" -> "ElasticsearchRepository")
+    # Handle qualified names (e.g., "db.Repository" -> "Repository")
     if "." in base_type:
         base_type = base_type.split(".")[-1]
 
@@ -434,7 +434,7 @@ def _lookup_method_by_type(
 
 
 def _find_element_in_file(
-    es: ElasticsearchRepository,
+    repo: Repository,
     file_path: str,
     element_name: str,
     scope: str,
@@ -444,7 +444,7 @@ def _find_element_in_file(
     """Find an element by name in a specific file.
 
     Args:
-        es: Elasticsearch repository.
+        repo: Repository.
         file_path: Relative path to the file.
         element_name: Name of the element to find.
         scope: Repository scope.
@@ -499,7 +499,7 @@ def _merge_candidates(
 
 
 def resolve_calls_by_embedding(
-    es: ElasticsearchRepository,
+    repo: Repository,
     scope: str,
     repository: str,
     username: str = "main",
@@ -515,7 +515,7 @@ def resolve_calls_by_embedding(
     with user's elements taking priority.
 
     Args:
-        es: Elasticsearch repository instance.
+        repo: Repository instance.
         scope: Repository scope.
         repository: Repository name.
         username: Username branch.
@@ -642,7 +642,7 @@ def resolve_calls_by_embedding(
 
 
 def compute_semantic_relationships(
-    es: ElasticsearchRepository,
+    repo: Repository,
     scope: str,
     repository: str,
     username: str = "main",
@@ -657,7 +657,7 @@ def compute_semantic_relationships(
     Queries both user and main indices for a complete view.
 
     Args:
-        es: Elasticsearch repository instance.
+        repo: Repository instance.
         scope: Repository scope.
         repository: Repository name.
         username: Username branch.

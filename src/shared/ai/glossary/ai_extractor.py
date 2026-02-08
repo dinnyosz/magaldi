@@ -820,7 +820,7 @@ def extract_glossary_from_features_concurrent(
     timing_stats: GlossaryTimingStats | None = None,
     on_phase_change: Callable[[str], None] | None = None,
     # Incremental indexing parameters
-    es_repo: Any | None = None,
+    repo: Any | None = None,
     scope: str | None = None,
     repository: str | None = None,
     username: str | None = None,
@@ -841,10 +841,10 @@ def extract_glossary_from_features_concurrent(
         worker_status: Shared worker status tracker.
         timing_stats: Shared timing statistics.
         on_phase_change: Callback when phase changes (phase name).
-        es_repo: Optional Elasticsearch repository for incremental indexing.
-        scope: Scope for indexing (required if es_repo provided).
-        repository: Repository name for indexing (required if es_repo provided).
-        username: Username for indexing (required if es_repo provided).
+        repo: Optional Elasticsearch repository for incremental indexing.
+        scope: Scope for indexing (required if repo provided).
+        repository: Repository name for indexing (required if repo provided).
+        username: Username for indexing (required if repo provided).
         on_indexed: Optional callback when an item is indexed (receives term name).
 
     Returns:
@@ -1174,7 +1174,7 @@ def extract_glossary_from_features_concurrent(
             final_items.append(completed_item)
 
         # Incremental indexing: index each item as it completes
-        if success and es_repo is not None and scope and repository and username:
+        if success and repo is not None and scope and repository and username:
             glossary_id = f"{scope}:{repository}:{username}:glossary:{completed_item.name}"
 
             # Build feature associations
@@ -1190,7 +1190,7 @@ def extract_glossary_from_features_concurrent(
                         "percentage": 0.0,
                     })
 
-            es_repo.index_glossary(
+            repo.index_glossary(
                 glossary_id=glossary_id,
                 scope=scope,
                 repository=repository,

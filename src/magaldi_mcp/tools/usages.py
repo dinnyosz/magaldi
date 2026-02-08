@@ -6,7 +6,7 @@ import logging
 import re
 from typing import Any
 
-from shared.db.elasticsearch import ElasticsearchRepository
+from shared.db.store import Repository
 
 from ._utils import _escape_for_lucene_regexp
 
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 def find_usages(
-    es: ElasticsearchRepository,
+    es: Repository,
     element_id: str,
     limit: int = 30,
 ) -> list[dict[str, Any]]:
@@ -130,7 +130,7 @@ def find_usages(
 
 
 def find_implementations(
-    es: ElasticsearchRepository,
+    es: Repository,
     element_id: str | None = None,
     class_name: str | None = None,
     scope: str | None = None,

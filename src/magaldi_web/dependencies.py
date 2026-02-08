@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Generator
 
 from shared.cli._shared import validate_llm_url
 from shared.config import MagaldiConfig, get_config, load_config
-from shared.db.elasticsearch import ElasticsearchRepository
+from shared.db.store import Repository
 
 if TYPE_CHECKING:
     pass
@@ -22,21 +22,21 @@ def get_cached_config() -> MagaldiConfig:
         return load_config()
 
 
-def get_es_repository() -> Generator[ElasticsearchRepository, None, None]:
-    """Get Elasticsearch repository as a dependency."""
+def get_repository() -> Generator[Repository, None, None]:
+    """Get repository as a dependency."""
     config = get_cached_config()
-    es_repo = ElasticsearchRepository(config)
+    repo = Repository(config)
     try:
-        yield es_repo
+        yield repo
     finally:
-        es_repo.close()
+        repo.close()
 
 
-async def check_elasticsearch_health(es_repo: ElasticsearchRepository) -> dict:
-    """Check Elasticsearch health."""
+async def check_search_health(repo: Repository) -> dict:
+    """Check search backend health."""
     try:
-        client = es_repo._get_client()
-        health = client.cluster.health()
+        client = repo._get_client()
+        health = client.cluster_health()
         return {
             "status": "healthy",
             "cluster_status": health.get("status", "unknown"),

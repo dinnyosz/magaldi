@@ -269,9 +269,9 @@ function Dashboard() {
               <Table borderless size="sm" className="mb-0">
                 <tbody>
                   <tr>
-                    <td>Elasticsearch</td>
+                    <td>Search</td>
                     <td className="text-end">
-                      {getHealthBadge(dashboard?.health?.elasticsearch?.status)}
+                      {getHealthBadge(dashboard?.health?.search?.status)}
                     </td>
                   </tr>
                   <tr>

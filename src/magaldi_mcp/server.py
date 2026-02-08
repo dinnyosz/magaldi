@@ -20,7 +20,7 @@ from magaldi_mcp.tools.schemas import ALL_TOOL_SCHEMAS
 from magaldi_mcp.tools.schemas._annotations import TOOLS_WITH_OUTPUT_CONTROL
 from shared.ai.embedding import CodeEmbeddingClient
 from shared.config import get_config, load_config
-from shared.db.elasticsearch import ElasticsearchRepository
+from shared.db.store import Repository
 from shared.db.redis import RedisMCPAnalyticsRepository
 
 log = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ class MagaldiMCPServer:
         self.server = Server("magaldi")
         self.config = get_config()
         self.default_username = default_username
-        self.es_repo: ElasticsearchRepository | None = None
+        self.repo: Repository | None = None
         self.embed_client: CodeEmbeddingClient | None = None
 
         # Analytics tracking
@@ -49,11 +49,11 @@ class MagaldiMCPServer:
         # Register handlers
         self._register_tools()
 
-    def _get_es(self) -> ElasticsearchRepository:
+    def _get_es(self) -> Repository:
         """Get or create Elasticsearch repository."""
-        if self.es_repo is None:
-            self.es_repo = ElasticsearchRepository(self.config)
-        return self.es_repo
+        if self.repo is None:
+            self.repo = Repository(self.config)
+        return self.repo
 
     def _get_embed_client(self) -> CodeEmbeddingClient:
         """Get or create embedding client."""

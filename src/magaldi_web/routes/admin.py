@@ -11,11 +11,11 @@ from fastapi import APIRouter, Depends, Query
 logger = logging.getLogger(__name__)
 
 from magaldi_web.dependencies import (
-    check_elasticsearch_health,
+    check_search_health,
     check_llm_health,
     check_redis_health,
     get_cached_config,
-    get_es_repository,
+    get_repository,
     get_job_queue_totals,
     retry_failed_jobs_in_redis,
 )
@@ -40,7 +40,7 @@ from magaldi_web.models import (
     ToolUsageInfo,
     TransitionDetailInfo,
 )
-from shared.db.elasticsearch import INDEX_NAME, ElasticsearchRepository
+from shared.db.store import INDEX_NAME, Repository
 from shared.db.redis import RedisMCPAnalyticsRepository
 
 router = APIRouter()
@@ -57,15 +57,15 @@ def format_bytes(size: int) -> str:
 
 @router.get("/admin/health", response_model=HealthStatus)
 async def get_health(
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> HealthStatus:
     """Get detailed health status of all services."""
     config = get_cached_config()
 
-    # Measure ES latency
-    es_start = time.time()
-    es_health = await check_elasticsearch_health(es_repo)
-    es_latency = (time.time() - es_start) * 1000
+    # Measure search backend latency
+    search_start = time.time()
+    search_health = await check_search_health(repo)
+    search_latency = (time.time() - search_start) * 1000
 
     # Measure Ollama latency
     llm_start = time.time()
@@ -78,12 +78,12 @@ async def get_health(
     redis_latency = (time.time() - redis_start) * 1000
 
     return HealthStatus(
-        elasticsearch=ServiceHealth(
-            status=es_health.get("status", "unknown"),
-            latency_ms=es_latency,
+        search=ServiceHealth(
+            status=search_health.get("status", "unknown"),
+            latency_ms=search_latency,
             details={
-                "cluster_status": es_health.get("cluster_status"),
-                "nodes": es_health.get("number_of_nodes"),
+                "cluster_status": search_health.get("cluster_status"),
+                "nodes": search_health.get("number_of_nodes"),
             },
         ),
         llm=ServiceHealth(
@@ -122,10 +122,10 @@ async def get_job_stats() -> JobStatsResponse:
 
 @router.get("/admin/index-stats", response_model=IndexStatsResponse)
 async def get_index_stats(
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> IndexStatsResponse:
     """Get Elasticsearch index statistics."""
-    client = es_repo._get_client()
+    client = repo._get_client()
 
     # Get index stats
     try:
@@ -165,12 +165,12 @@ async def get_index_stats(
 
 @router.get("/admin/overview", response_model=AdminOverviewResponse)
 async def get_admin_overview(
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> AdminOverviewResponse:
     """Get complete admin overview."""
-    health = await get_health(es_repo)
+    health = await get_health(repo)
     jobs = await get_job_stats()
-    index_stats = await get_index_stats(es_repo)
+    index_stats = await get_index_stats(repo)
 
     return AdminOverviewResponse(
         health=health,
@@ -203,10 +203,10 @@ async def retry_failed_jobs(
 
 @router.post("/admin/index/refresh")
 async def refresh_index(
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> dict:
     """Refresh the Elasticsearch index."""
-    client = es_repo._get_client()
+    client = repo._get_client()
     client.indices.refresh(index=INDEX_NAME)
     return {"status": "refreshed"}
 

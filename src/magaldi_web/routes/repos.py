@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
-from magaldi_web.dependencies import get_es_repository
+from magaldi_web.dependencies import get_repository
 from magaldi_web.models import (
     ActiveUser,
     Contributor,
@@ -18,17 +18,17 @@ from magaldi_web.models import (
     RepoSummary,
     TreeNode,
 )
-from shared.db.elasticsearch import ElasticsearchRepository, INDEX_NAME
+from shared.db.store import INDEX_NAME, Repository
 
 router = APIRouter()
 
 
 @router.get("/repos", response_model=RepoListResponse)
 async def list_repos(
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> RepoListResponse:
     """List all indexed repositories."""
-    client = es_repo._get_client()
+    client = repo._get_client()
 
     result = client.search(
         index=INDEX_NAME,
@@ -76,10 +76,10 @@ async def list_repos(
 async def get_repo_detail(
     scope: str = Path(..., description="Repository scope"),
     repository: str = Path(..., description="Repository name"),
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> RepoDetailResponse:
     """Get detailed information about a repository."""
-    client = es_repo._get_client()
+    client = repo._get_client()
 
     # Get repo stats
     result = client.search(
@@ -159,10 +159,10 @@ async def get_file_tree(
     scope: str = Path(..., description="Repository scope"),
     repository: str = Path(..., description="Repository name"),
     username: str = Query(default="main", description="Username/branch"),
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> FileTreeResponse:
     """Get file tree for a repository."""
-    client = es_repo._get_client()
+    client = repo._get_client()
 
     # Get all file elements
     result = client.search(
@@ -248,10 +248,10 @@ async def get_file_detail(
     repository: str = Path(..., description="Repository name"),
     file_path: str = Path(..., description="File path"),
     username: str = Query(default="main", description="Username/branch"),
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> FileDetailResponse:
     """Get detailed information about a file."""
-    client = es_repo._get_client()
+    client = repo._get_client()
 
     # Get file element
     file_result = client.search(

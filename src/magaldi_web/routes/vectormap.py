@@ -7,7 +7,7 @@ from typing import Literal
 import numpy as np
 from fastapi import APIRouter, Depends, Path, Query
 
-from magaldi_web.dependencies import get_es_repository
+from magaldi_web.dependencies import get_repository
 from magaldi_web.models import (
     Cluster,
     ClusterMember,
@@ -20,7 +20,7 @@ from magaldi_web.models import (
     VectorMapResponse,
     VectorPoint,
 )
-from shared.db.elasticsearch import ElasticsearchRepository, INDEX_NAME
+from shared.db.store import INDEX_NAME, Repository
 
 router = APIRouter()
 
@@ -94,10 +94,10 @@ async def get_vector_map(
     dimensions: int = Query(default=2, ge=2, le=3, description="Output dimensions"),
     algorithm: Literal["umap", "tsne"] = Query(default="umap", description="Reduction algorithm"),
     limit: int = Query(default=5000, ge=1, le=10000, description="Max elements"),
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> VectorMapResponse:
     """Get 2D/3D coordinates for visualizing the embedding space."""
-    client = es_repo._get_client()
+    client = repo._get_client()
 
     # Fetch elements with embeddings
     result = client.search(
@@ -211,10 +211,10 @@ async def get_clusters(
     repository: str = Path(..., description="Repository name"),
     username: str = Query(default="main", description="Username/branch"),
     limit: int = Query(default=50, ge=1, le=100, description="Max features to return"),
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> ClustersResponse:
     """Get pre-extracted HDBSCAN feature clusters from the codebase."""
-    client = es_repo._get_client()
+    client = repo._get_client()
 
     # Get features (element_type = 'feature') which are already extracted via HDBSCAN
     features_result = client.search(
@@ -334,14 +334,14 @@ async def get_feature_graph(
     scope: str = Path(..., description="Repository scope"),
     repository: str = Path(..., description="Repository name"),
     username: str = Query(default="main", description="Username/branch"),
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> FeatureGraphResponse:
     """Get feature graph data for visualization.
 
     Returns features and subfeatures as nodes, with connections between
     features based on soft clustering affinity.
     """
-    client = es_repo._get_client()
+    client = repo._get_client()
 
     # Get all features with their connected_features and member_ids
     features_result = client.search(

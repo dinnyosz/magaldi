@@ -90,7 +90,7 @@ function Admin() {
   const getOverallStatus = (): string => {
     if (!health) return 'unknown'
     const statuses = [
-      health.elasticsearch.status,
+      health.search.status,
       health.llm.status,
       health.redis.status,
     ]
@@ -128,10 +128,10 @@ function Admin() {
                       <tr>
                         <td>
                           <i className="bi bi-database me-2"></i>
-                          Elasticsearch
+                          Search
                         </td>
                         <td className="text-end">
-                          {getStatusBadge(health.elasticsearch.status)}
+                          {getStatusBadge(health.search.status)}
                         </td>
                       </tr>
                       <tr>
@@ -167,7 +167,7 @@ function Admin() {
           <Card className="h-100">
             <Card.Header>
               <i className="bi bi-bar-chart me-2"></i>
-              Elasticsearch Index
+              Search Index
             </Card.Header>
             <Card.Body>
               {statsLoading ? (

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from shared.db.elasticsearch import ElasticsearchRepository
+from shared.db.store import Repository
 
 from ._utils import _resolve_scope_repo
 
 
 def list_repos(
-    es: ElasticsearchRepository,
+    es: Repository,
     scope: str | None = None,
 ) -> list[dict[str, Any]]:
     """List all indexed repositories.
@@ -26,7 +26,7 @@ def list_repos(
 
 
 def list_features(
-    es: ElasticsearchRepository,
+    es: Repository,
     scope: str,
     repository: str,
     username: str = "main",
@@ -67,7 +67,7 @@ def list_features(
 
 
 def get_repo_stats(
-    es: ElasticsearchRepository,
+    es: Repository,
     scope: str | None = None,
     repository: str | None = None,
     username: str = "main",
@@ -94,7 +94,7 @@ def get_repo_stats(
 
 
 def get_feature_members(
-    es: ElasticsearchRepository,
+    es: Repository,
     feature_id: str,
 ) -> dict[str, Any]:
     """Get all members of a feature or subfeature cluster.

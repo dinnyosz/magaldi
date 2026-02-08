@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from shared.db.elasticsearch import ElasticsearchRepository
+from shared.db.store import Repository
 
 
 def get_call_graph(
-    es: ElasticsearchRepository,
+    es: Repository,
     element_id: str,
     direction: str = "both",
 ) -> dict[str, Any]:
@@ -122,7 +122,7 @@ def get_call_graph(
 
 
 def find_callers(
-    es: ElasticsearchRepository,
+    es: Repository,
     element_id: str,
     scope: str | None = None,
     repository: str | None = None,
@@ -216,7 +216,7 @@ def find_callers(
 
 
 def find_call_chain(
-    es: ElasticsearchRepository,
+    es: Repository,
     element_id: str,
     direction: str = "callees",
     max_depth: int = 5,
@@ -581,7 +581,7 @@ _EXCLUDED_NAMES = {
 
 
 def find_dead_code(
-    es: ElasticsearchRepository,
+    es: Repository,
     scope: str,
     repository: str,
     username: str | None = None,
@@ -721,7 +721,7 @@ def find_dead_code(
 
 
 def find_entry_points(
-    es: ElasticsearchRepository,
+    es: Repository,
     scope: str,
     repository: str,
     username: str | None = None,

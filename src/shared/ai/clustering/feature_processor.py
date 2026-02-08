@@ -32,7 +32,7 @@ from shared.ai.embedding import (
     validate_vector,
 )
 from shared.ai.summarization import SummarizationLLMClient
-from shared.db.elasticsearch import ElasticsearchRepository
+from shared.db.store import Repository
 
 # Import shared config from common module
 from shared.ai.clustering.config import (
@@ -471,7 +471,7 @@ def _process_single_feature(
     scope: str,
     repository: str,
     username: str,
-    es_repo: ElasticsearchRepository,
+    repo: Repository,
     llm_client: SummarizationLLMClient,
     embed_client: CodeEmbeddingClient,
     config: FeatureProcessingConfig,
@@ -488,7 +488,7 @@ def _process_single_feature(
         scope: Repository scope.
         repository: Repository name.
         username: Username/branch.
-        es_repo: Elasticsearch repository.
+        repo: Elasticsearch repository.
         llm_client: LLM client for summarization.
         embed_client: Embedding client.
         config: Processing configuration.
@@ -554,7 +554,7 @@ def _process_single_feature(
                         "affinity": conn.affinity,
                     })
 
-        es_repo.index_feature(
+        repo.index_feature(
             feature_id=feature_id,
             scope=scope,
             repository=repository,
@@ -594,7 +594,7 @@ def process_features(
     scope: str,
     repository: str,
     username: str,
-    es_repo: ElasticsearchRepository,
+    repo: Repository,
     config: FeatureProcessingConfig | None = None,
     on_progress: Callable[[FeatureProgressState], None] | None = None,
     on_status_change: Callable[[], None] | None = None,
@@ -610,7 +610,7 @@ def process_features(
         scope: Repository scope.
         repository: Repository name.
         username: Username/branch.
-        es_repo: Elasticsearch repository.
+        repo: Elasticsearch repository.
         config: Processing configuration.
         on_progress: Optional callback for progress updates.
         on_status_change: Optional callback when worker status changes.
@@ -644,14 +644,14 @@ def process_features(
             redis_repo.add_job(feature_id, scope, repository, username, label)
 
     # Delete existing feature documents
-    es_repo.delete_features(scope, repository, username)
+    repo.delete_features(scope, repository, username)
 
     # Fetch all member summaries in batch
     all_member_ids = []
     for cluster in clusters:
         all_member_ids.extend(cluster.element_ids)
 
-    member_summaries = es_repo.get_summaries_batch(all_member_ids)
+    member_summaries = repo.get_summaries_batch(all_member_ids)
 
     # Initialize LLM clients
     llm_client = SummarizationLLMClient(
@@ -718,7 +718,7 @@ def process_features(
                 scope=scope,
                 repository=repository,
                 username=username,
-                es_repo=es_repo,
+                repo=repo,
                 llm_client=llm_client,
                 embed_client=embed_client,
                 config=config,

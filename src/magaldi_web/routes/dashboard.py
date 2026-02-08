@@ -7,11 +7,11 @@ import time
 from fastapi import APIRouter, Depends
 
 from magaldi_web.dependencies import (
-    check_elasticsearch_health,
+    check_search_health,
     check_llm_health,
     check_redis_health,
     get_cached_config,
-    get_es_repository,
+    get_repository,
     get_redis_queue_stats,
 )
 from magaldi_web.models import (
@@ -23,18 +23,18 @@ from magaldi_web.models import (
     RepoSummary,
     ServiceHealth,
 )
-from shared.db.elasticsearch import ElasticsearchRepository, INDEX_NAME
+from shared.db.store import INDEX_NAME, Repository
 
 router = APIRouter()
 
 
 @router.get("/dashboard", response_model=DashboardResponse)
 async def get_dashboard(
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> DashboardResponse:
     """Get dashboard overview data."""
     config = get_cached_config()
-    client = es_repo._get_client()
+    client = repo._get_client()
 
     # Get repository stats with element type breakdowns
     repos_agg = client.search(
@@ -124,7 +124,7 @@ async def get_dashboard(
     element_count = sum(type_counts.values())
 
     # Check service health and queue stats
-    es_health = await check_elasticsearch_health(es_repo)
+    search_health = await check_search_health(repo)
     llm_health = await check_llm_health(config)
     redis_health = await check_redis_health(config)
     queue_stats = await get_redis_queue_stats(config)
@@ -185,11 +185,11 @@ async def get_dashboard(
             total_running=queue_stats.get("total_running", 0),
         ),
         health=HealthStatus(
-            elasticsearch=ServiceHealth(
-                status=es_health.get("status", "unknown"),
+            search=ServiceHealth(
+                status=search_health.get("status", "unknown"),
                 details={
-                    "cluster_status": es_health.get("cluster_status"),
-                    "nodes": es_health.get("number_of_nodes"),
+                    "cluster_status": search_health.get("cluster_status"),
+                    "nodes": search_health.get("number_of_nodes"),
                 },
             ),
             llm=ServiceHealth(

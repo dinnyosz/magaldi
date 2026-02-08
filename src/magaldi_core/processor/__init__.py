@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 from shared.ai.context_size import compute_element_num_ctx, CONTEXT_TIERS
 from shared.ai.embedding import CodeEmbeddingClient
 from shared.ai.summarization import SummarizationLLMClient
-from shared.db.elasticsearch import ElasticsearchRepository
+from shared.db.store import Repository
 
 from magaldi_core.code_parser import CodeElement, ParsedFile
 from magaldi_core.job_tracker import RedisJobTracker, SummaryCache
@@ -87,7 +87,7 @@ def process_elements(
     scope: str,
     repository: str,
     username: str,
-    es_repo: ElasticsearchRepository,
+    repo: Repository,
     config: ProcessingConfig | None = None,
     on_progress: Callable[[ProgressState], None] | None = None,
     file_hashes: dict[str, str] | None = None,
@@ -106,7 +106,7 @@ def process_elements(
         scope: Repository scope.
         repository: Repository name.
         username: Username/branch.
-        es_repo: Elasticsearch repository for indexing.
+        repo: Elasticsearch repository for indexing.
         config: Processing configuration.
         on_progress: Optional callback(ProgressState) for progress updates.
         file_hashes: Optional dict mapping relative_path to file hash.
@@ -149,7 +149,7 @@ def process_elements(
     stale_element_ids: list[str] = []
 
     for pf in parsed_files:
-        existing_ids = es_repo.get_element_ids_by_file(
+        existing_ids = repo.get_element_ids_by_file(
             scope, repository, username, pf.file_info.relative_path
         )
         # Stale = in ES but not in new code
@@ -159,7 +159,7 @@ def process_elements(
     # Get content hashes and summary state for change detection
     # Only skip if content unchanged AND summary exists (handles interrupted runs)
     all_element_ids = list(new_element_ids)
-    existing_states = es_repo.get_element_processing_state(all_element_ids)
+    existing_states = repo.get_element_processing_state(all_element_ids)
 
     # RELOCATED ELEMENT MATCHING (must happen BEFORE deleting stale elements!)
     # When an element's line number changes, its ID changes but content_hash stays same.
@@ -181,7 +181,7 @@ def process_elements(
         # Search each file separately to avoid cross-file false matches
         for rel_path, hashes in by_file.items():
             unique_hashes = list(set(hashes))
-            file_relocated = es_repo.find_elements_by_content_hash(
+            file_relocated = repo.find_elements_by_content_hash(
                 scope, repository, username, unique_hashes, relative_path=rel_path
             )
             relocated_states.update(file_relocated)
@@ -194,7 +194,7 @@ def process_elements(
     # Now delete stale elements, EXCLUDING relocated ones (they'll be updated, not deleted)
     truly_stale_ids = [eid for eid in stale_element_ids if eid not in relocated_old_ids]
     if truly_stale_ids:
-        es_repo.delete_elements(truly_stale_ids)
+        repo.delete_elements(truly_stale_ids)
         result.elements_deleted = len(truly_stale_ids)
 
     # Filter: only process elements that are new, changed, or missing summary
@@ -248,14 +248,14 @@ def process_elements(
                         state.get("summary_embedding"),
                         state.get("code_embedding"),
                         state.get("caller_embedding"),
-                        es_repo,
+                        repo,
                         file_hash,
                         element_count,
                     )
                     # Delete the old element now that we've indexed the new one
                     old_element_id = state.get("old_element_id")
                     if old_element_id:
-                        es_repo.delete_elements([old_element_id])
+                        repo.delete_elements([old_element_id])
                     relocated_copied += 1
                     result.elements_skipped += 1
                     skipped_by_file[elem.relative_path] = skipped_by_file.get(elem.relative_path, 0) + 1
@@ -299,7 +299,7 @@ def process_elements(
 
         if files_to_update:
             # Pass element_counts so FILE elements also get updated element_count
-            es_repo.update_file_hashes(
+            repo.update_file_hashes(
                 scope, repository, username, files_to_update, elements_per_file
             )
 
@@ -457,7 +457,7 @@ def process_elements(
                 config=config,
                 file_hashes=file_hashes,
                 element_counts=element_counts,
-                es_repo=es_repo,
+                repo=repo,
                 worker_id=wid,
                 worker_status=worker_status,
                 on_status_change=on_status_change,

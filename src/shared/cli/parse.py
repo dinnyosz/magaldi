@@ -123,9 +123,9 @@ def parse(
         # Force clean: Delete existing index data before change detection
         if force_clean and not dry_run:
             console.print("[yellow]Force clean:[/] Deleting existing index data...")
-            from shared.db.elasticsearch import ElasticsearchRepository
-            es_repo = ElasticsearchRepository(config)
-            deleted = es_repo.delete_by_repository(
+            from shared.db.store import Repository
+            repo = Repository(config)
+            deleted = repo.delete_by_repository(
                 scope=discovery_result.scope,
                 repository=discovery_result.repository,
                 username=user,
@@ -178,8 +178,8 @@ def parse(
 
         # Hierarchy Extraction (CLI commands, routes)
         if not dry_run and indexed > 0:
-            from shared.db.elasticsearch import ElasticsearchRepository
-            es_repo = ElasticsearchRepository(config)
+            from shared.db.store import Repository
+            repo = Repository(config)
             console.print("\n  [bold]Hierarchy Extraction[/]")
             try:
                 # Use repository name as CLI entry point fallback
@@ -188,7 +188,7 @@ def parse(
                     discovery_result.scope,
                     discovery_result.repository,
                     user,
-                    es_repo,
+                    repo,
                     cli_entry_point=cli_entry_point,
                 )
                 if rel_indexed > 0 or ref_indexed > 0:
@@ -202,7 +202,7 @@ def parse(
         if not dry_run and indexed > 0:
             console.print("\n[bold blue]Phase 5:[/] Call Resolution")
             run_call_resolution(
-                es_repo,
+                repo,
                 discovery_result.scope,
                 discovery_result.repository,
                 user,

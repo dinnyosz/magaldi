@@ -5,8 +5,8 @@ from __future__ import annotations
 import re
 from fastapi import APIRouter, Depends, Query
 
-from magaldi_web.dependencies import get_es_repository
-from shared.db.elasticsearch import ElasticsearchRepository, INDEX_NAME
+from magaldi_web.dependencies import get_repository
+from shared.db.store import INDEX_NAME, Repository
 
 router = APIRouter()
 
@@ -21,7 +21,7 @@ async def browse_elements(
     language: str | None = None,
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=50, ge=1, le=200),
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> dict:
     """Browse code elements with filtering.
 
@@ -38,7 +38,7 @@ async def browse_elements(
     Returns:
         Paginated list of elements with metadata.
     """
-    client = es_repo._get_client()
+    client = repo._get_client()
 
     # Build filters
     filters = []
@@ -253,7 +253,7 @@ async def browse_elements(
 async def get_element_children(
     hash_id: str,
     username: str = "main",
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> dict:
     """Get child elements of a parent element.
 
@@ -265,12 +265,12 @@ async def get_element_children(
         List of child elements grouped by type.
     """
     # Look up element by hash_id to get the element_id
-    source = es_repo.get_document_by_hash_id(hash_id)
+    source = repo.get_document_by_hash_id(hash_id)
     if not source:
         return {"error": "Element not found", "children": {}, "total_children": 0}
 
     element_id = source["element_id"]
-    client = es_repo._get_client()
+    client = repo._get_client()
 
     # Build filters
     usernames = ["main"]
@@ -352,14 +352,14 @@ async def get_element_children(
 
 @router.get("/browse/filters")
 async def get_browse_filters(
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> dict:
     """Get available filter options for browsing.
 
     Returns:
         Available scopes, repositories, element types, languages, and usernames.
     """
-    client = es_repo._get_client()
+    client = repo._get_client()
 
     result = client.search(
         index=INDEX_NAME,
@@ -407,7 +407,7 @@ async def get_browse_stats(
     scope: str | None = None,
     repository: str | None = None,
     username: str = "main",
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> dict:
     """Get element counts by type for the current filters.
 
@@ -419,7 +419,7 @@ async def get_browse_stats(
     Returns:
         Counts for each element type.
     """
-    client = es_repo._get_client()
+    client = repo._get_client()
 
     # Build filters
     filters = []
@@ -469,7 +469,7 @@ async def get_element_details(
     hash_id: str,
     include_call_graph: bool = False,
     username: str = "main",
-    es_repo: ElasticsearchRepository = Depends(get_es_repository),
+    repo: Repository = Depends(get_repository),
 ) -> dict:
     """Get detailed information about an element.
 
@@ -482,12 +482,12 @@ async def get_element_details(
         Detailed element info including container hierarchy and optionally call graph.
     """
     # Look up element by hash_id
-    source = es_repo.get_document_by_hash_id(hash_id)
+    source = repo.get_document_by_hash_id(hash_id)
     if not source:
         return {"error": "Element not found"}
 
     element_id = source["element_id"]
-    client = es_repo._get_client()
+    client = repo._get_client()
 
     # Build container chain (parent -> grandparent -> ...)
     containers = []

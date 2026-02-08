@@ -6,7 +6,7 @@ import logging
 from typing import Any
 
 from shared.ai.embedding import CodeEmbeddingClient
-from shared.db.elasticsearch import ElasticsearchRepository
+from shared.db.store import Repository
 
 from ._utils import _resolve_scope_repo
 
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 def search_code(
-    es: ElasticsearchRepository,
+    es: Repository,
     embed_client: CodeEmbeddingClient | None,
     query: str,
     scope: str | None = None,
@@ -178,7 +178,7 @@ def search_code(
 
 
 def search_features(
-    es: ElasticsearchRepository,
+    es: Repository,
     embed_client: CodeEmbeddingClient | None,
     query: str,
     scope: str | None = None,
@@ -274,7 +274,7 @@ def search_features(
 
 
 def find_similar(
-    es: ElasticsearchRepository,
+    es: Repository,
     element_id: str,
     limit: int = 10,
     same_repo_only: bool = False,

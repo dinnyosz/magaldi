@@ -12,19 +12,19 @@ from typing import TYPE_CHECKING, Any
 from .base import (
     EXTERNAL_REFS_INDEX_NAME,
     RELATIONSHIPS_INDEX_NAME,
-    ElasticsearchBase,
+    RepositoryBase,
 )
 
 if TYPE_CHECKING:
     from magaldi_core.analysis.relationships import CodeRelationship, ExternalReference
 
 
-class RelationshipsRepository(ElasticsearchBase):
+class RelationshipsRepository(RepositoryBase):
     """Repository for querying and storing code relationships."""
 
     def _get_bulk_timeout(self) -> int:
         """Get bulk operation timeout from config."""
-        return self._config.elasticsearch.bulk_timeout
+        return self._config.search_backend.bulk_timeout
 
     # =========================================================================
     # CRUD Operations
