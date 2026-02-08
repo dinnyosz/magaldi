@@ -1,6 +1,6 @@
 """Element repository for indexing and managing code elements.
 
-Handles CRUD operations for code elements in Elasticsearch.
+Handles CRUD operations for code elements in the search backend.
 """
 
 from __future__ import annotations
@@ -8,26 +8,26 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from elasticsearch import NotFoundError
+from shared.db.backends.base import NotFoundError
 
 from magaldi_core.code_parser import CodeElement
 
-from .base import INDEX_NAME, ElasticsearchBase, generate_hash_id
+from .base import INDEX_NAME, RepositoryBase, generate_hash_id
 
 
 class ElementRepository:
     """Repository for code element indexing and management."""
 
-    def __init__(self, base: ElasticsearchBase):
+    def __init__(self, base: RepositoryBase):
         self._base = base
 
     def _get_client(self) -> Any:
-        """Get Elasticsearch client from base."""
+        """Get search client from base."""
         return self._base._get_client()
 
     def _get_bulk_timeout(self) -> int:
         """Get bulk operation timeout from config."""
-        return self._base._config.elasticsearch.bulk_timeout
+        return self._base._config.search_backend.bulk_timeout
 
     def index_element(
         self,
@@ -144,14 +144,14 @@ class ElementRepository:
             doc["document_sections"] = element.document_sections
 
         client = self._get_client()
-        client.index(index=INDEX_NAME, id=element.element_id, document=doc)
+        client.index_document(INDEX_NAME, element.element_id, doc)
         return True
 
     def get_document(self, element_id: str) -> dict[str, Any] | None:
         """Get indexed document by ID."""
         try:
             client = self._get_client()
-            result = client.get(index=INDEX_NAME, id=element_id)
+            result = client.get_document(INDEX_NAME, element_id)
             return result["_source"]
         except NotFoundError:
             return None
@@ -213,7 +213,7 @@ class ElementRepository:
         """
         try:
             client = self._get_client()
-            return client.exists(index=INDEX_NAME, id=element_id)
+            return client.exists_document(INDEX_NAME, element_id)
         except Exception:
             return False
 
@@ -232,7 +232,7 @@ class ElementRepository:
         client = self._get_client()
 
         # Use mget for efficient batch lookup
-        response = client.mget(index=INDEX_NAME, ids=element_ids, _source=False)
+        response = client.mget(INDEX_NAME, element_ids, source=False)
 
         return {
             doc["_id"] for doc in response["docs"] if doc.get("found", False)
@@ -253,7 +253,7 @@ class ElementRepository:
         client = self._get_client()
 
         # Use mget for efficient batch lookup, only fetch content_hash
-        response = client.mget(index=INDEX_NAME, ids=element_ids, _source=["content_hash"])
+        response = client.mget(INDEX_NAME, element_ids, source=["content_hash"])
 
         result = {}
         for doc in response["docs"]:
@@ -285,9 +285,9 @@ class ElementRepository:
 
         # Fetch content_hash, summary, and embeddings in one call
         response = client.mget(
-            index=INDEX_NAME,
-            ids=element_ids,
-            _source=["content_hash", "summary", "summary_embedding", "code_embedding", "caller_embedding"],
+            INDEX_NAME,
+            element_ids,
+            source=["content_hash", "summary", "summary_embedding", "code_embedding", "caller_embedding"],
         )
 
         result = {}
@@ -447,14 +447,11 @@ class ElementRepository:
             return 0
 
         client = self._get_client()
-        # Use bulk delete for efficiency
-        from elasticsearch.helpers import bulk
-
         actions = [
             {"_op_type": "delete", "_index": INDEX_NAME, "_id": eid}
             for eid in element_ids
         ]
-        success, _ = bulk(client, actions, raise_on_error=False, refresh=True)
+        success, _ = client.bulk_helpers(actions, raise_on_error=False, refresh=True)
         return success
 
     def delete_by_file(
@@ -685,10 +682,7 @@ class ElementRepository:
         client = self._get_client()
 
         # Use mget for efficient batch lookup
-        response = client.mget(
-            index=INDEX_NAME,
-            ids=element_ids,
-        )
+        response = client.mget(INDEX_NAME, element_ids)
 
         result: dict[str, dict[str, Any]] = {}
         for doc in response.get("docs", []):

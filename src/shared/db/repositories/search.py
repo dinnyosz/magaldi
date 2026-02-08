@@ -7,17 +7,19 @@ from __future__ import annotations
 
 from typing import Any
 
-from .base import INDEX_NAME, ElasticsearchBase
+from shared.db.backends.base import build_vector_query
+
+from .base import INDEX_NAME, RepositoryBase
 
 
 class SearchRepository:
     """Repository for search operations."""
 
-    def __init__(self, base: ElasticsearchBase):
+    def __init__(self, base: RepositoryBase):
         self._base = base
 
     def _get_client(self) -> Any:
-        """Get Elasticsearch client from base."""
+        """Get search client from base."""
         return self._base._get_client()
 
     def search_by_text(
@@ -109,24 +111,21 @@ class SearchRepository:
         if element_types:
             filter_clauses.append({"terms": {"element_type": element_types}})
 
-        query: dict[str, Any] = {
-            "script_score": {
-                "query": {"bool": {"filter": filter_clauses}},
-                "script": {
-                    "source": f"cosineSimilarity(params.query_vector, '{field_name}') + 1.0",
-                    "params": {"query_vector": embedding},
-                },
-            }
-        }
+        backend_type = self._base.backend_type
+        query, adjusted_min_score = build_vector_query(
+            backend_type, field_name, embedding, filter_clauses, size, min_score,
+        )
 
         client = self._get_client()
         result = client.search(
             index=INDEX_NAME,
-            body={"query": query, "size": size, "min_score": min_score + 1.0},
+            body={"query": query, "size": size, "min_score": adjusted_min_score},
         )
 
+        # Normalize scores: ES script_score adds +1.0, OpenSearch knn returns raw cosine
+        score_offset = 1.0 if backend_type == "elasticsearch" else 0.0
         return [
-            {**hit["_source"], "_score": hit["_score"] - 1.0}
+            {**hit["_source"], "_score": hit["_score"] - score_offset}
             for hit in result["hits"]["hits"]
         ]
 

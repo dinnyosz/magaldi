@@ -1,15 +1,16 @@
-"""Base Elasticsearch repository with connection management.
+"""Base repository with connection management.
 
-Contains shared constants and the ElasticsearchBase class that provides
+Contains shared constants and the RepositoryBase class that provides
 connection management and index creation for all sub-repositories.
 """
 
 from __future__ import annotations
 
 import hashlib
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from elasticsearch import Elasticsearch
+from shared.db.backends.base import SearchClient, build_vector_query, get_index_mapping
+from shared.db.backends.factory import create_client
 
 if TYPE_CHECKING:
     from shared.config import MagaldiConfig
@@ -142,13 +143,14 @@ INDEX_MAPPING = {
             "feature_associations": {"type": "object"},  # Feature linking data
             "updated_at": {"type": "date"},  # Update timestamp
             # Renamed: was "embedding", now explicit for summary-based embedding
+            # Vector field mapping is backend-specific — see _make_index_mapping()
             "summary_embedding": {
                 "type": "dense_vector",
                 "dims": 1024,
                 "index": True,
                 "similarity": "cosine",
             },
-            # NEW: embedding of raw_code for structural similarity
+            # embedding of raw_code for structural similarity
             "code_embedding": {
                 "type": "dense_vector",
                 "dims": 1024,
@@ -464,33 +466,56 @@ EXTERNAL_REFS_INDEX_MAPPING = {
 }
 
 
-class ElasticsearchBase:
-    """Base class providing Elasticsearch connection management.
+def _make_index_mapping(backend_type: str, dims: int = 1024) -> dict[str, Any]:
+    """Build the main index mapping with backend-specific vector fields.
+
+    Args:
+        backend_type: "opensearch" or "elasticsearch".
+        dims: Embedding vector dimensions.
+
+    Returns:
+        Full index mapping dict ready for index creation.
+    """
+    import copy
+
+    mapping = copy.deepcopy(INDEX_MAPPING)
+    vec_mapping = get_index_mapping(backend_type, dims)
+    for field in ("summary_embedding", "code_embedding", "caller_embedding"):
+        mapping["mappings"]["properties"][field] = vec_mapping
+
+    # OpenSearch requires knn setting for vector search
+    if backend_type == "opensearch":
+        mapping["settings"]["index.knn"] = True
+
+    return mapping
+
+
+# Backward-compatible alias
+ElasticsearchBase = None  # type: ignore[assignment]  # removed, see RepositoryBase
+
+
+class RepositoryBase:
+    """Base class providing search backend connection management.
 
     All sub-repositories receive an instance of this class and use it
-    to get the ES client and ensure the index exists.
+    to get the search client and ensure the index exists.
     """
 
     def __init__(self, config: MagaldiConfig | None = None):
         from shared.config import get_config
         self._config = config or get_config()
-        self._client: Elasticsearch | None = None
+        self._client: SearchClient | None = None
 
-    def _get_client(self) -> Elasticsearch:
-        """Get or create Elasticsearch client."""
+    @property
+    def backend_type(self) -> str:
+        """Get the configured backend type."""
+        return self._config.search_backend.type
+
+    def _get_client(self) -> SearchClient:
+        """Get or create search backend client."""
         if self._client is None:
-            es_config = self._config.elasticsearch
-            self._client = Elasticsearch(
-                hosts=[{
-                    "host": es_config.host,
-                    "port": es_config.port,
-                    "scheme": es_config.scheme,
-                }],
-                timeout=es_config.timeout,
-                retry_on_timeout=es_config.retry_on_timeout,
-                max_retries=es_config.max_retries,
-            )
-            # Ensure index exists
+            self._client = create_client(self._config.search_backend)
+            # Ensure indices exist
             self._ensure_index()
         return self._client
 
@@ -498,22 +523,19 @@ class ElasticsearchBase:
         """Create indices if they don't exist."""
         client = self._client
         if client:
+            bt = self.backend_type
             # Main elements index
-            if not client.indices.exists(index=INDEX_NAME):
-                client.indices.create(index=INDEX_NAME, body=INDEX_MAPPING)
+            if not client.index_exists(INDEX_NAME):
+                client.index_create(INDEX_NAME, _make_index_mapping(bt))
             # Relationships index (knowledge graph edges)
-            if not client.indices.exists(index=RELATIONSHIPS_INDEX_NAME):
-                client.indices.create(
-                    index=RELATIONSHIPS_INDEX_NAME, body=RELATIONSHIPS_INDEX_MAPPING
-                )
+            if not client.index_exists(RELATIONSHIPS_INDEX_NAME):
+                client.index_create(RELATIONSHIPS_INDEX_NAME, RELATIONSHIPS_INDEX_MAPPING)
             # External references index (env vars, config keys, events, etc.)
-            if not client.indices.exists(index=EXTERNAL_REFS_INDEX_NAME):
-                client.indices.create(
-                    index=EXTERNAL_REFS_INDEX_NAME, body=EXTERNAL_REFS_INDEX_MAPPING
-                )
+            if not client.index_exists(EXTERNAL_REFS_INDEX_NAME):
+                client.index_create(EXTERNAL_REFS_INDEX_NAME, EXTERNAL_REFS_INDEX_MAPPING)
 
     def close(self) -> None:
-        """Close Elasticsearch client."""
+        """Close search backend client."""
         if self._client:
             self._client.close()
             self._client = None

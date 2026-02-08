@@ -1,6 +1,6 @@
-"""Elasticsearch repository modules.
+"""Repository modules for search backend interaction.
 
-This module provides a composed ElasticsearchRepository that maintains
+This module provides a composed Repository that maintains
 backward compatibility while delegating to focused sub-repositories.
 """
 
@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from .base import INDEX_MAPPING, INDEX_NAME, ElasticsearchBase, generate_hash_id
+from .base import INDEX_MAPPING, INDEX_NAME, RepositoryBase, generate_hash_id
 from .elements import ElementRepository
 from .features import FeatureRepository
 from .glossary import GlossaryRepository
@@ -22,8 +22,8 @@ if TYPE_CHECKING:
     from shared.config import MagaldiConfig
 
 
-class ElasticsearchRepository:
-    """Elasticsearch repository for code element indexing and search.
+class Repository:
+    """Repository for code element indexing and search.
 
     This class composes specialized sub-repositories and delegates
     all operations to them, maintaining backward compatibility with
@@ -31,7 +31,7 @@ class ElasticsearchRepository:
     """
 
     def __init__(self, config: MagaldiConfig | None = None):
-        self._base = ElasticsearchBase(config)
+        self._base = RepositoryBase(config)
         self._elements = ElementRepository(self._base)
         self._metadata = MetadataRepository(self._base)
         self._search = SearchRepository(self._base)
@@ -55,16 +55,16 @@ class ElasticsearchRepository:
 
     @property
     def _client(self) -> Any:
-        """Get ES client (for backward compatibility)."""
+        """Get search client (for backward compatibility)."""
         return self._base._client
 
     @_client.setter
     def _client(self, value: Any) -> None:
-        """Set ES client (for backward compatibility in tests)."""
+        """Set search client (for backward compatibility in tests)."""
         self._base._client = value
 
     def _get_client(self) -> Any:
-        """Get or create Elasticsearch client."""
+        """Get or create search backend client."""
         return self._base._get_client()
 
     def _ensure_index(self) -> None:
@@ -72,7 +72,7 @@ class ElasticsearchRepository:
         return self._base._ensure_index()
 
     def close(self) -> None:
-        """Close Elasticsearch client."""
+        """Close search backend client."""
         return self._base.close()
 
     # =========================================================================
@@ -102,11 +102,11 @@ class ElasticsearchRepository:
         return self._elements.get_document_by_id_or_hash(id_or_hash)
 
     def element_exists(self, element_id: str) -> bool:
-        """Check if element exists in ES."""
+        """Check if element exists."""
         return self._elements.element_exists(element_id)
 
     def get_existing_element_ids(self, element_ids: list[str]) -> set[str]:
-        """Check which elements already exist in ES."""
+        """Check which elements already exist."""
         return self._elements.get_existing_element_ids(element_ids)
 
     def get_element_content_hashes(self, element_ids: list[str]) -> dict[str, str | None]:
@@ -397,7 +397,7 @@ class ElasticsearchRepository:
         size: int = 50,
         include_tests: bool = True,
     ) -> list[dict[str, Any]]:
-        """Search raw_code field using Elasticsearch regexp query."""
+        """Search raw_code field using regexp query."""
         return self._search.search_by_regexp(
             pattern, scope, repository, username, glob, size, include_tests
         )
@@ -412,7 +412,7 @@ class ElasticsearchRepository:
         size: int = 50,
         include_tests: bool = True,
     ) -> list[dict[str, Any]]:
-        """Search raw_code field using Elasticsearch wildcard query."""
+        """Search raw_code field using wildcard query."""
         return self._search.search_by_wildcard(
             pattern, scope, repository, username, glob, size, include_tests
         )
@@ -713,10 +713,13 @@ class ElasticsearchRepository:
         return self._stats.get_repository_stats(scope, repository, username)
 
 
-# Export for backward compatibility
+# Backward-compatible alias
+ElasticsearchRepository = Repository
+
 __all__ = [
-    "ElasticsearchRepository",
-    "ElasticsearchBase",
+    "Repository",
+    "ElasticsearchRepository",  # backward compat alias
+    "RepositoryBase",
     "ElementRepository",
     "MetadataRepository",
     "SearchRepository",

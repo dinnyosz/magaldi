@@ -8,26 +8,26 @@ from __future__ import annotations
 
 from typing import Any
 
-from elasticsearch import NotFoundError
+from shared.db.backends.base import NotFoundError
 
-from .base import INDEX_NAME, ElasticsearchBase
+from .base import INDEX_NAME, RepositoryBase
 
 
 class MetadataRepository:
     """Repository for metadata operations (embeddings, summaries, imports, calls)."""
 
-    def __init__(self, base: ElasticsearchBase):
+    def __init__(self, base: RepositoryBase):
         self._base = base
 
     def _get_client(self) -> Any:
-        """Get Elasticsearch client from base."""
+        """Get search client from base."""
         return self._base._get_client()
 
     def get_document(self, element_id: str) -> dict[str, Any] | None:
         """Get indexed document by ID."""
         try:
             client = self._get_client()
-            result = client.get(index=INDEX_NAME, id=element_id)
+            result = client.get_document(INDEX_NAME, element_id)
             return result["_source"]
         except NotFoundError:
             return None
@@ -188,9 +188,9 @@ class MetadataRepository:
         field_name = f"{embedding_type}_embedding"
         try:
             client = self._get_client()
-            client.update(
-                index=INDEX_NAME,
-                id=element_id,
+            client.update_document(
+                INDEX_NAME,
+                element_id,
                 body={"doc": {field_name: embedding}},
             )
             return True
@@ -266,9 +266,9 @@ class MetadataRepository:
         """
         try:
             client = self._get_client()
-            client.update(
-                index=INDEX_NAME,
-                id=element_id,
+            client.update_document(
+                INDEX_NAME,
+                element_id,
                 body={"doc": {"summary": summary}},
             )
             return True
@@ -287,9 +287,9 @@ class MetadataRepository:
         """
         try:
             client = self._get_client()
-            client.update(
-                index=INDEX_NAME,
-                id=element_id,
+            client.update_document(
+                INDEX_NAME,
+                element_id,
                 body={"doc": {"imports": imports}},
             )
             return True
@@ -308,9 +308,9 @@ class MetadataRepository:
         """
         try:
             client = self._get_client()
-            client.update(
-                index=INDEX_NAME,
-                id=element_id,
+            client.update_document(
+                INDEX_NAME,
+                element_id,
                 body={"doc": {"calls": calls}},
             )
             return True
@@ -329,9 +329,9 @@ class MetadataRepository:
         """
         try:
             client = self._get_client()
-            client.update(
-                index=INDEX_NAME,
-                id=element_id,
+            client.update_document(
+                INDEX_NAME,
+                element_id,
                 body={"doc": {"semantic_related": related}},
             )
             return True
@@ -414,9 +414,9 @@ class MetadataRepository:
 
         # Use mget for efficient batch lookup
         response = client.mget(
-            index=INDEX_NAME,
-            ids=element_ids,
-            _source=["summary"],
+            INDEX_NAME,
+            element_ids,
+            source=["summary"],
         )
 
         result: dict[str, str] = {}

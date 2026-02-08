@@ -7,13 +7,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from .base import INDEX_NAME, ElasticsearchBase
+from .base import INDEX_NAME, RepositoryBase
 
 
 class StatsRepository:
     """Repository for statistics and repository listing operations."""
 
-    def __init__(self, base: ElasticsearchBase):
+    def __init__(self, base: RepositoryBase):
         self._base = base
 
     def _get_client(self) -> Any:

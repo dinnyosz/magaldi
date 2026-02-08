@@ -8,13 +8,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from .base import INDEX_NAME, ElasticsearchBase, generate_hash_id
+from .base import INDEX_NAME, RepositoryBase, generate_hash_id
 
 
 class GlossaryRepository:
     """Repository for glossary term operations."""
 
-    def __init__(self, base: ElasticsearchBase):
+    def __init__(self, base: RepositoryBase):
         self._base = base
 
     def _get_client(self) -> Any:
@@ -23,7 +23,7 @@ class GlossaryRepository:
 
     def _get_bulk_timeout(self) -> int:
         """Get bulk operation timeout from config."""
-        return self._base._config.elasticsearch.bulk_timeout
+        return self._base._config.search_backend.bulk_timeout
 
     def index_glossary(
         self,
@@ -75,7 +75,7 @@ class GlossaryRepository:
         }
 
         client = self._get_client()
-        client.index(index=INDEX_NAME, id=glossary_id, document=doc)
+        client.index_document(INDEX_NAME, glossary_id, doc)
         return True
 
     def get_glossary_terms(
@@ -154,7 +154,7 @@ class GlossaryRepository:
         client = self._get_client()
 
         try:
-            response = client.get(index=INDEX_NAME, id=glossary_id)
+            response = client.get_document(INDEX_NAME, glossary_id)
             if response.get("found"):
                 source = response.get("_source", {})
                 return {
@@ -282,13 +282,13 @@ class GlossaryRepository:
         """
         client = self._get_client()
 
-        client.update(
-            index=INDEX_NAME,
-            id=glossary_id,
-            doc={
+        client.update_document(
+            INDEX_NAME,
+            glossary_id,
+            body={"doc": {
                 "feature_associations": feature_associations,
                 "updated_at": datetime.now().isoformat(),
-            },
+            }},
         )
 
         return True
