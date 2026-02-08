@@ -149,7 +149,7 @@ class TestResolveCallsByEmbedding:
 
     def test_multiple_candidates_best_embedding_wins(self, mock_es):
         """With multiple candidates, highest similarity wins."""
-        caller_embedding = [0.8, 0.6, 0.0]
+        caller_emb = [0.8, 0.6, 0.0]
 
         mock_es.find_all_elements_with_calls.return_value = [
             {
@@ -163,7 +163,7 @@ class TestResolveCallsByEmbedding:
             {"element_id": "bad_match", "name": "process", "element_type": "method", "summary_embedding": [0.0, 0.0, 1.0]},
             {"element_id": "good_match", "name": "process", "element_type": "method", "summary_embedding": [0.7, 0.7, 0.0]},
         ]
-        mock_es.get_embedding.return_value = caller_embedding
+        mock_es.get_embedding.return_value = caller_emb
 
         total, single, embedding = resolve_calls_by_embedding(mock_es, "s", "r", "main")
 
@@ -172,6 +172,8 @@ class TestResolveCallsByEmbedding:
         assert embedding == 1
         stored_calls = mock_es.store_calls.call_args[0][1]
         assert stored_calls[0]["resolved_id"] == "good_match"
+        # Verify caller embedding is fetched with "caller" type (asymmetric)
+        mock_es.get_embedding.assert_called_with("caller1", "caller")
 
     def test_below_threshold_stays_unresolved(self, mock_es):
         """Candidates below similarity threshold are not resolved."""

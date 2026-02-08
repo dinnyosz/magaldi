@@ -20,6 +20,7 @@ from magaldi_core.parsers.base import Call
 from magaldi_core.tree_sitter_manager import get_manager
 from shared.ai.embedding import (
     InMemoryEmbeddingStore,
+    build_caller_embedding_text,
     build_summary_embedding_text,
 )
 
@@ -451,7 +452,8 @@ setup_env
 
 
 class TestFileEmbeddingWithCalls:
-    def test_file_element_includes_top_level_calls(self):
+    def test_summary_embedding_excludes_calls(self):
+        """Summary embedding (passport) should NOT include calls."""
         file_element = CodeElement(
             element_id="scope:repo:main:src/app.py:file:app.py:1",
             scope="scope",
@@ -477,6 +479,36 @@ class TestFileEmbeddingWithCalls:
 
         text = build_summary_embedding_text(file_element, store)
 
+        assert "Calls:" not in text
+        assert "Flask web application module" in text
+
+    def test_caller_embedding_includes_calls(self):
+        """Caller embedding should include calls (passport + calls)."""
+        file_element = CodeElement(
+            element_id="scope:repo:main:src/app.py:file:app.py:1",
+            scope="scope",
+            repository="repo",
+            username="main",
+            relative_path="src/app.py",
+            element_type="file",
+            name="app.py",
+            language="python",
+            line_start=1,
+            line_end=100,
+            level=0,
+            calls=[
+                Call(name="Flask", receiver=None, line=3),
+                Call(name="register_blueprint", receiver="app", line=5),
+                Call(name="run", receiver="app", line=10),
+            ],
+        )
+
+        store = InMemoryEmbeddingStore()
+        store.store_element(file_element)
+        store.store_summary(file_element.element_id, "Flask web application module.")
+
+        text = build_caller_embedding_text(file_element, store)
+
         assert "Calls: Flask, app.register_blueprint, app.run" in text
 
     def test_file_element_no_calls(self):
@@ -498,12 +530,12 @@ class TestFileEmbeddingWithCalls:
         store.store_element(file_element)
         store.store_summary(file_element.element_id, "Utility functions.")
 
-        text = build_summary_embedding_text(file_element, store)
+        text = build_caller_embedding_text(file_element, store)
 
         assert "Calls:" not in text
         assert "Utility functions" in text
 
-    def test_file_element_calls_deduplicated(self):
+    def test_caller_embedding_calls_deduplicated(self):
         file_element = CodeElement(
             element_id="scope:repo:main:src/app.py:file:app.py:1",
             scope="scope",
@@ -527,7 +559,7 @@ class TestFileEmbeddingWithCalls:
         store.store_element(file_element)
         store.store_summary(file_element.element_id, "App module.")
 
-        text = build_summary_embedding_text(file_element, store)
+        text = build_caller_embedding_text(file_element, store)
 
         # Should deduplicate "setup" — only one occurrence
         assert "Calls: setup, app.run" in text
@@ -552,6 +584,6 @@ class TestFileEmbeddingWithCalls:
         store.store_element(file_element)
         store.store_summary(file_element.element_id, "App module.")
 
-        text = build_summary_embedding_text(file_element, store)
+        text = build_caller_embedding_text(file_element, store)
 
         assert "Calls:" not in text

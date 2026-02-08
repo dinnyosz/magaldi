@@ -933,6 +933,7 @@ class TestIndexElementImportsAndCalls:
             summary="File summary",
             summary_embedding=None,
             code_embedding=None,
+            caller_embedding=None,
             es_repo=mock_es,
         )
 
@@ -979,6 +980,7 @@ class TestIndexElementImportsAndCalls:
             summary="Function summary",
             summary_embedding=None,
             code_embedding=None,
+            caller_embedding=None,
             es_repo=mock_es,
         )
 
@@ -1028,6 +1030,7 @@ class TestIndexElementImportsAndCalls:
             summary="Method summary",
             summary_embedding=None,
             code_embedding=None,
+            caller_embedding=None,
             es_repo=mock_es,
         )
 
@@ -1064,6 +1067,7 @@ class TestIndexElementImportsAndCalls:
             summary="Empty file",
             summary_embedding=None,
             code_embedding=None,
+            caller_embedding=None,
             es_repo=mock_es,
         )
 
@@ -1094,6 +1098,7 @@ class TestIndexElementImportsAndCalls:
             summary="Empty function",
             summary_embedding=None,
             code_embedding=None,
+            caller_embedding=None,
             es_repo=mock_es,
         )
 
@@ -1125,6 +1130,7 @@ class TestIndexElementImportsAndCalls:
             summary="Class summary",
             summary_embedding=None,
             code_embedding=None,
+            caller_embedding=None,
             es_repo=mock_es,
         )
 
@@ -1156,6 +1162,7 @@ class TestIndexElementImportsAndCalls:
             summary="Function summary",
             summary_embedding=None,
             code_embedding=None,
+            caller_embedding=None,
             es_repo=mock_es,
         )
 

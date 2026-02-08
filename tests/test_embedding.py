@@ -13,6 +13,7 @@ from shared.ai.embedding import (
     EmbeddingResult,
     InMemoryEmbeddingJobRepository,
     InMemoryEmbeddingStore,
+    build_caller_embedding_text,
     build_code_embedding_text,
     build_embedding_text,
     build_summary_embedding_text,
@@ -330,6 +331,46 @@ class TestBuildSummaryEmbeddingText:
 
         assert "Get user by ID" in text
 
+    def test_summary_excludes_outbound_calls(
+        self, embedding_store: InMemoryEmbeddingStore
+    ):
+        """Summary embedding (passport) should NOT include calls."""
+        element = CodeElement(
+            element_id="scope:repo:main:src/app.py:function:process:50",
+            scope="scope",
+            repository="repo",
+            username="main",
+            relative_path="src/app.py",
+            element_type="function",
+            name="process",
+            language="python",
+            line_start=50,
+            line_end=70,
+            level=2,
+            calls=[
+                Call(name="validate", receiver="self", line=55),
+                Call(name="save", receiver="db", line=60),
+            ],
+        )
+        embedding_store.store_element(element)
+
+        text = build_summary_embedding_text(element, embedding_store)
+
+        assert "Calls:" not in text
+
+    def test_no_calls_line_when_empty(
+        self, method_element: CodeElement, embedding_store: InMemoryEmbeddingStore
+    ):
+        embedding_store.store_element(method_element)
+
+        text = build_summary_embedding_text(method_element, embedding_store)
+
+        assert "Calls:" not in text
+
+
+class TestBuildCallerEmbeddingText:
+    """Tests for caller embedding text construction (passport + calls)."""
+
     def test_includes_outbound_calls(
         self, embedding_store: InMemoryEmbeddingStore
     ):
@@ -355,18 +396,57 @@ class TestBuildSummaryEmbeddingText:
         )
         embedding_store.store_element(element)
 
-        text = build_summary_embedding_text(element, embedding_store)
+        text = build_caller_embedding_text(element, embedding_store)
 
         assert "Calls: self.validate, db.save, log" in text
 
-    def test_no_calls_line_when_empty(
+    def test_no_calls_produces_same_as_summary(
         self, method_element: CodeElement, embedding_store: InMemoryEmbeddingStore
     ):
+        """Without calls, caller text is identical to summary text."""
         embedding_store.store_element(method_element)
 
-        text = build_summary_embedding_text(method_element, embedding_store)
+        summary_text = build_summary_embedding_text(method_element, embedding_store)
+        caller_text = build_caller_embedding_text(method_element, embedding_store)
 
-        assert "Calls:" not in text
+        assert summary_text == caller_text
+        assert "Calls:" not in caller_text
+
+    def test_includes_passport_and_calls(
+        self,
+        file_element: CodeElement,
+        embedding_store: InMemoryEmbeddingStore,
+    ):
+        """Caller text includes both passport info and calls."""
+        element = CodeElement(
+            element_id="scope:repo:main:src/app.py:function:handle:10",
+            scope="scope",
+            repository="repo",
+            username="main",
+            relative_path="src/app.py",
+            element_type="function",
+            name="handle",
+            language="python",
+            line_start=10,
+            line_end=30,
+            signature="def handle(request)",
+            level=2,
+            calls=[
+                Call(name="process", receiver=None, line=15),
+            ],
+        )
+        embedding_store.store_element(file_element)
+        embedding_store.store_summary(file_element.element_id, "Main app module.")
+        embedding_store.store_element(element)
+        embedding_store.store_summary(element.element_id, "Handles incoming requests.")
+
+        text = build_caller_embedding_text(element, embedding_store)
+
+        # Passport parts
+        assert "handle" in text
+        assert "Handles incoming requests" in text
+        # Calls part
+        assert "Calls: process" in text
 
 
 class TestBuildCodeEmbeddingText:
