@@ -221,7 +221,7 @@ mcp__magaldi__explain_element(element_id="...")  # Complete element overview
 ## Anti-Patterns (NEVER Do These)
 
 1. **Using built-in Grep instead of magaldi__pattern_search**
-   - Magaldi pattern_search runs queries server-side in Elasticsearch
+   - Magaldi pattern_search runs queries server-side in OpenSearch
    - Built-in Grep scans files one by one
 
 2. **Using deprecated grep_code**

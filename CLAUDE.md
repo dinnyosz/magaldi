@@ -14,7 +14,7 @@ make setup                  # Create venv and install dependencies
 source .venv/bin/activate   # Activate virtual environment
 pip install -e .            # Install magaldi CLI (required after code changes)
 
-# Start services (Elasticsearch, Redis, Kibana)
+# Start services (OpenSearch, Redis)
 make services               # Core services only
 make services-full          # Include Ollama
 make services-down          # Stop all
@@ -64,7 +64,7 @@ src/
 | Component | Technology |
 |-----------|------------|
 | Parser | Tree-sitter with S-expression queries |
-| Storage & Search | Elasticsearch 8.11.0 (dense_vector) |
+| Storage & Search | OpenSearch 2.19.0 (knn_vector + Faiss HNSW) |
 | Job Queue | Redis |
 | AI Models | LiteLLM (supports Ollama, OpenAI, Anthropic, etc.) |
 | MCP | Python MCP SDK for Claude Code integration |
@@ -97,7 +97,7 @@ All design documents are in `plans/`:
 - `phase1_discovery.md` - Path validation, config loading
 - `phase2_change_detection.md` - SHA256 hashing, diff logic
 - `phase3_parsing.md` - Tree-sitter extraction
-- `phase4_storage.md` - Elasticsearch storage, job creation
+- `phase4_storage.md` - Search backend storage, job creation
 - `ollama_model_research.md` - Model selection rationale
 - `magaldi_project_plan.md` - Complete implementation plan
 
@@ -141,7 +141,7 @@ The skill ensures:
 ## CRITICAL: Data Safety
 
 **NEVER delete or drop data without explicit user permission.** This includes:
-- Elasticsearch indices (`DELETE /index-name`)
+- Search indices (`DELETE /index-name`)
 - Database tables or records
 - Redis keys
 - Any persistent storage

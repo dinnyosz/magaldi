@@ -195,7 +195,7 @@ mcp__magaldi__find_implementations(class_name="BaseClass")
 ## Anti-Patterns (NEVER Do These)
 
 1. **Using built-in Grep instead of magaldi__pattern_search**
-   - Magaldi pattern_search runs queries server-side in Elasticsearch
+   - Magaldi pattern_search runs queries server-side in OpenSearch
    - Built-in Grep scans files one by one
 
 2. **Using built-in Glob instead of magaldi__find_files**

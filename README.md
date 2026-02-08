@@ -36,7 +36,7 @@ cp .env.example .env
 python3 -m venv .venv
 .venv/bin/pip install -e .
 
-# Start Docker services (Elasticsearch, Redis, Kibana)
+# Start Docker services (OpenSearch, Redis)
 docker compose up -d
 
 # Activate virtual environment
@@ -130,10 +130,10 @@ Magaldi uses a layered configuration system:
 ### Environment Variables
 
 ```bash
-# Optional overrides - Elasticsearch
-MAGALDI_ELASTICSEARCH_HOST=localhost
-MAGALDI_ELASTICSEARCH_PORT=9200
-MAGALDI_ELASTICSEARCH_SCHEME=http
+# Optional overrides - Search backend (OpenSearch)
+MAGALDI_SEARCH_HOST=localhost
+MAGALDI_SEARCH_PORT=9200
+MAGALDI_SEARCH_SCHEME=http
 
 # Optional overrides - Redis
 MAGALDI_REDIS_HOST=localhost
@@ -203,16 +203,16 @@ python3 -m venv .venv
 
 **Start/Stop Services:**
 ```bash
-docker compose up -d              # Start ES, Redis, Kibana
+docker compose up -d              # Start OpenSearch, Redis
 docker compose --profile ollama up -d  # Include Ollama
 docker compose down               # Stop all services
 docker compose ps                 # Check status
-docker compose logs elasticsearch # View logs
+docker compose logs opensearch    # View logs
 ```
 
 **Service URLs:**
-- Kibana: http://localhost:5601
-- Elasticsearch: http://localhost:9200
+- OpenSearch Dashboards: http://localhost:5601
+- OpenSearch: http://localhost:9200
 
 **Run Tests:**
 ```bash
@@ -255,7 +255,7 @@ ollama list                           # List installed models
 │                           PARSER PIPELINE                                    │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  Discovery  →  Change Detection  →  Parsing  →  Storage                     │
-│  (paths)       (SHA256 hash)        (Tree-sitter) (Elasticsearch)           │
+│  (paths)       (SHA256 hash)        (Tree-sitter) (OpenSearch)              │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -271,9 +271,9 @@ ollama list                           # List installed models
 | Component | Technology |
 |-----------|------------|
 | Parser | Tree-sitter |
-| Storage & Search | Elasticsearch 8.11.0 |
+| Storage & Search | OpenSearch 2.19.0 |
 | Job Queues | Redis |
-| ES Dashboard | Kibana 8.11.0 |
+| Dashboard | OpenSearch Dashboards 2.19.0 |
 | AI Models | Ollama (qwen2.5-coder:7b, qwen3-embedding:0.6b) |
 | Web Framework | FastAPI |
 | MCP | Python MCP SDK |
@@ -286,7 +286,7 @@ Detailed design documents are in `plans/`:
 - `phase1_discovery.md` - Path validation, config loading
 - `phase2_change_detection.md` - SHA256 hashing, diff logic
 - `phase3_parsing.md` - Tree-sitter extraction
-- `phase4_storage.md` - Elasticsearch storage
+- `phase4_storage.md` - Search backend storage
 - `phase5_summarization.md` - AI summarization
 - `phase6_embedding.md` - Vector generation
 - `phase7_mcp_server.md` - MCP tools
@@ -301,15 +301,15 @@ Detailed design documents are in `plans/`:
 docker compose ps
 
 # View logs
-docker compose logs elasticsearch
+docker compose logs opensearch
 docker compose logs redis
 ```
 
-### Elasticsearch Memory Issues
+### OpenSearch Memory Issues
 
 ```bash
 # Increase heap size in .env
-ES_HEAP_SIZE=2g
+SEARCH_HEAP_SIZE=2g
 
 # Or increase host vm.max_map_count
 sudo sysctl -w vm.max_map_count=262144

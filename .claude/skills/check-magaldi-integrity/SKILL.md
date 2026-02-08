@@ -29,7 +29,7 @@ Every piece of data extracted during parsing MUST be surfaced to users through A
 | Prompt sentence ranges | `LINE_THRESHOLDS`, `SENTENCE_RANGES` @ `src/shared/ai/summarization.py` |
 | Feature/subfeature prompts | `FEATURE_*_PROMPT`, `SUBFEATURE_*_PROMPT` @ `src/shared/ai/clustering/feature_processor.py` |
 | Glossary prompts | `GLOSSARY_*_PROMPT` @ `src/shared/ai/glossary/ai_extractor.py` |
-| ES field mappings | `src/shared/db/elasticsearch.py` |
+| Search field mappings | `src/shared/db/store.py` |
 | MCP tool implementations | `src/magaldi_mcp/tools_impl.py` |
 | MCP tool schemas | `src/magaldi_mcp/tools/schemas/` |
 | MCP formatters | `src/magaldi_mcp/formatters/` |
@@ -96,7 +96,7 @@ When extracting new metadata:
 - [ ] Implement extraction in relevant extractors
 
 ### Storage
-- [ ] Add field mapping in `src/shared/db/elasticsearch.py`
+- [ ] Add field mapping in `src/shared/db/store.py`
 - [ ] Update serialization in `src/magaldi_core/storage.py`
 
 ### Summarization Prompts
