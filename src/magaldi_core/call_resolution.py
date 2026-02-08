@@ -530,7 +530,7 @@ def resolve_calls_by_embedding(
 
     # Cache: call name -> merged candidate list
     name_cache: dict[str, list[dict]] = {}
-    # Cache: element_id -> summary_embedding
+    # Cache: element_id -> caller_embedding
     embedding_cache: dict[str, list[float] | None] = {}
 
     # Get all elements with calls
@@ -597,9 +597,9 @@ def resolve_calls_by_embedding(
                 continue
 
             # Multiple candidates — use embedding similarity
-            # Get caller's embedding (cached)
+            # Get caller's embedding (cached) — uses caller_embedding for asymmetric matching
             if element_id not in embedding_cache:
-                caller_embedding = es.get_embedding(element_id, "summary")
+                caller_embedding = es.get_embedding(element_id, "caller")
                 embedding_cache[element_id] = caller_embedding
             caller_embedding = embedding_cache[element_id]
 
