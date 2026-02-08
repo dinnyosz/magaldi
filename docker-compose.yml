@@ -3,21 +3,19 @@ services:
   # CORE SERVICES (always started)
   # ===========================================================================
 
-  elasticsearch:
-    image: elasticsearch:8.11.0
-    container_name: magaldi-elasticsearch
+  opensearch:
+    image: opensearchproject/opensearch:2.19.0
+    container_name: magaldi-opensearch
     restart: unless-stopped
     environment:
       - discovery.type=single-node
-      - xpack.security.enabled=false
-      - xpack.security.enrollment.enabled=false
-      - xpack.monitoring.collection.enabled=true
-      - xpack.monitoring.elasticsearch.collection.enabled=true
-      - "ES_JAVA_OPTS=-Xms${ES_HEAP_SIZE:-1g} -Xmx${ES_HEAP_SIZE:-1g}"
+      - plugins.security.disabled=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms${SEARCH_HEAP_SIZE:-1g} -Xmx${SEARCH_HEAP_SIZE:-1g}"
     ports:
-      - "${ES_PORT:-9200}:9200"
+      - "${SEARCH_PORT:-9200}:9200"
     volumes:
-      - es_data:/usr/share/elasticsearch/data
+      - opensearch_data:/usr/share/opensearch/data
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
       interval: 10s
@@ -39,17 +37,17 @@ services:
       timeout: 5s
       retries: 5
 
-  kibana:
-    image: kibana:8.11.0
-    container_name: magaldi-kibana
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.19.0
+    container_name: magaldi-opensearch-dashboards
     restart: unless-stopped
     environment:
-      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
-      - xpack.security.enabled=false
+      - OPENSEARCH_HOSTS=["http://opensearch:9200"]
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
     ports:
-      - "${KIBANA_PORT:-5601}:5601"
+      - "${DASHBOARDS_PORT:-5601}:5601"
     depends_on:
-      elasticsearch:
+      opensearch:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:5601/api/status || exit 1"]
@@ -122,8 +120,8 @@ services:
     ports:
       - "${WEB_PORT:-8080}:8080"
     environment:
-      - MAGALDI_ES_HOST=elasticsearch
-      - MAGALDI_ES_PORT=9200
+      - MAGALDI_SEARCH_HOST=opensearch
+      - MAGALDI_SEARCH_PORT=9200
       - MAGALDI_REDIS_HOST=redis
       - MAGALDI_REDIS_PORT=6379
       - MAGALDI_OLLAMA_HOST=ollama
@@ -131,7 +129,7 @@ services:
       - MAGALDI_WEB_HOST=0.0.0.0
       - MAGALDI_WEB_PORT=8080
     depends_on:
-      elasticsearch:
+      opensearch:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -143,8 +141,8 @@ services:
       start_period: 10s
 
 volumes:
-  es_data:
-    name: magaldi_es_data
+  opensearch_data:
+    name: magaldi_opensearch_data
   redis_data:
     name: magaldi_redis_data
   ollama_data:

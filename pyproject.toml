@@ -38,7 +38,7 @@ dependencies = [
     # LLM (unified interface for multiple providers)
     "litellm>=1.0.0",
     # Database
-    "elasticsearch>=8.11.0,<9.0.0",
+    "opensearch-py>=2.4.0",
     "redis>=5.0.0",
     # File watching
     "watchdog>=4.0.0",
@@ -160,6 +160,7 @@ module = [
     "tree_sitter_yaml.*",
     "tree_sitter_toml.*",
     "tree_sitter_dockerfile.*",
+    "opensearchpy.*",
     "elasticsearch.*",
     "redis.*",
     "umap.*",

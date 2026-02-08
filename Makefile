@@ -13,7 +13,7 @@ help:
 	@echo "  make setup        Create venv and install all dependencies"
 	@echo ""
 	@echo "Services:"
-	@echo "  make services      Start core Docker services (mysql, es, redis)"
+	@echo "  make services      Start core Docker services (opensearch, redis)"
 	@echo "  make services-full Start all services including Ollama"
 	@echo "  make services-down Stop all Docker services"
 	@echo "  make logs          Follow Docker service logs"
@@ -56,8 +56,7 @@ services:
 	docker compose up -d
 	@echo ""
 	@echo "Core services started:"
-	@echo "  MySQL:         localhost:3306"
-	@echo "  Elasticsearch: localhost:9200"
+	@echo "  OpenSearch:    localhost:9200"
 	@echo "  Redis:         localhost:6379"
 	@echo ""
 	@echo "Waiting for services to be healthy..."
@@ -67,8 +66,7 @@ services-full:
 	docker compose --profile ollama up -d
 	@echo ""
 	@echo "All services started:"
-	@echo "  MySQL:         localhost:3306"
-	@echo "  Elasticsearch: localhost:9200"
+	@echo "  OpenSearch:    localhost:9200"
 	@echo "  Redis:         localhost:6379"
 	@echo "  Ollama:        localhost:11434"
 	@echo ""
