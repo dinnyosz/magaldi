@@ -135,7 +135,7 @@ async def get_call_chain(
     element_id = source["element_id"]
 
     result = find_call_chain(
-        es=repo,
+        repo=repo,
         element_id=element_id,
         direction=direction,
         max_depth=max_depth,
@@ -181,7 +181,7 @@ async def get_dead_code(
     from magaldi_mcp.tools import find_dead_code
 
     result = find_dead_code(
-        es=repo,
+        repo=repo,
         scope=scope,
         repository=repository,
         username=username,
@@ -216,7 +216,7 @@ async def get_entry_points(
     from magaldi_mcp.tools import find_entry_points, get_command_tree
 
     result = find_entry_points(
-        es=repo,
+        repo=repo,
         scope=scope,
         repository=repository,
         username=username,
@@ -224,7 +224,7 @@ async def get_entry_points(
 
     # Get command tree to lookup full command paths
     command_tree = get_command_tree(
-        es=repo,
+        repo=repo,
         scope=scope,
         repository=repository,
         username=username,
@@ -316,7 +316,7 @@ async def get_dependencies(
     element_id = source["element_id"]
 
     result = find_dependencies(
-        es=repo,
+        repo=repo,
         element_id=element_id,
     )
 
@@ -353,7 +353,7 @@ async def get_dependents(
     from magaldi_mcp.tools import find_dependents
 
     result = find_dependents(
-        es=repo,
+        repo=repo,
         module=module,
         scope=scope,
         repository=repository,
@@ -390,7 +390,7 @@ async def get_dependency_graph(
     from magaldi_mcp.tools import dependency_graph
 
     result = dependency_graph(
-        es=repo,
+        repo=repo,
         scope=scope,
         repository=repository,
         username=username,
@@ -424,7 +424,7 @@ async def explain_element(
 
     element_id = source["element_id"]
 
-    result = explain_element_tool(es=repo, element_id=element_id)
+    result = explain_element_tool(repo=repo, element_id=element_id)
 
     # Convert callers
     callers = [
@@ -518,7 +518,7 @@ async def get_complex_functions(
     from magaldi_mcp.tools import find_complex_functions
 
     result = find_complex_functions(
-        es=repo,
+        repo=repo,
         scope=scope,
         repository=repository,
         username=username,
@@ -566,7 +566,7 @@ async def get_security_issues(
     from magaldi_mcp.tools import find_security_issues
 
     result = find_security_issues(
-        es=repo,
+        repo=repo,
         scope=scope,
         repository=repository,
         username=username,
@@ -614,7 +614,7 @@ async def get_undocumented_functions(
     from magaldi_mcp.tools import find_undocumented
 
     result = find_undocumented(
-        es=repo,
+        repo=repo,
         scope=scope,
         repository=repository,
         username=username,
@@ -663,7 +663,7 @@ async def get_env_usage(
     from magaldi_mcp.tools import find_env_usage
 
     result = find_env_usage(
-        es=repo,
+        repo=repo,
         scope=scope,
         repository=repository,
         username=username,
@@ -708,7 +708,7 @@ async def get_async_code(
     from magaldi_mcp.tools import find_async_code
 
     result = find_async_code(
-        es=repo,
+        repo=repo,
         scope=scope,
         repository=repository,
         username=username,

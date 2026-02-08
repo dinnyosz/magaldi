@@ -577,7 +577,7 @@ class TestGetCallGraphSemanticRelated:
         mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"hits": {"hits": []}}
 
-        result = get_call_graph(es=mock_repo, element_id="func1")
+        result = get_call_graph(repo=mock_repo, element_id="func1")
 
         assert "semantic_related" in result
         assert len(result["semantic_related"]) == 2
@@ -603,7 +603,7 @@ class TestGetCallGraphSemanticRelated:
         mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {"hits": {"hits": []}}
 
-        result = get_call_graph(es=mock_repo, element_id="func1")
+        result = get_call_graph(repo=mock_repo, element_id="func1")
 
         assert "semantic_related" not in result
 

@@ -27,7 +27,7 @@ class TestListRepos:
             {"scope": "magaldi", "repository": "magaldi", "element_count": 100}
         ]
 
-        result = list_repos(es=mock_repo)
+        result = list_repos(repo=mock_repo)
 
         assert isinstance(result, list)
         assert len(result) == 1
@@ -37,7 +37,7 @@ class TestListRepos:
         """Test list_repos with scope filter."""
         mock_repo.get_indexed_repositories.return_value = []
 
-        result = list_repos(es=mock_repo, scope="test-scope")
+        result = list_repos(repo=mock_repo, scope="test-scope")
 
         assert isinstance(result, list)
 
@@ -62,7 +62,7 @@ class TestFindFiles:
         ]
 
         result = find_files(
-            es=mock_repo,
+            repo=mock_repo,
             pattern="**/*.py",
         )
 
@@ -117,7 +117,7 @@ class TestFindFilesExtended:
         }
 
         result = find_files(
-            es=mock_repo,
+            repo=mock_repo,
             pattern="**/*.py",
         )
 
@@ -147,7 +147,7 @@ class TestGetRepoStats:
         }
 
         result = get_repo_stats(
-            es=mock_repo,
+            repo=mock_repo,
             scope="test-scope",
             repository="test-repo",
         )
@@ -228,7 +228,7 @@ class TestGetFileStructure:
         mock_client.search.side_effect = search_side_effect
 
         result = get_file_structure(
-            es=mock_repo,
+            repo=mock_repo,
             scope="github",
             repository="repo",
             file_path="test.py",
@@ -247,7 +247,7 @@ class TestGetFileStructure:
 
         with pytest.raises(ValueError, match="File not found"):
             get_file_structure(
-                es=mock_repo,
+                repo=mock_repo,
                 scope="github",
                 repository="repo",
                 file_path="nonexistent.py",

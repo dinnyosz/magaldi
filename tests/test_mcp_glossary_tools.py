@@ -24,7 +24,7 @@ class TestListGlossary:
         ]
 
         result = list_glossary(
-            es=mock_es,
+            repo=mock_es,
             scope="scope",
             repository="repo",
         )
@@ -41,7 +41,7 @@ class TestListGlossary:
         mock_es.get_glossary_terms.return_value = []
 
         list_glossary(
-            es=mock_es,
+            repo=mock_es,
             scope="scope",
             repository="repo",
             min_count=5,
@@ -60,7 +60,7 @@ class TestListGlossary:
         mock_es.get_glossary_terms.return_value = []
 
         list_glossary(
-            es=mock_es,
+            repo=mock_es,
             scope="scope",
             repository="repo",
             username="custom_user",
@@ -92,7 +92,7 @@ class TestGetGlossaryTerm:
         }
 
         result = get_glossary_term(
-            es=mock_es,
+            repo=mock_es,
             scope="scope",
             repository="repo",
             term="user",
@@ -109,7 +109,7 @@ class TestGetGlossaryTerm:
         mock_es.get_glossary_term.return_value = None
 
         result = get_glossary_term(
-            es=mock_es,
+            repo=mock_es,
             scope="scope",
             repository="repo",
             term="nonexistent",
@@ -130,7 +130,7 @@ class TestSearchGlossary:
         ]
 
         result = search_glossary(
-            es=mock_es,
+            repo=mock_es,
             scope="scope",
             repository="repo",
             query="user",
@@ -152,7 +152,7 @@ class TestSearchGlossary:
         mock_es.search_glossary.return_value = []
 
         result = search_glossary(
-            es=mock_es,
+            repo=mock_es,
             scope="scope",
             repository="repo",
             query="nonexistent",

@@ -51,7 +51,7 @@ class TestFindDependencies:
         }
 
         result = find_dependencies(
-            es=mock_repo,
+            repo=mock_repo,
             element_id="scope:repo:main:src/app.py:file:app.py:1",
         )
 
@@ -107,7 +107,7 @@ class TestFindDependencies:
         ]
 
         result = find_dependencies(
-            es=mock_repo,
+            repo=mock_repo,
             file_path="utils.py",
             scope="scope",
             repository="repo",
@@ -136,7 +136,7 @@ class TestFindDependencies:
         mock_client.search.return_value = {"hits": {"hits": []}}
 
         result = find_dependencies(
-            es=mock_repo,
+            repo=mock_repo,
             element_id="scope:repo:main:src/app.py:file:app.py:1",
         )
 
@@ -147,19 +147,19 @@ class TestFindDependencies:
     def test_find_dependencies_requires_file_path_or_element_id(self, mock_repo):
         """Test find_dependencies raises when neither file_path nor element_id provided."""
         with pytest.raises(ValueError, match="Either file_path or element_id required"):
-            find_dependencies(es=mock_repo)
+            find_dependencies(repo=mock_repo)
 
     def test_find_dependencies_element_not_found(self, mock_repo):
         """Test find_dependencies raises when element not found."""
         mock_repo.get_document.return_value = None
 
         with pytest.raises(ValueError, match="Element not found"):
-            find_dependencies(es=mock_repo, element_id="nonexistent")
+            find_dependencies(repo=mock_repo, element_id="nonexistent")
 
     def test_find_dependencies_requires_scope_repo_for_file_path(self, mock_repo):
         """Test find_dependencies requires scope/repository when using file_path."""
         with pytest.raises(ValueError, match="scope and repository required"):
-            find_dependencies(es=mock_repo, file_path="utils.py")
+            find_dependencies(repo=mock_repo, file_path="utils.py")
 
     def test_find_dependencies_rejects_non_file_elements(self, mock_repo):
         """Test find_dependencies raises when element is not a file."""
@@ -171,7 +171,7 @@ class TestFindDependencies:
 
         with pytest.raises(ValueError, match="Element is not a file"):
             find_dependencies(
-                es=mock_repo, element_id="scope:repo:main:utils.py:function:helper:10"
+                repo=mock_repo, element_id="scope:repo:main:utils.py:function:helper:10"
             )
 
 
@@ -203,7 +203,7 @@ class TestFindDependents:
         ]
 
         result = find_dependents(
-            es=mock_repo,
+            repo=mock_repo,
             module="utils",
             scope="scope",
             repository="repo",
@@ -222,7 +222,7 @@ class TestFindDependents:
         mock_repo.find_elements_importing.return_value = []
 
         result = find_dependents(
-            es=mock_repo,
+            repo=mock_repo,
             module="nonexistent_module",
             scope="scope",
             repository="repo",
@@ -236,7 +236,7 @@ class TestFindDependents:
         mock_repo.find_elements_importing.return_value = []
 
         result = find_dependents(
-            es=mock_repo,
+            repo=mock_repo,
             module="utils",
             scope="scope",
             repository="repo",
@@ -292,7 +292,7 @@ class TestDependencyGraph:
         }
 
         result = dependency_graph(
-            es=mock_repo,
+            repo=mock_repo,
             scope="scope",
             repository="repo",
         )
@@ -335,7 +335,7 @@ class TestDependencyGraph:
         }
 
         result = dependency_graph(
-            es=mock_repo,
+            repo=mock_repo,
             scope="scope",
             repository="repo",
         )
@@ -371,7 +371,7 @@ class TestDependencyGraph:
         }
 
         result = dependency_graph(
-            es=mock_repo,
+            repo=mock_repo,
             scope="scope",
             repository="repo",
         )
@@ -407,7 +407,7 @@ class TestDependencyGraph:
         }
 
         result = dependency_graph(
-            es=mock_repo,
+            repo=mock_repo,
             scope="scope",
             repository="repo",
         )
@@ -428,7 +428,7 @@ class TestDependencyGraph:
         mock_client.search.return_value = {"hits": {"hits": []}}
 
         result = dependency_graph(
-            es=mock_repo,
+            repo=mock_repo,
             scope="scope",
             repository="repo",
         )
@@ -467,7 +467,7 @@ class TestDependencyGraph:
         }
 
         result = dependency_graph(
-            es=mock_repo,
+            repo=mock_repo,
             scope="scope",
             repository="repo",
             internal_only=True,

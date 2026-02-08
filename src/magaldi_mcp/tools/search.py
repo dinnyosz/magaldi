@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 def search_code(
-    es: Repository,
+    repo: Repository,
     embed_client: CodeEmbeddingClient | None,
     query: str,
     scope: str | None = None,
@@ -62,7 +62,7 @@ def search_code(
     if embed_client is not None:
         try:
             query_embedding = embed_client.embed_single(query)
-            results = es.search_by_vector(
+            results = repo.search_by_vector(
                 embedding=query_embedding,
                 scope=scope,
                 repository=repository,
@@ -75,7 +75,7 @@ def search_code(
 
     # Fallback to keyword search if vector search failed or unavailable
     if not results:
-        results = es.search_by_keyword(
+        results = repo.search_by_keyword(
             query=query,
             scope=scope,
             repository=repository,
@@ -103,7 +103,7 @@ def search_code(
         name = result.get("name")
         if result.get("element_type") == "method" and result.get("parent_id"):
             # Try to get parent class name from parent_id
-            parent_doc = es.get_document(result["parent_id"])
+            parent_doc = repo.get_document(result["parent_id"])
             if parent_doc and parent_doc.get("element_type") == "class":
                 name = f"{parent_doc.get('name')}.{name}"
 
@@ -141,7 +141,7 @@ def search_code(
             if result.get("type") in ("function", "method") and result.get("hash_id"):
                 try:
                     # Find callers of this function
-                    callers = es.find_callers(
+                    callers = repo.find_callers(
                         result["hash_id"],
                         scope=scope,
                         repository=repository,
@@ -178,7 +178,7 @@ def search_code(
 
 
 def search_features(
-    es: Repository,
+    repo: Repository,
     embed_client: CodeEmbeddingClient | None,
     query: str,
     scope: str | None = None,
@@ -215,7 +215,7 @@ def search_features(
     if embed_client is not None:
         try:
             query_embedding = embed_client.embed_single(query)
-            results = es.search_by_vector(
+            results = repo.search_by_vector(
                 embedding=query_embedding,
                 scope=scope,
                 repository=repository,
@@ -228,7 +228,7 @@ def search_features(
 
     # Fallback to keyword search if vector search failed or unavailable
     if not results:
-        results = es.search_by_keyword(
+        results = repo.search_by_keyword(
             query=query,
             scope=scope,
             repository=repository,
@@ -239,7 +239,7 @@ def search_features(
 
     # Apply glossary term filter if provided
     if glossary_term is not None:
-        glossary_entry = es.get_glossary_term(scope, repository, glossary_term, username)
+        glossary_entry = repo.get_glossary_term(scope, repository, glossary_term, username)
         if glossary_entry is None:
             # Term not found, return empty results
             return []
@@ -274,7 +274,7 @@ def search_features(
 
 
 def find_similar(
-    es: Repository,
+    repo: Repository,
     element_id: str,
     limit: int = 10,
     same_repo_only: bool = False,
@@ -295,7 +295,7 @@ def find_similar(
     limit = max(1, min(limit, 50))
 
     # Get source element (supports both element_id and hash_id)
-    doc = es.get_document_by_id_or_hash(element_id)
+    doc = repo.get_document_by_id_or_hash(element_id)
     if not doc:
         raise ValueError(f"Element not found: {element_id}")
 
@@ -309,7 +309,7 @@ def find_similar(
     repository = doc.get("repository") if same_repo_only else None
 
     # Search excluding self
-    results = es.search_by_vector(
+    results = repo.search_by_vector(
         embedding=embedding,
         scope=scope,
         repository=repository,

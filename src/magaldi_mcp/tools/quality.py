@@ -9,7 +9,7 @@ from shared.db.repositories.base import INDEX_NAME
 
 
 def find_complex_functions(
-    es: Repository,
+    repo: Repository,
     scope: str,
     repository: str,
     username: str | None = None,
@@ -44,7 +44,7 @@ def find_complex_functions(
     if not include_tests:
         must_clauses.append({"term": {"is_test": False}})
 
-    client = es._get_client()
+    client = repo._get_client()
     result = client.search(
         index=INDEX_NAME,
         body={
@@ -93,7 +93,7 @@ def find_complex_functions(
 
 
 def find_security_issues(
-    es: Repository,
+    repo: Repository,
     scope: str,
     repository: str,
     username: str | None = None,
@@ -144,7 +144,7 @@ def find_security_issues(
         },
     ]
 
-    client = es._get_client()
+    client = repo._get_client()
     result = client.search(
         index=INDEX_NAME,
         body={
@@ -212,7 +212,7 @@ def find_security_issues(
 
 
 def find_undocumented(
-    es: Repository,
+    repo: Repository,
     scope: str,
     repository: str,
     username: str | None = None,
@@ -256,7 +256,7 @@ def find_undocumented(
     if not include_tests:
         must_clauses.append({"term": {"is_test": False}})
 
-    client = es._get_client()
+    client = repo._get_client()
     result = client.search(
         index=INDEX_NAME,
         body={
@@ -306,7 +306,7 @@ def find_undocumented(
 
 
 def find_env_usage(
-    es: Repository,
+    repo: Repository,
     scope: str,
     repository: str,
     username: str | None = None,
@@ -350,7 +350,7 @@ def find_env_usage(
 
     must_clauses.append(nested_query)
 
-    client = es._get_client()
+    client = repo._get_client()
     result = client.search(
         index=INDEX_NAME,
         body={
@@ -409,7 +409,7 @@ def find_env_usage(
 
 
 def find_async_code(
-    es: Repository,
+    repo: Repository,
     scope: str,
     repository: str,
     username: str | None = None,
@@ -462,7 +462,7 @@ def find_async_code(
     if not include_tests:
         must_clauses.append({"term": {"is_test": False}})
 
-    client = es._get_client()
+    client = repo._get_client()
     result = client.search(
         index=INDEX_NAME,
         body={

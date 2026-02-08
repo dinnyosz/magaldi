@@ -8,14 +8,14 @@ from shared.db.store import Repository
 
 
 def _find_file_element(
-    es: Repository,
+    repo: Repository,
     scope: str,
     repository: str,
     username: str,
     relative_path: str,
 ) -> dict[str, Any] | None:
     """Find the file element for a given path."""
-    client = es._get_client()
+    client = repo._get_client()
     result = client.search(
         index="magaldi-code-elements",
         body={
@@ -39,7 +39,7 @@ def _find_file_element(
 
 
 def find_dependencies(
-    es: Repository,
+    repo: Repository,
     file_path: str | None = None,
     element_id: str | None = None,
     scope: str | None = None,
@@ -73,7 +73,7 @@ def find_dependencies(
 
     # Get the file element (supports both element_id and hash_id)
     if element_id:
-        file_doc = es.get_document_by_id_or_hash(element_id)
+        file_doc = repo.get_document_by_id_or_hash(element_id)
         if not file_doc:
             raise ValueError(f"Element not found: {element_id}")
         if file_doc.get("element_type") != "file":
@@ -83,7 +83,7 @@ def find_dependencies(
     elif file_path:
         if not scope or not repository:
             raise ValueError("scope and repository required when using file_path")
-        file_doc = _find_file_element(es, scope, repository, username, file_path)
+        file_doc = _find_file_element(repo, scope, repository, username, file_path)
         if not file_doc:
             raise ValueError(f"File not found: {file_path}")
         element_id = file_doc.get("element_id")
@@ -91,14 +91,14 @@ def find_dependencies(
         raise ValueError("Either file_path or element_id required")
 
     # Get imports from the file element
-    imports = es.get_imports(element_id)
+    imports = repo.get_imports(element_id)
 
     # Classify imports as internal vs external
     internal_imports: list[dict[str, Any]] = []
     external_imports: list[dict[str, Any]] = []
 
     # Get all file paths in the repo to detect internal imports
-    client = es._get_client()
+    client = repo._get_client()
     file_result = client.search(
         index="magaldi-code-elements",
         body={
@@ -182,7 +182,7 @@ def find_dependencies(
 
 
 def find_dependents(
-    es: Repository,
+    repo: Repository,
     module: str,
     scope: str,
     repository: str,
@@ -211,7 +211,7 @@ def find_dependents(
     username = username or "main"
 
     # Find files that import this module
-    dependents = es.find_elements_importing(
+    dependents = repo.find_elements_importing(
         module=module,
         scope=scope,
         repository=repository,
@@ -238,7 +238,7 @@ def find_dependents(
 
 
 def dependency_graph(
-    es: Repository,
+    repo: Repository,
     scope: str,
     repository: str,
     username: str | None = None,
@@ -265,7 +265,7 @@ def dependency_graph(
     """
     username = username or "main"
 
-    client = es._get_client()
+    client = repo._get_client()
 
     # Get all file elements with their imports
     result = client.search(

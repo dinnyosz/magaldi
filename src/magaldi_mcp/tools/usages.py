@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 def find_usages(
-    es: Repository,
+    repo: Repository,
     element_id: str,
     limit: int = 30,
 ) -> list[dict[str, Any]]:
@@ -31,7 +31,7 @@ def find_usages(
         List of usage locations with context.
     """
     # Get the element to find its name (supports both element_id and hash_id)
-    doc = es.get_document_by_id_or_hash(element_id)
+    doc = repo.get_document_by_id_or_hash(element_id)
     if not doc:
         raise ValueError(f"Element not found: {element_id}")
 
@@ -62,8 +62,7 @@ def find_usages(
         # Generic: just the name
         pattern = escaped_name
 
-    # Search using ES regexp search (server-side)
-    results = es.search_by_regexp(
+    results = repo.search_by_regexp(
         pattern=pattern,
         scope=scope,
         repository=repository,
@@ -130,7 +129,7 @@ def find_usages(
 
 
 def find_implementations(
-    es: Repository,
+    repo: Repository,
     element_id: str | None = None,
     class_name: str | None = None,
     scope: str | None = None,
@@ -156,7 +155,7 @@ def find_implementations(
     """
     # Get the name and scope/repo to search for
     if element_id:
-        doc = es.get_document_by_id_or_hash(element_id)
+        doc = repo.get_document_by_id_or_hash(element_id)
         if not doc:
             raise ValueError(f"Element not found: {element_id}")
         name = doc.get("name")
@@ -176,8 +175,7 @@ def find_implementations(
     # Note: Lucene regexp uses .* for any string, \\( for literal paren
     pattern = f"class.*\\(.*{escaped_name}.*\\)"
 
-    # Search using ES regexp search (server-side)
-    results = es.search_by_regexp(
+    results = repo.search_by_regexp(
         pattern=pattern,
         scope=scope,
         repository=repository,

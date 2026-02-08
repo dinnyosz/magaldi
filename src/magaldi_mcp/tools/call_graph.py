@@ -8,7 +8,7 @@ from shared.db.store import Repository
 
 
 def get_call_graph(
-    es: Repository,
+    repo: Repository,
     element_id: str,
     direction: str = "both",
 ) -> dict[str, Any]:
@@ -24,7 +24,7 @@ def get_call_graph(
     Returns:
         Call graph with callers and callees lists.
     """
-    doc = es.get_document_by_id_or_hash(element_id)
+    doc = repo.get_document_by_id_or_hash(element_id)
     if not doc:
         raise ValueError(f"Element not found: {element_id}")
 
@@ -53,7 +53,7 @@ def get_call_graph(
 
     # Find callers (who calls this function) using indexed call data
     if direction in ("callers", "both"):
-        callers = es.find_elements_calling(
+        callers = repo.find_elements_calling(
             target_id=target_element_id,
             scope=scope,
             repository=repository,
@@ -75,7 +75,7 @@ def get_call_graph(
 
     # Find callees (what this function calls) using indexed call data
     if direction in ("callees", "both"):
-        calls = es.get_calls(element_id)
+        calls = repo.get_calls(element_id)
         for call in calls:
             callee_entry: dict[str, Any] = {
                 "name": call.get("name"),
@@ -87,7 +87,7 @@ def get_call_graph(
             if resolved_id:
                 callee_entry["element_id"] = resolved_id
                 # Get resolved element details
-                resolved_doc = es.get_document(resolved_id)
+                resolved_doc = repo.get_document(resolved_id)
                 if resolved_doc:
                     callee_entry["type"] = resolved_doc.get("element_type")
                     callee_entry["file"] = resolved_doc.get("relative_path")
@@ -103,7 +103,7 @@ def get_call_graph(
             rel_id = rel.get("element_id")
             if not rel_id:
                 continue
-            rel_doc = es.get_document(rel_id)
+            rel_doc = repo.get_document(rel_id)
             if rel_doc:
                 related_list.append({
                     "element_id": rel_id,
@@ -122,7 +122,7 @@ def get_call_graph(
 
 
 def find_callers(
-    es: Repository,
+    repo: Repository,
     element_id: str,
     scope: str | None = None,
     repository: str | None = None,
@@ -147,7 +147,7 @@ def find_callers(
         Dict with target info and lists of callers grouped by code/tests.
     """
     # Get target element info (supports both element_id and hash_id)
-    doc = es.get_document_by_id_or_hash(element_id)
+    doc = repo.get_document_by_id_or_hash(element_id)
     if not doc:
         raise ValueError(f"Element not found: {element_id}")
 
@@ -160,7 +160,7 @@ def find_callers(
     target_element_id = doc.get("element_id")
 
     # Find elements calling the target
-    callers = es.find_elements_calling(
+    callers = repo.find_elements_calling(
         target_id=target_element_id,
         scope=scope,
         repository=repository,
@@ -216,7 +216,7 @@ def find_callers(
 
 
 def find_call_chain(
-    es: Repository,
+    repo: Repository,
     element_id: str,
     direction: str = "callees",
     max_depth: int = 5,
@@ -243,7 +243,7 @@ def find_call_chain(
     max_depth = max(1, min(max_depth, 10))
 
     # Get root element info (supports both element_id and hash_id)
-    doc = es.get_document_by_id_or_hash(element_id)
+    doc = repo.get_document_by_id_or_hash(element_id)
     if not doc:
         raise ValueError(f"Element not found: {element_id}")
 
@@ -277,7 +277,7 @@ def find_call_chain(
         if depth >= max_depth:
             return []
 
-        callers = es.find_elements_calling(
+        callers = repo.find_elements_calling(
             target_id=node_id,
             scope=scope,
             repository=repository,
@@ -324,7 +324,7 @@ def find_call_chain(
         if depth >= max_depth:
             return []
 
-        calls = es.get_calls(node_id)
+        calls = repo.get_calls(node_id)
         children = []
 
         for call in calls:
@@ -358,7 +358,7 @@ def find_call_chain(
             visited.add(resolved_id)
 
             # Get resolved element info
-            resolved_doc = es.get_document(resolved_id)
+            resolved_doc = repo.get_document(resolved_id)
             if resolved_doc:
                 node = {
                     "element_id": resolved_id,
@@ -581,7 +581,7 @@ _EXCLUDED_NAMES = {
 
 
 def find_dead_code(
-    es: Repository,
+    repo: Repository,
     scope: str,
     repository: str,
     username: str | None = None,
@@ -607,7 +607,7 @@ def find_dead_code(
     """
     username = username or "main"
 
-    client = es._get_client()
+    client = repo._get_client()
 
     # Get all functions and methods in the repository
     filters = [
@@ -620,7 +620,7 @@ def find_dead_code(
     if not include_tests:
         filters.append({"term": {"is_test": False}})
 
-    es_result = client.search(
+    search_result = client.search(
         index="magaldi-code-elements",
         body={
             "query": {"bool": {"filter": filters}},
@@ -641,7 +641,7 @@ def find_dead_code(
         },
     )
 
-    hits = es_result.get("hits", {}).get("hits", [])
+    hits = search_result.get("hits", {}).get("hits", [])
 
     # Filter out entry points and find uncalled functions
     potentially_dead: list[dict[str, Any]] = []
@@ -685,7 +685,7 @@ def find_dead_code(
             continue
 
         # Check if anything calls this element
-        callers = es.find_elements_calling(
+        callers = repo.find_elements_calling(
             target_id=element_id,
             scope=scope,
             repository=repository,
@@ -721,7 +721,7 @@ def find_dead_code(
 
 
 def find_entry_points(
-    es: Repository,
+    repo: Repository,
     scope: str,
     repository: str,
     username: str | None = None,
@@ -769,7 +769,7 @@ def find_entry_points(
     test_decorators = {"pytest.fixture", "fixture", "pytest.mark"}
     async_decorators = {"celery.task", "task", "dramatiq.actor", "actor"}
 
-    client = es._get_client()
+    client = repo._get_client()
 
     # Get all functions and methods
     filters = [
@@ -779,7 +779,7 @@ def find_entry_points(
         {"terms": {"element_type": ["function", "method"]}},
     ]
 
-    es_result = client.search(
+    search_result = client.search(
         index="magaldi-code-elements",
         body={
             "query": {"bool": {"filter": filters}},
@@ -800,7 +800,7 @@ def find_entry_points(
         },
     )
 
-    hits = es_result.get("hits", {}).get("hits", [])
+    hits = search_result.get("hits", {}).get("hits", [])
 
     # Categorize entry points
     http_handlers: list[dict[str, Any]] = []

@@ -203,7 +203,7 @@ class ElementRepository:
             return self.get_document(id_or_hash)
 
     def element_exists(self, element_id: str) -> bool:
-        """Check if element exists in ES (meaning it's fully processed).
+        """Check if element exists (meaning it's fully processed).
 
         Args:
             element_id: Element ID to check.
@@ -218,7 +218,7 @@ class ElementRepository:
             return False
 
     def get_existing_element_ids(self, element_ids: list[str]) -> set[str]:
-        """Check which elements already exist in ES.
+        """Check which elements already exist.
 
         Args:
             element_ids: List of element IDs to check.

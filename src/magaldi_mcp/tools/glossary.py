@@ -10,7 +10,7 @@ from ._utils import _resolve_scope_repo
 
 
 def list_glossary(
-    es: Repository,
+    repo: Repository,
     scope: str | None = None,
     repository: str | None = None,
     username: str = "main",
@@ -43,7 +43,7 @@ def list_glossary(
             "scope and repository are required. Either provide them explicitly "
             "or create a magaldi.yaml file in your project root."
         )
-    return es.get_glossary_terms(
+    return repo.get_glossary_terms(
         scope=scope,
         repository=repository,
         username=username,
@@ -52,7 +52,7 @@ def list_glossary(
 
 
 def get_glossary_term(
-    es: Repository,
+    repo: Repository,
     scope: str | None = None,
     repository: str | None = None,
     term: str = "",
@@ -86,7 +86,7 @@ def get_glossary_term(
         )
     if not term:
         raise ValueError("term is required")
-    return es.get_glossary_term(
+    return repo.get_glossary_term(
         scope=scope,
         repository=repository,
         term=term,
@@ -95,7 +95,7 @@ def get_glossary_term(
 
 
 def search_glossary(
-    es: Repository,
+    repo: Repository,
     scope: str | None = None,
     repository: str | None = None,
     query: str = "",
@@ -128,7 +128,7 @@ def search_glossary(
         )
     if not query:
         raise ValueError("query is required")
-    return es.search_glossary(
+    return repo.search_glossary(
         scope=scope,
         repository=repository,
         query=query,

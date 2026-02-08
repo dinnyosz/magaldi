@@ -58,7 +58,7 @@ class TestFindUsages:
             }
         }
 
-        result = find_usages(es=mock_repo, element_id="func_id")
+        result = find_usages(repo=mock_repo, element_id="func_id")
 
         assert isinstance(result, list)
 
@@ -67,7 +67,7 @@ class TestFindUsages:
         mock_repo.get_document.return_value = None
 
         with pytest.raises(ValueError, match="Element not found"):
-            find_usages(es=mock_repo, element_id="nonexistent")
+            find_usages(repo=mock_repo, element_id="nonexistent")
 
 
 # =============================================================================
@@ -107,7 +107,7 @@ class TestFindUsagesWithPatternSearch:
         ]
 
         result = find_usages(
-            es=mock_repo,
+            repo=mock_repo,
             element_id="test:repo:main:file.py:function:my_func:10",
         )
 
@@ -130,7 +130,7 @@ class TestFindUsagesWithPatternSearch:
         mock_repo.search_by_regexp.return_value = []
 
         find_usages(
-            es=mock_repo,
+            repo=mock_repo,
             element_id="test:repo:main:file.py:function:my_func:10",
         )
 
@@ -156,7 +156,7 @@ class TestFindUsagesWithPatternSearch:
         mock_repo.search_by_regexp.return_value = []
 
         find_usages(
-            es=mock_repo,
+            repo=mock_repo,
             element_id="test:repo:main:file.py:method:my_method:10",
         )
 
@@ -180,7 +180,7 @@ class TestFindUsagesWithPatternSearch:
         mock_repo.search_by_regexp.return_value = []
 
         find_usages(
-            es=mock_repo,
+            repo=mock_repo,
             element_id="test:repo:main:file.py:class:MyClass:10",
         )
 
@@ -223,7 +223,7 @@ class TestFindUsagesWithPatternSearch:
         ]
 
         result = find_usages(
-            es=mock_repo,
+            repo=mock_repo,
             element_id="test:repo:main:file.py:function:my_func:10",
         )
 
@@ -246,7 +246,7 @@ class TestFindUsagesWithPatternSearch:
         mock_repo.search_by_regexp.return_value = []
 
         find_usages(
-            es=mock_repo,
+            repo=mock_repo,
             element_id="test:repo:main:file.py:function:func_with_dots:10",
         )
 
@@ -300,7 +300,7 @@ class TestFindImplementations:
             }
         }
 
-        result = find_implementations(es=mock_repo, element_id="base_id")
+        result = find_implementations(repo=mock_repo, element_id="base_id")
 
         assert isinstance(result, list)
 
@@ -311,7 +311,7 @@ class TestFindImplementations:
         mock_client.search.return_value = {"hits": {"hits": []}}
 
         result = find_implementations(
-            es=mock_repo,
+            repo=mock_repo,
             class_name="Protocol",
         )
 
@@ -320,7 +320,7 @@ class TestFindImplementations:
     def test_find_implementations_requires_id_or_name(self, mock_repo):
         """Test find_implementations requires element_id or class_name."""
         with pytest.raises(ValueError, match="Either element_id or class_name required"):
-            find_implementations(es=mock_repo)
+            find_implementations(repo=mock_repo)
 
 
 # =============================================================================
@@ -357,7 +357,7 @@ class TestFindImplementationsWithPatternSearch:
         ]
 
         result = find_implementations(
-            es=mock_repo,
+            repo=mock_repo,
             element_id="test:repo:main:base.py:class:BaseClass:1",
         )
 
@@ -376,7 +376,7 @@ class TestFindImplementationsWithPatternSearch:
         mock_repo.search_by_regexp.return_value = []
 
         find_implementations(
-            es=mock_repo,
+            repo=mock_repo,
             element_id="test:repo:main:base.py:class:BaseClass:1",
         )
 
@@ -393,7 +393,7 @@ class TestFindImplementationsWithPatternSearch:
         mock_repo.search_by_regexp.return_value = []
 
         find_implementations(
-            es=mock_repo,
+            repo=mock_repo,
             class_name="Protocol",
             scope="test",
             repository="repo",
@@ -426,7 +426,7 @@ class TestFindImplementationsWithPatternSearch:
         ]
 
         result = find_implementations(
-            es=mock_repo,
+            repo=mock_repo,
             element_id="test:repo:main:base.py:class:BaseClass:1",
         )
 
@@ -447,7 +447,7 @@ class TestFindImplementationsWithPatternSearch:
         mock_repo.search_by_regexp.return_value = []
 
         find_implementations(
-            es=mock_repo,
+            repo=mock_repo,
             element_id="test:repo:main:base.py:class:Base.Class:1",
         )
 
@@ -484,7 +484,7 @@ class TestGetCallGraph:
 
         mock_client.search.return_value = {"hits": {"hits": []}}
 
-        result = get_call_graph(es=mock_repo, element_id="func_id")
+        result = get_call_graph(repo=mock_repo, element_id="func_id")
 
         assert "element" in result
         assert "callers" in result
@@ -496,7 +496,7 @@ class TestGetCallGraph:
         mock_repo.get_document.return_value = None
 
         with pytest.raises(ValueError, match="Element not found"):
-            get_call_graph(es=mock_repo, element_id="nonexistent")
+            get_call_graph(repo=mock_repo, element_id="nonexistent")
 
     def test_get_call_graph_direction_callers(self, mock_repo):
         """Test get_call_graph with callers only direction."""
@@ -513,7 +513,7 @@ class TestGetCallGraph:
 
         mock_client.search.return_value = {"hits": {"hits": []}}
 
-        result = get_call_graph(es=mock_repo, element_id="func_id", direction="callers")
+        result = get_call_graph(repo=mock_repo, element_id="func_id", direction="callers")
 
         assert "callers" in result
         assert "callees" in result  # Should still be in result but empty
@@ -565,7 +565,7 @@ class TestFindCallers:
         ]
 
         result = find_callers(
-            es=mock_repo,
+            repo=mock_repo,
             element_id="scope:repo:main:utils.py:function:helper:10",
         )
 
@@ -583,7 +583,7 @@ class TestFindCallers:
         mock_repo.get_document.return_value = None
 
         with pytest.raises(ValueError, match="Element not found"):
-            find_callers(es=mock_repo, element_id="nonexistent")
+            find_callers(repo=mock_repo, element_id="nonexistent")
 
     def test_find_callers_excludes_tests_when_disabled(self, mock_repo):
         """Test find_callers excludes test results when include_tests=False."""
@@ -609,7 +609,7 @@ class TestFindCallers:
         ]
 
         result = find_callers(
-            es=mock_repo,
+            repo=mock_repo,
             element_id="scope:repo:main:utils.py:function:helper:10",
             include_tests=False,
         )
@@ -632,7 +632,7 @@ class TestFindCallers:
         mock_repo.find_elements_calling.return_value = []
 
         find_callers(
-            es=mock_repo,
+            repo=mock_repo,
             element_id="myscope:myrepo:main:utils.py:function:helper:10",
         )
 
@@ -691,7 +691,7 @@ class TestFindCallChain:
         ]
 
         result = find_call_chain(
-            es=mock_repo,
+            repo=mock_repo,
             element_id="scope:repo:main:app.py:function:main:1",
             direction="callees",
             max_depth=3,
@@ -732,7 +732,7 @@ class TestFindCallChain:
         ]
 
         result = find_call_chain(
-            es=mock_repo,
+            repo=mock_repo,
             element_id="scope:repo:main:utils.py:function:helper:10",
             direction="callers",
             max_depth=3,
@@ -747,7 +747,7 @@ class TestFindCallChain:
         mock_repo.get_document.return_value = None
 
         with pytest.raises(ValueError, match="Element not found"):
-            find_call_chain(es=mock_repo, element_id="nonexistent")
+            find_call_chain(repo=mock_repo, element_id="nonexistent")
 
     def test_find_call_chain_detects_cycles(self, mock_repo):
         """Test find_call_chain marks cycles instead of infinite recursion."""
@@ -794,7 +794,7 @@ class TestFindCallChain:
         ]
 
         result = find_call_chain(
-            es=mock_repo,
+            repo=mock_repo,
             element_id="scope:repo:main:app.py:function:func_a:1",
             direction="callees",
             max_depth=5,
@@ -826,7 +826,7 @@ class TestFindCallChain:
 
         # Test max_depth > 10 is clamped to 10
         result = find_call_chain(
-            es=mock_repo,
+            repo=mock_repo,
             element_id="scope:repo:main:app.py:function:main:1",
             max_depth=20,
         )
@@ -834,7 +834,7 @@ class TestFindCallChain:
 
         # Test max_depth < 1 is clamped to 1
         result = find_call_chain(
-            es=mock_repo,
+            repo=mock_repo,
             element_id="scope:repo:main:app.py:function:main:1",
             max_depth=0,
         )
@@ -895,7 +895,7 @@ class TestFindDeadCode:
         mock_repo.find_elements_calling.side_effect = [[], [{"name": "caller"}]]
 
         result = find_dead_code(
-            es=mock_repo,
+            repo=mock_repo,
             scope="scope",
             repository="repo",
         )
@@ -930,7 +930,7 @@ class TestFindDeadCode:
         }
 
         result = find_dead_code(
-            es=mock_repo,
+            repo=mock_repo,
             scope="scope",
             repository="repo",
         )
@@ -962,7 +962,7 @@ class TestFindDeadCode:
         }
 
         result = find_dead_code(
-            es=mock_repo,
+            repo=mock_repo,
             scope="scope",
             repository="repo",
         )
@@ -994,7 +994,7 @@ class TestFindDeadCode:
         }
 
         result = find_dead_code(
-            es=mock_repo,
+            repo=mock_repo,
             scope="scope",
             repository="repo",
         )
@@ -1071,7 +1071,7 @@ class TestFindEntryPoints:
         }
 
         result = find_entry_points(
-            es=mock_repo,
+            repo=mock_repo,
             scope="scope",
             repository="repo",
         )
@@ -1119,7 +1119,7 @@ class TestFindEntryPoints:
         }
 
         result = find_entry_points(
-            es=mock_repo,
+            repo=mock_repo,
             scope="scope",
             repository="repo",
         )
@@ -1153,7 +1153,7 @@ class TestFindEntryPoints:
         }
 
         result = find_entry_points(
-            es=mock_repo,
+            repo=mock_repo,
             scope="scope",
             repository="repo",
         )

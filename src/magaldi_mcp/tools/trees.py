@@ -8,7 +8,7 @@ from shared.db.store import Repository
 
 
 def get_command_tree(
-    es: Repository,
+    repo: Repository,
     scope: str,
     repository: str,
     username: str | None = None,
@@ -31,7 +31,7 @@ def get_command_tree(
     from shared.db.repositories.relationships import RelationshipsRepository
 
     username = username or "main"
-    rel_repo = RelationshipsRepository(es.config)
+    rel_repo = RelationshipsRepository(repo.config)
 
     # Get CLI entry point external ref
     cli_refs = rel_repo.get_external_refs(
@@ -66,7 +66,7 @@ def get_command_tree(
     # Fetch element details
     hash_to_element = {}
     if all_hashes:
-        client = es._get_client()
+        client = repo._get_client()
         hash_query = {
             "query": {
                 "bool": {
@@ -174,7 +174,7 @@ def get_command_tree(
 
 
 def get_route_tree(
-    es: Repository,
+    repo: Repository,
     scope: str,
     repository: str,
     username: str | None = None,
@@ -197,7 +197,7 @@ def get_route_tree(
     from shared.db.repositories.relationships import RelationshipsRepository
 
     username = username or "main"
-    rel_repo = RelationshipsRepository(es.config)
+    rel_repo = RelationshipsRepository(repo.config)
 
     # Get all HTTP router external refs
     router_refs = rel_repo.get_external_refs(
@@ -227,7 +227,7 @@ def get_route_tree(
     # Fetch element details
     hash_to_element = {}
     if source_hashes:
-        client = es._get_client()
+        client = repo._get_client()
         hash_query = {
             "query": {
                 "bool": {

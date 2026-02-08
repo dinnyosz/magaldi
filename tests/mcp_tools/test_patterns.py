@@ -78,7 +78,7 @@ class TestListPatterns:
         mock_client.search.side_effect = [agg_response, singleton_examples, factory_examples]
 
         result = list_patterns(
-            es=mock_repo,
+            repo=mock_repo,
             scope="scope",
             repository="repo",
         )
@@ -102,7 +102,7 @@ class TestListPatterns:
         mock_client.search.return_value = {"hits": {"hits": []}}
 
         result = list_patterns(
-            es=mock_repo,
+            repo=mock_repo,
             scope="scope",
             repository="repo",
         )
@@ -117,7 +117,7 @@ class TestListPatterns:
         mock_client.search.return_value = {"hits": {"hits": []}}
 
         list_patterns(
-            es=mock_repo,
+            repo=mock_repo,
             scope="scope",
             repository="repo",
             username="testuser",
@@ -176,7 +176,7 @@ class TestFindByPattern:
         }
 
         result = find_by_pattern(
-            es=mock_repo,
+            repo=mock_repo,
             pattern="singleton",
             scope="scope",
             repository="repo",
@@ -222,7 +222,7 @@ class TestFindByPattern:
         }
 
         result = find_by_pattern(
-            es=mock_repo,
+            repo=mock_repo,
             pattern="singleton",
             scope="scope",
             repository="repo",
@@ -239,7 +239,7 @@ class TestFindByPattern:
         mock_client.search.return_value = {"hits": {"hits": []}}
 
         result = find_by_pattern(
-            es=mock_repo,
+            repo=mock_repo,
             pattern="builder",
             scope="scope",
             repository="repo",
@@ -272,7 +272,7 @@ class TestFindByPattern:
         }
 
         result = find_by_pattern(
-            es=mock_repo,
+            repo=mock_repo,
             pattern="factory",
             scope="scope",
             repository="repo",

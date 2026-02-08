@@ -10,7 +10,7 @@ from ._utils import _resolve_scope_repo
 
 
 def list_repos(
-    es: Repository,
+    repo: Repository,
     scope: str | None = None,
 ) -> list[dict[str, Any]]:
     """List all indexed repositories.
@@ -22,11 +22,11 @@ def list_repos(
     Returns:
         List of repositories with statistics.
     """
-    return es.get_indexed_repositories(scope=scope)
+    return repo.get_indexed_repositories(scope=scope)
 
 
 def list_features(
-    es: Repository,
+    repo: Repository,
     scope: str,
     repository: str,
     username: str = "main",
@@ -45,12 +45,12 @@ def list_features(
         List of features and subfeatures with parent info.
     """
     # Get features
-    features = es.get_features(scope, repository, username)
+    features = repo.get_features(scope, repository, username)
     for f in features:
         f["type"] = "feature"
 
     # Get subfeatures
-    subfeatures = es.get_subfeatures(scope, repository, username)
+    subfeatures = repo.get_subfeatures(scope, repository, username)
     for sf in subfeatures:
         sf["type"] = "subfeature"
 
@@ -67,7 +67,7 @@ def list_features(
 
 
 def get_repo_stats(
-    es: Repository,
+    repo: Repository,
     scope: str | None = None,
     repository: str | None = None,
     username: str = "main",
@@ -90,11 +90,11 @@ def get_repo_stats(
             "scope and repository are required. Either provide them explicitly "
             "or create a magaldi.yaml file in your project root."
         )
-    return es.get_repository_stats(scope, repository, username)
+    return repo.get_repository_stats(scope, repository, username)
 
 
 def get_feature_members(
-    es: Repository,
+    repo: Repository,
     feature_id: str,
 ) -> dict[str, Any]:
     """Get all members of a feature or subfeature cluster.
@@ -107,7 +107,7 @@ def get_feature_members(
         Dict with 'members' list and 'glossary_terms' list.
     """
     # Get feature/subfeature document (supports both element_id and hash_id)
-    feature = es.get_document_by_id_or_hash(feature_id)
+    feature = repo.get_document_by_id_or_hash(feature_id)
     if not feature:
         raise ValueError(f"Feature/subfeature not found: {feature_id}")
 
@@ -118,7 +118,7 @@ def get_feature_members(
     # Fetch member documents
     members = []
     for member_id in member_ids:
-        doc = es.get_document(member_id)
+        doc = repo.get_document(member_id)
         if doc:
             members.append(
                 {
@@ -143,7 +143,7 @@ def get_feature_members(
         username = parts[2]
 
         # Get all glossary terms for this repo
-        all_terms = es.get_glossary_terms(scope, repository, username)
+        all_terms = repo.get_glossary_terms(scope, repository, username)
 
         # Filter to terms that have associations with this feature
         for term_entry in all_terms:

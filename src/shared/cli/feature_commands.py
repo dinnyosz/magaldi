@@ -199,7 +199,7 @@ def run_feature_extraction(
 
                 assignments.append(assignment)
 
-        # Update ES with feature assignments
+        # Save feature assignments
         if assignments:
             with console.status("[bold blue]Saving cluster assignments...[/]"):
                 repo.update_cluster_assignments(assignments)

@@ -10,7 +10,7 @@ from ._utils import _resolve_scope_repo
 
 
 def pattern_search(
-    es: Repository,
+    repo: Repository,
     pattern: str,
     mode: str,
     scope: str | None = None,
@@ -21,7 +21,7 @@ def pattern_search(
     limit: int = 50,
     include_tests: bool = True,
 ) -> dict[str, Any]:
-    """Search code using ES-native pattern matching.
+    """Search code using native pattern matching.
 
     Three modes available:
     - regexp: Lucene regexp syntax (e.g., "add_column.*Model")
@@ -58,9 +58,8 @@ def pattern_search(
     if mode not in valid_modes:
         raise ValueError(f"Invalid mode: {mode}. Must be one of {valid_modes}")
 
-    # Call the appropriate ES method
     if mode == "regexp":
-        results = es.search_by_regexp(
+        results = repo.search_by_regexp(
             pattern=pattern,
             scope=scope,
             repository=repository,
@@ -70,7 +69,7 @@ def pattern_search(
             include_tests=include_tests,
         )
     elif mode == "wildcard":
-        results = es.search_by_wildcard(
+        results = repo.search_by_wildcard(
             pattern=pattern,
             scope=scope,
             repository=repository,
@@ -80,7 +79,7 @@ def pattern_search(
             include_tests=include_tests,
         )
     else:  # proximity
-        results = es.search_by_proximity(
+        results = repo.search_by_proximity(
             terms=pattern,
             slop=slop,
             scope=scope,

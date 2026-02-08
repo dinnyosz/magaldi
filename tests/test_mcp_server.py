@@ -75,12 +75,12 @@ class TestMagaldiMCPServerInit:
             server = MagaldiMCPServer(default_username="custom-user")
             assert server.default_username == "custom-user"
 
-    def test_get_es_creatrepo_lazily(self, server):
-        """Test that _get_es creates the ES repo lazily."""
+    def test_get_repo_creatrepo_lazily(self, server):
+        """Test that _get_repo creates the ES repo lazily."""
         server.repo = None
         with patch("magaldi_mcp.server.Repository") as mock_es:
             mock_es.return_value = MagicMock()
-            result = server._get_es()
+            result = server._get_repo()
             assert result is not None
             mock_es.assert_called_once()
 
@@ -1027,10 +1027,10 @@ class TestFormatResultFallback:
 class TestLazyInitialization:
     """Tests for lazy initialization of clients."""
 
-    def test_get_es_returns_same_instance(self, server, mock_repo):
-        """Test that _get_es returns the same instance on subsequent calls."""
-        result1 = server._get_es()
-        result2 = server._get_es()
+    def test_get_repo_returns_same_instance(self, server, mock_repo):
+        """Test that _get_repo returns the same instance on subsequent calls."""
+        result1 = server._get_repo()
+        result2 = server._get_repo()
         assert result1 is result2
 
     def test_get_embed_client_returns_same_instance(self, server, mock_embed_client):

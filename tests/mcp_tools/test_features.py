@@ -34,7 +34,7 @@ class TestSearchFeatures:
         ]
 
         result = search_features(
-            es=mock_repo,
+            repo=mock_repo,
             embed_client=mock_embed_client,
             query="authentication",
         )
@@ -56,7 +56,7 @@ class TestSearchFeatures:
         ]
 
         result = search_features(
-            es=mock_repo,
+            repo=mock_repo,
             embed_client=None,
             query="auth",
         )
@@ -78,7 +78,7 @@ class TestSearchFeatures:
         ]
 
         result = search_features(
-            es=mock_repo,
+            repo=mock_repo,
             embed_client=mock_embed_client,
             query="token",
         )
@@ -232,7 +232,7 @@ class TestListFeatures:
         ]
 
         result = list_features(
-            es=mock_repo,
+            repo=mock_repo,
             scope="github",
             repository="repo",
         )
@@ -285,7 +285,7 @@ class TestGetFeatureMembers:
         ]
         mock_repo.get_glossary_terms.return_value = []
 
-        result = get_feature_members(es=mock_repo, feature_id="feature1")
+        result = get_feature_members(repo=mock_repo, feature_id="feature1")
 
         assert "members" in result
         assert "glossary_terms" in result
@@ -298,7 +298,7 @@ class TestGetFeatureMembers:
         mock_repo.get_document.return_value = None
 
         with pytest.raises(ValueError, match="not found"):
-            get_feature_members(es=mock_repo, feature_id="nonexistent")
+            get_feature_members(repo=mock_repo, feature_id="nonexistent")
 
     def test_get_feature_members_empty(self, mock_repo):
         """Test get_feature_members with no members."""
@@ -308,7 +308,7 @@ class TestGetFeatureMembers:
             "member_ids": [],
         }
 
-        result = get_feature_members(es=mock_repo, feature_id="feature1")
+        result = get_feature_members(repo=mock_repo, feature_id="feature1")
 
         assert result == {"members": [], "glossary_terms": []}
 

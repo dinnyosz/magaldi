@@ -10,7 +10,7 @@ from ._utils import _resolve_scope_repo
 
 
 def find_files(
-    es: Repository,
+    repo: Repository,
     pattern: str,
     scope: str | None = None,
     repository: str | None = None,
@@ -35,17 +35,17 @@ def find_files(
     # Auto-detect scope/repository from magaldi.yaml if not provided
     scope, repository = _resolve_scope_repo(scope, repository)
 
-    client = es._get_client()
+    client = repo._get_client()
 
-    # Convert glob pattern to ES wildcard
+    # Convert glob pattern to wildcard query
     if "*" not in pattern and "?" not in pattern:
         # No wildcards: exact filename match anywhere in tree
         es_pattern = f"*/{pattern}"
     else:
-        # Has wildcards: convert ** to * (ES wildcard doesn't have **)
+        # Has wildcards: convert ** to * (wildcard query doesn't support **)
         es_pattern = pattern.replace("**", "*")
 
-    # Build ES query with wildcard filter (filtering happens in ES, not client-side)
+    # Build query with wildcard filter
     filters = [
         {"term": {"element_type": "file"}},
         {"term": {"username": username}},
@@ -56,8 +56,7 @@ def find_files(
     if repository:
         filters.append({"term": {"repository": repository}})
 
-    # Fetch file elements - ES filters directly, no need for extra results
-    es_result = client.search(
+    result = client.search(
         index="magaldi-code-elements",
         body={
             "query": {"bool": {"filter": filters}},
@@ -66,7 +65,7 @@ def find_files(
         },
     )
 
-    hits = es_result.get("hits", {}).get("hits", [])
+    hits = result.get("hits", {}).get("hits", [])
     matches = []
 
     for hit in hits:

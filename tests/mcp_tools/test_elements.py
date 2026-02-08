@@ -36,7 +36,7 @@ class TestGetElement:
         }
 
         result = get_element(
-            es=mock_repo,
+            repo=mock_repo,
             element_id="scope:repo:user:file.py:function:test:1",
         )
 
@@ -49,7 +49,7 @@ class TestGetElement:
 
         with pytest.raises(ValueError, match="Element not found"):
             get_element(
-                es=mock_repo,
+                repo=mock_repo,
                 element_id="nonexistent",
             )
 
@@ -63,7 +63,7 @@ class TestGetElement:
         }
 
         result = get_element(
-            es=mock_repo,
+            repo=mock_repo,
             element_id="scope:repo:user:file.py:function:test:1",
             include_code=True,
         )
@@ -92,7 +92,7 @@ class TestBatchGetElements:
         ]
 
         result = batch_get_elements(
-            es=mock_repo,
+            repo=mock_repo,
             element_ids=["id1", "id2"],
         )
 
@@ -128,7 +128,7 @@ class TestGetElementExtended:
             "parent_id": "parent_id",
         }
 
-        result = get_element(es=mock_repo, element_id="id1", brief=False)
+        result = get_element(repo=mock_repo, element_id="id1", brief=False)
 
         assert result["signature"] == "def test():"
         assert result["docstring"] == "A test function."
@@ -161,7 +161,7 @@ class TestFindSimilar:
         ]
 
         result = find_similar(
-            es=mock_repo,
+            repo=mock_repo,
             element_id="id1",
         )
 
@@ -188,7 +188,7 @@ class TestFindSimilarExtended:
         mock_repo.get_document.return_value = None
 
         with pytest.raises(ValueError, match="Element not found"):
-            find_similar(es=mock_repo, element_id="nonexistent")
+            find_similar(repo=mock_repo, element_id="nonexistent")
 
     def test_find_similar_no_embedding(self, mock_repo):
         """Test find_similar raises when element has no embedding."""
@@ -198,7 +198,7 @@ class TestFindSimilarExtended:
         }
 
         with pytest.raises(ValueError, match="no embedding"):
-            find_similar(es=mock_repo, element_id="id1")
+            find_similar(repo=mock_repo, element_id="id1")
 
     def test_find_similar_excludes_self(self, mock_repo):
         """Test find_similar excludes the source element."""
@@ -212,7 +212,7 @@ class TestFindSimilarExtended:
             {"element_id": "id2", "name": "similar", "_score": 0.9},
         ]
 
-        result = find_similar(es=mock_repo, element_id="id1", limit=1)
+        result = find_similar(repo=mock_repo, element_id="id1", limit=1)
 
         assert len(result["code_results"]) == 1
         assert result["code_results"][0]["element_id"] == "id2"
@@ -228,7 +228,7 @@ class TestFindSimilarExtended:
         }
         mock_repo.search_by_vector.return_value = []
 
-        result = find_similar(es=mock_repo, element_id="id1", same_repo_only=True)
+        result = find_similar(repo=mock_repo, element_id="id1", same_repo_only=True)
 
         assert isinstance(result, dict)
         assert "code_results" in result
@@ -260,7 +260,7 @@ class TestFindSimilarTestGrouping:
             {"element_id": "id3", "name": "test_similar", "is_test": True},
         ]
 
-        result = find_similar(es=mock_repo, element_id="id1")
+        result = find_similar(repo=mock_repo, element_id="id1")
 
         assert "code_results" in result
         assert "test_results" in result
@@ -275,7 +275,7 @@ class TestFindSimilarTestGrouping:
             {"element_id": "id2", "name": "test_func", "is_test": True},
         ]
 
-        result = find_similar(es=mock_repo, element_id="id1", include_tests=False)
+        result = find_similar(repo=mock_repo, element_id="id1", include_tests=False)
 
         assert len(result["test_results"]) == 0
 
@@ -289,7 +289,7 @@ class TestFindSimilarTestGrouping:
             {"element_id": "id2", "name": "similar_func", "is_test": False},
         ]
 
-        result = find_similar(es=mock_repo, element_id="id1")
+        result = find_similar(repo=mock_repo, element_id="id1")
 
         assert len(result["code_results"]) == 1
         assert result["code_results"][0]["is_test"] is False
@@ -305,7 +305,7 @@ class TestFindSimilarTestGrouping:
             {"element_id": "id3", "name": "test_similar", "is_test": True},
         ]
 
-        result = find_similar(es=mock_repo, element_id="id1")
+        result = find_similar(repo=mock_repo, element_id="id1")
 
         assert "total_code" in result
         assert "total_tests" in result
@@ -335,7 +335,7 @@ class TestGetContext:
         mock_repo.get_children.return_value = []
 
         result = get_context(
-            es=mock_repo,
+            repo=mock_repo,
             element_id="scope:repo:user:file.py:function:test:1",
         )
 
@@ -397,7 +397,7 @@ class TestGetContextExtended:
             }
         }
 
-        result = get_context(es=mock_repo, element_id="method_id")
+        result = get_context(repo=mock_repo, element_id="method_id")
 
         assert result["file"]["name"] == "file.py"
         assert result["parent"]["name"] == "MyClass"
@@ -452,7 +452,7 @@ class TestGetContextExtended:
             }
         }
 
-        result = get_context(es=mock_repo, element_id="method1", include_siblings=True)
+        result = get_context(repo=mock_repo, element_id="method1", include_siblings=True)
 
         # method1 should be excluded from siblings
         assert len(result["siblings"]) == 1
@@ -499,7 +499,7 @@ class TestGetChildren:
         }
 
         result = get_children(
-            es=mock_repo,
+            repo=mock_repo,
             element_id="parent_id",
         )
 

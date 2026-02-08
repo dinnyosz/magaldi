@@ -34,7 +34,7 @@ class TestSearchCode:
         ]
 
         result = search_code(
-            es=mock_repo,
+            repo=mock_repo,
             embed_client=mock_embed_client,
             query="test function",
         )
@@ -50,7 +50,7 @@ class TestSearchCode:
         mock_repo.search_by_vector.return_value = []
 
         result = search_code(
-            es=mock_repo,
+            repo=mock_repo,
             embed_client=mock_embed_client,
             query="test",
             element_types=["function"],
@@ -66,7 +66,7 @@ class TestSearchCode:
         mock_repo.search_by_vector.return_value = []
 
         result = search_code(
-            es=mock_repo,
+            repo=mock_repo,
             embed_client=mock_embed_client,
             query="test",
             repository="test-repo",
@@ -103,7 +103,7 @@ class TestSearchCodeFallback:
         ]
 
         result = search_code(
-            es=mock_repo,
+            repo=mock_repo,
             embed_client=None,  # No embed client
             query="test",
         )
@@ -133,7 +133,7 @@ class TestSearchCodeFallback:
         ]
 
         result = search_code(
-            es=mock_repo,
+            repo=mock_repo,
             embed_client=mock_embed_client,
             query="test",
             language="python",
@@ -157,7 +157,7 @@ class TestSearchCodeFallback:
         ]
 
         result = search_code(
-            es=mock_repo,
+            repo=mock_repo,
             embed_client=mock_embed_client,
             query="test",
             brief=True,
@@ -181,7 +181,7 @@ class TestSearchCodeFallback:
         ]
 
         result = search_code(
-            es=mock_repo,
+            repo=mock_repo,
             embed_client=mock_embed_client,
             query="test",
             include_code=True,
@@ -209,7 +209,7 @@ class TestSearchCodeFallback:
         }
 
         result = search_code(
-            es=mock_repo,
+            repo=mock_repo,
             embed_client=mock_embed_client,
             query="method",
         )
@@ -252,7 +252,7 @@ class TestSearchCodeTestGrouping:
         ]
 
         result = search_code(
-            es=mock_repo,
+            repo=mock_repo,
             embed_client=mock_embed_client,
             query="user service",
         )
@@ -286,7 +286,7 @@ class TestSearchCodeTestGrouping:
         ]
 
         result = search_code(
-            es=mock_repo,
+            repo=mock_repo,
             embed_client=mock_embed_client,
             query="user service",
             include_tests=False,
@@ -309,7 +309,7 @@ class TestSearchCodeTestGrouping:
         ]
 
         result = search_code(
-            es=mock_repo,
+            repo=mock_repo,
             embed_client=mock_embed_client,
             query="foo",
         )
@@ -338,7 +338,7 @@ class TestSearchCodeTestGrouping:
         ]
 
         result = search_code(
-            es=mock_repo,
+            repo=mock_repo,
             embed_client=mock_embed_client,
             query="user service",
         )
@@ -376,7 +376,7 @@ class TestPatternSearch:
         ]
 
         result = pattern_search(
-            es=mock_repo,
+            repo=mock_repo,
             pattern="add_column.*Model",
             mode="regexp",
             scope="test",
@@ -403,7 +403,7 @@ class TestPatternSearch:
         mock_repo.search_by_wildcard.return_value = []
 
         result = pattern_search(
-            es=mock_repo,
+            repo=mock_repo,
             pattern="*column*",
             mode="wildcard",
             scope="test",
@@ -427,7 +427,7 @@ class TestPatternSearch:
         mock_repo.search_by_proximity.return_value = []
 
         result = pattern_search(
-            es=mock_repo,
+            repo=mock_repo,
             pattern="add column Model",
             mode="proximity",
             slop=5,
@@ -453,7 +453,7 @@ class TestPatternSearch:
         """Test pattern_search with invalid mode raises error."""
         with pytest.raises(ValueError, match="Invalid mode"):
             pattern_search(
-                es=mock_repo,
+                repo=mock_repo,
                 pattern="test",
                 mode="invalid",
                 scope="test",
@@ -484,7 +484,7 @@ class TestPatternSearch:
         ]
 
         result = pattern_search(
-            es=mock_repo,
+            repo=mock_repo,
             pattern="process",
             mode="regexp",
             scope="test",
@@ -503,7 +503,7 @@ class TestPatternSearch:
         mock_repo.search_by_regexp.return_value = []
 
         pattern_search(
-            es=mock_repo,
+            repo=mock_repo,
             pattern="test",
             mode="regexp",
             scope="test",
@@ -520,7 +520,7 @@ class TestPatternSearch:
         mock_repo.search_by_wildcard.return_value = []
 
         pattern_search(
-            es=mock_repo,
+            repo=mock_repo,
             pattern="*test*",
             mode="wildcard",
             scope="test",
@@ -537,7 +537,7 @@ class TestPatternSearch:
         mock_repo.search_by_proximity.return_value = []
 
         pattern_search(
-            es=mock_repo,
+            repo=mock_repo,
             pattern="test pattern",
             mode="proximity",
             scope="test",

@@ -9,7 +9,7 @@ from shared.db.repositories.base import INDEX_NAME
 
 
 def list_patterns(
-    es: Repository,
+    repo: Repository,
     scope: str,
     repository: str,
     username: str = "main",
@@ -38,7 +38,7 @@ def list_patterns(
         {"term": {"element_type": "class"}},
     ]
 
-    client = es._get_client()
+    client = repo._get_client()
 
     # Get pattern counts via aggregation
     agg_result = client.search(
@@ -110,7 +110,7 @@ def list_patterns(
 
 
 def find_by_pattern(
-    es: Repository,
+    repo: Repository,
     pattern: str,
     scope: str,
     repository: str,
@@ -148,7 +148,7 @@ def find_by_pattern(
         {"term": {"element_type": "class"}},
     ]
 
-    client = es._get_client()
+    client = repo._get_client()
     result = client.search(
         index=INDEX_NAME,
         body={

@@ -372,7 +372,7 @@ def _process_single_element(
         if should_embed(element):
             if config.skip_ai:
                 # Skip embeddings entirely - don't generate zero vectors
-                # (ES rejects dense_vectors with zero magnitude)
+                # (search backend rejects zero-magnitude vectors)
                 update_status("summ_embed", config.embed_model.name, "-")
                 update_status("code_embed", config.embed_model.name, "-")
                 # Leave embeddings as None
@@ -386,7 +386,7 @@ def _process_single_element(
                 )
                 embed_time = summary_embed_time + code_embed_time + caller_embed_time
 
-        # Step 3: Index to ES (only after summarize+embed complete)
+        # Step 3: Index (only after summarize+embed complete)
         update_status("indexing")
         # Store file_hash on ALL elements (not just file elements) for change detection
         # This allows us to delete all elements by file_hash if needed

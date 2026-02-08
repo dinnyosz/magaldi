@@ -8,7 +8,7 @@ from shared.db.store import Repository
 
 
 def explain_element(
-    es: Repository,
+    repo: Repository,
     element_id: str,
 ) -> dict[str, Any]:
     """Comprehensive overview of a code element.
@@ -31,7 +31,7 @@ def explain_element(
     Raises:
         ValueError: If element not found.
     """
-    doc = es.get_document_by_id_or_hash(element_id)
+    doc = repo.get_document_by_id_or_hash(element_id)
     if not doc:
         raise ValueError(f"Element not found: {element_id}")
 
@@ -84,7 +84,7 @@ def explain_element(
 
     # Get callers (who calls this function/method)
     if element_type in ("function", "method"):
-        callers = es.find_elements_calling(
+        callers = repo.find_elements_calling(
             target_id=target_element_id,
             scope=scope,
             repository=repository,
@@ -105,7 +105,7 @@ def explain_element(
             )
 
         # Get callees (what this function/method calls)
-        calls = es.get_calls(element_id)
+        calls = repo.get_calls(element_id)
         for call in calls:
             callee_entry: dict[str, Any] = {
                 "name": call.get("name"),
@@ -115,7 +115,7 @@ def explain_element(
             resolved_id = call.get("resolved_id")
             if resolved_id:
                 callee_entry["element_id"] = resolved_id
-                resolved_doc = es.get_document(resolved_id)
+                resolved_doc = repo.get_document(resolved_id)
                 if resolved_doc:
                     callee_entry["hash_id"] = resolved_doc.get("hash_id")
                     callee_entry["type"] = resolved_doc.get("element_type")
@@ -126,13 +126,13 @@ def explain_element(
 
     # Get imports (if file element)
     if element_type == "file":
-        imports = es.get_imports(element_id)
+        imports = repo.get_imports(element_id)
         result["imports"] = imports
 
     # Get similar code (top 3)
     summary_embedding = doc.get("summary_embedding")
     if summary_embedding:
-        similar_results = es.search_by_vector(
+        similar_results = repo.search_by_vector(
             embedding=summary_embedding,
             embedding_type="summary",
             scope=scope,
@@ -161,7 +161,7 @@ def explain_element(
     # Get parent context
     parent_id = doc.get("parent_id")
     if parent_id:
-        parent_doc = es.get_document(parent_id)
+        parent_doc = repo.get_document(parent_id)
         if parent_doc:
             result["parent"] = {
                 "element_id": parent_id,

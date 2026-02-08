@@ -47,7 +47,7 @@ def run_glossary_extraction(
         repository: Repository name.
         username: Username/branch.
         config: Magaldi configuration.
-        repo: Optional ES repository (creates one if not provided).
+        repo: Optional repository (creates one if not provided).
         workers: Number of concurrent workers.
         compact: If True, hide worker table in display (for watch mode).
 

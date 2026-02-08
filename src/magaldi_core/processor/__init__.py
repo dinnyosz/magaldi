@@ -6,7 +6,7 @@ Processes elements level-by-level:
 - Level 2: Functions/Methods
 - Level 3: Variables
 
-Only indexes to ES after full processing, ensuring ES presence = completion.
+Only indexes after full processing, ensuring search backend presence = completion.
 """
 
 from __future__ import annotations
@@ -144,7 +144,7 @@ def process_elements(
         return result
 
     # Smart delete: only remove stale elements (those no longer in code)
-    # For each file, compare existing ES elements with newly parsed elements
+    # For each file, compare existing indexed elements with newly parsed elements
     new_element_ids = {e.element_id for e in all_elements}
     stale_element_ids: list[str] = []
 
@@ -152,7 +152,7 @@ def process_elements(
         existing_ids = repo.get_element_ids_by_file(
             scope, repository, username, pf.file_info.relative_path
         )
-        # Stale = in ES but not in new code
+        # Stale = indexed but not in new code
         stale_ids = existing_ids - new_element_ids
         stale_element_ids.extend(stale_ids)
 

@@ -13,14 +13,14 @@ logger = logging.getLogger(__name__)
 
 
 def _find_file_element(
-    es: Repository,
+    repo: Repository,
     scope: str,
     repository: str,
     username: str,
     relative_path: str,
 ) -> dict[str, Any] | None:
     """Find the file element for a given path."""
-    client = es._get_client()
+    client = repo._get_client()
     result = client.search(
         index="magaldi-code-elements",
         body={
@@ -44,11 +44,11 @@ def _find_file_element(
 
 
 def _find_children(
-    es: Repository,
+    repo: Repository,
     parent_id: str,
 ) -> list[dict[str, Any]]:
     """Find all children of an element."""
-    client = es._get_client()
+    client = repo._get_client()
     result = client.search(
         index="magaldi-code-elements",
         body={
@@ -62,14 +62,14 @@ def _find_children(
 
 
 def _find_elements_in_file(
-    es: Repository,
+    repo: Repository,
     scope: str,
     repository: str,
     username: str,
     relative_path: str,
 ) -> list[dict[str, Any]]:
     """Find all elements in a file."""
-    client = es._get_client()
+    client = repo._get_client()
     result = client.search(
         index="magaldi-code-elements",
         body={
@@ -95,7 +95,7 @@ def _find_elements_in_file(
 
 
 def get_element(
-    es: Repository,
+    repo: Repository,
     element_id: str,
     include_code: bool = False,
     brief: bool = True,
@@ -111,7 +111,7 @@ def get_element(
     Returns:
         Element details.
     """
-    doc = es.get_document_by_id_or_hash(element_id)
+    doc = repo.get_document_by_id_or_hash(element_id)
     if not doc:
         raise ValueError(f"Element not found: {element_id}")
 
@@ -261,7 +261,7 @@ def get_element(
 
 
 def get_context(
-    es: Repository,
+    repo: Repository,
     element_id: str,
     include_siblings: bool = False,
     include_children: bool = True,
@@ -277,7 +277,7 @@ def get_context(
     Returns:
         Hierarchical context.
     """
-    doc = es.get_document_by_id_or_hash(element_id)
+    doc = repo.get_document_by_id_or_hash(element_id)
     if not doc:
         raise ValueError(f"Element not found: {element_id}")
 
@@ -305,7 +305,7 @@ def get_context(
     parent_id = doc.get("parent_id")
 
     # Get file context
-    file_doc = _find_file_element(es, scope, repository, username, relative_path)
+    file_doc = _find_file_element(repo, scope, repository, username, relative_path)
     if file_doc:
         context["file"] = {
             "id": file_doc.get("element_id"),
@@ -315,7 +315,7 @@ def get_context(
 
     # Get parent context
     if parent_id:
-        parent_doc = es.get_document(parent_id)
+        parent_doc = repo.get_document(parent_id)
         if parent_doc:
             context["parent"] = {
                 "id": parent_doc.get("element_id"),
@@ -327,7 +327,7 @@ def get_context(
 
     # Get siblings
     if include_siblings and parent_id:
-        siblings = _find_children(es, parent_id)
+        siblings = _find_children(repo, parent_id)
         context["siblings"] = [
             {
                 "id": s.get("element_id"),
@@ -342,7 +342,7 @@ def get_context(
 
     # Get children
     if include_children:
-        children = _find_children(es, element_id)
+        children = _find_children(repo, element_id)
         context["children"] = [
             {
                 "id": c.get("element_id"),
@@ -359,7 +359,7 @@ def get_context(
 
 
 def get_children(
-    es: Repository,
+    repo: Repository,
     element_id: str,
 ) -> list[dict[str, Any]]:
     """Get child elements of a parent.
@@ -371,7 +371,7 @@ def get_children(
     Returns:
         List of child elements.
     """
-    children = _find_children(es, element_id)
+    children = _find_children(repo, element_id)
     return [
         {
             "element_id": c.get("element_id"),
@@ -388,7 +388,7 @@ def get_children(
 
 
 def batch_get_elements(
-    es: Repository,
+    repo: Repository,
     element_ids: list[str],
     include_code: bool = False,
 ) -> list[dict[str, Any]]:
@@ -405,7 +405,7 @@ def batch_get_elements(
     results = []
     for eid in element_ids:
         # Support both element_id and hash_id formats
-        doc = es.get_document_by_id_or_hash(eid)
+        doc = repo.get_document_by_id_or_hash(eid)
         if doc:
             entry: dict[str, Any] = {
                 "name": doc.get("name"),
@@ -424,7 +424,7 @@ def batch_get_elements(
 
 
 def get_file_structure(
-    es: Repository,
+    repo: Repository,
     scope: str | None = None,
     repository: str | None = None,
     file_path: str = "",
@@ -453,12 +453,12 @@ def get_file_structure(
         raise ValueError("file_path is required")
 
     # Get file element
-    file_doc = _find_file_element(es, scope, repository, username, file_path)
+    file_doc = _find_file_element(repo, scope, repository, username, file_path)
     if not file_doc:
         raise ValueError(f"File not found: {file_path}")
 
     # Get all elements in file
-    all_elements = _find_elements_in_file(es, scope, repository, username, file_path)
+    all_elements = _find_elements_in_file(repo, scope, repository, username, file_path)
 
     # Filter to classes, functions, methods, imports (reduces output significantly)
     structure_types = {"class", "function", "method", "import"}

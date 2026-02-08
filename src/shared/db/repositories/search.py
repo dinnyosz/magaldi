@@ -122,7 +122,7 @@ class SearchRepository:
             body={"query": query, "size": size, "min_score": adjusted_min_score},
         )
 
-        # Normalize scores: ES script_score adds +1.0, OpenSearch knn returns raw cosine
+        # Normalize scores: script_score adds +1.0 (ES), knn returns raw cosine (OpenSearch)
         score_offset = 1.0 if backend_type == "elasticsearch" else 0.0
         return [
             {**hit["_source"], "_score": hit["_score"] - score_offset}
@@ -174,19 +174,19 @@ class SearchRepository:
             }
         }
 
-        es_query: dict[str, Any] = {
+        search_query: dict[str, Any] = {
             "bool": {
                 "must": [must_clause],
             }
         }
 
         if filter_clauses:
-            es_query["bool"]["filter"] = filter_clauses
+            search_query["bool"]["filter"] = filter_clauses
 
         client = self._get_client()
         result = client.search(
             index=INDEX_NAME,
-            body={"query": es_query, "size": size},
+            body={"query": search_query, "size": size},
         )
 
         return [

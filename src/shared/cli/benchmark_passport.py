@@ -52,7 +52,7 @@ ALL_VARIANT_NAMES = [
     "plus_siblings",
 ]
 
-# ES index
+# Index name
 INDEX_NAME = "magaldi-code-elements"
 
 
@@ -106,23 +106,23 @@ def _auto_detect_repo() -> tuple[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Phase 1: Connect to ES + validate embedding model
+# Phase 1: Connect to search backend + validate embedding model
 # ---------------------------------------------------------------------------
 
 
 def _connect() -> Any:
-    """Create ES repository and verify connectivity."""
+    """Create repository and verify connectivity."""
     from shared.config import load_config
     from shared.db.repositories import Repository
 
     config = load_config(skip_validation=True)
-    es = Repository(config)
+    repo = Repository(config)
     # Quick connectivity check
-    client = es._get_client()
+    client = repo._get_client()
     if not client.ping():
         console.print("[red]Error:[/] Cannot connect to search backend")
         sys.exit(1)
-    return es
+    return repo
 
 
 def _verify_embedding_model() -> Any:
@@ -162,7 +162,7 @@ def _verify_embedding_model() -> Any:
 
 
 def _sample_ground_truth(
-    es: Any,
+    repo: Any,
     scope: str,
     repository: str,
     n_callers: int,
@@ -173,7 +173,7 @@ def _sample_ground_truth(
     Returns:
         (pairs, caller_ids, callee_ids)
     """
-    client = es._get_client()
+    client = repo._get_client()
 
     # Find elements with resolved calls (not embedding_resolved)
     query = {
@@ -268,7 +268,7 @@ def _sample_ground_truth(
 
 
 def _batch_check_existence(client: Any, element_ids: list[str]) -> set[str]:
-    """Check which element IDs exist in ES via mget."""
+    """Check which element IDs exist via mget."""
     if not element_ids:
         return set()
 
@@ -291,7 +291,7 @@ def _batch_check_existence(client: Any, element_ids: list[str]) -> set[str]:
 
 
 def _sample_negatives(
-    es: Any,
+    repo: Any,
     scope: str,
     repository: str,
     n_negatives: int,
@@ -299,7 +299,7 @@ def _sample_negatives(
     seed: int,
 ) -> set[str]:
     """Sample random function/method elements as negative distractors."""
-    client = es._get_client()
+    client = repo._get_client()
 
     query = {
         "bool": {
@@ -332,7 +332,7 @@ def _sample_negatives(
 
 
 # ---------------------------------------------------------------------------
-# Phase 4: Fetch full documents via ES mget
+# Phase 4: Fetch full documents via mget
 # ---------------------------------------------------------------------------
 
 
@@ -1020,14 +1020,14 @@ def run_benchmark(
     console.print()
 
     # Phase 1: Connect
-    console.print("[bold]Phase 1:[/] Connecting to ES + validating embedding model...")
-    es = _connect()
+    console.print("[bold]Phase 1:[/] Connecting to search backend + validating embedding model...")
+    repo = _connect()
     embed_client = _verify_embedding_model()
     console.print("  [green]OK[/]")
 
     # Phase 2: Sample ground truth
     console.print("\n[bold]Phase 2:[/] Sampling ground truth pairs...")
-    pairs, caller_ids, callee_ids = _sample_ground_truth(es, scope, repository, n_callers, seed)
+    pairs, caller_ids, callee_ids = _sample_ground_truth(repo, scope, repository, n_callers, seed)
     if not pairs:
         console.print("[red]Error:[/] No valid ground truth pairs found")
         sys.exit(1)
@@ -1035,12 +1035,12 @@ def run_benchmark(
     # Phase 3: Negative distractors
     console.print("\n[bold]Phase 3:[/] Sampling negative distractors...")
     exclude = caller_ids | callee_ids
-    neg_ids = _sample_negatives(es, scope, repository, n_negatives, exclude, seed)
+    neg_ids = _sample_negatives(repo, scope, repository, n_negatives, exclude, seed)
 
     # Phase 4: Fetch full documents
     console.print("\n[bold]Phase 4:[/] Fetching documents...")
     all_ids = list(caller_ids | callee_ids | neg_ids)
-    client = es._get_client()
+    client = repo._get_client()
     docs = _fetch_documents(client, all_ids)
     console.print(f"  Fetched {len(docs)} documents")
 
@@ -1147,7 +1147,7 @@ def run_benchmark(
     md_path = _save_markdown(results, len(pairs), len(neg_ids), n_callers, seed, output_dir)
     console.print(f"\n  [green]Saved to:[/] {md_path}")
 
-    es.close()
+    repo.close()
 
 
 # ---------------------------------------------------------------------------

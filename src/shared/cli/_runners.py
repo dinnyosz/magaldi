@@ -138,7 +138,7 @@ def run_processing(
 
     # Handle deleted files: remove elements for files that no longer exist on disk
     # Note: Modified files are handled by process_elements' smart delete (compares
-    # existing ES elements with newly parsed elements, deletes only stale ones)
+    # existing indexed elements with newly parsed elements, deletes only stale ones)
     deleted_from_files = 0
     if manifest.deleted_files:
         for file_info in manifest.deleted_files:
