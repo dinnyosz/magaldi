@@ -276,7 +276,7 @@ class ElementRepository:
 
         Returns:
             Dict mapping element_id to {content_hash, has_summary, has_summary_embedding,
-            has_code_embedding}.
+            has_code_embedding, has_caller_embedding}.
         """
         if not element_ids:
             return {}
@@ -287,7 +287,7 @@ class ElementRepository:
         response = client.mget(
             index=INDEX_NAME,
             ids=element_ids,
-            _source=["content_hash", "summary", "summary_embedding", "code_embedding"],
+            _source=["content_hash", "summary", "summary_embedding", "code_embedding", "caller_embedding"],
         )
 
         result = {}
@@ -297,6 +297,7 @@ class ElementRepository:
                 summary = source.get("summary")
                 summary_emb = source.get("summary_embedding")
                 code_emb = source.get("code_embedding")
+                caller_emb = source.get("caller_embedding")
 
                 # Check for actual non-empty content, not just existence
                 result[doc["_id"]] = {
@@ -304,6 +305,7 @@ class ElementRepository:
                     "has_summary": isinstance(summary, str) and len(summary) > 0,
                     "has_summary_embedding": isinstance(summary_emb, list) and len(summary_emb) > 0,
                     "has_code_embedding": isinstance(code_emb, list) and len(code_emb) > 0,
+                    "has_caller_embedding": isinstance(caller_emb, list) and len(caller_emb) > 0,
                 }
 
         return result
@@ -359,7 +361,7 @@ class ElementRepository:
                         "filter": filters
                     }
                 },
-                "_source": ["content_hash", "summary", "summary_embedding", "code_embedding"],
+                "_source": ["content_hash", "summary", "summary_embedding", "code_embedding", "caller_embedding"],
                 "size": len(content_hashes) * 2,  # Allow for some duplicates
             },
         )
@@ -375,17 +377,20 @@ class ElementRepository:
             summary = source.get("summary")
             summary_emb = source.get("summary_embedding")
             code_emb = source.get("code_embedding")
+            caller_emb = source.get("caller_embedding")
 
             state = {
                 "content_hash": content_hash,
                 "has_summary": isinstance(summary, str) and len(summary) > 0,
                 "has_summary_embedding": isinstance(summary_emb, list) and len(summary_emb) > 0,
                 "has_code_embedding": isinstance(code_emb, list) and len(code_emb) > 0,
+                "has_caller_embedding": isinstance(caller_emb, list) and len(caller_emb) > 0,
                 "old_element_id": hit["_id"],  # Original ID for reference
                 # Include actual values for copying to new element
                 "summary": summary,
                 "summary_embedding": summary_emb,
                 "code_embedding": code_emb,
+                "caller_embedding": caller_emb,
             }
 
             # Keep the better match (one with summary)

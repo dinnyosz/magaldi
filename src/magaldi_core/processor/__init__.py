@@ -225,12 +225,13 @@ def process_elements(
             has_summary = state.get("has_summary", False)
             has_summary_embedding = state.get("has_summary_embedding", False)
             has_code_embedding = state.get("has_code_embedding", False)
+            has_caller_embedding = state.get("has_caller_embedding", False)
 
             # Check if element is fully processed
-            # For embeddable elements, require both embeddings
+            # For embeddable elements, require all three embeddings
             is_embeddable = should_embed(elem)
             is_fully_processed = has_summary and (
-                not is_embeddable or (has_summary_embedding and has_code_embedding)
+                not is_embeddable or (has_summary_embedding and has_code_embedding and has_caller_embedding)
             )
 
             if content_unchanged and is_fully_processed:
@@ -246,6 +247,7 @@ def process_elements(
                         state.get("summary"),
                         state.get("summary_embedding"),
                         state.get("code_embedding"),
+                        state.get("caller_embedding"),
                         es_repo,
                         file_hash,
                         element_count,
