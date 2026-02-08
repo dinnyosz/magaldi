@@ -221,6 +221,21 @@ class MetadataRepository:
         """
         return self.store_embedding(element_id, embedding, embedding_type="code")
 
+    def store_caller_embedding(self, element_id: str, embedding: list[float]) -> bool:
+        """Store caller embedding (convenience wrapper).
+
+        Caller embedding = summary embedding enriched with outbound calls.
+        Used for asymmetric call resolution (Strategy 6).
+
+        Args:
+            element_id: Element ID to update.
+            embedding: Vector embedding (1024 dimensions).
+
+        Returns:
+            True on success.
+        """
+        return self.store_embedding(element_id, embedding, embedding_type="caller")
+
     def get_embedding(
         self, element_id: str, embedding_type: str = "summary"
     ) -> list[float] | None:

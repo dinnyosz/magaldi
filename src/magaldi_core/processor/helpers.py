@@ -11,8 +11,9 @@ from typing import TYPE_CHECKING, Callable
 
 from shared.ai.context_size import compute_element_num_ctx
 from shared.ai.embedding import (
-    build_summary_embedding_text,
+    build_caller_embedding_text,
     build_code_embedding_text,
+    build_summary_embedding_text,
     normalize_vector,
     validate_vector,
 )
@@ -128,8 +129,8 @@ def _embed_element(
     embed_client: "CodeEmbeddingClient",
     config: ProcessingConfig,
     on_stage_change: Callable[[str], None] | None = None,
-) -> tuple[list[float], list[float], float, float]:
-    """Generate both embeddings for an element.
+) -> tuple[list[float], list[float], list[float], float, float, float]:
+    """Generate all three embeddings for an element.
 
     Args:
         element: Element to embed.
@@ -139,12 +140,13 @@ def _embed_element(
         on_stage_change: Optional callback to update status stage.
 
     Returns:
-        Tuple of (summary_embedding, code_embedding, summary_embed_time, code_embed_time).
+        Tuple of (summary_embedding, code_embedding, caller_embedding,
+                  summary_embed_time, code_embed_time, caller_embed_time).
 
     Raises:
         ValueError: If embedding validation fails.
     """
-    # Summary embedding (existing logic)
+    # Summary embedding
     if on_stage_change:
         on_stage_change("summ_embed")
     summary_text = build_summary_embedding_text(element, summary_cache, config.embed_max_context)
@@ -160,7 +162,7 @@ def _embed_element(
         )
     summary_embedding = normalize_vector(summary_embedding)
 
-    # Code embedding (new)
+    # Code embedding
     if on_stage_change:
         on_stage_change("code_embed")
     code_text = build_code_embedding_text(element, config.embed_max_context)
@@ -176,7 +178,28 @@ def _embed_element(
         )
     code_embedding = normalize_vector(code_embedding)
 
-    return summary_embedding, code_embedding, summary_embed_time, code_embed_time
+    # Caller embedding (passport + outbound calls for asymmetric resolution)
+    # Only elements with calls benefit — without calls, text is identical to summary
+    caller_embed_time = 0.0
+    if element.calls:
+        if on_stage_change:
+            on_stage_change("caller_embed")
+        caller_text = build_caller_embedding_text(element, summary_cache, config.embed_max_context)
+        caller_start = time.time()
+        caller_embedding = embed_client.embed_single(caller_text, timeout=config.embed_timeout)
+        caller_embed_time = time.time() - caller_start
+
+        if not validate_vector(caller_embedding, config.embed_dimensions):
+            raise ValueError(
+                f"Invalid caller embedding: expected {config.embed_dimensions} dims, "
+                f"got {len(caller_embedding)}"
+            )
+        caller_embedding = normalize_vector(caller_embedding)
+    else:
+        # No calls — reuse summary embedding (identical text)
+        caller_embedding = summary_embedding
+
+    return summary_embedding, code_embedding, caller_embedding, summary_embed_time, code_embed_time, caller_embed_time
 
 
 def _index_element(
@@ -184,17 +207,19 @@ def _index_element(
     summary: str,
     summary_embedding: list[float] | None,
     code_embedding: list[float] | None,
+    caller_embedding: list[float] | None,
     es_repo: "ElasticsearchRepository",
     file_hash: str | None = None,
     element_count: int | None = None,
 ) -> bool:
-    """Index element to Elasticsearch with summary and both embeddings.
+    """Index element to Elasticsearch with summary and all embeddings.
 
     Args:
         element: Element to index.
         summary: Generated summary.
         summary_embedding: Summary embedding vector (or None if not embedded).
         code_embedding: Code embedding vector (or None if not embedded).
+        caller_embedding: Caller embedding vector (or None if not embedded).
         es_repo: Elasticsearch repository.
         file_hash: File hash for all elements.
         element_count: Total element count in file (only for file-level elements).
@@ -213,6 +238,8 @@ def _index_element(
         es_repo.store_summary_embedding(element.element_id, summary_embedding)
     if code_embedding is not None:
         es_repo.store_code_embedding(element.element_id, code_embedding)
+    if caller_embedding is not None:
+        es_repo.store_caller_embedding(element.element_id, caller_embedding)
 
     # Store imports for file elements
     if element.element_type == "file" and element.imports:
@@ -222,8 +249,8 @@ def _index_element(
         ]
         es_repo.store_imports(element.element_id, imports_data)
 
-    # Store calls for function/method elements
-    if element.element_type in ("function", "method") and element.calls:
+    # Store calls for function/method/file elements
+    if element.element_type in ("function", "method", "file") and element.calls:
         calls_data = [
             {
                 "name": call.name,
@@ -337,9 +364,11 @@ def _process_single_element(
         # Cache summary for children
         summary_cache.add_summary(element.element_id, summary)
 
-        # Step 2: Embed (if applicable) - generate both summary and code embeddings
+        # Step 2: Embed (if applicable) - generate summary, code, and caller embeddings
         summary_embedding: list[float] | None = None
         code_embedding: list[float] | None = None
+        caller_embedding: list[float] | None = None
+        caller_embed_time = 0.0
         if should_embed(element):
             if config.skip_ai:
                 # Skip embeddings entirely - don't generate zero vectors
@@ -348,14 +377,14 @@ def _process_single_element(
                 update_status("code_embed", config.embed_model.name, "-")
                 # Leave embeddings as None
             else:
-                # Generate both embeddings (returns tuple with timing)
+                # Generate all embeddings (returns tuple with timing)
                 # Pass callback to update status between embedding phases
                 def on_embed_stage(stage: str) -> None:
                     update_status(stage, config.embed_model.name, "-")
-                summary_embedding, code_embedding, summary_embed_time, code_embed_time = _embed_element(
+                summary_embedding, code_embedding, caller_embedding, summary_embed_time, code_embed_time, caller_embed_time = _embed_element(
                     element, summary_cache, embed_client, config, on_embed_stage
                 )
-                embed_time = summary_embed_time + code_embed_time
+                embed_time = summary_embed_time + code_embed_time + caller_embed_time
 
         # Step 3: Index to ES (only after summarize+embed complete)
         update_status("indexing")
@@ -367,7 +396,7 @@ def _process_single_element(
         if element.element_type == "file" and element_counts:
             element_count = element_counts.get(element.relative_path)
 
-        _index_element(element, summary, summary_embedding, code_embedding, es_repo, file_hash, element_count)
+        _index_element(element, summary, summary_embedding, code_embedding, caller_embedding, es_repo, file_hash, element_count)
 
         worker_status.clear(worker_id)
         wall_time = time.time() - start_wall

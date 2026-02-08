@@ -155,6 +155,14 @@ INDEX_MAPPING = {
                 "index": True,
                 "similarity": "cosine",
             },
+            # Asymmetric caller embedding (passport + outbound calls)
+            # Used by Strategy 6: caller.caller_embedding vs candidate.summary_embedding
+            "caller_embedding": {
+                "type": "dense_vector",
+                "dims": 1024,
+                "index": True,
+                "similarity": "cosine",
+            },
             # On file elements - stores imports
             "imports": {
                 "type": "nested",

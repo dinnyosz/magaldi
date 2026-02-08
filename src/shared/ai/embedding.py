@@ -556,12 +556,6 @@ def build_summary_embedding_text(
         summary = embedding_store.get_summary(element.element_id)
         parts.append(f"Summary: {summary or 'No summary available'}")
 
-        # Top-level calls (e.g., app = Flask(__name__), setup(), register_routes())
-        if element.calls:
-            calls_text = _format_calls_text(element.calls)
-            if calls_text:
-                parts.append(f"Calls: {calls_text}")
-
     elif element.element_type == "class":
         # Include file context
         file_summary = embedding_store.get_file_summary(element)
@@ -601,13 +595,6 @@ def build_summary_embedding_text(
                 docstring += "..."
             parts.append(f"Docstring: {docstring}")
 
-        # Outbound call names improve caller→callee embedding similarity
-        # by +7.3% MRR (validated via passport embedding benchmark)
-        if element.calls:
-            calls_text = _format_calls_text(element.calls)
-            if calls_text:
-                parts.append(f"Calls: {calls_text}")
-
     elif element.element_type in ("variable", "constant"):
         # Variables and constants get hierarchical context
         file_summary = embedding_store.get_file_summary(element)
@@ -632,6 +619,39 @@ def build_summary_embedding_text(
             parts.append(f"Summary: {summary}")
 
     text = "\n".join(parts)
+    cpt = chars_per_token_for_language(element.language)
+    return validate_context_length(text, max_tokens, chars_per_token=cpt)
+
+
+def build_caller_embedding_text(
+    element: CodeElement,
+    embedding_store: EmbeddingStore,
+    max_tokens: int = 8000,
+) -> str:
+    """Build text for caller embedding (passport + outbound calls).
+
+    Starts from the summary embedding text (the element's identity/passport),
+    then enriches it with outbound call names. Used for asymmetric call
+    resolution: caller.caller_embedding vs candidate.summary_embedding.
+
+    For elements without calls, this produces identical text to
+    build_summary_embedding_text().
+
+    Args:
+        element: Code element to embed.
+        embedding_store: Store for getting summaries.
+        max_tokens: Maximum context tokens.
+
+    Returns:
+        Formatted embedding text with calls appended.
+    """
+    text = build_summary_embedding_text(element, embedding_store, max_tokens)
+
+    if element.calls:
+        calls_text = _format_calls_text(element.calls)
+        if calls_text:
+            text += f"\nCalls: {calls_text}"
+
     cpt = chars_per_token_for_language(element.language)
     return validate_context_length(text, max_tokens, chars_per_token=cpt)
 
