@@ -40,7 +40,7 @@ RELATIONSHIPS_INDEX_NAME = "magaldi-relationships"
 # Index name for external references (env vars, config keys, events, etc.)
 EXTERNAL_REFS_INDEX_NAME = "magaldi-external-refs"
 
-# Index mapping with dense_vector for embeddings
+# Base index mapping (vector fields are overridden by _make_index_mapping)
 INDEX_MAPPING = {
     "mappings": {
         "properties": {
@@ -466,6 +466,25 @@ EXTERNAL_REFS_INDEX_MAPPING = {
 }
 
 
+def _make_relationships_mapping(backend_type: str) -> dict[str, Any]:
+    """Build the relationships index mapping with backend-specific field types.
+
+    Args:
+        backend_type: "opensearch" or "elasticsearch".
+
+    Returns:
+        Full relationships index mapping dict ready for index creation.
+    """
+    import copy
+
+    mapping = copy.deepcopy(RELATIONSHIPS_INDEX_MAPPING)
+    if backend_type == "opensearch":
+        # OpenSearch uses "flat_object" instead of "flattened"
+        if "details" in mapping["mappings"]["properties"]:
+            mapping["mappings"]["properties"]["details"]["type"] = "flat_object"
+    return mapping
+
+
 def _make_index_mapping(backend_type: str, dims: int = 1024) -> dict[str, Any]:
     """Build the main index mapping with backend-specific vector fields.
 
@@ -529,7 +548,7 @@ class RepositoryBase:
                 client.index_create(INDEX_NAME, _make_index_mapping(bt))
             # Relationships index (knowledge graph edges)
             if not client.index_exists(RELATIONSHIPS_INDEX_NAME):
-                client.index_create(RELATIONSHIPS_INDEX_NAME, RELATIONSHIPS_INDEX_MAPPING)
+                client.index_create(RELATIONSHIPS_INDEX_NAME, _make_relationships_mapping(bt))
             # External references index (env vars, config keys, events, etc.)
             if not client.index_exists(EXTERNAL_REFS_INDEX_NAME):
                 client.index_create(EXTERNAL_REFS_INDEX_NAME, EXTERNAL_REFS_INDEX_MAPPING)

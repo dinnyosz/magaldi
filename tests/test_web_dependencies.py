@@ -122,7 +122,7 @@ class TestCheckElasticsearchHealth:
         """Test returns healthy status for healthy cluster."""
         mock_repo = MagicMock()
         mock_client = MagicMock()
-        mock_client.cluster.health.return_value = {
+        mock_client.cluster_health.return_value = {
             "status": "green",
             "number_of_nodes": 3,
         }
@@ -150,7 +150,7 @@ class TestCheckElasticsearchHealth:
         """Test handles missing fields in health response."""
         mock_repo = MagicMock()
         mock_client = MagicMock()
-        mock_client.cluster.health.return_value = {}
+        mock_client.cluster_health.return_value = {}
         mock_repo._get_client.return_value = mock_client
 
         result = await check_search_health(mock_repo)

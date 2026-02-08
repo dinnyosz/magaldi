@@ -68,11 +68,11 @@ class TestGetFileStatesWithIncompleteElements:
         from shared.db.store import ElasticsearchFileStateRepository
 
         repo = ElasticsearchFileStateRepository.__new__(ElasticsearchFileStateRepository)
-        repo._es = MagicMock()
+        repo._repo = MagicMock()
         repo._config = MagicMock()
 
         # Simulate ES returning file states
-        repo._es.get_file_states.return_value = {
+        repo._repo.get_file_states.return_value = {
             "src/foo.py": {
                 "file_hash": "abc123",
                 "element_count": 5,
@@ -83,9 +83,9 @@ class TestGetFileStatesWithIncompleteElements:
             },
         }
         # src/foo.py has incomplete elements
-        repo._es.find_files_with_incomplete_elements.return_value = ["src/foo.py"]
+        repo._repo.find_files_with_incomplete_elements.return_value = ["src/foo.py"]
         # element counts match (no count mismatch)
-        repo._es.count_elements_by_path.return_value = 5
+        repo._repo.count_elements_by_path.return_value = 5
 
         states = repo.get_file_states("s", "r", "main")
 
@@ -93,7 +93,7 @@ class TestGetFileStatesWithIncompleteElements:
         assert states["src/foo.py"].file_hash is None
         # src/bar.py should keep its hash (complete, but count check may apply)
         # We need to mock count for bar too
-        repo._es.count_elements_by_path.side_effect = lambda *a: {
+        repo._repo.count_elements_by_path.side_effect = lambda *a: {
             ("s", "r", "main", "src/foo.py"): 5,
             ("s", "r", "main", "src/bar.py"): 3,
         }.get(a, 0)
@@ -107,15 +107,15 @@ class TestGetFileStatesWithIncompleteElements:
         from shared.db.store import ElasticsearchFileStateRepository
 
         repo = ElasticsearchFileStateRepository.__new__(ElasticsearchFileStateRepository)
-        repo._es = MagicMock()
+        repo._repo = MagicMock()
         repo._config = MagicMock()
 
-        repo._es.get_file_states.return_value = {
+        repo._repo.get_file_states.return_value = {
             "src/foo.py": {"file_hash": "abc123", "element_count": 3},
         }
         # No incomplete elements
-        repo._es.find_files_with_incomplete_elements.return_value = []
-        repo._es.count_elements_by_path.return_value = 3
+        repo._repo.find_files_with_incomplete_elements.return_value = []
+        repo._repo.count_elements_by_path.return_value = 3
 
         states = repo.get_file_states("s", "r", "main")
         assert states["src/foo.py"].file_hash == "abc123"
@@ -125,11 +125,11 @@ class TestGetFileStatesWithIncompleteElements:
         from shared.db.store import ElasticsearchFileStateRepository
 
         repo = ElasticsearchFileStateRepository.__new__(ElasticsearchFileStateRepository)
-        repo._es = MagicMock()
+        repo._repo = MagicMock()
         repo._config = MagicMock()
 
-        repo._es.get_file_states.return_value = {}
-        repo._es.find_files_with_incomplete_elements.return_value = []
+        repo._repo.get_file_states.return_value = {}
+        repo._repo.find_files_with_incomplete_elements.return_value = []
 
         states = repo.get_file_states("s", "r", "main")
         assert states == {}

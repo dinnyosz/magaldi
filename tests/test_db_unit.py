@@ -126,16 +126,16 @@ class TestIndexElement:
 
     def test_index_element_success(self, mock_repo, mock_client, sample_element):
         """Test successful element indexing."""
-        mock_client.index.return_value = {"result": "created"}
+        mock_client.index_document.return_value = {"result": "created"}
 
         result = mock_repo.index_element(sample_element)
 
         assert result is True
-        mock_client.index.assert_called_once()
+        mock_client.index_document.assert_called_once()
 
     def test_index_element_with_file_hash(self, mock_repo, mock_client, sample_element):
         """Test indexing element with file hash."""
-        mock_client.index.return_value = {"result": "created"}
+        mock_client.index_document.return_value = {"result": "created"}
 
         result = mock_repo.index_element(
             sample_element,
@@ -143,8 +143,9 @@ class TestIndexElement:
         )
 
         assert result is True
-        call_args = mock_client.index.call_args
-        assert call_args[1]["document"]["file_hash"] == "abc123"
+        call_args = mock_client.index_document.call_args
+        doc = call_args[0][2]  # 3rd positional arg: (index, doc_id, document)
+        assert doc["file_hash"] == "abc123"
 
 
 # =============================================================================
@@ -157,7 +158,7 @@ class TestGetDocument:
 
     def test_get_document_found(self, mock_repo, mock_client):
         """Test getting existing document."""
-        mock_client.get.return_value = {
+        mock_client.get_document.return_value = {
             "_source": {"name": "test", "element_id": "test_id"}
         }
 
@@ -168,7 +169,7 @@ class TestGetDocument:
 
     def test_get_document_not_found(self, mock_repo, mock_client):
         """Test getting non-existent document."""
-        mock_client.get.side_effect = NotFoundError(404, "not found", {})
+        mock_client.get_document.side_effect = NotFoundError("not found")
 
         result = mock_repo.get_document("nonexistent")
 
@@ -212,7 +213,7 @@ class TestElementExists:
 
     def test_element_exists_true(self, mock_repo, mock_client):
         """Test element exists returns true."""
-        mock_client.exists.return_value = True
+        mock_client.exists_document.return_value = True
 
         result = mock_repo.element_exists("test_id")
 
@@ -220,7 +221,7 @@ class TestElementExists:
 
     def test_element_exists_false(self, mock_repo, mock_client):
         """Test element exists returns false."""
-        mock_client.exists.return_value = False
+        mock_client.exists_document.return_value = False
 
         result = mock_repo.element_exists("nonexistent")
 
@@ -253,12 +254,12 @@ class TestStoreEmbedding:
 
     def test_store_embedding_success(self, mock_repo, mock_client):
         """Test successful embedding storage."""
-        mock_client.update.return_value = {"result": "updated"}
+        mock_client.update_document.return_value = {"result": "updated"}
 
         result = mock_repo.store_embedding("test_id", [0.1] * 1024)
 
         assert result is True
-        mock_client.update.assert_called_once()
+        mock_client.update_document.assert_called_once()
 
 
 # =============================================================================
@@ -271,7 +272,7 @@ class TestStoreSummary:
 
     def test_store_summary_success(self, mock_repo, mock_client):
         """Test successful summary storage."""
-        mock_client.update.return_value = {"result": "updated"}
+        mock_client.update_document.return_value = {"result": "updated"}
 
         result = mock_repo.store_summary("test_id", "Test summary")
 
@@ -486,7 +487,7 @@ class TestGetEmbedding:
 
     def test_get_summary_embedding_found(self, mock_repo, mock_client):
         """Test getting summary embedding for existing element."""
-        mock_client.get.return_value = {
+        mock_client.get_document.return_value = {
             "_source": {"summary_embedding": [0.1] * 1024}
         }
 
@@ -497,7 +498,7 @@ class TestGetEmbedding:
 
     def test_get_code_embedding_found(self, mock_repo, mock_client):
         """Test getting code embedding for existing element."""
-        mock_client.get.return_value = {
+        mock_client.get_document.return_value = {
             "_source": {"code_embedding": [0.2] * 1024}
         }
 
@@ -509,7 +510,7 @@ class TestGetEmbedding:
 
     def test_get_embedding_default_is_summary(self, mock_repo, mock_client):
         """Test that default embedding_type is 'summary'."""
-        mock_client.get.return_value = {
+        mock_client.get_document.return_value = {
             "_source": {"summary_embedding": [0.3] * 1024}
         }
 
@@ -520,7 +521,7 @@ class TestGetEmbedding:
 
     def test_get_embedding_not_found(self, mock_repo, mock_client):
         """Test getting embedding for non-existent element."""
-        mock_client.get.side_effect = NotFoundError(404, "not found", {})
+        mock_client.get_document.side_effect = NotFoundError("not found")
 
         result = mock_repo.get_embedding("nonexistent")
 

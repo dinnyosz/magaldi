@@ -62,9 +62,9 @@ class TestIndexGlossary:
         )
 
         assert result is True
-        mock_client.index.assert_called_once()
-        call_kwargs = mock_client.index.call_args[1]
-        doc = call_kwargs["document"]
+        mock_client.index_document.assert_called_once()
+        call_args = mock_client.index_document.call_args[0]
+        doc = call_args[2]
 
         assert doc["term"] == "user"
         assert doc["element_type"] == "glossary"
@@ -93,8 +93,8 @@ class TestIndexGlossary:
         )
 
         assert result is True
-        call_kwargs = mock_client.index.call_args[1]
-        doc = call_kwargs["document"]
+        call_args = mock_client.index_document.call_args[0]
+        doc = call_args[2]
         assert doc["element_ids"] == []
         assert doc["file_paths"] == []
         assert doc["total_count"] == 0
@@ -113,8 +113,8 @@ class TestIndexGlossary:
             description="A person who uses the system",
         )
 
-        call_args = mock_client.index.call_args
-        body = call_args[1]["document"]
+        call_args_data = mock_client.index_document.call_args[0]
+        body = call_args_data[2]
         assert body["description"] == "A person who uses the system"
 
     def test_indexes_glossary_with_empty_description_by_default(self, mock_repo, mock_client):
@@ -130,8 +130,8 @@ class TestIndexGlossary:
             file_paths=["path/to/file.py"],
         )
 
-        call_args = mock_client.index.call_args
-        body = call_args[1]["document"]
+        call_args_data = mock_client.index_document.call_args[0]
+        body = call_args_data[2]
         assert body["description"] == ""
 
 
@@ -288,7 +288,7 @@ class TestGetGlossaryTerm:
 
     def test_returns_specific_term(self, mock_repo, mock_client):
         """Test getting a specific glossary term."""
-        mock_client.get.return_value = {
+        mock_client.get_document.return_value = {
             "found": True,
             "_source": {
                 "term": "user",
@@ -314,7 +314,7 @@ class TestGetGlossaryTerm:
 
     def test_returns_none_when_term_not_found(self, mock_repo, mock_client):
         """Test returns None when term doesn't exist."""
-        mock_client.get.return_value = {"found": False}
+        mock_client.get_document.return_value = {"found": False}
 
         result = mock_repo.get_glossary_term(
             scope="scope",
@@ -327,7 +327,7 @@ class TestGetGlossaryTerm:
 
     def test_returns_none_on_exception(self, mock_repo, mock_client):
         """Test returns None when exception occurs."""
-        mock_client.get.side_effect = Exception("ES error")
+        mock_client.get_document.side_effect = Exception("ES error")
 
         result = mock_repo.get_glossary_term(
             scope="scope",
@@ -340,7 +340,7 @@ class TestGetGlossaryTerm:
 
     def test_returns_description_field(self, mock_repo, mock_client):
         """Test that description field is returned."""
-        mock_client.get.return_value = {
+        mock_client.get_document.return_value = {
             "found": True,
             "_source": {
                 "term": "user",
@@ -364,7 +364,7 @@ class TestGetGlossaryTerm:
 
     def test_returns_empty_description_when_missing(self, mock_repo, mock_client):
         """Test that description defaults to empty string when not in source."""
-        mock_client.get.return_value = {
+        mock_client.get_document.return_value = {
             "found": True,
             "_source": {
                 "term": "user",
@@ -515,11 +515,12 @@ class TestUpdateGlossaryFeatureAssociations:
         )
 
         assert result is True
-        mock_client.update.assert_called_once()
-        call_kwargs = mock_client.update.call_args[1]
-        assert call_kwargs["id"] == "scope:repo:main:glossary:user"
-        assert call_kwargs["doc"]["feature_associations"] == associations
-        assert "updated_at" in call_kwargs["doc"]
+        mock_client.update_document.assert_called_once()
+        call_args = mock_client.update_document.call_args
+        assert call_args[0][1] == "scope:repo:main:glossary:user"
+        doc = call_args[1]["body"]["doc"]
+        assert doc["feature_associations"] == associations
+        assert "updated_at" in doc
 
     def test_updates_with_empty_associations(self, mock_repo, mock_client):
         """Test clearing feature associations."""
@@ -529,8 +530,9 @@ class TestUpdateGlossaryFeatureAssociations:
         )
 
         assert result is True
-        call_kwargs = mock_client.update.call_args[1]
-        assert call_kwargs["doc"]["feature_associations"] == []
+        call_args = mock_client.update_document.call_args
+        doc = call_args[1]["body"]["doc"]
+        assert doc["feature_associations"] == []
 
     def test_updates_with_multiple_associations(self, mock_repo, mock_client):
         """Test updating with multiple feature associations."""
@@ -557,8 +559,9 @@ class TestUpdateGlossaryFeatureAssociations:
         )
 
         assert result is True
-        call_kwargs = mock_client.update.call_args[1]
-        assert len(call_kwargs["doc"]["feature_associations"]) == 2
+        call_args = mock_client.update_document.call_args
+        doc = call_args[1]["body"]["doc"]
+        assert len(doc["feature_associations"]) == 2
 
 
 # =============================================================================
