@@ -572,11 +572,11 @@ def process_elements(
                 # Get element's tier for accurate ETA tracking
                 element_tier = dependency_tracker._get_tier(element.element_id)
 
-                # Use allowed workers for throughput calculation (average of start and end)
-                # This is more stable than actual counts which fluctuate during ramp-up
+                # Use peak allowed workers for throughput calculation
+                # max(start, end) reflects the peak concurrency the element competed with
                 allowed_at_start = future_to_allowed_at_start.pop(future, throttle_limit)
                 allowed_at_end = throttle_limit
-                avg_workers = min(allowed_at_start, allowed_at_end)
+                avg_workers = max(allowed_at_start, allowed_at_end)
 
                 # Record timing with element type, tier, and avg_workers (for throughput)
                 # Skip handcrafted types (imports) - they don't use LLM and aren't in ETA
