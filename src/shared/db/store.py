@@ -58,19 +58,15 @@ class FileStateRepository:
             file_hash = state.get("file_hash")
             element_count = state.get("element_count")
 
-            # If element count mismatches, update it to match actual count.
-            # This handles cases where parser changes altered element extraction
-            # without changing file content. File hash is the source of truth.
+            # If element count mismatches, force re-processing.
+            # This handles interrupted Phase 4 runs where FILE elements were
+            # indexed but child elements weren't processed yet.
             if file_hash and element_count is not None:
                 actual_count = self._repo.count_elements_by_path(
                     scope, repository, username, path
                 )
                 if actual_count != element_count:
-                    # Update the stored element_count to match reality
-                    self._repo.update_file_element_count(
-                        scope, repository, username, path, actual_count
-                    )
-                    element_count = actual_count
+                    file_hash = None  # Force re-processing
 
             # Force re-processing for files with incomplete elements
             if path in incomplete_paths:

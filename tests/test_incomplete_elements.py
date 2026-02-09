@@ -102,6 +102,33 @@ class TestGetFileStatesWithIncompleteElements:
         assert states["src/foo.py"].file_hash is None
         assert states["src/bar.py"].file_hash == "def456"
 
+    def test_count_mismatch_nullifies_hash(self) -> None:
+        """Files with fewer elements than expected should have file_hash=None.
+
+        This handles interrupted Phase 4 runs where FILE elements were indexed
+        but child elements weren't processed yet.
+        """
+        from shared.db.store import ElasticsearchFileStateRepository
+
+        repo = ElasticsearchFileStateRepository.__new__(ElasticsearchFileStateRepository)
+        repo._repo = MagicMock()
+        repo._config = MagicMock()
+
+        repo._repo.get_file_states.return_value = {
+            "src/foo.py": {
+                "file_hash": "abc123",
+                "element_count": 10,  # FILE element says 10 elements
+            },
+        }
+        repo._repo.find_files_with_incomplete_elements.return_value = []
+        # Only 3 elements actually exist (interrupted run)
+        repo._repo.count_elements_by_path.return_value = 3
+
+        states = repo.get_file_states("s", "r", "main")
+
+        # file_hash should be None because count mismatch
+        assert states["src/foo.py"].file_hash is None
+
     def test_complete_files_keep_hash(self) -> None:
         """Files with all embeddings complete should keep their file_hash."""
         from shared.db.store import ElasticsearchFileStateRepository
