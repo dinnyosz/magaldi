@@ -12,6 +12,22 @@ from dataclasses import dataclass, field
 from shared.throttling import ThroughputTracker
 from shared.ai.context_size import TIER_SCALING_EXPONENT
 
+# Types that always use the small model (regardless of tier)
+_ALWAYS_SMALL_TYPES = frozenset({"function", "method", "variable", "constant"})
+
+# Tier threshold at or below which all types use the small model
+_SMALL_MODEL_TIER_THRESHOLD = 1024
+
+
+def _uses_small_model(element_type: str, tier: int) -> bool:
+    """Determine if a (type, tier) combo uses the small model.
+
+    Must mirror ProcessingConfig.get_model_for_element_type() logic.
+    """
+    if element_type in _ALWAYS_SMALL_TYPES:
+        return True
+    return tier <= _SMALL_MODEL_TIER_THRESHOLD
+
 
 @dataclass
 class TimingStats:
@@ -397,19 +413,15 @@ class TimingStats:
             tier_ratio = (tier / closest_tier) ** TIER_SCALING_EXPONENT if closest_tier > 0 else 1.0
             return base_avg * tier_ratio, True
 
-        # 3. Same model group (large: file/class/interface/type_alias, small: function/method/variable)
-        large_types = {"file", "class", "interface", "type_alias"}
-        small_types = {"function", "method", "variable", "constant"}
-        if element_type in large_types:
-            model_types = large_types
-        elif element_type in small_types:
-            model_types = small_types
-        else:
-            model_types = set()
+        # 3. Same model group — match by actual model used, not just type
+        # A file@1024 uses the small model, so it should look at other small-model
+        # (type, tier) combos for fallback, not at class@4096 which uses the large model.
+        is_small = _uses_small_model(element_type, tier)
 
         same_model_tiers = [
             (t, tr) for (t, tr) in self.summarize_counts_by_type_tier
-            if t in model_types and self.summarize_counts_by_type_tier[(t, tr)] > 0
+            if _uses_small_model(t, tr) == is_small
+            and self.summarize_counts_by_type_tier[(t, tr)] > 0
         ]
         if same_model_tiers:
             # Find the minimum tier distance
@@ -440,45 +452,48 @@ class TimingStats:
 
         # 5. Fall back to same model group average (any type, any tier in same group)
         # This is better than global average which mixes large/small models
+        same_model_all = [
+            (t, tr) for (t, tr) in self.total_base_by_type_tier
+            if _uses_small_model(t, tr) == is_small
+        ]
         model_wall_total = sum(
-            self.total_base_by_type_tier.get((t, tr), 0.0)
-            for (t, tr) in self.total_base_by_type_tier if t in model_types
+            self.total_base_by_type_tier.get(key, 0.0) for key in same_model_all
         )
         model_count = sum(
-            self.summarize_counts_by_type_tier.get((t, tr), 0)
-            for (t, tr) in self.total_base_by_type_tier if t in model_types
+            self.summarize_counts_by_type_tier.get(key, 0) for key in same_model_all
         )
         if model_count > 0:
             base_avg = model_wall_total / model_count
             # Scale by tier ratio vs average tier in model group
             avg_tier = sum(
                 tr * self.summarize_counts_by_type_tier.get((t, tr), 0)
-                for (t, tr) in self.summarize_counts_by_type_tier if t in model_types
+                for (t, tr) in same_model_all
             ) / model_count if model_count > 0 else tier
             tier_ratio = tier / avg_tier if avg_tier > 0 else 1.0
             return base_avg * tier_ratio, True
 
         # 6. Cross-model fallback - use OTHER model group with scaling
         # Small model (~1.7B) is roughly 2x faster than large model (~4B) for same context
-        other_model_types = small_types if element_type in large_types else large_types
+        other_model_all = [
+            (t, tr) for (t, tr) in self.total_base_by_type_tier
+            if _uses_small_model(t, tr) != is_small
+        ]
         other_wall_total = sum(
-            self.total_base_by_type_tier.get((t, tr), 0.0)
-            for (t, tr) in self.total_base_by_type_tier if t in other_model_types
+            self.total_base_by_type_tier.get(key, 0.0) for key in other_model_all
         )
         other_count = sum(
-            self.summarize_counts_by_type_tier.get((t, tr), 0)
-            for (t, tr) in self.total_base_by_type_tier if t in other_model_types
+            self.summarize_counts_by_type_tier.get(key, 0) for key in other_model_all
         )
         if other_count > 0:
             base_avg = other_wall_total / other_count
             # Scale by tier ratio
             avg_tier = sum(
                 tr * self.summarize_counts_by_type_tier.get((t, tr), 0)
-                for (t, tr) in self.summarize_counts_by_type_tier if t in other_model_types
+                for (t, tr) in other_model_all
             ) / other_count if other_count > 0 else tier
             tier_ratio = tier / avg_tier if avg_tier > 0 else 1.0
             # Apply model scaling: small model ~2x faster than large
-            model_scale = 0.5 if element_type in small_types else 2.0
+            model_scale = 0.5 if is_small else 2.0
             return base_avg * tier_ratio * model_scale, True
 
         # 7. No data at all - return 0 (display will show "-")

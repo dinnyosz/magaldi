@@ -703,6 +703,36 @@ class TestTimingStats:
         assert eta is not None
         assert abs(eta - 4.0) < 0.2
 
+    def test_eta_fallback_file_at_1024_uses_small_model_group(self):
+        """file@1024 uses small model, so fallback should use small-model peers."""
+        stats = TimingStats()
+
+        # file@1024 (small model) and function@2048 (small model)
+        # class@4096 is large model — should NOT be used for file@1024 fallback
+        stats.set_totals_by_type_tier({
+            ("file", 1024): 3,      # No timing data yet → needs fallback
+            ("function", 2048): 3,  # Small model peer
+            ("class", 4096): 3,     # Large model — wrong group
+        })
+
+        # Only record data for function (small model) and class (large model)
+        stats.record(1.0, 0.6, 0.4, "function", True, tier=2048)
+        stats.record(1.0, 0.6, 0.4, "function", True, tier=2048)
+        stats.record(4.0, 3.0, 1.0, "class", True, tier=4096)
+
+        eta = stats.eta_seconds(3, 9, num_workers=1)
+        assert eta is not None
+
+        # file@1024 should fall back to function@2048 (same model group = small),
+        # then scale by tier ratio: 1.0 * (1024/2048)^0.65 ≈ 0.637
+        # NOT to class@4096 which uses the large model (would give ~4.0 * scale)
+        # Remaining: 3 file@1024 + 1 function@2048 + 2 class@4096
+        # file@1024: 3 * ~0.637 ≈ 1.91
+        # function@2048: 1 * 1.0 = 1.0
+        # class@4096: 2 * 4.0 = 8.0
+        # Total ≈ 10.91
+        assert abs(eta - 10.91) < 0.5
+
     def test_get_eta_breakdown(self):
         """Test ETA breakdown returns per-(type, tier) estimates."""
         stats = TimingStats()

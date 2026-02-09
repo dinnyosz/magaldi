@@ -95,12 +95,15 @@ class ProcessingConfig:
         """Get the appropriate model config for an element type.
 
         Uses small model for functions, methods, variables, constants.
-        Uses main model for files, classes — unless element fits in 1024
-        tier, where the small model is sufficient for trivially small elements.
+        Uses main model for files, classes — unless element fits in the
+        small-model tier threshold, where the small model is sufficient
+        for trivially small elements.
         """
-        if element_type in ("function", "method", "variable", "constant"):
+        from .timing import _ALWAYS_SMALL_TYPES, _SMALL_MODEL_TIER_THRESHOLD
+
+        if element_type in _ALWAYS_SMALL_TYPES:
             return self.summarize_model_small
-        if num_ctx > 0 and num_ctx <= 1024:
+        if num_ctx > 0 and num_ctx <= _SMALL_MODEL_TIER_THRESHOLD:
             return self.summarize_model_small
         return self.summarize_model
 
