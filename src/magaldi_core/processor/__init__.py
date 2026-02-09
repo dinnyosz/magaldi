@@ -512,6 +512,11 @@ def process_elements(
                 throttle_limit=throttle_limit,
             )
 
+            # Reset throughput history on tier/model change so stale data
+            # from a different tier doesn't pollute throttling decisions
+            if dependency_tracker.did_tier_just_change():
+                timing_stats.reset_throughput()
+
             # Submit new tasks for ready elements
             # Track allowed workers at start for throughput calculation
             for element in ready_elements:

@@ -1836,3 +1836,27 @@ class TestDynamicWorkerScaling:
         )
         # Should be able to ramp up now (no longer post-warmup)
         assert "post-warmup" not in decision2.reason.lower()
+
+    def test_tier_change_resets_throughput_history(self):
+        """Throughput tracker should be cleared when tier/model changes."""
+        stats = TimingStats()
+
+        # Record some data at tier 2048
+        stats.record(wall_time=4.0, summarize_time=3.0, embed_time=0.5,
+                      element_type="function", tier=2048, avg_workers=4.0)
+        stats.record_task_runtime(4.0, 4)
+
+        # Verify throughput has data
+        _, _, count = stats.get_throughput_stats()
+        assert count == 1
+
+        # Reset (simulates tier change)
+        stats.reset_throughput()
+
+        # Throughput history should be empty
+        _, _, count_after = stats.get_throughput_stats()
+        assert count_after == 0
+
+        # But per-(type, tier) ETA data should still be intact
+        key = ("function", 2048)
+        assert stats.summarize_counts_by_type_tier.get(key, 0) == 1
