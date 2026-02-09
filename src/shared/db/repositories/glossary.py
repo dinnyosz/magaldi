@@ -112,9 +112,7 @@ class GlossaryRepository:
 
         response = client.search(
             index=INDEX_NAME,
-            query=query,
-            size=1000,
-            sort=[{"total_count": "desc"}],
+            body={"query": query, "size": 1000, "sort": [{"total_count": "desc"}]},
         )
 
         results: list[dict[str, Any]] = []
@@ -205,9 +203,7 @@ class GlossaryRepository:
 
         response = client.search(
             index=INDEX_NAME,
-            query=es_query,
-            size=100,
-            sort=[{"total_count": "desc"}],
+            body={"query": es_query, "size": 100, "sort": [{"total_count": "desc"}]},
         )
 
         results: list[dict[str, Any]] = []
@@ -248,9 +244,7 @@ class GlossaryRepository:
 
         response = client.search(
             index=INDEX_NAME,
-            query=es_query,
-            size=100,
-            sort=[{"term": "asc"}],
+            body={"query": es_query, "size": 100, "sort": [{"term": "asc"}]},
         )
 
         results: list[dict[str, Any]] = []
@@ -314,14 +308,16 @@ class GlossaryRepository:
 
         response = client.delete_by_query(
             index=INDEX_NAME,
-            query={
-                "bool": {
-                    "must": [
-                        {"term": {"scope": scope}},
-                        {"term": {"repository": repository}},
-                        {"term": {"username": username}},
-                        {"term": {"element_type": "glossary"}},
-                    ]
+            body={
+                "query": {
+                    "bool": {
+                        "must": [
+                            {"term": {"scope": scope}},
+                            {"term": {"repository": repository}},
+                            {"term": {"username": username}},
+                            {"term": {"element_type": "glossary"}},
+                        ]
+                    }
                 }
             },
             refresh=True,

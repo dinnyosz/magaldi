@@ -136,8 +136,7 @@ class StatsRepository:
 
         response = client.search(
             index=INDEX_NAME,
-            query=query,
-            size=1000,
+            body={"query": query, "size": 1000},
             scroll="2m",
         )
 
