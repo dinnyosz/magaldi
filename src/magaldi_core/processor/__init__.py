@@ -591,6 +591,9 @@ def process_elements(
                         code_embed_time=processed.code_embed_time,
                         tier=element_tier,
                         avg_workers=avg_workers,
+                        prompt_tokens=processed.prompt_tokens,
+                        response_tokens=processed.response_tokens,
+                        assigned_tier=processed.assigned_tier,
                     )
                     timing_stats.record_task_runtime(processed.wall_time, avg_workers)
 

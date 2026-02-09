@@ -5,6 +5,7 @@ Contains the core processing logic for individual elements.
 
 from __future__ import annotations
 
+import logging
 import time
 from datetime import datetime
 from typing import TYPE_CHECKING, Callable
@@ -28,6 +29,8 @@ if TYPE_CHECKING:
     from shared.ai.summarization import SummarizationLLMClient
     from shared.db.store import Repository
     from .status import WorkerStatus
+
+logger = logging.getLogger(__name__)
 
 
 def should_embed(element: "CodeElement") -> bool:
@@ -85,7 +88,7 @@ def _summarize_element(
     summary_cache: "SummaryCache",
     llm_client: "SummarizationLLMClient",
     config: ProcessingConfig,
-) -> str:
+) -> tuple[str, int, int]:
     """Generate summary for an element.
 
     Args:
@@ -95,13 +98,14 @@ def _summarize_element(
         config: Processing configuration.
 
     Returns:
-        Generated summary.
+        Tuple of (summary, prompt_tokens, response_tokens).
     """
     # Get parent summaries for context
     parent_summaries = summary_cache.get_parent_summaries(element)
 
     # Build prompt with context
     prompt = build_prompt(element, parent_summaries, config.max_code_tokens)
+    prompt_tokens = len(prompt) // 4
 
     # Generate summary (select model based on element type)
     model_config = config.get_model_for_element_type(element.element_type)
@@ -118,9 +122,10 @@ def _summarize_element(
         model=model_config.name,
         num_ctx=num_ctx,
     )
+    response_tokens = len(raw_summary) // 4
 
     # Clean and return
-    return clean_summary(raw_summary)
+    return clean_summary(raw_summary), prompt_tokens, response_tokens
 
 
 def _embed_element(
@@ -302,6 +307,9 @@ def _process_single_element(
     embed_time = 0.0
     summary_embed_time = 0.0
     code_embed_time = 0.0
+    prompt_tokens = 0
+    response_tokens = 0
+    num_ctx = 0
 
     # Build hierarchical display name: [type] .../path/file.py → Class → method
     def build_display_name(max_path_len: int = 60) -> str:
@@ -358,8 +366,14 @@ def _process_single_element(
             summary = _generate_import_summary(element)
         else:
             api_start = time.time()
-            summary = _summarize_element(element, summary_cache, llm_client, config)
+            summary, prompt_tokens, response_tokens = _summarize_element(element, summary_cache, llm_client, config)
             summarize_time = time.time() - api_start
+
+            if prompt_tokens > num_ctx:
+                logger.warning(
+                    "Tier overflow: %s %s prompt=%d tier=%d",
+                    element.element_type, element.name, prompt_tokens, num_ctx,
+                )
 
         # Cache summary for children
         summary_cache.add_summary(element.element_id, summary)
@@ -409,6 +423,9 @@ def _process_single_element(
             embed_time=embed_time,
             summary_embed_time=summary_embed_time,
             code_embed_time=code_embed_time,
+            prompt_tokens=prompt_tokens,
+            response_tokens=response_tokens,
+            assigned_tier=num_ctx,
         )
 
     except Exception as e:
@@ -422,5 +439,8 @@ def _process_single_element(
             embed_time=embed_time,
             summary_embed_time=summary_embed_time,
             code_embed_time=code_embed_time,
+            prompt_tokens=prompt_tokens,
+            response_tokens=response_tokens,
+            assigned_tier=num_ctx,
             error=str(e),
         )

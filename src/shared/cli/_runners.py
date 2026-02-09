@@ -481,6 +481,50 @@ def run_processing(
             if "Processing stalled" in error:
                 console.print(f"\n  [red]Warning:[/] {error}")
 
+    # Display tier accuracy summary (only when issues detected)
+    tier_summary = timing_stats.get_tier_accuracy_summary()
+    if tier_summary.get("has_issues"):
+        input_rows = tier_summary.get("input", [])
+        output_rows = tier_summary.get("output", [])
+
+        if input_rows:
+            tier_table = Table(title="Context Tier Accuracy", box=None, padding=(0, 2), expand=False)
+            tier_table.add_column("type", style="cyan")
+            tier_table.add_column("tier", style="magenta", justify="right")
+            tier_table.add_column("count", justify="right")
+            tier_table.add_column("overflows", style="red", justify="right")
+            tier_table.add_column("avg headroom", justify="right")
+            tier_table.add_column("worst", justify="right")
+            for elem_type, tier, count, overflows, avg_pct, worst_pct in input_rows:
+                overflow_style = "red bold" if overflows > 0 else "dim"
+                worst_style = "red" if worst_pct < 0 else ("yellow" if worst_pct < 10 else "green")
+                tier_table.add_row(
+                    elem_type, str(tier), str(count),
+                    f"[{overflow_style}]{overflows}[/]",
+                    f"{avg_pct:.0f}%",
+                    f"[{worst_style}]{worst_pct:.0f}%[/]",
+                )
+            console.print()
+            console.print(tier_table)
+
+        if output_rows:
+            out_table = Table(title="Output Token Usage", box=None, padding=(0, 2), expand=False)
+            out_table.add_column("type", style="cyan")
+            out_table.add_column("avg", justify="right")
+            out_table.add_column("max", justify="right")
+            out_table.add_column("budget", justify="right")
+            for elem_type, avg_tokens, max_tokens, budget in output_rows:
+                exceeded = max_tokens > budget
+                max_style = "red bold" if exceeded else "green"
+                suffix = " [red]exceeded[/]" if exceeded else ""
+                out_table.add_row(
+                    elem_type, str(avg_tokens),
+                    f"[{max_style}]{max_tokens}[/]",
+                    f"{budget}{suffix}",
+                )
+            console.print()
+            console.print(out_table)
+
     # Get timing stats from current state
     avg_summ = current_state.timing.avg_summarize_time
     avg_embed = current_state.timing.avg_embed_time

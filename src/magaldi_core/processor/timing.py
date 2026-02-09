@@ -42,6 +42,17 @@ class TimingStats:
         default_factory=lambda: ThroughputTracker(window_seconds=300.0)
     )
 
+    # Tier accuracy tracking: per-(type, tier) input overflow detection
+    tier_overflow_counts: dict[tuple[str, int], int] = field(default_factory=dict)
+    tier_headroom_sum: dict[tuple[str, int], float] = field(default_factory=dict)
+    tier_headroom_min: dict[tuple[str, int], float] = field(default_factory=dict)
+    tier_sample_counts: dict[tuple[str, int], int] = field(default_factory=dict)
+
+    # Output token tracking: per-type response token stats
+    output_tokens_sum: dict[str, int] = field(default_factory=dict)
+    output_tokens_max: dict[str, int] = field(default_factory=dict)
+    output_sample_counts: dict[str, int] = field(default_factory=dict)
+
     def set_totals_by_type(self, totals: dict[str, int]) -> None:
         """Set total element counts by type."""
         with self._lock:
@@ -89,6 +100,9 @@ class TimingStats:
         code_embed_time: float = 0.0,
         tier: int = 0,
         avg_workers: float = 1.0,
+        prompt_tokens: int = 0,
+        response_tokens: int = 0,
+        assigned_tier: int = 0,
     ) -> None:
         """Record timing for a completed element.
 
@@ -102,6 +116,9 @@ class TimingStats:
             code_embed_time: Time spent on code embedding.
             tier: Context tier (2048, 4096, etc) for per-tier ETA tracking.
             avg_workers: Average workers during this task (for throughput calculation).
+            prompt_tokens: Estimated tokens in the full prompt.
+            response_tokens: Estimated tokens in the LLM response.
+            assigned_tier: Context tier assigned to this element.
         """
         with self._lock:
             if element_type:
@@ -142,6 +159,24 @@ class TimingStats:
                     self.summarize_counts_by_type_tier[type_tier_key] = (
                         self.summarize_counts_by_type_tier.get(type_tier_key, 0) + 1
                     )
+
+                # Track tier accuracy metrics (input overflow / headroom)
+                if assigned_tier > 0 and prompt_tokens > 0 and element_type:
+                    tt_key = (element_type, assigned_tier)
+                    headroom = 1.0 - (prompt_tokens / assigned_tier)
+                    self.tier_sample_counts[tt_key] = self.tier_sample_counts.get(tt_key, 0) + 1
+                    self.tier_headroom_sum[tt_key] = self.tier_headroom_sum.get(tt_key, 0.0) + headroom
+                    if tt_key not in self.tier_headroom_min or headroom < self.tier_headroom_min[tt_key]:
+                        self.tier_headroom_min[tt_key] = headroom
+                    if prompt_tokens > assigned_tier:
+                        self.tier_overflow_counts[tt_key] = self.tier_overflow_counts.get(tt_key, 0) + 1
+
+                # Track output token usage per type
+                if response_tokens > 0 and element_type:
+                    self.output_sample_counts[element_type] = self.output_sample_counts.get(element_type, 0) + 1
+                    self.output_tokens_sum[element_type] = self.output_tokens_sum.get(element_type, 0) + response_tokens
+                    if element_type not in self.output_tokens_max or response_tokens > self.output_tokens_max[element_type]:
+                        self.output_tokens_max[element_type] = response_tokens
 
     @property
     def total_summarize_count(self) -> int:
@@ -216,6 +251,57 @@ class TimingStats:
                 avg_wall = type_wall_total / type_count if type_count > 0 else 0.0
                 result[t] = (completed, total, avg_wall, avg_summ, avg_embed)
             return result
+
+    def get_tier_accuracy_summary(self) -> dict[str, list | dict]:
+        """Get tier accuracy metrics for end-of-phase display.
+
+        Returns:
+            Dict with keys:
+                "input": list of (type, tier, count, overflows, avg_headroom_pct, worst_headroom_pct)
+                "output": list of (type, avg_tokens, max_tokens, budget)
+                "has_issues": True if any overflows or tight headroom detected
+        """
+        from shared.ai.context_size import PROMPT_OVERHEAD
+
+        with self._lock:
+            # Input overflow summary
+            input_rows: list[tuple[str, int, int, int, float, float]] = []
+            has_issues = False
+
+            for (elem_type, tier), count in sorted(self.tier_sample_counts.items()):
+                overflows = self.tier_overflow_counts.get((elem_type, tier), 0)
+                avg_headroom = self.tier_headroom_sum.get((elem_type, tier), 0.0) / count
+                worst_headroom = self.tier_headroom_min.get((elem_type, tier), 1.0)
+                avg_pct = avg_headroom * 100
+                worst_pct = worst_headroom * 100
+
+                if overflows > 0 or worst_pct < 10:
+                    has_issues = True
+                    input_rows.append((elem_type, tier, count, overflows, avg_pct, worst_pct))
+
+            # Output token summary — extract output budget from PROMPT_OVERHEAD comments
+            # Output budgets per type (from PROMPT_OVERHEAD comments)
+            output_budgets = {
+                "file": 200, "class": 200, "function": 200,
+                "method": 150, "interface": 150, "trait": 150, "enum": 150,
+                "variable": 100, "constant": 100, "type_alias": 100,
+                "import": 50,
+            }
+            output_rows: list[tuple[str, int, int, int]] = []
+            for elem_type in sorted(self.output_sample_counts.keys()):
+                count = self.output_sample_counts[elem_type]
+                avg_tokens = self.output_tokens_sum[elem_type] // count
+                max_tokens = self.output_tokens_max[elem_type]
+                budget = output_budgets.get(elem_type, 200)
+                if max_tokens > budget:
+                    has_issues = True
+                    output_rows.append((elem_type, avg_tokens, max_tokens, budget))
+
+            return {
+                "input": input_rows,
+                "output": output_rows,
+                "has_issues": has_issues,
+            }
 
     def record_task_runtime(self, runtime: float, concurrent_workers: int = 1) -> None:
         """Record a completed task's runtime for throttling decisions.

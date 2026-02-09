@@ -139,4 +139,7 @@ class ProcessedElement:
     embed_time: float  # Total embed time (summary + code)
     summary_embed_time: float = 0.0  # Time for summary embedding
     code_embed_time: float = 0.0  # Time for code embedding
+    prompt_tokens: int = 0  # Estimated tokens in full prompt
+    response_tokens: int = 0  # Estimated tokens in LLM response
+    assigned_tier: int = 0  # Context tier assigned to this element
     error: str | None = None
