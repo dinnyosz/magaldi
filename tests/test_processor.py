@@ -714,6 +714,191 @@ class TestTimingStats:
         breakdown = stats.get_eta_breakdown()
         assert breakdown == []
 
+    def test_tier_overflow_detection(self):
+        """Test that overflows are detected when prompt_tokens > assigned_tier."""
+        stats = TimingStats()
+        stats.set_totals_by_type({"function": 5})
+
+        # Element within tier (1500 tokens < 2048 tier)
+        stats.record(1.0, 0.5, 0.3, "function", True,
+                     prompt_tokens=1500, response_tokens=100, assigned_tier=2048)
+
+        # Element overflowing tier (2200 tokens > 2048 tier)
+        stats.record(1.0, 0.5, 0.3, "function", True,
+                     prompt_tokens=2200, response_tokens=100, assigned_tier=2048)
+
+        # Another overflow
+        stats.record(1.0, 0.5, 0.3, "function", True,
+                     prompt_tokens=2500, response_tokens=100, assigned_tier=2048)
+
+        assert stats.tier_overflow_counts[("function", 2048)] == 2
+        assert stats.tier_sample_counts[("function", 2048)] == 3
+
+    def test_tier_headroom_tracking(self):
+        """Test headroom calculation: 1.0 - (prompt_tokens / assigned_tier)."""
+        stats = TimingStats()
+        stats.set_totals_by_type({"function": 2})
+
+        # 50% headroom: 1024 / 2048 = 0.5 → headroom = 0.5
+        stats.record(1.0, 0.5, 0.3, "function", True,
+                     prompt_tokens=1024, response_tokens=100, assigned_tier=2048)
+
+        # 25% headroom: 1536 / 2048 = 0.75 → headroom = 0.25
+        stats.record(1.0, 0.5, 0.3, "function", True,
+                     prompt_tokens=1536, response_tokens=100, assigned_tier=2048)
+
+        key = ("function", 2048)
+        avg_headroom = stats.tier_headroom_sum[key] / stats.tier_sample_counts[key]
+        assert abs(avg_headroom - 0.375) < 0.001  # (0.5 + 0.25) / 2
+
+        # Worst headroom should be 0.25 (the tighter one)
+        assert abs(stats.tier_headroom_min[key] - 0.25) < 0.001
+
+    def test_tier_headroom_negative_on_overflow(self):
+        """Headroom should be negative when prompt exceeds tier."""
+        stats = TimingStats()
+        stats.set_totals_by_type({"function": 1})
+
+        # 2560 / 2048 = 1.25 → headroom = -0.25
+        stats.record(1.0, 0.5, 0.3, "function", True,
+                     prompt_tokens=2560, response_tokens=100, assigned_tier=2048)
+
+        key = ("function", 2048)
+        assert abs(stats.tier_headroom_min[key] - (-0.25)) < 0.001
+
+    def test_output_token_tracking(self):
+        """Test per-type output token aggregation."""
+        stats = TimingStats()
+        stats.set_totals_by_type({"function": 3})
+
+        stats.record(1.0, 0.5, 0.3, "function", True,
+                     prompt_tokens=1000, response_tokens=80, assigned_tier=2048)
+        stats.record(1.0, 0.5, 0.3, "function", True,
+                     prompt_tokens=1000, response_tokens=120, assigned_tier=2048)
+        stats.record(1.0, 0.5, 0.3, "function", True,
+                     prompt_tokens=1000, response_tokens=60, assigned_tier=2048)
+
+        assert stats.output_sample_counts["function"] == 3
+        assert stats.output_tokens_sum["function"] == 260  # 80 + 120 + 60
+        assert stats.output_tokens_max["function"] == 120
+
+    def test_tier_accuracy_summary_no_issues(self):
+        """Summary should show has_issues=False when everything is within bounds."""
+        stats = TimingStats()
+        stats.set_totals_by_type({"function": 2})
+
+        # Comfortable headroom, low output tokens
+        stats.record(1.0, 0.5, 0.3, "function", True,
+                     prompt_tokens=1000, response_tokens=50, assigned_tier=2048)
+        stats.record(1.0, 0.5, 0.3, "function", True,
+                     prompt_tokens=1200, response_tokens=60, assigned_tier=2048)
+
+        summary = stats.get_tier_accuracy_summary()
+        assert summary["has_issues"] is False
+        assert summary["input"] == []
+        assert summary["output"] == []
+
+    def test_tier_accuracy_summary_with_overflow(self):
+        """Summary should report input overflows."""
+        stats = TimingStats()
+        stats.set_totals_by_type({"function": 3})
+
+        stats.record(1.0, 0.5, 0.3, "function", True,
+                     prompt_tokens=1000, response_tokens=50, assigned_tier=2048)
+        # Overflow
+        stats.record(1.0, 0.5, 0.3, "function", True,
+                     prompt_tokens=2200, response_tokens=50, assigned_tier=2048)
+        stats.record(1.0, 0.5, 0.3, "function", True,
+                     prompt_tokens=1500, response_tokens=50, assigned_tier=2048)
+
+        summary = stats.get_tier_accuracy_summary()
+        assert summary["has_issues"] is True
+        assert len(summary["input"]) == 1
+
+        row = summary["input"][0]
+        elem_type, tier, count, overflows, avg_pct, worst_pct = row
+        assert elem_type == "function"
+        assert tier == 2048
+        assert count == 3
+        assert overflows == 1
+        assert worst_pct < 0  # The overflow case has negative headroom
+
+    def test_tier_accuracy_summary_with_output_exceeded(self):
+        """Summary should report output budget exceedances."""
+        stats = TimingStats()
+        stats.set_totals_by_type({"function": 2})
+
+        # Output budget for function is 200 tokens
+        stats.record(1.0, 0.5, 0.3, "function", True,
+                     prompt_tokens=1000, response_tokens=150, assigned_tier=2048)
+        stats.record(1.0, 0.5, 0.3, "function", True,
+                     prompt_tokens=1000, response_tokens=250, assigned_tier=2048)
+
+        summary = stats.get_tier_accuracy_summary()
+        assert summary["has_issues"] is True
+        assert len(summary["output"]) == 1
+
+        row = summary["output"][0]
+        elem_type, avg_tokens, max_tokens, budget = row
+        assert elem_type == "function"
+        assert max_tokens == 250
+        assert budget == 200
+
+    def test_tier_accuracy_summary_tight_headroom(self):
+        """Summary should flag when worst headroom < 10% even without overflows."""
+        stats = TimingStats()
+        stats.set_totals_by_type({"function": 2})
+
+        # 5% headroom: 1946 / 2048 ≈ 0.95 → headroom ≈ 0.05
+        stats.record(1.0, 0.5, 0.3, "function", True,
+                     prompt_tokens=1946, response_tokens=50, assigned_tier=2048)
+        stats.record(1.0, 0.5, 0.3, "function", True,
+                     prompt_tokens=1000, response_tokens=50, assigned_tier=2048)
+
+        summary = stats.get_tier_accuracy_summary()
+        assert summary["has_issues"] is True
+        assert len(summary["input"]) == 1
+
+        row = summary["input"][0]
+        _, _, _, overflows, _, worst_pct = row
+        assert overflows == 0  # No overflows, just tight headroom
+        assert worst_pct < 10
+
+    def test_tier_accuracy_summary_multiple_types_and_tiers(self):
+        """Summary should track separately per (type, tier) combination."""
+        stats = TimingStats()
+        stats.set_totals_by_type({"function": 2, "class": 2})
+
+        # Function at 2048 - overflow
+        stats.record(1.0, 0.5, 0.3, "function", True,
+                     prompt_tokens=2200, response_tokens=50, assigned_tier=2048)
+        # Function at 4096 - fine
+        stats.record(1.0, 0.5, 0.3, "function", True,
+                     prompt_tokens=2000, response_tokens=50, assigned_tier=4096)
+        # Class at 4096 - fine
+        stats.record(1.0, 0.5, 0.3, "class", True,
+                     prompt_tokens=2000, response_tokens=50, assigned_tier=4096)
+
+        summary = stats.get_tier_accuracy_summary()
+        assert summary["has_issues"] is True
+
+        # Only function@2048 should appear (the overflow)
+        assert len(summary["input"]) == 1
+        assert summary["input"][0][0] == "function"
+        assert summary["input"][0][1] == 2048
+
+    def test_tier_metrics_skipped_when_no_prompt_tokens(self):
+        """Tier accuracy should not track elements with 0 prompt tokens (skip_ai)."""
+        stats = TimingStats()
+        stats.set_totals_by_type({"function": 2})
+
+        # No prompt tokens (skip_ai mode)
+        stats.record(1.0, 0.0, 0.0, "function", True,
+                     prompt_tokens=0, response_tokens=0, assigned_tier=2048)
+
+        assert stats.tier_sample_counts == {}
+        assert stats.output_sample_counts == {}
+
 
 # =============================================================================
 # WORKER STATUS TESTS
@@ -1244,6 +1429,33 @@ class TestPerElementContextSize:
         call_kwargs = mock_llm.generate.call_args[1]
         assert call_kwargs.get("num_ctx") == 16384
 
+    def test_summarize_element_returns_token_counts(self):
+        """_summarize_element should return (summary, prompt_tokens, response_tokens)."""
+        mock_llm = MagicMock()
+        mock_llm.generate.return_value = "Handles user authentication"
+
+        element = CodeElement(
+            element_id="test:repo:user:file.py:function:auth:1",
+            element_type="function",
+            name="auth",
+            raw_code="def auth(): pass",
+        )
+
+        config = ProcessingConfig()
+        cache = SummaryCache()
+        cache.add_element(element)
+
+        result = _summarize_element(element, cache, mock_llm, config)
+
+        assert isinstance(result, tuple)
+        assert len(result) == 3
+        summary, prompt_tokens, response_tokens = result
+        assert isinstance(summary, str)
+        assert prompt_tokens > 0
+        assert response_tokens > 0
+        # response_tokens should be len("Handles user authentication") // 4
+        assert response_tokens == len("Handles user authentication") // 4
+
     def test_element_type_affects_overhead(self):
         """Different element types have different prompt overheads."""
         mock_llm = MagicMock()
@@ -1446,6 +1658,37 @@ class TestDynamicWorkerScaling:
         # Default max workers
         tracker_default = DependencyTracker([element], {element.element_id: 500})
         assert tracker_default.get_current_max_workers() == 8  # DEFAULT_WORKERS
+
+    def test_processed_element_carries_tier_metrics(self):
+        """ProcessedElement should carry prompt_tokens, response_tokens, assigned_tier."""
+        elem = ProcessedElement(
+            element_id="scope:repo:user:file.py:function:test:1",
+            success=True,
+            wall_time=1.0,
+            summarize_time=0.5,
+            embed_time=0.3,
+            prompt_tokens=500,
+            response_tokens=120,
+            assigned_tier=2048,
+        )
+
+        assert elem.prompt_tokens == 500
+        assert elem.response_tokens == 120
+        assert elem.assigned_tier == 2048
+
+    def test_processed_element_tier_metrics_default_zero(self):
+        """Tier metric fields should default to 0."""
+        elem = ProcessedElement(
+            element_id="scope:repo:user:file.py:function:test:1",
+            success=True,
+            wall_time=1.0,
+            summarize_time=0.5,
+            embed_time=0.3,
+        )
+
+        assert elem.prompt_tokens == 0
+        assert elem.response_tokens == 0
+        assert elem.assigned_tier == 0
 
     def test_post_warmup_gradual_ramp(self):
         """After warmup completes, throttle should recommend gradual ramp from 1."""
