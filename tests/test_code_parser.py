@@ -598,9 +598,9 @@ class TestParsingResult:
         from shared.ai.context_size import CONTEXT_TIERS
 
         # Create elements of varying sizes that will land in different tiers
-        # Small: 200 chars = 50 tokens + 700 overhead = 750 -> 2048 tier
-        # Medium: 8000 chars = 2000 tokens + 700 overhead = 2700 -> 4096 tier
-        # Large: 50000 chars = 12500 tokens + 300 overhead = 12800 -> 16384 tier
+        # Small: 200 chars = 50 tokens + 800 overhead = 850 -> 1024 tier
+        # Medium: 8000 chars = 2000 tokens + 800 overhead = 2800 -> 4096 tier
+        # Large: 50000 chars = 12500 tokens + 650 overhead = 13150 -> 16384 tier
         elements = [
             CodeElement(element_id="1", name="small1", element_type="function", raw_code="x" * 200, relative_path="a.py"),
             CodeElement(element_id="2", name="small2", element_type="function", raw_code="x" * 300, relative_path="a.py"),
@@ -629,10 +629,10 @@ class TestParsingResult:
         for tier in CONTEXT_TIERS:
             assert tier in tiers
 
-        # Check 2048 tier (small functions)
-        assert tiers[2048]["count"] == 2
-        assert tiers[2048]["by_type"]["function"] == 2
-        assert tiers[2048]["largest"][0] == "small2"  # 300 > 200
+        # Check 1024 tier (small functions)
+        assert tiers[1024]["count"] == 2
+        assert tiers[1024]["by_type"]["function"] == 2
+        assert tiers[1024]["largest"][0] == "small2"  # 300 > 200
 
         # Check 4096 tier (medium function)
         assert tiers[4096]["count"] == 1
@@ -645,6 +645,7 @@ class TestParsingResult:
         assert tiers[16384]["largest"][0] == "large_file"
 
         # Empty tiers should have zero counts
+        assert tiers[2048]["count"] == 0
         assert tiers[8192]["count"] == 0
         assert tiers[32768]["count"] == 0
 

@@ -1179,11 +1179,11 @@ class TestPerElementContextSize:
     """Tests for per-element context size computation."""
 
     def test_small_element_uses_smallest_tier(self):
-        """Small elements should use 2048 context tier."""
+        """Small elements should use 1024 context tier."""
         mock_llm = MagicMock()
         mock_llm.generate.return_value = "test summary"
 
-        # Small function: 15 chars = ~4 tokens + 700 overhead = 704 → 2048 tier
+        # Small function: 15 chars = ~4 tokens + 800 overhead = 804 → 1024 tier
         element = CodeElement(
             element_id="test:repo:user:file.py:function:foo:1",
             element_type="function",
@@ -1198,7 +1198,7 @@ class TestPerElementContextSize:
         _summarize_element(element, cache, mock_llm, config)
 
         call_kwargs = mock_llm.generate.call_args[1]
-        assert call_kwargs.get("num_ctx") == 2048
+        assert call_kwargs.get("num_ctx") == 1024
 
     def test_medium_element_uses_appropriate_tier(self):
         """Medium elements should use appropriate tier based on size."""
@@ -1249,38 +1249,38 @@ class TestPerElementContextSize:
         mock_llm = MagicMock()
         mock_llm.generate.return_value = "test summary"
 
-        # 6000 chars with different types:
-        # - function: 6000/4=1500 + 700 overhead = 2200 → 4096 tier
-        # - file: 6000/4=1500 + 300 overhead = 1800 → 2048 tier
+        # 5000 chars with different types:
+        # - function: 5000/4=1250 + 800 overhead = 2050 → 4096 tier
+        # - import: 5000/4=1250 + 350 overhead = 1600 → 2048 tier
         func_element = CodeElement(
             element_id="test:repo:user:file.py:function:func:1",
             element_type="function",
             name="func",
-            raw_code="x" * 6000,
+            raw_code="x" * 5000,
         )
-        file_element = CodeElement(
-            element_id="test:repo:user:file.py:file:file.py:1",
-            element_type="file",
-            name="file.py",
-            raw_code="x" * 6000,
+        import_element = CodeElement(
+            element_id="test:repo:user:file.py:import:imp:1",
+            element_type="import",
+            name="imp",
+            raw_code="x" * 5000,
         )
 
         config = ProcessingConfig()
         cache = SummaryCache()
         cache.add_element(func_element)
-        cache.add_element(file_element)
+        cache.add_element(import_element)
 
         _summarize_element(func_element, cache, mock_llm, config)
         func_num_ctx = mock_llm.generate.call_args[1].get("num_ctx")
 
-        _summarize_element(file_element, cache, mock_llm, config)
-        file_num_ctx = mock_llm.generate.call_args[1].get("num_ctx")
+        _summarize_element(import_element, cache, mock_llm, config)
+        import_num_ctx = mock_llm.generate.call_args[1].get("num_ctx")
 
         assert func_num_ctx == 4096
-        assert file_num_ctx == 2048
+        assert import_num_ctx == 2048
 
     def test_status_shows_context_tier(self):
-        """Status should display context tier (e.g., 'summ@2K')."""
+        """Status should display context tier (e.g., '1K' for small elements)."""
         from magaldi_core.processor import (
             _process_single_element,
             WorkerStatus,
@@ -1292,7 +1292,7 @@ class TestPerElementContextSize:
         mock_embed = MagicMock()
         mock_es = MagicMock()
 
-        # Small function should show 2K tier
+        # Small function should show 1K tier
         small_element = CodeElement(
             element_id="test:repo:user:file.py:function:small:1",
             element_type="function",
@@ -1332,9 +1332,9 @@ class TestPerElementContextSize:
             if 0 in s and s[0][1] == "summarizing"
         ]
         assert len(summ_updates) > 0
-        # Small function should be 2K tier (shown in ctx_size field, index 3)
+        # Small function should be 1K tier (shown in ctx_size field, index 3)
         ctx_sizes = [u[3] for u in summ_updates]
-        assert "2K" in ctx_sizes
+        assert "1K" in ctx_sizes
 
 
 class TestDynamicWorkerScaling:

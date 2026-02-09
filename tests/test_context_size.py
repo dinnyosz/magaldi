@@ -2,6 +2,7 @@
 
 from shared.ai.context_size import (
     CONTEXT_TIERS,
+    PROMPT_OVERHEAD,
     compute_aggregation_num_ctx,
     compute_context_sizes,
     compute_element_num_ctx,
@@ -12,16 +13,19 @@ from shared.ai.context_size import (
 class TestComputeNumCtx:
     """Tests for compute_num_ctx function."""
 
-    def test_small_variable_returns_smallest_tier(self):
-        """Variable with 100 chars should use 2048 context."""
+    def test_small_variable_returns_1024_tier(self):
+        """Variable with 100 chars should use 1024 context.
+
+        Calculation: 100/4 = 25 + 550 overhead = 575 < 1024.
+        """
         result = compute_num_ctx("variable", 100)
-        assert result == 2048
+        assert result == 1024
 
     def test_medium_function_returns_4096(self):
         """Function with 8000 chars should use 4096 context.
 
-        Calculation: 8000 chars / 4 = 2000 tokens + 700 overhead = 2700 total.
-        2700 > 2048, so it needs 4096 tier.
+        Calculation: 8000/4 = 2000 + 800 overhead = 2800 total.
+        2800 > 2048, so it needs 4096 tier.
         """
         result = compute_num_ctx("function", 8000)
         assert result == 4096
@@ -81,29 +85,27 @@ class TestComputeContextSizes:
 class TestComputeElementNumCtx:
     """Tests for per-element context size computation."""
 
-    def test_tiny_function_uses_smallest_tier(self):
-        """A 200 char function should use 2048 context.
+    def test_tiny_function_uses_1024_tier(self):
+        """A 200 char function should use 1024 context.
 
-        Calculation: 200 chars / 4 = 50 tokens + 700 overhead = 750 total.
-        750 < 2048, so it uses smallest tier.
+        Calculation: 200/4 = 50 + 800 overhead = 850 < 1024.
         """
         result = compute_element_num_ctx("function", 200)
-        assert result == 2048
+        assert result == 1024
 
-    def test_small_function_uses_smallest_tier(self):
-        """A 2000 char function should use 2048 context.
+    def test_small_function_uses_2048_tier(self):
+        """A 4000 char function should use 2048 context.
 
-        Calculation: 2000 chars / 4 = 500 tokens + 700 overhead = 1200 total.
-        1200 < 2048, so it uses smallest tier.
+        Calculation: 4000/4 = 1000 + 800 overhead = 1800 < 2048.
         """
-        result = compute_element_num_ctx("function", 2000)
+        result = compute_element_num_ctx("function", 4000)
         assert result == 2048
 
     def test_medium_function_uses_4096(self):
         """A 10000 char function should use 4096 context.
 
-        Calculation: 10000 chars / 4 = 2500 tokens + 700 overhead = 3200 total.
-        3200 > 2048 but < 4096, so it uses 4096 tier.
+        Calculation: 10000/4 = 2500 + 800 overhead = 3300 total.
+        3300 > 2048 but < 4096, so it uses 4096 tier.
         """
         result = compute_element_num_ctx("function", 10000)
         assert result == 4096
@@ -111,8 +113,8 @@ class TestComputeElementNumCtx:
     def test_large_file_uses_32768(self):
         """A 72000 char file should use 32768 context.
 
-        Calculation: 72000 chars / 4 = 18000 tokens + 300 overhead = 18300 total.
-        18300 > 16384 but < 32768, so it uses 32768 tier.
+        Calculation: 72000/4 = 18000 + 650 overhead = 18650 total.
+        18650 > 16384 but < 32768, so it uses 32768 tier.
         """
         result = compute_element_num_ctx("file", 72000)
         assert result == 32768
@@ -120,24 +122,26 @@ class TestComputeElementNumCtx:
     def test_different_elements_same_size_different_tiers(self):
         """Different element types with same char count may get different tiers.
 
-        A 5000 char element:
-        - function: 5000/4 = 1250 + 700 = 1950 → 2048
-        - file: 5000/4 = 1250 + 300 = 1550 → 2048
-
-        Both fit in 2048, but larger code will show the difference.
+        5000 chars:
+        - function: 5000/4 = 1250 + 800 = 2050 → 4096
+        - import: 5000/4 = 1250 + 350 = 1600 → 2048
         """
-        # 6000 chars:
-        # - function: 6000/4 = 1500 + 700 = 2200 → 4096
-        # - file: 6000/4 = 1500 + 300 = 1800 → 2048
-        func_result = compute_element_num_ctx("function", 6000)
-        file_result = compute_element_num_ctx("file", 6000)
+        func_result = compute_element_num_ctx("function", 5000)
+        import_result = compute_element_num_ctx("import", 5000)
         assert func_result == 4096
-        assert file_result == 2048
+        assert import_result == 2048
 
-    def test_empty_code_uses_smallest_tier(self):
-        """Empty code should still account for overhead and use smallest tier."""
+    def test_empty_code_uses_1024_tier(self):
+        """Empty code with just overhead should use 1024 tier."""
+        # import: 0 + 350 = 350 → 1024
+        result = compute_element_num_ctx("import", 0)
+        assert result == 1024
+
+    def test_empty_code_function_uses_1024_tier(self):
+        """Empty function code with overhead should use 1024 tier."""
+        # function: 0 + 800 = 800 → 1024
         result = compute_element_num_ctx("function", 0)
-        assert result == 2048
+        assert result == 1024
 
     def test_huge_element_uses_largest_tier(self):
         """Very large elements should use the largest available tier."""
@@ -145,18 +149,27 @@ class TestComputeElementNumCtx:
         result = compute_element_num_ctx("file", 500000)
         assert result == CONTEXT_TIERS[-1]
 
+    def test_1024_tier_used_for_small_elements(self):
+        """Small variables/constants/enums should use the 1024 tier."""
+        # variable: 200/4 = 50 + 550 = 600 < 1024
+        assert compute_element_num_ctx("variable", 200) == 1024
+        # constant: 100/4 = 25 + 550 = 575 < 1024
+        assert compute_element_num_ctx("constant", 100) == 1024
+        # enum: 400/4 = 100 + 450 = 550 < 1024
+        assert compute_element_num_ctx("enum", 400) == 1024
+
 
 class TestComputeAggregationNumCtx:
     """Tests for aggregation context size computation (features, glossary)."""
 
     def test_small_prompt_uses_smallest_tier(self):
-        """Small prompts should use 2048 tier.
+        """Small prompts should use 1024 tier.
 
         1000 chars / 3.5 = 286 tokens + 200 overhead = 486 total.
-        With 2x multiplier = 972 < 2048 → 2048 tier.
+        With 2x multiplier = 972 < 1024 → 1024 tier.
         """
         result = compute_aggregation_num_ctx(1000, task_type="feature")
-        assert result == 2048
+        assert result == 1024
 
     def test_medium_prompt_uses_4096(self):
         """Medium prompts should use 4096 tier.

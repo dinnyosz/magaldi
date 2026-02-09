@@ -17,7 +17,23 @@ from typing import TypeVar
 T = TypeVar("T")
 
 # Context size tiers (powers of 2 for memory alignment)
-CONTEXT_TIERS = [2048, 4096, 8192, 16384, 32768]
+CONTEXT_TIERS = [1024, 2048, 4096, 8192, 16384, 32768]
+
+# Human-readable abbreviations for each tier (single source of truth)
+TIER_ABBREV = {tier: f"{tier // 1024}k" for tier in CONTEXT_TIERS}
+
+# Suffixes for Ollama tiered model aliases (e.g., "qwen3:4b-instruct-2k")
+TIER_SUFFIXES = {tier: f"-{tier // 1024}k" for tier in CONTEXT_TIERS}
+
+# Rich colors per tier for CLI display (red=biggest → yellow → green=smallest)
+TIER_COLORS = {
+    32768: "red",
+    16384: "bright_red",
+    8192: "yellow",
+    4096: "bright_yellow",
+    2048: "bright_green",
+    1024: "green",
+}
 
 # Tier scaling exponent for ETA estimation fallback.
 # Empirically derived from timing data: time_ratio = tier_ratio^TIER_SCALING_EXPONENT
@@ -29,7 +45,8 @@ TIER_SCALING_EXPONENT = 0.65
 # Smaller contexts = more parallelism, larger contexts = less to avoid GPU saturation
 # Tuned for M4 Pro 48GB - adjust for different hardware
 TIER_MAX_WORKERS = {
-    2048: 12,  # Small context - max parallelism
+    1024: 16,  # Tiny context - maximum parallelism
+    2048: 12,  # Small context - high parallelism
     4096: 8,   # Medium-small
     8192: 4,   # Medium
     16384: 2,  # Large - limited parallelism
@@ -40,6 +57,7 @@ TIER_MAX_WORKERS = {
 # Larger contexts take proportionally longer to process
 # NOTE: These are used for throttle calculations; Ollama may not enforce actual timeouts
 TIER_TIMEOUTS = {
+    1024: 60,    # 1 minute - tiny elements
     2048: 120,   # 2 minutes
     4096: 120,   # 2 minutes
     8192: 180,   # 3 minutes
@@ -47,23 +65,44 @@ TIER_TIMEOUTS = {
     32768: 240,  # 4 minutes
 }
 
-# Estimated prompt overhead per element type (tokens)
-# Accounts for system prompt, user template, and parent context
-# - file: system prompt (~162) + template (~50) + imports (~50) = ~262
-# - class: system prompt (~150) + file_summary (~200) + attrs (~100) = ~450
-# - function: system prompt (~137) + file_summary (~200) + class_context (~200) + sig/docstring (~100) = ~637
-# - method: system prompt (~137) + file_summary (~200) + class_summary (~200) + sig/state (~100) = ~637
-# - variable/constant: system prompt (~80) + file_summary (~200) + class_context (~200) + function_context (~200) = ~680
+# Estimated prompt overhead per element type (tokens), EXCLUDING raw code.
+# Includes: system prompt + user template + typical variable content + output budget.
+#
+# System prompts (fixed text, measured):
+#   file: 189, class: 189, interface: 153, trait: 149, enum: 128,
+#   type_alias: 133, function: 177, method: 169, constant: 126,
+#   variable: 129, import: 114
+#
+# User template (min static text, measured):
+#   file: 200, class: 212, interface: 166, trait: 161, enum: 126,
+#   type_alias: 132, function: 199, method: 206, constant: 136,
+#   variable: 134, import: 114
+#
+# Variable content (estimated typical, e.g. file_summary, class_context,
+#   signature/docstring duplication from raw_code):
+#   file: ~50, class: ~130, function: ~200 (sig+docstring in template AND code),
+#   method: ~240, variable/constant: ~160, interface/trait: ~70, enum/type_alias: ~60
+#
+# Output budget (based on max SENTENCE_RANGES per type):
+#   file/class/function: up to 5-6 sentences ≈ 200 tokens
+#   method/interface/trait/enum: up to 4-5 sentences ≈ 150 tokens
+#   variable/constant/type_alias: up to 2-3 sentences ≈ 100 tokens
+#   import: handcrafted (no LLM) ≈ 50 tokens
 PROMPT_OVERHEAD = {
-    "file": 300,
-    "class": 500,
-    "function": 700,
-    "method": 700,
-    "variable": 700,
-    "constant": 700,
+    "file": 650,        # 189 + 200 + 50 + 200 = 639 → 650
+    "class": 750,       # 189 + 212 + 130 + 200 = 731 → 750
+    "interface": 550,   # 153 + 166 + 70 + 150 = 539 → 550
+    "trait": 550,       # 149 + 161 + 70 + 150 = 530 → 550
+    "enum": 450,        # 128 + 126 + 60 + 150 = 464 → 450
+    "type_alias": 450,  # 133 + 132 + 60 + 100 = 425 → 450
+    "function": 800,    # 177 + 199 + 200 + 200 = 776 → 800
+    "method": 800,      # 169 + 206 + 240 + 150 = 765 → 800
+    "constant": 550,    # 126 + 136 + 160 + 100 = 522 → 550
+    "variable": 550,    # 129 + 134 + 160 + 100 = 523 → 550
+    "import": 350,      # 114 + 114 + 60 + 50 = 338 → 350
 }
 
-DEFAULT_OVERHEAD = 500
+DEFAULT_OVERHEAD = 550
 
 
 def compute_element_num_ctx(element_type: str, char_count: int) -> int:
@@ -73,9 +112,10 @@ def compute_element_num_ctx(element_type: str, char_count: int) -> int:
     smallest context tier that fits its actual size, maximizing KV cache
     efficiency.
 
-    Example:
-        - 200 char function (50 tokens + 700 overhead) → 2048 tier
-        - 72000 char file (18000 tokens + 300 overhead) → 32768 tier
+    The total includes prompt overhead (which includes output budget) + code tokens:
+        - 200 char function (50 code + 800 overhead = 850) → 1024 tier
+        - 4000 char function (1000 code + 800 overhead = 1800) → 2048 tier
+        - 72000 char file (18000 code + 650 overhead) → 32768 tier
 
     Args:
         element_type: Type of code element (file, class, function, etc.)

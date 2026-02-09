@@ -14,10 +14,10 @@ from shared.ai.ollama_models import (
 class TestGetTieredModelName:
     """Tests for get_tiered_model_name function."""
 
-    def test_returns_2k_for_small_context(self):
-        """Context <= 2048 should return -2k suffix."""
+    def test_returns_1k_for_small_context(self):
+        """Context <= 1024 should return -1k suffix."""
         result = get_tiered_model_name("qwen3:4b-instruct", 1000)
-        assert result == "qwen3:4b-instruct-2k"
+        assert result == "qwen3:4b-instruct-1k"
 
     def test_returns_2k_for_exact_tier(self):
         """Context == 2048 should return -2k suffix."""

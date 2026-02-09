@@ -236,9 +236,10 @@ def run_processing(
         eta_breakdown = state.timing.get_eta_breakdown_with_avg(state.num_workers)
         eta_table = None
         if eta_breakdown:
-            tier_abbrev = {2048: "2k", 4096: "4k", 8192: "8k", 16384: "16k", 32768: "32k"}
+            from shared.ai.context_size import CONTEXT_TIERS, TIER_ABBREV, TIER_COLORS
+            tier_abbrev = TIER_ABBREV
             type_abbrev = {"function": "fn", "method": "mth", "class": "cls", "file": "file", "variable": "var", "constant": "const"}
-            tiers = [32768, 16384, 8192, 4096, 2048]
+            tiers = sorted(CONTEXT_TIERS, reverse=True)
             type_order = ["file", "class", "function", "method", "variable", "constant", "import"]
 
             # Build lookup from breakdown data
@@ -249,7 +250,7 @@ def run_processing(
             # Create grid table: rows=types, columns=tiers
             eta_table = Table(show_header=True, box=None, padding=(0, 2), expand=False)
             eta_table.add_column("", style="dim", width=10)  # type column
-            tier_colors = {32768: "magenta", 16384: "blue", 8192: "cyan", 4096: "green", 2048: "yellow"}
+            tier_colors = TIER_COLORS
             for tier in tiers:
                 color = tier_colors.get(tier, "white")
                 eta_table.add_column(f"[{color}]{tier_abbrev.get(tier, f'{tier//1024}k')}[/]", justify="center")

@@ -138,8 +138,9 @@ def run_glossary_extraction(
             eta_breakdown = state.timing.get_eta_breakdown_with_avg(state.num_workers)
             eta_table = None
             if eta_breakdown:
-                tier_abbrev = {2048: "2k", 4096: "4k", 8192: "8k", 16384: "16k", 32768: "32k"}
-                tiers = [32768, 16384, 8192, 4096, 2048]
+                from shared.ai.context_size import CONTEXT_TIERS, TIER_ABBREV, TIER_COLORS
+                tier_abbrev = TIER_ABBREV
+                tiers = sorted(CONTEXT_TIERS, reverse=True)
                 type_order = ["glossary"]
 
                 # Build lookup from breakdown data
@@ -150,7 +151,7 @@ def run_glossary_extraction(
                 # Create grid table: rows=types, columns=tiers
                 eta_table = Table(show_header=True, box=None, padding=(0, 2), expand=False)
                 eta_table.add_column("", style="dim", width=10)
-                tier_colors = {32768: "magenta", 16384: "blue", 8192: "cyan", 4096: "green", 2048: "yellow"}
+                tier_colors = TIER_COLORS
                 for tier in tiers:
                     if any((t, tier) in eta_data for t in type_order):
                         color = tier_colors.get(tier, "white")

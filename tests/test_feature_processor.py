@@ -647,7 +647,7 @@ class TestGenerateFeatureSummary:
 
         call_args = mock_llm_client.generate_from_messages.call_args
         # Context should be one of the tiers
-        assert call_args.kwargs["num_ctx"] in [2048, 4096, 8192, 16384, 32768]
+        assert call_args.kwargs["num_ctx"] in [1024, 2048, 4096, 8192, 16384, 32768]
         assert call_args.kwargs["num_ctx"] == num_ctx
 
 
@@ -687,7 +687,7 @@ class TestGenerateSubfeatureSummary:
 
         call_args = mock_llm_client.generate_from_messages.call_args
         # Context should be one of the tiers
-        assert call_args.kwargs["num_ctx"] in [2048, 4096, 8192, 16384, 32768]
+        assert call_args.kwargs["num_ctx"] in [1024, 2048, 4096, 8192, 16384, 32768]
         assert call_args.kwargs["num_ctx"] == num_ctx
 
 

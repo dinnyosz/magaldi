@@ -22,22 +22,12 @@ from typing import TYPE_CHECKING
 
 import httpx
 
+from shared.ai.context_size import CONTEXT_TIERS, TIER_SUFFIXES
+
 if TYPE_CHECKING:
     from shared.config import ModelConfig
 
 logger = logging.getLogger(__name__)
-
-# Context tiers matching context_size.py
-CONTEXT_TIERS = [2048, 4096, 8192, 16384, 32768]
-
-# Suffix format for tiered models
-TIER_SUFFIXES = {
-    2048: "-2k",
-    4096: "-4k",
-    8192: "-8k",
-    16384: "-16k",
-    32768: "-32k",
-}
 
 
 @dataclass

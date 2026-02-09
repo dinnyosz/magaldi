@@ -138,8 +138,9 @@ def build_eta_table(
     if not eta_breakdown:
         return None
 
-    tier_abbrev = {2048: "2k", 4096: "4k", 8192: "8k", 16384: "16k", 32768: "32k"}
-    tiers = [32768, 16384, 8192, 4096, 2048]
+    from shared.ai.context_size import CONTEXT_TIERS, TIER_ABBREV, TIER_COLORS
+    tier_abbrev = TIER_ABBREV
+    tiers = sorted(CONTEXT_TIERS, reverse=True)
     type_colors = type_colors or {}
 
     # Build lookup from breakdown data
@@ -150,7 +151,7 @@ def build_eta_table(
     # Create grid table: rows=types, columns=tiers
     eta_table = Table(show_header=True, box=None, padding=(0, 2), expand=False)
     eta_table.add_column("", style="dim", width=10)
-    tier_colors_map = {32768: "magenta", 16384: "blue", 8192: "cyan", 4096: "green", 2048: "yellow"}
+    tier_colors_map = TIER_COLORS
 
     for tier in tiers:
         if any((t, tier) in eta_data for t in type_order):
