@@ -42,6 +42,7 @@ Every piece of data extracted during parsing MUST be surfaced to users through A
 | Dashboard aggregations | `get_dashboard()` @ `src/magaldi_web/routes/dashboard.py` |
 | ES serialization | `index_element()` @ `src/shared/db/repositories/elements.py` |
 | Conditional element types | `CONDITIONAL_ELEMENT_TYPES` @ `src/magaldi_web/frontend/src/pages/Explorer.tsx`, `Search.tsx` |
+| Language fixture files | `tests/fixtures/languages/example_*.{py,js,ts,tsx,php,rs,sh}` |
 
 ---
 
@@ -52,6 +53,7 @@ When adding a new element type:
 ### Parsing Layer
 - [ ] Add to `CodeElement.element_type` docstring in `src/magaldi_core/code_parser.py`
 - [ ] Implement extraction in relevant extractors in `src/magaldi_core/extractors/`
+- [ ] Add examples to language fixture files in `tests/fixtures/languages/` (see Section 13)
 
 ### Summarization Prompts (`src/shared/ai/summarization.py`)
 - [ ] Add to `LINE_THRESHOLDS` dict
@@ -739,6 +741,10 @@ After verification, produce:
 ### Anti-verbose Issues
 - [ ] `new_type` prompt missing "Start..." instruction
 
+### Missing Language Fixture Coverage
+- [ ] `new_type` not exercised in any fixture file in `tests/fixtures/languages/`
+- [ ] New language added but no `example_{lang}.{ext}` fixture file
+
 ### Recommendations
 1. Add `new_type` to all prompt dicts in summarization.py
 2. Add `new_field` to Element.tsx
@@ -746,4 +752,102 @@ After verification, produce:
 4. Add `{type}_count` to DashboardStats, RepoSummary, and dashboard route
 5. If language-specific, add to CONDITIONAL_ELEMENT_TYPES arrays
 6. Update MCP schema element_types description
+7. Add examples of `new_type` to relevant fixture files in `tests/fixtures/languages/`
+```
+
+---
+
+## 13. Language Fixture Files
+
+Example source files in `tests/fixtures/languages/` ensure all element types appear in the magaldi index when parsing its own repo. Each file is syntactically valid and exercises all element types the language supports.
+
+### Source of Truth
+
+| File | Language | Element Types Covered |
+|------|----------|----------------------|
+| `example_python.py` | Python | class, enum, function, method, constant, variable, import |
+| `example_javascript.js` | JavaScript | class, function, method, constant, variable, import |
+| `example_typescript.ts` | TypeScript | class, interface, type_alias, enum, function, method, constant, variable, import |
+| `example_react.tsx` | React/TSX | interface, type_alias, enum, function, constant, import |
+| `example_php.php` | PHP | class, interface, trait, enum, function, method, constant, variable, import |
+| `example_rust.rs` | Rust | class (struct), trait, enum, function, method, constant, variable, import |
+| `example_bash.sh` | Bash | function, constant |
+
+### Checklist for New Element Types
+
+- [ ] Add at least 2-3 examples of the new type to the relevant language fixture file(s)
+- [ ] Verify extraction works: run the verification script below
+- [ ] If adding a new language, create `tests/fixtures/languages/example_{lang}.{ext}`
+
+### Checklist for New Languages
+
+- [ ] Create `tests/fixtures/languages/example_{lang}.{ext}` with examples of ALL element types the extractor supports
+- [ ] Include: classes, functions, methods, constants, variables, imports
+- [ ] Include language-specific types: interfaces, traits, enums, type aliases (if applicable)
+- [ ] Verify with the extraction script below
+
+### Verification
+
+```bash
+# Verify all element types are covered by fixture files
+source .venv/bin/activate
+python -c "
+from magaldi_core.tree_sitter_manager import get_manager
+from magaldi_core.extractors import get_extractor
+from magaldi_core.extractors.bash import BashExtractor
+from pathlib import Path
+
+fixtures = Path('tests/fixtures/languages')
+langs = [
+    ('example_python.py', 'python'),
+    ('example_javascript.js', 'javascript'),
+    ('example_typescript.ts', 'typescript'),
+    ('example_react.tsx', 'typescript'),
+    ('example_php.php', 'php'),
+    ('example_rust.rs', 'rust'),
+    ('example_bash.sh', 'bash'),
+]
+
+all_types = set()
+for filename, lang in langs:
+    fp = fixtures / filename
+    if not fp.exists():
+        print(f'MISSING: {filename}')
+        continue
+    code = fp.read_text()
+    ext = BashExtractor() if lang == 'bash' else get_extractor(lang)
+    ts_lang = 'tsx' if filename.endswith('.tsx') else lang
+    tree = get_manager().parse(code.encode(), ts_lang)
+    elems = ext.extract_elements(tree, code.split('\n'))
+    types = {}
+    for e in elems:
+        types[e.element_type] = types.get(e.element_type, 0) + 1
+        all_types.add(e.element_type)
+    label = f'react/tsx' if filename.endswith('.tsx') else lang
+    print(f'{label:12s} {len(elems):3d} elements - {dict(sorted(types.items()))}')
+
+# file and method are created by the higher-level code parser, not raw extractors
+all_types.update(['file', 'method'])
+expected = {'file','class','interface','trait','enum','type_alias','function','method','constant','variable','import'}
+missing = expected - all_types
+if missing:
+    print(f'MISSING types: {sorted(missing)}')
+else:
+    print('All element types covered!')
+"
+```
+
+### Report Format
+
+```markdown
+### Language Fixture Gaps
+
+**Missing element types:**
+- [ ] `{type}` not exercised in any fixture file
+
+**Missing fixture files:**
+- [ ] No fixture for `{language}` — create `tests/fixtures/languages/example_{lang}.{ext}`
+
+**Fixture parse errors:**
+- [ ] `{filename}` fails to parse: {error}
 ```
