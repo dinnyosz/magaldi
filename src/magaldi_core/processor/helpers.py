@@ -334,8 +334,6 @@ def _process_single_element(
         return f"<{element.element_type}> " + " → ".join(parts)
 
     display_name = build_display_name()
-    # Get model for this element type
-    element_model = config.get_model_for_element_type(element.element_type)
 
     # Track current stage start time for elapsed display
     stage_start_time = time.time()
@@ -354,6 +352,8 @@ def _process_single_element(
             element.element_type,
             len(element.raw_code or ""),
         )
+        # Get model for this element type (needs num_ctx for 1024-tier fallback)
+        element_model = config.get_model_for_element_type(element.element_type, num_ctx)
         # Format tier compactly: 2048 -> "2K", 32768 -> "32K"
         ctx_display = f"{num_ctx // 1024}K" if num_ctx >= 1024 else str(num_ctx)
         # Display tiered model name for Ollama (e.g., "qwen3:4b-instruct-4k")

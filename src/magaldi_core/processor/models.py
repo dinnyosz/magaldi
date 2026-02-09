@@ -91,13 +91,16 @@ class ProcessingConfig:
     # Context sizes per element type (for LLM num_ctx parameter)
     context_sizes: dict[str, int] = field(default_factory=dict)
 
-    def get_model_for_element_type(self, element_type: str) -> "ModelConfig":
+    def get_model_for_element_type(self, element_type: str, num_ctx: int = 0) -> "ModelConfig":
         """Get the appropriate model config for an element type.
 
         Uses small model for functions, methods, variables, constants.
-        Uses main model for files, classes.
+        Uses main model for files, classes — unless element fits in 1024
+        tier, where the small model is sufficient for trivially small elements.
         """
         if element_type in ("function", "method", "variable", "constant"):
+            return self.summarize_model_small
+        if num_ctx > 0 and num_ctx <= 1024:
             return self.summarize_model_small
         return self.summarize_model
 

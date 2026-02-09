@@ -359,6 +359,37 @@ class TestProcessingConfig:
         model = config.get_model_for_element_type("file")
         assert model == config.summarize_model
 
+    def test_large_model_types_use_small_model_at_1024_tier(self):
+        """File/class/etc should fall back to small model at 1024 tier."""
+        config = ProcessingConfig()
+
+        for element_type in ("file", "class", "interface", "trait", "enum", "type_alias"):
+            model = config.get_model_for_element_type(element_type, num_ctx=1024)
+            assert model == config.summarize_model_small, (
+                f"{element_type} at 1024 should use small model"
+            )
+
+    def test_large_model_types_keep_large_model_at_2048(self):
+        """File/class/etc should keep large model at 2048+ tiers."""
+        config = ProcessingConfig()
+
+        for element_type in ("file", "class", "interface", "trait", "enum", "type_alias"):
+            model = config.get_model_for_element_type(element_type, num_ctx=2048)
+            assert model == config.summarize_model, (
+                f"{element_type} at 2048 should use large model"
+            )
+
+    def test_small_model_types_unaffected_by_num_ctx(self):
+        """Function/method/etc always use small model regardless of tier."""
+        config = ProcessingConfig()
+
+        for element_type in ("function", "method", "variable", "constant"):
+            for num_ctx in (1024, 2048, 4096, 8192):
+                model = config.get_model_for_element_type(element_type, num_ctx=num_ctx)
+                assert model == config.summarize_model_small, (
+                    f"{element_type} at {num_ctx} should always use small model"
+                )
+
 
 # =============================================================================
 # PROCESSING RESULT TESTS
