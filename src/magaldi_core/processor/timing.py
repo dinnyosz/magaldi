@@ -394,16 +394,21 @@ class TimingStats:
                 total_time = self.total_base_by_type_tier.get(type_tier_key, 0.0)
                 return total_time / count, False
 
-        # 2. Same type, find closest tier(s) and average
-        same_type_tiers = [
+        # 2. Same type, closest tier — but only tiers using the same model.
+        # file@1024 (small model) must NOT extrapolate from file@16384 (large model),
+        # because the ~2x model speed difference would make the ETA way off.
+        is_small = _uses_small_model(element_type, tier)
+        same_type_same_model = [
             (t, tr) for (t, tr) in self.summarize_counts_by_type_tier
-            if t == element_type and self.summarize_counts_by_type_tier[(t, tr)] > 0
+            if t == element_type
+            and _uses_small_model(t, tr) == is_small
+            and self.summarize_counts_by_type_tier[(t, tr)] > 0
         ]
-        if same_type_tiers:
+        if same_type_same_model:
             # Find the minimum tier distance
-            min_distance = min(abs(tr - tier) for (t, tr) in same_type_tiers)
+            min_distance = min(abs(tr - tier) for (t, tr) in same_type_same_model)
             # Get all items at that closest distance and average them
-            closest_items = [(t, tr) for (t, tr) in same_type_tiers if abs(tr - tier) == min_distance]
+            closest_items = [(t, tr) for (t, tr) in same_type_same_model if abs(tr - tier) == min_distance]
             total_time = sum(self.total_base_by_type_tier.get(key, 0.0) for key in closest_items)
             total_count = sum(self.summarize_counts_by_type_tier[key] for key in closest_items)
             base_avg = total_time / total_count
@@ -416,7 +421,6 @@ class TimingStats:
         # 3. Same model group — match by actual model used, not just type
         # A file@1024 uses the small model, so it should look at other small-model
         # (type, tier) combos for fallback, not at class@4096 which uses the large model.
-        is_small = _uses_small_model(element_type, tier)
 
         same_model_tiers = [
             (t, tr) for (t, tr) in self.summarize_counts_by_type_tier
