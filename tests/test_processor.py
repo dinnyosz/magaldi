@@ -733,6 +733,34 @@ class TestTimingStats:
         # Total ≈ 10.91
         assert abs(eta - 10.91) < 0.5
 
+    def test_eta_fallback_file_1024_only_large_model_data(self):
+        """file@1024 with only file@32768 data should NOT return raw 15s.
+
+        Regression test: step 4 used to return per-type average without
+        model filtering, so file@1024 (small model) would get file@32768
+        (large model) timing with no scaling at all.
+        """
+        stats = TimingStats()
+
+        stats.set_totals_by_type_tier({
+            ("file", 32768): 4,
+            ("file", 1024): 62,
+        })
+
+        # Only large-model file data exists
+        stats.record(15.0, 10.0, 5.0, "file", True, tier=32768)
+
+        eta = stats.eta_seconds(1, 66, num_workers=1)
+        assert eta is not None
+
+        # file@1024 must NOT get 15.0s (that's the large model at 32k).
+        # It should go to cross-model fallback (step 6) which applies
+        # tier scaling + 0.5x model scale, giving something << 15s.
+        # Remaining file@32768: 3 * 15.0 = 45.0
+        # Remaining file@1024: 62 * (cross-model estimate, should be < 2s)
+        # Total should be well under 62 * 15.0 = 930
+        assert eta < 200  # Sanity: not returning raw 15s for 62 elements
+
     def test_get_eta_breakdown(self):
         """Test ETA breakdown returns per-(type, tier) estimates."""
         stats = TimingStats()

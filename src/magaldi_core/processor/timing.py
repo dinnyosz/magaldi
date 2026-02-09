@@ -441,15 +441,16 @@ class TimingStats:
             tier_ratio = (tier / closest_tier) ** TIER_SCALING_EXPONENT if closest_tier > 0 else 1.0
             return base_avg * tier_ratio, True
 
-        # 4. Fall back to per-type average (ignoring tier) - use wall_time from type_tier
-        # Sum all wall_time for this type across all tiers
+        # 4. Fall back to per-type average — only same-model tiers
+        same_type_any_tier = [
+            (t, tr) for (t, tr) in self.total_base_by_type_tier
+            if t == element_type and _uses_small_model(t, tr) == is_small
+        ]
         type_wall_total = sum(
-            self.total_base_by_type_tier.get((element_type, tr), 0.0)
-            for tr in set(tr for (t, tr) in self.total_base_by_type_tier if t == element_type)
+            self.total_base_by_type_tier.get(key, 0.0) for key in same_type_any_tier
         )
         type_count = sum(
-            self.summarize_counts_by_type_tier.get((element_type, tr), 0)
-            for tr in set(tr for (t, tr) in self.summarize_counts_by_type_tier if t == element_type)
+            self.summarize_counts_by_type_tier.get(key, 0) for key in same_type_any_tier
         )
         if type_count > 0:
             return type_wall_total / type_count, True
