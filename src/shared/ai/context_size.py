@@ -83,26 +83,31 @@ TIER_TIMEOUTS = {
 #   file: ~50, class: ~130, function: ~200 (sig+docstring in template AND code),
 #   method: ~240, variable/constant: ~160, interface/trait: ~70, enum/type_alias: ~60
 #
-# Output budget (based on max SENTENCE_RANGES per type):
-#   file/class/function: up to 5-6 sentences ≈ 200 tokens
-#   method/interface/trait/enum: up to 4-5 sentences ≈ 150 tokens
-#   variable/constant/type_alias: up to 2-3 sentences ≈ 100 tokens
-#   import: handcrafted (no LLM) ≈ 50 tokens
+# Output budget (empirically measured from ~2300 elements, set to max * 1.25):
+#   file/function: max ~400 tokens → 500 budget
+#   class: max ~340 tokens → 450 budget
+#   method: max ~305 tokens → 400 budget
+#   interface/trait: max ~230 tokens → 300 budget
+#   enum: max ~200 tokens → 250 budget
+#   type_alias: max ~150 tokens → 200 budget
+#   constant: max ~160 tokens → 200 budget
+#   variable: max ~360 tokens → 450 budget
+#   import: handcrafted (no LLM) → 100 budget
 PROMPT_OVERHEAD = {
-    "file": 650,        # 189 + 200 + 50 + 200 = 639 → 650
-    "class": 750,       # 189 + 212 + 130 + 200 = 731 → 750
-    "interface": 550,   # 153 + 166 + 70 + 150 = 539 → 550
-    "trait": 550,       # 149 + 161 + 70 + 150 = 530 → 550
-    "enum": 450,        # 128 + 126 + 60 + 150 = 464 → 450
-    "type_alias": 450,  # 133 + 132 + 60 + 100 = 425 → 450
-    "function": 800,    # 177 + 199 + 200 + 200 = 776 → 800
-    "method": 800,      # 169 + 206 + 240 + 150 = 765 → 800
-    "constant": 550,    # 126 + 136 + 160 + 100 = 522 → 550
-    "variable": 550,    # 129 + 134 + 160 + 100 = 523 → 550
-    "import": 350,      # 114 + 114 + 60 + 50 = 338 → 350
+    "file": 950,        # 189 + 200 + 50 + 500 = 939 → 950
+    "class": 1000,      # 189 + 212 + 130 + 450 = 981 → 1000
+    "interface": 700,   # 153 + 166 + 70 + 300 = 689 → 700
+    "trait": 700,       # 149 + 161 + 70 + 300 = 680 → 700
+    "enum": 600,        # 128 + 126 + 60 + 250 = 564 → 600
+    "type_alias": 550,  # 133 + 132 + 60 + 200 = 525 → 550
+    "function": 1100,   # 177 + 199 + 200 + 500 = 1076 → 1100
+    "method": 1050,     # 169 + 206 + 240 + 400 = 1015 → 1050
+    "constant": 650,    # 126 + 136 + 160 + 200 = 622 → 650
+    "variable": 900,    # 129 + 134 + 160 + 450 = 873 → 900
+    "import": 400,      # 114 + 114 + 60 + 100 = 388 → 400
 }
 
-DEFAULT_OVERHEAD = 550
+DEFAULT_OVERHEAD = 800
 
 
 def compute_element_num_ctx(element_type: str, char_count: int) -> int:
@@ -113,9 +118,9 @@ def compute_element_num_ctx(element_type: str, char_count: int) -> int:
     efficiency.
 
     The total includes prompt overhead (which includes output budget) + code tokens:
-        - 200 char function (50 code + 800 overhead = 850) → 1024 tier
-        - 4000 char function (1000 code + 800 overhead = 1800) → 2048 tier
-        - 72000 char file (18000 code + 650 overhead) → 32768 tier
+        - 200 char function (50 code + 1100 overhead = 1150) → 2048 tier
+        - 4000 char function (1000 code + 1100 overhead = 2100) → 4096 tier
+        - 72000 char file (18000 code + 950 overhead) → 32768 tier
 
     Args:
         element_type: Type of code element (file, class, function, etc.)

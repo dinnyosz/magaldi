@@ -295,13 +295,12 @@ class TimingStats:
                     has_issues = True
                     input_rows.append((elem_type, tier, count, overflows, avg_pct, worst_pct))
 
-            # Output token summary — extract output budget from PROMPT_OVERHEAD comments
-            # Output budgets per type (from PROMPT_OVERHEAD comments)
+            # Output token summary — output budgets per type (from PROMPT_OVERHEAD)
             output_budgets = {
-                "file": 200, "class": 200, "function": 200,
-                "method": 150, "interface": 150, "trait": 150, "enum": 150,
-                "variable": 100, "constant": 100, "type_alias": 100,
-                "import": 50,
+                "file": 500, "class": 450, "function": 500,
+                "method": 400, "interface": 300, "trait": 300, "enum": 250,
+                "variable": 450, "constant": 200, "type_alias": 200,
+                "import": 100,
             }
             output_rows: list[tuple[str, int, int, int]] = []
             for elem_type in sorted(self.output_sample_counts.keys()):

@@ -85,27 +85,27 @@ class TestComputeContextSizes:
 class TestComputeElementNumCtx:
     """Tests for per-element context size computation."""
 
-    def test_tiny_function_uses_1024_tier(self):
-        """A 200 char function should use 1024 context.
+    def test_tiny_function_uses_2048_tier(self):
+        """A 200 char function should use 2048 context.
 
-        Calculation: 200/4 = 50 + 800 overhead = 850 < 1024.
+        Calculation: 200/4 = 50 + 1100 overhead = 1150 < 2048.
         """
         result = compute_element_num_ctx("function", 200)
-        assert result == 1024
+        assert result == 2048
 
-    def test_small_function_uses_2048_tier(self):
-        """A 4000 char function should use 2048 context.
+    def test_small_function_uses_4096_tier(self):
+        """A 4000 char function should use 4096 context.
 
-        Calculation: 4000/4 = 1000 + 800 overhead = 1800 < 2048.
+        Calculation: 4000/4 = 1000 + 1100 overhead = 2100 < 4096.
         """
         result = compute_element_num_ctx("function", 4000)
-        assert result == 2048
+        assert result == 4096
 
     def test_medium_function_uses_4096(self):
         """A 10000 char function should use 4096 context.
 
-        Calculation: 10000/4 = 2500 + 800 overhead = 3300 total.
-        3300 > 2048 but < 4096, so it uses 4096 tier.
+        Calculation: 10000/4 = 2500 + 1100 overhead = 3600 total.
+        3600 > 2048 but < 4096, so it uses 4096 tier.
         """
         result = compute_element_num_ctx("function", 10000)
         assert result == 4096
@@ -113,8 +113,8 @@ class TestComputeElementNumCtx:
     def test_large_file_uses_32768(self):
         """A 72000 char file should use 32768 context.
 
-        Calculation: 72000/4 = 18000 + 650 overhead = 18650 total.
-        18650 > 16384 but < 32768, so it uses 32768 tier.
+        Calculation: 72000/4 = 18000 + 950 overhead = 18950 total.
+        18950 > 16384 but < 32768, so it uses 32768 tier.
         """
         result = compute_element_num_ctx("file", 72000)
         assert result == 32768
@@ -123,8 +123,8 @@ class TestComputeElementNumCtx:
         """Different element types with same char count may get different tiers.
 
         5000 chars:
-        - function: 5000/4 = 1250 + 800 = 2050 → 4096
-        - import: 5000/4 = 1250 + 350 = 1600 → 2048
+        - function: 5000/4 = 1250 + 1100 = 2350 → 4096
+        - import: 5000/4 = 1250 + 400 = 1650 → 2048
         """
         func_result = compute_element_num_ctx("function", 5000)
         import_result = compute_element_num_ctx("import", 5000)
@@ -133,15 +133,15 @@ class TestComputeElementNumCtx:
 
     def test_empty_code_uses_1024_tier(self):
         """Empty code with just overhead should use 1024 tier."""
-        # import: 0 + 350 = 350 → 1024
+        # import: 0 + 400 = 400 → 1024
         result = compute_element_num_ctx("import", 0)
         assert result == 1024
 
-    def test_empty_code_function_uses_1024_tier(self):
-        """Empty function code with overhead should use 1024 tier."""
-        # function: 0 + 800 = 800 → 1024
+    def test_empty_code_function_uses_2048_tier(self):
+        """Empty function code with overhead should use 2048 tier."""
+        # function: 0 + 1100 = 1100 → 2048
         result = compute_element_num_ctx("function", 0)
-        assert result == 1024
+        assert result == 2048
 
     def test_huge_element_uses_largest_tier(self):
         """Very large elements should use the largest available tier."""
@@ -150,13 +150,13 @@ class TestComputeElementNumCtx:
         assert result == CONTEXT_TIERS[-1]
 
     def test_1024_tier_used_for_small_elements(self):
-        """Small variables/constants/enums should use the 1024 tier."""
-        # variable: 200/4 = 50 + 550 = 600 < 1024
-        assert compute_element_num_ctx("variable", 200) == 1024
-        # constant: 100/4 = 25 + 550 = 575 < 1024
-        assert compute_element_num_ctx("constant", 100) == 1024
-        # enum: 400/4 = 100 + 450 = 550 < 1024
-        assert compute_element_num_ctx("enum", 400) == 1024
+        """Small enums/imports should use the 1024 tier."""
+        # enum: 200/4 = 50 + 600 = 650 < 1024
+        assert compute_element_num_ctx("enum", 200) == 1024
+        # import: 200/4 = 50 + 400 = 450 < 1024
+        assert compute_element_num_ctx("import", 200) == 1024
+        # type_alias: 200/4 = 50 + 550 = 600 < 1024
+        assert compute_element_num_ctx("type_alias", 200) == 1024
 
 
 class TestComputeAggregationNumCtx:

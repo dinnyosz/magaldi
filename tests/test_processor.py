@@ -917,11 +917,11 @@ class TestTimingStats:
         stats = TimingStats()
         stats.set_totals_by_type({"function": 2})
 
-        # Output budget for function is 200 tokens
+        # Output budget for function is 500 tokens
         stats.record(1.0, 0.5, 0.3, "function", True,
-                     prompt_tokens=1000, response_tokens=150, assigned_tier=2048)
+                     prompt_tokens=1000, response_tokens=400, assigned_tier=2048)
         stats.record(1.0, 0.5, 0.3, "function", True,
-                     prompt_tokens=1000, response_tokens=250, assigned_tier=2048)
+                     prompt_tokens=1000, response_tokens=600, assigned_tier=2048)
 
         summary = stats.get_tier_accuracy_summary()
         assert summary["has_issues"] is True
@@ -930,8 +930,8 @@ class TestTimingStats:
         row = summary["output"][0]
         elem_type, avg_tokens, max_tokens, budget = row
         assert elem_type == "function"
-        assert max_tokens == 250
-        assert budget == 200
+        assert max_tokens == 600
+        assert budget == 500
 
     def test_tier_accuracy_summary_tight_headroom(self):
         """Summary should flag when worst headroom < 10% even without overflows."""
@@ -1457,7 +1457,7 @@ class TestPerElementContextSize:
         mock_llm = MagicMock()
         mock_llm.generate.return_value = "test summary"
 
-        # Small function: 15 chars = ~4 tokens + 800 overhead = 804 → 1024 tier
+        # Small function: 15 chars = ~4 tokens + 1100 overhead = 1104 → 2048 tier
         element = CodeElement(
             element_id="test:repo:user:file.py:function:foo:1",
             element_type="function",
@@ -1472,14 +1472,14 @@ class TestPerElementContextSize:
         _summarize_element(element, cache, mock_llm, config)
 
         call_kwargs = mock_llm.generate.call_args[1]
-        assert call_kwargs.get("num_ctx") == 1024
+        assert call_kwargs.get("num_ctx") == 2048
 
     def test_medium_element_uses_appropriate_tier(self):
         """Medium elements should use appropriate tier based on size."""
         mock_llm = MagicMock()
         mock_llm.generate.return_value = "test summary"
 
-        # 8000 chars = 2000 tokens + 700 overhead = 2700 → 4096 tier
+        # 8000 chars = 2000 tokens + 1100 overhead = 3100 → 4096 tier
         element = CodeElement(
             element_id="test:repo:user:file.py:function:big:1",
             element_type="function",
@@ -1633,9 +1633,9 @@ class TestPerElementContextSize:
             if 0 in s and s[0][1] == "summarizing"
         ]
         assert len(summ_updates) > 0
-        # Small function should be 1K tier (shown in ctx_size field, index 3)
+        # Small function should be 2K tier (shown in ctx_size field, index 3)
         ctx_sizes = [u[3] for u in summ_updates]
-        assert "1K" in ctx_sizes
+        assert "2K" in ctx_sizes
 
 
 class TestDynamicWorkerScaling:

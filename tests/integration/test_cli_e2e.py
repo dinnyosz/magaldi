@@ -74,8 +74,8 @@ class TestDryRunParsing:
         )
 
         assert result.exit_code == 0, f"CLI failed with output: {result.output}"
-        # valid_repo has 3 files: main.py, utils.py, helper.js
-        assert "3 files" in result.output or "3 new" in result.output
+        # valid_repo has 4 files: main.py, utils.py, helper.js, magaldi.yaml
+        assert "4 files" in result.output or "4 new" in result.output
 
     def test_parse_shows_element_types(self, cli_runner: CliRunner):
         """Test that element types are shown in the output."""
