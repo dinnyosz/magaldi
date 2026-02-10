@@ -117,15 +117,18 @@ class TestDryRunParsing:
 
         assert result.exit_code != 0
 
-    def test_parse_no_config_repo_fails(self, cli_runner: CliRunner):
-        """Test that parsing a repo without magaldi.yaml fails."""
+    def test_parse_no_config_repo_prompts_user(self, cli_runner: CliRunner):
+        """Test that parsing a repo without magaldi.yaml prompts to create one."""
         no_config_repo = FIXTURES_DIR / "repos" / "no_config_repo"
+        # Decline the prompt to create magaldi.yaml
         result = cli_runner.invoke(
-            main, ["parse", str(no_config_repo), "--user", "main", "--dry-run"]
+            main, ["parse", str(no_config_repo), "--user", "main", "--dry-run"],
+            input="\n\nn\n",
         )
 
         assert result.exit_code != 0
-        assert "magaldi.yaml" in result.output.lower() or "error" in result.output.lower()
+        assert "no magaldi.yaml found" in result.output.lower()
+        assert "aborted" in result.output.lower()
 
     def test_parse_requires_user_option(self, cli_runner: CliRunner):
         """Test that --user option is required."""

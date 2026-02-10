@@ -7,9 +7,11 @@ Discovery -> Change Detection -> Parsing -> Processing -> Feature Extraction -> 
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import click
+import yaml
 
 from shared.cli._printers import (
     print_change_manifest,
@@ -33,6 +35,47 @@ from shared.config import load_config
 if TYPE_CHECKING:
     from magaldi_core.discovery import DiscoveryResult
     from shared.config import MagaldiConfig
+
+
+def _ensure_repo_config(repo_path: str) -> None:
+    """Check for magaldi.yaml and offer to create it if missing.
+
+    Auto-detects scope and repository name, shows the user the detected values,
+    and lets them edit before confirming creation. Exits if the user declines.
+    """
+    repo_path_obj = Path(repo_path).resolve()
+    config_path = repo_path_obj / "magaldi.yaml"
+
+    if config_path.exists():
+        return
+
+    console.print("[yellow]No magaldi.yaml found[/] in this repository.\n")
+
+    # Auto-detect values
+    detected_repo = repo_path_obj.name
+    detected_scope = repo_path_obj.parent.name
+
+    # Let the user confirm or edit the detected values
+    scope = click.prompt("  Scope (groups related repos, e.g. org name)", default=detected_scope)
+    repository = click.prompt("  Repository name", default=detected_repo)
+
+    console.print()
+    console.print(f"  scope: [bold]{scope}[/]")
+    console.print(f"  repository: [bold]{repository}[/]")
+    console.print()
+
+    if not click.confirm("  Create magaldi.yaml with these values?", default=True):
+        console.print("\n[red]Aborted.[/] Create a magaldi.yaml manually to continue.")
+        sys.exit(1)
+
+    # Write config file
+    config_data = {"scope": scope, "repository": repository}
+    with open(config_path, "w", encoding="utf-8") as f:
+        f.write(f"# Magaldi configuration for {repository}\n")
+        f.write("# Scope groups related repositories (e.g., org name, username)\n\n")
+        yaml.dump(config_data, f, default_flow_style=False, sort_keys=False)
+
+    console.print(f"\n[green]Created[/] {config_path}\n")
 
 
 def _run_extraction_only(
@@ -113,6 +156,9 @@ def parse(
 
     if dry_run:
         console.print("[yellow]Dry run mode:[/] Using in-memory storage\n")
+
+    # Check for magaldi.yaml and offer to create it
+    _ensure_repo_config(repo_path)
 
     try:
         # Phase 1: Discovery

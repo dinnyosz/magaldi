@@ -862,6 +862,7 @@ class TestErrorHandling:
 
         repo_path = tmp_path / "test-repo"
         repo_path.mkdir()
+        (repo_path / "magaldi.yaml").write_text("scope: test")
 
         mock_load_config.return_value = mock_config
         mock_run_discovery.side_effect = DiscoveryError("Test error")
@@ -889,6 +890,7 @@ class TestErrorHandling:
         """Test parse command handles generic error."""
         repo_path = tmp_path / "test-repo"
         repo_path.mkdir()
+        (repo_path / "magaldi.yaml").write_text("scope: test")
 
         mock_load_config.return_value = mock_config
         mock_run_discovery.side_effect = Exception("Unexpected error")
@@ -928,6 +930,7 @@ class TestCliIntegration:
         """Test parse when no changes detected."""
         repo_path = tmp_path / "test-repo"
         repo_path.mkdir()
+        (repo_path / "magaldi.yaml").write_text("scope: test")
 
         mock_load_config.return_value = mock_config
         mock_run_discovery.return_value = mock_discovery_result
@@ -971,6 +974,7 @@ class TestCliIntegration:
         """Test parse when Ollama model check fails."""
         repo_path = tmp_path / "test-repo"
         repo_path.mkdir()
+        (repo_path / "magaldi.yaml").write_text("scope: test")
 
         mock_load_config.return_value = mock_config
         mock_run_discovery.return_value = mock_discovery_result
@@ -986,3 +990,80 @@ class TestCliIntegration:
 
         assert result.exit_code != 0
         assert "Pre-flight check failed" in result.output or "not found" in result.output
+
+
+# =============================================================================
+# ENSURE REPO CONFIG TESTS
+# =============================================================================
+
+
+class TestEnsureRepoConfig:
+    """Tests for _ensure_repo_config interactive config creation."""
+
+    def test_skips_when_config_exists(self, tmp_path):
+        """Should do nothing when magaldi.yaml already exists."""
+        from shared.cli.parse import _ensure_repo_config
+
+        (tmp_path / "magaldi.yaml").write_text("scope: test")
+        # Should not raise or prompt
+        _ensure_repo_config(str(tmp_path))
+
+    def test_creates_config_on_confirm(self, cli_runner, tmp_path):
+        """Should create magaldi.yaml when user confirms with defaults."""
+        # Accept defaults for scope/repo, then confirm with 'y'
+        result = cli_runner.invoke(
+            main,
+            ["parse", str(tmp_path), "--user", "main", "--dry-run"],
+            input="\n\ny\n",
+        )
+
+        config_path = tmp_path / "magaldi.yaml"
+        assert config_path.exists()
+
+        import yaml
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+        assert config["scope"] == tmp_path.parent.name
+        assert config["repository"] == tmp_path.name
+
+    def test_aborts_on_decline(self, cli_runner, tmp_path):
+        """Should exit when user declines config creation."""
+        result = cli_runner.invoke(
+            main,
+            ["parse", str(tmp_path), "--user", "main", "--dry-run"],
+            input="\n\nn\n",
+        )
+
+        assert result.exit_code != 0
+        assert "aborted" in result.output.lower()
+        assert not (tmp_path / "magaldi.yaml").exists()
+
+    def test_custom_values(self, cli_runner, tmp_path):
+        """Should use user-provided scope and repository values."""
+        result = cli_runner.invoke(
+            main,
+            ["parse", str(tmp_path), "--user", "main", "--dry-run"],
+            input="myorg\nmyrepo\ny\n",
+        )
+
+        config_path = tmp_path / "magaldi.yaml"
+        assert config_path.exists()
+
+        import yaml
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+        assert config["scope"] == "myorg"
+        assert config["repository"] == "myrepo"
+
+    def test_shows_detected_values(self, cli_runner, tmp_path):
+        """Should display auto-detected values to the user."""
+        result = cli_runner.invoke(
+            main,
+            ["parse", str(tmp_path), "--user", "main", "--dry-run"],
+            input="\n\nn\n",
+        )
+
+        assert "no magaldi.yaml found" in result.output.lower()
+        # Should show scope and repository prompts
+        assert "scope" in result.output.lower()
+        assert "repository" in result.output.lower()
