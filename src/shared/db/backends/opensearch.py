@@ -155,6 +155,9 @@ class OpenSearchClient:
     def indices_refresh(self, index: str) -> None:
         self._client.indices.refresh(index=index)
 
+    def indices_stats(self, index: str) -> dict[str, Any]:
+        return dict(self._client.indices.stats(index=index))
+
     # --- Lifecycle ---
 
     def close(self) -> None:

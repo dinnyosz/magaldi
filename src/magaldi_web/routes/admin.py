@@ -129,7 +129,7 @@ async def get_index_stats(
 
     # Get index stats
     try:
-        stats = client.indices.stats(index=INDEX_NAME)
+        stats = client.indices_stats(index=INDEX_NAME)
         index_stats = stats.get("indices", {}).get(INDEX_NAME, {})
         primaries = index_stats.get("primaries", {})
 
@@ -207,7 +207,7 @@ async def refresh_index(
 ) -> dict:
     """Refresh the Search index."""
     client = repo._get_client()
-    client.indices.refresh(index=INDEX_NAME)
+    client.indices_refresh(index=INDEX_NAME)
     return {"status": "refreshed"}
 
 
