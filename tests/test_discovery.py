@@ -368,7 +368,7 @@ class TestSupportedExtensions:
     def test_typescript_extensions(self):
         """TypeScript extensions should be supported."""
         assert SUPPORTED_EXTENSIONS[".ts"] == "typescript"
-        assert SUPPORTED_EXTENSIONS[".tsx"] == "typescript"
+        assert SUPPORTED_EXTENSIONS[".tsx"] == "tsx"
 
     def test_php_extension(self):
         """PHP extension should be supported."""

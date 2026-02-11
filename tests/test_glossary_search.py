@@ -188,7 +188,7 @@ class TestGetGlossaryTerms:
         mock_client.search.assert_called_once()
         call_kwargs = mock_client.search.call_args[1]
         assert call_kwargs["index"] == INDEX_NAME
-        assert call_kwargs["size"] == 1000
+        assert call_kwargs["body"]["size"] == 1000
 
     def test_returns_empty_list_when_no_terms(self, mock_repo, mock_client):
         """Test returns empty list when no glossary terms exist."""
@@ -214,7 +214,7 @@ class TestGetGlossaryTerms:
         )
 
         call_kwargs = mock_client.search.call_args[1]
-        query = call_kwargs["query"]
+        query = call_kwargs["body"]["query"]
         # Check that min_count filter is in the query
         range_filter = next((m for m in query["bool"]["must"] if "range" in m), None)
         assert range_filter is not None
@@ -430,7 +430,7 @@ class TestSearchGlossary:
 
         # Verify wildcard query is used
         call_kwargs = mock_client.search.call_args[1]
-        query = call_kwargs["query"]
+        query = call_kwargs["body"]["query"]
         wildcard_filter = next((m for m in query["bool"]["must"] if "wildcard" in m), None)
         assert wildcard_filter is not None
         assert "*user*" in wildcard_filter["wildcard"]["term"]
@@ -585,7 +585,7 @@ class TestDeleteGlossary:
         assert result == 10
         mock_client.delete_by_query.assert_called_once()
         call_kwargs = mock_client.delete_by_query.call_args[1]
-        query = call_kwargs["query"]
+        query = call_kwargs["body"]["query"]
         assert {"term": {"element_type": "glossary"}} in query["bool"]["must"]
 
     def test_returns_zero_when_nothing_to_delete(self, mock_repo, mock_client):

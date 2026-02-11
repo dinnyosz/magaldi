@@ -19,7 +19,7 @@ class TestRepository:
     def test_index_creates_index_if_missing(self, repo):
         """Test that indexing creates the index if it doesn't exist."""
         client = repo._get_client()
-        assert client.indices.exists(index=INDEX_NAME)
+        assert client.index_exists(index=INDEX_NAME)
 
     def test_index_and_get_element(self, repo, sample_element):
         """Test indexing and retrieving an element."""
@@ -27,7 +27,7 @@ class TestRepository:
         assert result is True
 
         # ES needs a refresh to make the document searchable
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         doc = repo.get_document(sample_element.element_id)
 
@@ -48,7 +48,7 @@ class TestRepository:
         for elem in multiple_elements:
             repo.index_element(elem)
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         # Delete elements from utils.py
         count = repo.delete_by_file(
@@ -59,7 +59,7 @@ class TestRepository:
         assert count == 3
 
         # Verify deletion
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
         doc = repo.get_document(multiple_elements[1].element_id)
         assert doc is None
 
@@ -73,7 +73,7 @@ class TestRepository:
         for elem in multiple_elements:
             repo.index_element(elem)
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         # Verify elements exist before deletion
         doc = repo.get_document(multiple_elements[0].element_id)
@@ -88,7 +88,7 @@ class TestRepository:
         assert count == 4
 
         # Verify all documents are deleted
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
         for elem in multiple_elements:
             doc = repo.get_document(elem.element_id)
             assert doc is None
@@ -139,13 +139,13 @@ class TestRepository:
         repo.index_element(elem1)
         repo.index_element(elem2)
         repo.index_element(elem3)
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         # Delete only repo-a:user1
         count = repo.delete_by_repository("test-del", "repo-a", "user1")
         assert count == 1
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         # elem1 should be deleted
         assert repo.get_document(elem1.element_id) is None
@@ -167,7 +167,7 @@ class TestIsTestIndexing:
         sample_element.is_test = True
         repo.index_element(sample_element)
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         doc = repo.get_document(sample_element.element_id)
         assert doc is not None
@@ -178,7 +178,7 @@ class TestIsTestIndexing:
         sample_element.is_test = False
         repo.index_element(sample_element)
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         doc = repo.get_document(sample_element.element_id)
         assert doc is not None
@@ -252,7 +252,7 @@ class TestInterruptedRunDetection:
         )
         repo.index_element(func2, file_hash=file_hash)
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         # Get file states - incomplete file should have file_hash=None
         file_states = file_state_repo.get_file_states(scope, repo, username)
@@ -331,7 +331,7 @@ class TestInterruptedRunDetection:
         )
         repo.index_element(func2, file_hash=file_hash)
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         # Get file states - complete file should have valid file_hash
         file_states = file_state_repo.get_file_states(scope, repo, username)
@@ -384,7 +384,7 @@ class TestOldDataHandling:
         # Index without element_count
         repo.index_element(file_elem, file_hash=file_hash, element_count=None)
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         # Get file states - old data should be treated as incomplete
         file_states = file_state_repo.get_file_states(scope, repo, username)

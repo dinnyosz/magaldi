@@ -102,10 +102,12 @@ class TestMCPToolsIntegration:
 
     def test_get_feature_members_includes_glossary_terms(self, mock_repo_with_glossary):
         """get_feature_members includes associated glossary terms."""
-        # Setup feature document
+        # Setup feature document (get_document_by_id_or_hash for feature lookup)
+        mock_repo_with_glossary.get_document_by_id_or_hash.return_value = {
+            "member_ids": ["e1", "e2"],
+        }
+        # Setup member documents (get_document for each member)
         mock_repo_with_glossary.get_document.side_effect = [
-            # Feature document
-            {"member_ids": ["e1", "e2"]},
             # First member
             {
                 "element_id": "e1",

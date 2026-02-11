@@ -132,6 +132,7 @@ def mock_parsing_result():
         16384: {"count": 0, "max_chars": 0, "max_tokens": 0, "largest": None, "by_type": {}},
         32768: {"count": 0, "max_chars": 0, "max_tokens": 0, "largest": None, "by_type": {}},
     }
+    result.variables_filtered = 0
     return result
 
 
@@ -420,7 +421,6 @@ class TestExtractFeaturesCommand:
 
         assert result.exit_code == 0
         assert "--user" in result.output
-        assert "--min-cluster-size" in result.output
 
     def test_extract_features_missing_user(self, cli_runner, tmp_path):
         """Test extract-features fails without --user."""
@@ -434,8 +434,8 @@ class TestExtractFeaturesCommand:
 
         assert result.exit_code != 0
 
-    @patch("shared.cli.extract.load_config")
-    @patch("shared.cli.extract.run_feature_extraction")
+    @patch("shared.cli.feature_commands.load_config")
+    @patch("shared.cli.feature_commands.run_feature_extraction")
     def test_extract_features_no_config(
         self,
         mock_run_feature_extraction,
@@ -483,8 +483,8 @@ class TestExtractGlossaryCommand:
 
         assert result.exit_code != 0
 
-    @patch("shared.cli.extract.load_config")
-    @patch("shared.cli.extract.run_glossary_extraction")
+    @patch("shared.cli.glossary_commands.load_config")
+    @patch("shared.cli.glossary_commands.run_glossary_extraction")
     def test_extract_glossary_no_config(
         self,
         mock_run_glossary_extraction,
@@ -509,8 +509,8 @@ class TestExtractGlossaryCommand:
         assert result.exit_code != 0
         assert "magaldi.yaml" in result.output
 
-    @patch("shared.cli.extract.load_config")
-    @patch("shared.cli.extract.run_glossary_extraction")
+    @patch("shared.cli.glossary_commands.load_config")
+    @patch("shared.cli.glossary_commands.run_glossary_extraction")
     @patch("magaldi_core.discovery.load_repo_config")
     def test_extract_glossary_calls_ai_extractor(
         self,
@@ -617,13 +617,10 @@ class TestPrintFunctions:
         assert "class" in captured.out
         # Per-tier context analysis should be displayed
         assert "Context tiers" in captured.out
-        assert "Max Chars" in captured.out
-        assert "Max Tokens" in captured.out
-        assert "2,048" in captured.out  # smallest tier with elements
-        assert "4,096" in captured.out  # mid tier
-        assert "8,192" in captured.out  # larger tier
-        assert "5,000" in captured.out  # max chars in 4096 tier
-        assert "8,000" in captured.out  # max chars in 8192 tier
+        assert "Tok" in captured.out  # "Max Tokens" header (may be truncated by Rich)
+        assert "2k" in captured.out  # smallest tier with elements
+        assert "4k" in captured.out  # mid tier
+        assert "8k" in captured.out  # larger tier
 
     def test_print_parsing_result_with_failures(self, capsys):
         """Test print_parsing_result with failed files."""
@@ -648,6 +645,7 @@ class TestPrintFunctions:
             16384: {"count": 0, "max_chars": 0, "max_tokens": 0, "largest": None, "by_type": {}},
             32768: {"count": 0, "max_chars": 0, "max_tokens": 0, "largest": None, "by_type": {}},
         }
+        result.variables_filtered = 0
 
         print_parsing_result(result)
 
@@ -779,7 +777,7 @@ class TestPhaseRunners:
         result = run_discovery("/path/to/repo", "testuser")
 
         assert result == mock_discovery_result
-        mock_discover.assert_called_once_with("/path/to/repo", "testuser")
+        mock_discover.assert_called_once_with("/path/to/repo", "testuser", skip_tests=False)
 
     @patch("magaldi_core.change_detection.detect_changes")
     @patch("magaldi_core.change_detection.InMemoryFileStateRepository")

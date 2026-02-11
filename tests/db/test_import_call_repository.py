@@ -38,7 +38,7 @@ class TestImportsAndCalls:
             level=0,
         )
         repo.index_element(file_elem)
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         imports = [
             {"name": "os", "module": "os", "alias": None, "line": 1},
@@ -50,7 +50,7 @@ class TestImportsAndCalls:
         result = repo.store_imports(file_elem.element_id, imports)
         assert result is True
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         retrieved = repo.get_imports(file_elem.element_id)
         assert len(retrieved) == 4
@@ -72,7 +72,7 @@ class TestImportsAndCalls:
     def test_get_imports_element_without_imports(self, repo, sample_element):
         """Test getting imports for element without imports returns empty list."""
         repo.index_element(sample_element)
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         result = repo.get_imports(sample_element.element_id)
         assert result == []
@@ -80,7 +80,7 @@ class TestImportsAndCalls:
     def test_store_and_get_calls(self, repo, sample_element):
         """Test storing and retrieving calls for a function element."""
         repo.index_element(sample_element)
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         calls = [
             {"name": "print", "receiver": None, "line": 15, "resolved_id": None},
@@ -101,7 +101,7 @@ class TestImportsAndCalls:
         result = repo.store_calls(sample_element.element_id, calls)
         assert result is True
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         retrieved = repo.get_calls(sample_element.element_id)
         assert len(retrieved) == 3
@@ -124,7 +124,7 @@ class TestImportsAndCalls:
     def test_get_calls_element_without_calls(self, repo, sample_element):
         """Test getting calls for element without calls returns empty list."""
         repo.index_element(sample_element)
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         result = repo.get_calls(sample_element.element_id)
         assert result == []
@@ -132,12 +132,12 @@ class TestImportsAndCalls:
     def test_store_empty_imports(self, repo, sample_element):
         """Test storing empty imports list."""
         repo.index_element(sample_element)
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         result = repo.store_imports(sample_element.element_id, [])
         assert result is True
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         retrieved = repo.get_imports(sample_element.element_id)
         assert retrieved == []
@@ -145,12 +145,12 @@ class TestImportsAndCalls:
     def test_store_empty_calls(self, repo, sample_element):
         """Test storing empty calls list."""
         repo.index_element(sample_element)
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         result = repo.store_calls(sample_element.element_id, [])
         assert result is True
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         retrieved = repo.get_calls(sample_element.element_id)
         assert retrieved == []
@@ -248,7 +248,7 @@ class TestFindElementsCalling:
             [{"name": "bar", "receiver": None, "line": 5, "resolved_id": "other-target"}],
         )
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
         return target_id
 
     def test_find_elements_calling(self, repo, elements_with_calls):
@@ -375,7 +375,7 @@ class TestFindElementsImporting:
             [{"name": "re", "module": "re", "alias": None, "line": 1}],
         )
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
     def test_find_elements_importing(self, repo, elements_with_imports):
         """Test finding elements that import a module."""

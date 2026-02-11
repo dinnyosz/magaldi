@@ -192,9 +192,9 @@ class TestMCPServerAnalyticsIntegration:
 
     def test_server_creates_session_id(self, mock_config):
         """Test that server creates a unique session ID."""
-        with patch("shared.config.get_config", return_value=mock_config):
-            from magaldi_mcp.server import MagaldiMCPServer
+        from magaldi_mcp.server import MagaldiMCPServer
 
+        with patch("magaldi_mcp.server.get_config", return_value=mock_config):
             server = MagaldiMCPServer(enable_analytics=False)
 
             assert server._session_id is not None
@@ -202,9 +202,9 @@ class TestMCPServerAnalyticsIntegration:
 
     def test_server_analytics_can_be_disabled(self, mock_config):
         """Test that analytics can be disabled."""
-        with patch("shared.config.get_config", return_value=mock_config):
-            from magaldi_mcp.server import MagaldiMCPServer
+        from magaldi_mcp.server import MagaldiMCPServer
 
+        with patch("magaldi_mcp.server.get_config", return_value=mock_config):
             server = MagaldiMCPServer(enable_analytics=False)
 
             assert server._enable_analytics is False
@@ -212,9 +212,9 @@ class TestMCPServerAnalyticsIntegration:
 
     def test_record_tool_call_handles_errors_gracefully(self, mock_config):
         """Test that analytics errors don't break tool execution."""
-        with patch("shared.config.get_config", return_value=mock_config):
-            from magaldi_mcp.server import MagaldiMCPServer
+        from magaldi_mcp.server import MagaldiMCPServer
 
+        with patch("magaldi_mcp.server.get_config", return_value=mock_config):
             server = MagaldiMCPServer(enable_analytics=True)
 
             # Mock analytics repo to raise an exception

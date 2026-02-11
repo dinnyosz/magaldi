@@ -19,7 +19,7 @@ class TestElasticsearchSummaryAndEmbedding:
     def test_store_and_get_summary(self, repo, sample_element):
         """Test storing and retrieving summaries."""
         repo.index_element(sample_element)
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         result = repo.store_summary(
             sample_element.element_id,
@@ -27,7 +27,7 @@ class TestElasticsearchSummaryAndEmbedding:
         )
         assert result is True
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         doc = repo.get_document(sample_element.element_id)
         assert doc["summary"] == "Processes input data by converting to uppercase."
@@ -35,7 +35,7 @@ class TestElasticsearchSummaryAndEmbedding:
     def test_store_and_get_embedding(self, repo, sample_element):
         """Test storing and retrieving embedding vectors."""
         repo.index_element(sample_element)
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         # Create a 1024-dimension vector (matching index mapping)
         embedding = [0.1] * 1024
@@ -43,7 +43,7 @@ class TestElasticsearchSummaryAndEmbedding:
         result = repo.store_embedding(sample_element.element_id, embedding)
         assert result is True
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         retrieved = repo.get_embedding(sample_element.element_id)
         assert retrieved is not None
@@ -63,7 +63,7 @@ class TestElasticsearchSummaryAndEmbedding:
     def test_store_summary_embedding(self, repo, sample_element):
         """Test storing summary embedding with explicit embedding_type."""
         repo.index_element(sample_element)
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         embedding = [0.2] * 1024
         result = repo.store_embedding(
@@ -71,7 +71,7 @@ class TestElasticsearchSummaryAndEmbedding:
         )
         assert result is True
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         retrieved = repo.get_embedding(sample_element.element_id, embedding_type="summary")
         assert retrieved is not None
@@ -81,7 +81,7 @@ class TestElasticsearchSummaryAndEmbedding:
     def test_store_code_embedding(self, repo, sample_element):
         """Test storing code embedding with embedding_type='code'."""
         repo.index_element(sample_element)
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         embedding = [0.3] * 1024
         result = repo.store_embedding(
@@ -89,7 +89,7 @@ class TestElasticsearchSummaryAndEmbedding:
         )
         assert result is True
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         retrieved = repo.get_embedding(sample_element.element_id, embedding_type="code")
         assert retrieved is not None
@@ -99,7 +99,7 @@ class TestElasticsearchSummaryAndEmbedding:
     def test_store_both_embeddings_independently(self, repo, sample_element):
         """Test storing both summary and code embeddings independently."""
         repo.index_element(sample_element)
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         summary_embedding = [0.4] * 1024
         code_embedding = [0.5] * 1024
@@ -107,7 +107,7 @@ class TestElasticsearchSummaryAndEmbedding:
         # Store both embeddings
         repo.store_embedding(sample_element.element_id, summary_embedding, embedding_type="summary")
         repo.store_embedding(sample_element.element_id, code_embedding, embedding_type="code")
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         # Retrieve and verify both
         retrieved_summary = repo.get_embedding(sample_element.element_id, embedding_type="summary")
@@ -121,13 +121,13 @@ class TestElasticsearchSummaryAndEmbedding:
     def test_store_summary_embedding_convenience_wrapper(self, repo, sample_element):
         """Test store_summary_embedding convenience method."""
         repo.index_element(sample_element)
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         embedding = [0.6] * 1024
         result = repo.store_summary_embedding(sample_element.element_id, embedding)
         assert result is True
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         retrieved = repo.get_embedding(sample_element.element_id, embedding_type="summary")
         assert retrieved is not None
@@ -136,13 +136,13 @@ class TestElasticsearchSummaryAndEmbedding:
     def test_store_code_embedding_convenience_wrapper(self, repo, sample_element):
         """Test store_code_embedding convenience method."""
         repo.index_element(sample_element)
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         embedding = [0.7] * 1024
         result = repo.store_code_embedding(sample_element.element_id, embedding)
         assert result is True
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         retrieved = repo.get_embedding(sample_element.element_id, embedding_type="code")
         assert retrieved is not None
@@ -151,13 +151,13 @@ class TestElasticsearchSummaryAndEmbedding:
     def test_default_embedding_type_is_summary(self, repo, sample_element):
         """Test that default embedding_type is 'summary' for backwards compatibility."""
         repo.index_element(sample_element)
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         embedding = [0.8] * 1024
 
         # Store without specifying type (should default to summary)
         repo.store_embedding(sample_element.element_id, embedding)
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         # Should be retrievable as summary embedding
         retrieved = repo.get_embedding(sample_element.element_id, embedding_type="summary")
@@ -194,7 +194,7 @@ class TestElasticsearchEmbeddingStore:
         )
 
         store.store_element(elem)
-        store._get_client().indices.refresh(index=INDEX_NAME)
+        store._get_client().indices_refresh(index=INDEX_NAME)
 
         # Verify it's in ES
         doc = store.get_document(elem.element_id)

@@ -219,7 +219,7 @@ class TestGetIndexStats:
         from shared.db.store import INDEX_NAME
 
         mock_client = mock_repo._get_client.return_value
-        mock_client.indices.stats.return_value = {
+        mock_client.indices_stats.return_value = {
             "indices": {
                 INDEX_NAME: {
                     "primaries": {
@@ -243,7 +243,7 @@ class TestGetIndexStats:
     def test_get_index_stats_handles_missing_index(self, client, mock_repo):
         """Test graceful handling when index doesn't exist."""
         mock_client = mock_repo._get_client.return_value
-        mock_client.indices.stats.side_effect = Exception("Index not found")
+        mock_client.indices_stats.side_effect = Exception("Index not found")
         mock_client.count.side_effect = Exception("Index not found")
 
         response = client.get("/admin/index-stats")
@@ -259,7 +259,7 @@ class TestGetIndexStats:
         from shared.db.store import INDEX_NAME
 
         mock_client = mock_repo._get_client.return_value
-        mock_client.indices.stats.return_value = {
+        mock_client.indices_stats.return_value = {
             "indices": {
                 INDEX_NAME: {
                     "primaries": {
@@ -293,7 +293,7 @@ class TestGetAdminOverview:
 
         mock_client = mock_repo._get_client.return_value
         mock_client.cluster.health.return_value = {"status": "green", "number_of_nodes": 3}
-        mock_client.indices.stats.return_value = {
+        mock_client.indices_stats.return_value = {
             "indices": {
                 INDEX_NAME: {
                     "primaries": {
@@ -387,11 +387,11 @@ class TestRefreshIndex:
     def test_refresh_index_success(self, client, mock_repo):
         """Test refreshing the index."""
         mock_client = mock_repo._get_client.return_value
-        mock_client.indices.refresh.return_value = {}
+        mock_client.indices_refresh.return_value = None
 
         response = client.post("/admin/index/refresh")
 
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "refreshed"
-        mock_client.indices.refresh.assert_called_once()
+        mock_client.indices_refresh.assert_called_once()

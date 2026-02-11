@@ -265,7 +265,7 @@ class TestElasticsearchIndexing:
         try:
             # Refresh the index to make sure all documents are searchable
             from shared.db.store import INDEX_NAME
-            repo._get_client().indices.refresh(index=INDEX_NAME)
+            repo._get_client().indices_refresh(index=INDEX_NAME)
 
             # Search for indexed elements using a broad query
             results = repo.search_by_text(

@@ -1355,7 +1355,7 @@ class TestPatternTools:
         repo.index_element(singleton_elem)
 
         # Refresh index
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
         return repo
 
     def test_list_patterns_returns_all_patterns(self, es_with_patterns):

@@ -107,8 +107,8 @@ class TestClusterConfig:
     def test_default_values(self):
         """Test default configuration values."""
         config = ClusterConfig()
-        assert config.min_cluster_size == 5
-        assert config.min_samples == 3
+        assert config.min_cluster_size == 3
+        assert config.min_samples == 1
         assert config.element_types == ["function", "method"]
         assert config.api_base == "http://localhost:11434"
 
@@ -165,7 +165,7 @@ class TestFeatureClusterer:
         """Test initialization with default config."""
         clusterer = FeatureClusterer()
         assert clusterer.config is not None
-        assert clusterer.config.min_cluster_size == 5
+        assert clusterer.config.min_cluster_size == 3
 
     def test_init_with_custom_config(self, cluster_config):
         """Test initialization with custom config."""

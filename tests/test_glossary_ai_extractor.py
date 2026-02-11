@@ -283,15 +283,14 @@ class TestParseLLMResponse:
         assert result == []
 
     def test_filters_empty_strings(self):
-        """Test that empty strings are returned but will be filtered in extract phase."""
+        """Test that empty strings are filtered by _is_valid_glossary_term."""
         response = '["user", "", "login"]'
         result = parse_llm_response(response)
 
-        # parse_llm_response returns all strings; filtering is done in extract phase
-        assert len(result) == 3
+        # parse_llm_response filters via _is_valid_glossary_term (rejects empty/short terms)
+        assert len(result) == 2
         assert result[0] == "user"
-        assert result[1] == ""
-        assert result[2] == "login"
+        assert result[1] == "login"
 
     def test_handles_empty_array(self):
         """Test handling of empty JSON array."""
@@ -321,13 +320,13 @@ class TestParseLLMResponse:
 
     def test_extracts_names_from_mixed_format(self):
         """Test that mixed formats are handled (strings and dicts with name)."""
-        response = '["user", {"name": "login"}, "register"]'
+        response = '["user", {"name": "login"}, "authentication"]'
         result = parse_llm_response(response)
 
         assert len(result) == 3
         assert result[0] == "user"
         assert result[1] == "login"
-        assert result[2] == "register"
+        assert result[2] == "authentication"
 
 
 class TestCallLLMForGlossary:

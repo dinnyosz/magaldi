@@ -82,9 +82,10 @@ class TestFindFilesExtended:
     """Extended tests for find_files function."""
 
     def test_find_files_with_glob_pattern(self, mock_repo):
-        """Test find_files filters by glob pattern."""
+        """Test find_files sends wildcard query and returns results."""
         mock_client = MagicMock()
         mock_repo._get_client.return_value = mock_client
+        # Mock returns only matching files (filtering is done server-side via wildcard query)
         mock_client.search.return_value = {
             "hits": {
                 "hits": [
@@ -104,14 +105,6 @@ class TestFindFilesExtended:
                             "line_end": 50,
                         }
                     },
-                    {
-                        "_source": {
-                            "element_id": "id3",
-                            "relative_path": "README.md",
-                            "language": "markdown",
-                            "line_end": 10,
-                        }
-                    },
                 ]
             }
         }
@@ -123,6 +116,12 @@ class TestFindFilesExtended:
 
         assert len(result) == 2
         assert all(r["path"].endswith(".py") for r in result)
+        # Verify wildcard query was sent to search backend
+        mock_client.search.assert_called_once()
+        call_body = mock_client.search.call_args[1]["body"]
+        filters = call_body["query"]["bool"]["filter"]
+        wildcard_filter = next(f for f in filters if "wildcard" in f)
+        assert "*.py" in wildcard_filter["wildcard"]["relative_path"]
 
 
 # =============================================================================
@@ -234,10 +233,10 @@ class TestGetFileStructure:
             file_path="test.py",
         )
 
-        assert result["file"]["path"] == "test.py"
-        assert result["file"]["language"] == "python"
-        assert result["stats"]["classes"] == 1
-        assert result["stats"]["functions"] == 1
+        assert result["file"] == "test.py"
+        assert result["language"] == "python"
+        assert result["counts"]["classes"] == 1
+        assert result["counts"]["functions"] == 1
 
     def test_get_file_structure_file_not_found(self, mock_repo):
         """Test get_file_structure raises when file not found."""

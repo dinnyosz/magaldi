@@ -25,7 +25,7 @@ class TestElasticsearchTextSearch:
         """Test searching by element name."""
         for elem in multiple_elements:
             repo.index_element(elem)
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         results = repo.search_by_text("calculate")
 
@@ -36,7 +36,7 @@ class TestElasticsearchTextSearch:
         """Test searching by docstring content."""
         for elem in multiple_elements:
             repo.index_element(elem)
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         # Search for "User model" which appears in the User class docstring
         results = repo.search_by_text("User model")
@@ -48,7 +48,7 @@ class TestElasticsearchTextSearch:
         """Test searching with scope filter."""
         for elem in multiple_elements:
             repo.index_element(elem)
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         # Search with matching scope
         results = repo.search_by_text("validate", scope="test-es")
@@ -62,7 +62,7 @@ class TestElasticsearchTextSearch:
         """Test searching with element type filter."""
         for elem in multiple_elements:
             repo.index_element(elem)
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         # Search only for classes
         results = repo.search_by_text("User", element_types=["class"])
@@ -91,7 +91,7 @@ class TestElasticsearchVectorSearch:
             embedding = [0.1 + (i * 0.1)] * 1024
             repo.store_embedding(elem.element_id, embedding)
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         # Search with a query vector
         query_vector = [0.1] * 1024
@@ -112,7 +112,7 @@ class TestElasticsearchVectorSearch:
             embedding = [0.5] * 1024
             repo.store_embedding(elem.element_id, embedding)
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         query_vector = [0.5] * 1024
 
@@ -134,7 +134,7 @@ class TestElasticsearchVectorSearch:
             summary_embedding = [0.1 + (i * 0.1)] * 1024
             repo.store_embedding(elem.element_id, summary_embedding, embedding_type="summary")
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         query_vector = [0.1] * 1024
         results = repo.search_by_vector(query_vector, min_score=0.5, embedding_type="summary")
@@ -150,7 +150,7 @@ class TestElasticsearchVectorSearch:
             code_embedding = [0.2 + (i * 0.1)] * 1024
             repo.store_embedding(elem.element_id, code_embedding, embedding_type="code")
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         query_vector = [0.2] * 1024
         results = repo.search_by_vector(query_vector, min_score=0.5, embedding_type="code")
@@ -168,7 +168,7 @@ class TestElasticsearchVectorSearch:
             repo.store_embedding(elem.element_id, summary_embedding, embedding_type="summary")
             repo.store_embedding(elem.element_id, code_embedding, embedding_type="code")
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         # Search without specifying embedding_type - should use summary
         query_vector = [0.3] * 1024
@@ -184,7 +184,7 @@ class TestElasticsearchVectorSearch:
             summary_embedding = [0.1 + (i * 0.1)] * 1024
             repo.store_embedding(elem.element_id, summary_embedding, embedding_type="summary")
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         results = repo.get_all_embeddings(
             scope="test-es",
@@ -203,7 +203,7 @@ class TestElasticsearchVectorSearch:
             code_embedding = [0.2 + (i * 0.1)] * 1024
             repo.store_embedding(elem.element_id, code_embedding, embedding_type="code")
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         results = repo.get_all_embeddings(
             scope="test-es",
@@ -255,7 +255,7 @@ class TestElasticsearchVectorSearch:
         repo.store_embedding(regular_elem.element_id, [0.1] * 1024, embedding_type="summary")
         repo.store_embedding(test_elem.element_id, [0.2] * 1024, embedding_type="summary")
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         # Default: exclude tests
         results = repo.get_all_embeddings(
@@ -307,7 +307,7 @@ class TestElasticsearchVectorSearch:
         repo.store_embedding(regular_elem.element_id, [0.3] * 1024, embedding_type="summary")
         repo.store_embedding(test_elem.element_id, [0.4] * 1024, embedding_type="summary")
 
-        repo._get_client().indices.refresh(index=INDEX_NAME)
+        repo._get_client().indices_refresh(index=INDEX_NAME)
 
         # Include tests
         results = repo.get_all_embeddings(
@@ -382,7 +382,7 @@ class TestPatternSearch:
         ]
         for elem in elements:
             repo.index_element(elem)
-        repo._get_client().indices.refresh(index="magaldi-code-elements")
+        repo._get_client().indices_refresh(index="magaldi-code-elements")
         return elements
 
     def test_search_by_regexp(self, repo, sample_elements):
