@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from shared.db.store import Repository
 from shared.db.repositories.base import INDEX_NAME
+from shared.db.store import Repository
 
 
 def find_complex_functions(
@@ -32,6 +32,7 @@ def find_complex_functions(
         Dict with functions list and statistics.
     """
     username = username or "main"
+    limit = max(1, min(limit, 100))
 
     must_clauses = [
         {"term": {"scope": scope}},
@@ -116,6 +117,7 @@ def find_security_issues(
         Dict with issues list and statistics.
     """
     username = username or "main"
+    limit = max(1, min(limit, 100))
 
     # Severity levels in order
     severity_levels = ["critical", "high", "medium", "low", "info"]
@@ -237,6 +239,7 @@ def find_undocumented(
         Dict with functions list and statistics.
     """
     username = username or "main"
+    limit = max(1, min(limit, 100))
 
     must_clauses = [
         {"term": {"scope": scope}},
@@ -327,6 +330,7 @@ def find_env_usage(
         Dict with usages list and statistics.
     """
     username = username or "main"
+    limit = max(1, min(limit, 100))
 
     must_clauses = [
         {"term": {"scope": scope}},
@@ -432,6 +436,7 @@ def find_async_code(
         Dict with functions list and statistics.
     """
     username = username or "main"
+    limit = max(1, min(limit, 100))
 
     must_clauses = [
         {"term": {"scope": scope}},

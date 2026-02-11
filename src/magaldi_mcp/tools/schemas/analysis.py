@@ -43,7 +43,8 @@ ANALYSIS_TOOLS = [
     Tool(
         name="find_usages",
         description="Find where a function/class/method is called or referenced. "
-        "Automatically filters definitions and includes context.",
+        "Automatically filters definitions and includes context. "
+        "Use after search_code to trace usage sites.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -57,7 +58,8 @@ ANALYSIS_TOOLS = [
     ),
     Tool(
         name="find_implementations",
-        description="Find classes that inherit from or implement a protocol/base class.",
+        description="Find classes that inherit from or implement a protocol/base class. "
+        "Shows subclasses and interface implementations.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -89,7 +91,8 @@ ANALYSIS_TOOLS = [
     Tool(
         name="find_callers",
         description="Find all functions that call a given function/method. "
-        "Returns callers grouped by code/tests.",
+        "Returns callers grouped by code/tests. "
+        "Use for impact analysis before modifying code.",
         inputSchema={
             "type": "object",
             "properties": {

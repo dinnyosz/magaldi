@@ -46,6 +46,8 @@ def pattern_search(
     Raises:
         ValueError: If mode is not one of the valid options.
     """
+    limit = max(1, min(limit, 200))
+
     # Auto-detect scope/repository from magaldi.yaml if not provided
     scope, repository = _resolve_scope_repo(scope, repository)
     if not scope or not repository:

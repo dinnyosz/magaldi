@@ -16,6 +16,7 @@ import tempfile
 from magaldi_mcp.server import (
     _apply_filename,
     _apply_max_tokens,
+    _build_result_hint,
     _estimate_tokens,
     _generate_file_summary,
 )
@@ -166,7 +167,7 @@ class TestApplyMaxTokens:
         # Budget for roughly 2 blocks
         result = _apply_max_tokens(text, 20)
         assert "Block 0" in result
-        assert "more blocks available" in result
+        assert "more results omitted" in result
 
     def test_truncation_keeps_complete_blocks(self):
         """Each kept block should be complete, not cut mid-text."""
@@ -175,7 +176,7 @@ class TestApplyMaxTokens:
         result = _apply_max_tokens(text, 30)
         # Should not end mid-block content
         for block in result.split("\n\n"):
-            if "more blocks available" not in block:
+            if "more results omitted" not in block:
                 assert block.startswith("Block ")
 
     def test_truncation_message_includes_budget(self):
@@ -336,3 +337,61 @@ class TestGenerateFileSummary:
         summary = _generate_file_summary("search_code", result, "/tmp/test.md", "x" * 100)
         assert "alpha" in summary
         assert "beta" in summary
+
+
+# =============================================================================
+# RESULT HINT TESTS
+# =============================================================================
+
+
+class TestBuildResultHint:
+    """Test narrowing hints when results hit the limit."""
+
+    def test_hint_when_list_hits_limit(self):
+        """Should return hint when list result count equals limit."""
+        result = [{"name": f"item_{i}"} for i in range(30)]
+        hint = _build_result_hint("find_usages", result, {"limit": 30})
+        assert hint is not None
+        assert "30 results" in hint
+        assert "limit reached" in hint
+
+    def test_no_hint_when_under_limit(self):
+        """Should return None when results are under the limit."""
+        result = [{"name": "item_0"}]
+        hint = _build_result_hint("find_usages", result, {"limit": 30})
+        assert hint is None
+
+    def test_no_hint_for_unknown_tool(self):
+        """Should return None for tools not in the narrowing map."""
+        result = [{"name": "item"} for _ in range(50)]
+        hint = _build_result_hint("get_element", result, {"limit": 50})
+        assert hint is None
+
+    def test_no_hint_when_no_limit_arg(self):
+        """Should return None when no limit was specified."""
+        result = [{"name": "item"} for _ in range(50)]
+        hint = _build_result_hint("search_code", result, {})
+        assert hint is None
+
+    def test_hint_for_grouped_results(self):
+        """Should count code_results + test_results for grouped tools."""
+        result = {
+            "code_results": [{"name": f"c{i}"} for i in range(40)],
+            "test_results": [{"name": f"t{i}"} for i in range(10)],
+        }
+        hint = _build_result_hint("pattern_search", result, {"limit": 50})
+        assert hint is not None
+        assert "50 results" in hint
+
+    def test_hint_includes_tool_specific_params(self):
+        """Hint should mention the right narrowing params for each tool."""
+        result = [{"name": f"item_{i}"} for i in range(50)]
+        hint = _build_result_hint("pattern_search", result, {"limit": 50})
+        assert "glob" in hint
+
+    def test_hint_for_dead_code(self):
+        """Should handle dead code result shape."""
+        result = {"potentially_dead": [{"name": f"fn{i}"} for i in range(30)]}
+        hint = _build_result_hint("find_dead_code", result, {"limit": 30})
+        assert hint is not None
+        assert "30 results" in hint

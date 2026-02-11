@@ -79,6 +79,12 @@ mcp__magaldi__generate_config(repo_path="/path/to/repo")
 
 Check `CLAUDE.md` for project-specific guidance including architecture, development commands, and configuration details.
 
+You can search for tools to: search code semantically, find files by pattern,
+grep/regex search, find where functions are called, trace call chains,
+analyze dependencies and imports, detect design patterns, find dead code,
+audit security issues, find complex functions, list HTTP routes and CLI commands,
+explore glossary terms, and inspect code elements with AI summaries.
+
 ## What's Pre-indexed
 
 The codebase is pre-indexed with:

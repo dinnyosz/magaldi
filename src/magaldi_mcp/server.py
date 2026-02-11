@@ -20,8 +20,8 @@ from magaldi_mcp.tools.schemas import ALL_TOOL_SCHEMAS
 from magaldi_mcp.tools.schemas._annotations import TOOLS_WITH_OUTPUT_CONTROL
 from shared.ai.embedding import CodeEmbeddingClient
 from shared.config import get_config, load_config
-from shared.db.store import Repository
 from shared.db.redis import RedisMCPAnalyticsRepository
+from shared.db.store import Repository
 
 log = logging.getLogger(__name__)
 
@@ -127,6 +127,11 @@ class MagaldiMCPServer:
             try:
                 result = await self._handle_tool(name, arguments)
                 formatted_result = format_result(result)
+
+                # Add narrowing hint when results hit the limit
+                hint = _build_result_hint(name, result, arguments)
+                if hint:
+                    formatted_result += f"\n\n{hint}"
 
                 # Apply output control: filename takes precedence over max_tokens
                 if filename:
@@ -629,6 +634,58 @@ def _estimate_tokens(text: str) -> int:
     return len(text) // 4
 
 
+# Per-tool narrowing hints: maps tool name to available filter parameters
+_TOOL_NARROWING_PARAMS: dict[str, str] = {
+    "search_code": "element_types, brief=true, or include_tests=false",
+    "pattern_search": "glob filter (e.g. '*.py') or include_tests=false",
+    "find_usages": "limit",
+    "find_files": "a more specific glob pattern",
+    "find_callers": "include_tests=false",
+    "find_dead_code": "include_tests, or save to filename",
+    "find_entry_points": "save to filename",
+    "find_security_issues": "severity filter or kind filter",
+    "find_undocumented": "max_coverage threshold or public_only=true",
+    "find_env_usage": "env_name filter",
+    "find_async_code": "pattern filter (async/threading/locking)",
+    "find_complex_functions": "higher min_complexity threshold",
+    "find_dependents": "limit",
+}
+
+
+def _count_results(result: Any) -> int | None:
+    """Count items in a tool result, handling various result shapes."""
+    if isinstance(result, list):
+        return len(result)
+    if isinstance(result, dict):
+        # Grouped results: code_results + test_results
+        if "code_results" in result:
+            return len(result.get("code_results", [])) + len(result.get("test_results", []))
+        # Dead code
+        if "potentially_dead" in result:
+            return len(result["potentially_dead"])
+        # Entry points
+        if "entry_points" in result:
+            return len(result["entry_points"])
+    return None
+
+
+def _build_result_hint(tool_name: str, result: Any, args: dict[str, Any]) -> str | None:
+    """Build a narrowing hint when results hit the requested limit."""
+    if tool_name not in _TOOL_NARROWING_PARAMS:
+        return None
+
+    limit = args.get("limit")
+    if limit is None:
+        return None
+
+    count = _count_results(result)
+    if count is None or count < limit:
+        return None
+
+    params = _TOOL_NARROWING_PARAMS[tool_name]
+    return f"Showing {count} results (limit reached). Narrow with {params}, or use max_tokens/filename for output control."
+
+
 def _apply_max_tokens(formatted: str, max_tokens: int) -> str:
     """Truncate formatted output to fit within a token budget.
 
@@ -663,7 +720,7 @@ def _apply_max_tokens(formatted: str, max_tokens: int) -> str:
     dropped = len(blocks) - len(kept)
     result = "\n\n".join(kept)
     if dropped > 0:
-        result += f"\n\n... {dropped} more blocks available (token budget: {max_tokens})"
+        result += f"\n\n... {dropped} more results omitted (token budget: {max_tokens}). Use filename param to save full results, or narrow your query."
     return result
 
 

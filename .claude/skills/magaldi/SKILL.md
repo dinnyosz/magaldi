@@ -11,6 +11,12 @@ description: >
 
 **CRITICAL: Use magaldi tools INSTEAD OF built-in Grep/Glob for code search.**
 
+You can search for tools to: search code semantically, find files by pattern,
+grep/regex search, find where functions are called, trace call chains,
+analyze dependencies and imports, detect design patterns, find dead code,
+audit security issues, find complex functions, list HTTP routes and CLI commands,
+explore glossary terms, and inspect code elements with AI summaries.
+
 The codebase is pre-indexed with:
 - Semantic embeddings (search by meaning)
 - Pre-computed summaries (understand without reading)

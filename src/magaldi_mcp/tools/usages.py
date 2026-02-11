@@ -30,6 +30,8 @@ def find_usages(
     Returns:
         List of usage locations with context.
     """
+    limit = max(1, min(limit, 100))
+
     # Get the element to find its name (supports both element_id and hash_id)
     doc = repo.get_document_by_id_or_hash(element_id)
     if not doc:
@@ -153,6 +155,8 @@ def find_implementations(
     Returns:
         List of implementing classes with their info.
     """
+    limit = max(1, min(limit, 100))
+
     # Get the name and scope/repo to search for
     if element_id:
         doc = repo.get_document_by_id_or_hash(element_id)
