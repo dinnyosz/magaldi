@@ -192,6 +192,27 @@ mcp__magaldi__find_implementations(class_name="BaseClass")
 4. THEN make changes
 ```
 
+## Deferred Tool Loading (API Users)
+
+When using Magaldi via the Anthropic API with `mcp_toolset`, configure deferred loading to save context tokens. Default all tools to deferred, keep the top 5 most-used always loaded:
+
+```json
+{
+  "type": "mcp_toolset",
+  "mcp_server_name": "magaldi",
+  "default_config": { "defer_loading": true },
+  "configs": {
+    "search_code": { "defer_loading": false },
+    "find_files": { "defer_loading": false },
+    "get_element": { "defer_loading": false },
+    "pattern_search": { "defer_loading": false },
+    "get_file_structure": { "defer_loading": false }
+  }
+}
+```
+
+Claude Code users: deferred loading is automatic when tool descriptions exceed 10K tokens (Magaldi qualifies).
+
 ## Anti-Patterns (NEVER Do These)
 
 1. **Using built-in Grep instead of magaldi__pattern_search**

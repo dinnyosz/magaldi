@@ -7,7 +7,7 @@ from magaldi_mcp.tools.schemas._annotations import OUTPUT_CONTROL_PROPERTIES, RE
 ANALYSIS_TOOLS = [
     Tool(
         name="pattern_search",
-        description="ES-native pattern matching on code. "
+        description="Search code by text pattern, regex, or grep-like matching. "
         "Three modes: regexp (Lucene syntax), wildcard (* and ?), proximity (terms near each other).",
         inputSchema={
             "type": "object",
@@ -74,7 +74,7 @@ ANALYSIS_TOOLS = [
     Tool(
         name="get_call_graph",
         description="Get callers and callees for a function. "
-        "Pre-computed from indexed code for instant dependency analysis. "
+        "Pre-computed call graph for instant dependency analysis. "
         "Also includes semantically related functions when available.",
         inputSchema={
             "type": "object",
