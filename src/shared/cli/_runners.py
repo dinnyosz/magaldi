@@ -232,64 +232,6 @@ def run_processing(
             bar_text.append(format_duration(eta), style="yellow")
             bar_text.append(" ETA", style="dim")
 
-        # ETA breakdown per (type, tier) - show avg time per item in a grid table
-        eta_breakdown = state.timing.get_eta_breakdown_with_avg(state.num_workers)
-        eta_table = None
-        if eta_breakdown:
-            from shared.ai.context_size import CONTEXT_TIERS, TIER_ABBREV, TIER_COLORS
-            tier_abbrev = TIER_ABBREV
-            type_abbrev = {"function": "fn", "method": "mth", "class": "cls", "file": "file", "variable": "var", "constant": "const"}
-            tiers = sorted(CONTEXT_TIERS, reverse=True)
-            type_order = ["file", "class", "function", "method", "variable", "constant", "import"]
-
-            # Build lookup from breakdown data
-            eta_data: dict[tuple[str, int], tuple[float, bool, int, int]] = {}
-            for elem_type, tier, avg_time, is_fallback, done, total in eta_breakdown:
-                eta_data[(elem_type, tier)] = (avg_time, is_fallback, done, total)
-
-            # Create grid table: rows=types, columns=tiers
-            eta_table = Table(show_header=True, box=None, padding=(0, 2), expand=False)
-            eta_table.add_column("", style="dim", width=10)  # type column
-            tier_colors = TIER_COLORS
-            for tier in tiers:
-                color = tier_colors.get(tier, "white")
-                eta_table.add_column(f"[{color}]{tier_abbrev.get(tier, f'{tier//1024}k')}[/]", justify="center")
-
-            # Type colors for row labels
-            type_colors = {"file": "cyan", "class": "magenta", "function": "blue", "method": "green", "variable": "yellow", "constant": "red", "import": "bright_black"}
-
-            # Add rows for each element type that has data
-            for elem_type in type_order:
-                has_data = any((elem_type, t) in eta_data for t in tiers)
-                if not has_data:
-                    continue
-
-                type_color = type_colors.get(elem_type, "white")
-                row = [f"[{type_color}]{elem_type}[/]"]
-                for tier in tiers:
-                    if (elem_type, tier) in eta_data:
-                        avg_time, is_fallback, done, total = eta_data[(elem_type, tier)]
-                        # Color progress: green if done, yellow if in progress
-                        if done >= total:
-                            count_str = f"[green]{done}/{total}[/]"
-                        elif done > 0:
-                            count_str = f"[yellow]{done}[/][dim]/{total}[/]"
-                        else:
-                            count_str = f"[dim]{done}/{total}[/]"
-                        # Time styling (time first, then count)
-                        if avg_time > 0:
-                            time_style = "dim cyan" if is_fallback else "cyan"
-                            time_str = f"[{time_style}]{avg_time:.1f}s[/]"
-                            if is_fallback:
-                                time_str = f"~{time_str}"
-                            cell = f"{time_str} {count_str}"
-                        else:
-                            cell = f"[dim]-[/] {count_str}"
-                    else:
-                        cell = ""
-                    row.append(cell)
-                eta_table.add_row(*row)
-
         # Worker table
         import time as time_mod
         worker_table = Table(show_header=False, box=None, padding=0)
@@ -404,8 +346,6 @@ def run_processing(
                 stats += f" [dim]|[/] [dim]Per Worker:[/] [yellow]{normalized_max:.1f}s[/] [dim]vs[/] [cyan]{td.completed_avg:.1f}s[/] [dim](last {td.completion_count})[/]"
 
         parts: list[RenderableType] = [bar_text]
-        if eta_table:
-            parts.append(eta_table)
         if not compact:
             parts.append(worker_table)
         if type_line:

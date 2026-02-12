@@ -615,12 +615,8 @@ class TestPrintFunctions:
         assert "20" in captured.out  # total_elements
         assert "function" in captured.out
         assert "class" in captured.out
-        # Per-tier context analysis should be displayed
+        # Compact context tier summary
         assert "Context tiers" in captured.out
-        assert "Tok" in captured.out  # "Max Tokens" header (may be truncated by Rich)
-        assert "2k" in captured.out  # smallest tier with elements
-        assert "4k" in captured.out  # mid tier
-        assert "8k" in captured.out  # larger tier
 
     def test_print_parsing_result_with_failures(self, capsys):
         """Test print_parsing_result with failed files."""

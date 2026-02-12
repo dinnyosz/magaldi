@@ -47,60 +47,16 @@ def print_parsing_result(result: "ParsingResult") -> None:
         filtered = f" | [dim]{result.variables_filtered} vars filtered[/]"
     console.print(f"  [green]{len(result.parsed_files)}[/] files → [green]{result.total_elements}[/] elements ({types}){failed}{filtered}")
 
-    # Per-tier context size analysis
+    # Per-tier context size summary (compact one-liner)
     tiers = result.elements_by_tier
     non_empty_tiers = {tier: stats for tier, stats in tiers.items() if stats["count"] > 0}
 
     if non_empty_tiers:
-        total_elements = sum(s["count"] for s in non_empty_tiers.values())
-
-        console.print()
-        console.print("  [dim]Context tiers (per-element KV cache optimization):[/]")
-
-        # Main tier table
-        tier_table = Table(show_header=True, header_style="dim", box=None, padding=(0, 2))
-        tier_table.add_column("Tier", justify="right", style="cyan")
-        tier_table.add_column("Count", justify="right", style="green")
-        tier_table.add_column("%", justify="right", style="yellow")
-        tier_table.add_column("Max Tokens", justify="right", style="dim")
-        # Add columns for each element type
-        all_types = ["file", "class", "function", "method", "variable", "constant"]
-        for etype in all_types:
-            tier_table.add_column(etype, justify="right", style="dim")
-
-        # Sort by tier size ascending
+        tier_parts = []
         for tier in sorted(non_empty_tiers.keys()):
-            stats = non_empty_tiers[tier]
-            count = stats["count"]
-            pct = count / total_elements * 100 if total_elements > 0 else 0
-            max_tokens = stats["max_tokens"]
-            by_type = stats["by_type"]
-
-            # Build row
-            row = [
-                f"{tier // 1024}k",
-                f"{count:,}",
-                f"{pct:.1f}%",
-                f"{max_tokens:,}",
-            ]
-            # Add count for each type
-            for etype in all_types:
-                type_count = by_type.get(etype, 0)
-                row.append(str(type_count) if type_count > 0 else "-")
-
-            tier_table.add_row(*row)
-
-        console.print(tier_table)
-
-        # Top 5 largest elements overall
-        largest = result.largest_elements(5)
-        if largest:
-            console.print()
-            console.print("  [dim]Largest elements:[/]")
-            console.print(f"    [dim]{'chars':>8}  {'type':<8}  {'file':<45}  name[/]")
-            for name, path, chars, etype in largest:
-                display_path = path if len(path) <= 45 else "..." + path[-42:]
-                console.print(f"    {chars:>8,}  [cyan]{etype:<8}[/]  [yellow]{display_path:<45}[/]  [green]{name}[/]")
+            count = non_empty_tiers[tier]["count"]
+            tier_parts.append(f"[cyan]{tier // 1024}k[/]:{count}")
+        console.print(f"  [dim]Context tiers:[/] {' [dim]|[/] '.join(tier_parts)}")
 
 
 def print_feature_result(result: dict) -> None:
