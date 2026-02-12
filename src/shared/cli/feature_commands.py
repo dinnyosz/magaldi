@@ -297,7 +297,7 @@ def run_feature_extraction(
             wall_time = state.timing.elapsed / state.completed if state.completed > 0 else 0
             running_count = len(workers_data)
 
-            stats = f"  [dim]Wall:[/] [green]{wall_time:.2f}s[/]/feature [dim]|[/] [dim]API:[/] [green]{avg_api:.1f}s[/]/feature [dim]([/][green]{state.timing.avg_summarize_time:.1f}s[/] summ + [green]{state.timing.avg_embed_time:.1f}s[/] embed[dim])[/]"
+            stats = f"  [dim]Throughput:[/] [green]{wall_time:.2f}s[/]/feature [dim]|[/] [dim]API:[/] [green]{avg_api:.1f}s[/]/feature [dim]([/][green]{state.timing.avg_summarize_time:.1f}s[/] summ + [green]{state.timing.avg_embed_time:.1f}s[/] embed[dim])[/]"
             if allowed_workers < num_workers:
                 stats += f" [dim]|[/] [dim]Workers:[/] [green]{running_count}[/]/[yellow]{allowed_workers}[/]/[cyan]{num_workers}[/]"
             else:

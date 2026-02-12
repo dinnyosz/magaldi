@@ -338,7 +338,7 @@ def run_glossary_extraction(
                     live.console.print()
                     live.console.print("  [bold green]✓ Phase 1 complete[/]")
                     live.console.print(f"    [green]{phase1_stats['completed']}[/] features processed in [cyan]{format_duration(phase1_stats['elapsed'])}[/]")
-                    live.console.print(f"    [cyan]{phase1_stats['terms']}[/] terms extracted | Wall: [green]{wall_time:.2f}s[/]/feature | API: [green]{phase1_stats['avg_api']:.1f}s[/]/feature")
+                    live.console.print(f"    [cyan]{phase1_stats['terms']}[/] terms extracted | Throughput: [green]{wall_time:.2f}s[/]/feature | API: [green]{phase1_stats['avg_api']:.1f}s[/]/feature")
                     if phase1_stats["failed"] > 0:
                         live.console.print(f"    [red]{phase1_stats['failed']} failed[/]")
                     live.console.print()
@@ -373,7 +373,7 @@ def run_glossary_extraction(
         wall_time = elapsed / features_processed if features_processed > 0 else 0
         console.print()
         console.print(f"  [green]{len(glossary_items)}[/] unique terms extracted and indexed in [cyan]{format_duration(elapsed)}[/]")
-        console.print(f"  Wall: [green]{wall_time:.2f}s[/]/feature | API: [green]{avg_api:.1f}s[/]/feature | Model: [yellow]{model_name}[/]")
+        console.print(f"  Throughput: [green]{wall_time:.2f}s[/]/feature | API: [green]{avg_api:.1f}s[/]/feature | Model: [yellow]{model_name}[/]")
 
         return {
             "terms_count": len(glossary_items),
