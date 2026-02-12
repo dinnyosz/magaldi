@@ -26,6 +26,21 @@ from shared.db.store import Repository
 log = logging.getLogger(__name__)
 
 
+_SERVER_INSTRUCTIONS = """\
+Magaldi is a code discovery engine. Search for tools to:
+- Search code semantically (by meaning, not just text)
+- Find files, grep/regex patterns, function usages
+- Trace call chains, callers, callees
+- Analyze dependencies and imports
+- Detect design patterns, dead code, security issues
+- Explore features, glossary terms, HTTP routes, CLI commands
+- Inspect elements with pre-computed AI summaries
+
+Tool categories: search, navigation, call-graph, features, \
+dependencies, code-quality, repo-config, parser-lab.
+"""
+
+
 class MagaldiMCPServer:
     """MCP Server for Magaldi code discovery."""
 
@@ -34,7 +49,7 @@ class MagaldiMCPServer:
         default_username: str = "main",
         enable_analytics: bool = True,
     ) -> None:
-        self.server = Server("magaldi")
+        self.server = Server("magaldi", instructions=_SERVER_INSTRUCTIONS)
         self.config = get_config()
         self.default_username = default_username
         self.repo: Repository | None = None

@@ -224,9 +224,21 @@ mcp__magaldi__explain_element(element_id="...")  # Complete element overview
    - One call instead of 5 separate calls
 ```
 
-## Deferred Tool Loading (API Users)
+## Token Optimization
 
-When using Magaldi via the Anthropic API with `mcp_toolset`, configure deferred loading to save context tokens. Default all tools to deferred, keep the top 5 most-used always loaded:
+### Claude Code Users
+
+Magaldi has 44 tools (~8,700 tokens of schema). Enable Tool Search to defer-load them on demand:
+
+```bash
+ENABLE_TOOL_SEARCH=true claude
+```
+
+Or add to your settings.json `env` field. This reduces the static tool tax from ~8,700 tokens to ~200 tokens (the ToolSearch tool itself). Auto mode (`auto`) should trigger since Magaldi exceeds the 10% threshold, but explicit `true` is more reliable.
+
+### API Users (Anthropic Messages API)
+
+When using Magaldi via `mcp_toolset`, configure deferred loading. Keep the 5 most-used tools always loaded, defer the rest:
 
 ```json
 {
@@ -243,7 +255,7 @@ When using Magaldi via the Anthropic API with `mcp_toolset`, configure deferred 
 }
 ```
 
-Claude Code users: deferred loading is automatic when tool descriptions exceed 10K tokens (Magaldi qualifies).
+This saves ~7,500 tokens while keeping core search tools instantly available. Requires the `advanced-tool-use-2025-11-20` beta header and a tool search tool in your tools list.
 
 ## Anti-Patterns (NEVER Do These)
 
