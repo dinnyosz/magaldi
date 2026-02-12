@@ -399,7 +399,7 @@ class FeatureRepository:
 
             bulk_body.append({"doc": doc})
 
-        response = client.bulk(body=bulk_body, refresh=True)
+        response = client.bulk(operations=bulk_body, refresh=True)
 
         # Count successful updates
         updated = 0
@@ -717,7 +717,7 @@ class FeatureRepository:
             return 0
 
         # Execute bulk update
-        response = client.bulk(body=bulk_body, refresh=True)
+        response = client.bulk(operations=bulk_body, refresh=True)
 
         # Count successful updates
         updated = 0

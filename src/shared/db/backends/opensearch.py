@@ -101,8 +101,7 @@ class OpenSearchClient:
         return dict(self._client.mget(**kwargs))
 
     def bulk(self, operations: list[dict[str, Any]], refresh: bool = False) -> dict[str, Any]:
-        body = "\n".join(operations)  # type: ignore[arg-type]
-        return dict(self._client.bulk(body=body, refresh=refresh))
+        return dict(self._client.bulk(body=operations, refresh=refresh))
 
     def bulk_helpers(
         self,
