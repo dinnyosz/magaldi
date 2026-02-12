@@ -228,13 +228,13 @@ class MagaldiMCPServer:
                 scope=args.get("scope"),
                 repository=args.get("repository"),
                 username=args.get("username", self.default_username),
-                element_types=args.get("element_types"),
+                element_types=args.get("element_types", ["function", "method"]),
                 language=args.get("language"),
                 limit=args.get("limit", 20),
                 include_code=args.get("include_code", False),
-                brief=args.get("brief", False),
-                include_tests=args.get("include_tests", True),
-                include_related=args.get("include_related", True),
+                brief=args.get("brief", True),
+                include_tests=args.get("include_tests", False),
+                include_related=args.get("include_related", False),
             )
         elif name == "search_features":
             return await asyncio.to_thread(
@@ -245,7 +245,7 @@ class MagaldiMCPServer:
                 scope=args.get("scope"),
                 repository=args.get("repository"),
                 username=args.get("username", self.default_username),
-                limit=args.get("limit", 10),
+                limit=args.get("limit", 20),
                 glossary_term=args.get("glossary_term"),
                 min_percentage=args.get("min_percentage", 0.0),
             )
@@ -254,7 +254,7 @@ class MagaldiMCPServer:
                 find_similar,
                 repo,
                 element_id=args["hash_id"],
-                limit=args.get("limit", 10),
+                limit=args.get("limit", 5),
                 same_repo_only=args.get("same_repo_only", False),
                 include_tests=args.get("include_tests", True),
             )
@@ -332,7 +332,7 @@ class MagaldiMCPServer:
                 pattern=args["pattern"],
                 scope=args.get("scope"),
                 repository=args.get("repository"),
-                limit=args.get("limit", 50),
+                limit=args.get("limit", 30),
             )
         elif name == "pattern_search":
             return await asyncio.to_thread(
@@ -345,7 +345,7 @@ class MagaldiMCPServer:
                 username=args.get("username"),  # Pass None if not provided
                 slop=args.get("slop", 5),
                 glob=args.get("glob"),
-                limit=args.get("limit", 50),
+                limit=args.get("limit", 20),
                 include_tests=args.get("include_tests", True),
             )
         elif name == "find_usages":
@@ -353,7 +353,7 @@ class MagaldiMCPServer:
                 find_usages,
                 repo,
                 element_id=args["hash_id"],
-                limit=args.get("limit", 30),
+                limit=args.get("limit", 20),
             )
         elif name == "find_implementations":
             return await asyncio.to_thread(
@@ -380,7 +380,7 @@ class MagaldiMCPServer:
                 scope=args.get("scope"),
                 repository=args.get("repository"),
                 username=args.get("username"),
-                limit=args.get("limit", 30),
+                limit=args.get("limit", 20),
                 include_tests=args.get("include_tests", True),
             )
         elif name == "find_call_chain":
@@ -389,13 +389,13 @@ class MagaldiMCPServer:
                 repo,
                 element_id=args["hash_id"],
                 direction=args.get("direction", "callees"),
-                max_depth=args.get("max_depth", 5),
+                max_depth=args.get("max_depth", 3),
                 scope=args.get("scope"),
                 repository=args.get("repository"),
                 username=args.get("username"),
             )
         elif name == "find_dead_code":
-            return await asyncio.to_thread(
+            result = await asyncio.to_thread(
                 find_dead_code,
                 repo,
                 scope=args.get("scope"),
@@ -403,14 +403,26 @@ class MagaldiMCPServer:
                 username=args.get("username"),
                 include_tests=args.get("include_tests", False),
             )
+            limit = args.get("limit", 30)
+            dead = result.get("potentially_dead", [])
+            if len(dead) > limit:
+                result["potentially_dead"] = dead[:limit]
+                result["stats"]["truncated_from"] = len(dead)
+            return result
         elif name == "find_entry_points":
-            return await asyncio.to_thread(
+            result = await asyncio.to_thread(
                 find_entry_points,
                 repo,
                 scope=args.get("scope"),
                 repository=args.get("repository"),
                 username=args.get("username"),
             )
+            limit = args.get("limit", 30)
+            for key in ("http", "cli", "test", "main", "async_tasks", "other"):
+                items = result.get(key, [])
+                if len(items) > limit:
+                    result[key] = items[:limit]
+            return result
         elif name == "generate_config":
             return await asyncio.to_thread(
                 generate_config,
@@ -432,7 +444,7 @@ class MagaldiMCPServer:
                 element_id=args["hash_id"],
             )
         elif name == "list_glossary":
-            return await asyncio.to_thread(
+            result = await asyncio.to_thread(
                 list_glossary,
                 repo,
                 scope=args.get("scope"),
@@ -440,6 +452,10 @@ class MagaldiMCPServer:
                 username=args.get("username", self.default_username),
                 min_count=args.get("min_count", 1),
             )
+            limit = args.get("limit", 50)
+            if isinstance(result, list) and len(result) > limit:
+                result = result[:limit]
+            return result
         elif name == "get_glossary_term":
             return await asyncio.to_thread(
                 get_glossary_term,
@@ -476,7 +492,7 @@ class MagaldiMCPServer:
                 scope=args.get("scope"),
                 repository=args.get("repository"),
                 username=args.get("username"),
-                limit=args.get("limit", 50),
+                limit=args.get("limit", 30),
             )
         elif name == "dependency_graph":
             return await asyncio.to_thread(
@@ -558,7 +574,7 @@ class MagaldiMCPServer:
                 username=args.get("username", self.default_username),
                 severity=args.get("severity", "high"),
                 kind=args.get("kind"),
-                limit=args.get("limit", 50),
+                limit=args.get("limit", 20),
             )
         elif name == "find_undocumented":
             return await asyncio.to_thread(
@@ -580,7 +596,7 @@ class MagaldiMCPServer:
                 repository=args.get("repository"),
                 username=args.get("username", self.default_username),
                 env_name=args.get("env_name"),
-                limit=args.get("limit", 50),
+                limit=args.get("limit", 30),
             )
         elif name == "find_async_code":
             return await asyncio.to_thread(
@@ -651,19 +667,20 @@ def _estimate_tokens(text: str) -> int:
 
 # Per-tool narrowing hints: maps tool name to available filter parameters
 _TOOL_NARROWING_PARAMS: dict[str, str] = {
-    "search_code": "element_types, brief=true, or include_tests=false",
+    "search_code": "element_types, brief=false for details, or include_code=true",
     "pattern_search": "glob filter (e.g. '*.py') or include_tests=false",
     "find_usages": "limit",
     "find_files": "a more specific glob pattern",
     "find_callers": "include_tests=false",
-    "find_dead_code": "include_tests, or save to filename",
-    "find_entry_points": "save to filename",
+    "find_dead_code": "include_tests, limit, or save to filename",
+    "find_entry_points": "limit, or save to filename",
     "find_security_issues": "severity filter or kind filter",
     "find_undocumented": "max_coverage threshold or public_only=true",
     "find_env_usage": "env_name filter",
     "find_async_code": "pattern filter (async/threading/locking)",
     "find_complex_functions": "higher min_complexity threshold",
     "find_dependents": "limit",
+    "list_glossary": "min_count or limit",
 }
 
 

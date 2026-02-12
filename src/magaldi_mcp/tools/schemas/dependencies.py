@@ -31,7 +31,7 @@ DEPENDENCY_TOOLS = [
                 "scope": {"type": "string"},
                 "repository": {"type": "string"},
                 "username": {"type": "string"},
-                "limit": {"type": "integer", "default": 50},
+                "limit": {"type": "integer", "default": 30},
             },
             "required": ["module", "scope", "repository"],
         },

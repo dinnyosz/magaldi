@@ -14,6 +14,7 @@ GLOSSARY_TOOLS = [
                 "scope": {"type": "string"},
                 "repository": {"type": "string"},
                 "min_count": {"type": "integer", "default": 1},
+                "limit": {"type": "integer", "default": 50},
             },
             "required": [],
         },
