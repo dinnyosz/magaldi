@@ -7,16 +7,15 @@ from magaldi_mcp.tools.schemas._annotations import READONLY_ANNOTATIONS
 DEPENDENCY_TOOLS = [
     Tool(
         name="find_dependencies",
-        description="Get imports for a file (internal and external). "
-        "Use find_dependents for the reverse.",
+        description="Get imports for a file. Use find_dependents for the reverse.",
         inputSchema={
             "type": "object",
             "properties": {
-                "file_path": {"type": "string", "description": "Relative file path (e.g., 'src/utils.py')"},
-                "hash_id": {"type": "string", "description": "Or provide file element ID directly (hash_id)"},
+                "file_path": {"type": "string", "description": "Relative file path"},
+                "hash_id": {"type": "string", "description": "Or file element ID"},
                 "scope": {"type": "string"},
                 "repository": {"type": "string"},
-                "username": {"type": "string", "description": "User branch"},
+                "username": {"type": "string"},
             },
             "required": [],
         },
@@ -24,15 +23,14 @@ DEPENDENCY_TOOLS = [
     ),
     Tool(
         name="find_dependents",
-        description="Find files that import a module. "
-        "Useful for impact analysis before changing a module.",
+        description="Find files that import a module. For impact analysis.",
         inputSchema={
             "type": "object",
             "properties": {
-                "module": {"type": "string", "description": "Module name (e.g., 'utils', 'shared.config', './utils')"},
+                "module": {"type": "string", "description": "Module name (e.g., 'shared.config')"},
                 "scope": {"type": "string"},
                 "repository": {"type": "string"},
-                "username": {"type": "string", "description": "User branch"},
+                "username": {"type": "string"},
                 "limit": {"type": "integer", "default": 50},
             },
             "required": ["module", "scope", "repository"],
@@ -41,15 +39,14 @@ DEPENDENCY_TOOLS = [
     ),
     Tool(
         name="dependency_graph",
-        description="Build a module-level dependency graph. "
-        "Useful for understanding architecture and detecting circular dependencies.",
+        description="Build module-level dependency graph. Detects circular dependencies.",
         inputSchema={
             "type": "object",
             "properties": {
                 "scope": {"type": "string"},
                 "repository": {"type": "string"},
-                "username": {"type": "string", "description": "User branch"},
-                "internal_only": {"type": "boolean", "default": True, "description": "Only include internal imports"},
+                "username": {"type": "string"},
+                "internal_only": {"type": "boolean", "default": True},
             },
             "required": ["scope", "repository"],
         },

@@ -7,13 +7,13 @@ from magaldi_mcp.tools.schemas._annotations import READONLY_ANNOTATIONS
 GLOSSARY_TOOLS = [
     Tool(
         name="list_glossary",
-        description="List all glossary terms (domain concepts extracted from code element names).",
+        description="List all glossary terms (domain concepts from code names).",
         inputSchema={
             "type": "object",
             "properties": {
                 "scope": {"type": "string"},
                 "repository": {"type": "string"},
-                "min_count": {"type": "integer", "default": 1, "description": "Minimum occurrence count"},
+                "min_count": {"type": "integer", "default": 1},
             },
             "required": [],
         },
@@ -21,13 +21,13 @@ GLOSSARY_TOOLS = [
     ),
     Tool(
         name="get_glossary_term",
-        description="Get full details for a specific glossary term (element IDs, file paths, features).",
+        description="Get details for a glossary term (elements, files, features).",
         inputSchema={
             "type": "object",
             "properties": {
                 "scope": {"type": "string"},
                 "repository": {"type": "string"},
-                "term": {"type": "string", "description": "The glossary term to look up"},
+                "term": {"type": "string"},
             },
             "required": ["term"],
         },
@@ -35,13 +35,13 @@ GLOSSARY_TOOLS = [
     ),
     Tool(
         name="search_glossary",
-        description="Search glossary terms by partial match (e.g., 'user' matches 'user', 'username').",
+        description="Search glossary terms by partial match.",
         inputSchema={
             "type": "object",
             "properties": {
                 "scope": {"type": "string"},
                 "repository": {"type": "string"},
-                "query": {"type": "string", "description": "Partial term to search for"},
+                "query": {"type": "string"},
             },
             "required": ["query"],
         },

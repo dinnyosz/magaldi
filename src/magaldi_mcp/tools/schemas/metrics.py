@@ -7,19 +7,14 @@ from magaldi_mcp.tools.schemas._annotations import READONLY_ANNOTATIONS
 METRICS_TOOLS = [
     Tool(
         name="find_complex_functions",
-        description="Find functions/methods with high cyclomatic complexity. "
-        "Use for identifying code needing refactoring or additional testing.",
+        description="Find functions with high cyclomatic complexity.",
         inputSchema={
             "type": "object",
             "properties": {
                 "scope": {"type": "string"},
                 "repository": {"type": "string"},
-                "username": {"type": "string", "description": "User branch"},
-                "min_complexity": {
-                    "type": "integer",
-                    "default": 10,
-                    "description": "Minimum cyclomatic complexity threshold",
-                },
+                "username": {"type": "string"},
+                "min_complexity": {"type": "integer", "default": 10},
                 "limit": {"type": "integer", "default": 20},
                 "include_tests": {"type": "boolean", "default": False},
             },
@@ -29,24 +24,19 @@ METRICS_TOOLS = [
     ),
     Tool(
         name="find_security_issues",
-        description="Find potential security issues (hardcoded secrets, SQL injection, etc). "
-        "Use for security audits and code review.",
+        description="Find potential security issues (hardcoded secrets, SQL injection, etc).",
         inputSchema={
             "type": "object",
             "properties": {
                 "scope": {"type": "string"},
                 "repository": {"type": "string"},
-                "username": {"type": "string", "description": "User branch"},
+                "username": {"type": "string"},
                 "severity": {
                     "type": "string",
                     "enum": ["critical", "high", "medium", "low", "info", "all"],
                     "default": "high",
-                    "description": "Minimum severity level to include",
                 },
-                "kind": {
-                    "type": "string",
-                    "description": "Filter by issue kind (e.g., 'sql_injection', 'hardcoded_secret')",
-                },
+                "kind": {"type": "string", "description": "Filter by issue kind (e.g., 'sql_injection')"},
                 "limit": {"type": "integer", "default": 50},
             },
             "required": ["scope", "repository"],
@@ -55,24 +45,15 @@ METRICS_TOOLS = [
     ),
     Tool(
         name="find_undocumented",
-        description="Find functions/methods missing documentation. "
-        "Use for improving code documentation coverage.",
+        description="Find functions/methods missing documentation.",
         inputSchema={
             "type": "object",
             "properties": {
                 "scope": {"type": "string"},
                 "repository": {"type": "string"},
-                "username": {"type": "string", "description": "User branch"},
-                "max_coverage": {
-                    "type": "number",
-                    "default": 0.5,
-                    "description": "Maximum documentation coverage (0-1) to include",
-                },
-                "public_only": {
-                    "type": "boolean",
-                    "default": True,
-                    "description": "Only include public functions/methods",
-                },
+                "username": {"type": "string"},
+                "max_coverage": {"type": "number", "default": 0.5, "description": "Max doc coverage (0-1)"},
+                "public_only": {"type": "boolean", "default": True},
                 "limit": {"type": "integer", "default": 30},
                 "include_tests": {"type": "boolean", "default": False},
             },
@@ -82,18 +63,14 @@ METRICS_TOOLS = [
     ),
     Tool(
         name="find_env_usage",
-        description="Find environment variable usage across the codebase. "
-        "Use for understanding configuration dependencies.",
+        description="Find environment variable usage across the codebase.",
         inputSchema={
             "type": "object",
             "properties": {
                 "scope": {"type": "string"},
                 "repository": {"type": "string"},
-                "username": {"type": "string", "description": "User branch"},
-                "env_name": {
-                    "type": "string",
-                    "description": "Filter by specific env var name",
-                },
+                "username": {"type": "string"},
+                "env_name": {"type": "string", "description": "Filter by env var name"},
                 "limit": {"type": "integer", "default": 50},
             },
             "required": ["scope", "repository"],
@@ -102,19 +79,17 @@ METRICS_TOOLS = [
     ),
     Tool(
         name="find_async_code",
-        description="Find async/concurrent code patterns (async functions, threading, locks). "
-        "Use for understanding concurrency patterns.",
+        description="Find async/concurrent code patterns.",
         inputSchema={
             "type": "object",
             "properties": {
                 "scope": {"type": "string"},
                 "repository": {"type": "string"},
-                "username": {"type": "string", "description": "User branch"},
+                "username": {"type": "string"},
                 "pattern": {
                     "type": "string",
                     "enum": ["async", "threading", "locking", "all"],
                     "default": "all",
-                    "description": "Type of concurrency pattern to find",
                 },
                 "limit": {"type": "integer", "default": 30},
                 "include_tests": {"type": "boolean", "default": False},

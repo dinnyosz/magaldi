@@ -7,17 +7,16 @@ from magaldi_mcp.tools.schemas._annotations import READONLY_ANNOTATIONS
 INSPECT_TOOLS = [
     Tool(
         name="get_element",
-        description="Get details of a specific element by ID. "
-        "Use include_code=true to see source code.",
+        description="Get details of a code element by ID.",
         inputSchema={
             "type": "object",
             "properties": {
-                "hash_id": {"type": "string", "description": "Element ID (hash_id from search results)"},
+                "hash_id": {"type": "string"},
                 "include_code": {"type": "boolean", "default": False},
                 "brief": {
                     "type": "boolean",
                     "default": True,
-                    "description": "Return core fields only (default). Set false for calls, complexity, etc.",
+                    "description": "Core fields only (default). False for calls, complexity, etc.",
                 },
             },
             "required": ["hash_id"],
@@ -26,15 +25,13 @@ INSPECT_TOOLS = [
     ),
     Tool(
         name="batch_get_elements",
-        description="Get several elements at once by their IDs. "
-        "More efficient than multiple get_element calls.",
+        description="Get multiple elements by ID in one call.",
         inputSchema={
             "type": "object",
             "properties": {
                 "hash_ids": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "List of element IDs (hash_ids from search results)",
                 },
                 "include_code": {"type": "boolean", "default": False},
             },
@@ -44,11 +41,11 @@ INSPECT_TOOLS = [
     ),
     Tool(
         name="get_context",
-        description="See where an element fits - its parent class, siblings, and children.",
+        description="Get an element's parent, siblings, and children.",
         inputSchema={
             "type": "object",
             "properties": {
-                "hash_id": {"type": "string", "description": "Element ID (hash_id from search results)"},
+                "hash_id": {"type": "string"},
                 "include_children": {"type": "boolean", "default": True},
                 "include_siblings": {"type": "boolean", "default": False},
             },
@@ -58,11 +55,11 @@ INSPECT_TOOLS = [
     ),
     Tool(
         name="get_children",
-        description="Get all child elements (methods in a class, etc).",
+        description="Get child elements (methods in a class, etc).",
         inputSchema={
             "type": "object",
             "properties": {
-                "hash_id": {"type": "string", "description": "Parent element ID (hash_id from search results)"},
+                "hash_id": {"type": "string"},
             },
             "required": ["hash_id"],
         },

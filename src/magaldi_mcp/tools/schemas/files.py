@@ -7,8 +7,7 @@ from magaldi_mcp.tools.schemas._annotations import READONLY_ANNOTATIONS
 FILE_TOOLS = [
     Tool(
         name="find_files",
-        description="Search for files by glob pattern in the indexed codebase. "
-        "Find files by name, extension, or path.",
+        description="Find files by glob pattern in the indexed codebase.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -23,8 +22,7 @@ FILE_TOOLS = [
     ),
     Tool(
         name="get_file_structure",
-        description="Get the structure of a file (classes, functions, methods, imports) without reading it. "
-        "Outline a file's contents.",
+        description="Outline a file's classes, functions, methods, and imports.",
         inputSchema={
             "type": "object",
             "properties": {

@@ -7,14 +7,13 @@ from magaldi_mcp.tools.schemas._annotations import READONLY_ANNOTATIONS
 HIERARCHY_TOOLS = [
     Tool(
         name="get_command_tree",
-        description="Get hierarchical structure of CLI commands (Click, Typer, etc.) "
-        "with full invocation paths.",
+        description="Get CLI command hierarchy (Click, Typer, etc).",
         inputSchema={
             "type": "object",
             "properties": {
                 "scope": {"type": "string"},
                 "repository": {"type": "string"},
-                "username": {"type": "string", "description": "User branch"},
+                "username": {"type": "string"},
             },
             "required": ["scope", "repository"],
         },
@@ -22,14 +21,13 @@ HIERARCHY_TOOLS = [
     ),
     Tool(
         name="get_route_tree",
-        description="Get hierarchical structure of HTTP routes (FastAPI, Flask, etc.) "
-        "grouped by router module with full URL paths.",
+        description="Get HTTP route hierarchy (FastAPI, Flask, etc).",
         inputSchema={
             "type": "object",
             "properties": {
                 "scope": {"type": "string"},
                 "repository": {"type": "string"},
-                "username": {"type": "string", "description": "User branch"},
+                "username": {"type": "string"},
             },
             "required": ["scope", "repository"],
         },

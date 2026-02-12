@@ -7,8 +7,7 @@ from magaldi_mcp.tools.schemas._annotations import READONLY_ANNOTATIONS
 FEATURE_TOOLS = [
     Tool(
         name="list_features",
-        description="List all extracted features/capabilities in a repo. "
-        "Use get_feature_members to see actual code in each feature.",
+        description="List all extracted features/capabilities in a repo.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -17,7 +16,7 @@ FEATURE_TOOLS = [
                 "brief": {
                     "type": "boolean",
                     "default": True,
-                    "description": "Omit summaries (default). Set false to include feature summaries.",
+                    "description": "Omit summaries (default). False to include.",
                 },
             },
             "required": ["scope", "repository"],
@@ -26,7 +25,7 @@ FEATURE_TOOLS = [
     ),
     Tool(
         name="get_feature_members",
-        description="Get all functions that belong to a feature.",
+        description="Get all functions belonging to a feature.",
         inputSchema={
             "type": "object",
             "properties": {

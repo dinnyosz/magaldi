@@ -7,28 +7,23 @@ from magaldi_mcp.tools.schemas._annotations import OUTPUT_CONTROL_PROPERTIES, RE
 SEARCH_TOOLS = [
     Tool(
         name="search_code",
-        description="Semantic search for functions, classes, methods by what they do. "
-        "Returns AI summaries so you understand code without reading it.",
+        description="Semantic search for code by what it does. Returns AI summaries.",
         inputSchema={
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "What the code does (e.g., 'handle authentication', 'parse JSON', 'validate email')",
+                    "description": "What the code does (e.g., 'handle authentication')",
                 },
                 "element_types": {
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Filter: file, class, interface, trait, enum, type_alias, function, method, constant, variable, import",
                 },
-                "include_code": {
-                    "type": "boolean",
-                    "description": "Include source code in results",
-                    "default": False,
-                },
+                "include_code": {"type": "boolean", "default": False},
                 "brief": {
                     "type": "boolean",
-                    "description": "Minimal output (name, file, line only) - use for broad exploration",
+                    "description": "Name, file, line only \u2014 for broad exploration",
                     "default": False,
                 },
                 "limit": {"type": "integer", "default": 20},
@@ -44,25 +39,24 @@ SEARCH_TOOLS = [
     ),
     Tool(
         name="search_features",
-        description="Search for high-level features (groups of related functions). "
-        "Returns pre-clustered capabilities in the codebase.",
+        description="Search for high-level features (groups of related functions).",
         inputSchema={
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "What capability you need (e.g., 'authentication', 'caching', 'validation')",
+                    "description": "Capability to find (e.g., 'authentication', 'caching')",
                 },
                 "repository": {"type": "string"},
                 "scope": {"type": "string"},
                 "limit": {"type": "integer", "default": 20},
                 "glossary_term": {
                     "type": "string",
-                    "description": "Filter to features where this glossary term appears in members",
+                    "description": "Filter to features containing this glossary term",
                 },
                 "min_percentage": {
                     "type": "number",
-                    "description": "Minimum percentage of members containing the term (0-100)",
+                    "description": "Min % of members with the term (0-100)",
                     "default": 0,
                 },
                 **OUTPUT_CONTROL_PROPERTIES,
@@ -73,11 +67,11 @@ SEARCH_TOOLS = [
     ),
     Tool(
         name="find_similar",
-        description="Given an element ID, find similar implementations and related patterns.",
+        description="Find similar implementations to a given element.",
         inputSchema={
             "type": "object",
             "properties": {
-                "hash_id": {"type": "string", "description": "Element ID (hash_id from search results)"},
+                "hash_id": {"type": "string"},
                 "limit": {"type": "integer", "default": 10},
                 "same_repo_only": {"type": "boolean", "default": False},
                 "include_tests": {"type": "boolean", "default": True},

@@ -36,22 +36,20 @@ META_TOOLS = [
     ),
     Tool(
         name="generate_skill",
-        description="Create a SKILL.md file that teaches LLMs how to use this MCP. "
-        "Ask the user for scope (project/global) and whether to add allowed tools.",
+        description="Create a SKILL.md that teaches LLMs to use this MCP.",
         inputSchema={
             "type": "object",
             "properties": {
-                "project_root": {"type": "string", "description": "Project root directory (required for scope='project')"},
-                "skill_name": {"type": "string", "default": "magaldi", "description": "Name of the skill directory"},
+                "project_root": {"type": "string", "description": "Project root (for scope='project')"},
+                "skill_name": {"type": "string", "default": "magaldi"},
                 "scope": {
                     "type": "string",
                     "enum": ["project", "global"],
-                    "description": "Where to install. Defaults to MCP installation scope if not specified.",
                 },
                 "add_allowed_tools": {
                     "type": "boolean",
                     "default": False,
-                    "description": "Add all magaldi MCP tools to allowed tools (no permission prompts)",
+                    "description": "Auto-allow all magaldi tools (no prompts)",
                 },
             },
             "required": [],
@@ -60,12 +58,11 @@ META_TOOLS = [
     ),
     Tool(
         name="explain_element",
-        description="Comprehensive overview of a code element in one call. "
-        "Returns details, callers, callees, imports, similar code, and parent context.",
+        description="Full overview: details, callers, callees, imports, similar, parent.",
         inputSchema={
             "type": "object",
             "properties": {
-                "hash_id": {"type": "string", "description": "Element ID to explain (hash_id)"},
+                "hash_id": {"type": "string"},
                 **OUTPUT_CONTROL_PROPERTIES,
             },
             "required": ["hash_id"],
@@ -74,15 +71,11 @@ META_TOOLS = [
     ),
     Tool(
         name="generate_config",
-        description="Create a magaldi.yaml config file for a repository. "
-        "Auto-detects repository name and scope from directory structure.",
+        description="Create magaldi.yaml config. Auto-detects repo name and scope.",
         inputSchema={
             "type": "object",
             "properties": {
-                "repo_path": {
-                    "type": "string",
-                    "description": "Path to the repository root directory",
-                },
+                "repo_path": {"type": "string", "description": "Repository root directory"},
                 "scope": {"type": "string", "description": "Override auto-detected scope"},
                 "repository": {"type": "string", "description": "Override auto-detected name"},
             },

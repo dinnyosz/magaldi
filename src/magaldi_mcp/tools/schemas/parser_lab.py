@@ -11,34 +11,21 @@ from magaldi_mcp.tools.schemas._annotations import READONLY_ANNOTATIONS, WRITE_A
 PARSER_LAB_TOOLS = [
     Tool(
         name="parser_lab_analyze",
-        description="Analyze parsing of code from a file, snippet, or Context7 query. "
-        "Returns extracted elements, AST summary, and gap analysis. "
-        "Restricted to magaldi/magaldi.",
+        description="Analyze code parsing: extracted elements, AST summary, gap analysis.",
         inputSchema={
             "type": "object",
             "properties": {
-                "file_path": {
-                    "type": "string",
-                    "description": "Path to file to parse (can be external to magaldi)",
-                },
-                "code": {
-                    "type": "string",
-                    "description": "Inline code snippet to parse",
-                },
+                "file_path": {"type": "string", "description": "File to parse"},
+                "code": {"type": "string", "description": "Code snippet to parse"},
                 "context7_query": {
                     "type": "string",
-                    "description": "Query for Context7 to fetch example code (e.g., 'Django class-based views')",
+                    "description": "Context7 query for example code",
                 },
                 "language": {
                     "type": "string",
                     "enum": ["python", "javascript", "typescript", "tsx", "php", "rust", "bash"],
-                    "description": "Language of the code (auto-detected if file_path provided)",
                 },
-                "debug": {
-                    "type": "boolean",
-                    "default": False,
-                    "description": "Include full AST tree in output (verbose)",
-                },
+                "debug": {"type": "boolean", "default": False, "description": "Include full AST"},
             },
             "required": [],
         },
@@ -46,37 +33,26 @@ PARSER_LAB_TOOLS = [
     ),
     Tool(
         name="parser_lab_create_test",
-        description="Create a pytest test case for expected parsing behavior. "
-        "Use TDD: create the test BEFORE fixing the parser. "
-        "Restricted to magaldi/magaldi.",
+        description="Create pytest test for expected parsing behavior (TDD).",
         inputSchema={
             "type": "object",
             "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "Test name (e.g., 'drf_api_view_decorator'). Used for file and class naming.",
-                },
+                "name": {"type": "string", "description": "Test name (e.g., 'drf_api_view_decorator')"},
                 "language": {
                     "type": "string",
                     "enum": ["python", "javascript", "typescript", "tsx", "php", "rust", "bash"],
-                    "description": "Language of the code to test",
                 },
-                "code": {
-                    "type": "string",
-                    "description": "Code snippet to test parsing on",
-                },
+                "code": {"type": "string", "description": "Code to test parsing on"},
                 "expected": {
                     "type": "object",
-                    "description": "Expected parsing results",
                     "properties": {
                         "elements": {
                             "type": "array",
-                            "description": "Expected elements to be extracted",
                             "items": {
                                 "type": "object",
                                 "properties": {
-                                    "type": {"type": "string", "description": "Element type (function, class, method, etc.)"},
-                                    "name": {"type": "string", "description": "Element name"},
+                                    "type": {"type": "string"},
+                                    "name": {"type": "string"},
                                     "decorators": {"type": "array", "items": {"type": "string"}},
                                     "is_async": {"type": "boolean"},
                                     "visibility": {"type": "string"},
@@ -85,17 +61,10 @@ PARSER_LAB_TOOLS = [
                                 "required": ["type", "name"],
                             },
                         },
-                        "element_count": {
-                            "type": "integer",
-                            "description": "Expected total element count (optional)",
-                        },
-                        "has_routes": {
-                            "type": "boolean",
-                            "description": "Whether HTTP routes should be detected",
-                        },
+                        "element_count": {"type": "integer"},
+                        "has_routes": {"type": "boolean"},
                         "routes": {
                             "type": "array",
-                            "description": "Expected HTTP routes",
                             "items": {
                                 "type": "object",
                                 "properties": {
@@ -107,13 +76,12 @@ PARSER_LAB_TOOLS = [
                         },
                         "calls": {
                             "type": "array",
-                            "description": "Expected calls within a function",
                             "items": {
                                 "type": "object",
                                 "properties": {
                                     "name": {"type": "string"},
                                     "receiver": {"type": "string"},
-                                    "in_element": {"type": "string", "description": "Name of element containing the call"},
+                                    "in_element": {"type": "string"},
                                 },
                             },
                         },
@@ -126,20 +94,12 @@ PARSER_LAB_TOOLS = [
     ),
     Tool(
         name="parser_lab_run_tests",
-        description="Run parser/extractor tests and return structured results. "
-        "Restricted to magaldi/magaldi.",
+        description="Run parser tests and return results.",
         inputSchema={
             "type": "object",
             "properties": {
-                "filter": {
-                    "type": "string",
-                    "description": "Pytest filter expression (e.g., 'test_drf' or 'tests/extractors/test_python_drf.py')",
-                },
-                "verbose": {
-                    "type": "boolean",
-                    "default": False,
-                    "description": "Include full test output",
-                },
+                "filter": {"type": "string", "description": "Pytest filter expression"},
+                "verbose": {"type": "boolean", "default": False},
             },
             "required": [],
         },
@@ -147,24 +107,16 @@ PARSER_LAB_TOOLS = [
     ),
     Tool(
         name="parser_lab_suggest_fix",
-        description="Suggest extractor modifications to fix a parsing gap. "
-        "Restricted to magaldi/magaldi.",
+        description="Suggest extractor fix for a parsing gap.",
         inputSchema={
             "type": "object",
             "properties": {
-                "gap_description": {
-                    "type": "string",
-                    "description": "Description of what's not being extracted correctly",
-                },
+                "gap_description": {"type": "string", "description": "What\'s not extracted correctly"},
                 "language": {
                     "type": "string",
                     "enum": ["python", "javascript", "typescript", "tsx", "php", "rust", "bash"],
-                    "description": "Language of the code with the gap",
                 },
-                "failing_test": {
-                    "type": "string",
-                    "description": "Optional: path to failing test for additional context",
-                },
+                "failing_test": {"type": "string", "description": "Path to failing test"},
             },
             "required": ["gap_description", "language"],
         },
