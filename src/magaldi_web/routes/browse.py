@@ -130,7 +130,7 @@ async def browse_elements(
         parent_result = client.mget(
             index=INDEX_NAME,
             ids=list(parent_ids),
-            _source=["name", "element_type", "relative_path", "hash_id"],
+            source=["name", "element_type", "relative_path", "hash_id"],
         )
         for doc in parent_result.get("docs", []):
             if doc.get("found") and doc.get("_source"):
@@ -497,10 +497,10 @@ async def get_element_details(
     while current_parent and current_parent not in seen:
         seen.add(current_parent)
         try:
-            parent_doc = client.get(
+            parent_doc = client.get_document(
                 index=INDEX_NAME,
-                id=current_parent,
-                _source=["element_id", "hash_id", "name", "element_type", "relative_path", "line_start"],
+                doc_id=current_parent,
+                source=["element_id", "hash_id", "name", "element_type", "relative_path", "line_start", "parent_id"],
             )
             psource = parent_doc["_source"]
             containers.append({

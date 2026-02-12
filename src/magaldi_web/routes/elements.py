@@ -287,7 +287,7 @@ async def get_element_detail(
             members_result = client.mget(
                 index=INDEX_NAME,
                 ids=member_ids[:50],
-                _source=["element_id", "hash_id", "name", "element_type", "relative_path", "line_start", "summary", "signature"],
+                source=["element_id", "hash_id", "name", "element_type", "relative_path", "line_start", "summary", "signature"],
             )
             for doc in members_result.get("docs", []):
                 if doc.get("found") and doc.get("_source"):
@@ -365,7 +365,7 @@ async def get_element_detail(
                 conn_result = client.mget(
                     index=INDEX_NAME,
                     ids=connected_ids,
-                    _source=["hash_id", "member_ids"],
+                    source=["hash_id", "member_ids"],
                 )
                 for doc in conn_result.get("docs", []):
                     if doc.get("found") and doc.get("_source"):
@@ -461,7 +461,7 @@ async def get_element_detail(
             features_result = client.mget(
                 index=INDEX_NAME,
                 ids=feature_ids,
-                _source=["element_id", "hash_id", "cluster_label", "summary", "member_count"],
+                source=["element_id", "hash_id", "cluster_label", "summary", "member_count"],
             )
             for doc in features_result.get("docs", []):
                 if doc.get("found") and doc.get("_source"):

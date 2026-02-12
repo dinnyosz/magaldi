@@ -581,7 +581,7 @@ class TestGetElementDetails:
                     }
                 }
 
-        mock_client.get.side_effect = get_side_effect
+        mock_client.get_document.side_effect = get_side_effect
         mock_client.count.return_value = {"count": 0}
 
         response = client.get("/browse/element/hash123/details")
@@ -695,7 +695,7 @@ class TestGetElementDetails:
         }
         mock_client = MagicMock()
         mock_repo._get_client.return_value = mock_client
-        mock_client.get.side_effect = Exception("Not found")
+        mock_client.get_document.side_effect = Exception("Not found")
         mock_client.count.return_value = {"count": 0}
 
         response = client.get("/browse/element/hash123/details")
