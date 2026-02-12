@@ -6,7 +6,9 @@ Continuously monitors a repository for file changes and auto-parses modified fil
 from __future__ import annotations
 
 import fnmatch
+import os
 import queue
+import signal
 import sys
 import threading
 import time
@@ -368,6 +370,23 @@ def watch_loop(
                 console.print("\n[green]✓ Watching for changes...[/]\n")
 
 
+def _shutdown_watch(
+    observer: Any | None = None,
+    stop_event: threading.Event | None = None,
+) -> None:
+    """Clean shutdown on Ctrl+C, avoiding thread-join hangs."""
+    console.print("\n[yellow]Stopping watch...[/]")
+    if stop_event is not None:
+        stop_event.set()
+    if observer is not None:
+        observer.stop()
+        observer.join(timeout=2.0)
+    # Restore default SIGINT so shutdown doesn't re-enter our handler
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    # Skip Python's threading shutdown which hangs on orphan ThreadPoolExecutor threads
+    os._exit(0)
+
+
 @main.command()
 @click.argument("repo_path", type=click.Path(exists=True, file_okay=False, dir_okay=True))
 @click.option("--user", "-u", required=True, help="Username/branch (use 'main' for primary parse)")
@@ -543,11 +562,11 @@ def watch(
                 stop_event,
             )
         except KeyboardInterrupt:
-            console.print("\n[yellow]Stopping watch...[/]")
-            stop_event.set()
-            observer.stop()
-            observer.join(timeout=2.0)
+            _shutdown_watch(observer, stop_event)
 
+    except KeyboardInterrupt:
+        # Ctrl+C during initial scan or setup
+        _shutdown_watch()
     except DiscoveryError as e:
         console.print(f"\n[red]Discovery error:[/] {e}")
         sys.exit(1)
