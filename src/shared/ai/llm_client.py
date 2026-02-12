@@ -190,6 +190,9 @@ def _sigint_handler(signum: int, frame: Any) -> None:
     This ensures HTTP sessions are closed before Python starts
     garbage collection, avoiding "coroutine was never awaited" warnings.
     """
+    # Restore default handler so subsequent SIGINTs (e.g. during thread
+    # shutdown joins) don't re-enter this handler and crash the shutdown.
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
     cleanup_llm_sessions()
     # Raise KeyboardInterrupt to let the application handle it normally
     raise KeyboardInterrupt
