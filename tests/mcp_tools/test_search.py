@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import pytest
-from unittest.mock import MagicMock
 
 from magaldi_mcp.tools import (
     pattern_search,
     search_code,
 )
-
 
 # =============================================================================
 # SEARCH CODE TESTS
@@ -79,8 +77,160 @@ class TestSearchCode:
 
 
 # =============================================================================
-# GET ELEMENT TESTS
+# SEARCH CODE NEW FIELDS TESTS
 # =============================================================================
+
+
+class TestSearchCodeNewFields:
+    """Tests for score, line_end, and truncated hash_id in search_code."""
+
+    def test_score_passed_through(self, mock_repo, mock_embed_client):
+        """Test that _score from search results is passed through as score."""
+        mock_repo.search_by_vector.return_value = [
+            {
+                "element_id": "scope:repo:user:file.py:function:test:1",
+                "name": "test",
+                "element_type": "function",
+                "relative_path": "file.py",
+                "line_start": 1,
+                "_score": 0.8765,
+            }
+        ]
+
+        result = search_code(
+            repo=mock_repo,
+            embed_client=mock_embed_client,
+            query="test",
+        )
+
+        assert result["code_results"][0]["score"] == 0.88
+
+    def test_score_defaults_to_zero(self, mock_repo, mock_embed_client):
+        """Test that missing _score defaults to 0.0."""
+        mock_repo.search_by_vector.return_value = [
+            {
+                "element_id": "id1",
+                "name": "test",
+                "element_type": "function",
+                "relative_path": "file.py",
+                "line_start": 1,
+            }
+        ]
+
+        result = search_code(
+            repo=mock_repo,
+            embed_client=mock_embed_client,
+            query="test",
+        )
+
+        assert result["code_results"][0]["score"] == 0.0
+
+    def test_line_end_passed_through(self, mock_repo, mock_embed_client):
+        """Test that line_end is included in results."""
+        mock_repo.search_by_vector.return_value = [
+            {
+                "element_id": "id1",
+                "name": "test",
+                "element_type": "function",
+                "relative_path": "file.py",
+                "line_start": 10,
+                "line_end": 25,
+            }
+        ]
+
+        result = search_code(
+            repo=mock_repo,
+            embed_client=mock_embed_client,
+            query="test",
+        )
+
+        assert result["code_results"][0]["line_end"] == 25
+
+    def test_hash_id_truncated_to_8_chars(self, mock_repo, mock_embed_client):
+        """Test that hash_id is truncated to first 8 characters."""
+        full_hash = "b1d0e591a4c8f2e3d5b7a9c1e3f5d7b9a1c3e5f7d9b1a3c5e7f9d1b3a5c7e9f1"
+        mock_repo.search_by_vector.return_value = [
+            {
+                "element_id": "id1",
+                "name": "test",
+                "element_type": "function",
+                "relative_path": "file.py",
+                "line_start": 1,
+                "hash_id": full_hash,
+            }
+        ]
+
+        result = search_code(
+            repo=mock_repo,
+            embed_client=mock_embed_client,
+            query="test",
+        )
+
+        assert result["code_results"][0]["hash_id"] == "b1d0e591"
+
+    def test_missing_hash_id_gives_empty_string(self, mock_repo, mock_embed_client):
+        """Test that missing hash_id gives empty string."""
+        mock_repo.search_by_vector.return_value = [
+            {
+                "element_id": "id1",
+                "name": "test",
+                "element_type": "function",
+                "relative_path": "file.py",
+                "line_start": 1,
+            }
+        ]
+
+        result = search_code(
+            repo=mock_repo,
+            embed_client=mock_embed_client,
+            query="test",
+        )
+
+        assert result["code_results"][0]["hash_id"] == ""
+
+    def test_no_related_files_in_response(self, mock_repo, mock_embed_client):
+        """Test that include_related feature is fully removed."""
+        mock_repo.search_by_vector.return_value = [
+            {
+                "element_id": "id1",
+                "name": "test",
+                "element_type": "function",
+                "relative_path": "file.py",
+                "line_start": 1,
+                "hash_id": "a" * 64,
+            }
+        ]
+
+        result = search_code(
+            repo=mock_repo,
+            embed_client=mock_embed_client,
+            query="test",
+        )
+
+        assert "related_files" not in result
+        assert "hint" not in result
+
+    def test_keyword_fallback_score_passed_through(self, mock_repo):
+        """Test that BM25 scores from keyword search are also passed through."""
+        mock_repo.search_by_keyword.return_value = [
+            {
+                "element_id": "id1",
+                "name": "test",
+                "element_type": "function",
+                "relative_path": "file.py",
+                "line_start": 1,
+                "_score": 12.5,
+            }
+        ]
+
+        result = search_code(
+            repo=mock_repo,
+            embed_client=None,
+            query="test",
+        )
+
+        assert result["code_results"][0]["score"] == 12.5
+
 
 # =============================================================================
 # SEARCH CODE FALLBACK TESTS

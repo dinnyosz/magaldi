@@ -8,9 +8,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from shared.db.backends.base import NotFoundError
-
 from magaldi_core.code_parser import CodeElement
+from shared.db.backends.base import NotFoundError
 
 from .base import INDEX_NAME, RepositoryBase, generate_hash_id
 
