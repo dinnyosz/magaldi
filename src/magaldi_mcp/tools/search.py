@@ -112,8 +112,10 @@ def search_code(
             "type": result.get("element_type"),
             "file": result.get("relative_path"),
             "line": result.get("line_start"),
+            "line_end": result.get("line_end"),
+            "score": round(result.get("_score", 0.0), 2),
             "element_id": result.get("element_id"),
-            "hash_id": result.get("hash_id"),
+            "hash_id": result.get("hash_id", "")[:8],
             "is_test": is_test,
         }
 
