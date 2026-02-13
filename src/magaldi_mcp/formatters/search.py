@@ -73,7 +73,25 @@ class FeatureSearchListFormatter(ResultFormatter):
 
 
 class GroupedSearchFormatter(ResultFormatter):
-    """Formatter for grouped search results (code_results and test_results)."""
+    """Compact file-grouped formatter for search results.
+
+    Groups elements by file, sorted by average relevance score.
+    Elements within each file sorted by score descending.
+    """
+
+    TYPE_ABBREV: dict[str, str] = {
+        "function": "fn",
+        "method": "mth",
+        "class": "cls",
+        "constant": "const",
+        "variable": "var",
+        "interface": "iface",
+        "enum": "enum",
+        "type_alias": "type",
+        "import": "imp",
+        "file": "file",
+        "trait": "trait",
+    }
 
     def can_format(self, result: Any) -> bool:
         """Check if result has code_results and test_results."""
@@ -82,78 +100,73 @@ class GroupedSearchFormatter(ResultFormatter):
         return "code_results" in result and "test_results" in result and "target" not in result
 
     def format(self, result: dict[str, Any]) -> str:
-        """Format grouped search results."""
+        """Format results as compact file-grouped output."""
         code_results = result.get("code_results", [])
         test_results = result.get("test_results", [])
-        total_code = result.get("total_code", len(code_results))
-        total_tests = result.get("total_tests", len(test_results))
 
-        lines = []
+        # Merge all results
+        all_results = code_results + test_results
+        total = len(all_results)
 
-        # Format code results
-        if code_results:
-            lines.append(f"Code Results ({total_code}):\n")
-            for r in code_results:
-                line_start = r.get('line', '?')
-                line_end = r.get('line_end', '')
-                line_range = f"{line_start}-{line_end}" if line_end else str(line_start)
-                loc = f"{r.get('file', '?')}:{line_range}" if r.get('file') else "N/A"
-                hash_id = r.get('hash_id', '')
-                id_suffix = f" | id:{hash_id}" if hash_id else ""
-                lines.append(f"[{r.get('type', '?')}] {r.get('name', '?')} ({loc}){id_suffix}")
-                if r.get('signature'):
-                    lines.append(f"  {r['signature']}")
-                if r.get('summary'):
-                    summary = r['summary']
+        if not all_results:
+            return "No results found."
+
+        # Group by file
+        file_groups: dict[str, list[dict[str, Any]]] = {}
+        for r in all_results:
+            file_path = r.get("file") or r.get("relative_path") or "unknown"
+            file_groups.setdefault(file_path, []).append(r)
+
+        # Sort elements within each file by score desc
+        for elements in file_groups.values():
+            elements.sort(key=lambda e: e.get("score", 0.0), reverse=True)
+
+        # Sort file groups by avg score desc
+        def _avg_score(elements: list[dict[str, Any]]) -> float:
+            scores = [e.get("score", 0.0) for e in elements]
+            return sum(scores) / len(scores) if scores else 0.0
+
+        sorted_files = sorted(
+            file_groups.items(), key=lambda item: _avg_score(item[1]), reverse=True,
+        )
+
+        lines: list[str] = [
+            f"# search_code: {total} results (scored 0-1, desc)",
+            "# type:name:L<start>[-end]:score|<hash8>",
+        ]
+
+        for file_path, elements in sorted_files:
+            avg = _avg_score(elements)
+            lines.append(f"\n{file_path}  avg:{avg:.2f}")
+
+            for r in elements:
+                lines.append(self._format_element(r))
+
+                # Non-brief: summary and signature indented under element
+                if r.get("summary"):
+                    summary = r["summary"]
                     if len(summary) > 200:
                         summary = summary[:200] + "..."
-                    lines.append(f"  {summary}")
-                if r.get('code'):
-                    lines.append("  ```")
-                    lines.append(r['code'])
-                    lines.append("  ```")
-                # For grep results
-                if r.get('content') and r.get('match'):
-                    for ctx in r.get("context_before", []):
-                        lines.append(f"  | {ctx}")
-                    lines.append(f"  > {r.get('content')}")
-                    for ctx in r.get("context_after", []):
-                        lines.append(f"  | {ctx}")
-                lines.append("")
-        else:
-            lines.append("No code results.\n")
-
-        # Format test results
-        if test_results:
-            lines.append(f"Test Results ({total_tests}):\n")
-            for r in test_results:
-                line_start = r.get('line', '?')
-                line_end = r.get('line_end', '')
-                line_range = f"{line_start}-{line_end}" if line_end else str(line_start)
-                loc = f"{r.get('file', '?')}:{line_range}" if r.get('file') else "N/A"
-                hash_id = r.get('hash_id', '')
-                id_suffix = f" | id:{hash_id}" if hash_id else ""
-                lines.append(f"[{r.get('type', '?')}] {r.get('name', '?')} ({loc}){id_suffix}")
-                if r.get('signature'):
-                    lines.append(f"  {r['signature']}")
-                if r.get('summary'):
-                    summary = r['summary']
-                    if len(summary) > 200:
-                        summary = summary[:200] + "..."
-                    lines.append(f"  {summary}")
-                if r.get('code'):
-                    lines.append("  ```")
-                    lines.append(r['code'])
-                    lines.append("  ```")
-                # For grep results
-                if r.get('content') and r.get('match'):
-                    for ctx in r.get("context_before", []):
-                        lines.append(f"  | {ctx}")
-                    lines.append(f"  > {r.get('content')}")
-                    for ctx in r.get("context_after", []):
-                        lines.append(f"  | {ctx}")
-                lines.append("")
-        elif result.get("total_tests", 0) > 0:
-            lines.append(f"(Tests excluded: {total_tests})")
+                    lines.append(f"    {summary}")
+                if r.get("signature"):
+                    lines.append(f"    {r['signature']}")
+                if r.get("code") or r.get("raw_code"):
+                    code = r.get("code") or r.get("raw_code")
+                    lines.append("    ```")
+                    for code_line in code.splitlines():
+                        lines.append(f"    {code_line}")
+                    lines.append("    ```")
 
         return "\n".join(lines)
+
+    def _format_element(self, r: dict[str, Any]) -> str:
+        """Format a single element as a compact line."""
+        elem_type = r.get("type") or r.get("element_type") or "?"
+        abbrev = self.TYPE_ABBREV.get(elem_type, elem_type)
+        name = r.get("name", "?")
+        line_start = r.get("line") or r.get("line_start") or "?"
+        line_end = r.get("line_end")
+        line_range = f"L{line_start}-{line_end}" if line_end else f"L{line_start}"
+        score = r.get("score", 0.0)
+        hash_id = r.get("hash_id", "")
+        return f"  {abbrev}:{name}:{line_range}:{score:.2f}|{hash_id}"
