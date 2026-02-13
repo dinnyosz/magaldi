@@ -26,7 +26,6 @@ def search_code(
     include_code: bool = False,
     brief: bool = False,
     include_tests: bool = True,
-    include_related: bool = True,
 ) -> dict[str, Any]:
     """Semantic search for code elements.
 
@@ -45,11 +44,9 @@ def search_code(
         include_code: Include source code in results (for detailed inspection).
         brief: Minimal output - just name, type, file, line (for exploration).
         include_tests: Include test results (default True).
-        include_related: Include related files that call/import found elements (default True).
 
     Returns:
         Dict with code_results and test_results lists, grouped by is_test field.
-        Also includes related_files when found elements have callers in other files.
     """
     # Auto-detect scope/repository from magaldi.yaml if not provided
     scope, repository = _resolve_scope_repo(scope, repository)
@@ -135,48 +132,12 @@ def search_code(
         else:
             code_results.append(entry)
 
-    # Find related files (callers) for functions/methods when results are limited
-    related_files: list[dict[str, Any]] = []
-    if include_related and len(code_results) > 0 and len(code_results) < 10:
-        seen_files: set[str] = {r.get("file", "") for r in code_results}
-        for result in code_results[:5]:  # Check top 5 results
-            if result.get("type") in ("function", "method") and result.get("hash_id"):
-                try:
-                    # Find callers of this function
-                    callers = repo.find_callers(
-                        result["hash_id"],
-                        scope=scope,
-                        repository=repository,
-                        username=username,
-                        limit=5,
-                        include_tests=False,
-                    )
-                    for caller in callers:
-                        caller_file = caller.get("relative_path", "")
-                        if caller_file and caller_file not in seen_files:
-                            seen_files.add(caller_file)
-                            related_files.append({
-                                "file": caller_file,
-                                "reason": f"calls {result.get('name', 'function')}",
-                                "caller_name": caller.get("name"),
-                                "caller_line": caller.get("line_start"),
-                            })
-                except Exception:
-                    logger.debug("Callers lookup failed for result", exc_info=True)
-
-    response: dict[str, Any] = {
+    return {
         "code_results": code_results[:limit],
         "test_results": test_results[:limit] if include_tests else [],
         "total_code": len(code_results),
         "total_tests": len(test_results) if include_tests else 0,
     }
-
-    # Add related files hint when found
-    if related_files:
-        response["related_files"] = related_files[:10]
-        response["hint"] = "Related files found that call/use the search results - consider examining these too"
-
-    return response
 
 
 def search_features(

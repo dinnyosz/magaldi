@@ -31,7 +31,6 @@ SEARCH_TOOLS = [
                 "repository": {"type": "string"},
                 "scope": {"type": "string"},
                 "include_tests": {"type": "boolean", "default": False},
-                "include_related": {"type": "boolean", "default": False},
                 **OUTPUT_CONTROL_PROPERTIES,
             },
             "required": ["query"],
