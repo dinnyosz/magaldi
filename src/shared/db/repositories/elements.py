@@ -157,27 +157,50 @@ class ElementRepository:
             return None
 
     def get_document_by_hash_id(self, hash_id: str) -> dict[str, Any] | None:
-        """Get indexed document by hash_id.
+        """Get indexed document by hash_id (full or prefix).
+
+        Supports both full 64-char hashes and truncated prefixes (e.g. 8 chars).
+        Uses exact match for full hashes, prefix query for shorter ones.
 
         Args:
-            hash_id: The 64-character SHA256 hash of the element_id.
+            hash_id: Full or prefix SHA256 hash of the element_id.
 
         Returns:
             Document source or None if not found.
+
+        Raises:
+            ValueError: If a prefix matches multiple documents (ambiguous).
         """
         try:
             client = self._get_client()
+
+            # Full hash: use exact term query
+            if len(hash_id) == 64:
+                query: dict[str, Any] = {"term": {"hash_id": hash_id}}
+                size = 1
+            else:
+                # Prefix: fetch 2 to detect ambiguity
+                query = {"prefix": {"hash_id": hash_id.lower()}}
+                size = 2
+
             result = client.search(
                 index=INDEX_NAME,
-                body={
-                    "size": 1,
-                    "query": {"term": {"hash_id": hash_id}},
-                },
+                body={"size": size, "query": query},
             )
             hits = result.get("hits", {}).get("hits", [])
-            if hits:
-                return hits[0]["_source"]
-            return None
+
+            if not hits:
+                return None
+
+            if len(hash_id) < 64 and len(hits) > 1:
+                raise ValueError(
+                    f"Ambiguous hash prefix '{hash_id}' matches multiple elements. "
+                    "Use more characters to disambiguate."
+                )
+
+            return hits[0]["_source"]
+        except ValueError:
+            raise
         except Exception:
             return None
 
@@ -185,17 +208,20 @@ class ElementRepository:
         """Get indexed document by either element_id or hash_id.
 
         Automatically detects which type of ID is provided:
-        - 64-char hex string without colons = hash_id
+        - Hex string (1-64 chars) without colons = hash_id (full or prefix)
         - Contains colons = element_id
 
         Args:
-            id_or_hash: Either an element_id or hash_id.
+            id_or_hash: Either an element_id or hash_id (full or prefix).
 
         Returns:
             Document source or None if not found.
         """
-        # Detect if it's a hash_id (64 hex chars, no colons) or element_id
-        is_hash = len(id_or_hash) == 64 and ":" not in id_or_hash and all(c in "0123456789abcdef" for c in id_or_hash.lower())
+        is_hash = (
+            1 <= len(id_or_hash) <= 64
+            and ":" not in id_or_hash
+            and all(c in "0123456789abcdef" for c in id_or_hash.lower())
+        )
 
         if is_hash:
             return self.get_document_by_hash_id(id_or_hash)
