@@ -906,3 +906,250 @@ class TestBuildScoringDisplay:
 
         display = _build_scoring_display(state, num_workers=4)
         assert display is not None
+
+    def test_display_with_throttle_decision(self):
+        """Verify display handles throttle decision state."""
+        from shared.cli._runners import _build_scoring_display
+        from shared.throttling import ThrottleDecision
+
+        state = ScoringProgressState(
+            total_variables=100,
+            total_batches=20,
+            completed_batches=10,
+            completed_variables=50,
+            kept=30,
+            dropped=20,
+            num_workers=8,
+            start_time=time.time() - 10.0,
+            batch_times=[2.0] * 10,
+            throttle_decision=ThrottleDecision(
+                should_throttle=True,
+                current_max=5.0,
+                historical_max=0.0,
+                completed_avg=2.5,
+                recommended_workers=4,
+                reason="Throttle (4=78s/2.5s base)",
+                completion_count=10,
+            ),
+            allowed_workers=4,
+        )
+
+        display = _build_scoring_display(state, num_workers=8)
+        assert display is not None
+
+    def test_display_throttled_workers_shown(self):
+        """Verify throttled workers appear differently from idle workers."""
+        from shared.cli._runners import _build_scoring_display
+
+        ws = ScoringWorkerStatus()
+        ws.set(0, 1, 10)
+        ws.set(1, 2, 8)
+
+        state = ScoringProgressState(
+            total_variables=50,
+            total_batches=10,
+            completed_batches=2,
+            completed_variables=15,
+            kept=10,
+            dropped=5,
+            num_workers=6,
+            start_time=time.time() - 5.0,
+            batch_times=[2.5] * 2,
+            workers=ws,
+            allowed_workers=3,  # Only 3 allowed, workers 3-5 are throttled
+        )
+
+        display = _build_scoring_display(state, num_workers=6)
+        assert display is not None
+
+
+# =============================================================================
+# Throttle integration tests
+# =============================================================================
+
+
+class TestScoreVariablesThrottling:
+    """Tests for score_variables with runtime-aware throttling."""
+
+    def test_throttling_activates_with_slow_llm(self):
+        """When LLM is slow, throttling should reduce allowed workers."""
+        # Create enough variables for many batches
+        variables = [
+            (f"eid{i}", "f.py", f"var_{i}", f"var_{i} = {i}" * 50)
+            for i in range(20)
+        ]
+        mock_client = MagicMock()
+
+        def slow_generate(**kwargs):
+            time.sleep(0.05)  # Simulate slow LLM
+            content = kwargs.get("messages", [{}])[-1].get("content", "")
+            lines = [line for line in content.split("\n") if line and line[0].isdigit()]
+            return "\n".join(f"{i+1}. 5,5,5,5" for i in range(len(lines)))
+
+        mock_client.generate_from_messages.side_effect = slow_generate
+
+        state = ScoringProgressState()
+        worker_status = ScoringWorkerStatus()
+        config = VariableScoringConfig(token_budget=100)
+
+        result = score_variables(
+            variables, mock_client, config=config, max_workers=4,
+            progress_state=state,
+            worker_status=worker_status,
+        )
+
+        # All variables should be scored regardless of throttling
+        assert len(result.scores) == 20
+        assert result.kept + result.dropped == 20
+        # Throttle decision should have been set
+        assert state.throttle_decision is not None
+
+    def test_throttle_state_in_progress(self):
+        """Verify throttle info is available in progress state."""
+        variables = [
+            (f"eid{i}", "f.py", f"var_{i}", f"var_{i} = {i}" * 50)
+            for i in range(10)
+        ]
+        mock_client = MagicMock()
+
+        def mock_generate(**kwargs):
+            content = kwargs.get("messages", [{}])[-1].get("content", "")
+            lines = [line for line in content.split("\n") if line and line[0].isdigit()]
+            return "\n".join(f"{i+1}. 5,5,5,5" for i in range(len(lines)))
+
+        mock_client.generate_from_messages.side_effect = mock_generate
+
+        progress_updates: list[int | None] = []
+
+        def on_progress(state: ScoringProgressState) -> None:
+            progress_updates.append(state.allowed_workers)
+
+        state = ScoringProgressState()
+        worker_status = ScoringWorkerStatus()
+        config = VariableScoringConfig(token_budget=100)
+
+        result = score_variables(
+            variables, mock_client, config=config, max_workers=4,
+            on_progress=on_progress,
+            progress_state=state,
+            worker_status=worker_status,
+        )
+
+        assert len(result.scores) == 10
+        # Should have received progress updates with allowed_workers info
+        assert len(progress_updates) >= 1
+        # All values should be positive integers
+        assert all(w is not None and w >= 1 for w in progress_updates)
+
+    def test_eta_uses_allowed_workers(self):
+        """Verify ETA calculation uses allowed_workers when throttled."""
+        state = ScoringProgressState(
+            total_batches=10,
+            completed_batches=5,
+            num_workers=8,
+            batch_times=[2.0] * 5,
+            allowed_workers=2,  # Throttled to 2
+        )
+        eta = state.eta_seconds()
+        assert eta is not None
+        # 5 remaining / min(2, 5) workers * 2s = 5s
+        assert 4.9 <= eta <= 5.1
+
+    def test_eta_uses_num_workers_when_no_throttle(self):
+        """Verify ETA calculation uses num_workers when not throttled."""
+        state = ScoringProgressState(
+            total_batches=10,
+            completed_batches=5,
+            num_workers=5,
+            batch_times=[2.0] * 5,
+            allowed_workers=None,  # No throttle
+        )
+        eta = state.eta_seconds()
+        assert eta is not None
+        # 5 remaining / 5 workers * 2s = 2s
+        assert 1.9 <= eta <= 2.1
+
+
+# =============================================================================
+# Debug log tests
+# =============================================================================
+
+
+class TestDebugLog:
+    """Tests for debug logging of prompt → LLM response."""
+
+    def test_debug_log_captured(self):
+        """Verify debug_log captures first batch's prompt and response."""
+        variables = [("eid1", "f.py", "x", "x = 1")]
+        mock_client = MagicMock()
+        mock_client.generate_from_messages.return_value = "1. 9,2,1,8"
+
+        result = score_variables(variables, mock_client, max_workers=1)
+
+        assert len(result.debug_log) == 1
+        prompt, response = result.debug_log[0]
+        assert "Score these variables:" in prompt
+        assert "x = 1" in prompt
+        assert "9,2,1,8" in response
+
+    def test_debug_log_only_first_batch(self):
+        """Verify debug_log only captures one batch even with multiple."""
+        variables = [
+            (f"eid{i}", "f.py", f"var_{i}", f"var_{i} = {i}" * 50)
+            for i in range(6)
+        ]
+        mock_client = MagicMock()
+
+        def mock_generate(**kwargs):
+            content = kwargs.get("messages", [{}])[-1].get("content", "")
+            lines = [line for line in content.split("\n") if line and line[0].isdigit()]
+            return "\n".join(f"{i+1}. 5,5,5,5" for i in range(len(lines)))
+
+        mock_client.generate_from_messages.side_effect = mock_generate
+
+        config = VariableScoringConfig(token_budget=100)
+        result = score_variables(variables, mock_client, config=config, max_workers=1)
+
+        assert result.batch_count > 1
+        assert len(result.debug_log) == 1  # Only first batch
+
+    def test_debug_log_empty_on_empty_input(self):
+        """Verify debug_log is empty when no variables."""
+        result = score_variables([], MagicMock())
+        assert result.debug_log == []
+
+    def test_debug_log_empty_on_all_errors(self):
+        """Verify debug_log is empty when LLM errors on all batches."""
+        variables = [("eid1", "f.py", "x", "x = 1")]
+        mock_client = MagicMock()
+        mock_client.generate_from_messages.side_effect = RuntimeError("LLM down")
+
+        result = score_variables(variables, mock_client, max_workers=1)
+
+        # _score_batch catches the error internally and returns defaults
+        # debug_log should be empty since the exception path doesn't capture
+        assert result.debug_log == []
+
+
+class TestWorkerStatusMaxRuntime:
+    """Tests for ScoringWorkerStatus.get_max_active_runtime."""
+
+    def test_max_runtime_empty(self):
+        ws = ScoringWorkerStatus()
+        assert ws.get_max_active_runtime() == 0.0
+
+    def test_max_runtime_single_worker(self):
+        ws = ScoringWorkerStatus()
+        ws.set(0, 1, 5)
+        time.sleep(0.05)
+        runtime = ws.get_max_active_runtime()
+        assert runtime >= 0.04
+
+    def test_max_runtime_multiple_workers(self):
+        ws = ScoringWorkerStatus()
+        ws.set(0, 1, 5)
+        time.sleep(0.05)
+        ws.set(1, 2, 3)  # Started later
+        runtime = ws.get_max_active_runtime()
+        # Worker 0 has been running longer
+        assert runtime >= 0.04

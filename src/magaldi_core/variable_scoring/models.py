@@ -5,6 +5,10 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from shared.throttling import ThrottleDecision
 
 
 @dataclass
@@ -61,6 +65,8 @@ class ScoringResult:
     elapsed: float = 0.0
     errors: int = 0
     scores: dict[str, VariableScore] = field(default_factory=dict)
+    # Debug: (user_prompt, llm_output) for first successful batch
+    debug_log: list[tuple[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -91,6 +97,14 @@ class ScoringWorkerStatus:
         with self._lock:
             return len(self._status)
 
+    def get_max_active_runtime(self) -> float:
+        """Get the max runtime of any currently active worker."""
+        now = time.time()
+        with self._lock:
+            if not self._status:
+                return 0.0
+            return max(now - start for _, _, start in self._status.values())
+
 
 @dataclass
 class ScoringProgressState:
@@ -108,6 +122,9 @@ class ScoringProgressState:
     workers: ScoringWorkerStatus = field(default_factory=ScoringWorkerStatus)
     # Per-batch timing for throughput calculation
     batch_times: list[float] = field(default_factory=list)
+    # Throttle state for display
+    throttle_decision: ThrottleDecision | None = None
+    allowed_workers: int | None = None
 
     @property
     def elapsed(self) -> float:
@@ -135,8 +152,9 @@ class ScoringProgressState:
         remaining_batches = self.total_batches - self.completed_batches
         if remaining_batches <= 0:
             return 0.0
-        # Account for parallelism: effective time per batch considers workers
-        effective_workers = min(self.num_workers, remaining_batches)
+        # Use allowed_workers (throttled count) for ETA if available
+        workers = self.allowed_workers if self.allowed_workers is not None else self.num_workers
+        effective_workers = min(workers, remaining_batches)
         if effective_workers <= 0:
             return None
         return (remaining_batches / effective_workers) * self.avg_batch_time

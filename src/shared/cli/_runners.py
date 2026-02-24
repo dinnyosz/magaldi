@@ -164,6 +164,7 @@ def _build_scoring_display(state: "ScoringProgressState", num_workers: int) -> R
     workers_data = state.workers.get_all()
     now = time_mod.time()
 
+    allowed = state.allowed_workers if state.allowed_workers is not None else num_workers
     for wid in range(num_workers):
         if wid in workers_data:
             batch_num, batch_size, start_time = workers_data[wid]
@@ -175,8 +176,10 @@ def _build_scoring_display(state: "ScoringProgressState", num_workers: int) -> R
                 f"{batch_size} vars",
                 f"{worker_elapsed:.1f}s",
             )
-        else:
+        elif wid < allowed:
             worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "", "")
+        else:
+            worker_table.add_row(f"[{wid}]", "[dim yellow]throttled[/]", "", "", "")
 
     # Throughput stats
     stats_text = Text()
@@ -194,10 +197,37 @@ def _build_scoring_display(state: "ScoringProgressState", num_workers: int) -> R
         stats_text.append(f"{vps:.1f}", style="green")
         stats_text.append(" vars/s", style="dim")
         stats_text.append(" | ", style="dim")
+
+        # Workers: running/allowed/baseline when throttled, running/baseline otherwise
+        running_count = state.workers.active_count()
+        allowed = state.allowed_workers if state.allowed_workers is not None else num_workers
         stats_text.append("Workers:", style="dim")
-        stats_text.append(f" {state.workers.active_count()}", style="green")
-        stats_text.append("/", style="dim")
-        stats_text.append(f"{num_workers}", style="cyan")
+        if allowed < num_workers:
+            stats_text.append(f" {running_count}", style="green")
+            stats_text.append("/", style="dim")
+            stats_text.append(f"{allowed}", style="yellow")
+            stats_text.append("/", style="dim")
+            stats_text.append(f"{num_workers}", style="cyan")
+        else:
+            stats_text.append(f" {running_count}", style="green")
+            stats_text.append("/", style="dim")
+            stats_text.append(f"{num_workers}", style="cyan")
+
+        # Show runtime info when throttle decision available
+        td = state.throttle_decision
+        if td is not None and (td.current_max > 0 or td.completed_avg > 0):
+            effective_max = max(td.current_max, td.historical_max)
+            normalized_max = effective_max / max(running_count, 1)
+            stats_text.append(" | ", style="dim")
+            stats_text.append("Max:", style="dim")
+            stats_text.append(f" {effective_max:.1f}s", style="yellow")
+            stats_text.append(" | ", style="dim")
+            stats_text.append("Per Worker:", style="dim")
+            stats_text.append(f" {normalized_max:.1f}s", style="yellow")
+            stats_text.append(" vs ", style="dim")
+            stats_text.append(f"{td.completed_avg:.1f}s", style="cyan")
+            if td.completion_count > 0:
+                stats_text.append(f" (last {td.completion_count})", style="dim")
 
     parts: list[RenderableType] = [bar_text]
     if score_text.plain:
@@ -293,6 +323,18 @@ def run_variable_scoring(
             progress_state=progress_state,
             worker_status=worker_status,
         )
+
+    # Print debug log: first batch's prompt → LLM response
+    if result.debug_log:
+        user_prompt, llm_output = result.debug_log[0]
+        console.print()
+        console.print("  [bold dim]─── Sample batch (prompt → response) ───[/]")
+        for line in user_prompt.split("\n"):
+            console.print(f"  [dim]{line}[/]")
+        console.print("  [bold dim]→ LLM response:[/]")
+        for line in llm_output.strip().split("\n"):
+            console.print(f"  [green]{line}[/]")
+        console.print("  [bold dim]───────────────────────────────────────[/]")
 
     # Remove variables that scored below threshold from parsing_result
     dropped_ids = {

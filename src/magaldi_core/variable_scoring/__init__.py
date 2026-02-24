@@ -14,7 +14,7 @@ import contextlib
 import logging
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -124,6 +124,7 @@ def _score_batch(
     llm_client: object,
     config: VariableScoringConfig,
     num_ctx: int,
+    debug_log: list[tuple[str, str]] | None = None,
 ) -> dict[str, VariableScore]:
     """Score a single batch of variables using the LLM.
 
@@ -132,6 +133,8 @@ def _score_batch(
         llm_client: LLM client with generate_from_messages method.
         config: Scoring configuration.
         num_ctx: Context window size for the LLM call.
+        debug_log: If provided and empty, appends (user_prompt, llm_output) for
+            the first batch that completes successfully (for debug display).
 
     Returns:
         Dict mapping element_id to VariableScore.
@@ -162,6 +165,10 @@ def _score_batch(
             eid: VariableScore(general_usefulness=5)
             for _, eid, _, _, _ in batch
         }
+
+    # Capture debug output for the first successful batch
+    if debug_log is not None and len(debug_log) == 0:
+        debug_log.append((user_prompt, output))
 
     # Parse scores
     parsed = _parse_scores(output, len(batch))
@@ -203,6 +210,9 @@ def score_variables(
 ) -> ScoringResult:
     """Score variables using the LLM and return scoring results.
 
+    Uses runtime-aware throttling to adapt worker count based on LLM response
+    times, preventing GPU saturation and timeouts.
+
     Args:
         variables: List of (element_id, file_path, name, raw_code) tuples.
         llm_client: LLM client with generate_from_messages method.
@@ -238,6 +248,9 @@ def score_variables(
 
     all_scores: dict[str, VariableScore] = {}
 
+    # Shared debug log: first successful batch captures (prompt, response)
+    debug_log: list[tuple[str, str]] = []
+
     def _update_progress(batch: list, batch_scores: dict[str, VariableScore], batch_time: float, is_error: bool = False) -> None:
         """Update progress state after a batch completes."""
         if progress_state is None:
@@ -257,7 +270,7 @@ def score_variables(
         if on_progress:
             on_progress(progress_state)
 
-    # Process batches in parallel
+    # Process batches in parallel with throttling
     effective_workers = min(max_workers, len(batches))
     if progress_state is not None:
         progress_state.num_workers = effective_workers
@@ -269,7 +282,7 @@ def score_variables(
             if worker_status is not None:
                 worker_status.set(0, batch_num + 1, len(batch))
             batch_start = time.time()
-            batch_scores = _score_batch(batch, llm_client, config, num_ctx)
+            batch_scores = _score_batch(batch, llm_client, config, num_ctx, debug_log)
             batch_time = time.time() - batch_start
             all_scores.update(batch_scores)
             if worker_status is not None:
@@ -277,6 +290,15 @@ def score_variables(
             _update_progress(batch, batch_scores, batch_time)
     else:
         import threading
+
+        from shared.ai.context_size import TIER_TIMEOUTS
+        from shared.throttling import ThroughputTracker, compute_throttle_decision
+
+        tier_for_timeout = _get_context_tier(batches[0])
+        tier_timeout = TIER_TIMEOUTS.get(tier_for_timeout, 120.0)
+
+        # Throughput tracker with 10s window
+        throughput_tracker = ThroughputTracker(window_seconds=10.0)
 
         # Map thread IDs to stable worker display IDs
         _thread_id_lock = threading.Lock()
@@ -303,36 +325,94 @@ def score_variables(
             if worker_status is not None:
                 worker_status.set(wid, batch_num + 1, len(batch))
             try:
-                return _score_batch(batch, llm_client, config, num_ctx)
+                return _score_batch(batch, llm_client, config, num_ctx, debug_log)
             finally:
                 if worker_status is not None:
                     worker_status.clear(wid)
 
+        # Incremental submission loop with throttling
+        next_batch_idx = 0
+        futures: dict[object, tuple[list, float, int]] = {}  # future -> (batch, submit_time, allowed_at_start)
+        POLL_INTERVAL = 2.0  # seconds between display refreshes
+
         with ThreadPoolExecutor(max_workers=effective_workers) as executor:
-            futures: dict[object, tuple[list, float]] = {}
+            while next_batch_idx < len(batches) or futures:
+                # --- Throttle decision ---
+                active_workers = worker_status.active_count() if worker_status else len(futures)
+                current_max_runtime = worker_status.get_max_active_runtime() if worker_status else 0.0
 
-            for batch_num, batch in enumerate(batches):
-                num_ctx = _get_context_tier(batch)
-                future = executor.submit(
-                    _score_batch_with_status, batch, batch_num, num_ctx,
+                throughput, avg_runtime, completion_count, avg_concurrency, avg_base_time = (
+                    throughput_tracker.get_stats_with_concurrency()
                 )
-                futures[future] = (batch, time.time())
 
-            for future in as_completed(futures):
-                batch, submit_time = futures[future]
-                batch_time = time.time() - submit_time
-                try:
-                    batch_scores = future.result()
-                    all_scores.update(batch_scores)
-                    _update_progress(batch, batch_scores, batch_time)
-                except Exception:
-                    # Mark all variables in this batch as errors, default to keep
-                    result.errors += 1
-                    error_scores = {}
-                    for _, eid, _, _, _ in batch:
-                        error_scores[eid] = VariableScore(general_usefulness=5)
-                    all_scores.update(error_scores)
-                    _update_progress(batch, error_scores, batch_time, is_error=True)
+                throttle = compute_throttle_decision(
+                    current_max_runtime=current_max_runtime,
+                    tier_timeout=tier_timeout,
+                    base_workers=effective_workers,
+                    active_workers=active_workers,
+                    throughput=throughput,
+                    avg_runtime=avg_runtime,
+                    completion_count=completion_count,
+                    avg_concurrency=avg_concurrency,
+                    avg_base_time=avg_base_time,
+                )
+
+                allowed_workers = throttle.recommended_workers
+
+                # Update progress state with throttle info
+                if progress_state is not None:
+                    progress_state.throttle_decision = throttle
+                    progress_state.allowed_workers = allowed_workers
+
+                # --- Submit new batches up to allowed limit ---
+                in_flight = len(futures)
+                slots = max(0, allowed_workers - in_flight)
+
+                for _ in range(slots):
+                    if next_batch_idx >= len(batches):
+                        break
+                    batch = batches[next_batch_idx]
+                    num_ctx = _get_context_tier(batch)
+                    future = executor.submit(
+                        _score_batch_with_status, batch, next_batch_idx, num_ctx,
+                    )
+                    futures[future] = (batch, time.time(), allowed_workers)
+                    next_batch_idx += 1
+
+                if not futures:
+                    break
+
+                # --- Wait for at least one completion or timeout for display refresh ---
+                done, _ = wait(futures.keys(), timeout=POLL_INTERVAL, return_when=FIRST_COMPLETED)
+
+                if not done:
+                    # No completions yet — just update display
+                    if on_progress and progress_state is not None:
+                        on_progress(progress_state)
+                    continue
+
+                # --- Process completed futures ---
+                for future in done:
+                    batch, submit_time, allowed_at_start = futures.pop(future)
+                    batch_time = time.time() - submit_time
+
+                    # Record in throughput tracker with concurrency context
+                    allowed_at_end = allowed_workers
+                    avg_workers = max(allowed_at_start, allowed_at_end)
+                    throughput_tracker.record_completion(batch_time, avg_workers)
+
+                    try:
+                        batch_scores = future.result()
+                        all_scores.update(batch_scores)
+                        _update_progress(batch, batch_scores, batch_time)
+                    except Exception:
+                        # Mark all variables in this batch as errors, default to keep
+                        result.errors += 1
+                        error_scores = {}
+                        for _, eid, _, _, _ in batch:
+                            error_scores[eid] = VariableScore(general_usefulness=5)
+                        all_scores.update(error_scores)
+                        _update_progress(batch, error_scores, batch_time, is_error=True)
 
     # Apply threshold (final tally from actual scores)
     result.kept = 0
@@ -345,5 +425,6 @@ def score_variables(
 
     result.scores = all_scores
     result.elapsed = time.time() - start
+    result.debug_log = debug_log
 
     return result
