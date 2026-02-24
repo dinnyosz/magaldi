@@ -276,29 +276,51 @@ def score_variables(
                 worker_status.clear(0)
             _update_progress(batch, batch_scores, batch_time)
     else:
+        import threading
+
+        # Map thread IDs to stable worker display IDs
+        _thread_id_lock = threading.Lock()
+        _thread_to_wid: dict[int, int] = {}
+        _next_wid = 0
+
+        def _get_worker_id() -> int:
+            """Assign a stable display ID to each thread."""
+            nonlocal _next_wid
+            tid = threading.get_ident()
+            with _thread_id_lock:
+                if tid not in _thread_to_wid:
+                    _thread_to_wid[tid] = _next_wid
+                    _next_wid += 1
+                return _thread_to_wid[tid]
+
+        def _score_batch_with_status(
+            batch: list[tuple[int, str, str, str, str]],
+            batch_num: int,
+            num_ctx: int,
+        ) -> dict[str, VariableScore]:
+            """Wrapper that reports worker status before/after scoring."""
+            wid = _get_worker_id()
+            if worker_status is not None:
+                worker_status.set(wid, batch_num + 1, len(batch))
+            try:
+                return _score_batch(batch, llm_client, config, num_ctx)
+            finally:
+                if worker_status is not None:
+                    worker_status.clear(wid)
+
         with ThreadPoolExecutor(max_workers=effective_workers) as executor:
-            futures = {}
-            worker_id_map: dict[object, int] = {}
-            batch_num_map: dict[object, int] = {}
-            batch_start_map: dict[object, float] = {}
+            futures: dict[object, tuple[list, float]] = {}
 
             for batch_num, batch in enumerate(batches):
                 num_ctx = _get_context_tier(batch)
-                wid = batch_num % effective_workers
-                future = executor.submit(_score_batch, batch, llm_client, config, num_ctx)
-                futures[future] = batch
-                worker_id_map[future] = wid
-                batch_num_map[future] = batch_num
-                batch_start_map[future] = time.time()
-                if worker_status is not None:
-                    worker_status.set(wid, batch_num + 1, len(batch))
+                future = executor.submit(
+                    _score_batch_with_status, batch, batch_num, num_ctx,
+                )
+                futures[future] = (batch, time.time())
 
             for future in as_completed(futures):
-                batch = futures[future]
-                wid = worker_id_map[future]
-                batch_time = time.time() - batch_start_map[future]
-                if worker_status is not None:
-                    worker_status.clear(wid)
+                batch, submit_time = futures[future]
+                batch_time = time.time() - submit_time
                 try:
                     batch_scores = future.result()
                     all_scores.update(batch_scores)
