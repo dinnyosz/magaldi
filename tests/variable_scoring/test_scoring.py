@@ -156,6 +156,19 @@ class TestSystemPrompt:
         assert "One line per variable" in SYSTEM_PROMPT
         assert "no explanations" in SYSTEM_PROMPT
 
+    def test_has_few_shot_examples(self):
+        """Prompt includes HIGH and LOW scoring examples for calibration."""
+        assert "Examples (HIGH)" in SYSTEM_PROMPT
+        assert "Examples (LOW" in SYSTEM_PROMPT
+        # LOW examples should show 1,1,1,1
+        assert "1,1,1,1" in SYSTEM_PROMPT
+        # HIGH examples should show high scores
+        assert "9,1,1,8" in SYSTEM_PROMPT  # config constant
+
+    def test_has_drop_rate_guidance(self):
+        """Prompt guides model that most variables should be dropped."""
+        assert "30%" in SYSTEM_PROMPT
+
 
 # =============================================================================
 # Token estimation tests

@@ -16,9 +16,25 @@ Scoring dimensions:
 Rules:
 - One line per variable, prefixed with its number
 - Scores only, no explanations
-- Loop counters and temporaries score 1 on all dimensions
-- Module-level constants typically score high on config_value
-- Framework instances (Flask app, Express router) score high on architectural_role\
+- Most variables should score LOW. Only ~30% of variables are worth keeping.
+- Score 1,1,1,1 for: loop counters, temp variables, function/method call results, \
+short names (i, j, x, tmp, res, val, err, _)
+- Score 1,1,1,1 for: generic assignments like result = func(), data = obj.method(), \
+response = requests.get(), items = process()
+- Score HIGH only for: module-level constants (MAX_RETRIES=3), framework instances \
+(app=Flask(__name__)), DB connections, loggers, type aliases, enums, compiled patterns
+
+Examples (HIGH):
+1. [src/config.py] MAX_RETRIES = 3 → 1. 9,1,1,8
+2. [src/app.py] app = Flask(__name__) → 2. 1,10,1,9
+3. [src/models.py] Status = Enum("Status", "ACTIVE INACTIVE") → 3. 1,1,9,8
+4. [src/db.py] engine = create_engine(DATABASE_URL) → 4. 1,9,1,9
+
+Examples (LOW - score 1,1,1,1):
+5. [src/utils.py] result = process_items(data) → 5. 1,1,1,1
+6. [src/handler.py] response = requests.get(url) → 6. 1,1,1,1
+7. [src/loop.py] i = 0 → 7. 1,1,1,1
+8. [src/parser.py] tmp = [] → 8. 1,1,1,1\
 """
 
 
