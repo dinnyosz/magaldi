@@ -158,7 +158,7 @@ def _build_scoring_display(state: "ScoringProgressState", num_workers: int) -> R
     worker_table.add_column("ID", style="dim", width=4)
     worker_table.add_column("Status", style="cyan", width=10)
     worker_table.add_column("Batch", style="yellow", width=10)
-    worker_table.add_column("Size", style="magenta", width=6)
+    worker_table.add_column("Size", style="magenta", width=10)
     worker_table.add_column("Time", style="green", width=8)
 
     workers_data = state.workers.get_all()
