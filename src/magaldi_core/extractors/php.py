@@ -26,12 +26,6 @@ from magaldi_core.extractors.types import (
     HttpRoute,
     ParameterInfo,
 )
-from magaldi_core.extractors.usefulness_filter import (
-    get_extraction_stats,
-    reset_extraction_stats,
-    should_skip_variable,
-    SKIP_NAMES,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -116,9 +110,6 @@ def extract_php_elements(
     Returns:
         List of extracted elements (classes, functions, imports).
     """
-    # Reset stats for this file
-    reset_extraction_stats()
-
     elements: list[ExtractedElement] = []
 
     # Walk the entire tree to find elements inside namespaces
@@ -169,11 +160,6 @@ def extract_php_elements(
             elem = _extract_php_define_constant(node, lines)
             if elem:
                 elements.append(elem)
-
-    # Log extraction stats if we have any skipped variables
-    stats = reset_extraction_stats()
-    if stats and stats.skipped_count > 0:
-        stats.log_summary(file_path or "<unknown>")
 
     return elements
 
@@ -510,7 +496,7 @@ def _extract_php_variable(node: Node, lines: list[str]) -> ExtractedElement | No
         lines: Source code lines.
 
     Returns:
-        ExtractedElement if the variable is useful, None otherwise.
+        ExtractedElement for the variable.
     """
     var_name = None
     value_node = None
@@ -529,60 +515,7 @@ def _extract_php_variable(node: Node, lines: list[str]) -> ExtractedElement | No
     if not var_name or not value_node:
         return None
 
-    # Skip short/temp names early
-    if var_name in SKIP_NAMES:
-        return None
-
     line_start = node.start_point[0] + 1
-    value_type = value_node.type
-    value_text = value_node.text.decode("utf-8") if value_node.text else ""
-
-    # Determine function/constructor name if this is a call
-    func_name: str | None = None
-    if value_type == "object_creation_expression":
-        # new SomeClass()
-        for child in value_node.children:
-            if child.type == "name":
-                func_name = get_node_text(child)
-                break
-            elif child.type == "qualified_name":
-                func_name = get_node_text(child)
-                break
-    elif value_type == "function_call_expression":
-        # someFunction() or SomeClass::method()
-        for child in value_node.children:
-            if child.type == "name":
-                func_name = get_node_text(child)
-                break
-            elif child.type == "qualified_name":
-                func_name = get_node_text(child)
-                break
-    elif value_type == "member_call_expression":
-        # $obj->method()
-        func_name = "->method"  # Marker for method call
-    elif value_type == "scoped_call_expression":
-        # SomeClass::staticMethod()
-        func_name = "::method"  # Marker for static method call
-
-    # Apply usefulness filter
-    skip, reason = should_skip_variable(
-        name=var_name,
-        value_type=value_type,
-        func_name=func_name,
-        language="php",
-        is_module_level=True,
-    )
-
-    if skip:
-        # Record the skip for reporting
-        stats = get_extraction_stats()
-        stats.record_skip(var_name, line_start, reason, value_type, value_text)
-        return None
-
-    # Record that we kept this one
-    stats = get_extraction_stats()
-    stats.record_keep()
-
     line_end = node.end_point[0] + 1
     raw_code = node.text.decode("utf-8") if node.text else ""
 

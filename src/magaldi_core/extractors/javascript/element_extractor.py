@@ -23,12 +23,6 @@ from magaldi_core.extractors.types import (
     DecoratorInfo,
     ExtractedElement,
 )
-from magaldi_core.extractors.usefulness_filter import (
-    get_extraction_stats,
-    reset_extraction_stats,
-    should_skip_variable,
-    SKIP_NAMES,
-)
 from magaldi_core.extractors.javascript.utils import (
     extract_js_parameters,
     extract_js_return_type,
@@ -52,9 +46,6 @@ def extract_javascript_elements(
     Returns:
         List of extracted elements.
     """
-    # Reset stats for this file
-    reset_extraction_stats()
-
     elements: list[ExtractedElement] = []
     root = tree.root_node
 
@@ -135,11 +126,6 @@ def extract_javascript_elements(
         # Import statements
         elif node.type == "import_statement":
             elements.append(_extract_js_import(node, lines))
-
-    # Log extraction stats if we have any skipped variables
-    stats = reset_extraction_stats()
-    if stats and stats.skipped_count > 0:
-        stats.log_summary(file_path or "<unknown>")
 
     return elements
 
@@ -269,8 +255,8 @@ def _extract_js_variable(
 ) -> ExtractedElement | None:
     """Extract a JavaScript/TypeScript variable or constant.
 
-    Applies usefulness filter to skip transient variables like instance
-    creations and function call results.
+    Extracts all variables without filtering — the LLM-based variable scoring
+    phase (Phase 4) handles usefulness determination downstream.
 
     Args:
         decl_node: The variable_declarator node.
@@ -280,47 +266,10 @@ def _extract_js_variable(
         is_const: Whether this is a const declaration.
 
     Returns:
-        ExtractedElement if the variable is useful, None otherwise.
+        ExtractedElement for the variable.
     """
-    # Skip short/temp names early
-    if name in SKIP_NAMES:
-        return None
-
     line_start = decl_node.start_point[0] + 1
     value_type = value_node.type
-    value_text = value_node.text.decode("utf-8") if value_node.text else ""
-
-    # Determine function name if this is a call
-    func_name: str | None = None
-    if value_type == "call_expression":
-        func_node = get_child_by_field(value_node, "function")
-        if func_node:
-            func_name = get_node_text(func_node)
-    elif value_type == "new_expression":
-        # For new expressions, the class name is in the "constructor" field
-        constructor_node = get_child_by_field(value_node, "constructor")
-        if constructor_node:
-            func_name = get_node_text(constructor_node)
-
-    # Apply usefulness filter
-    # Use "typescript" for language since JS and TS have same AST types
-    skip, reason = should_skip_variable(
-        name=name,
-        value_type=value_type,
-        func_name=func_name,
-        language="typescript",
-        is_module_level=True,  # JS doesn't have module-level distinction in our context
-    )
-
-    if skip:
-        # Record the skip for reporting
-        stats = get_extraction_stats()
-        stats.record_skip(name, line_start, reason, value_type, value_text)
-        return None
-
-    # Record that we kept this one
-    stats = get_extraction_stats()
-    stats.record_keep()
 
     line_end = decl_node.end_point[0] + 1
     raw_code = decl_node.text.decode("utf-8") if decl_node.text else ""

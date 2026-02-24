@@ -28,16 +28,10 @@ from magaldi_core.extractors.python.utils import (
     get_decorators,
     is_inside_class,
     is_python_enum,
-    is_useful_assignment,
 )
 from magaldi_core.extractors.types import (
     DecoratorInfo,
     ExtractedElement,
-)
-from magaldi_core.extractors.usefulness_filter import (
-    SKIP_NAMES,
-    get_extraction_stats,
-    reset_extraction_stats,
 )
 from magaldi_core.query_runner import QUERIES_DIR
 
@@ -60,9 +54,6 @@ def extract_python_elements(
     Returns:
         List of extracted elements.
     """
-    # Reset stats for this file
-    reset_extraction_stats()
-
     # Check if we have SCM queries available
     query_dir = QUERIES_DIR / "python"
     if not query_dir.exists() or not (query_dir / "elements.scm").exists():
@@ -70,11 +61,6 @@ def extract_python_elements(
         elements = _extract_python_elements_imperative(tree, lines)
     else:
         elements = _extract_python_elements_scm(tree, lines)
-
-    # Log extraction stats if we have any skipped variables
-    stats = reset_extraction_stats()
-    if stats and stats.skipped_count > 0:
-        stats.log_summary(file_path or "<unknown>")
 
     return elements
 
@@ -206,6 +192,12 @@ def _extract_python_elements_scm(tree: Tree, lines: list[str]) -> list[Extracted
             if elem:
                 elements.append(elem)
 
+    # Extract variables from inside function bodies (all depths)
+    for elem in list(elements):
+        if elem.element_type in ("function", "method") and elem.node:
+            body_vars = _extract_function_body_variables(elem.node, lines)
+            elements.extend(body_vars)
+
     # Process import statements (simple top-level walk, no SCM query needed)
     for node in tree.root_node.children:
         if node.type in ("import_statement", "import_from_statement"):
@@ -254,6 +246,12 @@ def _extract_python_elements_imperative(tree: Tree, lines: list[str]) -> list[Ex
                 elem = _extract_python_assignment(assign[0], lines, is_module_level=True)
                 if elem:
                     elements.append(elem)
+
+    # Extract variables from inside function bodies (all depths)
+    for elem in list(elements):
+        if elem.element_type in ("function", "method") and elem.node:
+            body_vars = _extract_function_body_variables(elem.node, lines)
+            elements.extend(body_vars)
 
     return elements
 
@@ -460,6 +458,48 @@ def _extract_python_function(
     )
 
 
+def _extract_function_body_variables(
+    func_node: Node, lines: list[str]
+) -> list[ExtractedElement]:
+    """Extract variable assignments from inside a function body.
+
+    Recursively walks the function body to find all assignments,
+    including those nested inside if/for/with/try blocks.
+
+    Args:
+        func_node: A function_definition node.
+        lines: Source code lines.
+
+    Returns:
+        List of variable elements found inside the function.
+    """
+    from magaldi_core.extractors.base import walk_tree
+
+    variables: list[ExtractedElement] = []
+    body_node = get_child_by_field(func_node, "body")
+    if not body_node:
+        return variables
+
+    for node in walk_tree(body_node):
+        if node.type == "assignment":
+            # Skip assignments inside nested function/class definitions
+            parent = node.parent
+            in_nested_scope = False
+            while parent and parent != body_node:
+                if parent.type in ("function_definition", "class_definition"):
+                    in_nested_scope = True
+                    break
+                parent = parent.parent
+            if in_nested_scope:
+                continue
+
+            elem = _extract_python_assignment(node, lines, is_module_level=False)
+            if elem:
+                variables.append(elem)
+
+    return variables
+
+
 def _extract_python_assignment(
     node: Node,
     lines: list[str],  # noqa: ARG001
@@ -468,38 +508,21 @@ def _extract_python_assignment(
 ) -> ExtractedElement | None:
     """Extract a variable/constant assignment.
 
-    Applies usefulness filter to skip variables unlikely to be useful for code discovery,
-    such as instance creations, function call results, and temporary variables.
+    Extracts all variables without filtering — the LLM-based variable scoring
+    phase (Phase 4) handles usefulness determination downstream.
     """
     left_node = get_child_by_field(node, "left")
     if not left_node or left_node.type != "identifier":
         return None
 
     name = get_node_text(left_node)
-    line_start = node.start_point[0] + 1
 
-    # Skip common non-interesting names
-    if name in SKIP_NAMES:
-        return None
-
-    # Get the right-hand side value for usefulness check
+    # Get the right-hand side value
     right_node = get_child_by_field(node, "right")
-    value_type = right_node.type if right_node else "none"
-    value_text = right_node.text.decode("utf-8") if right_node and right_node.text else ""
-
-    # Apply usefulness filter
-    is_useful, skip_reason = is_useful_assignment(name, right_node, is_module_level)
-
-    if not is_useful:
-        # Record the skip for reporting
-        stats = get_extraction_stats()
-        stats.record_skip(name, line_start, skip_reason, value_type, value_text)
+    if not right_node:
         return None
 
-    # Record that we kept this one
-    stats = get_extraction_stats()
-    stats.record_keep()
-
+    line_start = node.start_point[0] + 1
     line_end = node.end_point[0] + 1
     # Use byte-based extraction for precise raw_code (handles minified files)
     raw_code = node.text.decode('utf-8') if node.text else ""

@@ -16,10 +16,6 @@ from magaldi_core.extractors.types import (
     DecoratorInfo,
     ParameterInfo,
 )
-from magaldi_core.extractors.usefulness_filter import (
-    USEFUL_ATTRIBUTE_FACTORIES,
-    USEFUL_FACTORIES,
-)
 
 
 def is_likely_class_name(name: str) -> bool:
@@ -196,100 +192,6 @@ def extract_python_parameters(params_node: Node) -> list[ParameterInfo]:
 
     return parameters
 
-
-def is_useful_assignment(
-    name: str,
-    value_node: Node | None,
-    is_module_level: bool,
-) -> tuple[bool, str]:
-    """Determine if a variable assignment is useful for code discovery.
-
-    Uses the shared usefulness_filter module for consistent filtering across
-    all language extractors.
-
-    Returns:
-        Tuple of (is_useful, skip_reason). If is_useful is True, skip_reason is empty.
-    """
-    if not value_node:
-        return False, "no_value"
-
-    value_type = value_node.type
-
-    # USEFUL: Constants by naming convention (UPPER_CASE)
-    if name.isupper() and len(name) > 1:
-        return True, ""
-
-    # USEFUL: Dunder names (module metadata like __all__, __version__)
-    if name.startswith("__") and name.endswith("__"):
-        return True, ""
-
-    # USEFUL: Literal values (configuration, data)
-    literal_types = {
-        "string", "integer", "float", "true", "false", "none",
-        "list", "dictionary", "tuple", "set",
-        "concatenated_string", "binary_operator",  # string concatenation
-    }
-    if value_type in literal_types:
-        return True, ""
-
-    # USEFUL: Type references (type aliases) - identifier or subscript without call
-    # Examples: UserID = int, OptionalStr = Optional[str], Callback = Callable[[int], str]
-    if value_type in ("identifier", "subscript", "attribute"):
-        return True, ""
-
-    # Check call expressions
-    if value_type == "call":
-        func_node = value_node.child_by_field_name("function")
-        if func_node:
-            func_text = func_node.text.decode("utf-8") if func_node.text else ""
-
-            # USEFUL: Known useful factory functions (from shared module)
-            if func_text in USEFUL_FACTORIES:
-                return True, ""
-
-            # USEFUL: Known useful attribute factories (from shared module)
-            if func_text in USEFUL_ATTRIBUTE_FACTORIES:
-                return True, ""
-
-            # Check the last part of attribute for useful factories
-            if "." in func_text:
-                last_part = func_text.rsplit(".", 1)[-1]
-                if last_part in USEFUL_FACTORIES:
-                    return True, ""
-
-            # SKIP: Instance creation (PascalCase class name like SomeClient())
-            if (
-                func_node.type == "identifier"
-                and func_text
-                and func_text[0].isupper()
-                and not func_text.isupper()
-            ):
-                return False, "instance_creation"
-
-            # SKIP: Method calls on objects (attribute calls like obj.method())
-            if func_node.type == "attribute":
-                return False, "method_call_result"
-
-            # SKIP: Function call results (lowercase function like get_value())
-            if func_node.type == "identifier" and func_text and func_text[0].islower():
-                return False, "function_call_result"
-
-    # USEFUL: Await expressions on useful calls
-    if value_type == "await":
-        # Check the awaited expression
-        for child in value_node.children:
-            if child.type == "call":
-                return is_useful_assignment(name, child, is_module_level)
-
-    # USEFUL: Lambda expressions (these are callable definitions)
-    if value_type == "lambda":
-        return True, ""
-
-    # Default: keep if module-level (might be configuration), skip if local
-    if is_module_level:
-        return True, ""
-
-    return False, "local_variable"
 
 
 def is_python_enum(base_classes: list[str]) -> bool:

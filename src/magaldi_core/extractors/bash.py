@@ -25,7 +25,10 @@ class BashExtractor:
         return "bash"
 
     def extract_elements(self, tree: Tree, lines: list[str]) -> list[ExtractedElement]:
-        """Extract functions and top-level constants from a Bash AST."""
+        """Extract functions, variables, and constants from a Bash AST.
+
+        Extracts at all depths — including inside function bodies.
+        """
         elements: list[ExtractedElement] = []
         root = tree.root_node
 
@@ -34,6 +37,8 @@ class BashExtractor:
                 elem = _extract_function(child, lines)
                 if elem:
                     elements.append(elem)
+                    # Extract variables from function body
+                    elements.extend(_extract_function_body_variables(child, lines))
             elif child.type == "variable_assignment":
                 elem = _extract_variable(child, lines)
                 if elem:
@@ -127,9 +132,6 @@ def _extract_declaration(node: Node, lines: list[str]) -> ExtractedElement | Non
             if text.startswith("-") and "r" in text:
                 has_readonly_flag = True
 
-    if keyword == "local":
-        return None
-
     # Find the variable assignment child
     var_name = None
     for child in node.children:
@@ -165,6 +167,47 @@ def _extract_declaration(node: Node, lines: list[str]) -> ExtractedElement | Non
         raw_code=raw_code,
         node=node,
     )
+
+
+def _extract_function_body_variables(
+    func_node: Node, lines: list[str]
+) -> list[ExtractedElement]:
+    """Extract variable assignments and declarations from inside a Bash function body.
+
+    Args:
+        func_node: A function_definition node.
+        lines: Source code lines.
+
+    Returns:
+        List of variable/constant elements found inside the function.
+    """
+    variables: list[ExtractedElement] = []
+
+    # Find the compound_statement (function body)
+    body = None
+    for child in func_node.children:
+        if child.type == "compound_statement":
+            body = child
+            break
+
+    if not body:
+        return variables
+
+    for node in walk_tree(body):
+        # Skip nested function definitions
+        if node.type == "function_definition":
+            continue
+
+        if node.type == "variable_assignment":
+            elem = _extract_variable(node, lines)
+            if elem:
+                variables.append(elem)
+        elif node.type == "declaration_command":
+            elem = _extract_declaration(node, lines)
+            if elem:
+                variables.append(elem)
+
+    return variables
 
 
 def extract_bash_imports(tree: Tree, lines: list[str]) -> list[ExtractedImport]:

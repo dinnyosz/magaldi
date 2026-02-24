@@ -23,12 +23,6 @@ from magaldi_core.extractors.types import (
     ExtractedReference,
     ParameterInfo,
 )
-from magaldi_core.extractors.usefulness_filter import (
-    get_extraction_stats,
-    reset_extraction_stats,
-    should_skip_variable,
-    SKIP_NAMES,
-)
 
 # =============================================================================
 # RUST EXTRACTOR CLASS
@@ -105,9 +99,6 @@ def extract_rust_elements(
     Returns:
         List of extracted elements.
     """
-    # Reset stats for this file
-    reset_extraction_stats()
-
     elements: list[ExtractedElement] = []
     root = tree.root_node
 
@@ -124,6 +115,8 @@ def extract_rust_elements(
             elem = _extract_rust_function(node, lines)
             if elem:
                 elements.append(elem)
+                # Extract variables from function body
+                elements.extend(_extract_rust_function_body_variables(node, lines))
         elif node.type == "impl_item":
             # impl blocks become "class" elements for consistency
             elem = _extract_rust_impl(node, lines)
@@ -152,11 +145,6 @@ def extract_rust_elements(
             elem = _extract_rust_variable(node, lines)
             if elem:
                 elements.append(elem)
-
-    # Log extraction stats if we have any skipped variables
-    stats = reset_extraction_stats()
-    if stats and stats.skipped_count > 0:
-        stats.log_summary(file_path or "<unknown>")
 
     return elements
 
@@ -327,42 +315,7 @@ def _extract_rust_module_const(node: Node, lines: list[str]) -> ExtractedElement
     if not name:
         return None
 
-    # Skip short/temp names
-    if name in SKIP_NAMES:
-        return None
-
     line_start = node.start_point[0] + 1
-    value_type = value_node.type if value_node else "unknown"
-    value_text = value_node.text.decode("utf-8") if value_node and value_node.text else ""
-
-    # Determine function name if this is a call
-    func_name: str | None = None
-    if value_node and value_node.type == "call_expression":
-        func_node = value_node.children[0] if value_node.children else None
-        if func_node:
-            func_name = get_node_text(func_node)
-    elif value_node and value_node.type == "macro_invocation":
-        # vec![], lazy_static!, etc. - generally useful
-        func_name = None  # Don't skip macro invocations
-
-    # Apply usefulness filter
-    skip, reason = should_skip_variable(
-        name=name,
-        value_type=value_type,
-        func_name=func_name,
-        language="rust",
-        is_module_level=True,
-    )
-
-    if skip:
-        stats = get_extraction_stats()
-        stats.record_skip(name, line_start, reason, value_type, value_text)
-        return None
-
-    # Record that we kept this one
-    stats = get_extraction_stats()
-    stats.record_keep()
-
     line_end = node.end_point[0] + 1
     raw_code = node.text.decode("utf-8") if node.text else ""
     const_type = get_node_text(type_node) if type_node else None
@@ -390,10 +343,9 @@ def _extract_rust_static(node: Node, lines: list[str]) -> ExtractedElement | Non
         lines: Source code lines.
 
     Returns:
-        ExtractedElement if the static is useful, None otherwise.
+        ExtractedElement for the static declaration.
     """
     name = None
-    value_node = None
     type_node = None
     is_mutable = False
 
@@ -404,49 +356,11 @@ def _extract_rust_static(node: Node, lines: list[str]) -> ExtractedElement | Non
             is_mutable = True
         elif child.type in ("primitive_type", "type_identifier", "generic_type", "scoped_type_identifier"):
             type_node = child
-        elif child.type in (
-            "integer_literal", "float_literal", "string_literal", "char_literal",
-            "boolean_literal", "array_expression", "tuple_expression",
-            "call_expression", "macro_invocation",
-        ):
-            value_node = child
 
     if not name:
         return None
 
-    # Skip short/temp names
-    if name in SKIP_NAMES:
-        return None
-
     line_start = node.start_point[0] + 1
-    value_type = value_node.type if value_node else "unknown"
-    value_text = value_node.text.decode("utf-8") if value_node and value_node.text else ""
-
-    # Determine function name if this is a call
-    func_name: str | None = None
-    if value_node and value_node.type == "call_expression":
-        func_node = value_node.children[0] if value_node.children else None
-        if func_node:
-            func_name = get_node_text(func_node)
-
-    # Apply usefulness filter
-    skip, reason = should_skip_variable(
-        name=name,
-        value_type=value_type,
-        func_name=func_name,
-        language="rust",
-        is_module_level=True,
-    )
-
-    if skip:
-        stats = get_extraction_stats()
-        stats.record_skip(name, line_start, reason, value_type, value_text)
-        return None
-
-    # Record that we kept this one
-    stats = get_extraction_stats()
-    stats.record_keep()
-
     line_end = node.end_point[0] + 1
     raw_code = node.text.decode("utf-8") if node.text else ""
     static_type = get_node_text(type_node) if type_node else None
@@ -502,39 +416,7 @@ def _extract_rust_variable(node: Node, lines: list[str]) -> ExtractedElement | N
     if not name or not value_node:
         return None
 
-    # Skip short/temp names
-    if name in SKIP_NAMES:
-        return None
-
     line_start = node.start_point[0] + 1
-    value_type = value_node.type
-    value_text = value_node.text.decode("utf-8") if value_node.text else ""
-
-    # Determine function name if this is a call
-    func_name: str | None = None
-    if value_type == "call_expression":
-        func_node = value_node.children[0] if value_node.children else None
-        if func_node:
-            func_name = get_node_text(func_node)
-
-    # Apply usefulness filter
-    skip, reason = should_skip_variable(
-        name=name,
-        value_type=value_type,
-        func_name=func_name,
-        language="rust",
-        is_module_level=True,
-    )
-
-    if skip:
-        stats = get_extraction_stats()
-        stats.record_skip(name, line_start, reason, value_type, value_text)
-        return None
-
-    # Record that we kept this one
-    stats = get_extraction_stats()
-    stats.record_keep()
-
     line_end = node.end_point[0] + 1
     raw_code = node.text.decode("utf-8") if node.text else ""
 
@@ -552,6 +434,50 @@ def _extract_rust_variable(node: Node, lines: list[str]) -> ExtractedElement | N
         node=node,
         decorators=decorators if decorators else None,
     )
+
+
+def _extract_rust_function_body_variables(
+    func_node: Node, lines: list[str]
+) -> list[ExtractedElement]:
+    """Extract let/const declarations from inside a Rust function body.
+
+    Walks the function body to find all let_declaration and const_item nodes,
+    skipping nested function definitions.
+
+    Args:
+        func_node: A function_item node.
+        lines: Source code lines.
+
+    Returns:
+        List of variable/constant elements found inside the function.
+    """
+    variables: list[ExtractedElement] = []
+
+    # Find the block (function body)
+    body_node = None
+    for child in func_node.children:
+        if child.type == "block":
+            body_node = child
+            break
+
+    if not body_node:
+        return variables
+
+    for node in walk_tree(body_node):
+        # Skip nested function definitions
+        if node.type == "function_item":
+            continue
+
+        if node.type == "let_declaration":
+            elem = _extract_rust_variable(node, lines)
+            if elem:
+                variables.append(elem)
+        elif node.type == "const_item":
+            elem = _extract_rust_module_const(node, lines)
+            if elem:
+                variables.append(elem)
+
+    return variables
 
 
 def _extract_rust_parameters(params_node: Node) -> list[ParameterInfo]:
