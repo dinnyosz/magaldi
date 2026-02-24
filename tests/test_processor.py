@@ -12,6 +12,9 @@ from magaldi_core.processor import (
     ProgressState,
     ProcessedElement,
     _summarize_element,
+    _get_element_line_count,
+    _is_small_function,
+    _generate_small_function_summary,
 )
 from magaldi_core.job_tracker import SummaryCache
 from magaldi_core.code_parser import CodeElement
@@ -1860,3 +1863,227 @@ class TestDynamicWorkerScaling:
         # But per-(type, tier) ETA data should still be intact
         key = ("function", 2048)
         assert stats.summarize_counts_by_type_tier.get(key, 0) == 1
+
+
+# =============================================================================
+# HANDCRAFTED SMALL FUNCTION SUMMARY TESTS
+# =============================================================================
+
+
+class TestGetElementLineCount:
+    """Tests for _get_element_line_count helper."""
+
+    def test_uses_code_metrics_when_available(self):
+        """Should prefer code_metrics.line_count."""
+        elem = CodeElement(
+            element_type="function",
+            name="foo",
+            raw_code="def foo():\n    pass\n    return 1\n",
+            code_metrics={"line_count": 3, "param_count": 0, "char_count": 30},
+        )
+        assert _get_element_line_count(elem) == 3
+
+    def test_computes_from_raw_code(self):
+        """Should compute from raw_code when code_metrics absent."""
+        elem = CodeElement(
+            element_type="function",
+            name="foo",
+            raw_code="def foo():\n    pass\n",
+        )
+        assert _get_element_line_count(elem) == 2
+
+    def test_ignores_empty_lines(self):
+        """Empty lines should not count."""
+        elem = CodeElement(
+            element_type="function",
+            name="foo",
+            raw_code="def foo():\n\n    x = 1\n\n    return x\n\n",
+        )
+        assert _get_element_line_count(elem) == 3
+
+    def test_falls_back_to_line_positions(self):
+        """Should use line_start/line_end when raw_code is empty."""
+        elem = CodeElement(
+            element_type="function",
+            name="foo",
+            raw_code="",
+            line_start=10,
+            line_end=14,
+        )
+        assert _get_element_line_count(elem) == 5
+
+    def test_returns_zero_when_no_data(self):
+        """Should return 0 when no data available."""
+        elem = CodeElement(
+            element_type="function",
+            name="foo",
+        )
+        assert _get_element_line_count(elem) == 0
+
+
+class TestIsSmallFunction:
+    """Tests for _is_small_function helper."""
+
+    def test_small_function_below_threshold(self):
+        """Function with 2 non-empty lines should be small."""
+        elem = CodeElement(
+            element_type="function",
+            name="foo",
+            raw_code="def foo():\n    return 42\n",
+        )
+        assert _is_small_function(elem, 5)
+
+    def test_function_at_threshold(self):
+        """Function with exactly threshold lines should be small."""
+        elem = CodeElement(
+            element_type="function",
+            name="foo",
+            raw_code="def foo():\n    a = 1\n    b = 2\n    c = 3\n    return a + b + c\n",
+        )
+        assert _is_small_function(elem, 5)
+
+    def test_function_above_threshold(self):
+        """Function with 6 non-empty lines should NOT be small."""
+        lines = ["def foo():"] + [f"    line{i} = {i}" for i in range(5)] + ["    return 0\n"]
+        elem = CodeElement(
+            element_type="function",
+            name="foo",
+            raw_code="\n".join(lines),
+        )
+        assert not _is_small_function(elem, 5)
+
+    def test_method_is_eligible(self):
+        """Methods should also be eligible as small functions."""
+        elem = CodeElement(
+            element_type="method",
+            name="get_name",
+            raw_code="def get_name(self):\n    return self.name\n",
+        )
+        assert _is_small_function(elem, 5)
+
+    def test_disabled_with_zero_threshold(self):
+        """Threshold 0 should disable handcrafted summaries."""
+        elem = CodeElement(
+            element_type="function",
+            name="foo",
+            raw_code="def foo(): pass\n",
+        )
+        assert not _is_small_function(elem, 0)
+
+    def test_only_applies_to_function_and_method(self):
+        """Classes, files, variables etc. should never be small functions."""
+        for etype in ("class", "file", "variable", "constant", "import", "interface"):
+            elem = CodeElement(
+                element_type=etype,
+                name="foo",
+                raw_code="x = 1\n",
+            )
+            assert not _is_small_function(elem, 5), f"{etype} should not be a small function"
+
+
+class TestGenerateSmallFunctionSummary:
+    """Tests for _generate_small_function_summary helper."""
+
+    def test_prefers_docstring_first_sentence(self):
+        """Should use first sentence of docstring when available."""
+        elem = CodeElement(
+            element_type="function",
+            name="foo",
+            docstring="Return the sum of two numbers.\n\nArgs:\n    a: first\n    b: second",
+            signature="def foo(a, b)",
+            raw_code='def foo(a, b):\n    """Return the sum of two numbers."""\n    return a + b\n',
+        )
+        assert _generate_small_function_summary(elem) == "Return the sum of two numbers"
+
+    def test_strips_trailing_period_from_docstring(self):
+        """Should strip trailing period from docstring."""
+        elem = CodeElement(
+            element_type="function",
+            name="foo",
+            docstring="Return the name.",
+            signature="def foo(self)",
+        )
+        assert _generate_small_function_summary(elem) == "Return the name"
+
+    def test_falls_back_to_signature(self):
+        """Should use signature when no docstring."""
+        elem = CodeElement(
+            element_type="function",
+            name="get_name",
+            signature="def get_name(self) -> str",
+            raw_code="def get_name(self) -> str:\n    return self.name\n",
+        )
+        assert _generate_small_function_summary(elem) == "def get_name(self) -> str"
+
+    def test_falls_back_to_raw_code(self):
+        """Should use raw code when no docstring and no signature."""
+        elem = CodeElement(
+            element_type="function",
+            name="foo",
+            raw_code="def foo(): pass",
+        )
+        assert _generate_small_function_summary(elem) == "def foo(): pass"
+
+    def test_truncates_long_raw_code(self):
+        """Should truncate raw code longer than 200 chars."""
+        long_code = "def foo():\n" + "    " + "x" * 250 + "\n"
+        elem = CodeElement(
+            element_type="function",
+            name="foo",
+            raw_code=long_code,
+        )
+        summary = _generate_small_function_summary(elem)
+        # Should only include first 3 non-empty lines
+        assert len(summary.split("\n")) <= 3
+
+    def test_final_fallback_to_type_name(self):
+        """Should return type: name when nothing else available."""
+        elem = CodeElement(
+            element_type="method",
+            name="mystery",
+        )
+        assert _generate_small_function_summary(elem) == "Method: mystery"
+
+    def test_empty_docstring_falls_through(self):
+        """Empty docstring should fall through to signature."""
+        elem = CodeElement(
+            element_type="function",
+            name="foo",
+            docstring="   \n  ",
+            signature="def foo(x: int) -> int",
+        )
+        assert _generate_small_function_summary(elem) == "def foo(x: int) -> int"
+
+    def test_multiline_docstring_uses_first_line_only(self):
+        """Should only use first line of multi-line docstring."""
+        elem = CodeElement(
+            element_type="function",
+            name="foo",
+            docstring="Validate the input.\n\nRaises ValueError if invalid.\nAlso logs the attempt.",
+            signature="def foo(x)",
+        )
+        assert _generate_small_function_summary(elem) == "Validate the input"
+
+
+class TestHandcraftedSummaryConfig:
+    """Tests for ProcessingConfig.handcrafted_max_lines."""
+
+    def test_default_value(self):
+        """Default handcrafted_max_lines should be 5."""
+        config = ProcessingConfig()
+        assert config.handcrafted_max_lines == 5
+
+    def test_custom_value(self):
+        """Should accept custom threshold."""
+        config = ProcessingConfig(handcrafted_max_lines=3)
+        assert config.handcrafted_max_lines == 3
+
+    def test_disabled_with_zero(self):
+        """Setting to 0 should disable."""
+        config = ProcessingConfig(handcrafted_max_lines=0)
+        elem = CodeElement(
+            element_type="function",
+            name="foo",
+            raw_code="def foo(): pass\n",
+        )
+        assert not _is_small_function(elem, config.handcrafted_max_lines)
