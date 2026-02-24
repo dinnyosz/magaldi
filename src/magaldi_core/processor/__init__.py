@@ -42,6 +42,9 @@ from .helpers import (
     should_embed,
     _HANDCRAFTED_SUMMARY_TYPES,
     _generate_import_summary,
+    _get_element_line_count,
+    _is_small_function,
+    _generate_small_function_summary,
     _summarize_element,
     _embed_element,
     _index_element,
@@ -67,6 +70,9 @@ __all__ = [
     "should_embed",
     "_HANDCRAFTED_SUMMARY_TYPES",
     "_generate_import_summary",
+    "_get_element_line_count",
+    "_is_small_function",
+    "_generate_small_function_summary",
     "_summarize_element",
     "_embed_element",
     "_index_element",
@@ -385,11 +391,13 @@ def process_elements(
     timing_stats.set_totals_by_type(totals_by_type)
 
     # Count elements by (type, tier) for tier-aware ETA
-    # Exclude handcrafted summary types (imports) - they don't use LLM and have no model-based timing
+    # Exclude handcrafted types (imports, small functions) - they don't use LLM
     totals_by_type_tier: dict[tuple[str, int], int] = {}
     for elem in elements_to_process:
         if elem.element_type in _HANDCRAFTED_SUMMARY_TYPES:
             continue  # Skip - these don't use LLM summarization
+        if _is_small_function(elem, config.handcrafted_max_lines):
+            continue  # Skip - small functions use handcrafted summaries
         ctx_size = element_context_sizes.get(elem.element_id, 2048)
         # Snap to standard tier
         tier = 2048
@@ -584,8 +592,8 @@ def process_elements(
                 avg_workers = max(allowed_at_start, allowed_at_end)
 
                 # Record timing with element type, tier, and avg_workers (for throughput)
-                # Skip handcrafted types (imports) - they don't use LLM and aren't in ETA
-                if element.element_type not in _HANDCRAFTED_SUMMARY_TYPES:
+                # Skip handcrafted types (imports, small functions) - no LLM, not in ETA
+                if element.element_type not in _HANDCRAFTED_SUMMARY_TYPES and not _is_small_function(element, config.handcrafted_max_lines):
                     timing_stats.record(
                         processed.wall_time,
                         processed.summarize_time,
