@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from dataclasses import dataclass, field
 
 
@@ -59,3 +61,82 @@ class ScoringResult:
     elapsed: float = 0.0
     errors: int = 0
     scores: dict[str, VariableScore] = field(default_factory=dict)
+
+
+@dataclass
+class ScoringWorkerStatus:
+    """Track what each worker is doing during variable scoring."""
+
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+    # worker_id -> (batch_num, batch_size, start_time)
+    _status: dict[int, tuple[int, int, float]] = field(default_factory=dict)
+
+    def set(self, worker_id: int, batch_num: int, batch_size: int) -> None:
+        """Mark worker as processing a batch."""
+        with self._lock:
+            self._status[worker_id] = (batch_num, batch_size, time.time())
+
+    def clear(self, worker_id: int) -> None:
+        """Mark worker as idle."""
+        with self._lock:
+            self._status.pop(worker_id, None)
+
+    def get_all(self) -> dict[int, tuple[int, int, float]]:
+        """Get all worker statuses."""
+        with self._lock:
+            return dict(self._status)
+
+    def active_count(self) -> int:
+        """Get number of active workers."""
+        with self._lock:
+            return len(self._status)
+
+
+@dataclass
+class ScoringProgressState:
+    """Progress state for variable scoring live display."""
+
+    total_variables: int = 0
+    total_batches: int = 0
+    completed_batches: int = 0
+    completed_variables: int = 0
+    kept: int = 0
+    dropped: int = 0
+    errors: int = 0
+    num_workers: int = 1
+    start_time: float = field(default_factory=time.time)
+    workers: ScoringWorkerStatus = field(default_factory=ScoringWorkerStatus)
+    # Per-batch timing for throughput calculation
+    batch_times: list[float] = field(default_factory=list)
+
+    @property
+    def elapsed(self) -> float:
+        """Elapsed time in seconds."""
+        return time.time() - self.start_time
+
+    @property
+    def avg_batch_time(self) -> float:
+        """Average batch processing time."""
+        if not self.batch_times:
+            return 0.0
+        return sum(self.batch_times) / len(self.batch_times)
+
+    @property
+    def avg_variable_time(self) -> float:
+        """Average wall time per variable."""
+        if self.completed_variables == 0:
+            return 0.0
+        return self.elapsed / self.completed_variables
+
+    def eta_seconds(self) -> float | None:
+        """Estimate time remaining based on batch throughput."""
+        if self.completed_batches == 0:
+            return None
+        remaining_batches = self.total_batches - self.completed_batches
+        if remaining_batches <= 0:
+            return 0.0
+        # Account for parallelism: effective time per batch considers workers
+        effective_workers = min(self.num_workers, remaining_batches)
+        if effective_workers <= 0:
+            return None
+        return (remaining_batches / effective_workers) * self.avg_batch_time

@@ -15,9 +15,15 @@ import logging
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from magaldi_core.variable_scoring.models import (
+    ScoringProgressState,
     ScoringResult,
+    ScoringWorkerStatus,
     VariableScore,
     VariableScoringConfig,
 )
@@ -171,11 +177,29 @@ def _score_batch(
     return result
 
 
+def _get_context_tier(batch: list[tuple[int, str, str, str, str]]) -> int:
+    """Calculate the context tier for a batch."""
+    from shared.ai.context_size import CONTEXT_TIERS
+
+    content_chars = sum(len(code) + len(fp) + 20 for _, _, fp, _, code in batch)
+    output_tokens = len(batch) * 10 + 20
+    total_tokens = content_chars // 4 + 150 + output_tokens  # 150 = system prompt overhead
+    num_ctx = CONTEXT_TIERS[0]  # Default to smallest
+    for tier in CONTEXT_TIERS:
+        if total_tokens < tier:
+            num_ctx = tier
+            break
+    return num_ctx
+
+
 def score_variables(
     variables: list[tuple[str, str, str, str]],
     llm_client: object,
     config: VariableScoringConfig | None = None,
     max_workers: int = 12,
+    on_progress: Callable[[ScoringProgressState], None] | None = None,
+    progress_state: ScoringProgressState | None = None,
+    worker_status: ScoringWorkerStatus | None = None,
 ) -> ScoringResult:
     """Score variables using the LLM and return scoring results.
 
@@ -184,6 +208,9 @@ def score_variables(
         llm_client: LLM client with generate_from_messages method.
         config: Scoring configuration (defaults to VariableScoringConfig()).
         max_workers: Maximum parallel workers for batch processing.
+        on_progress: Optional callback called after each batch completes.
+        progress_state: Optional shared progress state for live display.
+        worker_status: Optional shared worker status for live display.
 
     Returns:
         ScoringResult with scores and statistics.
@@ -201,58 +228,93 @@ def score_variables(
     batches = _build_batches(variables, config.token_budget)
     result.batch_count = len(batches)
 
-    # Estimate context tier for scoring batches
-    # System prompt ~150 tokens + user content + output budget
-    # Most batches are small → 1k-2k tier
-    from shared.ai.context_size import CONTEXT_TIERS
+    # Initialize progress state if provided
+    if progress_state is not None:
+        progress_state.total_variables = len(variables)
+        progress_state.total_batches = len(batches)
+        progress_state.start_time = start
+        if worker_status is not None:
+            progress_state.workers = worker_status
 
     all_scores: dict[str, VariableScore] = {}
 
+    def _update_progress(batch: list, batch_scores: dict[str, VariableScore], batch_time: float, is_error: bool = False) -> None:
+        """Update progress state after a batch completes."""
+        if progress_state is None:
+            return
+        progress_state.completed_batches += 1
+        progress_state.completed_variables += len(batch)
+        progress_state.batch_times.append(batch_time)
+        if is_error:
+            progress_state.errors += 1
+        else:
+            # Count kept/dropped in real time
+            for _eid, score in batch_scores.items():
+                if score.passes_threshold(config.threshold):
+                    progress_state.kept += 1
+                else:
+                    progress_state.dropped += 1
+        if on_progress:
+            on_progress(progress_state)
+
     # Process batches in parallel
     effective_workers = min(max_workers, len(batches))
+    if progress_state is not None:
+        progress_state.num_workers = effective_workers
+
     if effective_workers <= 1:
         # Sequential processing for single batch
-        for batch in batches:
-            # Calculate num_ctx for this batch
-            content_chars = sum(len(code) + len(fp) + 20 for _, _, fp, _, code in batch)
-            output_tokens = len(batch) * 10 + 20
-            total_tokens = content_chars // 4 + 150 + output_tokens  # 150 = system prompt overhead
-            num_ctx = CONTEXT_TIERS[0]  # Default to smallest
-            for tier in CONTEXT_TIERS:
-                if total_tokens < tier:
-                    num_ctx = tier
-                    break
-
+        for batch_num, batch in enumerate(batches):
+            num_ctx = _get_context_tier(batch)
+            if worker_status is not None:
+                worker_status.set(0, batch_num + 1, len(batch))
+            batch_start = time.time()
             batch_scores = _score_batch(batch, llm_client, config, num_ctx)
+            batch_time = time.time() - batch_start
             all_scores.update(batch_scores)
+            if worker_status is not None:
+                worker_status.clear(0)
+            _update_progress(batch, batch_scores, batch_time)
     else:
         with ThreadPoolExecutor(max_workers=effective_workers) as executor:
             futures = {}
-            for batch in batches:
-                content_chars = sum(len(code) + len(fp) + 20 for _, _, fp, _, code in batch)
-                output_tokens = len(batch) * 10 + 20
-                total_tokens = content_chars // 4 + 150 + output_tokens
-                num_ctx = CONTEXT_TIERS[0]
-                for tier in CONTEXT_TIERS:
-                    if total_tokens < tier:
-                        num_ctx = tier
-                        break
+            worker_id_map: dict[object, int] = {}
+            batch_num_map: dict[object, int] = {}
+            batch_start_map: dict[object, float] = {}
 
+            for batch_num, batch in enumerate(batches):
+                num_ctx = _get_context_tier(batch)
+                wid = batch_num % effective_workers
                 future = executor.submit(_score_batch, batch, llm_client, config, num_ctx)
                 futures[future] = batch
+                worker_id_map[future] = wid
+                batch_num_map[future] = batch_num
+                batch_start_map[future] = time.time()
+                if worker_status is not None:
+                    worker_status.set(wid, batch_num + 1, len(batch))
 
             for future in as_completed(futures):
+                batch = futures[future]
+                wid = worker_id_map[future]
+                batch_time = time.time() - batch_start_map[future]
+                if worker_status is not None:
+                    worker_status.clear(wid)
                 try:
                     batch_scores = future.result()
                     all_scores.update(batch_scores)
+                    _update_progress(batch, batch_scores, batch_time)
                 except Exception:
                     # Mark all variables in this batch as errors, default to keep
-                    batch = futures[future]
                     result.errors += 1
+                    error_scores = {}
                     for _, eid, _, _, _ in batch:
-                        all_scores[eid] = VariableScore(general_usefulness=5)
+                        error_scores[eid] = VariableScore(general_usefulness=5)
+                    all_scores.update(error_scores)
+                    _update_progress(batch, error_scores, batch_time, is_error=True)
 
-    # Apply threshold
+    # Apply threshold (final tally from actual scores)
+    result.kept = 0
+    result.dropped = 0
     for _eid, score in all_scores.items():
         if score.passes_threshold(config.threshold):
             result.kept += 1

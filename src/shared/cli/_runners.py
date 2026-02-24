@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from magaldi_core.code_parser import ParsingResult
     from magaldi_core.discovery import DiscoveryResult
     from magaldi_core.processor import ProgressState, TimingStats
-    from magaldi_core.variable_scoring.models import ScoringResult
+    from magaldi_core.variable_scoring.models import ScoringProgressState, ScoringResult
     from shared.config import MagaldiConfig
     from shared.db.store import Repository
 
@@ -104,6 +104,111 @@ def run_parsing(manifest: "ChangeManifest") -> "ParsingResult":
         return parse_files(manifest, on_progress)
 
 
+def _build_scoring_display(state: "ScoringProgressState", num_workers: int) -> RenderableType:
+    """Build Rich display for variable scoring progress."""
+    # Progress bar
+    pct = (state.completed_batches / state.total_batches * 100) if state.total_batches > 0 else 0
+    eta = state.eta_seconds()
+    elapsed = state.elapsed
+    elapsed_str = format_duration(elapsed)
+
+    bar_width = 30
+    filled = int(bar_width * pct / 100)
+    bar = "━" * filled + "╺" + "─" * (bar_width - filled - 1) if filled < bar_width else "━" * bar_width
+    bar_text = Text()
+    bar_text.append("  ")
+    bar_text.append(bar[:filled], style="green")
+    if filled < bar_width:
+        bar_text.append(bar[filled:], style="dim")
+    bar_text.append(" ")
+    bar_text.append(f"{state.completed_batches}", style="green")
+    bar_text.append("/", style="dim")
+    bar_text.append(f"{state.total_batches}", style="cyan")
+    bar_text.append(" batches", style="dim")
+    bar_text.append(f" ({pct:.0f}%)", style="green")
+    bar_text.append(" | ", style="dim")
+    bar_text.append(f"{state.completed_variables}", style="green")
+    bar_text.append("/", style="dim")
+    bar_text.append(f"{state.total_variables}", style="cyan")
+    bar_text.append(" vars", style="dim")
+    if state.errors > 0:
+        bar_text.append(" | ", style="dim")
+        bar_text.append(f"{state.errors} errors", style="red")
+    bar_text.append(" | ", style="dim")
+    bar_text.append(elapsed_str, style="cyan")
+    bar_text.append(" elapsed", style="dim")
+    if eta is not None and eta > 0:
+        bar_text.append(" | ~", style="dim")
+        bar_text.append(format_duration(eta), style="yellow")
+        bar_text.append(" ETA", style="dim")
+
+    # Score distribution line
+    score_text = Text()
+    if state.completed_variables > 0:
+        keep_pct = (state.kept / state.completed_variables * 100) if state.completed_variables > 0 else 0
+        score_text.append("  ")
+        score_text.append(f"{state.kept} kept", style="green")
+        score_text.append(" | ", style="dim")
+        score_text.append(f"{state.dropped} dropped", style="red")
+        score_text.append(f" ({keep_pct:.0f}% keep rate)", style="dim")
+
+    # Worker table
+    import time as time_mod
+    worker_table = Table(show_header=False, box=None, padding=0)
+    worker_table.add_column("ID", style="dim", width=4)
+    worker_table.add_column("Status", style="cyan", width=10)
+    worker_table.add_column("Batch", style="yellow", width=10)
+    worker_table.add_column("Size", style="magenta", width=6)
+    worker_table.add_column("Time", style="green", width=8)
+
+    workers_data = state.workers.get_all()
+    now = time_mod.time()
+
+    for wid in range(num_workers):
+        if wid in workers_data:
+            batch_num, batch_size, start_time = workers_data[wid]
+            worker_elapsed = now - start_time if start_time > 0 else 0
+            worker_table.add_row(
+                f"[{wid}]",
+                "scoring",
+                f"#{batch_num}",
+                f"{batch_size} vars",
+                f"{worker_elapsed:.1f}s",
+            )
+        else:
+            worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "", "")
+
+    # Throughput stats
+    stats_text = Text()
+    if state.completed_batches > 0:
+        stats_text.append("  ")
+        stats_text.append("Throughput:", style="dim")
+        stats_text.append(f" {state.avg_batch_time:.2f}s", style="green")
+        stats_text.append("/batch", style="dim")
+        stats_text.append(" | ", style="dim")
+        stats_text.append(f"{state.avg_variable_time:.2f}s", style="green")
+        stats_text.append("/var", style="dim")
+        # Vars per second
+        vps = state.completed_variables / elapsed if elapsed > 0 else 0
+        stats_text.append(" | ", style="dim")
+        stats_text.append(f"{vps:.1f}", style="green")
+        stats_text.append(" vars/s", style="dim")
+        stats_text.append(" | ", style="dim")
+        stats_text.append("Workers:", style="dim")
+        stats_text.append(f" {state.workers.active_count()}", style="green")
+        stats_text.append("/", style="dim")
+        stats_text.append(f"{num_workers}", style="cyan")
+
+    parts: list[RenderableType] = [bar_text]
+    if score_text.plain:
+        parts.append(score_text)
+    parts.append(worker_table)
+    if stats_text.plain:
+        parts.append(stats_text)
+
+    return Group(*parts)
+
+
 def run_variable_scoring(
     parsing_result: "ParsingResult",
     config: "MagaldiConfig",
@@ -124,7 +229,12 @@ def run_variable_scoring(
         ScoringResult with statistics.
     """
     from magaldi_core.variable_scoring import score_variables
-    from magaldi_core.variable_scoring.models import ScoringResult, VariableScoringConfig
+    from magaldi_core.variable_scoring.models import (
+        ScoringProgressState,
+        ScoringResult,
+        ScoringWorkerStatus,
+        VariableScoringConfig,
+    )
     from shared.ai.summarization import SummarizationLLMClient
 
     # Collect all variable/constant elements
@@ -154,12 +264,34 @@ def run_variable_scoring(
     scoring_config = VariableScoringConfig()
     effective_workers = workers if workers > 0 else 12
 
-    with console.status(f"[bold blue]Scoring {len(variables)} variables...[/]"):
+    # Create shared state for live display
+    worker_status = ScoringWorkerStatus()
+    progress_state = ScoringProgressState(
+        total_variables=len(variables),
+        num_workers=effective_workers,
+        workers=worker_status,
+    )
+
+    class LiveScoringDisplay:
+        def __rich__(self) -> RenderableType:
+            return _build_scoring_display(current_state, display_workers)
+
+    current_state = progress_state
+    display_workers = effective_workers
+
+    def on_progress(state: "ScoringProgressState") -> None:
+        nonlocal current_state
+        current_state = state
+
+    with Live(LiveScoringDisplay(), console=console, refresh_per_second=4):
         result = score_variables(
             variables=variables,
             llm_client=llm_client._client,
             config=scoring_config,
             max_workers=effective_workers,
+            on_progress=on_progress,
+            progress_state=progress_state,
+            worker_status=worker_status,
         )
 
     # Remove variables that scored below threshold from parsing_result
@@ -718,7 +850,7 @@ def run_call_resolution(
     skip_resolve: bool = False,
     console: "Console | None" = None,
 ) -> None:
-    """Run Phase 5: Call Resolution (static + embedding + semantic relationships).
+    """Run Phase 6: Call Resolution (static + embedding + semantic relationships).
 
     Args:
         repo: Search repository instance.
