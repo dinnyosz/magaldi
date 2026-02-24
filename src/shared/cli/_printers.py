@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from magaldi_core.code_parser import ParsingResult
     from magaldi_core.discovery import DiscoveryResult
     from magaldi_core.processor import TimingStats
+    from magaldi_core.variable_scoring.models import ScoringResult
 
 
 def print_discovery_result(result: "DiscoveryResult") -> None:
@@ -88,6 +89,26 @@ def print_feature_result(result: dict) -> None:
             label = cluster.get("label") or f"feature_{cluster['cluster_id']}"
             names = ", ".join(cluster.get("sample_names", [])[:3])
             console.print(f"    [cyan]{label}[/] ({cluster['size']} elements): {names}...")
+
+
+def print_scoring_result(result: "ScoringResult") -> None:
+    """Print variable scoring results."""
+    if result.total_variables == 0:
+        console.print("  [dim]No variables to score[/]")
+        return
+
+    parts = [
+        f"[green]{result.kept} kept[/]",
+        f"[red]{result.dropped} dropped[/]",
+        f"of {result.total_variables} variables",
+        f"in {result.batch_count} batches",
+    ]
+    if result.elapsed > 0:
+        parts.append(f"{format_duration(result.elapsed)} elapsed")
+    if result.errors > 0:
+        parts.append(f"[yellow]{result.errors} errors[/]")
+
+    console.print(f"  {' | '.join(parts)}")
 
 
 def print_processing_result(

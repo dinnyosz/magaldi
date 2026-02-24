@@ -19,6 +19,7 @@ from shared.cli._printers import (
     print_feature_result,
     print_parsing_result,
     print_processing_result,
+    print_scoring_result,
     print_summary,
 )
 from shared.cli._runners import (
@@ -28,6 +29,7 @@ from shared.cli._runners import (
     run_hierarchy_extraction,
     run_parsing,
     run_processing,
+    run_variable_scoring,
 )
 from shared.cli._shared import check_model_availability, console, main
 from shared.config import load_config
@@ -206,8 +208,16 @@ def parse(
                     console.print(f"  [red]✗[/] {err}")
                 sys.exit(1)
 
-        # Phase 4: Processing (summarize -> embed -> index)
-        console.print("\n[bold blue]Phase 4:[/] Processing")
+        # Phase 4: Variable Scoring (LLM-based preflight)
+        if not dry_run and not skip_ai:
+            console.print("\n[bold blue]Phase 4:[/] Variable Scoring")
+            scoring_result = run_variable_scoring(parsing_result, config, workers)
+            print_scoring_result(scoring_result)
+        elif skip_ai:
+            console.print("\n[bold blue]Phase 4:[/] Variable Scoring [dim](skipped: --skip-ai)[/]")
+
+        # Phase 5: Processing (summarize -> embed -> index)
+        console.print("\n[bold blue]Phase 5:[/] Processing")
         processed, skipped, indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, failed_elements, deleted = run_processing(
             parsing_result, manifest, config, dry_run, skip_ai, workers
         )
@@ -244,9 +254,9 @@ def parse(
             except Exception as e:
                 console.print(f"  [yellow]Warning: Hierarchy extraction failed: {e}[/]")
 
-        # Phase 5: Call Resolution (static + embedding + semantic relationships)
+        # Phase 6: Call Resolution (static + embedding + semantic relationships)
         if not dry_run and indexed > 0:
-            console.print("\n[bold blue]Phase 5:[/] Call Resolution")
+            console.print("\n[bold blue]Phase 6:[/] Call Resolution")
             run_call_resolution(
                 repo,
                 discovery_result.scope,
@@ -256,9 +266,9 @@ def parse(
                 console=console,
             )
 
-        # Phase 6: Feature Extraction (opt-in with --features)
+        # Phase 7: Feature Extraction (opt-in with --features)
         if features and not skip_ai and not dry_run and processed > 0:
-            console.print("\n[bold blue]Phase 6:[/] Feature Extraction")
+            console.print("\n[bold blue]Phase 7:[/] Feature Extraction")
             feature_result = run_feature_extraction(
                 discovery_result.scope,
                 discovery_result.repository,
@@ -269,9 +279,9 @@ def parse(
             if feature_result:
                 print_feature_result(feature_result)
 
-        # Phase 7: Glossary Extraction (opt-in with --glossary)
+        # Phase 8: Glossary Extraction (opt-in with --glossary)
         if glossary and not skip_ai and not dry_run and processed > 0:
-            console.print("\n[bold blue]Phase 7:[/] Glossary Extraction")
+            console.print("\n[bold blue]Phase 8:[/] Glossary Extraction")
             run_glossary_extraction(
                 scope=discovery_result.scope,
                 repository=discovery_result.repository,

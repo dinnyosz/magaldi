@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from magaldi_core.code_parser import ParsingResult
     from magaldi_core.discovery import DiscoveryResult
     from magaldi_core.processor import ProgressState, TimingStats
+    from magaldi_core.variable_scoring.models import ScoringResult
     from shared.config import MagaldiConfig
     from shared.db.store import Repository
 
@@ -101,6 +102,80 @@ def run_parsing(manifest: "ChangeManifest") -> "ParsingResult":
             progress.update(task, completed=completed, total=total)
 
         return parse_files(manifest, on_progress)
+
+
+def run_variable_scoring(
+    parsing_result: "ParsingResult",
+    config: "MagaldiConfig",
+    workers: int = 0,
+) -> "ScoringResult":
+    """Run Phase 4: Variable Scoring.
+
+    Scores all variable/constant elements using the LLM to determine
+    which are useful for code discovery. Variables scoring below threshold
+    are removed from parsing_result in place.
+
+    Args:
+        parsing_result: Result from Phase 3 (modified in place).
+        config: Magaldi configuration.
+        workers: Max parallel workers (0=auto).
+
+    Returns:
+        ScoringResult with statistics.
+    """
+    from magaldi_core.variable_scoring import score_variables
+    from magaldi_core.variable_scoring.models import ScoringResult, VariableScoringConfig
+    from shared.ai.summarization import SummarizationLLMClient
+
+    # Collect all variable/constant elements
+    variables: list[tuple[str, str, str, str]] = []
+    for pf in parsing_result.parsed_files:
+        for elem in pf.elements:
+            if elem.element_type in ("variable", "constant"):
+                variables.append((
+                    elem.element_id,
+                    pf.file_info.relative_path,
+                    elem.name,
+                    elem.raw_code or "",
+                ))
+
+    if not variables:
+        return ScoringResult()
+
+    # Create LLM client using the small model (scoring is simple)
+    model_config = config.llm.get_summarize_model_small()
+    llm_client = SummarizationLLMClient(
+        url=model_config.url,
+        model=model_config.name,
+        provider=model_config.provider,
+        api_key=model_config.api_key,
+    )
+
+    scoring_config = VariableScoringConfig()
+    effective_workers = workers if workers > 0 else 12
+
+    with console.status(f"[bold blue]Scoring {len(variables)} variables...[/]"):
+        result = score_variables(
+            variables=variables,
+            llm_client=llm_client._client,
+            config=scoring_config,
+            max_workers=effective_workers,
+        )
+
+    # Remove variables that scored below threshold from parsing_result
+    dropped_ids = {
+        eid for eid, score in result.scores.items()
+        if not score.passes_threshold(scoring_config.threshold)
+    }
+
+    if dropped_ids:
+        for pf in parsing_result.parsed_files:
+            pf.elements = [
+                elem for elem in pf.elements
+                if elem.element_id not in dropped_ids
+            ]
+
+    return result
 
 
 def run_processing(
