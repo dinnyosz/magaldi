@@ -171,6 +171,7 @@ def search_features(
     Returns:
         List of matching features.
     """
+    scope, repository = _resolve_scope_repo(scope, repository)
     limit = max(1, min(limit, 50))
 
     # Try vector search first, fall back to keyword search

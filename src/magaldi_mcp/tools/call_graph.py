@@ -153,7 +153,8 @@ def find_callers(
     if not doc:
         raise ValueError(f"Element not found: {element_id}")
 
-    # Use target's scope/repo if not specified
+    # Auto-detect scope/repo, then fall back to target's values
+    scope, repository = _resolve_scope_repo(scope, repository)
     scope = scope or doc.get("scope")
     repository = repository or doc.get("repository")
     username = username or doc.get("username", "main")
@@ -249,7 +250,8 @@ def find_call_chain(
     if not doc:
         raise ValueError(f"Element not found: {element_id}")
 
-    # Use element's scope/repo if not specified
+    # Auto-detect scope/repo, then fall back to element's values
+    scope, repository = _resolve_scope_repo(scope, repository)
     scope = scope or doc.get("scope")
     repository = repository or doc.get("repository")
     username = username or doc.get("username", "main")

@@ -8,7 +8,7 @@ from typing import Any
 
 from shared.db.store import Repository
 
-from ._utils import _escape_for_lucene_regexp
+from ._utils import _escape_for_lucene_regexp, _resolve_scope_repo
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +155,7 @@ def find_implementations(
     Returns:
         List of implementing classes with their info.
     """
+    scope, repository = _resolve_scope_repo(scope, repository)
     limit = max(1, min(limit, 100))
 
     # Get the name and scope/repo to search for

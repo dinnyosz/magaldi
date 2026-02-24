@@ -2,9 +2,23 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _patch_auto_detect():
+    """Prevent auto-detection from reading real magaldi.yaml during tests.
+
+    Returns (None, None) so _resolve_scope_repo falls through to whatever
+    scope/repository the test passes explicitly.
+    """
+    with patch(
+        "magaldi_mcp.tools._utils._auto_detect_repo_config",
+        return_value=(None, None),
+    ):
+        yield
 
 
 @pytest.fixture
