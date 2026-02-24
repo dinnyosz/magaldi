@@ -11,15 +11,13 @@ FEATURE_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "scope": {"type": "string"},
-                "repository": {"type": "string"},
                 "brief": {
                     "type": "boolean",
                     "default": True,
                     "description": "Omit summaries (default). False to include.",
                 },
             },
-            "required": ["scope", "repository"],
+            "required": [],
         },
         annotations=READONLY_ANNOTATIONS,
     ),

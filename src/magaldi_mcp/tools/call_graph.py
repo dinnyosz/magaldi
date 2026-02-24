@@ -6,6 +6,8 @@ from typing import Any
 
 from shared.db.store import Repository
 
+from ._utils import _resolve_scope_repo
+
 
 def get_call_graph(
     repo: Repository,
@@ -582,8 +584,8 @@ _EXCLUDED_NAMES = {
 
 def find_dead_code(
     repo: Repository,
-    scope: str,
-    repository: str,
+    scope: str | None = None,
+    repository: str | None = None,
     username: str | None = None,
     include_tests: bool = False,
 ) -> dict[str, Any]:
@@ -597,14 +599,20 @@ def find_dead_code(
 
     Args:
         repo: Search repository.
-        scope: Repository scope (required).
-        repository: Repository name (required).
+        scope: Repository scope (auto-detected from magaldi.yaml if not provided).
+        repository: Repository name (auto-detected from magaldi.yaml if not provided).
         username: User branch (defaults to "main").
         include_tests: Whether to include test functions in dead code check.
 
     Returns:
         Dict with potentially_dead list and statistics.
     """
+    scope, repository = _resolve_scope_repo(scope, repository)
+    if not scope or not repository:
+        raise ValueError(
+            "scope and repository are required. Either provide them explicitly "
+            "or create a magaldi.yaml file in your project root."
+        )
     username = username or "main"
 
     client = repo._get_client()
@@ -722,8 +730,8 @@ def find_dead_code(
 
 def find_entry_points(
     repo: Repository,
-    scope: str,
-    repository: str,
+    scope: str | None = None,
+    repository: str | None = None,
     username: str | None = None,
 ) -> dict[str, Any]:
     """Find entry points: HTTP handlers, CLI commands, test fixtures, main functions.
@@ -735,13 +743,19 @@ def find_entry_points(
 
     Args:
         repo: Search repository.
-        scope: Repository scope (required).
-        repository: Repository name (required).
+        scope: Repository scope (auto-detected from magaldi.yaml if not provided).
+        repository: Repository name (auto-detected from magaldi.yaml if not provided).
         username: User branch (defaults to "main").
 
     Returns:
         Entry points grouped by type (http, cli, test, main, other).
     """
+    scope, repository = _resolve_scope_repo(scope, repository)
+    if not scope or not repository:
+        raise ValueError(
+            "scope and repository are required. Either provide them explicitly "
+            "or create a magaldi.yaml file in your project root."
+        )
     username = username or "main"
 
     # Decorator categories

@@ -11,11 +11,9 @@ HIERARCHY_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "scope": {"type": "string"},
-                "repository": {"type": "string"},
                 "username": {"type": "string"},
             },
-            "required": ["scope", "repository"],
+            "required": [],
         },
         annotations=READONLY_ANNOTATIONS,
     ),
@@ -25,11 +23,9 @@ HIERARCHY_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "scope": {"type": "string"},
-                "repository": {"type": "string"},
                 "username": {"type": "string"},
             },
-            "required": ["scope", "repository"],
+            "required": [],
         },
         annotations=READONLY_ANNOTATIONS,
     ),

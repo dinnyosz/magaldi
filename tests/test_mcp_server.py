@@ -1130,14 +1130,18 @@ class TestPatternSearchTool:
         assert "pattern" in schema["properties"]
         assert "mode" in schema["properties"]
         assert schema["properties"]["mode"]["enum"] == ["regexp", "wildcard", "proximity"]
-        # scope and repository are now optional (auto-detected from magaldi.yaml)
-        assert "scope" in schema["properties"]
-        assert "repository" in schema["properties"]
+        # scope and repository have been removed from schema (auto-detected from magaldi.yaml)
+        assert "scope" not in schema["properties"]
+        assert "repository" not in schema["properties"]
         assert "pattern" in schema["required"]
         assert "mode" in schema["required"]
 
     @pytest.mark.asyncio
-    async def test_pattern_search_returns_results(self, server, mock_repo):
+    @patch(
+        "magaldi_mcp.tools._utils._auto_detect_repo_config",
+        return_value=("test_scope", "test_repo"),
+    )
+    async def test_pattern_search_returns_results(self, _mock_detect, server, mock_repo):
         """Test pattern_search tool returns results."""
         mock_repo.search_by_regexp.return_value = [
             {
@@ -1156,8 +1160,6 @@ class TestPatternSearchTool:
             {
                 "pattern": "test.*",
                 "mode": "regexp",
-                "scope": "scope",
-                "repository": "repo",
             },
         )
 
@@ -1358,7 +1360,11 @@ class TestPatternTools:
         repo._get_client().indices_refresh(index=INDEX_NAME)
         return repo
 
-    def test_list_patterns_returns_all_patterns(self, es_with_patterns):
+    @patch(
+        "magaldi_mcp.tools._utils._auto_detect_repo_config",
+        return_value=("test-patterns", "test-repo"),
+    )
+    def test_list_patterns_returns_all_patterns(self, _mock_detect, es_with_patterns):
         """Test list_patterns returns all pattern types found."""
         from magaldi_mcp.tools import list_patterns
 
@@ -1370,7 +1376,11 @@ class TestPatternTools:
         assert "singleton" in pattern_names
         assert result["total_classes_with_patterns"] == 2
 
-    def test_list_patterns_includes_examples(self, es_with_patterns):
+    @patch(
+        "magaldi_mcp.tools._utils._auto_detect_repo_config",
+        return_value=("test-patterns", "test-repo"),
+    )
+    def test_list_patterns_includes_examples(self, _mock_detect, es_with_patterns):
         """Test list_patterns includes example classes for each pattern."""
         from magaldi_mcp.tools import list_patterns
 
@@ -1381,7 +1391,11 @@ class TestPatternTools:
         assert len(repo_pattern["examples"]) == 1
         assert repo_pattern["examples"][0]["name"] == "UserRepository"
 
-    def test_find_by_pattern_returns_matching_classes(self, es_with_patterns):
+    @patch(
+        "magaldi_mcp.tools._utils._auto_detect_repo_config",
+        return_value=("test-patterns", "test-repo"),
+    )
+    def test_find_by_pattern_returns_matching_classes(self, _mock_detect, es_with_patterns):
         """Test find_by_pattern returns classes with specified pattern."""
         from magaldi_mcp.tools import find_by_pattern
 
@@ -1391,7 +1405,11 @@ class TestPatternTools:
         assert result["classes"][0]["name"] == "UserRepository"
         assert result["classes"][0]["confidence"] == 0.8
 
-    def test_find_by_pattern_filters_by_confidence(self, es_with_patterns):
+    @patch(
+        "magaldi_mcp.tools._utils._auto_detect_repo_config",
+        return_value=("test-patterns", "test-repo"),
+    )
+    def test_find_by_pattern_filters_by_confidence(self, _mock_detect, es_with_patterns):
         """Test find_by_pattern respects min_confidence threshold."""
         from magaldi_mcp.tools import find_by_pattern
 
@@ -1407,7 +1425,11 @@ class TestPatternTools:
         )
         assert result["count"] == 0
 
-    def test_find_by_pattern_no_matches(self, es_with_patterns):
+    @patch(
+        "magaldi_mcp.tools._utils._auto_detect_repo_config",
+        return_value=("test-patterns", "test-repo"),
+    )
+    def test_find_by_pattern_no_matches(self, _mock_detect, es_with_patterns):
         """Test find_by_pattern returns empty when no matches."""
         from magaldi_mcp.tools import find_by_pattern
 

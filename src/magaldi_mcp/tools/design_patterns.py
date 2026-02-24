@@ -7,11 +7,13 @@ from typing import Any
 from shared.db.store import Repository
 from shared.db.repositories.base import INDEX_NAME
 
+from ._utils import _resolve_scope_repo
+
 
 def list_patterns(
     repo: Repository,
-    scope: str,
-    repository: str,
+    scope: str | None = None,
+    repository: str | None = None,
     username: str = "main",
 ) -> dict[str, Any]:
     """List all detected design patterns in a repository.
@@ -21,8 +23,8 @@ def list_patterns(
 
     Args:
         repo: Search repository.
-        scope: Repository scope (required).
-        repository: Repository name (required).
+        scope: Repository scope (auto-detected from magaldi.yaml if not provided).
+        repository: Repository name (auto-detected from magaldi.yaml if not provided).
         username: User branch.
 
     Returns:
@@ -30,6 +32,13 @@ def list_patterns(
         - patterns: List of pattern summaries with count and examples
         - total_classes_with_patterns: Total count of classes with patterns
     """
+    # Auto-detect scope/repository from magaldi.yaml if not provided
+    scope, repository = _resolve_scope_repo(scope, repository)
+    if not scope or not repository:
+        raise ValueError(
+            "scope and repository are required. Either provide them explicitly "
+            "or create a magaldi.yaml file in your project root."
+        )
     must_clauses = [
         {"term": {"username": username}},
         {"term": {"scope": scope}},
@@ -112,8 +121,8 @@ def list_patterns(
 def find_by_pattern(
     repo: Repository,
     pattern: str,
-    scope: str,
-    repository: str,
+    scope: str | None = None,
+    repository: str | None = None,
     username: str = "main",
     min_confidence: float = 0.6,
     limit: int = 20,
@@ -125,8 +134,8 @@ def find_by_pattern(
     Args:
         repo: Search repository.
         pattern: Pattern type to search for.
-        scope: Repository scope (required).
-        repository: Repository name (required).
+        scope: Repository scope (auto-detected from magaldi.yaml if not provided).
+        repository: Repository name (auto-detected from magaldi.yaml if not provided).
         username: User branch.
         min_confidence: Minimum confidence score (0.0-1.0).
         limit: Maximum results.
@@ -137,6 +146,13 @@ def find_by_pattern(
         - count: Total number of matches
         - pattern: The pattern searched for
     """
+    # Auto-detect scope/repository from magaldi.yaml if not provided
+    scope, repository = _resolve_scope_repo(scope, repository)
+    if not scope or not repository:
+        raise ValueError(
+            "scope and repository are required. Either provide them explicitly "
+            "or create a magaldi.yaml file in your project root."
+        )
     # Validate limit
     limit = max(1, min(limit, 100))
 

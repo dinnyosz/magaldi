@@ -7,11 +7,13 @@ from typing import Any
 from shared.db.repositories.base import INDEX_NAME
 from shared.db.store import Repository
 
+from ._utils import _resolve_scope_repo
+
 
 def find_complex_functions(
     repo: Repository,
-    scope: str,
-    repository: str,
+    scope: str | None = None,
+    repository: str | None = None,
     username: str | None = None,
     min_complexity: int = 10,
     limit: int = 20,
@@ -21,8 +23,8 @@ def find_complex_functions(
 
     Args:
         repo: Search repository.
-        scope: Repository scope (required).
-        repository: Repository name (required).
+        scope: Repository scope (auto-detected from magaldi.yaml if not provided).
+        repository: Repository name (auto-detected from magaldi.yaml if not provided).
         username: User branch (defaults to "main").
         min_complexity: Minimum cyclomatic complexity threshold.
         limit: Maximum results.
@@ -31,6 +33,12 @@ def find_complex_functions(
     Returns:
         Dict with functions list and statistics.
     """
+    scope, repository = _resolve_scope_repo(scope, repository)
+    if not scope or not repository:
+        raise ValueError(
+            "scope and repository are required. Either provide them explicitly "
+            "or create a magaldi.yaml file in your project root."
+        )
     username = username or "main"
     limit = max(1, min(limit, 100))
 
@@ -95,8 +103,8 @@ def find_complex_functions(
 
 def find_security_issues(
     repo: Repository,
-    scope: str,
-    repository: str,
+    scope: str | None = None,
+    repository: str | None = None,
     username: str | None = None,
     severity: str = "high",
     kind: str | None = None,
@@ -106,8 +114,8 @@ def find_security_issues(
 
     Args:
         repo: Search repository.
-        scope: Repository scope (required).
-        repository: Repository name (required).
+        scope: Repository scope (auto-detected from magaldi.yaml if not provided).
+        repository: Repository name (auto-detected from magaldi.yaml if not provided).
         username: User branch (defaults to "main").
         severity: Minimum severity level ("critical", "high", "medium", "low", "info", "all").
         kind: Filter by issue kind (optional).
@@ -116,6 +124,12 @@ def find_security_issues(
     Returns:
         Dict with issues list and statistics.
     """
+    scope, repository = _resolve_scope_repo(scope, repository)
+    if not scope or not repository:
+        raise ValueError(
+            "scope and repository are required. Either provide them explicitly "
+            "or create a magaldi.yaml file in your project root."
+        )
     username = username or "main"
     limit = max(1, min(limit, 100))
 
@@ -215,8 +229,8 @@ def find_security_issues(
 
 def find_undocumented(
     repo: Repository,
-    scope: str,
-    repository: str,
+    scope: str | None = None,
+    repository: str | None = None,
     username: str | None = None,
     max_coverage: float = 0.5,
     public_only: bool = True,
@@ -227,8 +241,8 @@ def find_undocumented(
 
     Args:
         repo: Search repository.
-        scope: Repository scope (required).
-        repository: Repository name (required).
+        scope: Repository scope (auto-detected from magaldi.yaml if not provided).
+        repository: Repository name (auto-detected from magaldi.yaml if not provided).
         username: User branch (defaults to "main").
         max_coverage: Maximum documentation coverage (0-1) to include.
         public_only: Only include public functions/methods.
@@ -238,6 +252,12 @@ def find_undocumented(
     Returns:
         Dict with functions list and statistics.
     """
+    scope, repository = _resolve_scope_repo(scope, repository)
+    if not scope or not repository:
+        raise ValueError(
+            "scope and repository are required. Either provide them explicitly "
+            "or create a magaldi.yaml file in your project root."
+        )
     username = username or "main"
     limit = max(1, min(limit, 100))
 
@@ -310,8 +330,8 @@ def find_undocumented(
 
 def find_env_usage(
     repo: Repository,
-    scope: str,
-    repository: str,
+    scope: str | None = None,
+    repository: str | None = None,
     username: str | None = None,
     env_name: str | None = None,
     limit: int = 50,
@@ -320,8 +340,8 @@ def find_env_usage(
 
     Args:
         repo: Search repository.
-        scope: Repository scope (required).
-        repository: Repository name (required).
+        scope: Repository scope (auto-detected from magaldi.yaml if not provided).
+        repository: Repository name (auto-detected from magaldi.yaml if not provided).
         username: User branch (defaults to "main").
         env_name: Filter by specific env var name (optional).
         limit: Maximum results.
@@ -329,6 +349,12 @@ def find_env_usage(
     Returns:
         Dict with usages list and statistics.
     """
+    scope, repository = _resolve_scope_repo(scope, repository)
+    if not scope or not repository:
+        raise ValueError(
+            "scope and repository are required. Either provide them explicitly "
+            "or create a magaldi.yaml file in your project root."
+        )
     username = username or "main"
     limit = max(1, min(limit, 100))
 
@@ -414,8 +440,8 @@ def find_env_usage(
 
 def find_async_code(
     repo: Repository,
-    scope: str,
-    repository: str,
+    scope: str | None = None,
+    repository: str | None = None,
     username: str | None = None,
     pattern: str = "all",
     limit: int = 30,
@@ -425,8 +451,8 @@ def find_async_code(
 
     Args:
         repo: Search repository.
-        scope: Repository scope (required).
-        repository: Repository name (required).
+        scope: Repository scope (auto-detected from magaldi.yaml if not provided).
+        repository: Repository name (auto-detected from magaldi.yaml if not provided).
         username: User branch (defaults to "main").
         pattern: Type of pattern ("async", "threading", "locking", "all").
         limit: Maximum results.
@@ -435,6 +461,12 @@ def find_async_code(
     Returns:
         Dict with functions list and statistics.
     """
+    scope, repository = _resolve_scope_repo(scope, repository)
+    if not scope or not repository:
+        raise ValueError(
+            "scope and repository are required. Either provide them explicitly "
+            "or create a magaldi.yaml file in your project root."
+        )
     username = username or "main"
     limit = max(1, min(limit, 100))
 

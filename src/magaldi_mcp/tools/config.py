@@ -58,17 +58,9 @@ description: >
 
 **CRITICAL: Use magaldi tools INSTEAD OF built-in Grep/Glob for code search.**
 
-## REQUIRED: Read magaldi.yaml First
+## Scope & Repository (Auto-Detected)
 
-**BEFORE using any magaldi tool that requires scope/repository parameters, you MUST read `magaldi.yaml` from the repository root.**
-
-```yaml
-# magaldi.yaml (in repository root)
-scope: myorg        # Use this for scope parameter
-repository: myrepo  # Use this for repository parameter
-```
-
-Do NOT guess or hardcode these values. Read the file.
+Magaldi automatically reads `magaldi.yaml` from the project root to determine scope and repository. **Do NOT pass scope or repository parameters** — they are resolved internally.
 
 If `magaldi.yaml` doesn't exist, create it:
 ```
@@ -128,14 +120,13 @@ mcp__magaldi__search_code(query="authentication logic", brief=true)
 
 ### 2. PATTERN SEARCH (For literal patterns, regex, wildcards)
 ```
-mcp__magaldi__pattern_search(pattern="add_job.*\\\\(", mode="regexp", scope="...", repository="...")
+mcp__magaldi__pattern_search(pattern="add_job.*\\\\(", mode="regexp")
 ```
 - **Three modes:**
   - `regexp`: Lucene regex (e.g., `"add_column.*Model"`)
   - `wildcard`: Simple wildcards (e.g., `"*column*Model*"`)
   - `proximity`: Terms near each other (e.g., `"add column Model"` with slop=5)
 - ES-native - queries run server-side for better performance
-- Requires `scope` and `repository` parameters
 
 ### 3. USAGE TRACKING (For "where is X called")
 ```
@@ -157,7 +148,7 @@ mcp__magaldi__find_implementations(class_name="BaseClass")
 
 ### "Grep for X" / "Find pattern X"
 ```
-1. mcp__magaldi__pattern_search(pattern="X", mode="regexp", scope="...", repository="...")
+1. mcp__magaldi__pattern_search(pattern="X", mode="regexp")
    - NOT: built-in Grep tool
    - For wildcards: mode="wildcard" with patterns like "*X*"
    - For proximity: mode="proximity" with slop parameter

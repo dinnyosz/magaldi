@@ -72,14 +72,13 @@ mcp__magaldi__search_code(query="authentication logic", brief=true)
 
 ### 2. PATTERN SEARCH (For literal patterns, regex, wildcards)
 ```
-mcp__magaldi__pattern_search(pattern="add_job.*\\(", mode="regexp", scope="...", repository="...")
+mcp__magaldi__pattern_search(pattern="add_job.*\\(", mode="regexp")
 ```
 - **Three modes:**
   - `regexp`: Lucene regex (e.g., `"add_column.*Model"`)
   - `wildcard`: Simple wildcards (e.g., `"*column*Model*"`)
   - `proximity`: Terms near each other (e.g., `"add column Model"` with slop=5)
 - ES-native - queries run server-side for better performance
-- Requires `scope` and `repository` parameters
 
 **Note:** `grep_code` is deprecated - use `pattern_search` with `mode="regexp"` instead.
 
@@ -103,7 +102,7 @@ mcp__magaldi__find_implementations(class_name="BaseClass")
 ```
 mcp__magaldi__find_similar_structure(element_id="...")  # Same structure/patterns
 mcp__magaldi__find_similar_intent(element_id="...")     # Same purpose/behavior
-mcp__magaldi__find_duplicates(scope="...", repository="...")  # Duplicate code detection
+mcp__magaldi__find_duplicates()  # Duplicate code detection
 ```
 - `find_similar_structure`: Find code that LOOKS similar (copy-paste, patterns)
 - `find_similar_intent`: Find code that DOES similar things (different implementations)
@@ -113,8 +112,8 @@ mcp__magaldi__find_duplicates(scope="...", repository="...")  # Duplicate code d
 ```
 mcp__magaldi__find_callers(element_id="...")           # Who calls this function
 mcp__magaldi__find_call_chain(element_id="...", direction="both", max_depth=5)  # Trace call chains
-mcp__magaldi__find_dead_code(scope="...", repository="...")  # Find uncalled functions
-mcp__magaldi__find_entry_points(scope="...", repository="...")  # Find HTTP handlers, CLI commands
+mcp__magaldi__find_dead_code()  # Find uncalled functions
+mcp__magaldi__find_entry_points()  # Find HTTP handlers, CLI commands
 ```
 - `find_callers`: Simple "who calls this" (separates code vs tests)
 - `find_call_chain`: Recursive tracing (A → B → C → D)
@@ -123,9 +122,9 @@ mcp__magaldi__find_entry_points(scope="...", repository="...")  # Find HTTP hand
 
 ### 7. DEPENDENCY ANALYSIS (For understanding imports)
 ```
-mcp__magaldi__find_dependencies(file_path="src/utils.py", scope="...", repository="...")
-mcp__magaldi__find_dependents(module="utils", scope="...", repository="...")
-mcp__magaldi__dependency_graph(scope="...", repository="...")  # Full module graph with cycle detection
+mcp__magaldi__find_dependencies(file_path="src/utils.py")
+mcp__magaldi__find_dependents(module="utils")
+mcp__magaldi__dependency_graph()  # Full module graph with cycle detection
 ```
 - `find_dependencies`: What does this file import (internal vs external)
 - `find_dependents`: What files import this module (reverse dependency)
@@ -147,7 +146,7 @@ mcp__magaldi__explain_element(element_id="...")  # Complete element overview
 
 ### "Grep for X" / "Find pattern X"
 ```
-1. mcp__magaldi__pattern_search(pattern="X", mode="regexp", scope="...", repository="...")
+1. mcp__magaldi__pattern_search(pattern="X", mode="regexp")
    - NOT: built-in Grep tool
    - For wildcards: mode="wildcard" with patterns like "*X*"
    - For proximity: mode="proximity" with slop parameter
@@ -190,7 +189,7 @@ mcp__magaldi__explain_element(element_id="...")  # Complete element overview
 
 ### "Find dead code / cleanup opportunities"
 ```
-1. mcp__magaldi__find_dead_code(scope="...", repository="...")
+1. mcp__magaldi__find_dead_code()
    - Returns functions with no callers
    - Excludes entry points (@route, @command, main)
    - Review before deleting
@@ -198,7 +197,7 @@ mcp__magaldi__explain_element(element_id="...")  # Complete element overview
 
 ### "Understand entry points for API/CLI"
 ```
-1. mcp__magaldi__find_entry_points(scope="...", repository="...")
+1. mcp__magaldi__find_entry_points()
    - Groups by type: HTTP, CLI, test fixtures, main
    - Shows decorators and file locations
 ```
@@ -212,7 +211,7 @@ mcp__magaldi__explain_element(element_id="...")  # Complete element overview
 
 ### "Check circular dependencies"
 ```
-1. mcp__magaldi__dependency_graph(scope="...", repository="...")
+1. mcp__magaldi__dependency_graph()
    - Returns nodes, edges, cycles
    - Shows circular import chains
 ```

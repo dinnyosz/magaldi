@@ -28,8 +28,6 @@ SEARCH_TOOLS = [
                     "default": True,
                 },
                 "limit": {"type": "integer", "default": 20},
-                "repository": {"type": "string"},
-                "scope": {"type": "string"},
                 "include_tests": {"type": "boolean", "default": False},
                 **OUTPUT_CONTROL_PROPERTIES,
             },
@@ -47,8 +45,6 @@ SEARCH_TOOLS = [
                     "type": "string",
                     "description": "Capability to find (e.g., 'authentication', 'caching')",
                 },
-                "repository": {"type": "string"},
-                "scope": {"type": "string"},
                 "limit": {"type": "integer", "default": 20},
                 "glossary_term": {
                     "type": "string",

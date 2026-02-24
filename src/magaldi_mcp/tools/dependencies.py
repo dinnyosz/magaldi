@@ -6,6 +6,8 @@ from typing import Any
 
 from shared.db.store import Repository
 
+from ._utils import _resolve_scope_repo
+
 
 def _find_file_element(
     repo: Repository,
@@ -81,6 +83,7 @@ def find_dependencies(
         scope = file_doc.get("scope")
         repository = file_doc.get("repository")
     elif file_path:
+        scope, repository = _resolve_scope_repo(scope, repository)
         if not scope or not repository:
             raise ValueError("scope and repository required when using file_path")
         file_doc = _find_file_element(repo, scope, repository, username, file_path)
@@ -184,8 +187,8 @@ def find_dependencies(
 def find_dependents(
     repo: Repository,
     module: str,
-    scope: str,
-    repository: str,
+    scope: str | None = None,
+    repository: str | None = None,
     username: str | None = None,
     limit: int = 50,
 ) -> dict[str, Any]:
@@ -197,8 +200,8 @@ def find_dependents(
     Args:
         repo: Search repository.
         module: Module name to search for (e.g., "utils", "shared.config", "./utils").
-        scope: Repository scope (required).
-        repository: Repository name (required).
+        scope: Repository scope (auto-detected from magaldi.yaml if not provided).
+        repository: Repository name (auto-detected from magaldi.yaml if not provided).
         username: User branch (defaults to "main").
         limit: Maximum files to return.
 
@@ -208,6 +211,12 @@ def find_dependents(
         - dependents: List of files that import the module
         - total: Number of dependents found
     """
+    scope, repository = _resolve_scope_repo(scope, repository)
+    if not scope or not repository:
+        raise ValueError(
+            "scope and repository are required. Either provide them explicitly "
+            "or create a magaldi.yaml file in your project root."
+        )
     username = username or "main"
 
     # Find files that import this module
@@ -239,8 +248,8 @@ def find_dependents(
 
 def dependency_graph(
     repo: Repository,
-    scope: str,
-    repository: str,
+    scope: str | None = None,
+    repository: str | None = None,
     username: str | None = None,
     internal_only: bool = True,
 ) -> dict[str, Any]:
@@ -251,8 +260,8 @@ def dependency_graph(
 
     Args:
         repo: Search repository.
-        scope: Repository scope (required).
-        repository: Repository name (required).
+        scope: Repository scope (auto-detected from magaldi.yaml if not provided).
+        repository: Repository name (auto-detected from magaldi.yaml if not provided).
         username: User branch (defaults to "main").
         internal_only: Only include internal imports (default True).
 
@@ -263,6 +272,12 @@ def dependency_graph(
         - cycles: List of circular dependency chains (if any)
         - stats: Graph statistics
     """
+    scope, repository = _resolve_scope_repo(scope, repository)
+    if not scope or not repository:
+        raise ValueError(
+            "scope and repository are required. Either provide them explicitly "
+            "or create a magaldi.yaml file in your project root."
+        )
     username = username or "main"
 
     client = repo._get_client()

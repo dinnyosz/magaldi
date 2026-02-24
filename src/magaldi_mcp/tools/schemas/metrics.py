@@ -11,14 +11,12 @@ METRICS_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "scope": {"type": "string"},
-                "repository": {"type": "string"},
                 "username": {"type": "string"},
                 "min_complexity": {"type": "integer", "default": 10},
                 "limit": {"type": "integer", "default": 20},
                 "include_tests": {"type": "boolean", "default": False},
             },
-            "required": ["scope", "repository"],
+            "required": [],
         },
         annotations=READONLY_ANNOTATIONS,
     ),
@@ -28,8 +26,6 @@ METRICS_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "scope": {"type": "string"},
-                "repository": {"type": "string"},
                 "username": {"type": "string"},
                 "severity": {
                     "type": "string",
@@ -39,7 +35,7 @@ METRICS_TOOLS = [
                 "kind": {"type": "string", "description": "Filter by issue kind (e.g., 'sql_injection')"},
                 "limit": {"type": "integer", "default": 20},
             },
-            "required": ["scope", "repository"],
+            "required": [],
         },
         annotations=READONLY_ANNOTATIONS,
     ),
@@ -49,15 +45,13 @@ METRICS_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "scope": {"type": "string"},
-                "repository": {"type": "string"},
                 "username": {"type": "string"},
                 "max_coverage": {"type": "number", "default": 0.5, "description": "Max doc coverage (0-1)"},
                 "public_only": {"type": "boolean", "default": True},
                 "limit": {"type": "integer", "default": 30},
                 "include_tests": {"type": "boolean", "default": False},
             },
-            "required": ["scope", "repository"],
+            "required": [],
         },
         annotations=READONLY_ANNOTATIONS,
     ),
@@ -67,13 +61,11 @@ METRICS_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "scope": {"type": "string"},
-                "repository": {"type": "string"},
                 "username": {"type": "string"},
                 "env_name": {"type": "string", "description": "Filter by env var name"},
                 "limit": {"type": "integer", "default": 30},
             },
-            "required": ["scope", "repository"],
+            "required": [],
         },
         annotations=READONLY_ANNOTATIONS,
     ),
@@ -83,8 +75,6 @@ METRICS_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "scope": {"type": "string"},
-                "repository": {"type": "string"},
                 "username": {"type": "string"},
                 "pattern": {
                     "type": "string",
@@ -94,7 +84,7 @@ METRICS_TOOLS = [
                 "limit": {"type": "integer", "default": 30},
                 "include_tests": {"type": "boolean", "default": False},
             },
-            "required": ["scope", "repository"],
+            "required": [],
         },
         annotations=READONLY_ANNOTATIONS,
     ),

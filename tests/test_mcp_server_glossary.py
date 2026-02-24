@@ -6,6 +6,12 @@ import pytest
 
 from magaldi_mcp.server import MagaldiMCPServer
 
+# Patch auto-detect so _resolve_scope_repo returns test values instead of magaldi.yaml values
+_PATCH_AUTO_DETECT = patch(
+    "magaldi_mcp.tools._utils._auto_detect_repo_config",
+    return_value=("test_scope", "test_repo"),
+)
+
 # =============================================================================
 # FIXTURES
 # =============================================================================
@@ -62,7 +68,8 @@ class TestListGlossaryTool:
     """Tests for list_glossary tool handler."""
 
     @pytest.mark.asyncio
-    async def test_list_glossary_returns_terms(self, server, mock_repo):
+    @_PATCH_AUTO_DETECT
+    async def test_list_glossary_returns_terms(self, _mock_detect, server, mock_repo):
         """Test list_glossary tool returns glossary terms."""
         mock_repo.get_glossary_terms.return_value = [
             {"term": "user", "total_count": 5, "description": "User-related code"},
@@ -71,7 +78,7 @@ class TestListGlossaryTool:
 
         result = await server._handle_tool(
             "list_glossary",
-            {"scope": "test", "repository": "repo"},
+            {},
         )
 
         assert isinstance(result, list)
@@ -79,14 +86,15 @@ class TestListGlossaryTool:
         assert result[0]["term"] == "user"
         assert result[0]["description"] == "User-related code"
         mock_repo.get_glossary_terms.assert_called_once_with(
-            scope="test",
-            repository="repo",
+            scope="test_scope",
+            repository="test_repo",
             username="main",
             min_count=1,
         )
 
     @pytest.mark.asyncio
-    async def test_list_glossary_with_min_count(self, server, mock_repo):
+    @_PATCH_AUTO_DETECT
+    async def test_list_glossary_with_min_count(self, _mock_detect, server, mock_repo):
         """Test list_glossary tool with min_count filter."""
         mock_repo.get_glossary_terms.return_value = [
             {"term": "user", "total_count": 5},
@@ -94,29 +102,30 @@ class TestListGlossaryTool:
 
         result = await server._handle_tool(
             "list_glossary",
-            {"scope": "test", "repository": "repo", "min_count": 3},
+            {"min_count": 3},
         )
 
         mock_repo.get_glossary_terms.assert_called_once_with(
-            scope="test",
-            repository="repo",
+            scope="test_scope",
+            repository="test_repo",
             username="main",
             min_count=3,
         )
 
     @pytest.mark.asyncio
-    async def test_list_glossary_with_custom_username(self, server, mock_repo):
+    @_PATCH_AUTO_DETECT
+    async def test_list_glossary_with_custom_username(self, _mock_detect, server, mock_repo):
         """Test list_glossary tool with custom username."""
         mock_repo.get_glossary_terms.return_value = []
 
         await server._handle_tool(
             "list_glossary",
-            {"scope": "test", "repository": "repo", "username": "custom"},
+            {"username": "custom"},
         )
 
         mock_repo.get_glossary_terms.assert_called_once_with(
-            scope="test",
-            repository="repo",
+            scope="test_scope",
+            repository="test_repo",
             username="custom",
             min_count=1,
         )
@@ -126,7 +135,8 @@ class TestGetGlossaryTermTool:
     """Tests for get_glossary_term tool handler."""
 
     @pytest.mark.asyncio
-    async def test_get_glossary_term_returns_term(self, server, mock_repo):
+    @_PATCH_AUTO_DETECT
+    async def test_get_glossary_term_returns_term(self, _mock_detect, server, mock_repo):
         """Test get_glossary_term tool returns term details."""
         mock_repo.get_glossary_term.return_value = {
             "term": "user",
@@ -138,7 +148,7 @@ class TestGetGlossaryTermTool:
 
         result = await server._handle_tool(
             "get_glossary_term",
-            {"scope": "test", "repository": "repo", "term": "user"},
+            {"term": "user"},
         )
 
         assert isinstance(result, dict)
@@ -146,37 +156,39 @@ class TestGetGlossaryTermTool:
         assert result["total_count"] == 5
         assert result["description"] == "Code related to user management and authentication"
         mock_repo.get_glossary_term.assert_called_once_with(
-            scope="test",
-            repository="repo",
+            scope="test_scope",
+            repository="test_repo",
             term="user",
             username="main",
         )
 
     @pytest.mark.asyncio
-    async def test_get_glossary_term_not_found(self, server, mock_repo):
+    @_PATCH_AUTO_DETECT
+    async def test_get_glossary_term_not_found(self, _mock_detect, server, mock_repo):
         """Test get_glossary_term returns None when term not found."""
         mock_repo.get_glossary_term.return_value = None
 
         result = await server._handle_tool(
             "get_glossary_term",
-            {"scope": "test", "repository": "repo", "term": "nonexistent"},
+            {"term": "nonexistent"},
         )
 
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_get_glossary_term_with_custom_username(self, server, mock_repo):
+    @_PATCH_AUTO_DETECT
+    async def test_get_glossary_term_with_custom_username(self, _mock_detect, server, mock_repo):
         """Test get_glossary_term tool with custom username."""
         mock_repo.get_glossary_term.return_value = {"term": "user", "total_count": 1}
 
         await server._handle_tool(
             "get_glossary_term",
-            {"scope": "test", "repository": "repo", "term": "user", "username": "custom"},
+            {"term": "user", "username": "custom"},
         )
 
         mock_repo.get_glossary_term.assert_called_once_with(
-            scope="test",
-            repository="repo",
+            scope="test_scope",
+            repository="test_repo",
             term="user",
             username="custom",
         )
@@ -186,7 +198,8 @@ class TestSearchGlossaryTool:
     """Tests for search_glossary tool handler."""
 
     @pytest.mark.asyncio
-    async def test_search_glossary_returns_matches(self, server, mock_repo):
+    @_PATCH_AUTO_DETECT
+    async def test_search_glossary_returns_matches(self, _mock_detect, server, mock_repo):
         """Test search_glossary tool returns matching terms."""
         mock_repo.search_glossary.return_value = [
             {"term": "user", "total_count": 5, "description": "User management"},
@@ -195,7 +208,7 @@ class TestSearchGlossaryTool:
 
         result = await server._handle_tool(
             "search_glossary",
-            {"scope": "test", "repository": "repo", "query": "user"},
+            {"query": "user"},
         )
 
         assert isinstance(result, list)
@@ -203,37 +216,39 @@ class TestSearchGlossaryTool:
         assert result[0]["description"] == "User management"
         assert result[1]["description"] == "Username handling"
         mock_repo.search_glossary.assert_called_once_with(
-            scope="test",
-            repository="repo",
+            scope="test_scope",
+            repository="test_repo",
             query="user",
             username="main",
         )
 
     @pytest.mark.asyncio
-    async def test_search_glossary_no_matches(self, server, mock_repo):
+    @_PATCH_AUTO_DETECT
+    async def test_search_glossary_no_matches(self, _mock_detect, server, mock_repo):
         """Test search_glossary returns empty list when no matches."""
         mock_repo.search_glossary.return_value = []
 
         result = await server._handle_tool(
             "search_glossary",
-            {"scope": "test", "repository": "repo", "query": "xyz"},
+            {"query": "xyz"},
         )
 
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_search_glossary_with_custom_username(self, server, mock_repo):
+    @_PATCH_AUTO_DETECT
+    async def test_search_glossary_with_custom_username(self, _mock_detect, server, mock_repo):
         """Test search_glossary tool with custom username."""
         mock_repo.search_glossary.return_value = []
 
         await server._handle_tool(
             "search_glossary",
-            {"scope": "test", "repository": "repo", "query": "test", "username": "custom"},
+            {"query": "test", "username": "custom"},
         )
 
         mock_repo.search_glossary.assert_called_once_with(
-            scope="test",
-            repository="repo",
+            scope="test_scope",
+            repository="test_repo",
             query="test",
             username="custom",
         )

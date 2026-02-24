@@ -41,19 +41,31 @@ def _auto_detect_repo_config() -> tuple[str | None, str | None]:
 def _resolve_scope_repo(
     scope: str | None, repository: str | None
 ) -> tuple[str | None, str | None]:
-    """Resolve scope and repository, auto-detecting from magaldi.yaml if not provided.
+    """Resolve scope and repository, always preferring auto-detected values.
+
+    Auto-detected values from magaldi.yaml always take priority over
+    explicitly provided values, because LLMs frequently guess wrong
+    (e.g., passing scope="project" instead of the actual scope).
 
     Args:
-        scope: Explicit scope or None to auto-detect.
-        repository: Explicit repository or None to auto-detect.
+        scope: Explicit scope (ignored if magaldi.yaml found).
+        repository: Explicit repository (ignored if magaldi.yaml found).
 
     Returns:
-        Tuple of (scope, repository) with auto-detected values filled in.
+        Tuple of (scope, repository) with auto-detected values preferred.
     """
-    if scope is None or repository is None:
-        auto_scope, auto_repo = _auto_detect_repo_config()
-        scope = scope or auto_scope
-        repository = repository or auto_repo
+    auto_scope, auto_repo = _auto_detect_repo_config()
+    # Always prefer auto-detected values — LLMs often guess wrong
+    if auto_scope:
+        if scope and scope != auto_scope:
+            logger.debug("Overriding scope=%r with auto-detected=%r", scope, auto_scope)
+        scope = auto_scope
+    if auto_repo:
+        if repository and repository != auto_repo:
+            logger.debug(
+                "Overriding repository=%r with auto-detected=%r", repository, auto_repo
+            )
+        repository = auto_repo
     return scope, repository
 
 

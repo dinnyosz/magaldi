@@ -6,11 +6,13 @@ from typing import Any
 
 from shared.db.store import Repository
 
+from ._utils import _resolve_scope_repo
+
 
 def get_command_tree(
     repo: Repository,
-    scope: str,
-    repository: str,
+    scope: str | None = None,
+    repository: str | None = None,
     username: str | None = None,
 ) -> dict[str, Any]:
     """Get CLI command tree with full command paths.
@@ -20,8 +22,8 @@ def get_command_tree(
 
     Args:
         repo: Search repository.
-        scope: Repository scope (required).
-        repository: Repository name (required).
+        scope: Repository scope (auto-detected from magaldi.yaml if not provided).
+        repository: Repository name (auto-detected from magaldi.yaml if not provided).
         username: User branch (defaults to "main").
 
     Returns:
@@ -30,6 +32,12 @@ def get_command_tree(
     from magaldi_core.analysis.relationships import ExternalRefType, RelationshipType
     from shared.db.repositories.relationships import RelationshipsRepository
 
+    scope, repository = _resolve_scope_repo(scope, repository)
+    if not scope or not repository:
+        raise ValueError(
+            "scope and repository are required. Either provide them explicitly "
+            "or create a magaldi.yaml file in your project root."
+        )
     username = username or "main"
     rel_repo = RelationshipsRepository(repo.config)
 
@@ -175,8 +183,8 @@ def get_command_tree(
 
 def get_route_tree(
     repo: Repository,
-    scope: str,
-    repository: str,
+    scope: str | None = None,
+    repository: str | None = None,
     username: str | None = None,
 ) -> dict[str, Any]:
     """Get HTTP route tree with full URL paths.
@@ -186,8 +194,8 @@ def get_route_tree(
 
     Args:
         repo: Search repository.
-        scope: Repository scope (required).
-        repository: Repository name (required).
+        scope: Repository scope (auto-detected from magaldi.yaml if not provided).
+        repository: Repository name (auto-detected from magaldi.yaml if not provided).
         username: User branch (defaults to "main").
 
     Returns:
@@ -196,6 +204,12 @@ def get_route_tree(
     from magaldi_core.analysis.relationships import ExternalRefType, RelationshipType
     from shared.db.repositories.relationships import RelationshipsRepository
 
+    scope, repository = _resolve_scope_repo(scope, repository)
+    if not scope or not repository:
+        raise ValueError(
+            "scope and repository are required. Either provide them explicitly "
+            "or create a magaldi.yaml file in your project root."
+        )
     username = username or "main"
     rel_repo = RelationshipsRepository(repo.config)
 

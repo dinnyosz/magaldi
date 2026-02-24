@@ -12,8 +12,6 @@ FILE_TOOLS = [
             "type": "object",
             "properties": {
                 "pattern": {"type": "string", "description": "Glob pattern"},
-                "scope": {"type": "string"},
-                "repository": {"type": "string"},
                 "limit": {"type": "integer", "default": 30},
             },
             "required": ["pattern"],
@@ -27,8 +25,6 @@ FILE_TOOLS = [
             "type": "object",
             "properties": {
                 "file_path": {"type": "string", "description": "Relative file path"},
-                "scope": {"type": "string"},
-                "repository": {"type": "string"},
             },
             "required": ["file_path"],
         },

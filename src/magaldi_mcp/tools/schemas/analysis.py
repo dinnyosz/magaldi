@@ -17,8 +17,6 @@ ANALYSIS_TOOLS = [
                     "enum": ["regexp", "wildcard", "proximity"],
                     "description": "regexp: Lucene regex. wildcard: * and ?. proximity: terms near each other.",
                 },
-                "scope": {"type": "string"},
-                "repository": {"type": "string"},
                 "username": {"type": "string"},
                 "slop": {
                     "type": "integer",
@@ -56,8 +54,6 @@ ANALYSIS_TOOLS = [
             "properties": {
                 "hash_id": {"type": "string", "description": "Element ID of the base class"},
                 "class_name": {"type": "string", "description": "Or search by class name"},
-                "scope": {"type": "string"},
-                "repository": {"type": "string"},
                 "limit": {"type": "integer", "default": 20},
             },
             "required": [],
@@ -84,8 +80,6 @@ ANALYSIS_TOOLS = [
             "type": "object",
             "properties": {
                 "hash_id": {"type": "string"},
-                "scope": {"type": "string"},
-                "repository": {"type": "string"},
                 "username": {"type": "string"},
                 "limit": {"type": "integer", "default": 20},
                 "include_tests": {"type": "boolean", "default": True},
@@ -108,8 +102,6 @@ ANALYSIS_TOOLS = [
                     "default": "callees",
                 },
                 "max_depth": {"type": "integer", "default": 3, "description": "1-10"},
-                "scope": {"type": "string"},
-                "repository": {"type": "string"},
                 "username": {"type": "string"},
                 **OUTPUT_CONTROL_PROPERTIES,
             },
@@ -123,8 +115,6 @@ ANALYSIS_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "scope": {"type": "string"},
-                "repository": {"type": "string"},
                 "username": {"type": "string"},
                 "include_tests": {"type": "boolean", "default": False},
                 "limit": {"type": "integer", "default": 30},
@@ -140,8 +130,6 @@ ANALYSIS_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "scope": {"type": "string"},
-                "repository": {"type": "string"},
                 "username": {"type": "string"},
                 "limit": {"type": "integer", "default": 30},
                 **OUTPUT_CONTROL_PROPERTIES,

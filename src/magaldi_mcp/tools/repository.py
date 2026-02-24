@@ -17,18 +17,19 @@ def list_repos(
 
     Args:
         repo: Search repository.
-        scope: Filter by scope.
+        scope: Filter by scope (auto-detected from magaldi.yaml if not provided).
 
     Returns:
         List of repositories with statistics.
     """
+    scope, _ = _resolve_scope_repo(scope, None)
     return repo.get_indexed_repositories(scope=scope)
 
 
 def list_features(
     repo: Repository,
-    scope: str,
-    repository: str,
+    scope: str | None = None,
+    repository: str | None = None,
     username: str = "main",
     brief: bool = True,
 ) -> list[dict[str, Any]]:
@@ -36,14 +37,20 @@ def list_features(
 
     Args:
         repo: Search repository.
-        scope: Repository scope.
-        repository: Repository name.
+        scope: Repository scope (auto-detected from magaldi.yaml if not provided).
+        repository: Repository name (auto-detected from magaldi.yaml if not provided).
         username: User branch.
         brief: Return only core fields (default True). Set False to include summaries.
 
     Returns:
         List of features and subfeatures with parent info.
     """
+    scope, repository = _resolve_scope_repo(scope, repository)
+    if not scope or not repository:
+        raise ValueError(
+            "scope and repository are required. Either provide them explicitly "
+            "or create a magaldi.yaml file in your project root."
+        )
     # Get features
     features = repo.get_features(scope, repository, username)
     for f in features:

@@ -14,9 +14,7 @@ META_TOOLS = [
         description="List all indexed codebases.",
         inputSchema={
             "type": "object",
-            "properties": {
-                "scope": {"type": "string"},
-            },
+            "properties": {},
             "required": [],
         },
         annotations=READONLY_ANNOTATIONS,
@@ -26,10 +24,7 @@ META_TOOLS = [
         description="Get repository statistics (element counts, languages, etc).",
         inputSchema={
             "type": "object",
-            "properties": {
-                "scope": {"type": "string"},
-                "repository": {"type": "string"},
-            },
+            "properties": {},
             "required": [],
         },
         annotations=READONLY_ANNOTATIONS,

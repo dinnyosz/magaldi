@@ -11,8 +11,6 @@ GLOSSARY_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "scope": {"type": "string"},
-                "repository": {"type": "string"},
                 "min_count": {"type": "integer", "default": 1},
                 "limit": {"type": "integer", "default": 50},
             },
@@ -26,8 +24,6 @@ GLOSSARY_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "scope": {"type": "string"},
-                "repository": {"type": "string"},
                 "term": {"type": "string"},
             },
             "required": ["term"],
@@ -40,8 +36,6 @@ GLOSSARY_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "scope": {"type": "string"},
-                "repository": {"type": "string"},
                 "query": {"type": "string"},
             },
             "required": ["query"],

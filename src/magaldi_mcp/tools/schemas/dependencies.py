@@ -13,8 +13,6 @@ DEPENDENCY_TOOLS = [
             "properties": {
                 "file_path": {"type": "string", "description": "Relative file path"},
                 "hash_id": {"type": "string", "description": "Or file element ID"},
-                "scope": {"type": "string"},
-                "repository": {"type": "string"},
                 "username": {"type": "string"},
             },
             "required": [],
@@ -28,12 +26,10 @@ DEPENDENCY_TOOLS = [
             "type": "object",
             "properties": {
                 "module": {"type": "string", "description": "Module name (e.g., 'shared.config')"},
-                "scope": {"type": "string"},
-                "repository": {"type": "string"},
                 "username": {"type": "string"},
                 "limit": {"type": "integer", "default": 30},
             },
-            "required": ["module", "scope", "repository"],
+            "required": ["module"],
         },
         annotations=READONLY_ANNOTATIONS,
     ),
@@ -43,12 +39,10 @@ DEPENDENCY_TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "scope": {"type": "string"},
-                "repository": {"type": "string"},
                 "username": {"type": "string"},
                 "internal_only": {"type": "boolean", "default": True},
             },
-            "required": ["scope", "repository"],
+            "required": [],
         },
         annotations=READONLY_ANNOTATIONS,
     ),
