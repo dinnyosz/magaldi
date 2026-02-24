@@ -54,7 +54,7 @@ def run_glossary_extraction(
     Returns:
         Dict with glossary extraction results or None if no features.
     """
-    # Handle workers=0 (auto) - use tier-based default like Phase 4
+    # Handle workers=0 (auto) - use tier-based default like Phase 5
     if workers <= 0:
         from shared.ai.context_size import TIER_MAX_WORKERS
         workers = max(TIER_MAX_WORKERS.values())
@@ -134,7 +134,7 @@ def run_glossary_extraction(
                 bar_text.append(format_duration(eta), style="yellow")
                 bar_text.append(" ETA", style="dim")
 
-            # ETA breakdown per tier - show as table like Phase 4
+            # ETA breakdown per tier - show as table like Phase 5
             eta_breakdown = state.timing.get_eta_breakdown_with_avg(state.num_workers)
             eta_table = None
             if eta_breakdown:

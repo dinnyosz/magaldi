@@ -45,7 +45,7 @@ def run_feature_extraction(
     workers: int = 4,
     compact: bool = False,
 ) -> dict | None:
-    """Run Phase 6: Feature Extraction.
+    """Run Phase 7: Feature Extraction.
 
     Args:
         compact: If True, hide worker table in display (for watch mode).
@@ -53,7 +53,7 @@ def run_feature_extraction(
     Returns:
         Dict with feature extraction results or None if no elements to extract.
     """
-    # Handle workers=0 (auto) - use tier-based default like Phase 4
+    # Handle workers=0 (auto) - use tier-based default like Phase 5
     if workers <= 0:
         from shared.ai.context_size import TIER_MAX_WORKERS
         workers = max(TIER_MAX_WORKERS.values())

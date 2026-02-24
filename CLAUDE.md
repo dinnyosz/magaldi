@@ -42,18 +42,18 @@ make ollama-pull            # qwen3:1.7b, qwen3:4b-instruct, qwen3-embedding:0.6
 
 The system consists of two pipelines:
 
-**Parser Pipeline (Phases 1-4):**
-- Discovery → Change Detection → Parsing → Storage
+**Parser Pipeline (Phases 1-5):**
+- Discovery → Change Detection → Parsing → Variable Scoring → Storage
 - CLI: `magaldi parse /path/to/repo --user <username>`
 
-**AI Processing Pipeline (Phases 5-8):**
+**AI Processing Pipeline (Phases 6-9):**
 - Summarization → Embedding → MCP Server → Web UI
 
 ### Source Layout
 
 ```
 src/
-├── magaldi_core/      # Parser pipeline (phases 1-4)
+├── magaldi_core/      # Parser pipeline (phases 1-5)
 ├── magaldi_mcp/       # MCP server for Claude Code integration
 ├── magaldi_web/       # FastAPI web UI
 └── shared/            # CLI, config, AI client, common modules

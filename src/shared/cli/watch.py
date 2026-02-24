@@ -229,7 +229,7 @@ def process_file_changes(
             console.print("  [yellow]AI models unavailable, skipping AI processing[/]")
             skip_ai = True
 
-    # Phase 4: Processing
+    # Phase 5: Processing
     console.print("  [bold blue]Processing[/]")
 
     # Build file hashes dict
@@ -468,7 +468,7 @@ def watch(
                 print_parsing_result(parsing_result)
 
                 if parsing_result.total_elements > 0:
-                    # Phase 4: Processing
+                    # Phase 5: Processing
                     console.print("\n[bold blue]Processing[/]")
                     processed, skipped, indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, failed_elements, deleted = run_processing(
                         parsing_result, manifest, config, dry_run=False, skip_ai=skip_ai, workers=workers, compact=True
