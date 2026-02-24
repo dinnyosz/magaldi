@@ -78,6 +78,85 @@ def _generate_import_summary(element: "CodeElement") -> str:
     return f"Import: {code}"
 
 
+# Small function/method handcrafted summaries
+# Functions/methods below a line threshold skip LLM and use code/docstring directly
+
+def _get_element_line_count(element: "CodeElement") -> int:
+    """Get non-empty line count for an element.
+
+    Uses code_metrics if available (populated by parser), otherwise
+    computes from raw_code, falling back to line_start/line_end.
+
+    Args:
+        element: Code element.
+
+    Returns:
+        Non-empty line count.
+    """
+    if element.code_metrics and "line_count" in element.code_metrics:
+        return element.code_metrics["line_count"]
+    if element.raw_code:
+        return sum(1 for line in element.raw_code.split("\n") if line.strip())
+    if element.line_end and element.line_start:
+        return max(1, element.line_end - element.line_start + 1)
+    return 0
+
+
+def _is_small_function(element: "CodeElement", threshold: int) -> bool:
+    """Check if a function/method is small enough for a handcrafted summary.
+
+    Args:
+        element: Code element to check.
+        threshold: Max non-empty lines for handcrafted summary (0 to disable).
+
+    Returns:
+        True if element is a function/method with <= threshold lines.
+    """
+    if threshold <= 0:
+        return False
+    if element.element_type not in ("function", "method"):
+        return False
+    return _get_element_line_count(element) <= threshold
+
+
+def _generate_small_function_summary(element: "CodeElement") -> str:
+    """Generate a handcrafted summary for a small function/method.
+
+    For small functions, the code itself is the best explanation. Priority:
+    1. First sentence of docstring (developer's own description)
+    2. Signature (for trivial getters/setters without docstring)
+    3. Raw code (fallback — code IS the explanation)
+
+    Args:
+        element: A small function or method element.
+
+    Returns:
+        A summary string suitable for embedding.
+    """
+    # Try docstring first sentence
+    if element.docstring:
+        first_line = element.docstring.strip().split("\n")[0].strip()
+        # Strip trailing period for consistency with clean_summary
+        first_line = first_line.rstrip(".")
+        if first_line:
+            return first_line
+
+    # Try signature
+    if element.signature:
+        return element.signature.strip()
+
+    # Fallback to raw code
+    code = (element.raw_code or "").strip()
+    if code:
+        if len(code) <= 200:
+            return code
+        # Truncate to first few non-empty lines
+        lines = [line for line in code.split("\n") if line.strip()][:3]
+        return "\n".join(lines)
+
+    return f"{element.element_type.title()}: {element.name}"
+
+
 # =============================================================================
 # ELEMENT PROCESSING HELPERS
 # =============================================================================
@@ -364,6 +443,9 @@ def _process_single_element(
         elif element.element_type in _HANDCRAFTED_SUMMARY_TYPES:
             # Use handcrafted summary (no LLM call needed)
             summary = _generate_import_summary(element)
+        elif _is_small_function(element, config.handcrafted_max_lines):
+            # Small functions: code/docstring is the best explanation, skip LLM
+            summary = _generate_small_function_summary(element)
         else:
             api_start = time.time()
             summary, prompt_tokens, response_tokens = _summarize_element(element, summary_cache, llm_client, config)

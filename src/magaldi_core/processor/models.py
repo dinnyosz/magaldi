@@ -80,6 +80,11 @@ class ProcessingConfig:
     summarize_timeout: int = 180  # 3 minutes to handle queue wait with many workers
     max_code_tokens: int = 4000
 
+    # Handcrafted summary threshold: functions/methods with <= this many
+    # non-empty lines get a handcrafted summary instead of LLM summarization.
+    # Set to 0 to disable. Default 5 (~24% of functions in typical codebases).
+    handcrafted_max_lines: int = 5
+
     # Embedding settings
     embed_dimensions: int = 1024
     embed_max_context: int = 8192
