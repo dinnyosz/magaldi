@@ -132,7 +132,6 @@ def mock_parsing_result():
         16384: {"count": 0, "max_chars": 0, "max_tokens": 0, "largest": None, "by_type": {}},
         32768: {"count": 0, "max_chars": 0, "max_tokens": 0, "largest": None, "by_type": {}},
     }
-    result.variables_filtered = 0
     return result
 
 
@@ -641,8 +640,7 @@ class TestPrintFunctions:
             16384: {"count": 0, "max_chars": 0, "max_tokens": 0, "largest": None, "by_type": {}},
             32768: {"count": 0, "max_chars": 0, "max_tokens": 0, "largest": None, "by_type": {}},
         }
-        result.variables_filtered = 0
-
+    
         print_parsing_result(result)
 
         captured = capsys.readouterr()
