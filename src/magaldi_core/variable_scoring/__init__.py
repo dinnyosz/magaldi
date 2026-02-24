@@ -297,8 +297,8 @@ def score_variables(
         tier_for_timeout = _get_context_tier(batches[0])
         tier_timeout = TIER_TIMEOUTS.get(tier_for_timeout, 120.0)
 
-        # Throughput tracker with 10s window
-        throughput_tracker = ThroughputTracker(window_seconds=10.0)
+        # Throughput tracker with 60s window (matches other processors)
+        throughput_tracker = ThroughputTracker(window_seconds=60.0)
 
         # Map thread IDs to stable worker display IDs
         _thread_id_lock = threading.Lock()

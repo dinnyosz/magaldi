@@ -158,12 +158,30 @@ class TestSystemPrompt:
 
     def test_has_few_shot_examples(self):
         """Prompt includes HIGH and LOW scoring examples for calibration."""
-        assert "Examples (HIGH)" in SYSTEM_PROMPT
+        assert "Examples (HIGH" in SYSTEM_PROMPT
         assert "Examples (LOW" in SYSTEM_PROMPT
         # LOW examples should show 1,1,1,1
         assert "1,1,1,1" in SYSTEM_PROMPT
         # HIGH examples should show high scores
         assert "9,1,1,8" in SYSTEM_PROMPT  # config constant
+
+    def test_covers_string_templates(self):
+        """Prompt covers string templates/prompts as HIGH scoring."""
+        assert "prompt template" in SYSTEM_PROMPT or "string template" in SYSTEM_PROMPT
+        assert "SYSTEM_PROMPT" in SYSTEM_PROMPT
+
+    def test_covers_coding_agent_perspective(self):
+        """Prompt frames scoring from a coding agent's perspective."""
+        assert "coding agent" in SYSTEM_PROMPT
+
+    def test_covers_export_lists(self):
+        """Prompt covers __all__ export lists as HIGH scoring."""
+        assert "__all__" in SYSTEM_PROMPT
+
+    def test_covers_query_strings(self):
+        """Prompt covers SQL/query strings and sentinels."""
+        assert "query string" in SYSTEM_PROMPT or "SQL" in SYSTEM_PROMPT
+        assert "sentinel" in SYSTEM_PROMPT
 
     def test_has_drop_rate_guidance(self):
         """Prompt guides model that most variables should be dropped."""
