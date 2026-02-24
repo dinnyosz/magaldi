@@ -23,6 +23,7 @@ from rich.table import Table
 from rich.text import Text
 
 from shared.cli._shared import console, format_duration, get_model_column_width
+from shared.cli.extract import build_eta_table
 
 if TYPE_CHECKING:
     from magaldi_core.change_detection import ChangeManifest
@@ -267,27 +268,36 @@ def run_processing(
                 # Worker is throttled - not allowed to run
                 worker_table.add_row(f"[{wid}]", "[dim yellow]throttled[/]", "", "", "", "")
 
-        # Per-type stats
+        # Per-type-per-tier ETA breakdown table
         type_colors = {
             "file": "cyan",
             "class": "magenta",
+            "interface": "magenta",
+            "type_alias": "magenta",
             "function": "blue",
             "method": "green",
             "constant": "yellow",
             "variable": "red",
             "import": "bright_black",
         }
-        type_stats = state.timing.get_type_stats()
-        type_parts = []
-        for t in ["file", "class", "function", "method", "constant", "variable", "import"]:
-            if t in type_stats:
-                done, tot, avg_wall, avg_summ, avg_embed = type_stats[t]
-                color = type_colors.get(t, "white")
-                if done >= tot:
-                    type_parts.append(f"[{color}]{t}[/]: [green]{done}/{tot}[/] [dim]({avg_wall:.1f}s)[/]")
-                else:
-                    type_parts.append(f"[{color}]{t}[/]: [yellow]{done}/{tot}[/] [dim]({avg_wall:.1f}s)[/]")
-        type_line = f"  [dim]Progress:[/] {' [dim]|[/] '.join(type_parts)}" if type_parts else ""
+        type_order = ["file", "class", "interface", "type_alias", "function", "method", "constant", "variable"]
+        eta_breakdown = state.timing.get_eta_breakdown_with_avg(effective_workers)
+        eta_table = build_eta_table(eta_breakdown, type_order, type_colors)
+
+        # Fallback: per-type single-line if no tier data yet
+        type_line = ""
+        if not eta_table:
+            type_stats = state.timing.get_type_stats()
+            type_parts = []
+            for t in type_order:
+                if t in type_stats:
+                    done, tot, avg_wall, avg_summ, avg_embed = type_stats[t]
+                    color = type_colors.get(t, "white")
+                    if done >= tot:
+                        type_parts.append(f"[{color}]{t}[/]: [green]{done}/{tot}[/] [dim]({avg_wall:.1f}s)[/]")
+                    else:
+                        type_parts.append(f"[{color}]{t}[/]: [yellow]{done}/{tot}[/] [dim]({avg_wall:.1f}s)[/]")
+            type_line = f"  [dim]Progress:[/] {' [dim]|[/] '.join(type_parts)}" if type_parts else ""
 
         # Stats line
         # state.completed already excludes unchanged/skipped elements
@@ -346,10 +356,12 @@ def run_processing(
                 stats += f" [dim]|[/] [dim]Per Worker:[/] [yellow]{normalized_max:.1f}s[/] [dim]vs[/] [cyan]{td.completed_avg:.1f}s[/] [dim](last {td.completion_count})[/]"
 
         parts: list[RenderableType] = [bar_text]
+        if eta_table:
+            parts.append(eta_table)
+        elif type_line:
+            parts.append(type_line)
         if not compact:
             parts.append(worker_table)
-        if type_line:
-            parts.append(type_line)
         parts.append(stats)
 
         # Show recent errors if any
