@@ -80,13 +80,15 @@ class TestBashExtractor:
         assert len(variables) == 1
         assert variables[0].name == "MY_ARRAY"
 
-    def test_skip_local_declarations(self):
-        """Local declarations inside functions should not appear at top level."""
+    def test_local_declarations_extracted_from_function_body(self):
+        """Local declarations inside functions are extracted as variables."""
         code = 'my_func() {\n    local x="hello"\n}\n'
         elements = self._extract(code)
-        # Should only have the function, no variable
-        assert len(elements) == 1
+        # Function + local variable (LLM scoring decides if variable is kept)
+        assert len(elements) == 2
         assert elements[0].element_type == "function"
+        assert elements[1].element_type == "variable"
+        assert elements[1].name == "x"
 
     def test_empty_script(self):
         code = ""

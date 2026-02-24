@@ -6,9 +6,7 @@ and the main score_variables orchestrator.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from magaldi_core.variable_scoring import (
     _build_batches,
@@ -23,7 +21,6 @@ from magaldi_core.variable_scoring.models import (
     VariableScoringConfig,
 )
 from magaldi_core.variable_scoring.prompts import SYSTEM_PROMPT, build_user_prompt
-
 
 # =============================================================================
 # VariableScore model tests
@@ -461,7 +458,7 @@ class TestScoreVariables:
         def mock_generate(**kwargs):
             # Parse the prompt to figure out how many variables
             content = kwargs.get("messages", [{}])[-1].get("content", "")
-            lines = [l for l in content.split("\n") if l and l[0].isdigit()]
+            lines = [line for line in content.split("\n") if line and line[0].isdigit()]
             return "\n".join(f"{i+1}. 5,5,5,5" for i in range(len(lines)))
 
         mock_client.generate_from_messages.side_effect = mock_generate

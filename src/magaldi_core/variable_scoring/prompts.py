@@ -32,7 +32,7 @@ def build_user_prompt(variables: list[tuple[int, str, str, str]]) -> str:
         Formatted user prompt.
     """
     lines = ["Score these variables:"]
-    for idx, file_path, name, raw_code in variables:
+    for idx, file_path, _name, raw_code in variables:
         # Truncate long code to keep prompt compact
         code = raw_code.replace("\n", " ").strip()
         if len(code) > 120:

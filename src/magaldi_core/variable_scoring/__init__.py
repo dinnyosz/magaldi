@@ -10,6 +10,7 @@ semantic approach that can handle novel patterns without maintenance.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 import time
@@ -101,15 +102,13 @@ def _parse_scores(output: str, batch_size: int) -> list[VariableScore | None]:
     for match in score_pattern.finditer(output):
         idx = int(match.group(1))
         if 1 <= idx <= batch_size:
-            try:
+            with contextlib.suppress(ValueError, IndexError):
                 scores[idx - 1] = VariableScore(
                     config_value=min(10, max(1, int(match.group(2)))),
                     architectural_role=min(10, max(1, int(match.group(3)))),
                     data_definition=min(10, max(1, int(match.group(4)))),
                     general_usefulness=min(10, max(1, int(match.group(5)))),
                 )
-            except (ValueError, IndexError):
-                pass
 
     return scores
 
@@ -254,7 +253,7 @@ def score_variables(
                         all_scores[eid] = VariableScore(general_usefulness=5)
 
     # Apply threshold
-    for eid, score in all_scores.items():
+    for _eid, score in all_scores.items():
         if score.passes_threshold(config.threshold):
             result.kept += 1
         else:

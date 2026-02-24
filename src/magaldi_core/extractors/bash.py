@@ -199,6 +199,11 @@ def _extract_function_body_variables(
             continue
 
         if node.type == "variable_assignment":
+            # Skip variable_assignment nodes inside declaration_command
+            # (e.g. `local x="hello"` has both a declaration_command and
+            # a child variable_assignment — avoid double extraction)
+            if node.parent and node.parent.type == "declaration_command":
+                continue
             elem = _extract_variable(node, lines)
             if elem:
                 variables.append(elem)
