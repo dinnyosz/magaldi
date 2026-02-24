@@ -148,8 +148,8 @@ def _score_batch(
         {"role": "user", "content": user_prompt},
     ]
 
-    # Estimate output tokens: ~10 tokens per variable (number + 4 scores + commas)
-    output_budget = len(batch) * 10 + 20
+    # Output budget: ~20 tokens per variable (number + 4 scores + commas + newline + slack)
+    output_budget = len(batch) * 20 + 50
 
     try:
         output = llm_client.generate_from_messages(
@@ -189,7 +189,7 @@ def _get_context_tier(batch: list[tuple[int, str, str, str, str]]) -> int:
     from shared.ai.context_size import CONTEXT_TIERS
 
     content_chars = sum(len(code) + len(fp) + 20 for _, _, fp, _, code in batch)
-    output_tokens = len(batch) * 10 + 20
+    output_tokens = len(batch) * 20 + 50
     total_tokens = content_chars // 4 + 150 + output_tokens  # 150 = system prompt overhead
     num_ctx = CONTEXT_TIERS[0]  # Default to smallest
     for tier in CONTEXT_TIERS:

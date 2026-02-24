@@ -282,8 +282,8 @@ def run_variable_scoring(
     if not variables:
         return ScoringResult()
 
-    # Create LLM client using the small model (scoring is simple)
-    model_config = config.llm.get_summarize_model_small()
+    # Create LLM client using the main model (small model scores everything 1,1,1,1)
+    model_config = config.llm.get_summarize_model()
     llm_client = SummarizationLLMClient(
         url=model_config.url,
         model=model_config.name,
@@ -328,7 +328,7 @@ def run_variable_scoring(
     if result.debug_log:
         user_prompt, llm_output = result.debug_log[0]
         console.print()
-        console.print("  [bold dim]─── Sample batch (prompt → response) ───[/]")
+        console.print(f"  [bold dim]─── Sample batch (model={model_config.name}, provider={model_config.provider}) ───[/]")
         for line in user_prompt.split("\n"):
             console.print(f"  [dim]{line}[/]")
         console.print("  [bold dim]→ LLM response:[/]")
