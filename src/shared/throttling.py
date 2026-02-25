@@ -50,9 +50,11 @@ RAMP_HOLD_THRESHOLD = 0.30
 
 # Exploration: when peak is confident but neighbors lack data, temporarily
 # target a neighbor to collect samples and verify the peak is real.
-# EXPLORE_MIN_SAMPLES: how many samples a level needs before we trust it.
+# Significance threshold: level * EXPLORE_SAMPLES_PER_LEVEL samples needed.
+# At level 2 → 4 samples, level 5 → 10, level 10 → 20.
+# Higher concurrency has more variance, so we need more data to trust it.
 # EXPLORE_RADIUS: how far from the peak we look for under-explored levels.
-EXPLORE_MIN_SAMPLES = 3
+EXPLORE_SAMPLES_PER_LEVEL = 2
 EXPLORE_RADIUS = 3
 
 # Ramp cooldown scales with context tier: tier // 1024 seconds.
@@ -365,13 +367,25 @@ class ThroughputByLevel:
                     result[level] = (avg_base, len(dq))
             return result
 
+    @staticmethod
+    def _min_samples_for_level(level: int) -> int:
+        """Minimum samples needed to trust a level.
+
+        Higher concurrency → more variance → need more samples.
+        Returns level * EXPLORE_SAMPLES_PER_LEVEL (e.g., level 3 → 6 samples).
+        """
+        return level * EXPLORE_SAMPLES_PER_LEVEL
+
     def get_exploration_target(self, max_level: int) -> int | None:
         """Find an under-explored level near the peak to collect more data.
 
-        If the peak is confident (>= EXPLORE_MIN_SAMPLES) but a neighbor
-        within ±EXPLORE_RADIUS lacks data, returns that neighbor as an
-        exploration target. Scans upward first (higher concurrency =
+        If the peak is confident (>= level * EXPLORE_SAMPLES_PER_LEVEL samples)
+        but a neighbor within ±EXPLORE_RADIUS lacks data, returns that neighbor
+        as an exploration target. Scans upward first (higher concurrency =
         potentially more throughput), then downward.
+
+        Significance is level-proportional: level 2 needs 4 samples,
+        level 5 needs 10, etc. Higher concurrency has more variance.
 
         Args:
             max_level: Upper bound for exploration (typically base_workers).
@@ -389,7 +403,7 @@ class ThroughputByLevel:
         with self._lock:
             # Peak must be confident before we explore from it
             peak_count = len(self._levels.get(peak, deque()))
-            if peak_count < EXPLORE_MIN_SAMPLES:
+            if peak_count < self._min_samples_for_level(peak):
                 return None
 
             # Scan upward: peak+1, peak+2, ..., peak+EXPLORE_RADIUS
@@ -398,7 +412,7 @@ class ThroughputByLevel:
                 if candidate > max_level:
                     break
                 count = len(self._levels.get(candidate, deque()))
-                if count < EXPLORE_MIN_SAMPLES:
+                if count < self._min_samples_for_level(candidate):
                     return candidate
 
             # Scan downward: peak-1, peak-2, ..., peak-EXPLORE_RADIUS
@@ -407,7 +421,7 @@ class ThroughputByLevel:
                 if candidate < 1:
                     break
                 count = len(self._levels.get(candidate, deque()))
-                if count < EXPLORE_MIN_SAMPLES:
+                if count < self._min_samples_for_level(candidate):
                     return candidate
 
         return None
