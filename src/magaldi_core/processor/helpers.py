@@ -158,6 +158,53 @@ def _generate_small_function_summary(element: "CodeElement") -> str:
 
 
 # =============================================================================
+# HANDCRAFTED SUMMARY DISPATCH
+# =============================================================================
+
+
+def _should_handcraft(element: "CodeElement", config: "ProcessingConfig") -> bool:
+    """Check if an element should use a handcrafted summary instead of LLM.
+
+    Centralizes the handcrafted/LLM decision so it can be used both in
+    processing and ETA tracking. Each element type has its own criteria:
+    - Imports: always handcrafted (code IS the summary)
+    - Functions/methods: handcrafted if below line threshold
+
+    Args:
+        element: Code element to check.
+        config: Processing configuration with thresholds.
+
+    Returns:
+        True if element should skip LLM and use a handcrafted summary.
+    """
+    if element.element_type in _HANDCRAFTED_SUMMARY_TYPES:
+        return True
+    if element.element_type in ("function", "method"):
+        return _is_small_function(element, config.handcrafted_max_lines)
+    return False
+
+
+def _generate_handcrafted_summary(element: "CodeElement") -> str:
+    """Generate a handcrafted summary based on element type.
+
+    Dispatches to the appropriate per-type generator. Each element type
+    that supports handcrafting has its own method with type-specific logic.
+
+    Args:
+        element: Code element to generate summary for.
+
+    Returns:
+        A summary string suitable for embedding.
+    """
+    if element.element_type in _HANDCRAFTED_SUMMARY_TYPES:
+        return _generate_import_summary(element)
+    if element.element_type in ("function", "method"):
+        return _generate_small_function_summary(element)
+    # Fallback for future types
+    return f"{element.element_type.title()}: {element.name}"
+
+
+# =============================================================================
 # ELEMENT PROCESSING HELPERS
 # =============================================================================
 
@@ -440,12 +487,9 @@ def _process_single_element(
         update_status("summarizing", model_display, ctx_display)
         if config.skip_ai:
             summary = f"{element.element_type.title()}: {element.name}"
-        elif element.element_type in _HANDCRAFTED_SUMMARY_TYPES:
-            # Use handcrafted summary (no LLM call needed)
-            summary = _generate_import_summary(element)
-        elif _is_small_function(element, config.handcrafted_max_lines):
-            # Small functions: code/docstring is the best explanation, skip LLM
-            summary = _generate_small_function_summary(element)
+        elif _should_handcraft(element, config):
+            # Handcrafted summary: per-type generator, no LLM call needed
+            summary = _generate_handcrafted_summary(element)
         else:
             api_start = time.time()
             summary, prompt_tokens, response_tokens = _summarize_element(element, summary_cache, llm_client, config)
