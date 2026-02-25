@@ -503,10 +503,12 @@ def process_elements(
                 timing_stats.get_throughput_stats_with_concurrency()
             )
             peak_concurrency = timing_stats.get_peak_concurrency()
+            exploration_target = timing_stats.get_exploration_target(max_workers)
             all_levels = timing_stats.get_all_throughput_levels()
             current_throttle = dependency_tracker.compute_throttle_decision(
                 current_max_runtime, active_workers, throughput, avg_runtime, completion_count,
                 avg_concurrency, high_load_avg, peak_concurrency=peak_concurrency,
+                exploration_target=exploration_target,
                 all_levels=all_levels if all_levels else None,
             )
 
@@ -563,11 +565,13 @@ def process_elements(
                         timing_stats.get_throughput_stats_with_concurrency()
                     )
                     fresh_peak = timing_stats.get_peak_concurrency()
+                    fresh_explore = timing_stats.get_exploration_target(max_workers)
                     fresh_all_levels = timing_stats.get_all_throughput_levels()
                     fresh_throttle = dependency_tracker.compute_throttle_decision(
                         fresh_current_max, fresh_active, fresh_throughput, fresh_avg, fresh_count,
                         fresh_avg_conc, fresh_high_load, is_display_call=True,
                         peak_concurrency=fresh_peak,
+                        exploration_target=fresh_explore,
                         all_levels=fresh_all_levels if fresh_all_levels else None,
                     )
                     progress_state = ProgressState(
@@ -666,10 +670,12 @@ def process_elements(
                     )
                     fresh_active = worker_status.active_count()
                     fresh_peak = timing_stats.get_peak_concurrency()
+                    fresh_explore = timing_stats.get_exploration_target(max_workers)
                     fresh_all_levels = timing_stats.get_all_throughput_levels()
                     fresh_throttle = dependency_tracker.compute_throttle_decision(
                         fresh_current_max, fresh_active, fresh_throughput, fresh_avg, fresh_count,
                         fresh_avg_conc, fresh_high_load, peak_concurrency=fresh_peak,
+                        exploration_target=fresh_explore,
                         all_levels=fresh_all_levels if fresh_all_levels else None,
                     )
                     progress_state = ProgressState(

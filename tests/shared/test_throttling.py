@@ -955,11 +955,11 @@ class TestFormatThroughputLevels:
         assert build_throughput_levels_text({}) is None
 
     def test_single_chunk_returns_table(self):
-        """≤16 levels returns a single Table with 3 rows (num + time + count)."""
+        """≤16 levels returns a single Table with 2 rows (num + time)."""
         from shared.throttling import _build_levels_row
         levels = {1: (2.0, 3), 2: (1.5, 5)}
         table = _build_levels_row(range(1, 3), levels, 1.5, 0.5, None)
-        assert table.row_count == 3
+        assert table.row_count == 2
         # 1 indent column + 2 level columns = 3
         assert len(table.columns) == 3
 
@@ -993,14 +993,19 @@ class TestFormatThroughputLevels:
         assert _confidence_style(3) == "bold"
         assert _confidence_style(10) == "bold"
 
-    def test_sample_count_row_displayed(self):
-        """Third row shows n={count} for each level."""
-        levels = {1: (2.0, 3), 2: (3.0, 7), 3: (4.0, 1)}
-        result = format_throughput_levels(levels, max_workers=3)
+    def test_exploration_target_marked_with_question(self):
+        """Exploration target level shows '?' prefix."""
+        levels = {1: (2.0, 3), 2: (3.0, 5)}
+        result = format_throughput_levels(levels, max_workers=4, exploration_target=3)
         text = _render_to_text(result)
-        assert "n=3" in text
-        assert "n=7" in text
-        assert "n=1" in text
+        assert "?3" in text
+
+    def test_exploration_target_with_data(self):
+        """Exploration target shows '?' even when it has data."""
+        levels = {1: (2.0, 3), 2: (3.0, 5), 3: (4.0, 1)}
+        result = format_throughput_levels(levels, max_workers=3, exploration_target=3)
+        text = _render_to_text(result)
+        assert "?3" in text
 
     def test_all_same_base_time(self):
         """All levels with same base time renders without errors."""
@@ -1009,3 +1014,246 @@ class TestFormatThroughputLevels:
         text = _render_to_text(result)
         # All same time → no division error, all levels shown
         assert "3.0s" in text
+
+
+class TestExplorationTarget:
+    """Tests for ThroughputByLevel.get_exploration_target().
+
+    Exploration: when peak is confident but neighbors lack data,
+    return a neighbor to explore (collect more samples before trusting peak).
+    """
+
+    def test_no_peak_returns_none(self):
+        """No peak (insufficient data) → no exploration."""
+        tracker = ThroughputByLevel(min_samples=1)
+        tracker.record(2, 5.0)
+        # Only 1 level → no peak → no exploration
+        assert tracker.get_exploration_target(max_level=8) is None
+
+    def test_peak_not_confident_returns_none(self):
+        """Peak exists but has < EXPLORE_MIN_SAMPLES → don't explore from weak peak."""
+        tracker = ThroughputByLevel(min_samples=1)
+        # Level 2: 2 samples (below EXPLORE_MIN_SAMPLES=3)
+        tracker.record(2, 4.0)
+        tracker.record(2, 4.0)
+        # Level 4: 2 samples
+        tracker.record(4, 10.0)
+        tracker.record(4, 10.0)
+        # Peak exists (level 2) but only 2 samples → not confident enough
+        assert tracker.get_exploration_target(max_level=8) is None
+
+    def test_explore_upward_nearest(self):
+        """Peak confident, nearest above missing → returns peak + 1."""
+        tracker = ThroughputByLevel(min_samples=1)
+        for _ in range(5):
+            tracker.record(2, 4.0)  # confident peak
+        for _ in range(3):
+            tracker.record(4, 10.0)  # another level
+        # Level 3 has no data → explore upward
+        assert tracker.get_exploration_target(max_level=8) == 3
+
+    def test_explore_upward_skips_explored(self):
+        """Peak confident, nearest above has data but peak+2 missing → returns peak+2."""
+        tracker = ThroughputByLevel(min_samples=1)
+        for _ in range(5):
+            tracker.record(2, 4.0)  # confident peak
+        for _ in range(3):
+            tracker.record(3, 6.0)  # level 3 explored
+        for _ in range(3):
+            tracker.record(5, 12.0)  # level 5 explored
+        # Level 4 has no data → explore peak+2
+        assert tracker.get_exploration_target(max_level=8) == 4
+
+    def test_explore_downward_when_above_explored(self):
+        """All above explored, below missing → returns peak - 1."""
+        tracker = ThroughputByLevel(min_samples=1)
+        for _ in range(5):
+            tracker.record(4, 4.0)  # peak at 4
+        for _ in range(3):
+            tracker.record(5, 5.0)  # above explored
+        for _ in range(3):
+            tracker.record(6, 6.0)  # above explored
+        for _ in range(3):
+            tracker.record(7, 7.0)  # above explored
+        for _ in range(3):
+            tracker.record(2, 3.0)  # other level (below)
+        # Levels 5,6,7 explored. Level 3 has no data → explore downward
+        assert tracker.get_exploration_target(max_level=8) == 3
+
+    def test_all_neighbors_explored_returns_none(self):
+        """All neighbors within radius have enough data → no exploration."""
+        tracker = ThroughputByLevel(min_samples=1)
+        # Peak at 4 with data at 1,2,3,4,5,6,7 (all within ±3 radius)
+        for level in range(1, 8):
+            for _ in range(5):
+                tracker.record(level, float(level) * 2)
+        assert tracker.get_exploration_target(max_level=8) is None
+
+    def test_peak_at_level_1_only_explores_above(self):
+        """Peak at 1 → no below to check, only explores above."""
+        tracker = ThroughputByLevel(min_samples=1)
+        for _ in range(5):
+            tracker.record(1, 3.0)  # peak at 1
+        for _ in range(3):
+            tracker.record(3, 9.0)  # level 3 explored
+        # Level 2 has no data → explore upward
+        assert tracker.get_exploration_target(max_level=8) == 2
+
+    def test_capped_by_max_level(self):
+        """Exploration doesn't return levels above max_level."""
+        tracker = ThroughputByLevel(min_samples=1)
+        for _ in range(5):
+            tracker.record(3, 3.0)  # peak at 3
+        for _ in range(3):
+            tracker.record(1, 5.0)  # level 1 explored
+        # max_level=3 → can't explore above
+        # Scan upward: 4 > max_level, stop
+        # Scan downward: level 2 has no data → return 2
+        assert tracker.get_exploration_target(max_level=3) == 2
+
+    def test_capped_by_max_level_all_neighbors_at_boundary(self):
+        """At max_level boundary with all explored → returns None."""
+        tracker = ThroughputByLevel(min_samples=1)
+        for _ in range(5):
+            tracker.record(3, 3.0)  # peak at 3
+        for _ in range(3):
+            tracker.record(1, 5.0)
+        for _ in range(3):
+            tracker.record(2, 4.0)
+        # max_level=3 → can't explore above, below are explored
+        assert tracker.get_exploration_target(max_level=3) is None
+
+    def test_radius_explores_up_to_3(self):
+        """With EXPLORE_RADIUS=3, explores up to peak+3."""
+        tracker = ThroughputByLevel(min_samples=1)
+        for _ in range(5):
+            tracker.record(2, 3.0)  # peak at 2
+        for _ in range(3):
+            tracker.record(3, 4.0)  # explored
+        for _ in range(3):
+            tracker.record(4, 5.0)  # explored
+        for _ in range(3):
+            tracker.record(1, 6.0)  # explored (below)
+        # Level 5 = peak+3, just within radius
+        assert tracker.get_exploration_target(max_level=10) == 5
+
+    def test_beyond_radius_not_explored(self):
+        """Levels beyond ±EXPLORE_RADIUS are not explored."""
+        tracker = ThroughputByLevel(min_samples=1)
+        for _ in range(5):
+            tracker.record(5, 3.0)  # peak at 5
+        # Fill all within radius: 2,3,4,5,6,7,8
+        for level in [2, 3, 4, 6, 7, 8]:
+            for _ in range(3):
+                tracker.record(level, float(level))
+        # Level 1 and 9+ are beyond radius → not explored
+        assert tracker.get_exploration_target(max_level=15) is None
+
+    def test_exploration_stops_after_collecting_data(self):
+        """Once neighbor gets enough samples, exploration moves to next."""
+        tracker = ThroughputByLevel(min_samples=1)
+        for _ in range(5):
+            tracker.record(2, 3.0)  # peak
+        for _ in range(3):
+            tracker.record(4, 8.0)  # another level
+
+        # Level 3 needs data → explore
+        assert tracker.get_exploration_target(max_level=8) == 3
+
+        # Simulate collecting data at level 3
+        tracker.record(3, 5.0)
+        tracker.record(3, 5.0)
+        tracker.record(3, 5.0)  # Now 3 samples
+
+        # Level 3 explored, level 4 explored, level 5 has no data → explore 5
+        assert tracker.get_exploration_target(max_level=8) == 5
+
+
+class TestExplorationInThrottleDecision:
+    """Tests for exploration_target parameter in compute_throttle_decision."""
+
+    def test_exploration_overrides_peak(self):
+        """Exploration target overrides peak as optimization target.
+
+        peak=4, exploration=6, formula=23 → target=6 (exploring beyond peak)
+        """
+        decision = compute_throttle_decision(
+            current_max_runtime=0.0,
+            tier_timeout=180.0,
+            base_workers=32,
+            active_workers=0,
+            avg_base_time=5.0,
+            completion_count=10,
+            peak_concurrency=4,
+            exploration_target=6,
+        )
+        assert decision.should_throttle
+        assert decision.recommended_workers == 6
+        assert decision.exploration_target == 6
+        assert "explore@6" in decision.reason
+
+    def test_exploration_capped_by_formula(self):
+        """Formula safety cap still limits exploration target.
+
+        formula=5, exploration=8 → capped to 5
+        """
+        decision = compute_throttle_decision(
+            current_max_runtime=0.0,
+            tier_timeout=180.0,
+            base_workers=32,
+            active_workers=0,
+            avg_base_time=20.0,  # formula = 117/20 = 5
+            completion_count=10,
+            peak_concurrency=3,
+            exploration_target=8,
+        )
+        assert decision.recommended_workers == 5
+
+    def test_exploration_none_falls_back_to_peak(self):
+        """When exploration is None, peak is used (existing behavior)."""
+        decision = compute_throttle_decision(
+            current_max_runtime=0.0,
+            tier_timeout=180.0,
+            base_workers=32,
+            active_workers=0,
+            avg_base_time=5.0,
+            completion_count=10,
+            peak_concurrency=4,
+            exploration_target=None,
+        )
+        assert decision.recommended_workers == 4
+        assert decision.exploration_target is None
+        assert "peak@4" in decision.reason
+
+    def test_emergency_overrides_exploration(self):
+        """Emergency throttle overrides exploration."""
+        decision = compute_throttle_decision(
+            current_max_runtime=110.0,  # 61% of 180
+            tier_timeout=180.0,
+            base_workers=8,
+            active_workers=4,
+            avg_base_time=5.0,
+            completion_count=10,
+            peak_concurrency=4,
+            exploration_target=6,
+        )
+        assert decision.recommended_workers == 1
+        assert "Emergency" in decision.reason
+
+    def test_exploration_with_ramp_up(self):
+        """Ramp-up still applies when exploring.
+
+        exploration=6, active=3 → ramp from 3: 3+1=4
+        """
+        decision = compute_throttle_decision(
+            current_max_runtime=10.0,
+            tier_timeout=180.0,
+            base_workers=32,
+            active_workers=3,
+            avg_base_time=5.0,
+            completion_count=10,
+            peak_concurrency=4,
+            exploration_target=6,
+        )
+        assert decision.recommended_workers == 4  # Ramped from 3 toward 6
+        assert "ramped from 3" in decision.reason

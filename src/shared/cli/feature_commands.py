@@ -314,7 +314,8 @@ def run_feature_extraction(
             levels_line = None
             if hasattr(state, 'all_levels') and state.all_levels:
                 from shared.throttling import format_throughput_levels
-                levels_line = format_throughput_levels(state.all_levels, state.peak_concurrency, max_workers=num_workers)
+                explore = getattr(state, 'exploration_target', None)
+                levels_line = format_throughput_levels(state.all_levels, state.peak_concurrency, max_workers=num_workers, exploration_target=explore)
 
             elements = [bar_text]
             if eta_table:
@@ -532,7 +533,8 @@ def run_feature_extraction(
                 levels_text = None
                 if hasattr(state, 'all_levels') and state.all_levels:
                     from shared.throttling import build_throughput_levels_text
-                    levels_text = build_throughput_levels_text(state.all_levels, state.peak_concurrency, max_workers=num_workers)
+                    explore = getattr(state, 'exploration_target', None)
+                    levels_text = build_throughput_levels_text(state.all_levels, state.peak_concurrency, max_workers=num_workers, exploration_target=explore)
 
                 elements = [header_text, bar_text]
                 if eta_table:

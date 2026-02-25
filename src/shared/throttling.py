@@ -48,6 +48,13 @@ MAX_RAMP_INCREMENT = 1
 # 30% gives time for contention to show before we add more workers.
 RAMP_HOLD_THRESHOLD = 0.30
 
+# Exploration: when peak is confident but neighbors lack data, temporarily
+# target a neighbor to collect samples and verify the peak is real.
+# EXPLORE_MIN_SAMPLES: how many samples a level needs before we trust it.
+# EXPLORE_RADIUS: how far from the peak we look for under-explored levels.
+EXPLORE_MIN_SAMPLES = 3
+EXPLORE_RADIUS = 3
+
 # Ramp cooldown scales with context tier: tier // 1024 seconds.
 # 2k→2s, 4k→4s, 8k→8s, 16k→16s, 32k→32s
 # Larger contexts take longer to process, so we wait longer to see impact.
@@ -68,6 +75,7 @@ class ThrottleDecision:
     reason: str
     completion_count: int = 0  # Number of completions used for completed_avg
     peak_concurrency: int | None = None  # Concurrency level with peak throughput (if available)
+    exploration_target: int | None = None  # Level being explored (if any)
     # Per-level throughput data: level -> (throughput_per_sec, sample_count)
     all_levels: dict[int, tuple[float, int]] | None = None
 
@@ -208,6 +216,20 @@ class ThroughputTracker:
         result = self._throughput_by_level.get_peak_level()
         return result[0] if result else None
 
+    def get_exploration_target(self, max_level: int) -> int | None:
+        """Get a neighbor of the peak that needs more data.
+
+        If the peak is confident but a nearby level (±EXPLORE_RADIUS) lacks
+        samples, returns that level as an exploration target.
+
+        Args:
+            max_level: Upper bound for exploration (typically base_workers).
+
+        Returns:
+            Level to explore, or None if no exploration needed.
+        """
+        return self._throughput_by_level.get_exploration_target(max_level)
+
 
 # Keep old name as alias for compatibility
 RuntimeHistory = ThroughputTracker
@@ -343,6 +365,53 @@ class ThroughputByLevel:
                     result[level] = (avg_base, len(dq))
             return result
 
+    def get_exploration_target(self, max_level: int) -> int | None:
+        """Find an under-explored level near the peak to collect more data.
+
+        If the peak is confident (>= EXPLORE_MIN_SAMPLES) but a neighbor
+        within ±EXPLORE_RADIUS lacks data, returns that neighbor as an
+        exploration target. Scans upward first (higher concurrency =
+        potentially more throughput), then downward.
+
+        Args:
+            max_level: Upper bound for exploration (typically base_workers).
+                Prevents exploring beyond what the system can use.
+
+        Returns:
+            Level to explore, or None if peak neighbors are well-sampled.
+        """
+        peak_result = self.get_peak_level()
+        if peak_result is None:
+            return None
+
+        peak, _ = peak_result
+
+        with self._lock:
+            # Peak must be confident before we explore from it
+            peak_count = len(self._levels.get(peak, deque()))
+            if peak_count < EXPLORE_MIN_SAMPLES:
+                return None
+
+            # Scan upward: peak+1, peak+2, ..., peak+EXPLORE_RADIUS
+            for offset in range(1, EXPLORE_RADIUS + 1):
+                candidate = peak + offset
+                if candidate > max_level:
+                    break
+                count = len(self._levels.get(candidate, deque()))
+                if count < EXPLORE_MIN_SAMPLES:
+                    return candidate
+
+            # Scan downward: peak-1, peak-2, ..., peak-EXPLORE_RADIUS
+            for offset in range(1, EXPLORE_RADIUS + 1):
+                candidate = peak - offset
+                if candidate < 1:
+                    break
+                count = len(self._levels.get(candidate, deque()))
+                if count < EXPLORE_MIN_SAMPLES:
+                    return candidate
+
+        return None
+
     def reset(self) -> None:
         """Clear all history."""
         with self._lock:
@@ -361,6 +430,7 @@ def compute_throttle_decision(
     avg_base_time: float = 0.0,
     post_warmup: bool = False,
     peak_concurrency: int | None = None,
+    exploration_target: int | None = None,
 ) -> ThrottleDecision:
     """Determine if throttling should be applied.
 
@@ -373,6 +443,10 @@ def compute_throttle_decision(
 
     The recommended workers = min(peak_level, formula_limit) when peak data
     is available, otherwise falls back to formula only.
+
+    When exploration_target is set, it temporarily overrides the peak as the
+    optimization target — allowing the system to ramp beyond the current peak
+    to collect data at a neighboring level.
 
     Args:
         current_max_runtime: Max runtime of currently active workers
@@ -390,6 +464,8 @@ def compute_throttle_decision(
         peak_concurrency: Concurrency level with highest observed throughput, or None
             if insufficient data. When set, this becomes the primary optimization
             target, capped by the formula-based safety limit.
+        exploration_target: Level to explore (neighbor of peak lacking data), or None.
+            When set, overrides peak_concurrency as the optimization target.
 
     Returns:
         ThrottleDecision with recommended action
@@ -490,7 +566,15 @@ def compute_throttle_decision(
     # Apply peak throughput optimization: if we have data showing which
     # concurrency level produces the best throughput, use that as the
     # primary target — but never exceed the formula's safety cap.
-    if peak_concurrency is not None:
+    # Exploration target overrides peak when set (temporarily ramp beyond
+    # current peak to collect data at a neighboring level).
+    if exploration_target is not None:
+        optimal = min(exploration_target, formula_optimal)
+        optimal = max(1, min(optimal, base_workers))  # Re-clamp
+        _log_throttle(
+            f"EXPLORE: target@{exploration_target} (peak@{peak_concurrency}) formula@{formula_optimal} → {optimal}"
+        )
+    elif peak_concurrency is not None:
         optimal = min(peak_concurrency, formula_optimal)
         optimal = max(1, min(optimal, base_workers))  # Re-clamp
         if peak_concurrency < formula_optimal:
@@ -556,15 +640,17 @@ def compute_throttle_decision(
 
     if should_throttle:
         peak_info = f",peak@{peak_concurrency}" if peak_concurrency is not None else ""
+        explore_info = f",explore@{exploration_target}" if exploration_target is not None else ""
         return ThrottleDecision(
             should_throttle=True,
             current_max=current_max_runtime,
             historical_max=0,
             completed_avg=effective_base_time,
             recommended_workers=effective_workers,
-            reason=f"Throttle ({effective_workers}={int(effective_timeout)}s/{effective_base_time:.1f}s base{peak_info}{reason_suffix})",
+            reason=f"Throttle ({effective_workers}={int(effective_timeout)}s/{effective_base_time:.1f}s base{peak_info}{explore_info}{reason_suffix})",
             completion_count=completion_count,
             peak_concurrency=peak_concurrency,
+            exploration_target=exploration_target,
         )
     else:
         return ThrottleDecision(
@@ -576,6 +662,7 @@ def compute_throttle_decision(
             reason=f"Normal{reason_suffix}" if reason_suffix else "Normal",
             completion_count=completion_count,
             peak_concurrency=peak_concurrency,
+            exploration_target=exploration_target,
         )
 
 
@@ -642,11 +729,13 @@ def _build_levels_row(
     min_bt: float,
     bt_range: float,
     peak_concurrency: int | None,
+    exploration_target: int | None = None,
 ) -> object:
-    """Build a single Rich Table for a chunk of levels (three rows: number + time + count).
+    """Build a single Rich Table for a chunk of levels (two rows: number + time).
 
     Text confidence varies by sample count: dim (1), normal (2), bold (3+).
     Color-coded background: green (best) → red (worst).
+    Peak level is underlined. Exploration target is marked with "?" prefix.
 
     Args:
         levels_range: Range of level numbers to display in this row.
@@ -654,6 +743,7 @@ def _build_levels_row(
         min_bt: Minimum base time across ALL levels (for consistent color scaling).
         bt_range: max_bt - min_bt across ALL levels.
         peak_concurrency: The level identified as peak, or None.
+        exploration_target: Level being explored (neighbor of peak), or None.
 
     Returns:
         A rich.table.Table renderable.
@@ -677,10 +767,10 @@ def _build_levels_row(
 
     row1_cells: list[Text] = [Text("")]  # indent (level number)
     row2_cells: list[Text] = [Text("")]  # indent (base time)
-    row3_cells: list[Text] = [Text("")]  # indent (sample count)
 
     for level in levels_range:
         is_peak = peak_concurrency is not None and level == peak_concurrency
+        is_explore = exploration_target is not None and level == exploration_target
         if level in all_levels:
             avg_bt, count = all_levels[level]
             t = (avg_bt - min_bt) / bt_range if bt_range > 0 else 0.0
@@ -694,24 +784,23 @@ def _build_levels_row(
             if is_peak:
                 style = f"underline {style}"
 
-            level_str = str(level).center(_LEVEL_COL_WIDTH)
+            # Mark exploration target with "?" prefix
+            level_label = f"?{level}" if is_explore else str(level)
+            level_str = level_label.center(_LEVEL_COL_WIDTH)
             row1_cells.append(Text(level_str, style=style))
 
             bt_str = f"{avg_bt:.1f}s" if avg_bt < 100 else f"{avg_bt:.0f}s"
             bt_padded = bt_str.center(_LEVEL_COL_WIDTH)
             row2_cells.append(Text(bt_padded, style=style))
-
-            count_str = f"n={count}".center(_LEVEL_COL_WIDTH)
-            row3_cells.append(Text(count_str, style=style))
         else:
-            level_str = str(level).center(_LEVEL_COL_WIDTH)
+            # Mark exploration target even when no data yet
+            level_label = f"?{level}" if is_explore else str(level)
+            level_str = level_label.center(_LEVEL_COL_WIDTH)
             row1_cells.append(Text(level_str, style="dim"))
             row2_cells.append(Text("···".center(_LEVEL_COL_WIDTH), style="dim"))
-            row3_cells.append(Text(" ".center(_LEVEL_COL_WIDTH), style="dim"))
 
     table.add_row(*row1_cells)
     table.add_row(*row2_cells)
-    table.add_row(*row3_cells)
 
     return table
 
@@ -720,6 +809,7 @@ def _build_levels_table(
     all_levels: dict[int, tuple[float, int]],
     peak_concurrency: int | None = None,
     max_workers: int = 0,
+    exploration_target: int | None = None,
 ) -> object:
     """Build color-graded level blocks, wrapping every 16 levels.
 
@@ -729,12 +819,14 @@ def _build_levels_table(
 
     Columns are color-coded on a green→red gradient based on base time.
     Levels without data show dim placeholders. The peak level is highlighted.
+    Exploration target is marked with "?" prefix.
     When there are more than 16 levels, they wrap onto new lines.
 
     Args:
         all_levels: Dict of level -> (avg_base_time_seconds, sample_count). Must be non-empty.
         peak_concurrency: The level identified as peak, or None.
         max_workers: Total worker slots (1..max_workers). If 0, uses max level in data.
+        exploration_target: Level being explored, or None.
 
     Returns:
         A Rich renderable (Table for ≤16 levels, Group of Tables for >16).
@@ -756,10 +848,10 @@ def _build_levels_table(
         chunks.append(range(start, end))
 
     if len(chunks) == 1:
-        return _build_levels_row(chunks[0], all_levels, min_bt, bt_range, peak_concurrency)
+        return _build_levels_row(chunks[0], all_levels, min_bt, bt_range, peak_concurrency, exploration_target)
 
     tables = [
-        _build_levels_row(chunk, all_levels, min_bt, bt_range, peak_concurrency)
+        _build_levels_row(chunk, all_levels, min_bt, bt_range, peak_concurrency, exploration_target)
         for chunk in chunks
     ]
     return Group(*tables)
@@ -769,6 +861,7 @@ def format_throughput_levels(
     all_levels: dict[int, tuple[float, int]] | None,
     peak_concurrency: int | None = None,
     max_workers: int = 0,
+    exploration_target: int | None = None,
 ) -> object | str:
     """Build a color-graded level table (Rich renderable).
 
@@ -776,11 +869,13 @@ def format_throughput_levels(
     - Row 1: level number (centered)
     - Row 2: avg base time (centered)
     Color-coded green (best) → red (worst). Peak level highlighted.
+    Exploration target marked with "?" prefix.
 
     Args:
         all_levels: Dict of level -> (avg_base_time_seconds, sample_count), or None.
         peak_concurrency: The level identified as peak, or None.
         max_workers: Total worker slots to display (1..max_workers). If 0, uses max level.
+        exploration_target: Level being explored, or None.
 
     Returns:
         Rich Table renderable, or empty string if no data.
@@ -788,13 +883,14 @@ def format_throughput_levels(
     if not all_levels:
         return ""
 
-    return _build_levels_table(all_levels, peak_concurrency, max_workers)
+    return _build_levels_table(all_levels, peak_concurrency, max_workers, exploration_target)
 
 
 def build_throughput_levels_text(
     all_levels: dict[int, tuple[float, int]] | None,
     peak_concurrency: int | None = None,
     max_workers: int = 0,
+    exploration_target: int | None = None,
 ) -> object | None:
     """Build a color-graded level table (Rich renderable).
 
@@ -802,6 +898,7 @@ def build_throughput_levels_text(
     - Row 1: level number (centered)
     - Row 2: avg base time (centered)
     Color-coded green (best) → red (worst). Peak level highlighted.
+    Exploration target marked with "?" prefix.
 
     Returns None if no data.
 
@@ -809,6 +906,7 @@ def build_throughput_levels_text(
         all_levels: Dict of level -> (avg_base_time_seconds, sample_count), or None.
         peak_concurrency: The level identified as peak, or None.
         max_workers: Total worker slots to display (1..max_workers). If 0, uses max level.
+        exploration_target: Level being explored, or None.
 
     Returns:
         A Rich Table renderable, or None if no data.
@@ -816,4 +914,4 @@ def build_throughput_levels_text(
     if not all_levels:
         return None
 
-    return _build_levels_table(all_levels, peak_concurrency, max_workers)
+    return _build_levels_table(all_levels, peak_concurrency, max_workers, exploration_target)
