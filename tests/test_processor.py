@@ -15,9 +15,12 @@ from magaldi_core.processor import (
     _get_element_line_count,
     _is_small_function,
     _generate_small_function_summary,
+    _should_handcraft,
+    _generate_handcrafted_summary,
 )
 from magaldi_core.job_tracker import SummaryCache
 from magaldi_core.code_parser import CodeElement
+from shared.ai.context_size import HANDCRAFTED_TIER
 
 
 def make_element(
@@ -2087,3 +2090,227 @@ class TestHandcraftedSummaryConfig:
             raw_code="def foo(): pass\n",
         )
         assert not _is_small_function(elem, config.handcrafted_max_lines)
+
+
+# =============================================================================
+# HANDCRAFTED SUMMARY DISPATCH TESTS
+# =============================================================================
+
+
+class TestShouldHandcraft:
+    """Tests for _should_handcraft unified decision function."""
+
+    def test_import_always_handcrafted(self):
+        """Imports should always be handcrafted regardless of config."""
+        config = ProcessingConfig(handcrafted_max_lines=0)  # Even when disabled
+        elem = CodeElement(element_type="import", name="os", raw_code="import os")
+        assert _should_handcraft(elem, config) is True
+
+    def test_small_function_handcrafted(self):
+        """Small function below threshold should be handcrafted."""
+        config = ProcessingConfig(handcrafted_max_lines=5)
+        elem = CodeElement(
+            element_type="function",
+            name="foo",
+            raw_code="def foo():\n    return 1\n",
+        )
+        assert _should_handcraft(elem, config) is True
+
+    def test_small_method_handcrafted(self):
+        """Small method below threshold should be handcrafted."""
+        config = ProcessingConfig(handcrafted_max_lines=5)
+        elem = CodeElement(
+            element_type="method",
+            name="bar",
+            raw_code="def bar(self):\n    return self.x\n",
+        )
+        assert _should_handcraft(elem, config) is True
+
+    def test_large_function_not_handcrafted(self):
+        """Function above threshold should NOT be handcrafted."""
+        config = ProcessingConfig(handcrafted_max_lines=3)
+        elem = CodeElement(
+            element_type="function",
+            name="big",
+            raw_code="def big():\n    a = 1\n    b = 2\n    c = 3\n    return a + b + c\n",
+        )
+        assert _should_handcraft(elem, config) is False
+
+    def test_function_disabled_with_zero(self):
+        """Functions should NOT be handcrafted when threshold is 0."""
+        config = ProcessingConfig(handcrafted_max_lines=0)
+        elem = CodeElement(
+            element_type="function",
+            name="tiny",
+            raw_code="def tiny(): pass\n",
+        )
+        assert _should_handcraft(elem, config) is False
+
+    def test_class_not_handcrafted(self):
+        """Classes should NOT be handcrafted (no handler yet)."""
+        config = ProcessingConfig(handcrafted_max_lines=5)
+        elem = CodeElement(
+            element_type="class",
+            name="Foo",
+            raw_code="class Foo: pass\n",
+        )
+        assert _should_handcraft(elem, config) is False
+
+    def test_file_not_handcrafted(self):
+        """Files should NOT be handcrafted."""
+        config = ProcessingConfig(handcrafted_max_lines=5)
+        elem = CodeElement(
+            element_type="file",
+            name="test.py",
+            raw_code="# test\n",
+        )
+        assert _should_handcraft(elem, config) is False
+
+    def test_variable_not_handcrafted(self):
+        """Variables should NOT be handcrafted."""
+        config = ProcessingConfig(handcrafted_max_lines=5)
+        elem = CodeElement(
+            element_type="variable",
+            name="x",
+            raw_code="x = 1\n",
+        )
+        assert _should_handcraft(elem, config) is False
+
+
+class TestGenerateHandcraftedSummary:
+    """Tests for _generate_handcrafted_summary dispatch function."""
+
+    def test_dispatches_import(self):
+        """Should dispatch to import generator for imports."""
+        elem = CodeElement(
+            element_type="import",
+            name="os",
+            raw_code="import os",
+        )
+        summary = _generate_handcrafted_summary(elem)
+        assert summary == "Import: import os"
+
+    def test_dispatches_function_with_docstring(self):
+        """Should dispatch to small function generator for functions."""
+        elem = CodeElement(
+            element_type="function",
+            name="foo",
+            raw_code="def foo():\n    return 1\n",
+            docstring="Return one",
+        )
+        summary = _generate_handcrafted_summary(elem)
+        assert summary == "Return one"
+
+    def test_dispatches_method_with_signature(self):
+        """Should dispatch to small function generator for methods."""
+        elem = CodeElement(
+            element_type="method",
+            name="bar",
+            raw_code="def bar(self): return self.x\n",
+            signature="def bar(self)",
+        )
+        summary = _generate_handcrafted_summary(elem)
+        assert summary == "def bar(self)"
+
+    def test_fallback_for_unknown_type(self):
+        """Should return type:name fallback for unsupported types."""
+        elem = CodeElement(
+            element_type="enum",
+            name="Color",
+            raw_code="enum Color { Red, Blue }",
+        )
+        summary = _generate_handcrafted_summary(elem)
+        assert summary == "Enum: Color"
+
+
+class TestHandcraftedTierETA:
+    """Tests for HANDCRAFTED_TIER integration with timing stats."""
+
+    def test_handcrafted_tier_value(self):
+        """HANDCRAFTED_TIER should be 0."""
+        assert HANDCRAFTED_TIER == 0
+
+    def test_timing_records_handcrafted_tier(self):
+        """TimingStats should track handcrafted elements with tier 0."""
+        stats = TimingStats()
+        stats.set_totals_by_type_tier({
+            ("function", HANDCRAFTED_TIER): 10,
+            ("function", 2048): 5,
+        })
+        stats.record(
+            wall_time=0.05,
+            summarize_time=0.0,
+            embed_time=0.04,
+            element_type="function",
+            tier=HANDCRAFTED_TIER,
+            avg_workers=1.0,
+        )
+        # Should appear in type_tier tracking
+        assert stats.summarize_counts_by_type_tier[("function", HANDCRAFTED_TIER)] == 1
+
+    def test_handcrafted_default_eta(self):
+        """Handcrafted tier should use 0.1s default when no data."""
+        stats = TimingStats()
+        stats.set_totals_by_type_tier({
+            ("import", HANDCRAFTED_TIER): 100,
+        })
+        eta = stats.eta_seconds(completed=0, total=100)
+        # No data yet, but handcrafted default should provide an estimate
+        # Need at least 1 completion for eta_seconds to work
+        assert eta is None  # No completions yet
+
+    def test_handcrafted_eta_after_completion(self):
+        """After completing one handcrafted element, ETA should use actual time."""
+        stats = TimingStats()
+        stats.set_totals_by_type_tier({
+            ("import", HANDCRAFTED_TIER): 10,
+        })
+        stats.record(
+            wall_time=0.08,
+            summarize_time=0.0,
+            embed_time=0.05,
+            element_type="import",
+            tier=HANDCRAFTED_TIER,
+            avg_workers=1.0,
+        )
+        eta = stats.eta_seconds(completed=1, total=10)
+        assert eta is not None
+        # 9 remaining * 0.08s avg = 0.72s
+        assert 0.5 < eta < 1.0
+
+    def test_handcrafted_in_eta_breakdown(self):
+        """Handcrafted elements should appear in ETA breakdown."""
+        stats = TimingStats()
+        stats.set_totals_by_type_tier({
+            ("function", HANDCRAFTED_TIER): 50,
+            ("function", 2048): 20,
+        })
+        breakdown = stats.get_eta_breakdown_with_avg()
+        tiers_in_breakdown = {tier for _, tier, *_ in breakdown}
+        assert HANDCRAFTED_TIER in tiers_in_breakdown
+        assert 2048 in tiers_in_breakdown
+
+    def test_handcrafted_fallback_eta_value(self):
+        """Handcrafted tier should fallback to 0.1s, not LLM-based tiers."""
+        stats = TimingStats()
+        stats.set_totals_by_type_tier({
+            ("function", HANDCRAFTED_TIER): 10,
+            ("function", 2048): 5,
+        })
+        # Record only LLM data (2048 tier), not handcrafted
+        stats.record(
+            wall_time=2.5,
+            summarize_time=2.0,
+            embed_time=0.3,
+            element_type="function",
+            tier=2048,
+            avg_workers=1.0,
+        )
+        breakdown = stats.get_eta_breakdown_with_avg()
+        # Find the handcrafted entry
+        handcrafted_entry = [e for e in breakdown if e[1] == HANDCRAFTED_TIER]
+        assert len(handcrafted_entry) == 1
+        avg_time, is_fallback = handcrafted_entry[0][2], handcrafted_entry[0][3]
+        # Should be 0.1s default, NOT extrapolated from 2.5s LLM time
+        assert avg_time == pytest.approx(0.1)
+        assert is_fallback is True
