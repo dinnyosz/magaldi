@@ -224,6 +224,8 @@ class SubfeatureProgressState:
     current_max: float = 0.0  # Max runtime of active workers (for throttle display)
     avg_base_time: float = 0.0  # Historical base time per worker
     completion_count: int = 0  # Number of completions used for avg_base_time
+    peak_concurrency: int | None = None  # Concurrency level with peak throughput
+    all_levels: dict[int, tuple[float, int]] | None = None  # Per-level throughput data
 
 
 @dataclass
@@ -795,6 +797,8 @@ def process_subfeatures(
             subfeature_state["current_max"] = throttle_info.current_max
             subfeature_state["avg_base_time"] = throttle_info.avg_base_time
             subfeature_state["completion_count"] = throttle_info.completion_count
+            subfeature_state["peak_concurrency"] = throttle_info.peak_concurrency
+            subfeature_state["all_levels"] = throttle_info.all_levels
         if on_progress:
             on_progress(SubfeatureProgressState(
                 total=total,
@@ -807,6 +811,8 @@ def process_subfeatures(
                 current_max=subfeature_state["current_max"],
                 avg_base_time=subfeature_state["avg_base_time"],
                 completion_count=subfeature_state["completion_count"],
+                peak_concurrency=subfeature_state.get("peak_concurrency"),
+                all_levels=subfeature_state.get("all_levels"),
             ))
 
     def process_wrapper(work_item: SubfeatureWorkItem) -> ProcessedSubfeature:

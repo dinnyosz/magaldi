@@ -68,6 +68,8 @@ class ThrottleDecision:
     reason: str
     completion_count: int = 0  # Number of completions used for completed_avg
     peak_concurrency: int | None = None  # Concurrency level with peak throughput (if available)
+    # Per-level throughput data: level -> (throughput_per_sec, sample_count)
+    all_levels: dict[int, tuple[float, int]] | None = None
 
 
 class ThroughputTracker:
@@ -589,3 +591,61 @@ def compute_throttle_decision(
             completion_count=completion_count,
             peak_concurrency=peak_concurrency,
         )
+
+
+def format_throughput_levels(
+    all_levels: dict[int, tuple[float, int]] | None,
+    peak_concurrency: int | None = None,
+) -> str:
+    """Format per-level throughput data as Rich markup string.
+
+    Output example: ``1→0.5/s(3) 2→0.8/s(5) *3→1.2/s(8) 4→0.9/s(4)``
+    where ``*`` marks the peak level.
+
+    Args:
+        all_levels: Dict of level -> (throughput_per_sec, sample_count), or None.
+        peak_concurrency: The level identified as peak, or None.
+
+    Returns:
+        Rich markup string, or empty string if no data.
+    """
+    if not all_levels:
+        return ""
+
+    parts: list[str] = []
+    for level in sorted(all_levels.keys()):
+        tp, count = all_levels[level]
+        is_peak = peak_concurrency is not None and level == peak_concurrency
+        if is_peak:
+            parts.append(f"[magenta]*{level}→{tp:.1f}/s({count})[/]")
+        else:
+            parts.append(f"[dim]{level}→{tp:.1f}/s({count})[/]")
+
+    return " ".join(parts)
+
+
+def append_throughput_levels(
+    text: object,
+    all_levels: dict[int, tuple[float, int]] | None,
+    peak_concurrency: int | None = None,
+) -> None:
+    """Append per-level throughput data to a Rich Text object.
+
+    Args:
+        text: A rich.text.Text instance (typed as object to avoid import).
+        all_levels: Dict of level -> (throughput_per_sec, sample_count), or None.
+        peak_concurrency: The level identified as peak, or None.
+    """
+    if not all_levels:
+        return
+
+    text.append(" | ", style="dim")  # type: ignore[attr-defined]
+    for i, level in enumerate(sorted(all_levels.keys())):
+        tp, count = all_levels[level]
+        is_peak = peak_concurrency is not None and level == peak_concurrency
+        if i > 0:
+            text.append(" ", style="dim")  # type: ignore[attr-defined]
+        if is_peak:
+            text.append(f"*{level}→{tp:.1f}/s({count})", style="magenta")  # type: ignore[attr-defined]
+        else:
+            text.append(f"{level}→{tp:.1f}/s({count})", style="dim")  # type: ignore[attr-defined]

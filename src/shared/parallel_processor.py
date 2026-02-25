@@ -400,6 +400,8 @@ class ThrottleDisplayInfo:
     avg_base_time: float
     completion_count: int  # Number of completions used to calculate avg_base_time
     peak_concurrency: int | None = None  # Concurrency level with peak throughput
+    # Per-level throughput data: level -> (throughput_per_sec, sample_count)
+    all_levels: dict[int, tuple[float, int]] | None = None
 
 
 @dataclass
@@ -435,6 +437,7 @@ class ThrottleContext:
             self.throughput_tracker.get_stats_with_concurrency()
         )
         peak = self.throughput_tracker.get_peak_concurrency()
+        all_levels = self.throughput_tracker._throughput_by_level.get_all_levels()
         throttle = compute_throttle_decision(
             current_max_runtime=current_max_runtime,
             tier_timeout=self.tier_timeout,
@@ -449,6 +452,8 @@ class ThrottleContext:
             peak_concurrency=peak,
         )
         self.post_warmup = False  # Only signal once
+        # Attach per-level throughput data for display
+        throttle.all_levels = all_levels if all_levels else None
         self.last_decision = throttle
 
         # Apply ramp cooldown (mirrors DependencyTracker.compute_throttle_decision)
@@ -473,6 +478,7 @@ class ThrottleContext:
             avg_base_time=avg_base,
             completion_count=count,
             peak_concurrency=peak,
+            all_levels=all_levels if all_levels else None,
         )
 
 

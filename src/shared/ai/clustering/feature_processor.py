@@ -280,6 +280,8 @@ class FeatureProgressState:
     current_max: float = 0.0  # Max runtime of active workers (for throttle display)
     avg_base_time: float = 0.0  # Historical base time per worker
     completion_count: int = 0  # Number of completions used for avg_base_time
+    peak_concurrency: int | None = None  # Concurrency level with peak throughput
+    all_levels: dict[int, tuple[float, int]] | None = None  # Per-level throughput data
 
 
 @dataclass
@@ -812,6 +814,8 @@ def process_features(
                 current_max=throttle_info.current_max,
                 avg_base_time=throttle_info.avg_base_time,
                 completion_count=throttle_info.completion_count,
+                peak_concurrency=throttle_info.peak_concurrency,
+                all_levels=throttle_info.all_levels,
             )
             on_progress(progress_state)
 

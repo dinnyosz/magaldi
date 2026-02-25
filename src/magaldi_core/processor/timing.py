@@ -354,6 +354,14 @@ class TimingStats:
         """Get concurrency level with peak throughput, or None if insufficient data."""
         return self.throughput_tracker.get_peak_concurrency()
 
+    def get_all_throughput_levels(self) -> dict[int, tuple[float, int]]:
+        """Get throughput data for all concurrency levels.
+
+        Returns:
+            Dict of level -> (throughput_per_sec, sample_count).
+        """
+        return self.throughput_tracker._throughput_by_level.get_all_levels()
+
     def reset_throughput(self) -> None:
         """Reset throughput tracker history.
 

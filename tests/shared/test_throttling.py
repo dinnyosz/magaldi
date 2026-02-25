@@ -9,7 +9,9 @@ from shared.throttling import (
     ThroughputByLevel,
     ThroughputTracker,
     TimeoutEvent,
+    append_throughput_levels,
     compute_throttle_decision,
+    format_throughput_levels,
 )
 
 
@@ -823,3 +825,66 @@ class TestPeakConcurrencyThrottleDecision:
         )
         assert not decision.should_throttle
         assert decision.recommended_workers == 8
+
+
+class TestFormatThroughputLevels:
+    """Tests for format_throughput_levels and append_throughput_levels."""
+
+    def test_empty_returns_empty(self):
+        """None or empty dict returns empty string."""
+        assert format_throughput_levels(None) == ""
+        assert format_throughput_levels({}) == ""
+
+    def test_single_level_no_peak(self):
+        """Single level without peak marked."""
+        result = format_throughput_levels({1: (0.5, 3)})
+        assert "1→0.5/s(3)" in result
+        assert "*" not in result  # No peak marker
+
+    def test_multiple_levels_with_peak(self):
+        """Multiple levels with peak highlighted."""
+        levels = {1: (0.5, 3), 2: (0.8, 5), 3: (1.2, 8), 4: (0.9, 4)}
+        result = format_throughput_levels(levels, peak_concurrency=3)
+        # Peak level should have * prefix and magenta styling
+        assert "*3→1.2/s(8)" in result
+        assert "1→0.5/s(3)" in result
+        assert "4→0.9/s(4)" in result
+
+    def test_levels_sorted_ascending(self):
+        """Levels should be displayed in ascending order."""
+        levels = {4: (0.9, 4), 1: (0.5, 3), 3: (1.2, 8), 2: (0.8, 5)}
+        result = format_throughput_levels(levels, peak_concurrency=3)
+        # Check that levels appear in order: 1, 2, 3, 4
+        pos_1 = result.find("1→")
+        pos_2 = result.find("2→")
+        pos_3 = result.find("3→")
+        pos_4 = result.find("4→")
+        assert pos_1 < pos_2 < pos_3 < pos_4
+
+    def test_peak_without_levels_returns_empty(self):
+        """Peak concurrency without level data returns empty."""
+        assert format_throughput_levels(None, peak_concurrency=3) == ""
+
+    def test_append_to_rich_text(self):
+        """append_throughput_levels adds to Rich Text object."""
+        from rich.text import Text
+        text = Text("prefix")
+        levels = {1: (0.5, 3), 2: (1.0, 5)}
+        append_throughput_levels(text, levels, peak_concurrency=2)
+        plain = text.plain
+        assert "1→0.5/s(3)" in plain
+        assert "*2→1.0/s(5)" in plain
+
+    def test_append_none_is_noop(self):
+        """append_throughput_levels with None does nothing."""
+        from rich.text import Text
+        text = Text("prefix")
+        append_throughput_levels(text, None)
+        assert text.plain == "prefix"
+
+    def test_append_empty_is_noop(self):
+        """append_throughput_levels with empty dict does nothing."""
+        from rich.text import Text
+        text = Text("prefix")
+        append_throughput_levels(text, {})
+        assert text.plain == "prefix"

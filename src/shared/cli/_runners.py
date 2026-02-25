@@ -228,7 +228,11 @@ def _build_scoring_display(state: "ScoringProgressState", num_workers: int) -> R
             stats_text.append(f"{td.completed_avg:.1f}s", style="cyan")
             if td.completion_count > 0:
                 stats_text.append(f" (last {td.completion_count})", style="dim")
-            if td.peak_concurrency is not None:
+            # Show per-level throughput data with peak highlighted
+            if hasattr(td, 'all_levels') and td.all_levels:
+                from shared.throttling import append_throughput_levels
+                append_throughput_levels(stats_text, td.all_levels, td.peak_concurrency)
+            elif td.peak_concurrency is not None:
                 stats_text.append(" | ", style="dim")
                 stats_text.append(f"Peak@{td.peak_concurrency}", style="magenta")
 
@@ -606,7 +610,13 @@ def run_processing(
                 normalized_max = effective_max / max(running_count, 1)
                 stats += f" [dim]|[/] [dim]Max:[/] [yellow]{effective_max:.1f}s[/]"
                 stats += f" [dim]|[/] [dim]Per Worker:[/] [yellow]{normalized_max:.1f}s[/] [dim]vs[/] [cyan]{td.completed_avg:.1f}s[/] [dim](last {td.completion_count})[/]"
-                if td.peak_concurrency is not None:
+                # Show per-level throughput data with peak highlighted
+                if hasattr(td, 'all_levels') and td.all_levels:
+                    from shared.throttling import format_throughput_levels
+                    levels_str = format_throughput_levels(td.all_levels, td.peak_concurrency)
+                    if levels_str:
+                        stats += f" [dim]|[/] {levels_str}"
+                elif td.peak_concurrency is not None:
                     stats += f" [dim]|[/] [magenta]Peak@{td.peak_concurrency}[/]"
 
         parts: list[RenderableType] = [bar_text]

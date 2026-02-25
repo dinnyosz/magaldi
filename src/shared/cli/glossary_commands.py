@@ -259,7 +259,11 @@ def run_glossary_extraction(
                 stats.append(" vs ", style="dim")
                 stats.append(f"{state.avg_base_time:.1f}s", style="cyan")
                 stats.append(f" (last {state.completion_count})", style="dim")
-                if state.peak_concurrency is not None:
+                # Show per-level throughput data with peak highlighted
+                if hasattr(state, 'all_levels') and state.all_levels:
+                    from shared.throttling import append_throughput_levels
+                    append_throughput_levels(stats, state.all_levels, state.peak_concurrency)
+                elif state.peak_concurrency is not None:
                     stats.append(" | ", style="dim")
                     stats.append(f"Peak@{state.peak_concurrency}", style="magenta")
 

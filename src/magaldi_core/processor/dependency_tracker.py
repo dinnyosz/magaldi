@@ -398,6 +398,7 @@ class DependencyTracker:
         avg_base_time: float = 0.0,
         is_display_call: bool = False,
         peak_concurrency: int | None = None,
+        all_levels: dict[int, tuple[float, int]] | None = None,
     ) -> ThrottleDecision:
         """Compute throttle decision based on base_time (normalized by concurrency).
 
@@ -479,6 +480,8 @@ class DependencyTracker:
                     # Scale down or other change, update tracking
                     self._last_recommended_workers = decision.recommended_workers
 
+            # Attach per-level throughput data for display
+            decision.all_levels = all_levels if all_levels else None
             return decision
 
     def get_tier_stats(self) -> dict[int, tuple[int, int]]:
