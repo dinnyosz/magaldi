@@ -591,19 +591,19 @@ class TestThroughputByLevel:
         assert tracker.get_all_levels() == {}
 
     def test_get_all_levels(self):
-        """get_all_levels returns avg_runtime and count for all levels."""
+        """get_all_levels returns avg base time (runtime/level) and count."""
         tracker = ThroughputByLevel(min_samples=1)
         for _ in range(3):
-            tracker.record(2, 5.0)
+            tracker.record(2, 5.0)  # base_time = 5.0/2 = 2.5
         for _ in range(5):
-            tracker.record(4, 8.0)
+            tracker.record(4, 8.0)  # base_time = 8.0/4 = 2.0
 
         levels = tracker.get_all_levels()
         assert 2 in levels
         assert 4 in levels
-        assert levels[2][0] == pytest.approx(5.0)  # avg_runtime at level 2
+        assert levels[2][0] == pytest.approx(2.5)  # avg base time at level 2
         assert levels[2][1] == 3  # 3 samples at level 2
-        assert levels[4][0] == pytest.approx(8.0)  # avg_runtime at level 4
+        assert levels[4][0] == pytest.approx(2.0)  # avg base time at level 4
         assert levels[4][1] == 5  # 5 samples at level 4
 
     def test_concurrency_zero_clamped_to_one(self):

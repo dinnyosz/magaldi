@@ -343,10 +343,14 @@ class ThroughputByLevel:
             return (best_level, best_tp)
 
     def get_all_levels(self) -> dict[int, tuple[float, int]]:
-        """Get average runtime stats for all levels (for display).
+        """Get average base time (per-worker cost) for all levels (for display).
+
+        Base time = runtime / concurrency_level. This normalizes across levels
+        so they're directly comparable: a 6s task at level 3 = 2.0s base,
+        same as a 2s task at level 1.
 
         Returns:
-            Dict of level -> (avg_runtime_seconds, sample_count).
+            Dict of level -> (avg_base_time_seconds, sample_count).
         """
         now = time.time()
         with self._lock:
@@ -354,8 +358,8 @@ class ThroughputByLevel:
             result = {}
             for level, dq in self._levels.items():
                 if dq:
-                    avg_rt = sum(rt for _, rt in dq) / len(dq)
-                    result[level] = (avg_rt, len(dq))
+                    avg_base = sum(rt / level for _, rt in dq) / len(dq)
+                    result[level] = (avg_base, len(dq))
             return result
 
     def reset(self) -> None:
@@ -598,14 +602,15 @@ def format_throughput_levels(
     all_levels: dict[int, tuple[float, int]] | None,
     peak_concurrency: int | None = None,
 ) -> str:
-    """Format per-level runtime data as a standalone Rich markup line.
+    """Format per-level base time data as a standalone Rich markup line.
 
-    Output: ``  Levels: 1→2.1s(3) 2→3.4s(5) *3→4.0s(8) 4→6.2s(4)``
-    Shows avg runtime per level; ``*`` marks the peak throughput level.
+    Output: ``  Levels: 1→2.1s(3) 2→1.7s(5) *3→1.3s(8) 4→1.6s(4)``
+    Shows avg base time (runtime/workers) per level; ``*`` marks the peak.
+    Lower base time at higher concurrency = GPU handling parallelism well.
     Intended to be rendered on its own line.
 
     Args:
-        all_levels: Dict of level -> (avg_runtime_seconds, sample_count), or None.
+        all_levels: Dict of level -> (avg_base_time_seconds, sample_count), or None.
         peak_concurrency: The level identified as peak, or None.
 
     Returns:
@@ -630,13 +635,13 @@ def build_throughput_levels_text(
     all_levels: dict[int, tuple[float, int]] | None,
     peak_concurrency: int | None = None,
 ) -> object | None:
-    """Build a Rich Text object for per-level runtime data.
+    """Build a Rich Text object for per-level base time data.
 
     Returns a standalone Text suitable for appending as a new line in a Group.
     Returns None if no data.
 
     Args:
-        all_levels: Dict of level -> (avg_runtime_seconds, sample_count), or None.
+        all_levels: Dict of level -> (avg_base_time_seconds, sample_count), or None.
         peak_concurrency: The level identified as peak, or None.
 
     Returns:
