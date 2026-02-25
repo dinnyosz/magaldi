@@ -267,7 +267,7 @@ def run_glossary_extraction(
             levels_text = None
             if hasattr(state, 'all_levels') and state.all_levels:
                 from shared.throttling import build_throughput_levels_text
-                levels_text = build_throughput_levels_text(state.all_levels, state.peak_concurrency)
+                levels_text = build_throughput_levels_text(state.all_levels, state.peak_concurrency, max_workers=num_workers)
 
             # Build group with optional eta_table
             elements = [phase_text, bar_text]

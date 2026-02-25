@@ -237,7 +237,7 @@ def _build_scoring_display(state: "ScoringProgressState", num_workers: int) -> R
     td = state.throttle_decision
     if td is not None and hasattr(td, 'all_levels') and td.all_levels:
         from shared.throttling import build_throughput_levels_text
-        levels_text = build_throughput_levels_text(td.all_levels, td.peak_concurrency)
+        levels_text = build_throughput_levels_text(td.all_levels, td.peak_concurrency, max_workers=num_workers)
 
     parts: list[RenderableType] = [bar_text]
     if score_text.plain:
@@ -624,7 +624,7 @@ def run_processing(
             td = parallelism.throttle_decision
             if hasattr(td, 'all_levels') and td.all_levels:
                 from shared.throttling import format_throughput_levels
-                levels_line = format_throughput_levels(td.all_levels, td.peak_concurrency)
+                levels_line = format_throughput_levels(td.all_levels, td.peak_concurrency, max_workers=num_workers)
 
         parts: list[RenderableType] = [bar_text]
         if eta_table:

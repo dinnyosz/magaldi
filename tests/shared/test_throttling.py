@@ -835,53 +835,82 @@ class TestPeakConcurrencyThrottleDecision:
 
 
 class TestFormatThroughputLevels:
-    """Tests for format_throughput_levels and build_throughput_levels_text."""
+    """Tests for color-graded dot visualization (format_throughput_levels and build_throughput_levels_text)."""
 
     def test_empty_returns_empty(self):
         """None or empty dict returns empty string."""
         assert format_throughput_levels(None) == ""
         assert format_throughput_levels({}) == ""
 
-    def test_single_level_no_peak(self):
-        """Single level without peak marked — shows avg runtime."""
+    def test_single_level_renders_block(self):
+        """Single level renders a block character with best label."""
         result = format_throughput_levels({1: (2.5, 3)})
-        assert "1→2.5s(3)" in result
-        assert "*" not in result  # No peak marker
-        assert "Levels:" in result  # Has label prefix
+        assert "█" in result
+        assert "best@1" in result or "peak@1" in result
 
     def test_multiple_levels_with_peak(self):
-        """Multiple levels with peak highlighted."""
-        levels = {1: (2.1, 3), 2: (3.4, 5), 3: (4.0, 8), 4: (6.2, 4)}
+        """Multiple levels with peak shows peak label."""
+        levels = {1: (2.1, 3), 2: (3.4, 5), 3: (1.3, 8), 4: (6.2, 4)}
         result = format_throughput_levels(levels, peak_concurrency=3)
-        # Peak level should have * prefix and magenta styling
-        assert "*3→4.0s(8)" in result
-        assert "1→2.1s(3)" in result
-        assert "4→6.2s(4)" in result
+        # Should have block chars and peak info
+        assert "█" in result
+        assert "peak@3" in result
+        assert "1.3s(8)" in result  # Peak's base time and count
 
-    def test_levels_sorted_ascending(self):
-        """Levels should be displayed in ascending order."""
-        levels = {4: (6.2, 4), 1: (2.1, 3), 3: (4.0, 8), 2: (3.4, 5)}
-        result = format_throughput_levels(levels, peak_concurrency=3)
-        # Check that levels appear in order: 1, 2, 3, 4
-        pos_1 = result.find("1→")
-        pos_2 = result.find("2→")
-        pos_3 = result.find("3→")
-        pos_4 = result.find("4→")
-        assert pos_1 < pos_2 < pos_3 < pos_4
+    def test_max_workers_shows_empty_slots(self):
+        """max_workers > max level shows dim dots for empty slots."""
+        levels = {1: (2.0, 3), 2: (3.0, 5)}
+        result = format_throughput_levels(levels, max_workers=5)
+        # Should have 2 blocks + 3 dots
+        assert result.count("█") == 2
+        assert result.count("·") == 3
+
+    def test_max_workers_zero_uses_max_level(self):
+        """max_workers=0 defaults to highest level in data."""
+        levels = {1: (2.0, 3), 3: (4.0, 5)}
+        result = format_throughput_levels(levels, max_workers=0)
+        # Should show positions 1, 2, 3 — level 2 is missing (dot)
+        assert result.count("█") == 2
+        assert result.count("·") == 1
+
+    def test_color_gradient_best_is_green(self):
+        """Best level (lowest base time) should get green color."""
+        from shared.throttling import _lerp_color
+        green = _lerp_color(0.0)  # Best
+        red = _lerp_color(1.0)  # Worst
+        # Green should have high green channel, low red
+        assert green == "#00c800"  # (0, 200, 0)
+        # Red should have high red channel, low green
+        assert red == "#dc0000"  # (220, 0, 0)
+
+    def test_color_gradient_midpoint_is_yellow(self):
+        """Midpoint should be yellow-ish."""
+        from shared.throttling import _lerp_color
+        mid = _lerp_color(0.5)
+        # At t=0.5: r=220, g=200 → yellow
+        assert mid == "#dcc800"
 
     def test_peak_without_levels_returns_empty(self):
         """Peak concurrency without level data returns empty."""
         assert format_throughput_levels(None, peak_concurrency=3) == ""
 
     def test_build_text_returns_rich_text(self):
-        """build_throughput_levels_text returns a Rich Text object."""
+        """build_throughput_levels_text returns a Rich Text object with blocks."""
         levels = {1: (2.5, 3), 2: (3.0, 5)}
         result = build_throughput_levels_text(levels, peak_concurrency=2)
         assert result is not None
         plain = result.plain
-        assert "1→2.5s(3)" in plain
-        assert "*2→3.0s(5)" in plain
-        assert "Levels:" in plain
+        assert "█" in plain
+        assert "peak@2" in plain
+
+    def test_build_text_with_max_workers(self):
+        """build_throughput_levels_text respects max_workers for empty slots."""
+        levels = {1: (2.0, 3)}
+        result = build_throughput_levels_text(levels, max_workers=4)
+        assert result is not None
+        plain = result.plain
+        assert plain.count("█") == 1
+        assert plain.count("·") == 3
 
     def test_build_text_none_returns_none(self):
         """build_throughput_levels_text with None returns None."""
@@ -890,3 +919,22 @@ class TestFormatThroughputLevels:
     def test_build_text_empty_returns_none(self):
         """build_throughput_levels_text with empty dict returns None."""
         assert build_throughput_levels_text({}) is None
+
+    def test_peak_underlined_in_markup(self):
+        """Peak level should have underline in Rich markup."""
+        levels = {1: (2.0, 3), 2: (1.5, 5), 3: (3.0, 4)}
+        result = format_throughput_levels(levels, peak_concurrency=2)
+        assert "underline" in result
+
+    def test_non_peak_no_underline(self):
+        """Non-peak levels should not have underline."""
+        levels = {1: (2.0, 3)}
+        result = format_throughput_levels(levels)
+        assert "underline" not in result
+
+    def test_all_same_base_time(self):
+        """All levels with same base time renders without errors."""
+        levels = {1: (3.0, 5), 2: (3.0, 5), 3: (3.0, 5)}
+        result = format_throughput_levels(levels, peak_concurrency=2, max_workers=3)
+        # All same time → all get t=0 (green), no division error
+        assert result.count("█") == 3

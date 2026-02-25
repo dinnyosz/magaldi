@@ -576,20 +576,49 @@ def compute_throttle_decision(
         )
 
 
+def _lerp_color(t: float) -> str:
+    """Interpolate from green (t=0, best) to red (t=1, worst).
+
+    Uses green → yellow → red gradient via RGB interpolation.
+
+    Args:
+        t: Value in [0, 1] where 0 = best (green), 1 = worst (red).
+
+    Returns:
+        Hex color string like ``#rrggbb``.
+    """
+    t = max(0.0, min(1.0, t))
+    # Green (0,200,0) → Yellow (220,200,0) → Red (220,0,0)
+    if t < 0.5:
+        # Green → Yellow
+        p = t * 2  # 0→1 over first half
+        r = int(220 * p)
+        g = 200
+    else:
+        # Yellow → Red
+        p = (t - 0.5) * 2  # 0→1 over second half
+        r = 220
+        g = int(200 * (1 - p))
+    return f"#{r:02x}{g:02x}00"
+
+
 def format_throughput_levels(
     all_levels: dict[int, tuple[float, int]] | None,
     peak_concurrency: int | None = None,
+    max_workers: int = 0,
 ) -> str:
-    """Format per-level base time data as a standalone Rich markup line.
+    """Format per-level base time as a color-graded dot line (Rich markup).
 
-    Output: ``  Levels: 1→2.1s(3) 2→1.7s(5) *3→1.3s(8) 4→1.6s(4)``
-    Shows avg base time (runtime/workers) per level; ``*`` marks the peak.
-    Lower base time at higher concurrency = GPU handling parallelism well.
-    Intended to be rendered on its own line.
+    Each position from 1 to max_workers is a block character (█), colored
+    on a gradient: green = lowest base time (best), red = highest (worst).
+    Levels without data show a dim dot (·). The peak level is underlined.
+
+    Example output (conceptual): ``  ⟨ █ █ █ █ · · · · ⟩  peak@3 1.3s``
 
     Args:
         all_levels: Dict of level -> (avg_base_time_seconds, sample_count), or None.
         peak_concurrency: The level identified as peak, or None.
+        max_workers: Total worker slots to display (1..max_workers). If 0, uses max level.
 
     Returns:
         Rich markup string, or empty string if no data.
@@ -597,23 +626,54 @@ def format_throughput_levels(
     if not all_levels:
         return ""
 
-    parts: list[str] = []
-    for level in sorted(all_levels.keys()):
-        avg_rt, count = all_levels[level]
-        is_peak = peak_concurrency is not None and level == peak_concurrency
-        if is_peak:
-            parts.append(f"[magenta]*{level}→{avg_rt:.1f}s({count})[/]")
-        else:
-            parts.append(f"[dim]{level}→{avg_rt:.1f}s({count})[/]")
+    max_level = max_workers if max_workers > 0 else max(all_levels.keys())
+    if max_level < 1:
+        return ""
 
-    return f"  [dim]Levels:[/] {' '.join(parts)}"
+    # Find min/max base times for color scaling
+    base_times = {lvl: bt for lvl, (bt, _) in all_levels.items()}
+    min_bt = min(base_times.values())
+    max_bt = max(base_times.values())
+    bt_range = max_bt - min_bt
+
+    parts: list[str] = ["  "]
+    for level in range(1, max_level + 1):
+        if level in all_levels:
+            avg_bt, count = all_levels[level]
+            # Normalize: 0 = best (lowest base time), 1 = worst (highest)
+            t = (avg_bt - min_bt) / bt_range if bt_range > 0 else 0.0
+            color = _lerp_color(t)
+            is_peak = peak_concurrency is not None and level == peak_concurrency
+            if is_peak:
+                parts.append(f"[bold underline {color}]█[/]")
+            else:
+                parts.append(f"[{color}]█[/]")
+        else:
+            parts.append("[dim]·[/]")
+
+    # Legend: show peak info and best/worst values
+    if peak_concurrency is not None and peak_concurrency in all_levels:
+        peak_bt, peak_count = all_levels[peak_concurrency]
+        parts.append(f"  [magenta]peak@{peak_concurrency}[/] [dim]{peak_bt:.1f}s({peak_count})[/]")
+    elif all_levels:
+        # Show best level info
+        best_level = min(all_levels, key=lambda l: all_levels[l][0])
+        best_bt, best_count = all_levels[best_level]
+        parts.append(f"  [dim]best@{best_level} {best_bt:.1f}s({best_count})[/]")
+
+    return "".join(parts)
 
 
 def build_throughput_levels_text(
     all_levels: dict[int, tuple[float, int]] | None,
     peak_concurrency: int | None = None,
+    max_workers: int = 0,
 ) -> object | None:
-    """Build a Rich Text object for per-level base time data.
+    """Build a Rich Text object for color-graded dot visualization.
+
+    Each position from 1 to max_workers is a block character (█), colored
+    on a gradient: green = lowest base time (best), red = highest (worst).
+    Levels without data show a dim dot (·). The peak level is underlined.
 
     Returns a standalone Text suitable for appending as a new line in a Group.
     Returns None if no data.
@@ -621,6 +681,7 @@ def build_throughput_levels_text(
     Args:
         all_levels: Dict of level -> (avg_base_time_seconds, sample_count), or None.
         peak_concurrency: The level identified as peak, or None.
+        max_workers: Total worker slots to display (1..max_workers). If 0, uses max level.
 
     Returns:
         A rich.text.Text instance, or None if no data.
@@ -630,16 +691,41 @@ def build_throughput_levels_text(
 
     from rich.text import Text
 
+    max_level = max_workers if max_workers > 0 else max(all_levels.keys())
+    if max_level < 1:
+        return None
+
+    # Find min/max base times for color scaling
+    base_times = {lvl: bt for lvl, (bt, _) in all_levels.items()}
+    min_bt = min(base_times.values())
+    max_bt = max(base_times.values())
+    bt_range = max_bt - min_bt
+
     text = Text("  ")
-    text.append("Levels: ", style="dim")
-    for i, level in enumerate(sorted(all_levels.keys())):
-        avg_rt, count = all_levels[level]
-        is_peak = peak_concurrency is not None and level == peak_concurrency
-        if i > 0:
-            text.append(" ", style="dim")
-        if is_peak:
-            text.append(f"*{level}→{avg_rt:.1f}s({count})", style="magenta")
+    for level in range(1, max_level + 1):
+        if level in all_levels:
+            avg_bt, count = all_levels[level]
+            # Normalize: 0 = best (lowest base time), 1 = worst (highest)
+            t = (avg_bt - min_bt) / bt_range if bt_range > 0 else 0.0
+            color = _lerp_color(t)
+            is_peak = peak_concurrency is not None and level == peak_concurrency
+            if is_peak:
+                text.append("█", style=f"bold underline {color}")
+            else:
+                text.append("█", style=color)
         else:
-            text.append(f"{level}→{avg_rt:.1f}s({count})", style="dim")
+            text.append("·", style="dim")
+
+    # Legend: show peak info and best/worst values
+    if peak_concurrency is not None and peak_concurrency in all_levels:
+        peak_bt, peak_count = all_levels[peak_concurrency]
+        text.append("  ", style="dim")
+        text.append(f"peak@{peak_concurrency}", style="magenta")
+        text.append(f" {peak_bt:.1f}s({peak_count})", style="dim")
+    elif all_levels:
+        best_level = min(all_levels, key=lambda l: all_levels[l][0])
+        best_bt, best_count = all_levels[best_level]
+        text.append("  ", style="dim")
+        text.append(f"best@{best_level} {best_bt:.1f}s({best_count})", style="dim")
 
     return text
