@@ -168,7 +168,8 @@ class TimingStats:
                         self.code_embed_counts_by_type[element_type] = self.code_embed_counts_by_type.get(element_type, 0) + 1
 
                 # Track per-(type, tier) timing for accurate ETA
-                if tier > 0:
+                # tier >= 0 to include HANDCRAFTED_TIER (0); tier < 0 means "not set"
+                if tier >= 0:
                     type_tier_key = (element_type, tier)
                     if type_tier_key not in self.total_summarize_by_type_tier:
                         self.total_summarize_by_type_tier[type_tier_key] = 0.0
