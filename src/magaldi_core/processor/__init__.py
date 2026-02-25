@@ -502,9 +502,10 @@ def process_elements(
             throughput, avg_runtime, completion_count, avg_concurrency, high_load_avg = (
                 timing_stats.get_throughput_stats_with_concurrency()
             )
+            peak_concurrency = timing_stats.get_peak_concurrency()
             current_throttle = dependency_tracker.compute_throttle_decision(
                 current_max_runtime, active_workers, throughput, avg_runtime, completion_count,
-                avg_concurrency, high_load_avg
+                avg_concurrency, high_load_avg, peak_concurrency=peak_concurrency
             )
 
             # Always use recommended_workers as the limit (includes ramp-up logic)
@@ -559,9 +560,11 @@ def process_elements(
                     fresh_throughput, fresh_avg, fresh_count, fresh_avg_conc, fresh_high_load = (
                         timing_stats.get_throughput_stats_with_concurrency()
                     )
+                    fresh_peak = timing_stats.get_peak_concurrency()
                     fresh_throttle = dependency_tracker.compute_throttle_decision(
                         fresh_current_max, fresh_active, fresh_throughput, fresh_avg, fresh_count,
-                        fresh_avg_conc, fresh_high_load, is_display_call=True
+                        fresh_avg_conc, fresh_high_load, is_display_call=True,
+                        peak_concurrency=fresh_peak
                     )
                     progress_state = ProgressState(
                         total=total,
@@ -658,9 +661,10 @@ def process_elements(
                         timing_stats.get_throughput_stats_with_concurrency()
                     )
                     fresh_active = worker_status.active_count()
+                    fresh_peak = timing_stats.get_peak_concurrency()
                     fresh_throttle = dependency_tracker.compute_throttle_decision(
                         fresh_current_max, fresh_active, fresh_throughput, fresh_avg, fresh_count,
-                        fresh_avg_conc, fresh_high_load
+                        fresh_avg_conc, fresh_high_load, peak_concurrency=fresh_peak
                     )
                     progress_state = ProgressState(
                         total=total,

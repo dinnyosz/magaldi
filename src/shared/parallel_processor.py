@@ -433,6 +433,7 @@ class ThrottleContext:
         throughput, avg_runtime, count, avg_conc, avg_base = (
             self.throughput_tracker.get_stats_with_concurrency()
         )
+        peak = self.throughput_tracker.get_peak_concurrency()
         throttle = compute_throttle_decision(
             current_max_runtime=current_max_runtime,
             tier_timeout=self.tier_timeout,
@@ -444,6 +445,7 @@ class ThrottleContext:
             avg_concurrency=avg_conc,
             avg_base_time=avg_base,
             post_warmup=self.post_warmup,
+            peak_concurrency=peak,
         )
         self.post_warmup = False  # Only signal once
         self.last_decision = throttle

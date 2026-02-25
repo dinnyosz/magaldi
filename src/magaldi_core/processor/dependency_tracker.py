@@ -397,6 +397,7 @@ class DependencyTracker:
         avg_concurrency: float = 0.0,
         avg_base_time: float = 0.0,
         is_display_call: bool = False,
+        peak_concurrency: int | None = None,
     ) -> ThrottleDecision:
         """Compute throttle decision based on base_time (normalized by concurrency).
 
@@ -412,6 +413,7 @@ class DependencyTracker:
             avg_concurrency: Average workers active at task start.
             avg_base_time: Average of (runtime/workers) from completions.
             is_display_call: If True, don't apply cooldown (display only, not actual throttle).
+            peak_concurrency: Concurrency level with peak throughput, or None.
 
         Returns:
             ThrottleDecision with recommended action.
@@ -435,6 +437,7 @@ class DependencyTracker:
                 avg_concurrency=avg_concurrency,
                 avg_base_time=avg_base_time,
                 post_warmup=post_warmup,
+                peak_concurrency=peak_concurrency,
             )
 
             # Apply ramp cooldown: scales with context tier (2k→2s, 4k→4s, 8k→8s, etc.)

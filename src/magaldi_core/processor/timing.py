@@ -350,6 +350,10 @@ class TimingStats:
         """
         return self.throughput_tracker.get_stats_with_concurrency()
 
+    def get_peak_concurrency(self) -> int | None:
+        """Get concurrency level with peak throughput, or None if insufficient data."""
+        return self.throughput_tracker.get_peak_concurrency()
+
     def reset_throughput(self) -> None:
         """Reset throughput tracker history.
 
