@@ -620,8 +620,22 @@ def _text_color_for_bg(bg_hex: str) -> str:
     return "black" if luminance > 128 else "white"
 
 
-_LEVEL_COL_WIDTH = 6  # Fixed width per level column (chars)
+_LEVEL_COL_WIDTH = 7  # Fixed width per level column (chars)
 _LEVELS_PER_ROW = 16  # Max levels before wrapping to a new line
+
+
+def _box_chars(count: int) -> tuple[str, str, str, str, str, str, str, str]:
+    """Return (top_left, top_h, top_right, side, bot_left, bot_h, bot_right, side) for sample count."""
+    if count <= 0:
+        return ("", " ", "", " ", "", " ", "", " ")
+    if count == 1:
+        return ("┌", "┄", "┐", "┆", "└", "┄", "┘", "┆")
+    if count == 2:
+        return ("┌", "╌", "┐", "╎", "└", "╌", "┘", "╎")
+    if count == 3:
+        return ("┌", "─", "┐", "│", "└", "─", "┘", "│")
+    # 4+
+    return ("┏", "━", "┓", "┃", "┗", "━", "┛", "┃")
 
 
 def _build_levels_row(
@@ -631,7 +645,13 @@ def _build_levels_row(
     bt_range: float,
     peak_concurrency: int | None,
 ) -> object:
-    """Build a single Rich Table for a chunk of levels (two rows: numbers + times).
+    """Build a single Rich Table for a chunk of levels (4 rows: border/number/time/border).
+
+    Border style varies by sample count to indicate data confidence:
+    - 1 sample: dotted border
+    - 2 samples: dashed border
+    - 3 samples: thin solid border
+    - 4+ samples: bold/thick border
 
     Args:
         levels_range: Range of level numbers to display in this row.
@@ -645,6 +665,8 @@ def _build_levels_row(
     """
     from rich.table import Table
     from rich.text import Text
+
+    inner_w = _LEVEL_COL_WIDTH - 2  # width inside borders
 
     table = Table(
         show_header=False,
@@ -660,8 +682,10 @@ def _build_levels_row(
     for _ in levels_range:
         table.add_column(width=_LEVEL_COL_WIDTH, no_wrap=True, justify="center")
 
-    row1_cells: list[Text] = [Text("")]  # indent
-    row2_cells: list[Text] = [Text("")]  # indent
+    top_cells: list[Text] = [Text("")]
+    row1_cells: list[Text] = [Text("")]
+    row2_cells: list[Text] = [Text("")]
+    bot_cells: list[Text] = [Text("")]
 
     for level in levels_range:
         is_peak = peak_concurrency is not None and level == peak_concurrency
@@ -671,20 +695,45 @@ def _build_levels_row(
             color = _lerp_color(t)
             fg = _text_color_for_bg(color)
             bg = f"on {color}"
-            style = f"bold {fg} {bg}" if is_peak else f"{fg} {bg}"
+            content_style = f"bold {fg} {bg}" if is_peak else f"{fg} {bg}"
 
-            label = Text(f" {level} ", style=style, justify="center")
-            row1_cells.append(label)
+            tl, th, tr, side, bl, bh, br, _ = _box_chars(count)
+            border_style = f"{color}"  # border in the gradient color
 
+            # Top border: ┌────┐
+            top = Text(f"{tl}{th * inner_w}{tr}", style=border_style)
+            top_cells.append(top)
+
+            # Level number: │ 3  │
+            level_str = str(level).center(inner_w)
+            cell = Text(side, style=border_style)
+            cell.append(level_str, style=content_style)
+            cell.append(side, style=border_style)
+            row1_cells.append(cell)
+
+            # Base time: │1.3s │
             bt_str = f"{avg_bt:.1f}s" if avg_bt < 100 else f"{avg_bt:.0f}s"
-            time_label = Text(f" {bt_str} ", style=style, justify="center")
-            row2_cells.append(time_label)
-        else:
-            row1_cells.append(Text(f" {level} ", style="dim", justify="center"))
-            row2_cells.append(Text(" ··· ", style="dim", justify="center"))
+            bt_padded = bt_str.center(inner_w)
+            tcell = Text(side, style=border_style)
+            tcell.append(bt_padded, style=content_style)
+            tcell.append(side, style=border_style)
+            row2_cells.append(tcell)
 
+            # Bottom border: └────┘
+            bot = Text(f"{bl}{bh * inner_w}{br}", style=border_style)
+            bot_cells.append(bot)
+        else:
+            # No data for this level
+            level_str = str(level).center(_LEVEL_COL_WIDTH)
+            top_cells.append(Text(" " * _LEVEL_COL_WIDTH))
+            row1_cells.append(Text(level_str, style="dim"))
+            row2_cells.append(Text("···".center(_LEVEL_COL_WIDTH), style="dim"))
+            bot_cells.append(Text(" " * _LEVEL_COL_WIDTH))
+
+    table.add_row(*top_cells)
     table.add_row(*row1_cells)
     table.add_row(*row2_cells)
+    table.add_row(*bot_cells)
 
     return table
 

@@ -955,11 +955,11 @@ class TestFormatThroughputLevels:
         assert build_throughput_levels_text({}) is None
 
     def test_single_chunk_returns_table(self):
-        """≤16 levels returns a single Table with two rows."""
+        """≤16 levels returns a single Table with 4 rows (border/num/time/border)."""
         from shared.throttling import _build_levels_row
         levels = {1: (2.0, 3), 2: (1.5, 5)}
         table = _build_levels_row(range(1, 3), levels, 1.5, 0.5, None)
-        assert table.row_count == 2
+        assert table.row_count == 4
         # 1 indent column + 2 level columns = 3
         assert len(table.columns) == 3
 
@@ -984,6 +984,35 @@ class TestFormatThroughputLevels:
         result = _build_levels_table(levels, max_workers=20)
         # Should be a Group (>16 levels)
         assert isinstance(result, Group)
+
+    def test_border_varies_by_sample_count(self):
+        """Border style changes based on number of data points."""
+        # 1 sample → dotted (┄), 2 → dashed (╌), 3 → thin (─), 4+ → bold (━)
+        levels = {1: (2.0, 1), 2: (2.0, 2), 3: (2.0, 3), 4: (2.0, 5)}
+        result = format_throughput_levels(levels, max_workers=4)
+        text = _render_to_text(result)
+        assert "┄" in text  # 1 sample: dotted
+        assert "╌" in text  # 2 samples: dashed
+        assert "─" in text  # 3 samples: thin solid
+        assert "━" in text  # 4+ samples: bold
+
+    def test_box_chars_function(self):
+        """_box_chars returns correct characters for each confidence tier."""
+        from shared.throttling import _box_chars
+        # 1 sample: dotted
+        tl, th, tr, side, *_ = _box_chars(1)
+        assert th == "┄" and side == "┆"
+        # 2 samples: dashed
+        tl, th, tr, side, *_ = _box_chars(2)
+        assert th == "╌" and side == "╎"
+        # 3 samples: thin
+        tl, th, tr, side, *_ = _box_chars(3)
+        assert th == "─" and side == "│"
+        # 4+ samples: bold
+        tl, th, tr, side, *_ = _box_chars(4)
+        assert th == "━" and side == "┃"
+        tl, th, tr, side, *_ = _box_chars(100)
+        assert th == "━" and side == "┃"
 
     def test_all_same_base_time(self):
         """All levels with same base time renders without errors."""
