@@ -731,7 +731,7 @@ def _build_levels_row(
     peak_concurrency: int | None,
     exploration_target: int | None = None,
 ) -> object:
-    """Build a single Rich Table for a chunk of levels (two rows: number + time).
+    """Build a single Rich Table for a chunk of levels (three rows: number + time + count).
 
     Text confidence varies by sample count: dim (1), normal (2), bold (3+).
     Color-coded background: green (best) → red (worst).
@@ -767,6 +767,7 @@ def _build_levels_row(
 
     row1_cells: list[Text] = [Text("")]  # indent (level number)
     row2_cells: list[Text] = [Text("")]  # indent (base time)
+    row3_cells: list[Text] = [Text("")]  # indent (sample count)
 
     for level in levels_range:
         is_peak = peak_concurrency is not None and level == peak_concurrency
@@ -792,15 +793,20 @@ def _build_levels_row(
             bt_str = f"{avg_bt:.1f}s" if avg_bt < 100 else f"{avg_bt:.0f}s"
             bt_padded = bt_str.center(_LEVEL_COL_WIDTH)
             row2_cells.append(Text(bt_padded, style=style))
+
+            count_str = str(count).center(_LEVEL_COL_WIDTH)
+            row3_cells.append(Text(count_str, style=style))
         else:
             # Mark exploration target even when no data yet
             level_label = f"?{level}" if is_explore else str(level)
             level_str = level_label.center(_LEVEL_COL_WIDTH)
             row1_cells.append(Text(level_str, style="dim"))
             row2_cells.append(Text("···".center(_LEVEL_COL_WIDTH), style="dim"))
+            row3_cells.append(Text(" ".center(_LEVEL_COL_WIDTH), style="dim"))
 
     table.add_row(*row1_cells)
     table.add_row(*row2_cells)
+    table.add_row(*row3_cells)
 
     return table
 
