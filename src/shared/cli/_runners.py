@@ -529,7 +529,7 @@ def run_processing(
             "variable": "red",
             "import": "bright_black",
         }
-        type_order = ["file", "class", "interface", "type_alias", "function", "method", "constant", "variable"]
+        type_order = ["file", "class", "interface", "type_alias", "function", "method", "constant", "variable", "import"]
         eta_breakdown = state.timing.get_eta_breakdown_with_avg(effective_workers)
         eta_table = build_eta_table(eta_breakdown, type_order, type_colors)
 

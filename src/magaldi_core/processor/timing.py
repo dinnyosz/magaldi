@@ -624,7 +624,7 @@ class TimingStats:
                 # Include all items, even those with no timing data yet (avg=0)
                 breakdown.append((element_type, tier, avg, is_fallback, done, tot))
 
-            # Sort by hierarchy (file → class/interface/type_alias → function → method → variable), then tier descending
-            type_order = {"file": 0, "class": 1, "interface": 1, "type_alias": 1, "function": 2, "method": 3, "variable": 4, "constant": 5}
+            # Sort by hierarchy (file → class/interface/type_alias → function → method → variable → import), then tier descending
+            type_order = {"file": 0, "class": 1, "interface": 1, "type_alias": 1, "function": 2, "method": 3, "variable": 4, "constant": 5, "import": 6}
             breakdown.sort(key=lambda x: (type_order.get(x[0], 99), -x[1]))
             return breakdown
