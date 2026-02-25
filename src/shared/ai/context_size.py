@@ -19,8 +19,13 @@ T = TypeVar("T")
 # Context size tiers (powers of 2 for memory alignment)
 CONTEXT_TIERS = [1024, 2048, 4096, 8192, 16384, 32768]
 
+# Sentinel tier for handcrafted summaries (no LLM context needed).
+# Elements assigned this tier skip LLM summarization and use code/docstring directly.
+HANDCRAFTED_TIER = 0
+
 # Human-readable abbreviations for each tier (single source of truth)
 TIER_ABBREV = {tier: f"{tier // 1024}k" for tier in CONTEXT_TIERS}
+TIER_ABBREV[HANDCRAFTED_TIER] = "craft"
 
 # Suffixes for Ollama tiered model aliases (e.g., "qwen3:4b-instruct-2k")
 TIER_SUFFIXES = {tier: f"-{tier // 1024}k" for tier in CONTEXT_TIERS}
@@ -33,6 +38,7 @@ TIER_COLORS = {
     4096: "bright_yellow",
     2048: "bright_green",
     1024: "green",
+    HANDCRAFTED_TIER: "dim green",
 }
 
 # Tier scaling exponent for ETA estimation fallback.
@@ -45,6 +51,7 @@ TIER_SCALING_EXPONENT = 0.65
 # Smaller contexts = more parallelism, larger contexts = less to avoid GPU saturation
 # Tuned for M4 Pro 48GB - adjust for different hardware
 TIER_MAX_WORKERS = {
+    HANDCRAFTED_TIER: 16,  # No LLM - maximum parallelism
     1024: 16,  # Tiny context - maximum parallelism
     2048: 12,  # Small context - high parallelism
     4096: 8,   # Medium-small
@@ -57,6 +64,7 @@ TIER_MAX_WORKERS = {
 # Larger contexts take proportionally longer to process
 # NOTE: These are used for throttle calculations; Ollama may not enforce actual timeouts
 TIER_TIMEOUTS = {
+    HANDCRAFTED_TIER: 30,  # 30 seconds - no LLM, very fast
     1024: 60,    # 1 minute - tiny elements
     2048: 120,   # 2 minutes
     4096: 120,   # 2 minutes
