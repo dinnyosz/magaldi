@@ -251,7 +251,7 @@ class ThroughputByLevel:
     With only 1 level, there's no slope to compare — returns None.
     """
 
-    def __init__(self, window_seconds: float = 300.0, min_samples: int = 3):
+    def __init__(self, window_seconds: float = 300.0, min_samples: int = 1):
         """Initialize throughput-by-level tracker.
 
         Data is kept for the entire tier lifetime (no time-based pruning).
