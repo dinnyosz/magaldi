@@ -138,9 +138,10 @@ def build_eta_table(
     if not eta_breakdown:
         return None
 
-    from shared.ai.context_size import CONTEXT_TIERS, TIER_ABBREV, TIER_COLORS
+    from shared.ai.context_size import CONTEXT_TIERS, TIER_ABBREV, TIER_COLORS, HANDCRAFTED_TIER
     tier_abbrev = TIER_ABBREV
-    tiers = sorted(CONTEXT_TIERS, reverse=True)
+    # Standard tiers descending + handcrafted column at the end
+    all_tiers = sorted(CONTEXT_TIERS, reverse=True) + [HANDCRAFTED_TIER]
     type_colors = type_colors or {}
 
     # Build lookup from breakdown data
@@ -153,19 +154,19 @@ def build_eta_table(
     eta_table.add_column("", style="dim", width=10)
     tier_colors_map = TIER_COLORS
 
-    for tier in tiers:
+    for tier in all_tiers:
         if any((t, tier) in eta_data for t in type_order):
             color = tier_colors_map.get(tier, "white")
-            eta_table.add_column(f"[{color}]{tier_abbrev.get(tier, f'{tier//1024}k')}[/]", justify="center")
+            eta_table.add_column(f"[{color}]{tier_abbrev.get(tier, str(tier))}[/]", justify="center")
 
     for elem_type in type_order:
-        has_data = any((elem_type, t) in eta_data for t in tiers)
+        has_data = any((elem_type, t) in eta_data for t in all_tiers)
         if not has_data:
             continue
 
         type_color = type_colors.get(elem_type, "white")
         row = [f"[{type_color}]{elem_type}[/]"]
-        for tier in tiers:
+        for tier in all_tiers:
             if not any((t, tier) in eta_data for t in type_order):
                 continue
             if (elem_type, tier) in eta_data:
