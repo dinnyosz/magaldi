@@ -955,11 +955,11 @@ class TestFormatThroughputLevels:
         assert build_throughput_levels_text({}) is None
 
     def test_single_chunk_returns_table(self):
-        """≤16 levels returns a single Table with 2 rows (num + time)."""
+        """≤16 levels returns a single Table with 3 rows (num + time + count)."""
         from shared.throttling import _build_levels_row
         levels = {1: (2.0, 3), 2: (1.5, 5)}
         table = _build_levels_row(range(1, 3), levels, 1.5, 0.5, None)
-        assert table.row_count == 2
+        assert table.row_count == 3
         # 1 indent column + 2 level columns = 3
         assert len(table.columns) == 3
 
@@ -992,6 +992,15 @@ class TestFormatThroughputLevels:
         assert _confidence_style(2) == ""
         assert _confidence_style(3) == "bold"
         assert _confidence_style(10) == "bold"
+
+    def test_sample_count_row_displayed(self):
+        """Third row shows n={count} for each level."""
+        levels = {1: (2.0, 3), 2: (3.0, 7), 3: (4.0, 1)}
+        result = format_throughput_levels(levels, max_workers=3)
+        text = _render_to_text(result)
+        assert "n=3" in text
+        assert "n=7" in text
+        assert "n=1" in text
 
     def test_all_same_base_time(self):
         """All levels with same base time renders without errors."""
