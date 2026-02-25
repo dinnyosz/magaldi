@@ -509,37 +509,37 @@ class TestThroughputByLevel:
         assert tracker.get_peak_level() is None
 
     def test_two_levels_finds_peak(self):
-        """With 2 levels, finds the one with higher throughput.
+        """With 2 levels, finds the one with lowest base time.
 
-        Level 2: 5 completions in ~0s → throughput ~5/1s = 5.0/s
-        Level 4: 3 completions in ~0s → throughput ~3/1s = 3.0/s
-        Peak should be level 2.
+        Level 2: runtime=5.0, base_time=5.0/2=2.5s
+        Level 4: runtime=10.0, base_time=10.0/4=2.5s
+        Same base time → either is valid. Make them different:
+        Level 2: runtime=4.0, base_time=4.0/2=2.0s  ← better
+        Level 4: runtime=10.0, base_time=10.0/4=2.5s
         """
         tracker = ThroughputByLevel(min_samples=3)
-        # Level 2: 5 completions (more than level 4)
         for _ in range(5):
-            tracker.record(2, 5.0)
-        # Level 4: 3 completions
+            tracker.record(2, 4.0)  # base = 2.0s
         for _ in range(3):
-            tracker.record(4, 10.0)
+            tracker.record(4, 10.0)  # base = 2.5s
 
         result = tracker.get_peak_level()
         assert result is not None
-        level, tp = result
-        assert level == 2  # More completions in same timespan = higher throughput
+        level, bt = result
+        assert level == 2  # Lower base time = better per-worker cost
+        assert bt == pytest.approx(2.0)
 
     def test_higher_concurrency_lower_throughput(self):
-        """Detects when high concurrency has worse throughput (GPU contention).
+        """Detects when high concurrency has worse base time (GPU contention).
 
-        Simulates: level 3 has better throughput than level 6.
+        Level 3: runtime=5.0, base_time=5.0/3=1.67s  ← better
+        Level 6: runtime=15.0, base_time=15.0/6=2.5s  ← contention
         """
         tracker = ThroughputByLevel(min_samples=3)
-        # Level 3: 6 completions
         for _ in range(6):
-            tracker.record(3, 5.0)
-        # Level 6: 3 completions (GPU contention made tasks slower)
+            tracker.record(3, 5.0)  # base = 1.67s
         for _ in range(3):
-            tracker.record(6, 15.0)
+            tracker.record(6, 15.0)  # base = 2.5s
 
         result = tracker.get_peak_level()
         assert result is not None
@@ -621,24 +621,24 @@ class TestThroughputByLevel:
         assert 0 not in levels
 
     def test_three_levels_peak_in_middle(self):
-        """Peak can be at a middle concurrency level.
+        """Peak can be at a middle concurrency level (lowest base time).
 
-        Level 1: 2 completions → low throughput (underutilized)
-        Level 3: 6 completions → high throughput (sweet spot)
-        Level 6: 3 completions → lower throughput (contention)
+        Level 1: runtime=5.0, base_time=5.0/1=5.0s  (underutilized)
+        Level 3: runtime=3.0, base_time=3.0/3=1.0s  (sweet spot) ← best
+        Level 6: runtime=12.0, base_time=12.0/6=2.0s (contention)
         """
         tracker = ThroughputByLevel(min_samples=2)
         for _ in range(2):
-            tracker.record(1, 5.0)
+            tracker.record(1, 5.0)  # base = 5.0s
         for _ in range(6):
-            tracker.record(3, 5.0)
+            tracker.record(3, 3.0)  # base = 1.0s
         for _ in range(3):
-            tracker.record(6, 5.0)
+            tracker.record(6, 12.0)  # base = 2.0s
 
         result = tracker.get_peak_level()
         assert result is not None
         level, _ = result
-        assert level == 3  # Most completions = highest throughput
+        assert level == 3  # Lowest base time = best per-worker efficiency
 
 
 class TestThroughputTrackerPeakIntegration:
@@ -668,7 +668,7 @@ class TestThroughputTrackerPeakIntegration:
 
         peak = tracker.get_peak_concurrency()
         assert peak is not None
-        assert peak == 2  # More completions = higher throughput
+        assert peak == 2  # base=3.0/2=1.5s < 10.0/6=1.67s → lower base time
 
     def test_reset_clears_peak(self):
         """Reset clears both regular stats and peak data."""

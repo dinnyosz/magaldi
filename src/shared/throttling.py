@@ -296,28 +296,31 @@ class ThroughputByLevel:
         return count / time_span
 
     def get_peak_level(self) -> tuple[int, float] | None:
-        """Find concurrency level with highest throughput.
+        """Find concurrency level with lowest base time (best per-worker cost).
+
+        Base time = runtime / concurrency_level. The level with the lowest
+        average base time is the sweet spot: GPU handles that parallelism
+        most efficiently.
 
         Returns:
-            (level, throughput_per_sec) for the peak, or None if insufficient data.
+            (level, avg_base_time) for the peak, or None if insufficient data.
             Requires >= 2 levels with >= min_samples completions each.
         """
-        now = time.time()
         with self._lock:
             # Collect levels with sufficient samples
             qualified: list[tuple[int, float]] = []
             for level, dq in self._levels.items():
                 if len(dq) >= self.min_samples:
-                    tp = self._compute_throughput(dq, now)
-                    qualified.append((level, tp))
+                    avg_base = sum(rt / level for _, rt in dq) / len(dq)
+                    qualified.append((level, avg_base))
 
             # Need >= 2 qualified levels to detect a peak
             if len(qualified) < 2:
                 return None
 
-            # Find level with highest throughput
-            best_level, best_tp = max(qualified, key=lambda x: x[1])
-            return (best_level, best_tp)
+            # Find level with lowest base time (= best throughput)
+            best_level, best_bt = min(qualified, key=lambda x: x[1])
+            return (best_level, best_bt)
 
     def get_all_levels(self) -> dict[int, tuple[float, int]]:
         """Get average base time (per-worker cost) for all levels (for display).
