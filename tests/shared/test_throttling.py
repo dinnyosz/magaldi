@@ -9,7 +9,7 @@ from shared.throttling import (
     ThroughputByLevel,
     ThroughputTracker,
     TimeoutEvent,
-    append_throughput_levels,
+    build_throughput_levels_text,
     compute_throttle_decision,
     format_throughput_levels,
 )
@@ -591,17 +591,19 @@ class TestThroughputByLevel:
         assert tracker.get_all_levels() == {}
 
     def test_get_all_levels(self):
-        """get_all_levels returns stats for all levels with data."""
+        """get_all_levels returns avg_runtime and count for all levels."""
         tracker = ThroughputByLevel(min_samples=1)
         for _ in range(3):
             tracker.record(2, 5.0)
         for _ in range(5):
-            tracker.record(4, 5.0)
+            tracker.record(4, 8.0)
 
         levels = tracker.get_all_levels()
         assert 2 in levels
         assert 4 in levels
+        assert levels[2][0] == pytest.approx(5.0)  # avg_runtime at level 2
         assert levels[2][1] == 3  # 3 samples at level 2
+        assert levels[4][0] == pytest.approx(8.0)  # avg_runtime at level 4
         assert levels[4][1] == 5  # 5 samples at level 4
 
     def test_concurrency_zero_clamped_to_one(self):
@@ -828,7 +830,7 @@ class TestPeakConcurrencyThrottleDecision:
 
 
 class TestFormatThroughputLevels:
-    """Tests for format_throughput_levels and append_throughput_levels."""
+    """Tests for format_throughput_levels and build_throughput_levels_text."""
 
     def test_empty_returns_empty(self):
         """None or empty dict returns empty string."""
@@ -836,23 +838,24 @@ class TestFormatThroughputLevels:
         assert format_throughput_levels({}) == ""
 
     def test_single_level_no_peak(self):
-        """Single level without peak marked."""
-        result = format_throughput_levels({1: (0.5, 3)})
-        assert "1→0.5/s(3)" in result
+        """Single level without peak marked — shows avg runtime."""
+        result = format_throughput_levels({1: (2.5, 3)})
+        assert "1→2.5s(3)" in result
         assert "*" not in result  # No peak marker
+        assert "Levels:" in result  # Has label prefix
 
     def test_multiple_levels_with_peak(self):
         """Multiple levels with peak highlighted."""
-        levels = {1: (0.5, 3), 2: (0.8, 5), 3: (1.2, 8), 4: (0.9, 4)}
+        levels = {1: (2.1, 3), 2: (3.4, 5), 3: (4.0, 8), 4: (6.2, 4)}
         result = format_throughput_levels(levels, peak_concurrency=3)
         # Peak level should have * prefix and magenta styling
-        assert "*3→1.2/s(8)" in result
-        assert "1→0.5/s(3)" in result
-        assert "4→0.9/s(4)" in result
+        assert "*3→4.0s(8)" in result
+        assert "1→2.1s(3)" in result
+        assert "4→6.2s(4)" in result
 
     def test_levels_sorted_ascending(self):
         """Levels should be displayed in ascending order."""
-        levels = {4: (0.9, 4), 1: (0.5, 3), 3: (1.2, 8), 2: (0.8, 5)}
+        levels = {4: (6.2, 4), 1: (2.1, 3), 3: (4.0, 8), 2: (3.4, 5)}
         result = format_throughput_levels(levels, peak_concurrency=3)
         # Check that levels appear in order: 1, 2, 3, 4
         pos_1 = result.find("1→")
@@ -865,26 +868,20 @@ class TestFormatThroughputLevels:
         """Peak concurrency without level data returns empty."""
         assert format_throughput_levels(None, peak_concurrency=3) == ""
 
-    def test_append_to_rich_text(self):
-        """append_throughput_levels adds to Rich Text object."""
-        from rich.text import Text
-        text = Text("prefix")
-        levels = {1: (0.5, 3), 2: (1.0, 5)}
-        append_throughput_levels(text, levels, peak_concurrency=2)
-        plain = text.plain
-        assert "1→0.5/s(3)" in plain
-        assert "*2→1.0/s(5)" in plain
+    def test_build_text_returns_rich_text(self):
+        """build_throughput_levels_text returns a Rich Text object."""
+        levels = {1: (2.5, 3), 2: (3.0, 5)}
+        result = build_throughput_levels_text(levels, peak_concurrency=2)
+        assert result is not None
+        plain = result.plain
+        assert "1→2.5s(3)" in plain
+        assert "*2→3.0s(5)" in plain
+        assert "Levels:" in plain
 
-    def test_append_none_is_noop(self):
-        """append_throughput_levels with None does nothing."""
-        from rich.text import Text
-        text = Text("prefix")
-        append_throughput_levels(text, None)
-        assert text.plain == "prefix"
+    def test_build_text_none_returns_none(self):
+        """build_throughput_levels_text with None returns None."""
+        assert build_throughput_levels_text(None) is None
 
-    def test_append_empty_is_noop(self):
-        """append_throughput_levels with empty dict does nothing."""
-        from rich.text import Text
-        text = Text("prefix")
-        append_throughput_levels(text, {})
-        assert text.plain == "prefix"
+    def test_build_text_empty_returns_none(self):
+        """build_throughput_levels_text with empty dict returns None."""
+        assert build_throughput_levels_text({}) is None

@@ -307,14 +307,14 @@ def run_feature_extraction(
                 normalized_max = state.current_max / max(running_count, 1)
                 stats += f" [dim]|[/] [dim]Max:[/] [yellow]{state.current_max:.1f}s[/]"
                 stats += f" [dim]|[/] [dim]Per Worker:[/] [yellow]{normalized_max:.1f}s[/] [dim]vs[/] [cyan]{state.avg_base_time:.1f}s[/] [dim](last {state.completion_count})[/]"
-                # Show per-level throughput data with peak highlighted
-                if hasattr(state, 'all_levels') and state.all_levels:
-                    from shared.throttling import format_throughput_levels
-                    levels_str = format_throughput_levels(state.all_levels, state.peak_concurrency)
-                    if levels_str:
-                        stats += f" [dim]|[/] {levels_str}"
-                elif state.peak_concurrency is not None:
+                if state.peak_concurrency is not None:
                     stats += f" [dim]|[/] [magenta]Peak@{state.peak_concurrency}[/]"
+
+            # Build per-level throughput line (separate from stats)
+            levels_line = None
+            if hasattr(state, 'all_levels') and state.all_levels:
+                from shared.throttling import format_throughput_levels
+                levels_line = format_throughput_levels(state.all_levels, state.peak_concurrency)
 
             elements = [bar_text]
             if eta_table:
@@ -322,6 +322,8 @@ def run_feature_extraction(
             if not compact:
                 elements.append(worker_table)
             elements.append(stats)
+            if levels_line:
+                elements.append(levels_line)
             return Group(*elements)
 
         current_state = FeatureProgressState(
@@ -522,13 +524,15 @@ def run_feature_extraction(
                         stats_text.append(" vs ", style="dim")
                         stats_text.append(f"{state.avg_base_time:.1f}s", style="cyan")
                         stats_text.append(f" (last {state.completion_count})", style="dim")
-                        # Show per-level throughput data with peak highlighted
-                        if hasattr(state, 'all_levels') and state.all_levels:
-                            from shared.throttling import append_throughput_levels
-                            append_throughput_levels(stats_text, state.all_levels, state.peak_concurrency)
-                        elif state.peak_concurrency is not None:
+                        if state.peak_concurrency is not None:
                             stats_text.append(" | ", style="dim")
                             stats_text.append(f"Peak@{state.peak_concurrency}", style="magenta")
+
+                # Build per-level throughput line (separate from stats)
+                levels_text = None
+                if hasattr(state, 'all_levels') and state.all_levels:
+                    from shared.throttling import build_throughput_levels_text
+                    levels_text = build_throughput_levels_text(state.all_levels, state.peak_concurrency)
 
                 elements = [header_text, bar_text]
                 if eta_table:
@@ -536,6 +540,8 @@ def run_feature_extraction(
                 if not compact:
                     elements.append(worker_table)
                 elements.append(stats_text)
+                if levels_text is not None:
+                    elements.append(levels_text)
                 return Group(*elements)
 
             current_sub_state = SubfeatureProgressState(

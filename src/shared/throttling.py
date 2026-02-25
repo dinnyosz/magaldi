@@ -343,18 +343,19 @@ class ThroughputByLevel:
             return (best_level, best_tp)
 
     def get_all_levels(self) -> dict[int, tuple[float, int]]:
-        """Get throughput stats for all levels (for debugging/display).
+        """Get average runtime stats for all levels (for display).
 
         Returns:
-            Dict of level -> (throughput_per_sec, sample_count).
+            Dict of level -> (avg_runtime_seconds, sample_count).
         """
         now = time.time()
         with self._lock:
             self._prune_all(now)
             result = {}
             for level, dq in self._levels.items():
-                tp = self._compute_throughput(dq, now)
-                result[level] = (tp, len(dq))
+                if dq:
+                    avg_rt = sum(rt for _, rt in dq) / len(dq)
+                    result[level] = (avg_rt, len(dq))
             return result
 
     def reset(self) -> None:
@@ -597,13 +598,14 @@ def format_throughput_levels(
     all_levels: dict[int, tuple[float, int]] | None,
     peak_concurrency: int | None = None,
 ) -> str:
-    """Format per-level throughput data as Rich markup string.
+    """Format per-level runtime data as a standalone Rich markup line.
 
-    Output example: ``1→0.5/s(3) 2→0.8/s(5) *3→1.2/s(8) 4→0.9/s(4)``
-    where ``*`` marks the peak level.
+    Output: ``  Levels: 1→2.1s(3) 2→3.4s(5) *3→4.0s(8) 4→6.2s(4)``
+    Shows avg runtime per level; ``*`` marks the peak throughput level.
+    Intended to be rendered on its own line.
 
     Args:
-        all_levels: Dict of level -> (throughput_per_sec, sample_count), or None.
+        all_levels: Dict of level -> (avg_runtime_seconds, sample_count), or None.
         peak_concurrency: The level identified as peak, or None.
 
     Returns:
@@ -614,38 +616,47 @@ def format_throughput_levels(
 
     parts: list[str] = []
     for level in sorted(all_levels.keys()):
-        tp, count = all_levels[level]
+        avg_rt, count = all_levels[level]
         is_peak = peak_concurrency is not None and level == peak_concurrency
         if is_peak:
-            parts.append(f"[magenta]*{level}→{tp:.1f}/s({count})[/]")
+            parts.append(f"[magenta]*{level}→{avg_rt:.1f}s({count})[/]")
         else:
-            parts.append(f"[dim]{level}→{tp:.1f}/s({count})[/]")
+            parts.append(f"[dim]{level}→{avg_rt:.1f}s({count})[/]")
 
-    return " ".join(parts)
+    return f"  [dim]Levels:[/] {' '.join(parts)}"
 
 
-def append_throughput_levels(
-    text: object,
+def build_throughput_levels_text(
     all_levels: dict[int, tuple[float, int]] | None,
     peak_concurrency: int | None = None,
-) -> None:
-    """Append per-level throughput data to a Rich Text object.
+) -> object | None:
+    """Build a Rich Text object for per-level runtime data.
+
+    Returns a standalone Text suitable for appending as a new line in a Group.
+    Returns None if no data.
 
     Args:
-        text: A rich.text.Text instance (typed as object to avoid import).
-        all_levels: Dict of level -> (throughput_per_sec, sample_count), or None.
+        all_levels: Dict of level -> (avg_runtime_seconds, sample_count), or None.
         peak_concurrency: The level identified as peak, or None.
+
+    Returns:
+        A rich.text.Text instance, or None if no data.
     """
     if not all_levels:
-        return
+        return None
 
-    text.append(" | ", style="dim")  # type: ignore[attr-defined]
+    from rich.text import Text
+
+    text = Text("  ")
+    text.append("Levels: ", style="dim")
     for i, level in enumerate(sorted(all_levels.keys())):
-        tp, count = all_levels[level]
+        avg_rt, count = all_levels[level]
         is_peak = peak_concurrency is not None and level == peak_concurrency
         if i > 0:
-            text.append(" ", style="dim")  # type: ignore[attr-defined]
+            text.append(" ", style="dim")
         if is_peak:
-            text.append(f"*{level}→{tp:.1f}/s({count})", style="magenta")  # type: ignore[attr-defined]
+            text.append(f"*{level}→{avg_rt:.1f}s({count})", style="magenta")
         else:
-            text.append(f"{level}→{tp:.1f}/s({count})", style="dim")  # type: ignore[attr-defined]
+            text.append(f"{level}→{avg_rt:.1f}s({count})", style="dim")
+
+    return text
