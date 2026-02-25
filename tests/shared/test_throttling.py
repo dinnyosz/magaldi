@@ -1029,11 +1029,12 @@ class TestFormatThroughputLevels:
 class TestExplorationTarget:
     """Tests for ThroughputByLevel.get_exploration_target().
 
-    Exploration: when peak is confident but neighbors lack data,
-    return a neighbor to explore (collect more samples before trusting peak).
+    Exploration: when peak is confident but levels within ±(max_level // 2)
+    lack data, return one to explore (collect more samples before trusting peak).
 
-    Significance is level-proportional: level N needs N * 2 samples.
-    Level 1 → 2, level 2 → 4, level 3 → 6, level 5 → 10, etc.
+    Significance = max(10, level * 2). Floor of 10 ensures enough data.
+    Level 1 → 10, level 5 → 10, level 6 → 12, level 10 → 20.
+    Radius = max_level // 2 (half of max workers).
     """
 
     def test_no_peak_returns_none(self):
@@ -1044,184 +1045,237 @@ class TestExplorationTarget:
         assert tracker.get_exploration_target(max_level=8) is None
 
     def test_peak_not_confident_returns_none(self):
-        """Peak exists but has < level*2 samples → don't explore from weak peak.
+        """Peak exists but has < 10 samples → don't explore from weak peak.
 
-        Peak at level 2 needs 2*2=4 samples. Only 3 here → not confident.
+        All levels need at least 10 samples (min floor).
         """
         tracker = ThroughputByLevel(min_samples=1)
-        # Level 2: 3 samples (below 2*2=4)
-        for _ in range(3):
+        # Level 2: 9 samples (below min floor 10)
+        for _ in range(9):
             tracker.record(2, 4.0)
-        # Level 4: 3 samples
-        for _ in range(3):
+        # Level 4: 5 samples
+        for _ in range(5):
             tracker.record(4, 10.0)
-        # Peak exists (level 2) but only 3 samples < 4 needed → not confident
+        # Peak exists (level 2) but only 9 samples < 10 needed → not confident
         assert tracker.get_exploration_target(max_level=8) is None
 
     def test_explore_upward_nearest(self):
         """Peak confident, nearest above missing → returns peak + 1.
 
-        Peak at level 2 needs 4 samples (2*2). Level 3 needs 6 (3*2).
+        Peak at level 2 needs 10 samples (min floor). Level 3 needs 10.
+        max_level=8 → radius=4, range covers 1..6.
         """
         tracker = ThroughputByLevel(min_samples=1)
-        for _ in range(5):
-            tracker.record(2, 4.0)  # confident peak (5 >= 4)
-        for _ in range(8):
-            tracker.record(4, 10.0)  # another level (8 >= 8)
+        for _ in range(11):
+            tracker.record(2, 4.0)  # confident peak (11 >= 10)
+        for _ in range(10):
+            tracker.record(4, 10.0)  # another level (10 >= 10)
         # Level 3 has no data → explore upward
         assert tracker.get_exploration_target(max_level=8) == 3
 
     def test_explore_upward_skips_explored(self):
         """Peak confident, nearest above explored but peak+2 missing → returns peak+2.
 
-        Peak at level 2 (4 needed). Level 3 needs 6, level 4 needs 8.
+        Peak at level 2 (10 needed). Level 3 needs 10, level 4 needs 10.
+        max_level=8 → radius=4.
         """
         tracker = ThroughputByLevel(min_samples=1)
-        for _ in range(5):
+        for _ in range(11):
             tracker.record(2, 4.0)  # confident peak
-        for _ in range(6):
-            tracker.record(3, 6.0)  # level 3 explored (6 >= 6)
+        for _ in range(10):
+            tracker.record(3, 6.0)  # level 3 explored (10 >= 10)
         for _ in range(10):
             tracker.record(5, 12.0)  # level 5 explored (10 >= 10)
-        # Level 4 has no data (needs 8) → explore peak+2
+        # Level 4 has no data (needs 10) → explore peak+2
         assert tracker.get_exploration_target(max_level=8) == 4
 
     def test_explore_downward_when_above_explored(self):
-        """All above explored, below missing → returns peak - 1.
+        """All above in range explored, below missing → returns peak - 1.
 
-        Peak at level 4 (needs 8). Levels 5(10), 6(12), 7(14) explored.
-        Level 3 (needs 6) has no data.
+        Peak at level 4 (needs 10). max_level=8 → radius=4, range=1..8.
+        Levels 5-8 explored. Level 3 (needs 10) has no data.
         """
         tracker = ThroughputByLevel(min_samples=1)
-        for _ in range(10):
-            tracker.record(4, 4.0)  # peak at 4 (10 >= 8)
+        for _ in range(12):
+            tracker.record(4, 4.0)  # peak at 4 (12 >= 10)
         for _ in range(10):
             tracker.record(5, 5.0)  # above explored (10 >= 10)
         for _ in range(12):
             tracker.record(6, 6.0)  # above explored (12 >= 12)
         for _ in range(14):
             tracker.record(7, 7.0)  # above explored (14 >= 14)
-        for _ in range(4):
-            tracker.record(2, 3.0)  # other level (4 >= 4)
-        # Level 3 has no data (needs 6) → explore downward
+        for _ in range(16):
+            tracker.record(8, 8.0)  # above explored (16 >= 16)
+        for _ in range(10):
+            tracker.record(2, 3.0)  # other level (10 >= 10)
+        # Level 3 has no data (needs 10) → explore downward
         assert tracker.get_exploration_target(max_level=8) == 3
 
-    def test_all_neighbors_explored_returns_none(self):
-        """All neighbors within radius have enough data → no exploration.
+    def test_all_in_range_explored_returns_none(self):
+        """All levels within ±radius have enough data → no exploration.
 
-        Peak at level 4. Levels 1-7 all have level*2 samples.
+        Peak at level 4. max_level=8 → radius=4, range=1..8.
+        All levels 1-8 have max(10, level*2) samples.
         """
         tracker = ThroughputByLevel(min_samples=1)
-        # Fill each level with level*2 + extra samples
-        for level in range(1, 8):
-            for _ in range(level * 2 + 2):
+        for level in range(1, 9):
+            needed = max(10, level * 2) + 2
+            for _ in range(needed):
                 tracker.record(level, float(level) * 2)
         assert tracker.get_exploration_target(max_level=8) is None
 
     def test_peak_at_level_1_only_explores_above(self):
         """Peak at 1 → no below to check, only explores above.
 
-        Peak at level 1 needs 2 samples (1*2). Level 2 needs 4 (2*2).
+        Peak at level 1 needs 10 (min floor). Level 2 needs 10.
+        max_level=8 → radius=4, range covers 1..5.
         """
         tracker = ThroughputByLevel(min_samples=1)
-        for _ in range(3):
-            tracker.record(1, 3.0)  # peak at 1 (3 >= 2)
-        for _ in range(6):
-            tracker.record(3, 9.0)  # level 3 explored (6 >= 6)
-        # Level 2 has no data (needs 4) → explore upward
+        for _ in range(11):
+            tracker.record(1, 3.0)  # peak at 1 (11 >= 10)
+        for _ in range(10):
+            tracker.record(3, 9.0)  # level 3 explored (10 >= 10)
+        # Level 2 has no data (needs 10) → explore upward
         assert tracker.get_exploration_target(max_level=8) == 2
 
     def test_capped_by_max_level(self):
         """Exploration doesn't return levels above max_level.
 
-        Peak at level 3 needs 6 samples. Level 2 needs 4.
+        Peak at level 3 needs 10. max_level=3 → radius=1.
+        Only level 2 (downward) is in range.
         """
         tracker = ThroughputByLevel(min_samples=1)
-        for _ in range(7):
-            tracker.record(3, 3.0)  # peak at 3 (7 >= 6)
-        for _ in range(3):
-            tracker.record(1, 5.0)  # level 1 explored (3 >= 2)
-        # max_level=3 → can't explore above
-        # Scan downward: level 2 has no data (needs 4) → return 2
+        for _ in range(11):
+            tracker.record(3, 3.0)  # peak at 3 (11 >= 10)
+        for _ in range(10):
+            tracker.record(1, 5.0)  # level 1 explored (10 >= 10)
+        # max_level=3 → radius=1 → upward: nothing (3+1=4 > 3)
+        # downward: level 2 has no data (needs 10) → return 2
         assert tracker.get_exploration_target(max_level=3) == 2
 
-    def test_capped_by_max_level_all_neighbors_at_boundary(self):
-        """At max_level boundary with all explored → returns None."""
+    def test_capped_by_max_level_all_in_range_explored(self):
+        """At max_level boundary with all in range explored → returns None."""
         tracker = ThroughputByLevel(min_samples=1)
-        for _ in range(7):
-            tracker.record(3, 3.0)  # peak at 3 (7 >= 6)
-        for _ in range(3):
-            tracker.record(1, 5.0)  # level 1 (3 >= 2)
-        for _ in range(5):
-            tracker.record(2, 4.0)  # level 2 (5 >= 4)
-        # max_level=3 → can't explore above, below are explored
+        for _ in range(11):
+            tracker.record(3, 3.0)  # peak at 3 (11 >= 10)
+        for _ in range(10):
+            tracker.record(1, 5.0)  # level 1 (10 >= 10)
+        for _ in range(10):
+            tracker.record(2, 4.0)  # level 2 (10 >= 10)
+        # max_level=3 → radius=1 → only level 2 in range, explored
         assert tracker.get_exploration_target(max_level=3) is None
 
-    def test_radius_explores_up_to_3(self):
-        """With EXPLORE_RADIUS=3, explores up to peak+3.
+    def test_radius_is_half_max_level(self):
+        """Radius = max_level // 2. With max_level=10, radius=5.
 
-        Peak at level 2 (needs 4). Levels 3(6), 4(8) explored. Level 1(2) explored.
-        Level 5 = peak+3, needs 10 samples.
+        Peak at level 3 (needs 10). Levels 4-8 are within range (3+5=8).
+        Levels 4-7 explored. Level 8 needs 16 (8*2).
         """
         tracker = ThroughputByLevel(min_samples=1)
-        for _ in range(5):
-            tracker.record(2, 3.0)  # peak at 2 (5 >= 4)
-        for _ in range(6):
-            tracker.record(3, 4.0)  # explored (6 >= 6)
-        for _ in range(8):
-            tracker.record(4, 5.0)  # explored (8 >= 8)
-        for _ in range(3):
-            tracker.record(1, 6.0)  # explored below (3 >= 2)
-        # Level 5 = peak+3, needs 10, has 0 → explore
-        assert tracker.get_exploration_target(max_level=10) == 5
-
-    def test_beyond_radius_not_explored(self):
-        """Levels beyond ±EXPLORE_RADIUS are not explored.
-
-        Peak at level 5 (needs 10). Radius covers 2-8.
-        """
-        tracker = ThroughputByLevel(min_samples=1)
+        for _ in range(11):
+            tracker.record(3, 3.0)  # peak at 3 (11 >= 10)
+        for _ in range(10):
+            tracker.record(4, 4.0)  # explored (10 >= 10)
+        for _ in range(10):
+            tracker.record(5, 5.0)  # explored (10 >= 10)
         for _ in range(12):
-            tracker.record(5, 3.0)  # peak at 5 (12 >= 10)
-        # Fill all within radius: 2,3,4,6,7,8
-        for level in [2, 3, 4, 6, 7, 8]:
-            for _ in range(level * 2 + 1):
+            tracker.record(6, 6.0)  # explored (12 >= 12)
+        for _ in range(14):
+            tracker.record(7, 7.0)  # explored (14 >= 14)
+        for _ in range(10):
+            tracker.record(1, 6.0)  # level 1 explored (10 >= 10)
+        for _ in range(10):
+            tracker.record(2, 5.0)  # level 2 explored (10 >= 10)
+        # Level 8 = peak+5, within radius(5), needs 16 (8*2), has 0 → explore
+        assert tracker.get_exploration_target(max_level=10) == 8
+
+    def test_beyond_max_level_not_explored(self):
+        """Levels beyond max_level are not explored.
+
+        Peak at level 5. max_level=10 → radius=5.
+        Fill all levels 1-10 → returns None (11+ not explored).
+        """
+        tracker = ThroughputByLevel(min_samples=1)
+        for level in range(1, 11):
+            needed = max(10, level * 2) + 1
+            for _ in range(needed):
                 tracker.record(level, float(level))
-        # Level 1 and 9+ are beyond radius → not explored
-        assert tracker.get_exploration_target(max_level=15) is None
+        assert tracker.get_exploration_target(max_level=10) is None
 
     def test_exploration_stops_after_collecting_data(self):
-        """Once neighbor gets enough samples, exploration moves to next.
+        """Once level gets enough samples, exploration moves to next.
 
-        Peak at level 2 (needs 4). Level 3 needs 6, level 4 needs 8.
+        Peak at level 2 (needs 10). All levels need at least 10.
+        max_level=8 → radius=4.
         """
         tracker = ThroughputByLevel(min_samples=1)
-        for _ in range(5):
-            tracker.record(2, 3.0)  # peak (5 >= 4)
-        for _ in range(8):
-            tracker.record(4, 8.0)  # level 4 explored (8 >= 8)
+        for _ in range(11):
+            tracker.record(2, 3.0)  # peak (11 >= 10)
+        for _ in range(10):
+            tracker.record(4, 8.0)  # level 4 explored (10 >= 10)
 
-        # Level 3 has no data (needs 6) → explore
+        # Level 3 has no data (needs 10) → explore
         assert tracker.get_exploration_target(max_level=8) == 3
 
-        # Simulate collecting 6 samples at level 3
-        for _ in range(6):
+        # Simulate collecting 10 samples at level 3
+        for _ in range(10):
             tracker.record(3, 5.0)
 
-        # Level 3 explored (6 >= 6), level 4 explored (8 >= 8)
+        # Level 3 explored (10 >= 10), level 4 explored (10 >= 10)
         # Level 5 has no data (needs 10) → explore 5
         assert tracker.get_exploration_target(max_level=8) == 5
 
     def test_level_proportional_significance(self):
-        """Higher levels need proportionally more samples.
+        """Significance = max(10, level * 2).
 
-        Level 1 needs 2, level 2 needs 4, level 10 needs 20.
+        Low levels hit the floor of 10. High levels use level * 2.
         """
         from shared.throttling import ThroughputByLevel as TBL
-        assert TBL._min_samples_for_level(1) == 2
-        assert TBL._min_samples_for_level(2) == 4
-        assert TBL._min_samples_for_level(5) == 10
-        assert TBL._min_samples_for_level(10) == 20
+        assert TBL._min_samples_for_level(1) == 10  # max(10, 2) = 10
+        assert TBL._min_samples_for_level(2) == 10  # max(10, 4) = 10
+        assert TBL._min_samples_for_level(5) == 10  # max(10, 10) = 10
+        assert TBL._min_samples_for_level(6) == 12  # max(10, 12) = 12
+        assert TBL._min_samples_for_level(10) == 20  # max(10, 20) = 20
+
+    def test_small_max_level_has_minimum_radius_of_1(self):
+        """max_level=2 → radius=max(1, 1)=1. Still explores within range.
+
+        Peak needs both levels to exist.
+        """
+        tracker = ThroughputByLevel(min_samples=1)
+        for _ in range(11):
+            tracker.record(1, 3.0)  # peak at 1 (11 >= 10)
+        for _ in range(10):
+            tracker.record(2, 6.0)  # level 2 (10 >= 10)
+        # max_level=2, radius=1 → range 1..2, both explored → None
+        assert tracker.get_exploration_target(max_level=2) is None
+
+    def test_radius_limits_downward_exploration(self):
+        """Downward exploration is capped by radius.
+
+        Peak at level 8 (needs 16). max_level=10 → radius=5.
+        Lower bound = max(8-5, 1) = 3. Level 2 is below radius → not explored.
+        """
+        tracker = ThroughputByLevel(min_samples=1)
+        for _ in range(16):
+            tracker.record(8, 4.0)  # peak at 8 (16 >= 16)
+        for _ in range(18):
+            tracker.record(9, 5.0)  # explored (18 >= 18)
+        for _ in range(20):
+            tracker.record(10, 6.0)  # explored (20 >= 20)
+        # Fill levels 4-7 (within radius 5 downward from 8: 3..7)
+        for level in [4, 5, 6, 7]:
+            needed = max(10, level * 2) + 1
+            for _ in range(needed):
+                tracker.record(level, float(level))
+        # Level 3 = 8-5 = lower boundary, needs 10, has 0 → explore
+        assert tracker.get_exploration_target(max_level=10) == 3
+        # Level 2 is below radius (8-5=3, level 2 < 3) → NOT explored
+        # If we fill level 3:
+        for _ in range(10):
+            tracker.record(3, 3.0)
+        # All within radius explored → returns None (level 2 is outside radius)
+        assert tracker.get_exploration_target(max_level=10) is None
 
 
 class TestExplorationInThrottleDecision:
