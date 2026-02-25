@@ -337,16 +337,27 @@ def run_variable_scoring(
             worker_status=worker_status,
         )
 
-    # Print debug log: first batch's prompt → LLM response
-    if result.debug_log:
-        user_prompt, llm_output = result.debug_log[0]
+    # Print batch samples: random variables with scores across batches
+    if result.batch_samples:
         console.print()
-        console.print(f"  [bold dim]─── Sample batch (model={model_config.name}, provider={model_config.provider}) ───[/]")
-        for line in user_prompt.split("\n"):
-            console.print(f"  [dim]{line}[/]")
-        console.print("  [bold dim]→ LLM response:[/]")
-        for line in llm_output.strip().split("\n"):
-            console.print(f"  [green]{line}[/]")
+        console.print(
+            f"  [bold dim]─── Variable scoring samples "
+            f"(model={model_config.name}, {len(result.batch_samples)} batches sampled) ───[/]"
+        )
+        for batch_idx, samples in enumerate(result.batch_samples):
+            console.print(f"  [bold dim]Batch {batch_idx + 1}:[/]")
+            for file_path, name, raw_code, score in samples:
+                verdict = "[green]KEEP[/]" if score.passes_threshold() else "[red]DROP[/]"
+                scores_str = ",".join(str(s) for s in score.as_tuple())
+                console.print(f"    {verdict} [{scores_str}] [cyan]{name}[/] [dim]({file_path})[/]")
+                # Show raw_code preserving newlines, indented and truncated
+                code_lines = (raw_code or "").split("\n")
+                for line in code_lines[:6]:
+                    truncated = line[:100] + "…" if len(line) > 100 else line
+                    console.print(f"    [dim]│[/] {truncated}")
+                if len(code_lines) > 6:
+                    console.print(f"    [dim]│ ... ({len(code_lines) - 6} more lines)[/]")
+            console.print()
         console.print("  [bold dim]───────────────────────────────────────[/]")
 
     # Remove variables that scored below threshold from parsing_result

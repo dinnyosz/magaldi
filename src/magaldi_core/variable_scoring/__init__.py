@@ -250,6 +250,37 @@ def score_variables(
     # Shared debug log: first successful batch captures (prompt, response)
     debug_log: list[tuple[str, str]] = []
 
+    # Batch sampling: collect up to N batches with 3 random items each
+    import random as _random
+
+    _SAMPLE_BATCHES = 5
+    _SAMPLE_PER_BATCH = 3
+    batch_samples: list[list[tuple[str, str, str, VariableScore]]] = []
+    _batch_sample_count = 0  # total batches seen (for reservoir sampling)
+
+    def _collect_batch_sample(
+        batch: list[tuple[int, str, str, str, str]],
+        batch_scores: dict[str, VariableScore],
+    ) -> None:
+        """Reservoir-sample batches and pick random items from each."""
+        nonlocal _batch_sample_count
+        _batch_sample_count += 1
+
+        # Build sample items: (file_path, name, raw_code, score)
+        items = [
+            (fp, name, code, batch_scores.get(eid, VariableScore()))
+            for _, eid, fp, name, code in batch
+        ]
+        sampled = _random.sample(items, min(_SAMPLE_PER_BATCH, len(items)))
+
+        # Reservoir sampling: always keep first N, then replace with probability
+        if len(batch_samples) < _SAMPLE_BATCHES:
+            batch_samples.append(sampled)
+        else:
+            j = _random.randint(0, _batch_sample_count - 1)
+            if j < _SAMPLE_BATCHES:
+                batch_samples[j] = sampled
+
     def _update_progress(batch: list, batch_scores: dict[str, VariableScore], batch_time: float, is_error: bool = False) -> None:
         """Update progress state after a batch completes."""
         if progress_state is None:
@@ -284,6 +315,7 @@ def score_variables(
             batch_scores = _score_batch(batch, llm_client, config, num_ctx, debug_log)
             batch_time = time.time() - batch_start
             all_scores.update(batch_scores)
+            _collect_batch_sample(batch, batch_scores)
             if worker_status is not None:
                 worker_status.clear(0)
             _update_progress(batch, batch_scores, batch_time)
@@ -352,6 +384,7 @@ def score_variables(
             _sync_throttle_to_progress()
             try:
                 all_scores.update(batch_scores)
+                _collect_batch_sample(batch, batch_scores)
                 _update_progress(batch, batch_scores, runtime)
             except Exception:
                 result.errors += 1
@@ -402,5 +435,6 @@ def score_variables(
     result.scores = all_scores
     result.elapsed = time.time() - start
     result.debug_log = debug_log
+    result.batch_samples = batch_samples
 
     return result

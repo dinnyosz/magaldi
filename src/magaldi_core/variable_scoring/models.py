@@ -67,6 +67,11 @@ class ScoringResult:
     scores: dict[str, VariableScore] = field(default_factory=dict)
     # Debug: (user_prompt, llm_output) for first successful batch
     debug_log: list[tuple[str, str]] = field(default_factory=list)
+    # Debug: batch-level samples for display
+    # Each entry is a list of (file_path, name, raw_code, score) from one batch
+    batch_samples: list[list[tuple[str, str, str, VariableScore]]] = field(
+        default_factory=list
+    )
 
 
 @dataclass
