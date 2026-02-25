@@ -399,6 +399,7 @@ class ThrottleDisplayInfo:
     current_max: float
     avg_base_time: float
     completion_count: int  # Number of completions used to calculate avg_base_time
+    peak_concurrency: int | None = None  # Concurrency level with peak throughput
 
 
 @dataclass
@@ -471,6 +472,7 @@ class ThrottleContext:
             current_max=max(current_max_runtime, throttle.historical_max),
             avg_base_time=avg_base,
             completion_count=count,
+            peak_concurrency=peak,
         )
 
 

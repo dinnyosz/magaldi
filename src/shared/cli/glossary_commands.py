@@ -259,6 +259,9 @@ def run_glossary_extraction(
                 stats.append(" vs ", style="dim")
                 stats.append(f"{state.avg_base_time:.1f}s", style="cyan")
                 stats.append(f" (last {state.completion_count})", style="dim")
+                if state.peak_concurrency is not None:
+                    stats.append(" | ", style="dim")
+                    stats.append(f"Peak@{state.peak_concurrency}", style="magenta")
 
             # Build group with optional eta_table
             elements = [phase_text, bar_text]

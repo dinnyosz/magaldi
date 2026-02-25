@@ -307,6 +307,8 @@ def run_feature_extraction(
                 normalized_max = state.current_max / max(running_count, 1)
                 stats += f" [dim]|[/] [dim]Max:[/] [yellow]{state.current_max:.1f}s[/]"
                 stats += f" [dim]|[/] [dim]Per Worker:[/] [yellow]{normalized_max:.1f}s[/] [dim]vs[/] [cyan]{state.avg_base_time:.1f}s[/] [dim](last {state.completion_count})[/]"
+                if state.peak_concurrency is not None:
+                    stats += f" [dim]|[/] [magenta]Peak@{state.peak_concurrency}[/]"
 
             elements = [bar_text]
             if eta_table:
@@ -514,6 +516,9 @@ def run_feature_extraction(
                         stats_text.append(" vs ", style="dim")
                         stats_text.append(f"{state.avg_base_time:.1f}s", style="cyan")
                         stats_text.append(f" (last {state.completion_count})", style="dim")
+                        if state.peak_concurrency is not None:
+                            stats_text.append(" | ", style="dim")
+                            stats_text.append(f"Peak@{state.peak_concurrency}", style="magenta")
 
                 elements = [header_text, bar_text]
                 if eta_table:
