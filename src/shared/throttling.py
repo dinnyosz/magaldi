@@ -58,12 +58,12 @@ RAMP_HOLD_THRESHOLD = 0.30
 EXPLORE_MIN_SAMPLES = 10
 EXPLORE_SAMPLES_PER_LEVEL = 2
 
-# Ramp cooldown scales with context tier: tier // 1024 seconds.
-# 2k→2s, 4k→4s, 8k→8s, 16k→16s, 32k→32s
+# Ramp cooldown scales with context tier: tier // 512 seconds.
+# 2k→4s, 4k→8s, 8k→16s, 16k→32s, 32k→64s
 # Larger contexts take longer to process, so we wait longer to see impact.
 def get_ramp_cooldown(tier: int) -> float:
     """Get ramp cooldown in seconds based on context tier."""
-    return tier // 1024
+    return tier // 512
 
 
 @dataclass

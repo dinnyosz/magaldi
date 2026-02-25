@@ -86,7 +86,7 @@ class TestThrottleContextCooldown:
             tier_timeout=120.0,
             base_workers=12,
             throughput_tracker=tracker,
-            tier=2048,  # cooldown = 2048 // 1024 = 2 seconds
+            tier=2048,  # cooldown = 2048 // 512 = 4 seconds
         )
 
         # First call: establishes baseline
