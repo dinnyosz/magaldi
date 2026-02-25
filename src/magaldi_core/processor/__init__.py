@@ -20,7 +20,7 @@ from typing import Any, Callable, TYPE_CHECKING
 if TYPE_CHECKING:
     from shared.config import MagaldiConfig
 
-from shared.ai.context_size import compute_element_num_ctx, CONTEXT_TIERS
+from shared.ai.context_size import compute_element_num_ctx, CONTEXT_TIERS, HANDCRAFTED_TIER
 from shared.ai.embedding import CodeEmbeddingClient
 from shared.ai.summarization import SummarizationLLMClient
 from shared.db.store import Repository
@@ -45,6 +45,8 @@ from .helpers import (
     _get_element_line_count,
     _is_small_function,
     _generate_small_function_summary,
+    _should_handcraft,
+    _generate_handcrafted_summary,
     _summarize_element,
     _embed_element,
     _index_element,
@@ -73,6 +75,8 @@ __all__ = [
     "_get_element_line_count",
     "_is_small_function",
     "_generate_small_function_summary",
+    "_should_handcraft",
+    "_generate_handcrafted_summary",
     "_summarize_element",
     "_embed_element",
     "_index_element",
@@ -391,23 +395,22 @@ def process_elements(
     timing_stats.set_totals_by_type(totals_by_type)
 
     # Count elements by (type, tier) for tier-aware ETA
-    # Exclude handcrafted types (imports, small functions) - they don't use LLM
+    # Handcrafted elements get HANDCRAFTED_TIER (0) instead of a context tier
     totals_by_type_tier: dict[tuple[str, int], int] = {}
     for elem in elements_to_process:
-        if elem.element_type in _HANDCRAFTED_SUMMARY_TYPES:
-            continue  # Skip - these don't use LLM summarization
-        if _is_small_function(elem, config.handcrafted_max_lines):
-            continue  # Skip - small functions use handcrafted summaries
-        ctx_size = element_context_sizes.get(elem.element_id, 2048)
-        # Snap to standard tier
-        tier = 2048
-        for t in CONTEXT_TIERS:
-            if ctx_size <= t:
-                tier = t
-                break
+        if _should_handcraft(elem, config):
+            key = (elem.element_type, HANDCRAFTED_TIER)
         else:
-            tier = CONTEXT_TIERS[-1]
-        key = (elem.element_type, tier)
+            ctx_size = element_context_sizes.get(elem.element_id, 2048)
+            # Snap to standard tier
+            tier = 2048
+            for t in CONTEXT_TIERS:
+                if ctx_size <= t:
+                    tier = t
+                    break
+            else:
+                tier = CONTEXT_TIERS[-1]
+            key = (elem.element_type, tier)
         totals_by_type_tier[key] = totals_by_type_tier.get(key, 0) + 1
     timing_stats.set_totals_by_type_tier(totals_by_type_tier)
 
@@ -592,23 +595,23 @@ def process_elements(
                 avg_workers = max(allowed_at_start, allowed_at_end)
 
                 # Record timing with element type, tier, and avg_workers (for throughput)
-                # Skip handcrafted types (imports, small functions) - no LLM, not in ETA
-                if element.element_type not in _HANDCRAFTED_SUMMARY_TYPES and not _is_small_function(element, config.handcrafted_max_lines):
-                    timing_stats.record(
-                        processed.wall_time,
-                        processed.summarize_time,
-                        processed.embed_time,
-                        element.element_type,
-                        was_embedded=should_embed(element),
-                        summary_embed_time=processed.summary_embed_time,
-                        code_embed_time=processed.code_embed_time,
-                        tier=element_tier,
-                        avg_workers=avg_workers,
-                        prompt_tokens=processed.prompt_tokens,
-                        response_tokens=processed.response_tokens,
-                        assigned_tier=processed.assigned_tier,
-                    )
-                    timing_stats.record_task_runtime(processed.wall_time, avg_workers)
+                # Handcrafted elements use HANDCRAFTED_TIER (0) for their own ETA column
+                record_tier = HANDCRAFTED_TIER if _should_handcraft(element, config) else element_tier
+                timing_stats.record(
+                    processed.wall_time,
+                    processed.summarize_time,
+                    processed.embed_time,
+                    element.element_type,
+                    was_embedded=should_embed(element),
+                    summary_embed_time=processed.summary_embed_time,
+                    code_embed_time=processed.code_embed_time,
+                    tier=record_tier,
+                    avg_workers=avg_workers,
+                    prompt_tokens=processed.prompt_tokens,
+                    response_tokens=processed.response_tokens,
+                    assigned_tier=processed.assigned_tier,
+                )
+                timing_stats.record_task_runtime(processed.wall_time, avg_workers)
 
                 was_embedded = should_embed(element)
                 if processed.success:
