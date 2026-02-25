@@ -1,7 +1,14 @@
 """Runtime-aware throttling for parallel processing.
 
 Tracks max runtimes of active workers and historical windows to make
-intelligent throttling decisions that prevent timeouts.
+intelligent throttling decisions that maximize throughput.
+
+Two complementary strategies:
+1. Formula-based safety: max_workers = (timeout * margin) / base_time
+   Prevents timeouts but uses made-up constants.
+2. Peak throughput tracking: find the concurrency level where tasks/sec peaks.
+   Optimizes toward the actual sweet spot where GPU utilization is maximized
+   without contention degrading total throughput.
 """
 
 from __future__ import annotations
@@ -60,6 +67,7 @@ class ThrottleDecision:
     recommended_workers: int  # Suggested worker count
     reason: str
     completion_count: int = 0  # Number of completions used for completed_avg
+    peak_concurrency: int | None = None  # Concurrency level with peak throughput (if available)
 
 
 class ThroughputTracker:
@@ -83,6 +91,8 @@ class ThroughputTracker:
         # Store (timestamp, runtime, concurrent_workers) for each completion
         self.completions: deque[tuple[float, float, int]] = deque()
         self._lock = Lock()
+        # Track throughput at each concurrency level for peak detection
+        self._throughput_by_level = ThroughputByLevel(window_seconds=window_seconds)
 
     def record_completion(self, runtime: float, concurrent_workers: float = 1.0) -> None:
         """Record a completed task with concurrency context.
@@ -102,6 +112,8 @@ class ThroughputTracker:
             cutoff = now - self.window_seconds
             while self.completions and self.completions[0][0] < cutoff:
                 self.completions.popleft()
+        # Also record for per-level peak throughput tracking
+        self._throughput_by_level.record(round(concurrent_workers), runtime)
 
     def get_stats(self) -> tuple[float, float, int]:
         """Get throughput statistics (backwards compatible).
@@ -182,6 +194,17 @@ class ThroughputTracker:
         """Clear all history."""
         with self._lock:
             self.completions.clear()
+        self._throughput_by_level.reset()
+
+    def get_peak_concurrency(self) -> int | None:
+        """Get the concurrency level with peak throughput.
+
+        Returns:
+            The concurrency level (int) where throughput peaked, or None
+            if insufficient data (< 2 levels with enough samples).
+        """
+        result = self._throughput_by_level.get_peak_level()
+        return result[0] if result else None
 
 
 # Keep old name as alias for compatibility
@@ -211,6 +234,133 @@ class TimeoutEvent:
         )
 
 
+class ThroughputByLevel:
+    """Track throughput at each concurrency level to find the peak.
+
+    The key insight: there's a sweet spot for concurrency where throughput
+    (tasks/second) is maximized. Below it, GPU sits idle. Above it,
+    contention causes each task to take longer, reducing total throughput.
+
+    Records completions bucketed by concurrency level. For each level,
+    computes actual throughput = completions_in_window / window_duration.
+    The level with highest throughput is the target.
+
+    Requires data at >= 2 levels (each with >= min_samples) to detect a peak.
+    With only 1 level, there's no slope to compare — returns None.
+    """
+
+    def __init__(self, window_seconds: float = 300.0, min_samples: int = 3):
+        """Initialize throughput-by-level tracker.
+
+        Args:
+            window_seconds: Time window for measuring throughput.
+            min_samples: Minimum completions per level before trusting it.
+        """
+        self.window_seconds = window_seconds
+        self.min_samples = min_samples
+        # level -> deque of (timestamp, runtime) for recent completions
+        self._levels: dict[int, deque[tuple[float, float]]] = {}
+        self._lock = Lock()
+
+    def record(self, concurrency: int, runtime: float) -> None:
+        """Record a completion at this concurrency level.
+
+        Args:
+            concurrency: Number of concurrent workers when task completed.
+            runtime: Task runtime in seconds.
+        """
+        now = time.time()
+        level = max(1, concurrency)  # Clamp to at least 1
+        with self._lock:
+            if level not in self._levels:
+                self._levels[level] = deque()
+            self._levels[level].append((now, runtime))
+            self._prune_level(level, now)
+
+    def _prune_level(self, level: int, now: float) -> None:
+        """Remove expired entries from a level (caller must hold lock)."""
+        cutoff = now - self.window_seconds
+        dq = self._levels[level]
+        while dq and dq[0][0] < cutoff:
+            dq.popleft()
+        # Remove empty levels
+        if not dq:
+            del self._levels[level]
+
+    def _prune_all(self, now: float) -> None:
+        """Remove expired entries from all levels (caller must hold lock)."""
+        empty_levels = []
+        cutoff = now - self.window_seconds
+        for level, dq in self._levels.items():
+            while dq and dq[0][0] < cutoff:
+                dq.popleft()
+            if not dq:
+                empty_levels.append(level)
+        for level in empty_levels:
+            del self._levels[level]
+
+    def _compute_throughput(self, dq: deque[tuple[float, float]], now: float) -> float:
+        """Compute throughput for a level's data (caller must hold lock).
+
+        Throughput = completions / time_span, where time_span is from
+        the oldest completion to now.
+        """
+        if not dq:
+            return 0.0
+        count = len(dq)
+        oldest = dq[0][0]
+        time_span = now - oldest
+        if time_span < 1.0:
+            time_span = 1.0  # Avoid division issues for near-instant completions
+        return count / time_span
+
+    def get_peak_level(self) -> tuple[int, float] | None:
+        """Find concurrency level with highest throughput.
+
+        Returns:
+            (level, throughput_per_sec) for the peak, or None if insufficient data.
+            Requires >= 2 levels with >= min_samples completions each.
+        """
+        now = time.time()
+        with self._lock:
+            self._prune_all(now)
+
+            # Collect levels with sufficient samples
+            qualified: list[tuple[int, float]] = []
+            for level, dq in self._levels.items():
+                if len(dq) >= self.min_samples:
+                    tp = self._compute_throughput(dq, now)
+                    qualified.append((level, tp))
+
+            # Need >= 2 qualified levels to detect a peak
+            if len(qualified) < 2:
+                return None
+
+            # Find level with highest throughput
+            best_level, best_tp = max(qualified, key=lambda x: x[1])
+            return (best_level, best_tp)
+
+    def get_all_levels(self) -> dict[int, tuple[float, int]]:
+        """Get throughput stats for all levels (for debugging/display).
+
+        Returns:
+            Dict of level -> (throughput_per_sec, sample_count).
+        """
+        now = time.time()
+        with self._lock:
+            self._prune_all(now)
+            result = {}
+            for level, dq in self._levels.items():
+                tp = self._compute_throughput(dq, now)
+                result[level] = (tp, len(dq))
+            return result
+
+    def reset(self) -> None:
+        """Clear all history."""
+        with self._lock:
+            self._levels.clear()
+
+
 def compute_throttle_decision(
     current_max_runtime: float,
     tier_timeout: float,
@@ -222,16 +372,19 @@ def compute_throttle_decision(
     avg_concurrency: float = 0.0,
     avg_base_time: float = 0.0,
     post_warmup: bool = False,
+    peak_concurrency: int | None = None,
 ) -> ThrottleDecision:
     """Determine if throttling should be applied.
 
-    KEY INSIGHT: Runtime scales linearly with concurrent workers (GPU contention).
-    So we use base_time = runtime / workers for throttling decisions.
+    Uses two complementary strategies:
+    1. Peak throughput: if we have data at multiple concurrency levels, target
+       the level where actual throughput (tasks/sec) peaked. This optimizes
+       toward the real sweet spot rather than using made-up constants.
+    2. Formula safety cap: max_workers = (timeout * safety_margin) / base_time.
+       Prevents timeouts. The peak can never exceed this cap.
 
-    Example: 10 workers each taking 10s → base_time = 1s
-    If timeout = 7s → max_workers = 7/1 = 7
-
-    Formula: max_workers = (timeout * safety_margin) / base_time
+    The recommended workers = min(peak_level, formula_limit) when peak data
+    is available, otherwise falls back to formula only.
 
     Args:
         current_max_runtime: Max runtime of currently active workers
@@ -246,6 +399,9 @@ def compute_throttle_decision(
         post_warmup: If True, just exited warmup - force gradual ramp from 1 worker
             instead of using historical data for FRESH START. Historical data may
             be from a different tier/model and shouldn't be trusted for initial count.
+        peak_concurrency: Concurrency level with highest observed throughput, or None
+            if insufficient data. When set, this becomes the primary optimization
+            target, capped by the formula-based safety limit.
 
     Returns:
         ThrottleDecision with recommended action
@@ -338,10 +494,23 @@ def compute_throttle_decision(
             )
 
     # Calculate optimal workers: (timeout * safety_margin) / base_time
-    # Safety margin accounts for variance in task runtimes
+    # This formula acts as a SAFETY CAP to prevent timeouts
     effective_timeout = tier_timeout * THROTTLE_SAFETY_MARGIN
-    optimal = int(effective_timeout / effective_base_time)
-    optimal = max(1, min(optimal, base_workers))  # Clamp to [1, base_workers]
+    formula_optimal = int(effective_timeout / effective_base_time)
+    formula_optimal = max(1, min(formula_optimal, base_workers))  # Clamp to [1, base_workers]
+
+    # Apply peak throughput optimization: if we have data showing which
+    # concurrency level produces the best throughput, use that as the
+    # primary target — but never exceed the formula's safety cap.
+    if peak_concurrency is not None:
+        optimal = min(peak_concurrency, formula_optimal)
+        optimal = max(1, min(optimal, base_workers))  # Re-clamp
+        if peak_concurrency < formula_optimal:
+            _log_throttle(
+                f"PEAK THROUGHPUT: peak@{peak_concurrency} < formula@{formula_optimal} → using peak"
+            )
+    else:
+        optimal = formula_optimal
 
     # Determine target: either optimal (if throttling) or base_workers (if not)
     target_workers = optimal if optimal < base_workers else base_workers
@@ -398,14 +567,16 @@ def compute_throttle_decision(
                 )
 
     if should_throttle:
+        peak_info = f",peak@{peak_concurrency}" if peak_concurrency is not None else ""
         return ThrottleDecision(
             should_throttle=True,
             current_max=current_max_runtime,
             historical_max=0,
             completed_avg=effective_base_time,
             recommended_workers=effective_workers,
-            reason=f"Throttle ({effective_workers}={int(effective_timeout)}s/{effective_base_time:.1f}s base{reason_suffix})",
+            reason=f"Throttle ({effective_workers}={int(effective_timeout)}s/{effective_base_time:.1f}s base{peak_info}{reason_suffix})",
             completion_count=completion_count,
+            peak_concurrency=peak_concurrency,
         )
     else:
         return ThrottleDecision(
@@ -416,4 +587,5 @@ def compute_throttle_decision(
             recommended_workers=effective_workers,
             reason=f"Normal{reason_suffix}" if reason_suffix else "Normal",
             completion_count=completion_count,
+            peak_concurrency=peak_concurrency,
         )
