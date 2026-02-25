@@ -5,8 +5,9 @@ import time
 import pytest
 
 from shared.throttling import (
-    ThroughputTracker,
     ThrottleDecision,
+    ThroughputByLevel,
+    ThroughputTracker,
     TimeoutEvent,
     compute_throttle_decision,
 )
@@ -484,3 +485,341 @@ class TestTimeoutEvent:
         assert "avg=25.3s" in log_line
         assert "max=45.7s" in log_line
         assert "limit=180s" in log_line
+
+
+class TestThroughputByLevel:
+    """Tests for ThroughputByLevel class.
+
+    Tracks throughput at each concurrency level to find the peak — the
+    concurrency where tasks/second is maximized.
+    """
+
+    def test_empty_returns_none(self):
+        """Empty tracker has no peak."""
+        tracker = ThroughputByLevel()
+        assert tracker.get_peak_level() is None
+
+    def test_single_level_returns_none(self):
+        """Single level is insufficient — need >= 2 to detect a trend."""
+        tracker = ThroughputByLevel(min_samples=2)
+        for _ in range(5):
+            tracker.record(4, 10.0)
+        assert tracker.get_peak_level() is None
+
+    def test_two_levels_finds_peak(self):
+        """With 2 levels, finds the one with higher throughput.
+
+        Level 2: 5 completions in ~0s → throughput ~5/1s = 5.0/s
+        Level 4: 3 completions in ~0s → throughput ~3/1s = 3.0/s
+        Peak should be level 2.
+        """
+        tracker = ThroughputByLevel(min_samples=3)
+        # Level 2: 5 completions (more than level 4)
+        for _ in range(5):
+            tracker.record(2, 5.0)
+        # Level 4: 3 completions
+        for _ in range(3):
+            tracker.record(4, 10.0)
+
+        result = tracker.get_peak_level()
+        assert result is not None
+        level, tp = result
+        assert level == 2  # More completions in same timespan = higher throughput
+
+    def test_higher_concurrency_lower_throughput(self):
+        """Detects when high concurrency has worse throughput (GPU contention).
+
+        Simulates: level 3 has better throughput than level 6.
+        """
+        tracker = ThroughputByLevel(min_samples=3)
+        # Level 3: 6 completions
+        for _ in range(6):
+            tracker.record(3, 5.0)
+        # Level 6: 3 completions (GPU contention made tasks slower)
+        for _ in range(3):
+            tracker.record(6, 15.0)
+
+        result = tracker.get_peak_level()
+        assert result is not None
+        level, _ = result
+        assert level == 3
+
+    def test_below_min_samples_not_qualified(self):
+        """Levels with fewer than min_samples are ignored."""
+        tracker = ThroughputByLevel(min_samples=3)
+        # Level 2: 5 completions (qualified)
+        for _ in range(5):
+            tracker.record(2, 5.0)
+        # Level 4: only 2 completions (not qualified)
+        tracker.record(4, 5.0)
+        tracker.record(4, 5.0)
+
+        # Only 1 qualified level → returns None
+        assert tracker.get_peak_level() is None
+
+    def test_window_expiration(self):
+        """Old entries are pruned from the window."""
+        tracker = ThroughputByLevel(window_seconds=0.1, min_samples=2)
+
+        # Record data at two levels
+        for _ in range(3):
+            tracker.record(2, 1.0)
+            tracker.record(4, 1.0)
+
+        # Verify peak exists
+        assert tracker.get_peak_level() is not None
+
+        # Wait for window to expire
+        time.sleep(0.15)
+
+        # All data expired
+        assert tracker.get_peak_level() is None
+        assert tracker.get_all_levels() == {}
+
+    def test_reset_clears_all(self):
+        """Reset should clear all level data."""
+        tracker = ThroughputByLevel(min_samples=2)
+        for _ in range(5):
+            tracker.record(2, 1.0)
+            tracker.record(4, 1.0)
+
+        assert tracker.get_peak_level() is not None
+        tracker.reset()
+        assert tracker.get_peak_level() is None
+        assert tracker.get_all_levels() == {}
+
+    def test_get_all_levels(self):
+        """get_all_levels returns stats for all levels with data."""
+        tracker = ThroughputByLevel(min_samples=1)
+        for _ in range(3):
+            tracker.record(2, 5.0)
+        for _ in range(5):
+            tracker.record(4, 5.0)
+
+        levels = tracker.get_all_levels()
+        assert 2 in levels
+        assert 4 in levels
+        assert levels[2][1] == 3  # 3 samples at level 2
+        assert levels[4][1] == 5  # 5 samples at level 4
+
+    def test_concurrency_zero_clamped_to_one(self):
+        """Concurrency 0 (warmup) should be clamped to 1."""
+        tracker = ThroughputByLevel(min_samples=1)
+        tracker.record(0, 5.0)
+
+        levels = tracker.get_all_levels()
+        assert 1 in levels
+        assert 0 not in levels
+
+    def test_three_levels_peak_in_middle(self):
+        """Peak can be at a middle concurrency level.
+
+        Level 1: 2 completions → low throughput (underutilized)
+        Level 3: 6 completions → high throughput (sweet spot)
+        Level 6: 3 completions → lower throughput (contention)
+        """
+        tracker = ThroughputByLevel(min_samples=2)
+        for _ in range(2):
+            tracker.record(1, 5.0)
+        for _ in range(6):
+            tracker.record(3, 5.0)
+        for _ in range(3):
+            tracker.record(6, 5.0)
+
+        result = tracker.get_peak_level()
+        assert result is not None
+        level, _ = result
+        assert level == 3  # Most completions = highest throughput
+
+
+class TestThroughputTrackerPeakIntegration:
+    """Tests for ThroughputTracker.get_peak_concurrency() integration."""
+
+    def test_peak_none_with_no_data(self):
+        """No data → no peak."""
+        tracker = ThroughputTracker(window_seconds=10.0)
+        assert tracker.get_peak_concurrency() is None
+
+    def test_peak_none_with_single_level(self):
+        """Data at only one concurrency level → no peak."""
+        tracker = ThroughputTracker(window_seconds=10.0)
+        for _ in range(5):
+            tracker.record_completion(5.0, concurrent_workers=4)
+        assert tracker.get_peak_concurrency() is None
+
+    def test_peak_detected_with_two_levels(self):
+        """Data at two levels → peak detected."""
+        tracker = ThroughputTracker(window_seconds=10.0)
+        # Level 2: 5 completions
+        for _ in range(5):
+            tracker.record_completion(3.0, concurrent_workers=2)
+        # Level 6: 3 completions
+        for _ in range(3):
+            tracker.record_completion(10.0, concurrent_workers=6)
+
+        peak = tracker.get_peak_concurrency()
+        assert peak is not None
+        assert peak == 2  # More completions = higher throughput
+
+    def test_reset_clears_peak(self):
+        """Reset clears both regular stats and peak data."""
+        tracker = ThroughputTracker(window_seconds=10.0)
+        for _ in range(5):
+            tracker.record_completion(3.0, concurrent_workers=2)
+        for _ in range(3):
+            tracker.record_completion(10.0, concurrent_workers=6)
+
+        assert tracker.get_peak_concurrency() is not None
+        tracker.reset()
+        assert tracker.get_peak_concurrency() is None
+
+
+class TestPeakConcurrencyThrottleDecision:
+    """Tests for peak_concurrency parameter in compute_throttle_decision.
+
+    When peak throughput data is available, it becomes the primary optimization
+    target — but the formula-based limit acts as a safety cap.
+    """
+
+    def test_peak_none_falls_back_to_formula(self):
+        """When peak_concurrency is None, behavior is identical to formula-only.
+
+        avg_base_time=20s → formula_optimal = 117/20 = 5
+        """
+        decision = compute_throttle_decision(
+            current_max_runtime=0.0,
+            tier_timeout=180.0,
+            base_workers=32,
+            active_workers=0,
+            avg_base_time=20.0,
+            completion_count=10,
+            peak_concurrency=None,
+        )
+        assert decision.recommended_workers == 5
+        assert decision.peak_concurrency is None
+
+    def test_peak_below_formula_uses_peak(self):
+        """When peak < formula_optimal, use peak (it's the real sweet spot).
+
+        formula_optimal = 117/5 = 23 workers (safety cap)
+        peak = 4 workers (actual throughput sweet spot)
+        → should use 4
+        """
+        decision = compute_throttle_decision(
+            current_max_runtime=0.0,
+            tier_timeout=180.0,
+            base_workers=32,
+            active_workers=0,
+            avg_base_time=5.0,
+            completion_count=10,
+            peak_concurrency=4,
+        )
+        assert decision.should_throttle
+        assert decision.recommended_workers == 4
+        assert decision.peak_concurrency == 4
+        assert "peak@4" in decision.reason
+
+    def test_peak_above_formula_capped_by_formula(self):
+        """When peak > formula_optimal, formula acts as safety cap.
+
+        formula_optimal = 117/20 = 5 workers (safety cap)
+        peak = 8 workers (but formula says that would risk timeouts)
+        → should use 5
+        """
+        decision = compute_throttle_decision(
+            current_max_runtime=0.0,
+            tier_timeout=180.0,
+            base_workers=32,
+            active_workers=0,
+            avg_base_time=20.0,
+            completion_count=10,
+            peak_concurrency=8,
+        )
+        assert decision.should_throttle
+        assert decision.recommended_workers == 5
+        assert decision.peak_concurrency == 8
+
+    def test_peak_equals_base_workers_no_throttle(self):
+        """When peak >= base_workers and formula allows, no throttle needed.
+
+        formula_optimal = 117/0.5 = 234 → capped at 8 → no throttle
+        peak = 8 → matches base_workers → no throttle
+        """
+        decision = compute_throttle_decision(
+            current_max_runtime=5.0,
+            tier_timeout=180.0,
+            base_workers=8,
+            active_workers=8,
+            avg_base_time=0.5,
+            completion_count=10,
+            peak_concurrency=8,
+        )
+        assert not decision.should_throttle
+        assert decision.recommended_workers == 8
+
+    def test_peak_with_ramp_up(self):
+        """Peak should work with ramp-up logic (gradual increase).
+
+        peak = 6, formula = 23, active = 3
+        target = min(6, 23) = 6, ramp from 3: 3 + 1 = 4
+        """
+        decision = compute_throttle_decision(
+            current_max_runtime=10.0,  # Under hold threshold
+            tier_timeout=180.0,
+            base_workers=32,
+            active_workers=3,
+            avg_base_time=5.0,
+            completion_count=10,
+            peak_concurrency=6,
+        )
+        assert decision.should_throttle
+        assert decision.recommended_workers == 4  # Ramped from 3 toward 6
+        assert "ramped from 3" in decision.reason
+
+    def test_peak_one_minimizes_workers(self):
+        """Peak at 1 means highest throughput is serial — use 1 worker."""
+        decision = compute_throttle_decision(
+            current_max_runtime=0.0,
+            tier_timeout=180.0,
+            base_workers=8,
+            active_workers=0,
+            avg_base_time=5.0,
+            completion_count=10,
+            peak_concurrency=1,
+        )
+        assert decision.should_throttle
+        assert decision.recommended_workers == 1
+
+    def test_emergency_overrides_peak(self):
+        """Emergency throttle (>60% timeout) still overrides peak."""
+        decision = compute_throttle_decision(
+            current_max_runtime=110.0,  # 61% of 180
+            tier_timeout=180.0,
+            base_workers=8,
+            active_workers=4,
+            avg_base_time=5.0,
+            completion_count=10,
+            peak_concurrency=6,
+        )
+        assert decision.should_throttle
+        assert decision.recommended_workers == 1
+        assert "Emergency" in decision.reason
+
+    def test_peak_capped_by_base_workers(self):
+        """Peak cannot exceed base_workers even if throughput says so.
+
+        peak = 20, base_workers = 8 → capped at 8
+        formula = 117/0.5 = 234 → capped at 8
+        → no throttle, 8 workers
+        """
+        decision = compute_throttle_decision(
+            current_max_runtime=5.0,
+            tier_timeout=180.0,
+            base_workers=8,
+            active_workers=8,
+            avg_base_time=0.5,
+            completion_count=10,
+            peak_concurrency=20,
+        )
+        assert not decision.should_throttle
+        assert decision.recommended_workers == 8
