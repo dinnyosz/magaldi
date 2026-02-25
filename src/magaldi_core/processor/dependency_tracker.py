@@ -480,8 +480,10 @@ class DependencyTracker:
                     # Scale down or other change, update tracking
                     self._last_recommended_workers = decision.recommended_workers
 
-            # Attach per-level throughput data for display
+            # Attach per-level data for display (early returns in compute_throttle_decision
+            # don't set these, so we always override from the source of truth)
             decision.all_levels = all_levels if all_levels else None
+            decision.peak_concurrency = peak_concurrency
             return decision
 
     def get_tier_stats(self) -> dict[int, tuple[int, int]]:

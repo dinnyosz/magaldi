@@ -452,8 +452,10 @@ class ThrottleContext:
             peak_concurrency=peak,
         )
         self.post_warmup = False  # Only signal once
-        # Attach per-level throughput data for display
+        # Attach per-level data for display (early returns in compute_throttle_decision
+        # don't set these, so we always override from the source of truth)
         throttle.all_levels = all_levels if all_levels else None
+        throttle.peak_concurrency = peak
         self.last_decision = throttle
 
         # Apply ramp cooldown (mirrors DependencyTracker.compute_throttle_decision)
