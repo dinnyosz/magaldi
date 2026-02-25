@@ -53,7 +53,7 @@ RAMP_HOLD_THRESHOLD = 0.30
 # Significance threshold: max(EXPLORE_MIN_SAMPLES, level * EXPLORE_SAMPLES_PER_LEVEL).
 # At level 2 → 10 (min floor), level 5 → 10, level 6 → 12, level 10 → 20.
 # Higher concurrency has more variance, so we need more data to trust it.
-# Exploration range: ±(max_level // 2) around the peak (clamped to 1..max_level).
+# Exploration range: ±(max_level // 3) around the peak (clamped to 1..max_level).
 # Priority: scan outward from peak (upward first, then downward).
 EXPLORE_MIN_SAMPLES = 10
 EXPLORE_SAMPLES_PER_LEVEL = 2
@@ -222,13 +222,13 @@ class ThroughputTracker:
     def get_exploration_target(self, max_level: int) -> int | None:
         """Get a level that needs more data.
 
-        If the peak is confident but any level within ±(max_level // 2) of
+        If the peak is confident but any level within ±(max_level // 3) of
         the peak lacks samples, returns the nearest under-explored level
         (scanning outward from peak: upward first, then downward).
 
         Args:
             max_level: Upper bound for exploration (typically base_workers).
-                Also determines radius: max_level // 2.
+                Also determines radius: max(3, max_level // 3).
 
         Returns:
             Level to explore, or None if all levels in range are significant.
@@ -383,16 +383,15 @@ class ThroughputByLevel:
     def get_exploration_target(self, max_level: int) -> int | None:
         """Find an under-explored level to collect more data.
 
-        Explores within ±(max_level // 2) of the peak, clamped to 1..max_level.
+        Explores within ±(max_level // 3) of the peak, clamped to 1..max_level.
         Scans outward from the peak: upward first (higher concurrency =
         potentially more throughput), then downward.
 
-        Significance is level-proportional: level 2 needs 4 samples,
-        level 5 needs 10, etc. Higher concurrency has more variance.
+        Significance is level-proportional: max(10, level * 2) samples needed.
 
         Args:
             max_level: Upper bound for exploration (typically base_workers).
-                Also determines radius: max_level // 2.
+                Also determines radius: max_level // 3.
 
         Returns:
             Level to explore, or None if all levels in range are significant.
@@ -402,7 +401,7 @@ class ThroughputByLevel:
             return None
 
         peak, _ = peak_result
-        radius = max(1, max_level // 2)
+        radius = max(3, max_level // 3)
 
         with self._lock:
             # Peak must be confident before we explore from it
