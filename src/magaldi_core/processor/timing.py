@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass, field
 
 from shared.throttling import ThroughputTracker
-from shared.ai.context_size import TIER_SCALING_EXPONENT
+from shared.ai.context_size import TIER_SCALING_EXPONENT, HANDCRAFTED_TIER
 
 # Types that always use the small model (regardless of tier)
 _ALWAYS_SMALL_TYPES = frozenset({"function", "method", "variable", "constant"})
@@ -18,12 +18,18 @@ _ALWAYS_SMALL_TYPES = frozenset({"function", "method", "variable", "constant"})
 # Tier threshold at or below which all types use the small model
 _SMALL_MODEL_TIER_THRESHOLD = 1024
 
+# Default ETA for handcrafted elements (embed + index only, no LLM)
+_HANDCRAFTED_DEFAULT_ETA = 0.1
+
 
 def _uses_small_model(element_type: str, tier: int) -> bool:
     """Determine if a (type, tier) combo uses the small model.
 
     Must mirror ProcessingConfig.get_model_for_element_type() logic.
+    Handcrafted tier (no LLM) is treated as "small" for grouping purposes.
     """
+    if tier == HANDCRAFTED_TIER:
+        return True  # No model needed, group with small for fallback
     if element_type in _ALWAYS_SMALL_TYPES:
         return True
     return tier <= _SMALL_MODEL_TIER_THRESHOLD
@@ -392,6 +398,12 @@ class TimingStats:
             if count > 0:
                 total_time = self.total_base_by_type_tier.get(type_tier_key, 0.0)
                 return total_time / count, False
+
+        # 1b. Handcrafted tier: use seeded default when no data yet.
+        # Handcrafted elements skip LLM and only do embed+index (~0.1s).
+        # Don't fall through to LLM-based tier fallbacks which would overestimate.
+        if tier == HANDCRAFTED_TIER:
+            return _HANDCRAFTED_DEFAULT_ETA, True
 
         # 2. Same type, closest tier — but only tiers using the same model.
         # file@1024 (small model) must NOT extrapolate from file@16384 (large model),
