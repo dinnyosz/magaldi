@@ -479,7 +479,7 @@ def run_throttled_tier(
     process_fn: Callable[[T], R],
     throttle_ctx: ThrottleContext,
     get_max_runtime: Callable[[], float],
-    on_complete: Callable[[T, R, float], None],
+    on_complete: Callable[[T, R, float, float], None],
     on_tick: Callable[[ThrottleDisplayInfo], None] | None = None,
     warmup: bool = True,
 ) -> None:
@@ -495,7 +495,7 @@ def run_throttled_tier(
         process_fn: Function to process an item
         throttle_ctx: Context with throughput tracker and config
         get_max_runtime: Function to get current max active runtime
-        on_complete: Called when item completes with (item, result, avg_workers)
+        on_complete: Called when item completes with (item, result, avg_workers, runtime)
         on_tick: Called on each loop iteration with ThrottleDisplayInfo (for progress refresh)
         warmup: If True, run the first item synchronously to get a baseline
             runtime before entering the throttled loop. Prevents aggressive
@@ -519,7 +519,7 @@ def run_throttled_tier(
         warmup_result = process_fn(warmup_item)
         warmup_time = time.time() - warmup_start
         throttle_ctx.throughput_tracker.record_completion(warmup_time, 1.0)
-        on_complete(warmup_item, warmup_result, 1.0)
+        on_complete(warmup_item, warmup_result, 1.0, warmup_time)
         throttle_ctx.post_warmup = True
 
     if not pending_items:
@@ -528,6 +528,7 @@ def run_throttled_tier(
     executor = ThreadPoolExecutor(max_workers=effective_workers)
     futures: dict = {}
     future_to_allowed_at_start: dict = {}
+    future_to_submit_time: dict = {}
 
     try:
         while pending_items or futures:
@@ -545,6 +546,7 @@ def run_throttled_tier(
                 future = executor.submit(process_fn, item)
                 futures[future] = item
                 future_to_allowed_at_start[future] = allowed_workers
+                future_to_submit_time[future] = time.time()
 
             if not futures:
                 break
@@ -555,13 +557,19 @@ def run_throttled_tier(
             # Handle completed tasks
             for future in done:
                 item = futures.pop(future)
+                submit_time = future_to_submit_time.pop(future, time.time())
+                runtime = time.time() - submit_time
+
                 # Use allowed workers (max of start and end for peak concurrency)
                 allowed_at_start = future_to_allowed_at_start.pop(future, allowed_workers)
                 allowed_at_end = allowed_workers
                 avg_workers = max(allowed_at_start, allowed_at_end)
 
+                # Record in throughput tracker for throttle decisions
+                throttle_ctx.throughput_tracker.record_completion(runtime, avg_workers)
+
                 result = future.result()
-                on_complete(item, result, avg_workers)
+                on_complete(item, result, avg_workers, runtime)
 
             # Tick for progress refresh
             if on_tick:

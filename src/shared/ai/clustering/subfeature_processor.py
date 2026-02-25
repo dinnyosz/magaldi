@@ -888,16 +888,14 @@ def process_subfeatures(
     # Handle workers=0 (auto) - will use tier-specific limits
     max_pool_workers = config.num_workers if config.num_workers > 0 else max(TIER_MAX_WORKERS.values())
 
-    def on_complete(work_item: SubfeatureWorkItem, processed: ProcessedSubfeature, avg_workers: float) -> None:
+    def on_complete(work_item: SubfeatureWorkItem, processed: ProcessedSubfeature, _avg_workers: float, _runtime: float) -> None:
         """Handle completed subfeature processing."""
         nonlocal errors
         tier = work_item_to_tier.get(
             (work_item.parent_label, work_item.sub_cluster.cluster_id), 0
         )
 
-        # Record for throttling
-        wall_time = processed.summarize_time + processed.embed_time
-        timing_stats.record_task_runtime(wall_time, avg_workers)
+        # Throughput is recorded by run_throttled_tier in the throttle context
         timing_stats.record(processed.summarize_time, processed.embed_time, tier=tier)
 
         if processed.success:

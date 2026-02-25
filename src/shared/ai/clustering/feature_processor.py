@@ -783,14 +783,12 @@ def process_features(
     # Mutable state for callbacks
     state = {"completed": 0, "failed": 0, "current_workers": max_pool_workers}
 
-    def on_complete(cluster: ClusterResult, processed: ProcessedFeature, avg_workers: float) -> None:
+    def on_complete(cluster: ClusterResult, processed: ProcessedFeature, _avg_workers: float, _runtime: float) -> None:
         """Handle completed feature processing."""
         nonlocal processed_features, errors
         tier = cluster_to_tier.get(processed.cluster_id, 0)
 
-        # Record for throttling
-        wall_time = processed.summarize_time + processed.embed_time
-        timing_stats.record_task_runtime(wall_time, avg_workers)
+        # Throughput is recorded by run_throttled_tier in the throttle context
         timing_stats.record(processed.summarize_time, processed.embed_time, tier=tier)
 
         if processed.success:

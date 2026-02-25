@@ -134,10 +134,10 @@ class TestRunThrottledTierWarmup:
             order.append(item)
             return item * 10
 
-        completed: list[tuple[int, int, float]] = []
+        completed: list[tuple[int, int, float, float]] = []
 
-        def on_complete(item: int, result: int, avg_workers: float) -> None:
-            completed.append((item, result, avg_workers))
+        def on_complete(item: int, result: int, avg_workers: float, runtime: float) -> None:
+            completed.append((item, result, avg_workers, runtime))
 
         tracker = ThroughputTracker(window_seconds=60.0)
         ctx = ThrottleContext(
@@ -161,8 +161,12 @@ class TestRunThrottledTierWarmup:
 
         # All items should be processed
         assert len(completed) == 5
-        # First completion should be item 1 (warmup)
-        assert completed[0] == (1, 10, 1.0)
+        # First completion should be item 1 (warmup) with avg_workers=1.0
+        assert completed[0][0] == 1
+        assert completed[0][1] == 10
+        assert completed[0][2] == 1.0
+        # Runtime should be a positive float
+        assert completed[0][3] >= 0.0
         # post_warmup should have been set then consumed
         assert ctx.post_warmup is False
 
@@ -178,7 +182,7 @@ class TestRunThrottledTierWarmup:
 
         completed: list[int] = []
 
-        def on_complete(item: int, _result: int, _avg_workers: float) -> None:
+        def on_complete(item: int, _result: int, _avg_workers: float, _runtime: float) -> None:
             completed.append(item)
 
         items = [1, 2, 3]
@@ -216,13 +220,72 @@ class TestRunThrottledTierWarmup:
             process_fn=slow_fn,
             throttle_ctx=ctx,
             get_max_runtime=lambda: 0.0,
-            on_complete=lambda _i, _r, _w: None,
+            on_complete=lambda _i, _r, _w, _rt: None,
             warmup=True,
         )
 
-        # Tracker should have completions recorded
+        # Tracker should have completions recorded (warmup + main loop)
         _, _, count, _, _ = tracker.get_stats_with_concurrency()
-        assert count >= 1  # At least the warmup
+        assert count >= 2  # Warmup + at least the second item
+
+    def test_all_completions_recorded_in_tracker(self):
+        """All completions (not just warmup) should be recorded in throughput tracker."""
+        tracker = ThroughputTracker(window_seconds=60.0)
+        ctx = ThrottleContext(
+            tier_timeout=120.0,
+            base_workers=4,
+            throughput_tracker=tracker,
+            tier=2048,
+        )
+
+        run_throttled_tier(
+            items=[1, 2, 3, 4, 5],
+            tier=2048,
+            effective_workers=4,
+            process_fn=lambda x: x,
+            throttle_ctx=ctx,
+            get_max_runtime=lambda: 0.0,
+            on_complete=lambda _i, _r, _w, _rt: None,
+            warmup=True,
+        )
+
+        # All 5 items should be recorded in the tracker
+        _, _, count, _, _ = tracker.get_stats_with_concurrency()
+        assert count == 5
+
+    def test_runtime_passed_to_on_complete(self):
+        """on_complete should receive a positive runtime for each item."""
+        runtimes: list[float] = []
+
+        def on_complete(_item: int, _result: int, _avg_workers: float, runtime: float) -> None:
+            runtimes.append(runtime)
+
+        def slow_fn(item: int) -> int:
+            time.sleep(0.02)
+            return item
+
+        tracker = ThroughputTracker(window_seconds=60.0)
+        ctx = ThrottleContext(
+            tier_timeout=120.0,
+            base_workers=2,
+            throughput_tracker=tracker,
+            tier=2048,
+        )
+
+        run_throttled_tier(
+            items=[1, 2, 3],
+            tier=2048,
+            effective_workers=2,
+            process_fn=slow_fn,
+            throttle_ctx=ctx,
+            get_max_runtime=lambda: 0.0,
+            on_complete=on_complete,
+            warmup=True,
+        )
+
+        assert len(runtimes) == 3
+        # All runtimes should be positive (at least 20ms sleep)
+        assert all(rt >= 0.01 for rt in runtimes)
 
     def test_empty_items(self):
         """Empty items list should return immediately."""
@@ -242,14 +305,14 @@ class TestRunThrottledTierWarmup:
             process_fn=lambda x: x,
             throttle_ctx=ctx,
             get_max_runtime=lambda: 0.0,
-            on_complete=lambda _i, _r, _w: None,
+            on_complete=lambda _i, _r, _w, _rt: None,
         )
 
     def test_single_item_warmup_only(self):
         """Single item should be handled by warmup, no loop needed."""
         completed: list[int] = []
 
-        def on_complete(item: int, _result: int, _avg_workers: float) -> None:
+        def on_complete(item: int, _result: int, _avg_workers: float, _runtime: float) -> None:
             completed.append(item)
 
         tracker = ThroughputTracker(window_seconds=60.0)
@@ -299,7 +362,7 @@ class TestRunThrottledTierWarmup:
             process_fn=slow_fn,
             throttle_ctx=ctx,
             get_max_runtime=lambda: 0.0,
-            on_complete=lambda _i, _r, _w: None,
+            on_complete=lambda _i, _r, _w, _rt: None,
             on_tick=on_tick,
             warmup=True,
         )

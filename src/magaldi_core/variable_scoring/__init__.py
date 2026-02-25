@@ -345,20 +345,21 @@ def score_variables(
             item: tuple[list, int, int],
             batch_scores: dict[str, VariableScore],
             _avg_workers: float,
+            runtime: float,
         ) -> None:
             """Handle batch completion: update scores and progress."""
             batch = item[0]
             _sync_throttle_to_progress()
             try:
                 all_scores.update(batch_scores)
-                _update_progress(batch, batch_scores, 0.0)
+                _update_progress(batch, batch_scores, runtime)
             except Exception:
                 result.errors += 1
                 error_scores = {}
                 for _, eid, _, _, _ in batch:
                     error_scores[eid] = VariableScore(general_usefulness=5)
                 all_scores.update(error_scores)
-                _update_progress(batch, error_scores, 0.0, is_error=True)
+                _update_progress(batch, error_scores, runtime, is_error=True)
 
         def on_tick(_info: object) -> None:
             """Update progress display on poll timeouts."""

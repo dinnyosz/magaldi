@@ -977,7 +977,7 @@ def extract_glossary_from_features_concurrent(
     # Mutable state for current tier workers
     state = {"current_workers": max_pool_workers}
 
-    def on_complete_phase1(feature: dict, result: tuple, avg_workers: float) -> None:
+    def on_complete_phase1(feature: dict, result: tuple, _avg_workers: float, _runtime: float) -> None:
         """Handle completed feature extraction."""
         items, api_time, success = result
 
@@ -985,8 +985,7 @@ def extract_glossary_from_features_concurrent(
         fid = feature.get("feature_id") or feature.get("subfeature_id", "")
         tier = feature_to_tier.get(fid, 0)
 
-        # Record for throttling
-        timing_stats.record_task_runtime(api_time, avg_workers)
+        # Throughput is recorded by run_throttled_tier in the throttle context
 
         with progress_lock:
             counters["completed"] += 1
@@ -1152,7 +1151,7 @@ def extract_glossary_from_features_concurrent(
     phase2_state = {"current_workers": max_pool_workers}
 
     def on_complete_phase2(
-        item: GlossaryItem, result: tuple, avg_workers: float
+        item: GlossaryItem, result: tuple, _avg_workers: float, _runtime: float
     ) -> None:
         """Handle completed summary generation."""
         completed_item, api_time, success = result
@@ -1160,8 +1159,7 @@ def extract_glossary_from_features_concurrent(
         # Look up tier for this term
         tier = term_to_tier.get(item.name, 0)
 
-        # Record for throttling
-        timing_stats.record_task_runtime(api_time, avg_workers)
+        # Throughput is recorded by run_throttled_tier in the throttle context
 
         with progress_lock:
             counters["completed"] += 1
