@@ -1,4 +1,7 @@
-"""Formatters for dependency analysis results."""
+"""Formatters for dependency analysis results.
+
+All formatters use compact output format for token efficiency.
+"""
 
 from __future__ import annotations
 
@@ -7,8 +10,31 @@ from typing import Any
 from magaldi_mcp.formatters.base import ResultFormatter
 
 
+def _compact_import(imp: dict[str, Any]) -> str:
+    """Format a single import as a compact line.
+
+    Returns:
+        Line like '  module.name:L42' or '  module.name as alias:L42'
+    """
+    module = imp.get("module", "")
+    name = imp.get("name", "")
+    alias = imp.get("alias", "")
+    line_num = imp.get("line", "?")
+
+    if module and name:
+        path = f"{module}.{name}"
+    elif module:
+        path = module
+    else:
+        path = name
+
+    if alias:
+        return f"  {path} as {alias}:L{line_num}"
+    return f"  {path}:L{line_num}"
+
+
 class DependencyFormatter(ResultFormatter):
-    """Formatter for find_dependencies results."""
+    """Compact formatter for find_dependencies results."""
 
     def can_format(self, result: Any) -> bool:
         """Check if result is dependencies."""
@@ -17,49 +43,31 @@ class DependencyFormatter(ResultFormatter):
         return "internal_imports" in result and "external_imports" in result
 
     def format(self, result: dict[str, Any]) -> str:
-        """Format dependencies."""
+        """Format dependencies with compact import lines."""
         file_info = result.get("file_info", {})
         stats = result.get("stats", {})
-        lines = [f"Dependencies for {file_info.get('path', '?')}\n"]
-        lines.append(f"Stats: {stats.get('total', 0)} total ({stats.get('internal', 0)} internal, {stats.get('external', 0)} external)")
-        lines.append("")
+        lines = [
+            f"# deps: {file_info.get('path', '?')}",
+            f"# {stats.get('total', 0)} total ({stats.get('internal', 0)} int, {stats.get('external', 0)} ext)",
+        ]
 
         internal = result.get("internal_imports", [])
         if internal:
-            lines.append(f"Internal Imports ({len(internal)}):")
+            lines.append(f"\nInternal ({len(internal)}):")
             for imp in internal:
-                module = imp.get("module", "")
-                name = imp.get("name", "")
-                alias = imp.get("alias", "")
-                line_num = imp.get("line", "?")
-                if alias:
-                    lines.append(f"  from {module} import {name} as {alias} (line {line_num})")
-                elif module:
-                    lines.append(f"  from {module} import {name} (line {line_num})")
-                else:
-                    lines.append(f"  import {name} (line {line_num})")
-            lines.append("")
+                lines.append(_compact_import(imp))
 
         external = result.get("external_imports", [])
         if external:
-            lines.append(f"External Imports ({len(external)}):")
+            lines.append(f"\nExternal ({len(external)}):")
             for imp in external:
-                module = imp.get("module", "")
-                name = imp.get("name", "")
-                alias = imp.get("alias", "")
-                line_num = imp.get("line", "?")
-                if alias:
-                    lines.append(f"  from {module} import {name} as {alias} (line {line_num})")
-                elif module:
-                    lines.append(f"  from {module} import {name} (line {line_num})")
-                else:
-                    lines.append(f"  import {name} (line {line_num})")
+                lines.append(_compact_import(imp))
 
         return "\n".join(lines)
 
 
 class DependentFormatter(ResultFormatter):
-    """Formatter for find_dependents results."""
+    """Compact formatter for find_dependents results."""
 
     def can_format(self, result: Any) -> bool:
         """Check if result is dependents."""
@@ -68,23 +76,23 @@ class DependentFormatter(ResultFormatter):
         return "module" in result and "dependents" in result and "total" in result
 
     def format(self, result: dict[str, Any]) -> str:
-        """Format dependents."""
+        """Format dependents as compact file list."""
         module = result.get("module", "?")
         dependents = result.get("dependents", [])
         total = result.get("total", 0)
-        lines = [f"Files importing '{module}' ({total}):\n"]
+        lines = [f"# dependents_of: {module} ({total})"]
 
-        for dep in dependents:
-            lines.append(f"  {dep.get('file', '?')}")
-
-        if not dependents:
-            lines.append("  (no dependents found)")
+        if dependents:
+            for dep in dependents:
+                lines.append(f"  {dep.get('file', '?')}")
+        else:
+            lines.append("  (none)")
 
         return "\n".join(lines)
 
 
 class DependencyGraphFormatter(ResultFormatter):
-    """Formatter for dependency_graph results."""
+    """Compact formatter for dependency_graph results."""
 
     def can_format(self, result: Any) -> bool:
         """Check if result is a dependency graph."""
@@ -93,29 +101,29 @@ class DependencyGraphFormatter(ResultFormatter):
         return "nodes" in result and "edges" in result and "cycles" in result
 
     def format(self, result: dict[str, Any]) -> str:
-        """Format dependency graph."""
+        """Format dependency graph with compact stats and edges."""
         stats = result.get("stats", {})
-        lines = ["Dependency Graph"]
-        lines.append(f"  Nodes: {stats.get('node_count', 0)}")
-        lines.append(f"  Edges: {stats.get('edge_count', 0)}")
-        lines.append(f"  Cycles: {stats.get('cycle_count', 0)}")
-        lines.append("")
-
         cycles = result.get("cycles", [])
-        if cycles:
-            lines.append(f"Circular Dependencies ({len(cycles)}):")
-            for i, cycle in enumerate(cycles[:10], 1):  # Show up to 10 cycles
-                lines.append(f"  {i}. {' -> '.join(cycle)}")
-            if len(cycles) > 10:
-                lines.append(f"  ... and {len(cycles) - 10} more")
-            lines.append("")
-
         edges = result.get("edges", [])
+
+        lines = [
+            f"# dep_graph: {stats.get('node_count', 0)} nodes,"
+            f" {stats.get('edge_count', 0)} edges,"
+            f" {stats.get('cycle_count', 0)} cycles",
+        ]
+
+        if cycles:
+            lines.append(f"\nCycles ({len(cycles)}):")
+            for cycle in cycles[:10]:
+                lines.append(f"  {' → '.join(cycle)}")
+            if len(cycles) > 10:
+                lines.append(f"  ...+{len(cycles) - 10} more")
+
         if edges:
-            lines.append(f"Dependencies ({len(edges)}):")
-            for edge in edges[:50]:  # Show up to 50 edges
-                lines.append(f"  {edge.get('from', '?')} -> {edge.get('to', '?')}")
+            lines.append(f"\nEdges ({len(edges)}):")
+            for edge in edges[:50]:
+                lines.append(f"  {edge.get('from', '?')} → {edge.get('to', '?')}")
             if len(edges) > 50:
-                lines.append(f"  ... and {len(edges) - 50} more")
+                lines.append(f"  ...+{len(edges) - 50} more")
 
         return "\n".join(lines)

@@ -1,20 +1,29 @@
-"""Formatters for element details and lists."""
+"""Formatters for element details and lists.
+
+All element references use the shared compact format from _compact module.
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
+from magaldi_mcp.formatters._compact import (
+    abbrev_type,
+    compact_element,
+    indented_summary,
+    line_range,
+    truncate_hash,
+)
 from magaldi_mcp.formatters.base import ResultFormatter
 
 
 class ElementDetailsFormatter(ResultFormatter):
-    """Formatter for single element details."""
+    """Compact formatter for single element details."""
 
     def can_format(self, result: Any) -> bool:
         """Check if result is a single element with details."""
         if not isinstance(result, dict):
             return False
-        # Element details have element_id, type, and file but NOT callers/callees (explain_element)
         return (
             "element_id" in result
             and "type" in result
@@ -23,30 +32,39 @@ class ElementDetailsFormatter(ResultFormatter):
         )
 
     def format(self, result: dict[str, Any]) -> str:
-        """Format element details."""
-        lines = [f"[{result.get('type')}] {result.get('name')}"]
-        lines.append(f"  File: {result.get('file')}:{result.get('line_start')}-{result.get('line_end')}")
+        """Format element details using compact format."""
+        abbrev = abbrev_type(result.get("type"))
+        name = result.get("name", "?")
+        lr = line_range(result)
+        hid = truncate_hash(result.get("hash_id"))
+        fp = result.get("file", "?")
+
+        lines = [f"# {abbrev}:{name}:{lr}|{hid}"]
+        lines.append(f"  file: {fp}")
         if result.get('signature'):
-            lines.append(f"  Signature: {result['signature']}")
+            lines.append(f"  sig: {result['signature']}")
         if result.get('summary'):
-            lines.append(f"  Summary: {result['summary']}")
+            lines.append(f"  {result['summary']}")
         if result.get('document_sections'):
-            lines.append("  Sections:")
+            lines.append("  sections:")
             for s in result['document_sections']:
                 indent = "  " * s.get("level", 1)
                 lines.append(f"    {indent}{s.get('title')} (L{s.get('line_start')}-{s.get('line_end')})")
         if result.get('semantic_related'):
-            lines.append(f"  Semantically Related ({len(result['semantic_related'])}):")
+            lines.append(f"  similar ({len(result['semantic_related'])}):")
             for r in result['semantic_related']:
                 score_pct = int(r.get('score', 0) * 100)
-                lines.append(f"    {r.get('hash_id', r.get('element_id', '?'))} - {score_pct}% similar")
+                rhid = truncate_hash(r.get('hash_id', r.get('element_id', '?')))
+                lines.append(f"    {rhid} {score_pct}%")
         if result.get('code'):
-            lines.append(f"  Code:\n{result['code']}")
+            lines.append("```")
+            lines.append(result['code'])
+            lines.append("```")
         return "\n".join(lines)
 
 
 class RepoListFormatter(ResultFormatter):
-    """Formatter for repository list."""
+    """Compact formatter for repository list."""
 
     def can_format(self, result: Any) -> bool:
         """Check if result is a list of repositories."""
@@ -57,17 +75,17 @@ class RepoListFormatter(ResultFormatter):
 
     def format(self, result: list[dict[str, Any]]) -> str:
         """Format repository list."""
-        lines = ["Indexed repositories:\n"]
+        lines = [f"# repos: {len(result)}"]
         for r in result:
             lines.append(
-                f"  {r.get('scope')}/{r.get('repository')}: "
-                f"{r.get('element_count')} elements, {r.get('file_count')} files"
+                f"  {r.get('scope')}/{r.get('repository')}:"
+                f" {r.get('element_count')} elem, {r.get('file_count')} files"
             )
         return "\n".join(lines)
 
 
 class FileListFormatter(ResultFormatter):
-    """Formatter for file list (find_files)."""
+    """Compact formatter for file list (find_files)."""
 
     def can_format(self, result: Any) -> bool:
         """Check if result is a list of files."""
@@ -78,16 +96,16 @@ class FileListFormatter(ResultFormatter):
 
     def format(self, result: list[dict[str, Any]]) -> str:
         """Format file list."""
-        lines = [f"Found {len(result)} files:\n"]
+        lines = [f"# files: {len(result)}"]
         for r in result:
             size = r.get('size') or r.get('lines', 0)
-            unit = 'bytes' if r.get('size') else 'lines'
-            lines.append(f"  {r.get('path')} ({size} {unit})")
+            unit = 'b' if r.get('size') else 'L'
+            lines.append(f"  {r.get('path')} ({size}{unit})")
         return "\n".join(lines)
 
 
 class GrepResultsFormatter(ResultFormatter):
-    """Formatter for grep results."""
+    """Compact formatter for grep/pattern_search results."""
 
     def can_format(self, result: Any) -> bool:
         """Check if result is grep results."""
@@ -97,21 +115,20 @@ class GrepResultsFormatter(ResultFormatter):
         return "file" in first and "content" in first and "line" in first and "element_id" not in first
 
     def format(self, result: list[dict[str, Any]]) -> str:
-        """Format grep results."""
-        lines = [f"Found {len(result)} matches:\n"]
+        """Format grep results with compact file:line prefix."""
+        lines = [f"# matches: {len(result)}"]
         for r in result:
-            lines.append(f"{r.get('file')}:{r.get('line')}")
+            lines.append(f"{r.get('file')}:L{r.get('line')}")
             for ctx in r.get("context_before", []):
                 lines.append(f"  | {ctx}")
             lines.append(f"  > {r.get('content')}")
             for ctx in r.get("context_after", []):
                 lines.append(f"  | {ctx}")
-            lines.append("")
         return "\n".join(lines)
 
 
 class UsageResultsFormatter(ResultFormatter):
-    """Formatter for find_usages results."""
+    """Compact formatter for find_usages results."""
 
     def can_format(self, result: Any) -> bool:
         """Check if result is usage results."""
@@ -121,21 +138,20 @@ class UsageResultsFormatter(ResultFormatter):
         return "file" in first and "content" in first and "context_before" in first and "element_id" not in first
 
     def format(self, result: list[dict[str, Any]]) -> str:
-        """Format usage results."""
-        lines = [f"Found {len(result)} usages:\n"]
+        """Format usage results with compact file:line prefix."""
+        lines = [f"# usages: {len(result)}"]
         for r in result:
-            lines.append(f"{r.get('file')}:{r.get('line')}")
+            lines.append(f"{r.get('file')}:L{r.get('line')}")
             for ctx in r.get("context_before", []):
                 lines.append(f"  | {ctx}")
             lines.append(f"  > {r.get('content')}")
             for ctx in r.get("context_after", []):
                 lines.append(f"  | {ctx}")
-            lines.append("")
         return "\n".join(lines)
 
 
 class ImplementationResultsFormatter(ResultFormatter):
-    """Formatter for find_implementations results."""
+    """Compact formatter for find_implementations results."""
 
     def can_format(self, result: Any) -> bool:
         """Check if result is implementation results."""
@@ -145,17 +161,18 @@ class ImplementationResultsFormatter(ResultFormatter):
         return "class_name" in first and "definition" in first
 
     def format(self, result: list[dict[str, Any]]) -> str:
-        """Format implementation results."""
-        lines = [f"Found {len(result)} implementations:\n"]
+        """Format implementation results with compact element format."""
+        lines = [f"# implementations: {len(result)}"]
         for r in result:
-            lines.append(f"[class] {r.get('class_name')} ({r.get('file')}:{r.get('line')})")
-            lines.append(f"  {r.get('definition')}")
-            lines.append("")
+            fp = r.get('file', '?')
+            line = r.get('line', '?')
+            lines.append(f"  cls:{r.get('class_name')}:L{line}  {fp}")
+            lines.append(f"    {r.get('definition')}")
         return "\n".join(lines)
 
 
 class GlossaryListFormatter(ResultFormatter):
-    """Formatter for glossary list results."""
+    """Compact formatter for glossary list results."""
 
     def can_format(self, result: Any) -> bool:
         """Check if result is glossary list."""
@@ -166,18 +183,17 @@ class GlossaryListFormatter(ResultFormatter):
 
     def format(self, result: list[dict[str, Any]]) -> str:
         """Format glossary list."""
-        lines = [f"Found {len(result)} glossary terms:\n"]
+        lines = [f"# glossary: {len(result)} terms"]
         for r in result:
-            lines.append(f"  {r.get('term')}: {r.get('total_count')} occurrences")
+            lines.append(f"  {r.get('term')}: {r.get('total_count')}x")
             if r.get('feature_associations'):
-                assocs = r['feature_associations'][:3]  # Show top 3
-                for a in assocs:
-                    lines.append(f"    -> {a.get('feature_label')} ({a.get('percentage'):.0f}%)")
+                for a in r['feature_associations'][:3]:
+                    lines.append(f"    → {a.get('feature_label')} ({a.get('percentage'):.0f}%)")
         return "\n".join(lines)
 
 
 class RepoStatsFormatter(ResultFormatter):
-    """Formatter for repository stats."""
+    """Compact formatter for repository stats."""
 
     def can_format(self, result: Any) -> bool:
         """Check if result is repo stats."""
@@ -187,16 +203,17 @@ class RepoStatsFormatter(ResultFormatter):
 
     def format(self, result: dict[str, Any]) -> str:
         """Format repository stats."""
-        lines = ["Repository stats:"]
-        lines.append(f"  Total elements: {result.get('total_elements')}")
-        lines.append(f"  Total lines: {result.get('total_lines')}")
-        lines.append(f"  Features: {result.get('feature_count')}")
-        lines.append(f"  By type: {result.get('elements_by_type')}")
+        by_type = result.get('elements_by_type', {})
+        type_parts = [f"{k}:{v}" for k, v in by_type.items()] if isinstance(by_type, dict) else [str(by_type)]
+        lines = [
+            f"# stats: {result.get('total_elements')} elem, {result.get('total_lines')} lines, {result.get('feature_count')} features",
+            f"  {', '.join(type_parts)}",
+        ]
         return "\n".join(lines)
 
 
 class FileReadFormatter(ResultFormatter):
-    """Formatter for file read result."""
+    """Compact formatter for file read result."""
 
     def can_format(self, result: Any) -> bool:
         """Check if result is a file read result."""
@@ -206,15 +223,20 @@ class FileReadFormatter(ResultFormatter):
 
     def format(self, result: dict[str, Any]) -> str:
         """Format file read result."""
-        lines = [f"File: {result.get('path')} ({result.get('lines_returned')}/{result.get('total_lines')} lines)"]
-        lines.append("```")
-        lines.append(result.get("content", ""))
-        lines.append("```")
+        lines = [
+            f"# file: {result.get('path')} ({result.get('lines_returned')}/{result.get('total_lines')}L)",
+            "```",
+            result.get("content", ""),
+            "```",
+        ]
         return "\n".join(lines)
 
 
 class FeatureMembersFormatter(ResultFormatter):
-    """Formatter for feature members result."""
+    """Compact formatter for feature members result.
+
+    Uses shared compact element format for member listings.
+    """
 
     def can_format(self, result: Any) -> bool:
         """Check if result is feature members."""
@@ -223,34 +245,28 @@ class FeatureMembersFormatter(ResultFormatter):
         return "members" in result and "glossary_terms" in result
 
     def format(self, result: dict[str, Any]) -> str:
-        """Format feature members."""
+        """Format feature members with compact element format."""
         members = result.get("members", [])
         glossary_terms = result.get("glossary_terms", [])
 
-        lines = []
+        lines: list[str] = []
 
-        # Format members
         if members:
-            lines.append(f"Feature Members ({len(members)}):\n")
+            lines.append(f"Members ({len(members)}):\n")
             for m in members:
-                loc = f"{m.get('file', '?')}:{m.get('line', '?')}" if m.get('file') else "N/A"
-                lines.append(f"[{m.get('type', '?')}] {m.get('name', '?')} ({loc})")
+                lines.append(compact_element(m, indent=0))
                 if m.get('signature'):
                     lines.append(f"  {m['signature']}")
-                if m.get('summary'):
-                    summary = m['summary']
-                    if len(summary) > 200:
-                        summary = summary[:200] + "..."
-                    lines.append(f"  {summary}")
+                summary = indented_summary(m, indent=2)
+                if summary:
+                    lines.append(summary)
                 lines.append("")
         else:
             lines.append("No members.\n")
 
-        # Format glossary terms
         if glossary_terms:
-            lines.append(f"Glossary Terms ({len(glossary_terms)}):\n")
+            lines.append(f"Glossary ({len(glossary_terms)}):")
             for t in glossary_terms:
-                lines.append(f"  {t.get('term')}: {t.get('frequency')} occurrences ({t.get('percentage', 0):.1f}%)")
-            lines.append("")
+                lines.append(f"  {t.get('term')}: {t.get('frequency')} ({t.get('percentage', 0):.1f}%)")
 
         return "\n".join(lines)

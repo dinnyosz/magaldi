@@ -1,14 +1,30 @@
-"""Formatters for analysis results (call graphs, dead code, entry points)."""
+"""Formatters for analysis results (call graphs, dead code, entry points).
+
+All element references use the shared compact format from _compact module
+for consistent output across all tools.
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
+from magaldi_mcp.formatters._compact import (
+    SUMMARY_SHORT,
+    compact_element,
+    compact_element_header,
+    compact_ref,
+    compact_unresolved,
+    file_group,
+    indented_summary,
+)
 from magaldi_mcp.formatters.base import ResultFormatter
 
 
 class CallGraphFormatter(ResultFormatter):
-    """Formatter for get_call_graph results."""
+    """Compact formatter for get_call_graph results.
+
+    Uses file-grouped layout for callers/callees and compact element refs.
+    """
 
     def can_format(self, result: Any) -> bool:
         """Check if result is a call graph."""
@@ -17,50 +33,55 @@ class CallGraphFormatter(ResultFormatter):
         return "callers" in result and "callees" in result and "element" in result
 
     def format(self, result: dict[str, Any]) -> str:
-        """Format call graph."""
+        """Format call graph with compact element references."""
         elem = result.get("element", {})
-        lines = [f"Call graph for [{elem.get('type')}] {elem.get('name')} ({elem.get('file')}:{elem.get('line')})\n"]
+        callers = result.get("callers", [])
+        callees = result.get("callees", [])
+        semantic = result.get("semantic_related", [])
 
-        if result.get("callers"):
-            lines.append(f"Callers ({len(result['callers'])}):")
-            for c in result["callers"]:
-                loc = f"{c.get('file')}:{c.get('line')}" if c.get('file') else "?"
-                lines.append(f"  [{c.get('type', '?')}] {c.get('name')} ({loc})")
-                if c.get('summary'):
-                    summary = c['summary'][:100] + "..." if len(c.get('summary', '')) > 100 else c.get('summary', '')
-                    lines.append(f"    {summary}")
-            lines.append("")
+        resolved_callees = [c for c in callees if c.get("element_id")]
+        unresolved_callees = [c for c in callees if not c.get("element_id")]
 
-        if result.get("callees"):
-            lines.append(f"Callees ({len(result['callees'])}):")
-            for c in result["callees"]:
-                if c.get("element_id"):
-                    loc = f"{c.get('file')}:{c.get('target_line')}" if c.get('file') else "?"
-                    lines.append(f"  [{c.get('type', '?')}] {c.get('name')} ({loc})")
-                    if c.get('summary'):
-                        summary = c['summary'][:100] + "..." if len(c.get('summary', '')) > 100 else c.get('summary', '')
-                        lines.append(f"    {summary}")
-                else:
-                    receiver = f"{c.get('receiver')}." if c.get('receiver') else ""
-                    lines.append(f"  {receiver}{c.get('name')}() @ line {c.get('line')} (unresolved)")
-            lines.append("")
+        lines = [
+            f"# call_graph: {compact_element_header(elem)}",
+            f"# {len(callers)} callers, {len(callees)} callees"
+            + (f", {len(semantic)} similar" if semantic else ""),
+        ]
 
-        if result.get("semantic_related"):
-            lines.append(f"Semantically Related ({len(result['semantic_related'])}):")
-            for r in result["semantic_related"]:
-                loc = f"{r.get('file')}:{r.get('line')}" if r.get('file') else "?"
-                score_pct = int(r.get('score', 0) * 100)
-                lines.append(f"  [{r.get('type', '?')}] {r.get('name')} ({loc}) - {score_pct}% similar")
-                if r.get('summary'):
-                    summary = r['summary'][:100] + "..." if len(r.get('summary', '')) > 100 else r.get('summary', '')
-                    lines.append(f"    {summary}")
-            lines.append("")
+        if callers:
+            lines.append(f"\nCallers ({len(callers)}):")
+            for fp, _, elements in file_group(callers):
+                lines.append(f"  {fp}")
+                for c in elements:
+                    lines.append(compact_ref(c, arrow="←", indent=4))
+
+        if resolved_callees:
+            lines.append(f"\nCallees ({len(resolved_callees)}):")
+            for c in resolved_callees:
+                # Use target_line for resolved callees
+                ref = dict(c)
+                if "target_line" in ref:
+                    ref["line"] = ref["target_line"]
+                lines.append(compact_ref(ref, arrow="→", indent=2))
+
+        if unresolved_callees:
+            lines.append(f"\nUnresolved ({len(unresolved_callees)}):")
+            for c in unresolved_callees:
+                lines.append(compact_unresolved(c))
+
+        if semantic:
+            lines.append(f"\nSimilar ({len(semantic)}):")
+            for s in semantic:
+                lines.append(compact_ref(s, arrow="~", indent=2, score=True))
 
         return "\n".join(lines)
 
 
 class FindCallersFormatter(ResultFormatter):
-    """Formatter for find_callers results."""
+    """Compact formatter for find_callers results.
+
+    Merges code/test callers into file-grouped layout, marks tests with [T].
+    """
 
     def can_format(self, result: Any) -> bool:
         """Check if result is find_callers result."""
@@ -69,34 +90,42 @@ class FindCallersFormatter(ResultFormatter):
         return "target" in result and "code_results" in result and "test_results" in result
 
     def format(self, result: dict[str, Any]) -> str:
-        """Format find_callers results."""
+        """Format find_callers with compact element references."""
         target = result.get("target", {})
-        lines = [f"Callers of [{target.get('type')}] {target.get('name')} ({target.get('file')}:{target.get('line')})\n"]
-
         code_results = result.get("code_results", [])
         test_results = result.get("test_results", [])
 
+        total = len(code_results) + len(test_results)
+        lines = [
+            f"# callers_of: {compact_element_header(target)}",
+            f"# {len(code_results)} code, {len(test_results)} test",
+        ]
+
         if code_results:
-            lines.append(f"Code Callers ({len(code_results)}):")
-            for c in code_results:
-                loc = f"{c.get('file')}:{c.get('line')}" if c.get('file') else "?"
-                lines.append(f"  [{c.get('type', '?')}] {c.get('name')} ({loc})")
-                if c.get('summary'):
-                    summary = c['summary'][:100] + "..." if len(c.get('summary', '')) > 100 else c.get('summary', '')
-                    lines.append(f"    {summary}")
-            lines.append("")
+            lines.append(f"\nCode ({len(code_results)}):")
+            for fp, _, elements in file_group(code_results):
+                lines.append(f"  {fp}")
+                for c in elements:
+                    lines.append(compact_ref(c, arrow="←", indent=4))
 
         if test_results:
-            lines.append(f"Test Callers ({len(test_results)}):")
-            for c in test_results:
-                loc = f"{c.get('file')}:{c.get('line')}" if c.get('file') else "?"
-                lines.append(f"  [{c.get('type', '?')}] {c.get('name')} ({loc})")
+            lines.append(f"\nTests ({len(test_results)}):")
+            for fp, _, elements in file_group(test_results):
+                lines.append(f"  {fp}")
+                for c in elements:
+                    lines.append(compact_ref(c, arrow="←", indent=4))
+
+        if not total:
+            lines.append("\nNo callers found.")
 
         return "\n".join(lines)
 
 
 class CallChainFormatter(ResultFormatter):
-    """Formatter for find_call_chain results."""
+    """Compact formatter for find_call_chain results.
+
+    Uses ASCII tree with compact element refs and arrow indicators.
+    """
 
     def can_format(self, result: Any) -> bool:
         """Check if result is a call chain."""
@@ -105,46 +134,48 @@ class CallChainFormatter(ResultFormatter):
         return "root" in result and "direction" in result
 
     def format(self, result: dict[str, Any]) -> str:
-        """Format call chain."""
+        """Format call chain with compact tree nodes."""
         root = result.get("root", {})
         direction = result.get("direction")
         max_depth = result.get("max_depth", 5)
-        lines = [f"Call chain for [{root.get('type')}] {root.get('name')} ({root.get('file')}:{root.get('line')})"]
-        lines.append(f"Direction: {direction}, Max depth: {max_depth}\n")
+        lines = [
+            f"# call_chain: {compact_element_header(root)}",
+            f"# direction:{direction} depth:{max_depth}",
+        ]
 
-        def format_tree(nodes: list, indent: int = 0) -> None:
+        def format_tree(nodes: list, indent: int = 1, arrow: str = "→") -> None:
             for node in nodes:
                 prefix = "  " * indent
                 if node.get("cycle"):
-                    lines.append(f"{prefix}[CYCLE] {node.get('name')}")
+                    lines.append(f"{prefix}⟳ {node.get('name')}")
                 elif node.get("unresolved"):
                     receiver = f"{node.get('receiver')}." if node.get('receiver') else ""
-                    lines.append(f"{prefix}[unresolved] {receiver}{node.get('name')}()")
+                    lines.append(f"{prefix}→ ?:{receiver}{node.get('name')}()")
                 elif node.get("missing"):
-                    lines.append(f"{prefix}[missing] {node.get('name')}")
+                    lines.append(f"{prefix}→ ?:{node.get('name')}")
                 else:
-                    loc = f"{node.get('file')}:{node.get('line')}" if node.get('file') else "?"
-                    lines.append(f"{prefix}[{node.get('type', '?')}] {node.get('name')} ({loc})")
-                    # Recurse into children
+                    lines.append(compact_ref(node, arrow=arrow, indent=indent * 2))
                     if node.get("callers"):
-                        format_tree(node["callers"], indent + 1)
+                        format_tree(node["callers"], indent + 1, arrow="←")
                     if node.get("callees"):
-                        format_tree(node["callees"], indent + 1)
+                        format_tree(node["callees"], indent + 1, arrow="→")
 
         if result.get("callers"):
-            lines.append("Callers:")
-            format_tree(result["callers"], 1)
-            lines.append("")
+            lines.append("\nCallers:")
+            format_tree(result["callers"], 1, arrow="←")
 
         if result.get("callees"):
-            lines.append("Callees:")
-            format_tree(result["callees"], 1)
+            lines.append("\nCallees:")
+            format_tree(result["callees"], 1, arrow="→")
 
         return "\n".join(lines)
 
 
 class DeadCodeFormatter(ResultFormatter):
-    """Formatter for find_dead_code results."""
+    """Compact formatter for find_dead_code results.
+
+    File-grouped dead elements with compact element format.
+    """
 
     def can_format(self, result: Any) -> bool:
         """Check if result is dead code analysis."""
@@ -153,33 +184,37 @@ class DeadCodeFormatter(ResultFormatter):
         return "potentially_dead" in result and "stats" in result
 
     def format(self, result: dict[str, Any]) -> str:
-        """Format dead code analysis."""
+        """Format dead code with compact element references."""
         dead = result.get("potentially_dead", [])
         stats = result.get("stats", {})
-        lines = ["Dead Code Analysis\n"]
-        lines.append("Stats:")
-        lines.append(f"  Total functions: {stats.get('total_functions', 0)}")
-        lines.append(f"  Excluded (entry points): {stats.get('excluded_entry_points', 0)}")
-        lines.append(f"  Called: {stats.get('called', 0)}")
-        lines.append(f"  Potentially dead: {stats.get('potentially_dead', 0)}")
-        lines.append("")
+
+        lines = [
+            f"# dead_code: {stats.get('potentially_dead', 0)} dead"
+            f" / {stats.get('total_functions', 0)} total"
+            f" ({stats.get('called', 0)} called,"
+            f" {stats.get('excluded_entry_points', 0)} entry points)",
+        ]
 
         if dead:
-            lines.append(f"Potentially Dead Code ({len(dead)}):")
-            for d in dead:
-                loc = f"{d.get('file')}:{d.get('line')}" if d.get('file') else "?"
-                lines.append(f"  [{d.get('type', '?')}] {d.get('name')} ({loc})")
-                if d.get('summary'):
-                    summary = d['summary'][:100] + "..." if len(d.get('summary', '')) > 100 else d.get('summary', '')
-                    lines.append(f"    {summary}")
+            lines.append("")
+            for fp, _, elements in file_group(dead):
+                lines.append(fp)
+                for d in elements:
+                    lines.append(compact_element(d))
+                    summary = indented_summary(d, max_len=SUMMARY_SHORT)
+                    if summary:
+                        lines.append(summary)
         else:
-            lines.append("No potentially dead code found!")
+            lines.append("\nNo potentially dead code found!")
 
         return "\n".join(lines)
 
 
 class EntryPointsFormatter(ResultFormatter):
-    """Formatter for find_entry_points results."""
+    """Compact formatter for find_entry_points results.
+
+    Compact element format grouped by entry point category.
+    """
 
     def can_format(self, result: Any) -> bool:
         """Check if result is entry points."""
@@ -188,34 +223,38 @@ class EntryPointsFormatter(ResultFormatter):
         return "http" in result and "cli" in result and "test" in result and "main" in result
 
     def format(self, result: dict[str, Any]) -> str:
-        """Format entry points."""
+        """Format entry points with compact element references."""
         stats = result.get("stats", {})
-        lines = [f"Entry Points (Total: {stats.get('total', 0)})\n"]
+        lines = [f"# entry_points: {stats.get('total', 0)} total"]
 
-        def format_entries(title: str, entries: list) -> None:
+        categories = [
+            ("HTTP", result.get("http", [])),
+            ("CLI", result.get("cli", [])),
+            ("Test", result.get("test", [])),
+            ("Main", result.get("main", [])),
+            ("Async", result.get("async_tasks", [])),
+        ]
+
+        for title, entries in categories:
             if entries:
-                lines.append(f"{title} ({len(entries)}):")
+                lines.append(f"\n{title} ({len(entries)}):")
                 for e in entries:
-                    loc = f"{e.get('file')}:{e.get('line')}" if e.get('file') else "?"
-                    lines.append(f"  [{e.get('type', '?')}] {e.get('name')} ({loc})")
+                    lines.append(compact_element(e))
                     if e.get('decorators'):
                         decs = ", ".join(e['decorators'][:3])
                         if len(e['decorators']) > 3:
                             decs += "..."
-                        lines.append(f"    decorators: {decs}")
-                lines.append("")
-
-        format_entries("HTTP Handlers", result.get("http", []))
-        format_entries("CLI Commands", result.get("cli", []))
-        format_entries("Test Fixtures", result.get("test", []))
-        format_entries("Main Functions", result.get("main", []))
-        format_entries("Async Tasks", result.get("async_tasks", []))
+                        lines.append(f"    @{decs}")
 
         return "\n".join(lines)
 
 
 class ExplainElementFormatter(ResultFormatter):
-    """Formatter for explain_element results."""
+    """Compact formatter for explain_element results.
+
+    Uses compact element format throughout all sections. Significantly
+    reduces output tokens compared to the verbose original.
+    """
 
     def can_format(self, result: Any) -> bool:
         """Check if result is explain_element."""
@@ -224,87 +263,78 @@ class ExplainElementFormatter(ResultFormatter):
         return "element" in result and "similar_code" in result and "parent" in result
 
     def format(self, result: dict[str, Any]) -> str:
-        """Format explain_element results."""
+        """Format explain_element with compact references everywhere."""
         elem = result.get("element", {})
-        lines = [f"Element Overview: [{elem.get('type')}] {elem.get('name')}"]
-        lines.append(f"  File: {elem.get('file')}:{elem.get('line')}")
+        lines = [f"# explain: {compact_element_header(elem)}"]
+
+        # Core info
         if elem.get('signature'):
-            lines.append(f"  Signature: {elem['signature']}")
+            lines.append(f"  sig: {elem['signature']}")
         if elem.get('summary'):
-            lines.append(f"  Summary: {elem['summary']}")
+            lines.append(f"  {elem['summary']}")
         if elem.get('docstring'):
             docstring = elem['docstring']
-            if len(docstring) > 200:
-                docstring = docstring[:200] + "..."
-            lines.append(f"  Docstring: {docstring}")
+            if len(docstring) > SUMMARY_SHORT:
+                docstring = docstring[:SUMMARY_SHORT] + "..."
+            lines.append(f"  doc: {docstring}")
         if elem.get('decorators'):
-            lines.append(f"  Decorators: {', '.join(elem['decorators'])}")
-        lines.append("")
+            lines.append(f"  @{', '.join(elem['decorators'])}")
 
         # Parent context
         parent = result.get("parent")
         if parent:
-            lines.append(f"Parent: [{parent.get('type')}] {parent.get('name')} ({parent.get('file')}:{parent.get('line')})")
-            if parent.get('summary'):
-                lines.append(f"  {parent['summary'][:100]}...")
-            lines.append("")
+            lines.append(f"\nParent: {compact_element_header(parent)}")
+            summary = indented_summary(parent, indent=2, max_len=SUMMARY_SHORT)
+            if summary:
+                lines.append(summary)
 
         # Callers
         callers = result.get("callers", [])
         if callers:
-            lines.append(f"Callers ({len(callers)}):")
+            lines.append(f"\nCallers ({len(callers)}):")
             for c in callers:
-                loc = f"{c.get('file')}:{c.get('line')}" if c.get('file') else "?"
-                lines.append(f"  [{c.get('type', '?')}] {c.get('name')} ({loc})")
-                if c.get('summary'):
-                    summary = c['summary'][:80] + "..." if len(c.get('summary', '')) > 80 else c.get('summary', '')
-                    lines.append(f"    {summary}")
-            lines.append("")
+                lines.append(compact_ref(c, arrow="←"))
 
         # Callees
         callees = result.get("callees", [])
         if callees:
-            lines.append(f"Callees ({len(callees)}):")
-            for c in callees:
-                if c.get("element_id"):
-                    loc = f"{c.get('file')}:{c.get('target_line')}" if c.get('file') else "?"
-                    lines.append(f"  [{c.get('type', '?')}] {c.get('name')} ({loc})")
-                    if c.get('summary'):
-                        summary = c['summary'][:80] + "..." if len(c.get('summary', '')) > 80 else c.get('summary', '')
-                        lines.append(f"    {summary}")
-                else:
-                    receiver = f"{c.get('receiver')}." if c.get('receiver') else ""
-                    lines.append(f"  {receiver}{c.get('name')}() @ line {c.get('line')} (unresolved)")
-            lines.append("")
+            resolved = [c for c in callees if c.get("element_id")]
+            unresolved = [c for c in callees if not c.get("element_id")]
+            lines.append(f"\nCallees ({len(callees)}):")
+            for c in resolved:
+                ref = dict(c)
+                if "target_line" in ref:
+                    ref["line"] = ref["target_line"]
+                lines.append(compact_ref(ref, arrow="→"))
+            for c in unresolved:
+                lines.append(compact_unresolved(c))
 
-        # Imports (for file elements)
+        # Imports (compact count + list)
         imports = result.get("imports", [])
         if imports:
-            lines.append(f"Imports ({len(imports)}):")
+            lines.append(f"\nImports ({len(imports)}):")
             for imp in imports[:10]:
                 module = imp.get("module", "")
                 name = imp.get("name", "")
                 alias = imp.get("alias", "")
                 if alias:
-                    lines.append(f"  from {module} import {name} as {alias}")
+                    lines.append(f"  {module}.{name} as {alias}")
                 elif module:
-                    lines.append(f"  from {module} import {name}")
+                    lines.append(f"  {module}.{name}")
                 else:
-                    lines.append(f"  import {name}")
+                    lines.append(f"  {name}")
             if len(imports) > 10:
-                lines.append(f"  ... and {len(imports) - 10} more")
-            lines.append("")
+                lines.append(f"  ... +{len(imports) - 10} more")
 
         # Similar code
         similar = result.get("similar_code", [])
         if similar:
-            lines.append(f"Similar Code ({len(similar)}):")
+            lines.append(f"\nSimilar ({len(similar)}):")
             for s in similar:
-                loc = f"{s.get('file')}:{s.get('line')}" if s.get('file') else "?"
-                sim_score = s.get('similarity', 0)
-                lines.append(f"  [{s.get('type', '?')}] {s.get('name')} ({loc}) - {sim_score:.1%} similar")
-                if s.get('summary'):
-                    summary = s['summary'][:80] + "..." if len(s.get('summary', '')) > 80 else s.get('summary', '')
-                    lines.append(f"    {summary}")
+                # Use similarity field for score display
+                ref = dict(s)
+                if "similarity" in ref:
+                    ref["score"] = ref["similarity"]
+                lines.append(compact_ref(ref, arrow="~", score=True))
 
         return "\n".join(lines)

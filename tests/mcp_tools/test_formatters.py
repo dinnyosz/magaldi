@@ -193,12 +193,13 @@ class TestGroupedSearchFormatter:
         output = self.formatter.format(result)
         assert "    Process input data and validate" in output
 
-    def test_non_brief_with_signature(self):
-        """Non-brief results show signature indented under element."""
+    def test_non_brief_omits_signature(self):
+        """Compact format omits signature (available via get_element)."""
         entries = [self._make_entry(signature="def foo(x: int) -> str")]
         result = self._make_result(code_results=entries)
         output = self.formatter.format(result)
-        assert "    def foo(x: int) -> str" in output
+        # Signature is NOT included in compact search output
+        assert "def foo(x: int) -> str" not in output
 
     def test_summary_truncation(self):
         """Summaries longer than 200 chars are truncated."""
@@ -212,14 +213,14 @@ class TestGroupedSearchFormatter:
         # 4 spaces indent + 200 chars + "..." = 207
         assert len(summary_line) == 207
 
-    def test_code_included(self):
-        """Code blocks are indented under elements."""
+    def test_code_omitted_in_compact(self):
+        """Compact format omits code blocks (available via get_element)."""
         entries = [self._make_entry(code="def foo():\n    return 42")]
         result = self._make_result(code_results=entries)
         output = self.formatter.format(result)
-        assert "    ```" in output
-        assert "    def foo():" in output
-        assert "        return 42" in output
+        # Code is NOT included in compact search output
+        assert "```" not in output
+        assert "def foo():" not in output
 
     def test_mixed_code_and_test_results(self):
         """Code and test results are merged into same file groups."""
@@ -273,5 +274,5 @@ class TestGroupedSearchFormatter:
         }
         output = self.formatter.format(result)
         assert "fn:process:L10:" in output
-        assert "    ```" in output
-        assert "    def process(): pass" in output
+        # Compact format omits code blocks
+        assert "```" not in output
