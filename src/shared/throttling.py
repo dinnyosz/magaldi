@@ -602,33 +602,35 @@ def _lerp_color(t: float) -> str:
     return f"#{r:02x}{g:02x}00"
 
 
-def format_throughput_levels(
-    all_levels: dict[int, tuple[float, int]] | None,
+_LEVEL_COL_WIDTH = 6  # Fixed width per level column (chars)
+
+
+def _build_levels_table(
+    all_levels: dict[int, tuple[float, int]],
     peak_concurrency: int | None = None,
     max_workers: int = 0,
-) -> str:
-    """Format per-level base time as a color-graded dot line (Rich markup).
+) -> object:
+    """Build a Rich Table showing color-graded level blocks.
 
-    Each position from 1 to max_workers is a block character (█), colored
-    on a gradient: green = lowest base time (best), red = highest (worst).
-    Levels without data show a dim dot (·). The peak level is underlined.
+    Each level is a fixed-width column with two rows:
+    - Row 1: level number (centered)
+    - Row 2: avg base time, e.g. "1.3s" (centered)
 
-    Example output (conceptual): ``  ⟨ █ █ █ █ · · · · ⟩  peak@3 1.3s``
+    Columns are color-coded on a green→red gradient based on base time.
+    Levels without data show dim placeholders. The peak level is highlighted.
 
     Args:
-        all_levels: Dict of level -> (avg_base_time_seconds, sample_count), or None.
+        all_levels: Dict of level -> (avg_base_time_seconds, sample_count). Must be non-empty.
         peak_concurrency: The level identified as peak, or None.
-        max_workers: Total worker slots to display (1..max_workers). If 0, uses max level.
+        max_workers: Total worker slots (1..max_workers). If 0, uses max level in data.
 
     Returns:
-        Rich markup string, or empty string if no data.
+        A rich.table.Table renderable.
     """
-    if not all_levels:
-        return ""
+    from rich.table import Table
+    from rich.text import Text
 
     max_level = max_workers if max_workers > 0 else max(all_levels.keys())
-    if max_level < 1:
-        return ""
 
     # Find min/max base times for color scaling
     base_times = {lvl: bt for lvl, (bt, _) in all_levels.items()}
@@ -636,32 +638,77 @@ def format_throughput_levels(
     max_bt = max(base_times.values())
     bt_range = max_bt - min_bt
 
-    parts: list[str] = ["  "]
+    # Build the table: no header, no border, fixed column widths
+    table = Table(
+        show_header=False,
+        show_edge=False,
+        show_lines=False,
+        box=None,
+        padding=(0, 0),
+        expand=False,
+    )
+
+    # Add columns: leading indent + one per level
+    table.add_column(width=2, no_wrap=True)  # indent
+    for _ in range(max_level):
+        table.add_column(width=_LEVEL_COL_WIDTH, no_wrap=True, justify="center")
+
+    # Build row 1 (level numbers) and row 2 (base times)
+    row1_cells: list[Text] = [Text("")]  # indent
+    row2_cells: list[Text] = [Text("")]  # indent
+
     for level in range(1, max_level + 1):
+        is_peak = peak_concurrency is not None and level == peak_concurrency
         if level in all_levels:
             avg_bt, count = all_levels[level]
-            # Normalize: 0 = best (lowest base time), 1 = worst (highest)
             t = (avg_bt - min_bt) / bt_range if bt_range > 0 else 0.0
             color = _lerp_color(t)
-            is_peak = peak_concurrency is not None and level == peak_concurrency
-            if is_peak:
-                parts.append(f"[bold underline {color}]█[/]")
-            else:
-                parts.append(f"[{color}]█[/]")
+            bg = f"on {color}"
+            style = f"bold white {bg}" if is_peak else f"white {bg}"
+
+            # Level number cell
+            label = Text(f" {level} ", style=style, justify="center")
+            row1_cells.append(label)
+
+            # Base time cell
+            bt_str = f"{avg_bt:.1f}s" if avg_bt < 100 else f"{avg_bt:.0f}s"
+            time_label = Text(f" {bt_str} ", style=style, justify="center")
+            row2_cells.append(time_label)
         else:
-            parts.append("[dim]·[/]")
+            # No data for this level
+            row1_cells.append(Text(f" {level} ", style="dim", justify="center"))
+            row2_cells.append(Text(" ··· ", style="dim", justify="center"))
 
-    # Legend: show peak info and best/worst values
-    if peak_concurrency is not None and peak_concurrency in all_levels:
-        peak_bt, peak_count = all_levels[peak_concurrency]
-        parts.append(f"  [magenta]peak@{peak_concurrency}[/] [dim]{peak_bt:.1f}s({peak_count})[/]")
-    elif all_levels:
-        # Show best level info
-        best_level = min(all_levels, key=lambda l: all_levels[l][0])
-        best_bt, best_count = all_levels[best_level]
-        parts.append(f"  [dim]best@{best_level} {best_bt:.1f}s({best_count})[/]")
+    table.add_row(*row1_cells)
+    table.add_row(*row2_cells)
 
-    return "".join(parts)
+    return table
+
+
+def format_throughput_levels(
+    all_levels: dict[int, tuple[float, int]] | None,
+    peak_concurrency: int | None = None,
+    max_workers: int = 0,
+) -> object | str:
+    """Build a color-graded level table (Rich renderable).
+
+    Each level is a fixed-width block, two rows tall:
+    - Row 1: level number (centered)
+    - Row 2: avg base time (centered)
+    Color-coded green (best) → red (worst). Peak level highlighted.
+
+    Args:
+        all_levels: Dict of level -> (avg_base_time_seconds, sample_count), or None.
+        peak_concurrency: The level identified as peak, or None.
+        max_workers: Total worker slots to display (1..max_workers). If 0, uses max level.
+
+    Returns:
+        Rich Table renderable, or empty string if no data.
+    """
+    if not all_levels:
+        return ""
+
+    return _build_levels_table(all_levels, peak_concurrency, max_workers)
 
 
 def build_throughput_levels_text(
@@ -669,13 +716,13 @@ def build_throughput_levels_text(
     peak_concurrency: int | None = None,
     max_workers: int = 0,
 ) -> object | None:
-    """Build a Rich Text object for color-graded dot visualization.
+    """Build a color-graded level table (Rich renderable).
 
-    Each position from 1 to max_workers is a block character (█), colored
-    on a gradient: green = lowest base time (best), red = highest (worst).
-    Levels without data show a dim dot (·). The peak level is underlined.
+    Each level is a fixed-width block, two rows tall:
+    - Row 1: level number (centered)
+    - Row 2: avg base time (centered)
+    Color-coded green (best) → red (worst). Peak level highlighted.
 
-    Returns a standalone Text suitable for appending as a new line in a Group.
     Returns None if no data.
 
     Args:
@@ -684,48 +731,9 @@ def build_throughput_levels_text(
         max_workers: Total worker slots to display (1..max_workers). If 0, uses max level.
 
     Returns:
-        A rich.text.Text instance, or None if no data.
+        A Rich Table renderable, or None if no data.
     """
     if not all_levels:
         return None
 
-    from rich.text import Text
-
-    max_level = max_workers if max_workers > 0 else max(all_levels.keys())
-    if max_level < 1:
-        return None
-
-    # Find min/max base times for color scaling
-    base_times = {lvl: bt for lvl, (bt, _) in all_levels.items()}
-    min_bt = min(base_times.values())
-    max_bt = max(base_times.values())
-    bt_range = max_bt - min_bt
-
-    text = Text("  ")
-    for level in range(1, max_level + 1):
-        if level in all_levels:
-            avg_bt, count = all_levels[level]
-            # Normalize: 0 = best (lowest base time), 1 = worst (highest)
-            t = (avg_bt - min_bt) / bt_range if bt_range > 0 else 0.0
-            color = _lerp_color(t)
-            is_peak = peak_concurrency is not None and level == peak_concurrency
-            if is_peak:
-                text.append("█", style=f"bold underline {color}")
-            else:
-                text.append("█", style=color)
-        else:
-            text.append("·", style="dim")
-
-    # Legend: show peak info and best/worst values
-    if peak_concurrency is not None and peak_concurrency in all_levels:
-        peak_bt, peak_count = all_levels[peak_concurrency]
-        text.append("  ", style="dim")
-        text.append(f"peak@{peak_concurrency}", style="magenta")
-        text.append(f" {peak_bt:.1f}s({peak_count})", style="dim")
-    elif all_levels:
-        best_level = min(all_levels, key=lambda l: all_levels[l][0])
-        best_bt, best_count = all_levels[best_level]
-        text.append("  ", style="dim")
-        text.append(f"best@{best_level} {best_bt:.1f}s({best_count})", style="dim")
-
-    return text
+    return _build_levels_table(all_levels, peak_concurrency, max_workers)
