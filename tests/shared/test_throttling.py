@@ -559,9 +559,9 @@ class TestThroughputByLevel:
         # Only 1 qualified level → returns None
         assert tracker.get_peak_level() is None
 
-    def test_window_expiration(self):
-        """Old entries are pruned from the window."""
-        tracker = ThroughputByLevel(window_seconds=0.1, min_samples=2)
+    def test_data_persists_over_time(self):
+        """Data is kept for the entire tier lifetime (no time-based pruning)."""
+        tracker = ThroughputByLevel(min_samples=2)
 
         # Record data at two levels
         for _ in range(3):
@@ -571,10 +571,15 @@ class TestThroughputByLevel:
         # Verify peak exists
         assert tracker.get_peak_level() is not None
 
-        # Wait for window to expire
-        time.sleep(0.15)
+        # Wait a bit — data should still be there
+        time.sleep(0.05)
 
-        # All data expired
+        # Data persists (no time-based expiration)
+        assert tracker.get_peak_level() is not None
+        assert len(tracker.get_all_levels()) == 2
+
+        # Only reset() clears it
+        tracker.reset()
         assert tracker.get_peak_level() is None
         assert tracker.get_all_levels() == {}
 

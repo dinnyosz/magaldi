@@ -254,13 +254,15 @@ class ThroughputByLevel:
     def __init__(self, window_seconds: float = 300.0, min_samples: int = 3):
         """Initialize throughput-by-level tracker.
 
+        Data is kept for the entire tier lifetime (no time-based pruning).
+        Call reset() on tier/model changes to clear stale data.
+
         Args:
-            window_seconds: Time window for measuring throughput.
+            window_seconds: Unused (kept for backward compat). Data is never pruned by time.
             min_samples: Minimum completions per level before trusting it.
         """
-        self.window_seconds = window_seconds
         self.min_samples = min_samples
-        # level -> deque of (timestamp, runtime) for recent completions
+        # level -> deque of (timestamp, runtime) for all completions in this tier
         self._levels: dict[int, deque[tuple[float, float]]] = {}
         self._lock = Lock()
 
@@ -277,29 +279,6 @@ class ThroughputByLevel:
             if level not in self._levels:
                 self._levels[level] = deque()
             self._levels[level].append((now, runtime))
-            self._prune_level(level, now)
-
-    def _prune_level(self, level: int, now: float) -> None:
-        """Remove expired entries from a level (caller must hold lock)."""
-        cutoff = now - self.window_seconds
-        dq = self._levels[level]
-        while dq and dq[0][0] < cutoff:
-            dq.popleft()
-        # Remove empty levels
-        if not dq:
-            del self._levels[level]
-
-    def _prune_all(self, now: float) -> None:
-        """Remove expired entries from all levels (caller must hold lock)."""
-        empty_levels = []
-        cutoff = now - self.window_seconds
-        for level, dq in self._levels.items():
-            while dq and dq[0][0] < cutoff:
-                dq.popleft()
-            if not dq:
-                empty_levels.append(level)
-        for level in empty_levels:
-            del self._levels[level]
 
     def _compute_throughput(self, dq: deque[tuple[float, float]], now: float) -> float:
         """Compute throughput for a level's data (caller must hold lock).
@@ -325,8 +304,6 @@ class ThroughputByLevel:
         """
         now = time.time()
         with self._lock:
-            self._prune_all(now)
-
             # Collect levels with sufficient samples
             qualified: list[tuple[int, float]] = []
             for level, dq in self._levels.items():
@@ -349,12 +326,13 @@ class ThroughputByLevel:
         so they're directly comparable: a 6s task at level 3 = 2.0s base,
         same as a 2s task at level 1.
 
+        Data is kept for the entire tier lifetime — reset() clears it on
+        tier/model changes.
+
         Returns:
             Dict of level -> (avg_base_time_seconds, sample_count).
         """
-        now = time.time()
         with self._lock:
-            self._prune_all(now)
             result = {}
             for level, dq in self._levels.items():
                 if dq:
