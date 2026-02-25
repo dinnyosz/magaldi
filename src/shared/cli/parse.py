@@ -1,7 +1,8 @@
 """Parse command for the Magaldi CLI.
 
 This module contains the parse command which runs the full parsing pipeline:
-Discovery -> Change Detection -> Parsing -> Processing -> Feature Extraction -> Glossary.
+Discovery -> Change Detection -> Parsing -> Variable Scoring -> Processing ->
+Call Resolution -> Feature Extraction -> Glossary.
 """
 
 from __future__ import annotations
