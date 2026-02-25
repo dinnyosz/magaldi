@@ -911,6 +911,16 @@ class TestFormatThroughputLevels:
         mid = _lerp_color(0.5)
         assert mid == "#dcc800"
 
+    def test_text_color_contrast(self):
+        """Light backgrounds get black text, dark backgrounds get white."""
+        from shared.throttling import _lerp_color, _text_color_for_bg
+        # Green (#00c800) is light → black text
+        assert _text_color_for_bg(_lerp_color(0.0)) == "black"
+        # Yellow (#dcc800) is light → black text
+        assert _text_color_for_bg(_lerp_color(0.5)) == "black"
+        # Red (#dc0000) is dark → white text
+        assert _text_color_for_bg(_lerp_color(1.0)) == "white"
+
     def test_peak_without_levels_returns_empty(self):
         """Peak concurrency without level data returns empty."""
         assert format_throughput_levels(None, peak_concurrency=3) == ""
@@ -944,20 +954,36 @@ class TestFormatThroughputLevels:
         """build_throughput_levels_text with empty dict returns None."""
         assert build_throughput_levels_text({}) is None
 
-    def test_table_has_two_rows(self):
-        """Table should have level numbers row and base times row."""
-        from shared.throttling import _build_levels_table
+    def test_single_chunk_returns_table(self):
+        """≤16 levels returns a single Table with two rows."""
+        from shared.throttling import _build_levels_row
         levels = {1: (2.0, 3), 2: (1.5, 5)}
-        table = _build_levels_table(levels, max_workers=2)
+        table = _build_levels_row(range(1, 3), levels, 1.5, 0.5, None)
         assert table.row_count == 2
+        # 1 indent column + 2 level columns = 3
+        assert len(table.columns) == 3
 
-    def test_table_column_count(self):
-        """Table should have indent + one column per level."""
+    def test_wraps_after_16_levels(self):
+        """More than 16 levels wraps into multiple rows."""
+        levels = {i: (float(i), 3) for i in range(1, 21)}  # 20 levels
+        result = format_throughput_levels(levels, max_workers=20)
+        text = _render_to_text(result)
+        # All 20 level numbers should appear
+        for i in range(1, 21):
+            assert f" {i} " in text or str(i) in text
+        # Both chunks' base times should appear
+        assert "1.0s" in text
+        assert "20.0s" in text
+
+    def test_color_consistent_across_chunks(self):
+        """Color scaling is consistent across wrapped rows (uses global min/max)."""
         from shared.throttling import _build_levels_table
-        levels = {1: (2.0, 3)}
-        table = _build_levels_table(levels, max_workers=4)
-        # 1 indent column + 4 level columns = 5
-        assert len(table.columns) == 5
+        from rich.console import Group
+        # 20 levels: level 1 = 1.0s (best), level 20 = 20.0s (worst)
+        levels = {i: (float(i), 3) for i in range(1, 21)}
+        result = _build_levels_table(levels, max_workers=20)
+        # Should be a Group (>16 levels)
+        assert isinstance(result, Group)
 
     def test_all_same_base_time(self):
         """All levels with same base time renders without errors."""

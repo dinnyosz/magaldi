@@ -602,27 +602,40 @@ def _lerp_color(t: float) -> str:
     return f"#{r:02x}{g:02x}00"
 
 
+def _text_color_for_bg(bg_hex: str) -> str:
+    """Return 'black' or 'white' for readable text on the given background.
+
+    Uses relative luminance (ITU-R BT.709) to decide contrast.
+    Light backgrounds (green, yellow) → black text.
+    Dark backgrounds (red) → white text.
+    """
+    r = int(bg_hex[1:3], 16)
+    g = int(bg_hex[3:5], 16)
+    b = int(bg_hex[5:7], 16)
+    # Perceived luminance (0-255 scale)
+    luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    return "black" if luminance > 128 else "white"
+
+
 _LEVEL_COL_WIDTH = 6  # Fixed width per level column (chars)
+_LEVELS_PER_ROW = 16  # Max levels before wrapping to a new line
 
 
-def _build_levels_table(
+def _build_levels_row(
+    levels_range: range,
     all_levels: dict[int, tuple[float, int]],
-    peak_concurrency: int | None = None,
-    max_workers: int = 0,
+    min_bt: float,
+    bt_range: float,
+    peak_concurrency: int | None,
 ) -> object:
-    """Build a Rich Table showing color-graded level blocks.
-
-    Each level is a fixed-width column with two rows:
-    - Row 1: level number (centered)
-    - Row 2: avg base time, e.g. "1.3s" (centered)
-
-    Columns are color-coded on a green→red gradient based on base time.
-    Levels without data show dim placeholders. The peak level is highlighted.
+    """Build a single Rich Table for a chunk of levels (two rows: numbers + times).
 
     Args:
-        all_levels: Dict of level -> (avg_base_time_seconds, sample_count). Must be non-empty.
+        levels_range: Range of level numbers to display in this row.
+        all_levels: Full dict of level -> (avg_base_time_seconds, sample_count).
+        min_bt: Minimum base time across ALL levels (for consistent color scaling).
+        bt_range: max_bt - min_bt across ALL levels.
         peak_concurrency: The level identified as peak, or None.
-        max_workers: Total worker slots (1..max_workers). If 0, uses max level in data.
 
     Returns:
         A rich.table.Table renderable.
@@ -630,15 +643,6 @@ def _build_levels_table(
     from rich.table import Table
     from rich.text import Text
 
-    max_level = max_workers if max_workers > 0 else max(all_levels.keys())
-
-    # Find min/max base times for color scaling
-    base_times = {lvl: bt for lvl, (bt, _) in all_levels.items()}
-    min_bt = min(base_times.values())
-    max_bt = max(base_times.values())
-    bt_range = max_bt - min_bt
-
-    # Build the table: no header, no border, fixed column widths
     table = Table(
         show_header=False,
         show_edge=False,
@@ -648,34 +652,31 @@ def _build_levels_table(
         expand=False,
     )
 
-    # Add columns: leading indent + one per level
+    # Add columns: leading indent + one per level in this chunk
     table.add_column(width=2, no_wrap=True)  # indent
-    for _ in range(max_level):
+    for _ in levels_range:
         table.add_column(width=_LEVEL_COL_WIDTH, no_wrap=True, justify="center")
 
-    # Build row 1 (level numbers) and row 2 (base times)
     row1_cells: list[Text] = [Text("")]  # indent
     row2_cells: list[Text] = [Text("")]  # indent
 
-    for level in range(1, max_level + 1):
+    for level in levels_range:
         is_peak = peak_concurrency is not None and level == peak_concurrency
         if level in all_levels:
             avg_bt, count = all_levels[level]
             t = (avg_bt - min_bt) / bt_range if bt_range > 0 else 0.0
             color = _lerp_color(t)
+            fg = _text_color_for_bg(color)
             bg = f"on {color}"
-            style = f"bold white {bg}" if is_peak else f"white {bg}"
+            style = f"bold {fg} {bg}" if is_peak else f"{fg} {bg}"
 
-            # Level number cell
             label = Text(f" {level} ", style=style, justify="center")
             row1_cells.append(label)
 
-            # Base time cell
             bt_str = f"{avg_bt:.1f}s" if avg_bt < 100 else f"{avg_bt:.0f}s"
             time_label = Text(f" {bt_str} ", style=style, justify="center")
             row2_cells.append(time_label)
         else:
-            # No data for this level
             row1_cells.append(Text(f" {level} ", style="dim", justify="center"))
             row2_cells.append(Text(" ··· ", style="dim", justify="center"))
 
@@ -683,6 +684,55 @@ def _build_levels_table(
     table.add_row(*row2_cells)
 
     return table
+
+
+def _build_levels_table(
+    all_levels: dict[int, tuple[float, int]],
+    peak_concurrency: int | None = None,
+    max_workers: int = 0,
+) -> object:
+    """Build color-graded level blocks, wrapping every 16 levels.
+
+    Each level is a fixed-width column with two rows:
+    - Row 1: level number (centered)
+    - Row 2: avg base time, e.g. "1.3s" (centered)
+
+    Columns are color-coded on a green→red gradient based on base time.
+    Levels without data show dim placeholders. The peak level is highlighted.
+    When there are more than 16 levels, they wrap onto new lines.
+
+    Args:
+        all_levels: Dict of level -> (avg_base_time_seconds, sample_count). Must be non-empty.
+        peak_concurrency: The level identified as peak, or None.
+        max_workers: Total worker slots (1..max_workers). If 0, uses max level in data.
+
+    Returns:
+        A Rich renderable (Table for ≤16 levels, Group of Tables for >16).
+    """
+    from rich.console import Group
+
+    max_level = max_workers if max_workers > 0 else max(all_levels.keys())
+
+    # Find min/max base times for color scaling (consistent across all chunks)
+    base_times = {lvl: bt for lvl, (bt, _) in all_levels.items()}
+    min_bt = min(base_times.values())
+    max_bt = max(base_times.values())
+    bt_range = max_bt - min_bt
+
+    # Split levels into chunks of _LEVELS_PER_ROW
+    chunks: list[range] = []
+    for start in range(1, max_level + 1, _LEVELS_PER_ROW):
+        end = min(start + _LEVELS_PER_ROW, max_level + 1)
+        chunks.append(range(start, end))
+
+    if len(chunks) == 1:
+        return _build_levels_row(chunks[0], all_levels, min_bt, bt_range, peak_concurrency)
+
+    tables = [
+        _build_levels_row(chunk, all_levels, min_bt, bt_range, peak_concurrency)
+        for chunk in chunks
+    ]
+    return Group(*tables)
 
 
 def format_throughput_levels(
