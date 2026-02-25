@@ -21,10 +21,15 @@ import time
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Generic, TypeVar
 
 from shared.ai.context_size import TIER_MAX_WORKERS, TIER_TIMEOUTS, iter_by_tier
-from shared.throttling import ThroughputTracker, compute_throttle_decision
+from shared.throttling import (
+    ThrottleDecision,
+    ThroughputTracker,
+    compute_throttle_decision,
+    get_ramp_cooldown,
+)
 
 if TYPE_CHECKING:
     pass
@@ -398,16 +403,33 @@ class ThrottleDisplayInfo:
 
 @dataclass
 class ThrottleContext:
-    """Context for throttle calculations."""
+    """Context for throttle calculations with warmup and cooldown.
+
+    Mirrors the throttling logic from DependencyTracker (phase 5):
+    - post_warmup: after warmup completes, forces gradual ramp from 1 worker
+    - Cooldown timer: prevents ramp-up faster than the tier's cooldown period
+    - Emergency scale-down: always immediate (no cooldown check)
+    """
 
     tier_timeout: float
     base_workers: int
     throughput_tracker: ThroughputTracker
+    tier: int = 2048  # Context tier for cooldown calculation
+
+    # Warmup + cooldown state (managed internally)
+    post_warmup: bool = False
+    last_decision: ThrottleDecision | None = field(default=None, repr=False)
+    _last_ramp_time: float = field(default=0.0, repr=False)
+    _last_recommended_workers: int = field(default=0, repr=False)
 
     def get_throttle_decision(
         self, active_workers: int, current_max_runtime: float
     ) -> ThrottleDisplayInfo:
-        """Get throttle decision with display info."""
+        """Get throttle decision with cooldown gating.
+
+        Always calls compute_throttle_decision (for emergency detection).
+        Ramp-up is gated by cooldown timer — mirrors DependencyTracker pattern.
+        """
         throughput, avg_runtime, count, avg_conc, avg_base = (
             self.throughput_tracker.get_stats_with_concurrency()
         )
@@ -421,9 +443,29 @@ class ThrottleContext:
             completion_count=count,
             avg_concurrency=avg_conc,
             avg_base_time=avg_base,
+            post_warmup=self.post_warmup,
         )
+        self.post_warmup = False  # Only signal once
+        self.last_decision = throttle
+
+        # Apply ramp cooldown (mirrors DependencyTracker.compute_throttle_decision)
+        recommended = throttle.recommended_workers
+        now = time.time()
+        cooldown_seconds = get_ramp_cooldown(self.tier)
+        cooldown_elapsed = (now - self._last_ramp_time) >= cooldown_seconds
+        is_ramping = recommended > self._last_recommended_workers
+
+        if is_ramping and not cooldown_elapsed:
+            # Hold at current level during cooldown
+            allowed_workers = self._last_recommended_workers
+        else:
+            allowed_workers = recommended
+            if is_ramping and cooldown_elapsed:
+                self._last_ramp_time = now
+            self._last_recommended_workers = allowed_workers
+
         return ThrottleDisplayInfo(
-            allowed_workers=throttle.recommended_workers,
+            allowed_workers=allowed_workers,
             current_max=max(current_max_runtime, throttle.historical_max),
             avg_base_time=avg_base,
             completion_count=count,
@@ -439,6 +481,7 @@ def run_throttled_tier(
     get_max_runtime: Callable[[], float],
     on_complete: Callable[[T, R, float], None],
     on_tick: Callable[[ThrottleDisplayInfo], None] | None = None,
+    warmup: bool = True,
 ) -> None:
     """Run throttled processing for a single tier.
 
@@ -454,19 +497,41 @@ def run_throttled_tier(
         get_max_runtime: Function to get current max active runtime
         on_complete: Called when item completes with (item, result, avg_workers)
         on_tick: Called on each loop iteration with ThrottleDisplayInfo (for progress refresh)
+        warmup: If True, run the first item synchronously to get a baseline
+            runtime before entering the throttled loop. Prevents aggressive
+            ramp-up when no completion data exists yet.
     """
+    if not items:
+        return
+
     tier_timeout = TIER_TIMEOUTS.get(tier, 180)
     throttle_ctx.tier_timeout = tier_timeout
     throttle_ctx.base_workers = effective_workers
+    throttle_ctx.tier = tier
+
+    pending_items = list(items)
+
+    # Warmup: run first item synchronously to get baseline runtime.
+    # Without this, the throttler has no data and may ramp up too aggressively.
+    if warmup and pending_items:
+        warmup_item = pending_items.pop(0)
+        warmup_start = time.time()
+        warmup_result = process_fn(warmup_item)
+        warmup_time = time.time() - warmup_start
+        throttle_ctx.throughput_tracker.record_completion(warmup_time, 1.0)
+        on_complete(warmup_item, warmup_result, 1.0)
+        throttle_ctx.post_warmup = True
+
+    if not pending_items:
+        return
 
     executor = ThreadPoolExecutor(max_workers=effective_workers)
     futures: dict = {}
     future_to_allowed_at_start: dict = {}
-    pending_items = list(items)
 
     try:
         while pending_items or futures:
-            # Get throttle decision
+            # Get throttle decision (always runs for emergency detection)
             active_workers = len(futures)
             current_max = get_max_runtime()
             throttle_info = throttle_ctx.get_throttle_decision(
@@ -490,10 +555,10 @@ def run_throttled_tier(
             # Handle completed tasks
             for future in done:
                 item = futures.pop(future)
-                # Use allowed workers (min of start and end for worst case)
+                # Use allowed workers (max of start and end for peak concurrency)
                 allowed_at_start = future_to_allowed_at_start.pop(future, allowed_workers)
                 allowed_at_end = allowed_workers
-                avg_workers = min(allowed_at_start, allowed_at_end)
+                avg_workers = max(allowed_at_start, allowed_at_end)
 
                 result = future.result()
                 on_complete(item, result, avg_workers)

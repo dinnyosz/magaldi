@@ -14,7 +14,6 @@ import contextlib
 import logging
 import re
 import time
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -190,7 +189,7 @@ def _get_context_tier(batch: list[tuple[int, str, str, str, str]]) -> int:
 
     content_chars = sum(len(code) + len(fp) + 20 for _, _, fp, _, code in batch)
     output_tokens = len(batch) * 20 + 50
-    total_tokens = content_chars // 4 + 150 + output_tokens  # 150 = system prompt overhead
+    total_tokens = content_chars // 4 + 700 + output_tokens  # 700 = system prompt (~660 tokens)
     num_ctx = CONTEXT_TIERS[0]  # Default to smallest
     for tier in CONTEXT_TIERS:
         if total_tokens < tier:
@@ -291,11 +290,10 @@ def score_variables(
     else:
         import threading
 
-        from shared.ai.context_size import TIER_TIMEOUTS
-        from shared.throttling import ThroughputTracker, compute_throttle_decision
+        from shared.parallel_processor import ThrottleContext, run_throttled_tier
+        from shared.throttling import ThroughputTracker
 
         tier_for_timeout = _get_context_tier(batches[0])
-        tier_timeout = TIER_TIMEOUTS.get(tier_for_timeout, 120.0)
 
         # Throughput tracker with 3min window (matches other processors)
         throughput_tracker = ThroughputTracker(window_seconds=180.0)
@@ -315,12 +313,17 @@ def score_variables(
                     _next_wid += 1
                 return _thread_to_wid[tid]
 
-        def _score_batch_with_status(
-            batch: list[tuple[int, str, str, str, str]],
-            batch_num: int,
-            num_ctx: int,
+        # Items for run_throttled_tier: (batch, batch_num, num_ctx) tuples
+        batch_items = [
+            (batch, batch_num, _get_context_tier(batch))
+            for batch_num, batch in enumerate(batches)
+        ]
+
+        def process_fn(
+            item: tuple[list, int, int],
         ) -> dict[str, VariableScore]:
-            """Wrapper that reports worker status before/after scoring."""
+            """Process a single batch with worker status tracking."""
+            batch, batch_num, num_ctx = item
             wid = _get_worker_id()
             if worker_status is not None:
                 worker_status.set(wid, batch_num + 1, len(batch))
@@ -330,89 +333,61 @@ def score_variables(
                 if worker_status is not None:
                     worker_status.clear(wid)
 
-        # Incremental submission loop with throttling
-        next_batch_idx = 0
-        futures: dict[object, tuple[list, float, int]] = {}  # future -> (batch, submit_time, allowed_at_start)
-        POLL_INTERVAL = 2.0  # seconds between display refreshes
-
-        with ThreadPoolExecutor(max_workers=effective_workers) as executor:
-            while next_batch_idx < len(batches) or futures:
-                # --- Throttle decision ---
-                active_workers = worker_status.active_count() if worker_status else len(futures)
-                current_max_runtime = worker_status.get_max_active_runtime() if worker_status else 0.0
-
-                throughput, avg_runtime, completion_count, avg_concurrency, avg_base_time = (
-                    throughput_tracker.get_stats_with_concurrency()
+        def _sync_throttle_to_progress() -> None:
+            """Sync throttle state from ThrottleContext to progress_state."""
+            if progress_state is not None:
+                progress_state.throttle_decision = throttle_ctx.last_decision
+                progress_state.allowed_workers = (
+                    throttle_ctx._last_recommended_workers or 1
                 )
 
-                throttle = compute_throttle_decision(
-                    current_max_runtime=current_max_runtime,
-                    tier_timeout=tier_timeout,
-                    base_workers=effective_workers,
-                    active_workers=active_workers,
-                    throughput=throughput,
-                    avg_runtime=avg_runtime,
-                    completion_count=completion_count,
-                    avg_concurrency=avg_concurrency,
-                    avg_base_time=avg_base_time,
-                )
+        def on_complete(
+            item: tuple[list, int, int],
+            batch_scores: dict[str, VariableScore],
+            _avg_workers: float,
+        ) -> None:
+            """Handle batch completion: update scores and progress."""
+            batch = item[0]
+            _sync_throttle_to_progress()
+            try:
+                all_scores.update(batch_scores)
+                _update_progress(batch, batch_scores, 0.0)
+            except Exception:
+                result.errors += 1
+                error_scores = {}
+                for _, eid, _, _, _ in batch:
+                    error_scores[eid] = VariableScore(general_usefulness=5)
+                all_scores.update(error_scores)
+                _update_progress(batch, error_scores, 0.0, is_error=True)
 
-                allowed_workers = throttle.recommended_workers
+        def on_tick(_info: object) -> None:
+            """Update progress display on poll timeouts."""
+            _sync_throttle_to_progress()
+            if on_progress and progress_state is not None:
+                on_progress(progress_state)
 
-                # Update progress state with throttle info
-                if progress_state is not None:
-                    progress_state.throttle_decision = throttle
-                    progress_state.allowed_workers = allowed_workers
+        def get_max_runtime() -> float:
+            if worker_status is not None:
+                return worker_status.get_max_active_runtime()
+            return 0.0
 
-                # --- Submit new batches up to allowed limit ---
-                in_flight = len(futures)
-                slots = max(0, allowed_workers - in_flight)
+        throttle_ctx = ThrottleContext(
+            tier_timeout=0,  # Set by run_throttled_tier
+            base_workers=effective_workers,
+            throughput_tracker=throughput_tracker,
+            tier=tier_for_timeout,
+        )
 
-                for _ in range(slots):
-                    if next_batch_idx >= len(batches):
-                        break
-                    batch = batches[next_batch_idx]
-                    num_ctx = _get_context_tier(batch)
-                    future = executor.submit(
-                        _score_batch_with_status, batch, next_batch_idx, num_ctx,
-                    )
-                    futures[future] = (batch, time.time(), allowed_workers)
-                    next_batch_idx += 1
-
-                if not futures:
-                    break
-
-                # --- Wait for at least one completion or timeout for display refresh ---
-                done, _ = wait(futures.keys(), timeout=POLL_INTERVAL, return_when=FIRST_COMPLETED)
-
-                if not done:
-                    # No completions yet — just update display
-                    if on_progress and progress_state is not None:
-                        on_progress(progress_state)
-                    continue
-
-                # --- Process completed futures ---
-                for future in done:
-                    batch, submit_time, allowed_at_start = futures.pop(future)
-                    batch_time = time.time() - submit_time
-
-                    # Record in throughput tracker with concurrency context
-                    allowed_at_end = allowed_workers
-                    avg_workers = max(allowed_at_start, allowed_at_end)
-                    throughput_tracker.record_completion(batch_time, avg_workers)
-
-                    try:
-                        batch_scores = future.result()
-                        all_scores.update(batch_scores)
-                        _update_progress(batch, batch_scores, batch_time)
-                    except Exception:
-                        # Mark all variables in this batch as errors, default to keep
-                        result.errors += 1
-                        error_scores = {}
-                        for _, eid, _, _, _ in batch:
-                            error_scores[eid] = VariableScore(general_usefulness=5)
-                        all_scores.update(error_scores)
-                        _update_progress(batch, error_scores, batch_time, is_error=True)
+        run_throttled_tier(
+            items=batch_items,
+            tier=tier_for_timeout,
+            effective_workers=effective_workers,
+            process_fn=process_fn,
+            throttle_ctx=throttle_ctx,
+            get_max_runtime=get_max_runtime,
+            on_complete=on_complete,
+            on_tick=on_tick,
+        )
 
     # Apply threshold (final tally from actual scores)
     result.kept = 0
