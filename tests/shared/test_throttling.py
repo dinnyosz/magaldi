@@ -503,25 +503,23 @@ class TestThroughputByLevel:
 
     def test_single_level_returns_none(self):
         """Single level is insufficient — need >= 2 to detect a trend."""
-        tracker = ThroughputByLevel(min_samples=2)
-        for _ in range(5):
+        tracker = ThroughputByLevel()
+        for _ in range(10):  # level 4 needs max(10, 8)=10
             tracker.record(4, 10.0)
         assert tracker.get_peak_level() is None
 
     def test_two_levels_finds_peak(self):
         """With 2 levels, finds the one with lowest base time.
 
-        Level 2: runtime=5.0, base_time=5.0/2=2.5s
-        Level 4: runtime=10.0, base_time=10.0/4=2.5s
-        Same base time → either is valid. Make them different:
         Level 2: runtime=4.0, base_time=4.0/2=2.0s  ← better
         Level 4: runtime=10.0, base_time=10.0/4=2.5s
+        Both need max(10, level*2) samples: level 2→10, level 4→10.
         """
-        tracker = ThroughputByLevel(min_samples=3)
-        for _ in range(5):
-            tracker.record(2, 4.0)  # base = 2.0s
-        for _ in range(3):
-            tracker.record(4, 10.0)  # base = 2.5s
+        tracker = ThroughputByLevel()
+        for _ in range(10):
+            tracker.record(2, 4.0)  # base = 2.0s (10 >= 10)
+        for _ in range(10):
+            tracker.record(4, 10.0)  # base = 2.5s (10 >= 10)
 
         result = tracker.get_peak_level()
         assert result is not None
@@ -534,12 +532,13 @@ class TestThroughputByLevel:
 
         Level 3: runtime=5.0, base_time=5.0/3=1.67s  ← better
         Level 6: runtime=15.0, base_time=15.0/6=2.5s  ← contention
+        Level 3 needs max(10, 6)=10, level 6 needs max(10, 12)=12.
         """
-        tracker = ThroughputByLevel(min_samples=3)
-        for _ in range(6):
-            tracker.record(3, 5.0)  # base = 1.67s
-        for _ in range(3):
-            tracker.record(6, 15.0)  # base = 2.5s
+        tracker = ThroughputByLevel()
+        for _ in range(10):
+            tracker.record(3, 5.0)  # base = 1.67s (10 >= 10)
+        for _ in range(12):
+            tracker.record(6, 15.0)  # base = 2.5s (12 >= 12)
 
         result = tracker.get_peak_level()
         assert result is not None
@@ -547,26 +546,29 @@ class TestThroughputByLevel:
         assert level == 3
 
     def test_below_min_samples_not_qualified(self):
-        """Levels with fewer than min_samples are ignored."""
-        tracker = ThroughputByLevel(min_samples=3)
-        # Level 2: 5 completions (qualified)
-        for _ in range(5):
+        """Levels with fewer than level-proportional min samples are ignored.
+
+        Level 2 needs max(10, 4)=10 samples. Level 4 needs max(10, 8)=10.
+        """
+        tracker = ThroughputByLevel()
+        # Level 2: 10 completions (qualified: 10 >= 10)
+        for _ in range(10):
             tracker.record(2, 5.0)
-        # Level 4: only 2 completions (not qualified)
-        tracker.record(4, 5.0)
-        tracker.record(4, 5.0)
+        # Level 4: only 5 completions (not qualified: 5 < 10)
+        for _ in range(5):
+            tracker.record(4, 5.0)
 
         # Only 1 qualified level → returns None
         assert tracker.get_peak_level() is None
 
     def test_data_persists_over_time(self):
         """Data is kept for the entire tier lifetime (no time-based pruning)."""
-        tracker = ThroughputByLevel(min_samples=2)
+        tracker = ThroughputByLevel()
 
-        # Record data at two levels
-        for _ in range(3):
+        # Record data at two levels (both need 10 samples)
+        for _ in range(10):
             tracker.record(2, 1.0)
-            tracker.record(4, 1.0)
+            tracker.record(4, 2.0)
 
         # Verify peak exists
         assert tracker.get_peak_level() is not None
@@ -585,10 +587,10 @@ class TestThroughputByLevel:
 
     def test_reset_clears_all(self):
         """Reset should clear all level data."""
-        tracker = ThroughputByLevel(min_samples=2)
-        for _ in range(5):
+        tracker = ThroughputByLevel()
+        for _ in range(10):
             tracker.record(2, 1.0)
-            tracker.record(4, 1.0)
+            tracker.record(4, 2.0)
 
         assert tracker.get_peak_level() is not None
         tracker.reset()
@@ -596,8 +598,12 @@ class TestThroughputByLevel:
         assert tracker.get_all_levels() == {}
 
     def test_get_all_levels(self):
-        """get_all_levels returns avg base time (runtime/level) and count."""
-        tracker = ThroughputByLevel(min_samples=1)
+        """get_all_levels returns avg base time (runtime/level) and count.
+
+        Note: get_all_levels shows ALL levels regardless of sample count.
+        Only get_peak_level filters by min samples.
+        """
+        tracker = ThroughputByLevel()
         for _ in range(3):
             tracker.record(2, 5.0)  # base_time = 5.0/2 = 2.5
         for _ in range(5):
@@ -613,7 +619,7 @@ class TestThroughputByLevel:
 
     def test_concurrency_zero_clamped_to_one(self):
         """Concurrency 0 (warmup) should be clamped to 1."""
-        tracker = ThroughputByLevel(min_samples=1)
+        tracker = ThroughputByLevel()
         tracker.record(0, 5.0)
 
         levels = tracker.get_all_levels()
@@ -623,17 +629,17 @@ class TestThroughputByLevel:
     def test_three_levels_peak_in_middle(self):
         """Peak can be at a middle concurrency level (lowest base time).
 
-        Level 1: runtime=5.0, base_time=5.0/1=5.0s  (underutilized)
-        Level 3: runtime=3.0, base_time=3.0/3=1.0s  (sweet spot) ← best
-        Level 6: runtime=12.0, base_time=12.0/6=2.0s (contention)
+        Level 1: runtime=5.0, base_time=5.0/1=5.0s  (underutilized, needs 10)
+        Level 3: runtime=3.0, base_time=3.0/3=1.0s  (sweet spot, needs 10) ← best
+        Level 6: runtime=12.0, base_time=12.0/6=2.0s (contention, needs 12)
         """
-        tracker = ThroughputByLevel(min_samples=2)
-        for _ in range(2):
-            tracker.record(1, 5.0)  # base = 5.0s
-        for _ in range(6):
-            tracker.record(3, 3.0)  # base = 1.0s
-        for _ in range(3):
-            tracker.record(6, 12.0)  # base = 2.0s
+        tracker = ThroughputByLevel()
+        for _ in range(10):
+            tracker.record(1, 5.0)  # base = 5.0s (10 >= 10)
+        for _ in range(10):
+            tracker.record(3, 3.0)  # base = 1.0s (10 >= 10)
+        for _ in range(12):
+            tracker.record(6, 12.0)  # base = 2.0s (12 >= 12)
 
         result = tracker.get_peak_level()
         assert result is not None
@@ -657,13 +663,16 @@ class TestThroughputTrackerPeakIntegration:
         assert tracker.get_peak_concurrency() is None
 
     def test_peak_detected_with_two_levels(self):
-        """Data at two levels → peak detected."""
+        """Data at two levels → peak detected.
+
+        Level 2 needs max(10, 4)=10, level 6 needs max(10, 12)=12.
+        """
         tracker = ThroughputTracker(window_seconds=10.0)
-        # Level 2: 5 completions
-        for _ in range(5):
+        # Level 2: 10 completions (10 >= 10)
+        for _ in range(10):
             tracker.record_completion(3.0, concurrent_workers=2)
-        # Level 6: 3 completions
-        for _ in range(3):
+        # Level 6: 12 completions (12 >= 12)
+        for _ in range(12):
             tracker.record_completion(10.0, concurrent_workers=6)
 
         peak = tracker.get_peak_concurrency()
@@ -673,9 +682,9 @@ class TestThroughputTrackerPeakIntegration:
     def test_reset_clears_peak(self):
         """Reset clears both regular stats and peak data."""
         tracker = ThroughputTracker(window_seconds=10.0)
-        for _ in range(5):
+        for _ in range(10):
             tracker.record_completion(3.0, concurrent_workers=2)
-        for _ in range(3):
+        for _ in range(12):
             tracker.record_completion(10.0, concurrent_workers=6)
 
         assert tracker.get_peak_concurrency() is not None
@@ -1039,24 +1048,27 @@ class TestExplorationTarget:
 
     def test_no_peak_returns_none(self):
         """No peak (insufficient data) → no exploration."""
-        tracker = ThroughputByLevel(min_samples=1)
-        tracker.record(2, 5.0)
+        tracker = ThroughputByLevel()
+        for _ in range(10):
+            tracker.record(2, 5.0)
         # Only 1 level → no peak → no exploration
         assert tracker.get_exploration_target(max_level=8) is None
 
     def test_peak_not_confident_returns_none(self):
         """Peak exists but has < 10 samples → don't explore from weak peak.
 
-        All levels need at least 10 samples (min floor).
+        Both levels need at least 10 samples (min floor). Level 2 has only 9.
+        Since get_peak_level now also uses level-proportional thresholds,
+        the peak won't even be detected with insufficient samples.
         """
-        tracker = ThroughputByLevel(min_samples=1)
-        # Level 2: 9 samples (below min floor 10)
+        tracker = ThroughputByLevel()
+        # Level 2: 9 samples (below min floor 10 — not even qualified as peak)
         for _ in range(9):
             tracker.record(2, 4.0)
-        # Level 4: 5 samples
+        # Level 4: 5 samples (also below 10)
         for _ in range(5):
             tracker.record(4, 10.0)
-        # Peak exists (level 2) but only 9 samples < 10 needed → not confident
+        # No peak detected (neither level qualifies) → no exploration
         assert tracker.get_exploration_target(max_level=8) is None
 
     def test_explore_upward_nearest(self):
@@ -1064,7 +1076,7 @@ class TestExplorationTarget:
 
         Peak at level 2 needs 10. max_level=8 → radius=max(3,2)=3, range 1..5.
         """
-        tracker = ThroughputByLevel(min_samples=1)
+        tracker = ThroughputByLevel()
         for _ in range(11):
             tracker.record(2, 4.0)  # confident peak (11 >= 10)
         for _ in range(10):
@@ -1077,7 +1089,7 @@ class TestExplorationTarget:
 
         Peak at level 2 (10 needed). max_level=8 → radius=3.
         """
-        tracker = ThroughputByLevel(min_samples=1)
+        tracker = ThroughputByLevel()
         for _ in range(11):
             tracker.record(2, 4.0)  # confident peak
         for _ in range(10):
@@ -1093,7 +1105,7 @@ class TestExplorationTarget:
         Peak at level 4 (needs 10). max_level=8 → radius=3, range=1..7.
         Levels 5-7 explored. Level 3 (needs 10) has no data.
         """
-        tracker = ThroughputByLevel(min_samples=1)
+        tracker = ThroughputByLevel()
         for _ in range(12):
             tracker.record(4, 4.0)  # peak at 4 (12 >= 10)
         for _ in range(10):
@@ -1113,7 +1125,7 @@ class TestExplorationTarget:
         Peak at level 4. max_level=8 → radius=3, range=1..7.
         All levels 1-7 have max(10, level*2) samples.
         """
-        tracker = ThroughputByLevel(min_samples=1)
+        tracker = ThroughputByLevel()
         for level in range(1, 8):
             needed = max(10, level * 2) + 2
             for _ in range(needed):
@@ -1125,7 +1137,7 @@ class TestExplorationTarget:
 
         Peak at level 1 needs 10. max_level=8 → radius=3, range 1..4.
         """
-        tracker = ThroughputByLevel(min_samples=1)
+        tracker = ThroughputByLevel()
         for _ in range(11):
             tracker.record(1, 3.0)  # peak at 1 (11 >= 10)
         for _ in range(10):
@@ -1139,7 +1151,7 @@ class TestExplorationTarget:
         Peak at level 3 needs 10. max_level=3 → radius=max(3,1)=3.
         Upward capped at 3 (max_level). Only downward level 2 and 1 in range.
         """
-        tracker = ThroughputByLevel(min_samples=1)
+        tracker = ThroughputByLevel()
         for _ in range(11):
             tracker.record(3, 3.0)  # peak at 3 (11 >= 10)
         for _ in range(10):
@@ -1149,7 +1161,7 @@ class TestExplorationTarget:
 
     def test_capped_by_max_level_all_in_range_explored(self):
         """At max_level boundary with all in range explored → returns None."""
-        tracker = ThroughputByLevel(min_samples=1)
+        tracker = ThroughputByLevel()
         for _ in range(11):
             tracker.record(3, 3.0)  # peak at 3 (11 >= 10)
         for _ in range(10):
@@ -1165,7 +1177,7 @@ class TestExplorationTarget:
         Peak at level 3 (needs 10). Levels 4-7 are within range (3+4=7).
         Levels 4-6 explored. Level 7 needs 14 (7*2).
         """
-        tracker = ThroughputByLevel(min_samples=1)
+        tracker = ThroughputByLevel()
         for _ in range(11):
             tracker.record(3, 3.0)  # peak at 3 (11 >= 10)
         for _ in range(10):
@@ -1187,7 +1199,7 @@ class TestExplorationTarget:
         Peak at level 5. max_level=10 → radius=3, range=2..8.
         Fill all levels 2-8 → returns None (levels 1 and 9-10 beyond radius).
         """
-        tracker = ThroughputByLevel(min_samples=1)
+        tracker = ThroughputByLevel()
         # Need peak at 5 (lowest base time). Make level 5 the best.
         for _ in range(11):
             tracker.record(5, 2.5)  # base=2.5/5=0.5 (best)
@@ -1202,7 +1214,7 @@ class TestExplorationTarget:
 
         Peak at level 2 (needs 10). max_level=8 → radius=3.
         """
-        tracker = ThroughputByLevel(min_samples=1)
+        tracker = ThroughputByLevel()
         for _ in range(11):
             tracker.record(2, 3.0)  # peak (11 >= 10)
         for _ in range(10):
@@ -1236,7 +1248,7 @@ class TestExplorationTarget:
 
         Peak needs both levels to exist. Both explored → None.
         """
-        tracker = ThroughputByLevel(min_samples=1)
+        tracker = ThroughputByLevel()
         for _ in range(11):
             tracker.record(1, 3.0)  # peak at 1 (11 >= 10)
         for _ in range(10):
@@ -1250,7 +1262,7 @@ class TestExplorationTarget:
         Peak at level 8 (needs 16). max_level=10 → radius=max(3, 3)=3.
         Lower bound = max(8-3, 1) = 5. Level 4 is below radius → not explored.
         """
-        tracker = ThroughputByLevel(min_samples=1)
+        tracker = ThroughputByLevel()
         for _ in range(16):
             tracker.record(8, 4.0)  # peak at 8 (16 >= 16)
         for _ in range(18):
@@ -1273,7 +1285,7 @@ class TestExplorationTarget:
 
     def test_large_max_level_scales_radius(self):
         """With max_level=30, radius=max(3, 10)=10. Scales for large pools."""
-        tracker = ThroughputByLevel(min_samples=1)
+        tracker = ThroughputByLevel()
         # Peak at 15 needs max(10, 15*2)=30 samples to be confident
         for _ in range(31):
             tracker.record(15, 1.5)  # peak at 15: base=1.5/15=0.1 (best)

@@ -281,11 +281,12 @@ class ThroughputByLevel:
     computes actual throughput = completions_in_window / window_duration.
     The level with highest throughput is the target.
 
-    Requires data at >= 2 levels (each with >= min_samples) to detect a peak.
+    Requires data at >= 2 levels (each with level-proportional samples:
+    max(EXPLORE_MIN_SAMPLES, level * EXPLORE_SAMPLES_PER_LEVEL)) to detect a peak.
     With only 1 level, there's no slope to compare — returns None.
     """
 
-    def __init__(self, window_seconds: float = 300.0, min_samples: int = 1):
+    def __init__(self, window_seconds: float = 300.0):
         """Initialize throughput-by-level tracker.
 
         Data is kept for the entire tier lifetime (no time-based pruning).
@@ -293,9 +294,7 @@ class ThroughputByLevel:
 
         Args:
             window_seconds: Unused (kept for backward compat). Data is never pruned by time.
-            min_samples: Minimum completions per level before trusting it.
         """
-        self.min_samples = min_samples
         # level -> deque of (timestamp, runtime) for all completions in this tier
         self._levels: dict[int, deque[tuple[float, float]]] = {}
         self._lock = Lock()
@@ -338,13 +337,14 @@ class ThroughputByLevel:
 
         Returns:
             (level, avg_base_time) for the peak, or None if insufficient data.
-            Requires >= 2 levels with >= min_samples completions each.
+            Requires >= 2 levels with sufficient samples each
+            (level-proportional: max(EXPLORE_MIN_SAMPLES, level * EXPLORE_SAMPLES_PER_LEVEL)).
         """
         with self._lock:
-            # Collect levels with sufficient samples
+            # Collect levels with sufficient samples (level-proportional threshold)
             qualified: list[tuple[int, float]] = []
             for level, dq in self._levels.items():
-                if len(dq) >= self.min_samples:
+                if len(dq) >= self._min_samples_for_level(level):
                     avg_base = sum(rt / level for _, rt in dq) / len(dq)
                     qualified.append((level, avg_base))
 
