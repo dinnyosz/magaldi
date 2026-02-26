@@ -403,6 +403,8 @@ class ThrottleDisplayInfo:
     peak_concurrency: int | None = None  # Concurrency level with peak throughput
     exploration_target: int | None = None  # Level being explored (neighbor of peak)
     gss_probe: int | None = None  # GSS probe target (if active)
+    gss_lo: int | None = None  # GSS bracket lower bound
+    gss_hi: int | None = None  # GSS bracket upper bound
     # Per-level throughput data: level -> (throughput_per_sec, sample_count)
     all_levels: dict[int, tuple[float, int]] | None = None
 
@@ -537,6 +539,9 @@ class ThrottleContext:
         throttle.peak_concurrency = effective_peak
         throttle.exploration_target = explore
         throttle.gss_probe = gss_probe
+        if self._gss is not None:
+            throttle.gss_lo = self._gss.lo
+            throttle.gss_hi = self._gss.hi
         self.last_decision = throttle
 
         # Apply ramp cooldown (mirrors DependencyTracker.compute_throttle_decision)
@@ -564,6 +569,8 @@ class ThrottleContext:
             peak_concurrency=effective_peak,
             exploration_target=explore,
             gss_probe=gss_probe,
+            gss_lo=self._gss.lo if self._gss else None,
+            gss_hi=self._gss.hi if self._gss else None,
             all_levels=all_levels if all_levels else None,
         )
 

@@ -117,6 +117,8 @@ class ThrottleDecision:
     peak_concurrency: int | None = None  # Concurrency level with peak throughput (if available)
     exploration_target: int | None = None  # Level being explored (if any)
     gss_probe: int | None = None  # GSS probe target (if active)
+    gss_lo: int | None = None  # GSS bracket lower bound
+    gss_hi: int | None = None  # GSS bracket upper bound
     # Per-level throughput data: level -> (throughput_per_sec, sample_count)
     all_levels: dict[int, tuple[float, int]] | None = None
 
