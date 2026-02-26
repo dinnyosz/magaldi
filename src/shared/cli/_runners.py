@@ -172,7 +172,7 @@ def _build_scoring_display(state: "ScoringProgressState", num_workers: int) -> R
             worker_table.add_row(
                 f"[{wid}]",
                 "scoring",
-                f"#{batch_num}",
+                f"batch#{batch_num}",
                 f"{batch_size} vars",
                 f"{worker_elapsed:.1f}s",
             )
