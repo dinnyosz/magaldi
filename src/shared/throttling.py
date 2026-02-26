@@ -21,8 +21,9 @@ from threading import Lock
 
 
 def _log_throttle(message: str) -> None:
-    """Debug logging - disabled by default."""
-    pass
+    """Debug logging - writes to /tmp/throttle.log."""
+    with open("/tmp/throttle.log", "a") as f:
+        f.write(f"{time.time():.3f} {message}\n")
 
 
 # Safety margin for throttling - use 65% of timeout to leave 35% headroom
@@ -46,8 +47,9 @@ MAX_RAMP_INCREMENT = 1
 # Threshold for holding ramp-up. If any active task has been running longer
 # than this fraction of timeout, don't ramp up - wait for tasks to complete
 # and provide feedback. This prevents ramping blindly based on stale data.
-# 30% gives time for contention to show before we add more workers.
-RAMP_HOLD_THRESHOLD = 0.30
+# 50% is conservative enough to avoid premature holds while still catching
+# genuine slowdowns before emergency kicks in.
+RAMP_HOLD_THRESHOLD = 0.50
 
 # Exploration: when peak is confident but nearby levels lack data, temporarily
 # target an under-explored level to collect samples and verify the peak is real.
@@ -83,28 +85,15 @@ FORMULA_CONFIDENCE_MIN = 0.30  # Floor confidence at count=1
 FORMULA_CONFIDENCE_FULL_AT = 25  # Full confidence at this many completions
 FORMULA_CONFIDENCE_THRESHOLD = 0.95  # Snap to 1.0 above this
 
-# Geometric ramp-up for pre-peak phase. Before a peak is detected, we double
-# the worker count each step (1→2→4→8→16→32) so each level accumulates enough
-# samples for statistical significance. With +1 increments, 90 completions
-# spread across ~30 levels (1-2 samples each) — none reach significance.
-# With geometric doubling, 6 levels get ~15 samples each — well above threshold.
-# After peak detection, revert to +1 for fine-grained tuning.
-
-
-def _compute_ramp_increment(active_workers: int, peak_concurrency: int | None) -> int:
-    """Compute ramp increment based on phase.
-
-    Pre-peak (no peak detected): geometric doubling — ``max(1, active_workers)``.
-    Post-peak (peak detected): conservative +1 (``MAX_RAMP_INCREMENT``).
-
-    The caller is responsible for capping the result so it doesn't overshoot
-    the target (``min(increment, delta)`` or ``min(ramped, target)``).
-    """
-    if peak_concurrency is not None:
-        return MAX_RAMP_INCREMENT
-    # Geometric: 0→1, 1→+1=2, 2→+2=4, 4→+4=8, 8→+8=16, 16→+16=32
-    return max(1, active_workers)
-
+# Pre-peak step-wise exploration. Before peak is detected, explore levels
+# 1 through PRE_PEAK_MAX_WORKERS one at a time, collecting
+# PRE_PEAK_SAMPLES_PER_LEVEL samples at each before advancing.
+# Peak detection needs ≥2 levels with sufficient samples, so 2 levels is enough.
+# Matches EXPLORE_MIN_SAMPLES so levels qualify for peak detection immediately.
+# With 2 levels × 10 samples × ~3s each ≈ 30-40s of exploration, then
+# peak detection fires and post-peak +1 ramp takes over.
+PRE_PEAK_MAX_WORKERS = 2
+PRE_PEAK_SAMPLES_PER_LEVEL = EXPLORE_MIN_SAMPLES  # 10 — match peak detection threshold
 
 # Ramp cooldown scales with context tier: tier // 512 seconds.
 # 2k→4s, 4k→8s, 8k→16s, 16k→32s, 32k→64s
@@ -619,6 +608,28 @@ def _compute_formula_confidence(
     return confidence
 
 
+def _compute_pre_peak_target(level_counts: dict[int, int] | None) -> int:
+    """Compute the pre-peak step-wise exploration target level.
+
+    Walks levels 1..PRE_PEAK_MAX_WORKERS in order. Returns the first level
+    that doesn't yet have PRE_PEAK_SAMPLES_PER_LEVEL samples. If all levels
+    within range are sufficiently explored, returns PRE_PEAK_MAX_WORKERS + 1
+    (signals graduation from pre-peak).
+
+    Args:
+        level_counts: Dict of level -> sample_count, or None if no data.
+
+    Returns:
+        Target level (1..PRE_PEAK_MAX_WORKERS) or PRE_PEAK_MAX_WORKERS + 1
+        when all levels have enough data.
+    """
+    counts = level_counts or {}
+    for level in range(1, PRE_PEAK_MAX_WORKERS + 1):
+        if counts.get(level, 0) < PRE_PEAK_SAMPLES_PER_LEVEL:
+            return level
+    return PRE_PEAK_MAX_WORKERS + 1
+
+
 def compute_throttle_decision(
     current_max_runtime: float,
     tier_timeout: float,
@@ -632,6 +643,7 @@ def compute_throttle_decision(
     post_warmup: bool = False,
     peak_concurrency: int | None = None,
     exploration_target: int | None = None,
+    level_counts: dict[int, int] | None = None,
 ) -> ThrottleDecision:
     """Determine if throttling should be applied.
 
@@ -667,14 +679,25 @@ def compute_throttle_decision(
             target, capped by the formula-based safety limit.
         exploration_target: Level to explore (neighbor of peak lacking data), or None.
             When set, overrides peak_concurrency as the optimization target.
+        level_counts: Dict of concurrency_level -> sample_count from ThroughputByLevel.
+            Used for pre-peak step-wise exploration: the system holds at each level
+            1..PRE_PEAK_MAX_WORKERS until PRE_PEAK_SAMPLES_PER_LEVEL samples are collected.
+            None means no per-level data available.
 
     Returns:
         ThrottleDecision with recommended action
     """
+    _log_throttle(
+        f"DECISION INPUT: active={active_workers} base={base_workers} max_rt={current_max_runtime:.1f}s "
+        f"tier_timeout={tier_timeout:.0f}s avg_base={avg_base_time:.3f}s count={completion_count} "
+        f"peak={peak_concurrency} explore={exploration_target} post_warmup={post_warmup}"
+    )
+
     # Emergency check uses RAW max_runtime - is any task about to timeout?
-    # Use 60% threshold - more aggressive than safety margin (65%) to react before it's too late
+    # Use 80% threshold - fires after hold (50%) has had time to stabilize,
+    # but before the safety margin (65% effective timeout) is breached.
     raw_ratio = current_max_runtime / tier_timeout if tier_timeout > 0 else 0.0
-    if raw_ratio >= 0.60:
+    if raw_ratio >= 0.80:
         _log_throttle(
             f"EMERGENCY: max_runtime={current_max_runtime:.1f}s ({raw_ratio:.0%} of {tier_timeout}s timeout) "
             f"active={active_workers} → forcing 1 worker"
@@ -685,7 +708,7 @@ def compute_throttle_decision(
             historical_max=0,
             completed_avg=current_max_runtime,
             recommended_workers=1,
-            reason="Emergency (>60% timeout)",
+            reason="Emergency (>80% timeout)",
             completion_count=completion_count,
         )
 
@@ -694,16 +717,12 @@ def compute_throttle_decision(
     normalized_max = current_max_runtime / max(active_workers, 1)
     normalized_max / tier_timeout if tier_timeout > 0 else 0.0
 
-    # Check if any task is taking too long - if so, hold at current level.
-    # Uses raw max (like emergency) but with lower threshold.
-    # Pre-peak: skip holds — we're exploring and need to reach higher levels fast.
-    # Peak detection will catch overload via base_time spikes. Holding pre-peak
-    # just prevents data collection, which is the opposite of what we need.
+    # Check if any task is taking too long - if so, hold at current level
+    # Uses raw max (like emergency) but with lower threshold
     hold_threshold = tier_timeout * RAMP_HOLD_THRESHOLD
     should_hold = (
         current_max_runtime > hold_threshold
         and active_workers > 0
-        and peak_concurrency is not None  # Only hold post-peak (fine-tuning)
     )
 
     # Use the larger of historical avg_base_time or normalized_max for worker calculation.
@@ -734,11 +753,17 @@ def compute_throttle_decision(
                 completion_count=completion_count,
             )
         elif active_workers > 0:
-            # Tasks running fast, safe to ramp (geometric pre-peak, +1 post-peak)
-            delta = base_workers - active_workers
-            increment = min(_compute_ramp_increment(active_workers, None), delta)
+            # Tasks running fast, safe to ramp +1
+            # Pre-peak: cap at step-wise target to collect data level by level
+            if level_counts is not None and peak_concurrency is None:
+                no_data_target = _compute_pre_peak_target(level_counts)
+                cap = no_data_target if no_data_target <= PRE_PEAK_MAX_WORKERS else base_workers
+            else:
+                cap = base_workers
+            delta = cap - active_workers
+            increment = min(MAX_RAMP_INCREMENT, max(0, delta))
             ramped = active_workers + increment
-            ramped = min(ramped, base_workers)
+            ramped = min(ramped, cap)
             _log_throttle(
                 f"NO DATA RAMP: active={active_workers} normalized_max={normalized_max:.1f}s "
                 f"< {hold_threshold:.0f}s threshold → ramped to {ramped} (+{increment})"
@@ -783,6 +808,21 @@ def compute_throttle_decision(
 
     formula_optimal = max(1, min(formula_optimal, base_workers))  # Clamp to [1, base_workers]
 
+    # Pre-peak step-wise exploration: walk levels 1..PRE_PEAK_MAX_WORKERS,
+    # holding at each until PRE_PEAK_SAMPLES_PER_LEVEL samples collected.
+    # This ensures multiple levels have data for reliable peak detection.
+    # Lifts when: (a) peak detected, (b) exploration active, or
+    # (c) all levels 1..PRE_PEAK_MAX_WORKERS have sufficient data.
+    # Only active when level_counts is provided (callers opt-in).
+    if level_counts is not None and peak_concurrency is None and exploration_target is None:
+        pre_peak_target = _compute_pre_peak_target(level_counts)
+        if pre_peak_target <= PRE_PEAK_MAX_WORKERS:
+            formula_optimal = min(formula_optimal, pre_peak_target)
+            _log_throttle(
+                f"PRE-PEAK: step target={pre_peak_target} "
+                f"(levels: {level_counts})"
+            )
+
     # Apply peak throughput optimization: if we have data showing which
     # concurrency level produces the best throughput, use that as the
     # primary target — but never exceed the formula's safety cap.
@@ -822,9 +862,9 @@ def compute_throttle_decision(
                 f"> {RAMP_HOLD_THRESHOLD:.0%} threshold, holding at {active_workers} (target={target_workers})"
             )
         else:
-            # Scaling UP - geometric doubling pre-peak, +1 post-peak
+            # Scaling UP - ramp +1 per decision to avoid overwhelming the system
             delta = target_workers - active_workers
-            increment = min(_compute_ramp_increment(active_workers, peak_concurrency), delta)
+            increment = min(max(1, int(delta * RAMP_UP_FACTOR)), MAX_RAMP_INCREMENT)
             ramped = active_workers + increment
             ramped = min(ramped, target_workers)  # Don't exceed target
             effective_workers = ramped
@@ -856,6 +896,11 @@ def compute_throttle_decision(
                 _log_throttle(
                     f"FRESH START: base_time={effective_base_time:.1f}s → starting at {effective_workers} workers"
                 )
+
+    _log_throttle(
+        f"DECISION OUTPUT: recommended={effective_workers} throttle={should_throttle} "
+        f"target={target_workers} should_hold={should_hold}{reason_suffix}"
+    )
 
     if should_throttle:
         peak_info = f",peak@{peak_concurrency}" if peak_concurrency is not None else ""
