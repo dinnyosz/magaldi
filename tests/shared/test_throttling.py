@@ -2043,13 +2043,12 @@ class TestProbabilityMap:
     """Tests for ProbabilityMap class."""
 
     def test_uniform_initial_distribution(self):
-        """All levels should start at 1/N."""
+        """All levels should start at 0.5 (neutral)."""
         pmap = ProbabilityMap(lo=1, hi=20)
         probs = pmap.get_probabilities()
         assert len(probs) == 20
-        expected = 1.0 / 20
         for lvl in range(1, 21):
-            assert abs(probs[lvl] - expected) < 1e-10
+            assert abs(probs[lvl] - 0.5) < 1e-10
 
     def test_good_signal_boosts_neighbors(self):
         """Good signal should boost the level and its neighbors."""
@@ -2071,14 +2070,16 @@ class TestProbabilityMap:
         pmap = ProbabilityMap(lo=1, hi=20)
         initial = pmap.get_probabilities()
         initial_10 = initial[10]
+        initial_1 = initial[1]
 
         pmap.update(10, is_good=False, strength=1.0)
 
         updated = pmap.get_probabilities()
-        # Level 10 should have lower probability
+        # Level 10 should have lower score
         assert updated[10] < initial_10
-        # Distant levels should have higher relative probability
-        assert updated[1] > initial[1]
+        # Distant levels should be unaffected (independent scores, no normalization)
+        # The Gaussian effect at distance 9 with sigma=3 is negligible
+        assert abs(updated[1] - initial_1) < 0.01
 
     def test_gaussian_decay_with_distance(self):
         """Effect should fall off with distance from source level."""
@@ -2086,10 +2087,13 @@ class TestProbabilityMap:
         pmap.update(10, is_good=True, strength=1.0)
 
         probs = pmap.get_probabilities()
-        # Level 10 should be highest
+        # Level 10 should be highest (center of boost)
         assert probs[10] > probs[11]
-        # Level 11 should be higher than level 15
+        # Level 11 should be higher than level 15 (closer to center)
         assert probs[11] > probs[15]
+        # All scores should be within [0.0, 1.0]
+        for lvl in range(1, 21):
+            assert 0.0 <= probs[lvl] <= 1.0
 
     def test_activation_guard_blocks_early(self):
         """Map should return None before sufficient geometric probes."""
@@ -2105,7 +2109,9 @@ class TestProbabilityMap:
         """Map should work after threshold geometric probes reached."""
         pmap = ProbabilityMap(lo=1, hi=20)
         # sigma = max(2, 19//6) = 3, threshold = 3
-        pmap.update(5, is_good=True, strength=1.0)
+        # Boost level 5 multiple times to make it clearly the highest
+        for _ in range(3):
+            pmap.update(5, is_good=True, strength=1.0)
 
         # Record enough geometric probes
         for _ in range(pmap._activation_threshold):
@@ -2114,7 +2120,7 @@ class TestProbabilityMap:
         result = pmap.get_best_unqualified(set(), 1, 20)
         assert result is not None
         lvl, prob = result
-        assert lvl == 5  # Level 5 was boosted
+        assert lvl == 5  # Level 5 was boosted most
 
     def test_flat_map_falls_through(self):
         """When all probabilities within 10%, should return None."""
@@ -2129,15 +2135,20 @@ class TestProbabilityMap:
     def test_best_unqualified_skips_qualified(self):
         """Should not return already-qualified levels."""
         pmap = ProbabilityMap(lo=1, hi=20)
-        pmap.update(5, is_good=True, strength=1.0)
+        # Boost level 5 strongly, penalize distant levels to create clear gradient
+        for _ in range(5):
+            pmap.update(5, is_good=True, strength=1.0)
+        for _ in range(3):
+            pmap.update(15, is_good=False, strength=1.0)
         for _ in range(10):
             pmap.record_geometric_probe()
 
-        # Mark level 5 as qualified
+        # Mark level 5 as qualified — should pick a neighbor instead
         result = pmap.get_best_unqualified({5}, 1, 20)
-        if result is not None:
-            lvl, _ = result
-            assert lvl != 5  # Should pick a neighbor, not 5 itself
+        assert result is not None
+        lvl, _ = result
+        assert lvl != 5  # Should pick a neighbor, not 5 itself
+        assert abs(lvl - 5) <= 3  # Should be near level 5 (boosted region)
 
     def test_sigma_scales_with_bracket(self):
         """Sigma should be max(2, bracket_width // 6)."""
@@ -2149,25 +2160,34 @@ class TestProbabilityMap:
         pmap_large = ProbabilityMap(lo=1, hi=60)
         assert pmap_large._sigma == 9
 
-    def test_normalization_after_update(self):
-        """Probabilities should always sum to 1.0 after updates."""
-        pmap = ProbabilityMap(lo=1, hi=20)
+    def test_scores_clamped_to_0_1(self):
+        """Scores should stay within [0.0, 1.0] after updates."""
+        pmap = ProbabilityMap(lo=1, hi=10)
 
-        pmap.update(5, is_good=True, strength=1.0)
-        total = sum(pmap.get_probabilities().values())
-        assert abs(total - 1.0) < 1e-10
+        # Boost a level many times — should not exceed 1.0
+        for _ in range(20):
+            pmap.update(5, is_good=True, strength=1.0)
+        probs = pmap.get_probabilities()
+        assert probs[5] == 1.0
+        for lvl in range(1, 11):
+            assert 0.0 <= probs[lvl] <= 1.0
 
-        pmap.update(15, is_good=False, strength=0.5)
-        total = sum(pmap.get_probabilities().values())
-        assert abs(total - 1.0) < 1e-10
+        # Penalize a level many times — should not go below 0.0
+        for _ in range(20):
+            pmap.update(5, is_good=False, strength=1.0)
+        probs = pmap.get_probabilities()
+        assert probs[5] == 0.0
+        for lvl in range(1, 11):
+            assert 0.0 <= probs[lvl] <= 1.0
 
     def test_integration_with_gss(self):
         """Probability map should steer GSS probes when active."""
         gss = GoldenSectionSearch(lo=1, hi=20)
         pmap = ProbabilityMap(lo=1, hi=20)
 
-        # Simulate: boost level 7, activate map
-        pmap.update(7, is_good=True, strength=1.0)
+        # Simulate: boost level 7 multiple times to make it clearly highest
+        for _ in range(3):
+            pmap.update(7, is_good=True, strength=1.0)
         for _ in range(pmap._activation_threshold):
             pmap.record_geometric_probe()
 

@@ -834,11 +834,13 @@ class GoldenSectionSearch:
 
 
 class ProbabilityMap:
-    """Probability distribution over concurrency levels for probe steering.
+    """Independent per-level scores for probe steering.
 
-    Each level has P(best) — probability of being the optimal concurrency.
-    Updated via Gaussian kernel: good performance boosts a level and neighbors,
-    bad performance penalizes them. Decay falls off with distance.
+    Each level has an independent score in [0.0, 1.0] indicating how likely
+    it is to be the optimal concurrency. Updated via Gaussian kernel: good
+    performance boosts a level and neighbors, bad performance penalizes them.
+    Decay falls off with distance. Scores are NOT normalized — each level
+    stands alone.
 
     Activation guard: only activates after sufficient geometric probes to
     prevent sequential walking from the low end. The threshold scales with
@@ -867,22 +869,27 @@ class ProbabilityMap:
         self._geometric_probes += 1
 
     def _ensure_initialized(self) -> None:
-        """Lazy-init uniform probabilities."""
+        """Lazy-init scores to 0.5 (neutral)."""
         if not self._initialized:
-            n = self.hi - self.lo + 1
-            uniform = 1.0 / n
-            self._probs = dict.fromkeys(range(self.lo, self.hi + 1), uniform)
+            self._probs = dict.fromkeys(range(self.lo, self.hi + 1), 0.5)
             self._initialized = True
 
+    # Maximum score change per update at distance=0
+    _STEP_SCALE = 0.15
+
     def update(self, level: int, is_good: bool, strength: float = 1.0) -> None:
-        """Update probabilities using Gaussian kernel around level.
+        """Update scores using Gaussian kernel around level.
 
         Good performance boosts the level and its neighbors; bad performance
         penalizes them. Effect decays with distance via Gaussian curve.
+        Scores are independent per level (not normalized to sum=1).
+
+        The step is scaled by _STEP_SCALE (0.15) so a single update doesn't
+        saturate — signals accumulate over multiple observations.
 
         Args:
             level: The concurrency level with new data.
-            is_good: True = boost probability, False = penalize.
+            is_good: True = boost score, False = penalize.
             strength: Multiplier for the effect (0.0-1.0).
         """
         self._ensure_initialized()
@@ -890,18 +897,12 @@ class ProbabilityMap:
 
         for lvl in range(self.lo, self.hi + 1):
             dist = abs(lvl - level)
-            effect = strength * math.exp(-(dist ** 2) / (2 * sigma ** 2))
+            effect = self._STEP_SCALE * strength * math.exp(-(dist ** 2) / (2 * sigma ** 2))
 
             if is_good:
-                self._probs[lvl] = self._probs.get(lvl, 0) + effect
+                self._probs[lvl] = min(1.0, self._probs.get(lvl, 0.5) + effect)
             else:
-                self._probs[lvl] = max(0.001, self._probs.get(lvl, 0) - effect)
-
-        # Normalize to sum=1
-        total = sum(self._probs.values())
-        if total > 0:
-            for lvl in self._probs:
-                self._probs[lvl] /= total
+                self._probs[lvl] = max(0.0, self._probs.get(lvl, 0.5) - effect)
 
     def get_best_unqualified(
         self, qualified_levels: set[int], bracket_lo: int, bracket_hi: int
@@ -927,8 +928,8 @@ class ProbabilityMap:
         best_prob = -1.0
 
         for lvl in range(bracket_lo, bracket_hi + 1):
-            if lvl not in qualified_levels and self._probs.get(lvl, 0) > best_prob:
-                best_prob = self._probs[lvl]
+            if lvl not in qualified_levels and self._probs.get(lvl, 0.5) > best_prob:
+                best_prob = self._probs.get(lvl, 0.5)
                 best_lvl = lvl
 
         if best_lvl is None:
@@ -936,7 +937,7 @@ class ProbabilityMap:
 
         # Check if the map is "flat" — all unqualified levels within 10% of each other
         unqualified_probs = [
-            self._probs.get(lvl, 0)
+            self._probs.get(lvl, 0.5)
             for lvl in range(bracket_lo, bracket_hi + 1)
             if lvl not in qualified_levels
         ]
