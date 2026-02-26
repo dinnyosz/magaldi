@@ -6,6 +6,7 @@ Contains the core processing logic for individual elements.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from datetime import datetime
 from typing import TYPE_CHECKING, Callable
@@ -81,6 +82,44 @@ def _generate_import_summary(element: "CodeElement") -> str:
 # Small function/method handcrafted summaries
 # Functions/methods below a line threshold skip LLM and use code/docstring directly
 
+# Section header patterns that mark end of docstring description paragraph
+_DOCSTRING_SECTION_HEADERS = re.compile(
+    r"^\s*("
+    r"Args?:|Returns?:|Raises?:|Yields?:|Note:|Notes?:|"  # Google
+    r"Example:|Examples:|Todo:|Attributes?:|See Also:|References?:|Warnings?:|"  # Google cont.
+    r"Parameters?[\s:]*$|Returns?\s*$|Raises?\s*$|"  # NumPy (followed by ---)
+    r":param\s|:type\s|:returns?:|:rtype:|:raises?:|"  # Sphinx
+    r"@param\s|@returns?\s|@throws?\s|@type\s"  # JSDoc/PHPDoc
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _extract_docstring_description(docstring: str) -> str:
+    """Extract the description paragraph from a docstring.
+
+    Takes everything before the first section header (Args:, Returns:,
+    :param, @param, etc.), joining lines into a single string.
+
+    Args:
+        docstring: Raw docstring text.
+
+    Returns:
+        Description text with lines joined by spaces.
+    """
+    lines = docstring.strip().split("\n")
+    description_lines: list[str] = []
+
+    for line in lines:
+        # Stop at section headers
+        if _DOCSTRING_SECTION_HEADERS.match(line):
+            break
+        description_lines.append(line.strip())
+
+    # Join non-empty lines with spaces
+    text = " ".join(line for line in description_lines if line)
+    return text.strip()
+
 def _get_element_line_count(element: "CodeElement") -> int:
     """Get non-empty line count for an element.
 
@@ -123,7 +162,7 @@ def _generate_small_function_summary(element: "CodeElement") -> str:
     """Generate a handcrafted summary for a small function/method.
 
     For small functions, the code itself is the best explanation. Priority:
-    1. First sentence of docstring (developer's own description)
+    1. Description paragraph from docstring (developer's own description)
     2. Signature (for trivial getters/setters without docstring)
     3. Raw code (fallback — code IS the explanation)
 
@@ -133,13 +172,13 @@ def _generate_small_function_summary(element: "CodeElement") -> str:
     Returns:
         A summary string suitable for embedding.
     """
-    # Try docstring first sentence
+    # Try docstring description paragraph
     if element.docstring:
-        first_line = element.docstring.strip().split("\n")[0].strip()
+        desc = _extract_docstring_description(element.docstring)
         # Strip trailing period for consistency with clean_summary
-        first_line = first_line.rstrip(".")
-        if first_line:
-            return first_line
+        desc = desc.rstrip(".")
+        if desc:
+            return desc
 
     # Try signature
     if element.signature:

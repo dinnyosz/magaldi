@@ -12,6 +12,7 @@ from magaldi_core.processor import (
     ProgressState,
     ProcessedElement,
     _summarize_element,
+    _extract_docstring_description,
     _get_element_line_count,
     _is_small_function,
     _generate_small_function_summary,
@@ -1984,11 +1985,117 @@ class TestIsSmallFunction:
             assert not _is_small_function(elem, 5), f"{etype} should not be a small function"
 
 
+class TestExtractDocstringDescription:
+    """Tests for _extract_docstring_description helper."""
+
+    def test_single_line_docstring(self):
+        """Single line docstring returns as-is."""
+        assert _extract_docstring_description("Return the name.") == "Return the name."
+
+    def test_multiline_description_before_args(self):
+        """Should capture full description paragraph before Args."""
+        docstring = (
+            "Return the sum of two numbers.\n"
+            "\n"
+            "Handles negative values and raises ValueError for non-numeric inputs.\n"
+            "\n"
+            "Args:\n"
+            "    a: first\n"
+            "    b: second"
+        )
+        result = _extract_docstring_description(docstring)
+        assert result == (
+            "Return the sum of two numbers. "
+            "Handles negative values and raises ValueError for non-numeric inputs."
+        )
+
+    def test_stops_at_returns_section(self):
+        """Should stop at Returns: header."""
+        docstring = "Check if valid.\n\nReturns:\n    True if valid."
+        assert _extract_docstring_description(docstring) == "Check if valid."
+
+    def test_stops_at_raises_section(self):
+        """Should stop at Raises: header."""
+        docstring = "Parse the input.\n\nRaises:\n    ValueError: if bad."
+        assert _extract_docstring_description(docstring) == "Parse the input."
+
+    def test_stops_at_yields_section(self):
+        """Should stop at Yields: header."""
+        docstring = "Iterate over items.\n\nYields:\n    Each item."
+        assert _extract_docstring_description(docstring) == "Iterate over items."
+
+    def test_stops_at_example_section(self):
+        """Should stop at Example: header."""
+        docstring = "Format the string.\n\nExample:\n    format('hello')"
+        assert _extract_docstring_description(docstring) == "Format the string."
+
+    def test_stops_at_note_section(self):
+        """Should stop at Note: header."""
+        docstring = "Process data.\n\nNote:\n    This is slow."
+        assert _extract_docstring_description(docstring) == "Process data."
+
+    def test_stops_at_sphinx_param(self):
+        """Should stop at Sphinx :param directive."""
+        docstring = "Calculate the total.\n\n:param x: first value\n:param y: second value"
+        assert _extract_docstring_description(docstring) == "Calculate the total."
+
+    def test_stops_at_sphinx_returns(self):
+        """Should stop at Sphinx :returns: directive."""
+        docstring = "Get the count.\n\n:returns: The count value."
+        assert _extract_docstring_description(docstring) == "Get the count."
+
+    def test_stops_at_sphinx_rtype(self):
+        """Should stop at Sphinx :rtype: directive."""
+        docstring = "Get the count.\n\n:rtype: int"
+        assert _extract_docstring_description(docstring) == "Get the count."
+
+    def test_stops_at_jsdoc_param(self):
+        """Should stop at JSDoc @param."""
+        docstring = "Calculate the total.\n\n@param x first value\n@param y second value"
+        assert _extract_docstring_description(docstring) == "Calculate the total."
+
+    def test_stops_at_jsdoc_returns(self):
+        """Should stop at JSDoc @returns."""
+        docstring = "Get the value.\n\n@returns The value."
+        assert _extract_docstring_description(docstring) == "Get the value."
+
+    def test_stops_at_jsdoc_throws(self):
+        """Should stop at JSDoc @throws."""
+        docstring = "Parse the input.\n\n@throws Error if invalid."
+        assert _extract_docstring_description(docstring) == "Parse the input."
+
+    def test_stops_at_numpy_parameters(self):
+        """Should stop at NumPy Parameters section."""
+        docstring = "Calculate something.\n\nParameters\n----------\nx : int"
+        assert _extract_docstring_description(docstring) == "Calculate something."
+
+    def test_description_only_no_sections(self):
+        """Multi-line description with no section headers returns all."""
+        docstring = "Validate the input.\n\nRuns checks and logs the attempt."
+        result = _extract_docstring_description(docstring)
+        assert result == "Validate the input. Runs checks and logs the attempt."
+
+    def test_empty_docstring(self):
+        """Empty docstring returns empty string."""
+        assert _extract_docstring_description("") == ""
+        assert _extract_docstring_description("   \n  ") == ""
+
+    def test_stops_at_attributes_section(self):
+        """Should stop at Attributes: header."""
+        docstring = "Store config values.\n\nAttributes:\n    name: The name."
+        assert _extract_docstring_description(docstring) == "Store config values."
+
+    def test_indented_section_header(self):
+        """Should stop at indented section headers too."""
+        docstring = "Do something.\n\n    Args:\n        x: value"
+        assert _extract_docstring_description(docstring) == "Do something."
+
+
 class TestGenerateSmallFunctionSummary:
     """Tests for _generate_small_function_summary helper."""
 
-    def test_prefers_docstring_first_sentence(self):
-        """Should use first sentence of docstring when available."""
+    def test_prefers_docstring_description(self):
+        """Should use full description paragraph from docstring."""
         elem = CodeElement(
             element_type="function",
             name="foo",
@@ -1997,6 +2104,25 @@ class TestGenerateSmallFunctionSummary:
             raw_code='def foo(a, b):\n    """Return the sum of two numbers."""\n    return a + b\n',
         )
         assert _generate_small_function_summary(elem) == "Return the sum of two numbers"
+
+    def test_multiline_description_before_args(self):
+        """Should capture full description paragraph before Args section."""
+        elem = CodeElement(
+            element_type="function",
+            name="foo",
+            docstring=(
+                "Validate the input.\n"
+                "\n"
+                "Runs checks and logs the attempt.\n"
+                "\n"
+                "Args:\n"
+                "    x: the input"
+            ),
+            signature="def foo(x)",
+        )
+        assert _generate_small_function_summary(elem) == (
+            "Validate the input. Runs checks and logs the attempt"
+        )
 
     def test_strips_trailing_period_from_docstring(self):
         """Should strip trailing period from docstring."""
@@ -2057,15 +2183,28 @@ class TestGenerateSmallFunctionSummary:
         )
         assert _generate_small_function_summary(elem) == "def foo(x: int) -> int"
 
-    def test_multiline_docstring_uses_first_line_only(self):
-        """Should only use first line of multi-line docstring."""
+    def test_multiline_description_no_sections(self):
+        """Should capture all description lines when no section headers."""
         elem = CodeElement(
             element_type="function",
             name="foo",
             docstring="Validate the input.\n\nRaises ValueError if invalid.\nAlso logs the attempt.",
             signature="def foo(x)",
         )
-        assert _generate_small_function_summary(elem) == "Validate the input"
+        assert _generate_small_function_summary(elem) == (
+            "Validate the input. Raises ValueError if invalid. Also logs the attempt"
+        )
+
+    def test_docstring_with_only_section_headers(self):
+        """Docstring starting with a section header should fall through."""
+        elem = CodeElement(
+            element_type="function",
+            name="foo",
+            docstring="Args:\n    x: value",
+            signature="def foo(x)",
+        )
+        # Description is empty, falls through to signature
+        assert _generate_small_function_summary(elem) == "def foo(x)"
 
 
 class TestHandcraftedSummaryConfig:
