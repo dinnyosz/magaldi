@@ -477,17 +477,21 @@ class ThrottleContext:
             if GSS_PARTIAL_MIN_SAMPLES <= cnt < EXPLORE_MIN_SAMPLES
         }
 
-        # GSS warmup: stay at level 1 until EXPLORE_MIN_SAMPLES completions,
-        # then start GSS with a solid baseline. No pre-GSS formula ramp —
-        # level 1 gets proper data, then GSS probes golden-ratio points.
+        # Two-phase warmup before GSS:
+        # Phase A: run at level 1 until EXPLORE_MIN_SAMPLES → solid low-end baseline
+        # Phase B: run at high probe (~2/3 of max) until EXPLORE_MIN_SAMPLES → high-end reference
+        # Then GSS starts with data at both ends, avoiding blind sequential walk.
+        _WARMUP_HIGH_PROBE = max(2, int(self.base_workers * 2 / 3))
         level1_count = all_levels.get(1, (0, 0))[1] if all_levels else 0
-        if self._gss is None and level1_count >= EXPLORE_MIN_SAMPLES:
+        high_probe_count = all_levels.get(_WARMUP_HIGH_PROBE, (0, 0))[1] if all_levels else 0
+
+        if self._gss is None and level1_count >= EXPLORE_MIN_SAMPLES and high_probe_count >= EXPLORE_MIN_SAMPLES:
             self._gss = GoldenSectionSearch(lo=1, hi=self.base_workers)
             self._prob_map = ProbabilityMap(lo=1, hi=self.base_workers)
             from shared.throttling import _log_throttle
             _log_throttle(
                 f"GSS INIT: bracket=[{self._gss.lo}, {self._gss.hi}] "
-                f"(level 1 has {level1_count} samples, max_workers={self.base_workers})"
+                f"(level 1={level1_count}, level {_WARMUP_HIGH_PROBE}={high_probe_count} samples)"
             )
 
         # Update probability map: direct score mapping from base_time data.
@@ -551,11 +555,20 @@ class ThrottleContext:
         )
         self.post_warmup = False  # Only signal once
 
-        # Pre-GSS: cap at 1 worker to build level-1 baseline.
-        # The formula would ramp to 32 otherwise, wasting samples.
-        if self._gss is None and throttle.recommended_workers > 1:
-            throttle.recommended_workers = 1
-            throttle.reason = "Warmup (building level 1 baseline)"
+        # Pre-GSS warmup: force specific levels to collect baseline data.
+        # Phase A: level 1 until 10 samples, Phase B: high probe until 10 samples.
+        if self._gss is None:
+            _WARMUP_HIGH = max(2, int(self.base_workers * 2 / 3))
+            l1_cnt = all_levels.get(1, (0, 0))[1] if all_levels else 0
+            if l1_cnt < EXPLORE_MIN_SAMPLES:
+                # Phase A: collect level-1 baseline
+                throttle.recommended_workers = 1
+                throttle.reason = f"Warmup A: level 1 ({l1_cnt}/{EXPLORE_MIN_SAMPLES})"
+            else:
+                # Phase B: collect high-end reference
+                hi_cnt = all_levels.get(_WARMUP_HIGH, (0, 0))[1] if all_levels else 0
+                throttle.recommended_workers = _WARMUP_HIGH
+                throttle.reason = f"Warmup B: level {_WARMUP_HIGH} ({hi_cnt}/{EXPLORE_MIN_SAMPLES})"
 
         # Attach per-level data for display (early returns in compute_throttle_decision
         # don't set these, so we always override from the source of truth)
