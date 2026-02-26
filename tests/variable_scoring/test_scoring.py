@@ -82,7 +82,7 @@ class TestVariableScoringConfig:
         config = VariableScoringConfig()
         assert config.threshold == 5
         assert config.temperature == 0.1
-        assert config.token_budget == 800
+        assert config.token_budget == 200
         assert config.max_retries == 2
 
 

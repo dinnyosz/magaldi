@@ -50,7 +50,7 @@ class VariableScoringConfig:
 
     threshold: int = 5
     temperature: float = 0.1
-    token_budget: int = 800
+    token_budget: int = 200
     max_retries: int = 2
 
 
