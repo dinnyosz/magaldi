@@ -98,15 +98,6 @@ FORMULA_CONFIDENCE_MIN = 0.30  # Floor confidence at count=1
 FORMULA_CONFIDENCE_FULL_AT = 25  # Full confidence at this many completions
 FORMULA_CONFIDENCE_THRESHOLD = 0.95  # Snap to 1.0 above this
 
-# Pre-peak step-wise exploration. Before peak is detected, explore levels
-# 1 through PRE_PEAK_MAX_WORKERS one at a time, collecting
-# PRE_PEAK_SAMPLES_PER_LEVEL samples at each before advancing.
-# Peak detection needs ≥2 levels with sufficient samples, so 2 levels is enough.
-# Matches EXPLORE_MIN_SAMPLES so levels qualify for peak detection immediately.
-# With 2 levels × 10 samples × ~3s each ≈ 30-40s of exploration, then
-# peak detection fires and post-peak +1 ramp takes over.
-PRE_PEAK_MAX_WORKERS = 2
-PRE_PEAK_SAMPLES_PER_LEVEL = EXPLORE_MIN_SAMPLES  # 10 — match peak detection threshold
 
 # Ramp cooldown scales with context tier: tier // 512 seconds.
 # 2k→4s, 4k→8s, 8k→16s, 16k→32s, 32k→64s
@@ -586,8 +577,8 @@ class GoldenSectionSearch:
     Maintains a bracket [lo, hi] and narrows it by evaluating throughput
     at golden-ratio interior points. Converges in O(log_φ(N)) steps.
 
-    Use from_level_data() to create with a bracket narrowed by existing
-    data from pre-peak exploration and organic accumulation.
+    Starts with full bracket [1, max_workers] and uses geometric probes
+    for broad coverage, with signal-aware and probability map overrides.
     """
 
     # Minimum bracket width to avoid premature convergence on noisy data
@@ -609,44 +600,6 @@ class GoldenSectionSearch:
         self._pending_probe: int | None = None
         # Last signal-aware action for display (e.g. "promote 7" or "skip [5,9]")
         self.last_signal: str | None = None
-
-    @classmethod
-    def from_level_data(
-        cls, level_data: dict[int, float], max_workers: int
-    ) -> GoldenSectionSearch:
-        """Create GSS with a bracket narrowed by existing level data.
-
-        At GSS init time, pre-peak exploration (levels 1-2) and organic
-        accumulation from nearby levels provide data points. Instead of
-        searching the full [1, max_workers], we bracket around the best
-        known level with room for error.
-
-        Strategy:
-        - lo = max(1, best_level // 2)
-        - hi = min(max_workers, best_level * 6)
-        - Minimum bracket width of MIN_BRACKET to avoid premature convergence
-
-        Falls back to [1, max_workers] if insufficient data (<2 levels).
-        """
-        if len(level_data) < 2:
-            return cls(lo=1, hi=max_workers)
-
-        best_level = min(level_data, key=level_data.get)  # type: ignore[arg-type]
-
-        # Asymmetric bracket: half below, 6x above
-        # Wide upward because pre-peak only explores levels 1-2, so
-        # best=2 just means "more is better" — real optimum could be 10+
-        lo = max(1, best_level // 2)
-        hi = min(max_workers, best_level * 6)
-
-        # Ensure minimum bracket width
-        if hi - lo < cls.MIN_BRACKET:
-            mid = (lo + hi) // 2
-            lo = max(1, mid - cls.MIN_BRACKET // 2)
-            hi = min(max_workers, lo + cls.MIN_BRACKET)
-            lo = max(1, hi - cls.MIN_BRACKET)  # re-adjust if hi hit max
-
-        return cls(lo=lo, hi=hi)
 
     def get_next_probe(
         self,
@@ -900,27 +853,6 @@ def _compute_formula_confidence(
     return confidence
 
 
-def _compute_pre_peak_target(level_counts: dict[int, int] | None) -> int:
-    """Compute the pre-peak step-wise exploration target level.
-
-    Walks levels 1..PRE_PEAK_MAX_WORKERS in order. Returns the first level
-    that doesn't yet have PRE_PEAK_SAMPLES_PER_LEVEL samples. If all levels
-    within range are sufficiently explored, returns PRE_PEAK_MAX_WORKERS + 1
-    (signals graduation from pre-peak).
-
-    Args:
-        level_counts: Dict of level -> sample_count, or None if no data.
-
-    Returns:
-        Target level (1..PRE_PEAK_MAX_WORKERS) or PRE_PEAK_MAX_WORKERS + 1
-        when all levels have enough data.
-    """
-    counts = level_counts or {}
-    for level in range(1, PRE_PEAK_MAX_WORKERS + 1):
-        if counts.get(level, 0) < PRE_PEAK_SAMPLES_PER_LEVEL:
-            return level
-    return PRE_PEAK_MAX_WORKERS + 1
-
 
 def compute_throttle_decision(
     current_max_runtime: float,
@@ -935,7 +867,6 @@ def compute_throttle_decision(
     post_warmup: bool = False,
     peak_concurrency: int | None = None,
     exploration_target: int | None = None,
-    level_counts: dict[int, int] | None = None,
     gss_probe: int | None = None,
 ) -> ThrottleDecision:
     """Determine if throttling should be applied.
@@ -972,10 +903,6 @@ def compute_throttle_decision(
             target, capped by the formula-based safety limit.
         exploration_target: Level to explore (neighbor of peak lacking data), or None.
             When set, overrides peak_concurrency as the optimization target.
-        level_counts: Dict of concurrency_level -> sample_count from ThroughputByLevel.
-            Used for pre-peak step-wise exploration: the system holds at each level
-            1..PRE_PEAK_MAX_WORKERS until PRE_PEAK_SAMPLES_PER_LEVEL samples are collected.
-            None means no per-level data available.
         gss_probe: Golden section search probe target, or None. When set, overrides
             peak and exploration targeting — jumps directly to the probe level to
             collect data for the search. Capped by the formula safety limit.
@@ -1050,12 +977,7 @@ def compute_throttle_decision(
             )
         elif active_workers > 0:
             # Tasks running fast, safe to ramp +1
-            # Pre-peak: cap at step-wise target to collect data level by level
-            if level_counts is not None and peak_concurrency is None:
-                no_data_target = _compute_pre_peak_target(level_counts)
-                cap = no_data_target if no_data_target <= PRE_PEAK_MAX_WORKERS else base_workers
-            else:
-                cap = base_workers
+            cap = base_workers
             delta = cap - active_workers
             increment = min(MAX_RAMP_INCREMENT, max(0, delta))
             ramped = active_workers + increment
@@ -1103,21 +1025,6 @@ def compute_throttle_decision(
         )
 
     formula_optimal = max(1, min(formula_optimal, base_workers))  # Clamp to [1, base_workers]
-
-    # Pre-peak step-wise exploration: walk levels 1..PRE_PEAK_MAX_WORKERS,
-    # holding at each until PRE_PEAK_SAMPLES_PER_LEVEL samples collected.
-    # This ensures multiple levels have data for reliable peak detection.
-    # Lifts when: (a) peak detected, (b) exploration active, or
-    # (c) all levels 1..PRE_PEAK_MAX_WORKERS have sufficient data.
-    # Only active when level_counts is provided (callers opt-in).
-    if level_counts is not None and peak_concurrency is None and exploration_target is None:
-        pre_peak_target = _compute_pre_peak_target(level_counts)
-        if pre_peak_target <= PRE_PEAK_MAX_WORKERS:
-            formula_optimal = min(formula_optimal, pre_peak_target)
-            _log_throttle(
-                f"PRE-PEAK: step target={pre_peak_target} "
-                f"(levels: {level_counts})"
-            )
 
     # Apply peak throughput optimization: if we have data showing which
     # concurrency level produces the best throughput, use that as the

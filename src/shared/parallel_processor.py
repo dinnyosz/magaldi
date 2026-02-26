@@ -451,9 +451,8 @@ class ThrottleContext:
         )
         peak = self.throughput_tracker.get_peak_concurrency()
         all_levels = self.throughput_tracker._throughput_by_level.get_all_levels()
-        lvl_counts = {lvl: cnt for lvl, (_, cnt) in all_levels.items()} if all_levels else None
 
-        # GSS lifecycle: initialize when peak is detected, drive exploration
+        # GSS lifecycle: initialize immediately with full bracket, drive exploration
         gss_probe = None
 
         # Build level_data once: used for both GSS init and ongoing probes.
@@ -474,24 +473,15 @@ class ThrottleContext:
             if GSS_PARTIAL_MIN_SAMPLES <= cnt < EXPLORE_MIN_SAMPLES
         }
 
-        if peak is not None and self._gss is None:
-            # Pre-peak done, peak detected — start golden section search
-            # Use available level data to narrow the initial bracket
-            self._gss = GoldenSectionSearch.from_level_data(
-                level_data, self.base_workers
-            )
+        if self._gss is None:
+            # Start GSS immediately with full bracket [1, max_workers].
+            # No pre-peak walk — first geometric probes are widely spaced.
+            self._gss = GoldenSectionSearch(lo=1, hi=self.base_workers)
             from shared.throttling import _log_throttle
-            if level_data:
-                best = min(level_data, key=level_data.get)  # type: ignore[arg-type]
-                _log_throttle(
-                    f"GSS INIT: bracket=[{self._gss.lo}, {self._gss.hi}] "
-                    f"from {len(level_data)} levels (best={best})"
-                )
-            else:
-                _log_throttle(
-                    f"GSS INIT: bracket=[{self._gss.lo}, {self._gss.hi}] "
-                    f"(no qualified levels, using full range)"
-                )
+            _log_throttle(
+                f"GSS INIT: bracket=[{self._gss.lo}, {self._gss.hi}] "
+                f"(full range, max_workers={self.base_workers})"
+            )
 
         if self._gss is not None and not self._gss.converged:
             gss_probe = self._gss.get_next_probe(level_data, partial_data=partial_data)
@@ -538,7 +528,6 @@ class ThrottleContext:
             post_warmup=self.post_warmup,
             peak_concurrency=effective_peak,
             exploration_target=explore,
-            level_counts=lvl_counts,
             gss_probe=gss_probe,
         )
         self.post_warmup = False  # Only signal once
