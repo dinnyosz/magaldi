@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Generic, TypeVar
 from shared.ai.context_size import TIER_MAX_WORKERS, TIER_TIMEOUTS, iter_by_tier
 from shared.throttling import (
     GoldenSectionSearch,
+    ProbabilityMap,
     ThrottleDecision,
     ThroughputTracker,
     compute_throttle_decision,
@@ -408,6 +409,8 @@ class ThrottleDisplayInfo:
     gss_signal: str | None = None  # Signal-aware action ("promote 7" or "blacklist [5,9]")
     # Per-level throughput data: level -> (throughput_per_sec, sample_count)
     all_levels: dict[int, tuple[float, int]] | None = None
+    # Probability map: level -> P(best) for display
+    prob_map_data: dict[int, float] | None = None
 
 
 @dataclass
@@ -431,6 +434,7 @@ class ThrottleContext:
     _last_ramp_time: float = field(default=0.0, repr=False)
     _last_recommended_workers: int = field(default=0, repr=False)
     _gss: GoldenSectionSearch | None = field(default=None, repr=False)
+    _prob_map: ProbabilityMap | None = field(default=None, repr=False)
 
     def get_throttle_decision(
         self, active_workers: int, current_max_runtime: float,
@@ -477,14 +481,27 @@ class ThrottleContext:
             # Start GSS immediately with full bracket [1, max_workers].
             # No pre-peak walk — first geometric probes are widely spaced.
             self._gss = GoldenSectionSearch(lo=1, hi=self.base_workers)
+            self._prob_map = ProbabilityMap(lo=1, hi=self.base_workers)
             from shared.throttling import _log_throttle
             _log_throttle(
                 f"GSS INIT: bracket=[{self._gss.lo}, {self._gss.hi}] "
                 f"(full range, max_workers={self.base_workers})"
             )
 
+        # Update probability map with all available level data
+        from shared.throttling import GSS_PROMISING_THRESHOLD
+        if self._prob_map is not None and level_data:
+            best_bt = min(level_data.values())
+            for lvl, (bt, cnt) in all_levels.items():
+                if cnt >= GSS_PARTIAL_MIN_SAMPLES:
+                    is_good = bt <= best_bt * GSS_PROMISING_THRESHOLD
+                    strength = min(1.0, cnt / EXPLORE_MIN_SAMPLES)
+                    self._prob_map.update(lvl, is_good=is_good, strength=strength)
+
         if self._gss is not None and not self._gss.converged:
-            gss_probe = self._gss.get_next_probe(level_data, partial_data=partial_data)
+            gss_probe = self._gss.get_next_probe(
+                level_data, partial_data=partial_data, prob_map=self._prob_map,
+            )
             if self._gss.converged:
                 from shared.throttling import _log_throttle
                 # Boundary re-search: if best_level landed at/near the hi edge
@@ -502,7 +519,10 @@ class ThrottleContext:
                         f"extending to [{new_lo}, {self.base_workers}]"
                     )
                     self._gss = GoldenSectionSearch(lo=new_lo, hi=self.base_workers)
-                    gss_probe = self._gss.get_next_probe(level_data, partial_data=partial_data)
+                    self._prob_map = ProbabilityMap(lo=new_lo, hi=self.base_workers)
+                    gss_probe = self._gss.get_next_probe(
+                        level_data, partial_data=partial_data, prob_map=self._prob_map,
+                    )
                 else:
                     _log_throttle(f"GSS CONVERGED: best_level={self._gss.best_level}")
 
@@ -571,6 +591,7 @@ class ThrottleContext:
             gss_hi=self._gss.hi if self._gss else None,
             gss_signal=self._gss.last_signal if self._gss else None,
             all_levels=all_levels if all_levels else None,
+            prob_map_data=self._prob_map.get_probabilities() if self._prob_map else None,
         )
 
 

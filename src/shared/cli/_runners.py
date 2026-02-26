@@ -252,7 +252,8 @@ def _build_scoring_display(state: ScoringProgressState, num_workers: int) -> Ren
     if td is not None and hasattr(td, 'all_levels') and td.all_levels:
         from shared.throttling import build_throughput_levels_text
         explore = getattr(td, 'exploration_target', None)
-        levels_text = build_throughput_levels_text(td.all_levels, td.peak_concurrency, max_workers=num_workers, exploration_target=explore)
+        prob_data = getattr(td, 'prob_map_data', None)
+        levels_text = build_throughput_levels_text(td.all_levels, td.peak_concurrency, max_workers=num_workers, exploration_target=explore, prob_map_data=prob_data)
 
     parts: list[RenderableType] = [bar_text]
     if score_text.plain:
@@ -662,7 +663,8 @@ def run_processing(
             if hasattr(td, 'all_levels') and td.all_levels:
                 from shared.throttling import format_throughput_levels
                 explore = getattr(td, 'exploration_target', None)
-                levels_line = format_throughput_levels(td.all_levels, td.peak_concurrency, max_workers=num_workers, exploration_target=explore)
+                prob_data = getattr(td, 'prob_map_data', None)
+                levels_line = format_throughput_levels(td.all_levels, td.peak_concurrency, max_workers=num_workers, exploration_target=explore, prob_map_data=prob_data)
 
         parts: list[RenderableType] = [bar_text]
         if eta_table:

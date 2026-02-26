@@ -605,11 +605,14 @@ class GoldenSectionSearch:
         self,
         level_data: dict[int, float],
         partial_data: dict[int, tuple[float, int]] | None = None,
+        prob_map: ProbabilityMap | None = None,
     ) -> int | None:
         """Get the next level to probe, or None if converged.
 
-        Uses signal-aware override when partial_data is provided: promotes
-        promising partial levels and blacklists clearly bad ones.
+        Probe selection priority:
+        1. Signal-aware override (partial data: promote/blacklist)
+        2. Probability map (highest-probability unqualified level)
+        3. Geometric (golden-ratio interior points)
 
         Args:
             level_data: Dict of level -> avg_base_time for levels with
@@ -617,6 +620,8 @@ class GoldenSectionSearch:
             partial_data: Dict of level -> (avg_base_time, sample_count) for
                 levels with GSS_PARTIAL_MIN_SAMPLES..EXPLORE_MIN_SAMPLES-1
                 samples. Used for signal-aware probe steering.
+            prob_map: Probability distribution over levels. When active,
+                steers probes toward highest-probability unqualified level.
 
         Returns:
             Level to collect data at, or None if search is complete.
@@ -647,6 +652,19 @@ class GoldenSectionSearch:
                 self._pending_probe = probe
                 return probe
 
+        # Probability map override: pick highest-probability unqualified level
+        if prob_map is not None:
+            qualified = set(level_data.keys())
+            result = prob_map.get_best_unqualified(qualified, self.lo, self.hi)
+            if result is not None:
+                target, prob = result
+                self.last_signal = f"pmap→{target} (P={prob:.2f})"
+                _log_throttle(
+                    f"GSS PMAP: steering to level {target} (P={prob:.3f})"
+                )
+                self._pending_probe = target
+                return target
+
         have_m1 = m1 in level_data
         have_m2 = m2 in level_data
 
@@ -659,15 +677,21 @@ class GoldenSectionSearch:
                 # m2 is better → optimum in [m1, hi]
                 self.lo = m1
             # Recurse: compute new probes for narrowed bracket
-            return self.get_next_probe(level_data, partial_data)
+            return self.get_next_probe(level_data, partial_data, prob_map)
         elif have_m1:
+            if prob_map is not None:
+                prob_map.record_geometric_probe()
             self._pending_probe = m2
             return m2
         elif have_m2:
+            if prob_map is not None:
+                prob_map.record_geometric_probe()
             self._pending_probe = m1
             return m1
         else:
             # Neither probe has data — request m1 first (arbitrary)
+            if prob_map is not None:
+                prob_map.record_geometric_probe()
             self._pending_probe = m1
             return m1
 
@@ -804,6 +828,127 @@ class GoldenSectionSearch:
         else:
             # Fallback: midpoint
             self.best_level = (self.lo + self.hi) // 2
+
+
+class ProbabilityMap:
+    """Probability distribution over concurrency levels for probe steering.
+
+    Each level has P(best) — probability of being the optimal concurrency.
+    Updated via Gaussian kernel: good performance boosts a level and neighbors,
+    bad performance penalizes them. Decay falls off with distance.
+
+    Activation guard: only activates after sufficient geometric probes to
+    prevent sequential walking from the low end. The threshold scales with
+    bracket width (sigma = max(2, bracket_width // 6)).
+    """
+
+    # Minimum geometric probes before probability map activates
+    ACTIVATION_MIN = 2
+
+    def __init__(self, lo: int, hi: int):
+        self.lo = lo
+        self.hi = hi
+        self._probs: dict[int, float] = {}  # level -> probability
+        self._sigma = max(2, (hi - lo) // 6)
+        self._activation_threshold = max(self.ACTIVATION_MIN, self._sigma)
+        self._geometric_probes = 0  # count of GSS geometric probes completed
+        self._initialized = False
+
+    @property
+    def active(self) -> bool:
+        """Whether the map has enough data to steer probes."""
+        return self._geometric_probes >= self._activation_threshold
+
+    def record_geometric_probe(self) -> None:
+        """Increment geometric probe counter (call when GSS uses geometric)."""
+        self._geometric_probes += 1
+
+    def _ensure_initialized(self) -> None:
+        """Lazy-init uniform probabilities."""
+        if not self._initialized:
+            n = self.hi - self.lo + 1
+            uniform = 1.0 / n
+            self._probs = dict.fromkeys(range(self.lo, self.hi + 1), uniform)
+            self._initialized = True
+
+    def update(self, level: int, is_good: bool, strength: float = 1.0) -> None:
+        """Update probabilities using Gaussian kernel around level.
+
+        Good performance boosts the level and its neighbors; bad performance
+        penalizes them. Effect decays with distance via Gaussian curve.
+
+        Args:
+            level: The concurrency level with new data.
+            is_good: True = boost probability, False = penalize.
+            strength: Multiplier for the effect (0.0-1.0).
+        """
+        self._ensure_initialized()
+        sigma = self._sigma
+
+        for lvl in range(self.lo, self.hi + 1):
+            dist = abs(lvl - level)
+            effect = strength * math.exp(-(dist ** 2) / (2 * sigma ** 2))
+
+            if is_good:
+                self._probs[lvl] = self._probs.get(lvl, 0) + effect
+            else:
+                self._probs[lvl] = max(0.001, self._probs.get(lvl, 0) - effect)
+
+        # Normalize to sum=1
+        total = sum(self._probs.values())
+        if total > 0:
+            for lvl in self._probs:
+                self._probs[lvl] /= total
+
+    def get_best_unqualified(
+        self, qualified_levels: set[int], bracket_lo: int, bracket_hi: int
+    ) -> tuple[int, float] | None:
+        """Return highest-probability unqualified level within bracket.
+
+        Returns None if the map is inactive, all levels are qualified,
+        or the probability distribution is flat (all within 10%).
+
+        Args:
+            qualified_levels: Levels already at EXPLORE_MIN_SAMPLES.
+            bracket_lo: Current GSS bracket lower bound.
+            bracket_hi: Current GSS bracket upper bound.
+
+        Returns:
+            (level, probability) or None if no override needed.
+        """
+        if not self.active:
+            return None
+
+        self._ensure_initialized()
+        best_lvl = None
+        best_prob = -1.0
+
+        for lvl in range(bracket_lo, bracket_hi + 1):
+            if lvl not in qualified_levels and self._probs.get(lvl, 0) > best_prob:
+                best_prob = self._probs[lvl]
+                best_lvl = lvl
+
+        if best_lvl is None:
+            return None
+
+        # Check if the map is "flat" — all unqualified levels within 10% of each other
+        unqualified_probs = [
+            self._probs.get(lvl, 0)
+            for lvl in range(bracket_lo, bracket_hi + 1)
+            if lvl not in qualified_levels
+        ]
+        if unqualified_probs and len(unqualified_probs) > 1:
+            min_p = min(unqualified_probs)
+            max_p = max(unqualified_probs)
+            if max_p > 0 and (max_p - min_p) / max_p < 0.10:
+                return None  # Map is flat, fall through to geometric
+
+        return (best_lvl, best_prob)
+
+    def get_probabilities(self) -> dict[int, float]:
+        """Return current probability map (for display)."""
+        self._ensure_initialized()
+        return dict(self._probs)
 
 
 def _compute_formula_confidence(
@@ -1192,8 +1337,8 @@ def _text_color_for_bg(bg_hex: str) -> str:
     return "black" if luminance > 128 else "white"
 
 
-_LEVEL_COL_WIDTH = 6  # Fixed width per level column (chars)
-_LEVELS_PER_ROW = 16  # Max levels before wrapping to a new line
+_LEVEL_COL_WIDTH = 10  # Fixed width per level column (chars)
+_LEVELS_PER_ROW = 8  # Max levels before wrapping to a new line
 
 
 def _confidence_style(count: int) -> str:
@@ -1215,11 +1360,13 @@ def _build_levels_row(
     bt_range: float,
     peak_concurrency: int | None,
     exploration_target: int | None = None,
+    prob_map_data: dict[int, float] | None = None,
 ) -> object:
     """Build a single Rich Table for a chunk of levels (three rows: number + time + count).
 
-    Text confidence varies by sample count: dim (1), normal (2), bold (3+).
-    Color-coded background: green (best) → red (worst).
+    Row 1 (level number + probability): colored by probability (green=high, red=low).
+    Row 2 (base time): colored by base_time performance (green=fast, red=slow).
+    Row 3 (sample count): same coloring as row 2.
     Peak level is underlined. Exploration target is marked with "?" prefix.
 
     Args:
@@ -1229,6 +1376,7 @@ def _build_levels_row(
         bt_range: max_bt - min_bt across ALL levels.
         peak_concurrency: The level identified as peak, or None.
         exploration_target: Level being explored (neighbor of peak), or None.
+        prob_map_data: Dict of level -> P(best) for probability display, or None.
 
     Returns:
         A rich.table.Table renderable.
@@ -1245,47 +1393,93 @@ def _build_levels_row(
         expand=False,
     )
 
+    # Compute probability color scaling: need min/max across visible levels
+    prob_min = 0.0
+    prob_max = 0.0
+    prob_range = 0.0
+    if prob_map_data:
+        visible_probs = [prob_map_data[lvl] for lvl in levels_range if lvl in prob_map_data]
+        if visible_probs:
+            prob_min = min(visible_probs)
+            prob_max = max(visible_probs)
+            prob_range = prob_max - prob_min
+
     # Add columns: leading indent + one per level in this chunk
     table.add_column(width=2, no_wrap=True)  # indent
     for _ in levels_range:
         table.add_column(width=_LEVEL_COL_WIDTH, no_wrap=True, justify="center")
 
-    row1_cells: list[Text] = [Text("")]  # indent (level number)
+    row1_cells: list[Text] = [Text("")]  # indent (level number + probability)
     row2_cells: list[Text] = [Text("")]  # indent (base time)
     row3_cells: list[Text] = [Text("")]  # indent (sample count)
 
     for level in levels_range:
         is_peak = peak_concurrency is not None and level == peak_concurrency
         is_explore = exploration_target is not None and level == exploration_target
+
+        # Build level label with probability
+        level_label = f"?{level}" if is_explore else str(level)
+        if prob_map_data and level in prob_map_data:
+            prob = prob_map_data[level]
+            level_label = f"{level_label} .{int(prob * 100):02d}"
+
         if level in all_levels:
             avg_bt, count = all_levels[level]
+
+            # Row 1 style: colored by probability (high=green, low=red)
+            if prob_map_data and level in prob_map_data and prob_range > 0:
+                prob = prob_map_data[level]
+                # Invert: high probability = green (t=0), low = red (t=1)
+                prob_t = 1.0 - ((prob - prob_min) / prob_range)
+                prob_color = _lerp_color(prob_t)
+                prob_fg = _text_color_for_bg(prob_color)
+                prob_style = f"{prob_fg} on {prob_color}"
+            else:
+                # Fallback: use base_time color for row 1 too
+                t = (avg_bt - min_bt) / bt_range if bt_range > 0 else 0.0
+                prob_color = _lerp_color(t)
+                prob_fg = _text_color_for_bg(prob_color)
+                conf = _confidence_style(count)
+                parts = [s for s in [conf, prob_fg, f"on {prob_color}"] if s]
+                prob_style = " ".join(parts)
+
+            if is_peak:
+                prob_style = f"underline {prob_style}"
+
+            level_str = level_label.center(_LEVEL_COL_WIDTH)
+            row1_cells.append(Text(level_str, style=prob_style))
+
+            # Rows 2-3 style: colored by base_time (green=fast, red=slow)
             t = (avg_bt - min_bt) / bt_range if bt_range > 0 else 0.0
             color = _lerp_color(t)
             fg = _text_color_for_bg(color)
             bg = f"on {color}"
             conf = _confidence_style(count)
-            # Combine: "bold black on #00c800" or "dim white on #dc0000"
             parts = [s for s in [conf, fg, bg] if s]
-            style = " ".join(parts)
+            bt_style = " ".join(parts)
             if is_peak:
-                style = f"underline {style}"
-
-            # Mark exploration target with "?" prefix
-            level_label = f"?{level}" if is_explore else str(level)
-            level_str = level_label.center(_LEVEL_COL_WIDTH)
-            row1_cells.append(Text(level_str, style=style))
+                bt_style = f"underline {bt_style}"
 
             bt_str = f"{avg_bt:.1f}s" if avg_bt < 100 else f"{avg_bt:.0f}s"
             bt_padded = bt_str.center(_LEVEL_COL_WIDTH)
-            row2_cells.append(Text(bt_padded, style=style))
+            row2_cells.append(Text(bt_padded, style=bt_style))
 
             count_str = str(count).center(_LEVEL_COL_WIDTH)
-            row3_cells.append(Text(count_str, style=style))
+            row3_cells.append(Text(count_str, style=bt_style))
         else:
-            # Mark exploration target even when no data yet
-            level_label = f"?{level}" if is_explore else str(level)
+            # No data for this level
             level_str = level_label.center(_LEVEL_COL_WIDTH)
-            row1_cells.append(Text(level_str, style="dim"))
+
+            # Row 1: probability color even without base_time data
+            if prob_map_data and level in prob_map_data and prob_range > 0:
+                prob = prob_map_data[level]
+                prob_t = 1.0 - ((prob - prob_min) / prob_range)
+                prob_color = _lerp_color(prob_t)
+                prob_fg = _text_color_for_bg(prob_color)
+                row1_cells.append(Text(level_str, style=f"{prob_fg} on {prob_color}"))
+            else:
+                row1_cells.append(Text(level_str, style="dim"))
+
             row2_cells.append(Text("···".center(_LEVEL_COL_WIDTH), style="dim"))
             row3_cells.append(Text(" ".center(_LEVEL_COL_WIDTH), style="dim"))
 
@@ -1301,26 +1495,26 @@ def _build_levels_table(
     peak_concurrency: int | None = None,
     max_workers: int = 0,
     exploration_target: int | None = None,
+    prob_map_data: dict[int, float] | None = None,
 ) -> object:
-    """Build color-graded level blocks, wrapping every 16 levels.
+    """Build color-graded level blocks, wrapping every _LEVELS_PER_ROW levels.
 
-    Each level is a fixed-width column with two rows:
-    - Row 1: level number (centered)
-    - Row 2: avg base time, e.g. "1.3s" (centered)
+    Each level is a fixed-width column with three rows:
+    - Row 1: level number + probability (colored by probability)
+    - Row 2: avg base time (colored by base_time)
+    - Row 3: sample count (colored by base_time)
 
-    Columns are color-coded on a green→red gradient based on base time.
-    Levels without data show dim placeholders. The peak level is highlighted.
-    Exploration target is marked with "?" prefix.
-    When there are more than 16 levels, they wrap onto new lines.
+    Peak level is underlined. Exploration target is marked with "?" prefix.
 
     Args:
         all_levels: Dict of level -> (avg_base_time_seconds, sample_count). Must be non-empty.
         peak_concurrency: The level identified as peak, or None.
         max_workers: Total worker slots (1..max_workers). If 0, uses max level in data.
         exploration_target: Level being explored, or None.
+        prob_map_data: Dict of level -> P(best) for probability display, or None.
 
     Returns:
-        A Rich renderable (Table for ≤16 levels, Group of Tables for >16).
+        A Rich renderable (Table for single row, Group of Tables for multiple).
     """
     from rich.console import Group, RenderableType
 
@@ -1339,10 +1533,16 @@ def _build_levels_table(
         chunks.append(range(start, end))
 
     if len(chunks) == 1:
-        return _build_levels_row(chunks[0], all_levels, min_bt, bt_range, peak_concurrency, exploration_target)
+        return _build_levels_row(
+            chunks[0], all_levels, min_bt, bt_range, peak_concurrency,
+            exploration_target, prob_map_data,
+        )
 
     tables: list[RenderableType] = [
-        _build_levels_row(chunk, all_levels, min_bt, bt_range, peak_concurrency, exploration_target)  # type: ignore[misc]
+        _build_levels_row(
+            chunk, all_levels, min_bt, bt_range, peak_concurrency,
+            exploration_target, prob_map_data,
+        )  # type: ignore[misc]
         for chunk in chunks
     ]
     return Group(*tables)
@@ -1353,20 +1553,20 @@ def format_throughput_levels(
     peak_concurrency: int | None = None,
     max_workers: int = 0,
     exploration_target: int | None = None,
+    prob_map_data: dict[int, float] | None = None,
 ) -> object | str:
     """Build a color-graded level table (Rich renderable).
 
-    Each level is a fixed-width block, two rows tall:
-    - Row 1: level number (centered)
-    - Row 2: avg base time (centered)
-    Color-coded green (best) → red (worst). Peak level highlighted.
-    Exploration target marked with "?" prefix.
+    Row 1: level number + probability (colored by probability).
+    Row 2: avg base time (colored by base_time).
+    Row 3: sample count (colored by base_time).
 
     Args:
         all_levels: Dict of level -> (avg_base_time_seconds, sample_count), or None.
         peak_concurrency: The level identified as peak, or None.
         max_workers: Total worker slots to display (1..max_workers). If 0, uses max level.
         exploration_target: Level being explored, or None.
+        prob_map_data: Dict of level -> P(best) for probability display, or None.
 
     Returns:
         Rich Table renderable, or empty string if no data.
@@ -1374,7 +1574,7 @@ def format_throughput_levels(
     if not all_levels:
         return ""
 
-    return _build_levels_table(all_levels, peak_concurrency, max_workers, exploration_target)
+    return _build_levels_table(all_levels, peak_concurrency, max_workers, exploration_target, prob_map_data)
 
 
 def build_throughput_levels_text(
@@ -1382,14 +1582,13 @@ def build_throughput_levels_text(
     peak_concurrency: int | None = None,
     max_workers: int = 0,
     exploration_target: int | None = None,
+    prob_map_data: dict[int, float] | None = None,
 ) -> object | None:
     """Build a color-graded level table (Rich renderable).
 
-    Each level is a fixed-width block, two rows tall:
-    - Row 1: level number (centered)
-    - Row 2: avg base time (centered)
-    Color-coded green (best) → red (worst). Peak level highlighted.
-    Exploration target marked with "?" prefix.
+    Row 1: level number + probability (colored by probability).
+    Row 2: avg base time (colored by base_time).
+    Row 3: sample count (colored by base_time).
 
     Returns None if no data.
 
@@ -1398,6 +1597,7 @@ def build_throughput_levels_text(
         peak_concurrency: The level identified as peak, or None.
         max_workers: Total worker slots to display (1..max_workers). If 0, uses max level.
         exploration_target: Level being explored, or None.
+        prob_map_data: Dict of level -> P(best) for probability display, or None.
 
     Returns:
         A Rich Table renderable, or None if no data.
@@ -1405,4 +1605,4 @@ def build_throughput_levels_text(
     if not all_levels:
         return None
 
-    return _build_levels_table(all_levels, peak_concurrency, max_workers, exploration_target)
+    return _build_levels_table(all_levels, peak_concurrency, max_workers, exploration_target, prob_map_data)
