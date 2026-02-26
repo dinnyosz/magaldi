@@ -1364,6 +1364,8 @@ def _build_levels_row(
     peak_concurrency: int | None,
     exploration_target: int | None = None,
     prob_map_data: dict[int, float] | None = None,
+    prob_min: float = 0.0,
+    prob_range: float = 0.0,
 ) -> object:
     """Build a single Rich Table for a chunk of levels (three rows: number + time + count).
 
@@ -1380,6 +1382,8 @@ def _build_levels_row(
         peak_concurrency: The level identified as peak, or None.
         exploration_target: Level being explored (neighbor of peak), or None.
         prob_map_data: Dict of level -> P(best) for probability display, or None.
+        prob_min: Minimum probability across ALL levels (for consistent color scaling).
+        prob_range: max_prob - min_prob across ALL levels.
 
     Returns:
         A rich.table.Table renderable.
@@ -1395,17 +1399,6 @@ def _build_levels_row(
         padding=(0, 0),
         expand=False,
     )
-
-    # Compute probability color scaling: need min/max across visible levels
-    prob_min = 0.0
-    prob_max = 0.0
-    prob_range = 0.0
-    if prob_map_data:
-        visible_probs = [prob_map_data[lvl] for lvl in levels_range if lvl in prob_map_data]
-        if visible_probs:
-            prob_min = min(visible_probs)
-            prob_max = max(visible_probs)
-            prob_range = prob_max - prob_min
 
     # Add columns: leading indent + one per level in this chunk
     table.add_column(width=2, no_wrap=True)  # indent
@@ -1529,6 +1522,16 @@ def _build_levels_table(
     max_bt = max(base_times.values())
     bt_range = max_bt - min_bt
 
+    # Find min/max probability for color scaling (consistent across all chunks)
+    p_min = 0.0
+    p_range = 0.0
+    if prob_map_data:
+        all_probs = list(prob_map_data.values())
+        if all_probs:
+            p_min = min(all_probs)
+            p_max = max(all_probs)
+            p_range = p_max - p_min
+
     # Split levels into chunks of _LEVELS_PER_ROW
     chunks: list[range] = []
     for start in range(1, max_level + 1, _LEVELS_PER_ROW):
@@ -1538,13 +1541,13 @@ def _build_levels_table(
     if len(chunks) == 1:
         return _build_levels_row(
             chunks[0], all_levels, min_bt, bt_range, peak_concurrency,
-            exploration_target, prob_map_data,
+            exploration_target, prob_map_data, p_min, p_range,
         )
 
     tables: list[RenderableType] = [
         _build_levels_row(
             chunk, all_levels, min_bt, bt_range, peak_concurrency,
-            exploration_target, prob_map_data,
+            exploration_target, prob_map_data, p_min, p_range,
         )  # type: ignore[misc]
         for chunk in chunks
     ]
