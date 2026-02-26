@@ -571,10 +571,12 @@ class GoldenSectionSearch:
     Maintains a bracket [lo, hi] and narrows it by evaluating throughput
     at golden-ratio interior points. Converges in O(log_φ(N)) steps.
 
-    After pre-peak exploration provides data at levels 1 and 2, this class
-    initializes the bracket to [1, max_workers] and drives exploration
-    toward the optimum.
+    Use from_level_data() to create with a bracket narrowed by existing
+    data from pre-peak exploration and organic accumulation.
     """
+
+    # Minimum bracket width to avoid premature convergence on noisy data
+    MIN_BRACKET = 6
 
     def __init__(self, lo: int, hi: int):
         """Initialize with search bracket.
@@ -590,6 +592,44 @@ class GoldenSectionSearch:
         # Pending probe: the level we're currently collecting data for.
         # None means we need to decide which probe to request next.
         self._pending_probe: int | None = None
+
+    @classmethod
+    def from_level_data(
+        cls, level_data: dict[int, float], max_workers: int
+    ) -> GoldenSectionSearch:
+        """Create GSS with a bracket narrowed by existing level data.
+
+        At GSS init time, pre-peak exploration (levels 1-2) and organic
+        accumulation from nearby levels provide data points. Instead of
+        searching the full [1, max_workers], we bracket around the best
+        known level with room for error.
+
+        Strategy:
+        - lo = max(1, best_level // 2)
+        - hi = min(max_workers, best_level * 3)
+        - Minimum bracket width of MIN_BRACKET to avoid premature convergence
+
+        Falls back to [1, max_workers] if insufficient data (<2 levels).
+        """
+        if len(level_data) < 2:
+            return cls(lo=1, hi=max_workers)
+
+        best_level = min(level_data, key=level_data.get)  # type: ignore[arg-type]
+
+        # Asymmetric bracket: half below, triple above
+        # Wider upward because higher concurrency is common for optimum
+        # and pre-peak only explored low levels
+        lo = max(1, best_level // 2)
+        hi = min(max_workers, best_level * 3)
+
+        # Ensure minimum bracket width
+        if hi - lo < cls.MIN_BRACKET:
+            mid = (lo + hi) // 2
+            lo = max(1, mid - cls.MIN_BRACKET // 2)
+            hi = min(max_workers, lo + cls.MIN_BRACKET)
+            lo = max(1, hi - cls.MIN_BRACKET)  # re-adjust if hi hit max
+
+        return cls(lo=lo, hi=hi)
 
     def get_next_probe(self, level_data: dict[int, float]) -> int | None:
         """Get the next level to probe, or None if converged.

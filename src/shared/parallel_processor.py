@@ -452,24 +452,37 @@ class ThrottleContext:
 
         # GSS lifecycle: initialize when peak is detected, drive exploration
         gss_probe = None
+
+        # Build level_data once: used for both GSS init and ongoing probes.
+        # Flat EXPLORE_MIN_SAMPLES threshold (not proportional) because GSS
+        # only needs directional comparisons and organic accumulation fills
+        # nearby levels naturally.
+        from shared.throttling import EXPLORE_MIN_SAMPLES
+        level_data = {
+            lvl: bt for lvl, (bt, cnt) in all_levels.items()
+            if cnt >= EXPLORE_MIN_SAMPLES
+        }
+
         if peak is not None and self._gss is None:
             # Pre-peak done, peak detected — start golden section search
-            self._gss = GoldenSectionSearch(lo=1, hi=self.base_workers)
+            # Use available level data to narrow the initial bracket
+            self._gss = GoldenSectionSearch.from_level_data(
+                level_data, self.base_workers
+            )
+            from shared.throttling import _log_throttle
+            if level_data:
+                best = min(level_data, key=level_data.get)
+                _log_throttle(
+                    f"GSS INIT: bracket=[{self._gss.lo}, {self._gss.hi}] "
+                    f"from {len(level_data)} levels (best={best})"
+                )
+            else:
+                _log_throttle(
+                    f"GSS INIT: bracket=[{self._gss.lo}, {self._gss.hi}] "
+                    f"(no qualified levels, using full range)"
+                )
 
         if self._gss is not None and not self._gss.converged:
-            # Build level_data: level -> avg_base_time for GSS decisions.
-            # Use flat EXPLORE_MIN_SAMPLES (not proportional) because:
-            # 1. GSS only needs directional comparisons ("is A better than B?"),
-            #    not high-confidence peak detection
-            # 2. Running at level N organically accumulates data at nearby levels
-            #    (tasks record at max(start_workers, end_workers)), so proportional
-            #    thresholds (level*2) would waste time waiting for data that's
-            #    already good enough for a comparison
-            from shared.throttling import EXPLORE_MIN_SAMPLES
-            level_data = {
-                lvl: bt for lvl, (bt, cnt) in all_levels.items()
-                if cnt >= EXPLORE_MIN_SAMPLES
-            }
             gss_probe = self._gss.get_next_probe(level_data)
             if self._gss.converged:
                 from shared.throttling import _log_throttle

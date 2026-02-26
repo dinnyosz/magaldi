@@ -2181,3 +2181,96 @@ class TestGoldenSectionSearch:
             current_range = gss.hi - gss.lo
             assert current_range <= prev_range  # Never expands
             prev_range = current_range
+
+    # --- from_level_data tests ---
+
+    def test_from_level_data_narrows_bracket(self):
+        """from_level_data should produce a tighter bracket than [1, max]."""
+        level_data = {1: 5.0, 2: 3.5, 3: 4.0}  # best at 2
+        gss = GoldenSectionSearch.from_level_data(level_data, max_workers=32)
+        # Should be much narrower than [1, 32]
+        assert gss.hi - gss.lo < 32
+        # Best is 2, so bracket should contain 2
+        assert gss.lo <= 2 <= gss.hi
+
+    def test_from_level_data_minimum_width(self):
+        """Bracket should never be narrower than MIN_BRACKET."""
+        # Best at 2: lo=1, hi=6 → width=5 < MIN_BRACKET=6 → expanded
+        level_data = {1: 5.0, 2: 3.0}
+        gss = GoldenSectionSearch.from_level_data(level_data, max_workers=32)
+        assert gss.hi - gss.lo >= GoldenSectionSearch.MIN_BRACKET
+
+    def test_from_level_data_respects_max_workers(self):
+        """hi should never exceed max_workers."""
+        level_data = {1: 5.0, 10: 2.0, 15: 3.0}  # best at 10, hi=30
+        gss = GoldenSectionSearch.from_level_data(level_data, max_workers=20)
+        assert gss.hi <= 20
+
+    def test_from_level_data_insufficient_data_fallback(self):
+        """<2 data points should fall back to [1, max_workers]."""
+        # Only 1 level
+        gss = GoldenSectionSearch.from_level_data({1: 5.0}, max_workers=32)
+        assert gss.lo == 1
+        assert gss.hi == 32
+
+        # Empty
+        gss = GoldenSectionSearch.from_level_data({}, max_workers=32)
+        assert gss.lo == 1
+        assert gss.hi == 32
+
+    def test_from_level_data_high_optimum(self):
+        """High best level should produce bracket in upper range."""
+        level_data = {1: 10.0, 2: 8.0, 5: 4.0, 15: 2.0}  # best at 15
+        gss = GoldenSectionSearch.from_level_data(level_data, max_workers=32)
+        # lo = 15//2 = 7, hi = min(32, 15*3) = 32
+        assert gss.lo >= 5
+        assert gss.hi <= 32
+        assert gss.lo <= 15 <= gss.hi
+
+    def test_from_level_data_lo_never_below_1(self):
+        """lo should never go below 1."""
+        level_data = {1: 2.0, 2: 3.0}  # best at 1, lo=1//2=0 → clamped to 1
+        gss = GoldenSectionSearch.from_level_data(level_data, max_workers=32)
+        assert gss.lo >= 1
+
+    def test_from_level_data_small_max_workers(self):
+        """Should work correctly with small max_workers."""
+        level_data = {1: 5.0, 2: 3.0}
+        gss = GoldenSectionSearch.from_level_data(level_data, max_workers=8)
+        assert gss.lo >= 1
+        assert gss.hi <= 8
+        assert gss.hi - gss.lo >= min(GoldenSectionSearch.MIN_BRACKET, 8 - 1)
+
+    def test_from_level_data_converges_faster(self):
+        """Smart bracket should converge in fewer steps than full range."""
+        # Simulate: optimum at level 10, with organic data at 1-5
+        organic_data = {i: abs(i - 10) + 1.0 for i in range(1, 6)}
+
+        # Full range: [1, 32]
+        gss_full = GoldenSectionSearch(lo=1, hi=32)
+        level_data_full: dict[int, float] = dict(organic_data)
+        steps_full = 0
+        while not gss_full.converged and steps_full < 20:
+            probe = gss_full.get_next_probe(level_data_full)
+            if probe is None:
+                break
+            level_data_full[probe] = abs(probe - 10) + 1.0
+            steps_full += 1
+
+        # Smart range: bracket narrowed by organic data
+        gss_smart = GoldenSectionSearch.from_level_data(organic_data, max_workers=32)
+        level_data_smart: dict[int, float] = dict(organic_data)
+        steps_smart = 0
+        while not gss_smart.converged and steps_smart < 20:
+            probe = gss_smart.get_next_probe(level_data_smart)
+            if probe is None:
+                break
+            level_data_smart[probe] = abs(probe - 10) + 1.0
+            steps_smart += 1
+
+        # Smart should converge in fewer or equal steps
+        assert steps_smart <= steps_full
+        # Both should find something near 10
+        assert gss_full.best_level is not None
+        assert gss_smart.best_level is not None
+        assert abs(gss_smart.best_level - 10) <= 2
