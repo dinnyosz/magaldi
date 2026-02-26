@@ -123,8 +123,11 @@ class ThrottleDecision:
     gss_probe: int | None = None  # GSS probe target (if active)
     gss_lo: int | None = None  # GSS bracket lower bound
     gss_hi: int | None = None  # GSS bracket upper bound
+    gss_signal: str | None = None  # Signal-aware action for display
     # Per-level throughput data: level -> (throughput_per_sec, sample_count)
     all_levels: dict[int, tuple[float, int]] | None = None
+    # Probability map: level -> P(best) for display
+    prob_map_data: dict[int, float] | None = None
 
 
 class ThroughputTracker:

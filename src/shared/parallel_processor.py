@@ -560,6 +560,8 @@ class ThrottleContext:
         if self._gss is not None:
             throttle.gss_lo = self._gss.lo
             throttle.gss_hi = self._gss.hi
+            throttle.gss_signal = self._gss.last_signal
+        throttle.prob_map_data = self._prob_map.get_probabilities() if self._prob_map else None
         self.last_decision = throttle
 
         # Apply ramp cooldown (mirrors DependencyTracker.compute_throttle_decision)
