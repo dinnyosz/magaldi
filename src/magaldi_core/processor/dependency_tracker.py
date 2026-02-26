@@ -292,10 +292,15 @@ class DependencyTracker:
         """Check if tier just changed (for throughput reset).
 
         Returns True once per tier change, then clears the flag.
+        Also resets ramp cooldown state so the new tier starts fresh
+        without stale _last_ramp_time or _last_recommended_workers
+        from the previous tier affecting ramp-up decisions.
         """
         with self._lock:
             if self._tier_just_changed:
                 self._tier_just_changed = False
+                self._last_ramp_time = 0.0
+                self._last_recommended_workers = 0
                 return True
             return False
 
