@@ -58,6 +58,11 @@ RAMP_HOLD_THRESHOLD = 0.30
 EXPLORE_MIN_SAMPLES = 10
 EXPLORE_SAMPLES_PER_LEVEL = 2
 
+# Budget-aware exploration: skip if remaining elements < samples_needed * multiplier.
+# With x3, we only explore if there's enough runway for the exploration data
+# PLUS meaningful processing at the (possibly new) optimal level afterward.
+EXPLORE_BUDGET_MULTIPLIER = 3
+
 # Ramp cooldown scales with context tier: tier // 512 seconds.
 # 2k→4s, 4k→8s, 8k→16s, 16k→32s, 32k→64s
 # Larger contexts take longer to process, so we wait longer to see impact.
@@ -219,7 +224,7 @@ class ThroughputTracker:
         result = self._throughput_by_level.get_peak_level()
         return result[0] if result else None
 
-    def get_exploration_target(self, max_level: int) -> int | None:
+    def get_exploration_target(self, max_level: int, remaining: int | None = None) -> int | None:
         """Get a level that needs more data.
 
         If the peak is confident but any level within ±(max_level // 3) of
@@ -229,11 +234,13 @@ class ThroughputTracker:
         Args:
             max_level: Upper bound for exploration (typically base_workers).
                 Also determines radius: max(3, max_level // 3).
+            remaining: Number of elements left to process, or None if unknown.
+                When provided, skips exploration if the budget is too small.
 
         Returns:
             Level to explore, or None if all levels in range are significant.
         """
-        return self._throughput_by_level.get_exploration_target(max_level)
+        return self._throughput_by_level.get_exploration_target(max_level, remaining)
 
 
 # Keep old name as alias for compatibility
@@ -380,7 +387,7 @@ class ThroughputByLevel:
         """
         return max(EXPLORE_MIN_SAMPLES, level * EXPLORE_SAMPLES_PER_LEVEL)
 
-    def get_exploration_target(self, max_level: int) -> int | None:
+    def get_exploration_target(self, max_level: int, remaining: int | None = None) -> int | None:
         """Find an under-explored level to collect more data.
 
         Explores within ±(max_level // 3) of the peak, clamped to 1..max_level.
@@ -389,9 +396,17 @@ class ThroughputByLevel:
 
         Significance is level-proportional: max(10, level * 2) samples needed.
 
+        Budget-aware: if remaining elements is known, skip exploration when
+        there aren't enough elements left to justify the cost. Requires
+        remaining >= samples_needed * EXPLORE_BUDGET_MULTIPLIER so there's
+        enough runway to collect data AND benefit from the finding.
+
         Args:
             max_level: Upper bound for exploration (typically base_workers).
                 Also determines radius: max_level // 3.
+            remaining: Number of elements left to process, or None if unknown.
+                When provided, skips candidates whose sample cost exceeds
+                the remaining budget.
 
         Returns:
             Level to explore, or None if all levels in range are significant.
@@ -412,15 +427,27 @@ class ThroughputByLevel:
             # Scan upward from peak, capped by radius and max_level
             upper = min(peak + radius, max_level)
             for candidate in range(peak + 1, upper + 1):
+                samples_needed = self._min_samples_for_level(candidate)
                 count = len(self._levels.get(candidate, deque()))
-                if count < self._min_samples_for_level(candidate):
+                if count < samples_needed:
+                    # Budget check: skip if not enough remaining elements
+                    if remaining is not None:
+                        samples_left = samples_needed - count
+                        if remaining < samples_left * EXPLORE_BUDGET_MULTIPLIER:
+                            continue
                     return candidate
 
             # Scan downward from peak, capped by radius and 1
             lower = max(peak - radius, 1)
             for candidate in range(peak - 1, lower - 1, -1):
+                samples_needed = self._min_samples_for_level(candidate)
                 count = len(self._levels.get(candidate, deque()))
-                if count < self._min_samples_for_level(candidate):
+                if count < samples_needed:
+                    # Budget check: skip if not enough remaining elements
+                    if remaining is not None:
+                        samples_left = samples_needed - count
+                        if remaining < samples_left * EXPLORE_BUDGET_MULTIPLIER:
+                            continue
                     return candidate
 
         return None

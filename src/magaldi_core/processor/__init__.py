@@ -503,7 +503,8 @@ def process_elements(
                 timing_stats.get_throughput_stats_with_concurrency()
             )
             peak_concurrency = timing_stats.get_peak_concurrency()
-            exploration_target = timing_stats.get_exploration_target(max_workers)
+            remaining = dependency_tracker.pending_count()
+            exploration_target = timing_stats.get_exploration_target(max_workers, remaining)
             all_levels = timing_stats.get_all_throughput_levels()
             current_throttle = dependency_tracker.compute_throttle_decision(
                 current_max_runtime, active_workers, throughput, avg_runtime, completion_count,
@@ -565,7 +566,8 @@ def process_elements(
                         timing_stats.get_throughput_stats_with_concurrency()
                     )
                     fresh_peak = timing_stats.get_peak_concurrency()
-                    fresh_explore = timing_stats.get_exploration_target(max_workers)
+                    fresh_remaining = dependency_tracker.pending_count()
+                    fresh_explore = timing_stats.get_exploration_target(max_workers, fresh_remaining)
                     fresh_all_levels = timing_stats.get_all_throughput_levels()
                     fresh_throttle = dependency_tracker.compute_throttle_decision(
                         fresh_current_max, fresh_active, fresh_throughput, fresh_avg, fresh_count,
@@ -670,7 +672,8 @@ def process_elements(
                     )
                     fresh_active = worker_status.active_count()
                     fresh_peak = timing_stats.get_peak_concurrency()
-                    fresh_explore = timing_stats.get_exploration_target(max_workers)
+                    fresh_remaining = dependency_tracker.pending_count()
+                    fresh_explore = timing_stats.get_exploration_target(max_workers, fresh_remaining)
                     fresh_all_levels = timing_stats.get_all_throughput_levels()
                     fresh_throttle = dependency_tracker.compute_throttle_decision(
                         fresh_current_max, fresh_active, fresh_throughput, fresh_avg, fresh_count,

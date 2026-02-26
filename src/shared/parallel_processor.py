@@ -427,18 +427,24 @@ class ThrottleContext:
     _last_recommended_workers: int = field(default=0, repr=False)
 
     def get_throttle_decision(
-        self, active_workers: int, current_max_runtime: float
+        self, active_workers: int, current_max_runtime: float,
+        remaining: int | None = None,
     ) -> ThrottleDisplayInfo:
         """Get throttle decision with cooldown gating.
 
         Always calls compute_throttle_decision (for emergency detection).
         Ramp-up is gated by cooldown timer — mirrors DependencyTracker pattern.
+
+        Args:
+            active_workers: Number of currently active workers.
+            current_max_runtime: Max runtime of currently active workers.
+            remaining: Elements left to process (for budget-aware exploration).
         """
         throughput, avg_runtime, count, avg_conc, avg_base = (
             self.throughput_tracker.get_stats_with_concurrency()
         )
         peak = self.throughput_tracker.get_peak_concurrency()
-        explore = self.throughput_tracker.get_exploration_target(self.base_workers)
+        explore = self.throughput_tracker.get_exploration_target(self.base_workers, remaining)
         all_levels = self.throughput_tracker._throughput_by_level.get_all_levels()
         throttle = compute_throttle_decision(
             current_max_runtime=current_max_runtime,
@@ -552,8 +558,9 @@ def run_throttled_tier(
             # Get throttle decision (always runs for emergency detection)
             active_workers = len(futures)
             current_max = get_max_runtime()
+            remaining = len(pending_items) + len(futures)
             throttle_info = throttle_ctx.get_throttle_decision(
-                active_workers, current_max
+                active_workers, current_max, remaining=remaining
             )
             allowed_workers = throttle_info.allowed_workers
 

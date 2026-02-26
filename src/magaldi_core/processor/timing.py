@@ -362,16 +362,18 @@ class TimingStats:
         """
         return self.throughput_tracker._throughput_by_level.get_all_levels()
 
-    def get_exploration_target(self, max_level: int) -> int | None:
+    def get_exploration_target(self, max_level: int, remaining: int | None = None) -> int | None:
         """Get a neighbor of the peak that needs more data.
 
         Args:
             max_level: Upper bound for exploration (typically base_workers).
+            remaining: Number of elements left to process, or None if unknown.
+                When provided, skips exploration if the budget is too small.
 
         Returns:
             Level to explore, or None if no exploration needed.
         """
-        return self.throughput_tracker.get_exploration_target(max_level)
+        return self.throughput_tracker.get_exploration_target(max_level, remaining)
 
     def reset_throughput(self) -> None:
         """Reset throughput tracker history.
