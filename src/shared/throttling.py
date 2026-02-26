@@ -116,6 +116,7 @@ class ThrottleDecision:
     completion_count: int = 0  # Number of completions used for completed_avg
     peak_concurrency: int | None = None  # Concurrency level with peak throughput (if available)
     exploration_target: int | None = None  # Level being explored (if any)
+    gss_probe: int | None = None  # GSS probe target (if active)
     # Per-level throughput data: level -> (throughput_per_sec, sample_count)
     all_levels: dict[int, tuple[float, int]] | None = None
 
@@ -561,6 +562,101 @@ class ThroughputByLevel:
             self._levels.clear()
 
 
+PHI = (1 + math.sqrt(5)) / 2  # Golden ratio ≈ 1.618
+
+
+class GoldenSectionSearch:
+    """Golden section search for optimal concurrency level.
+
+    Maintains a bracket [lo, hi] and narrows it by evaluating throughput
+    at golden-ratio interior points. Converges in O(log_φ(N)) steps.
+
+    After pre-peak exploration provides data at levels 1 and 2, this class
+    initializes the bracket to [1, max_workers] and drives exploration
+    toward the optimum.
+    """
+
+    def __init__(self, lo: int, hi: int):
+        """Initialize with search bracket.
+
+        Args:
+            lo: Lower bound (inclusive), typically 1.
+            hi: Upper bound (inclusive), typically max_workers.
+        """
+        self.lo = lo
+        self.hi = hi
+        self.converged = False
+        self.best_level: int | None = None
+        # Pending probe: the level we're currently collecting data for.
+        # None means we need to decide which probe to request next.
+        self._pending_probe: int | None = None
+
+    def get_next_probe(self, level_data: dict[int, float]) -> int | None:
+        """Get the next level to probe, or None if converged.
+
+        Args:
+            level_data: Dict of level -> avg_base_time for levels with
+                sufficient data (≥ EXPLORE_MIN_SAMPLES).
+
+        Returns:
+            Level to collect data at, or None if search is complete.
+        """
+        if self.converged:
+            return None
+
+        if self.hi - self.lo <= 2:
+            # Bracket is small enough — pick the best known level in [lo, hi]
+            self._finalize(level_data)
+            return None
+
+        m1 = round(self.hi - (self.hi - self.lo) / PHI)
+        m2 = round(self.lo + (self.hi - self.lo) / PHI)
+
+        # Ensure probes are distinct and within bounds
+        m1 = max(self.lo + 1, min(m1, self.hi - 1))
+        m2 = max(self.lo + 1, min(m2, self.hi - 1))
+        if m1 == m2:
+            m2 = min(m1 + 1, self.hi - 1)
+
+        have_m1 = m1 in level_data
+        have_m2 = m2 in level_data
+
+        if have_m1 and have_m2:
+            # Both probes have data — narrow the bracket
+            if level_data[m1] <= level_data[m2]:
+                # m1 is better (lower base_time) → optimum in [lo, m2]
+                self.hi = m2
+            else:
+                # m2 is better → optimum in [m1, hi]
+                self.lo = m1
+            # Recurse: compute new probes for narrowed bracket
+            return self.get_next_probe(level_data)
+        elif have_m1:
+            self._pending_probe = m2
+            return m2
+        elif have_m2:
+            self._pending_probe = m1
+            return m1
+        else:
+            # Neither probe has data — request m1 first (arbitrary)
+            self._pending_probe = m1
+            return m1
+
+    def _finalize(self, level_data: dict[int, float]) -> None:
+        """Mark search as converged, pick best level in final bracket."""
+        self.converged = True
+        # Find best level in [lo, hi] range from available data
+        candidates = {
+            lvl: bt for lvl, bt in level_data.items()
+            if self.lo <= lvl <= self.hi
+        }
+        if candidates:
+            self.best_level = min(candidates, key=candidates.get)  # type: ignore[arg-type]
+        else:
+            # Fallback: midpoint
+            self.best_level = (self.lo + self.hi) // 2
+
+
 def _compute_formula_confidence(
     completion_count: int,
     peak_concurrency: int | None = None,
@@ -644,6 +740,7 @@ def compute_throttle_decision(
     peak_concurrency: int | None = None,
     exploration_target: int | None = None,
     level_counts: dict[int, int] | None = None,
+    gss_probe: int | None = None,
 ) -> ThrottleDecision:
     """Determine if throttling should be applied.
 
@@ -683,6 +780,9 @@ def compute_throttle_decision(
             Used for pre-peak step-wise exploration: the system holds at each level
             1..PRE_PEAK_MAX_WORKERS until PRE_PEAK_SAMPLES_PER_LEVEL samples are collected.
             None means no per-level data available.
+        gss_probe: Golden section search probe target, or None. When set, overrides
+            peak and exploration targeting — jumps directly to the probe level to
+            collect data for the search. Capped by the formula safety limit.
 
     Returns:
         ThrottleDecision with recommended action
@@ -826,9 +926,15 @@ def compute_throttle_decision(
     # Apply peak throughput optimization: if we have data showing which
     # concurrency level produces the best throughput, use that as the
     # primary target — but never exceed the formula's safety cap.
-    # Exploration target overrides peak when set (temporarily ramp beyond
-    # current peak to collect data at a neighboring level).
-    if exploration_target is not None:
+    # Priority: GSS probe > exploration target > peak concurrency > formula.
+    if gss_probe is not None:
+        # Golden section search: jump directly to probe level
+        optimal = min(gss_probe, formula_optimal)
+        optimal = max(1, min(optimal, base_workers))  # Re-clamp
+        _log_throttle(
+            f"GSS PROBE: target@{gss_probe} formula@{formula_optimal} → {optimal}"
+        )
+    elif exploration_target is not None:
         optimal = min(exploration_target, formula_optimal)
         optimal = max(1, min(optimal, base_workers))  # Re-clamp
         _log_throttle(
@@ -862,17 +968,26 @@ def compute_throttle_decision(
                 f"> {RAMP_HOLD_THRESHOLD:.0%} threshold, holding at {active_workers} (target={target_workers})"
             )
         else:
-            # Scaling UP - ramp +1 per decision to avoid overwhelming the system
-            delta = target_workers - active_workers
-            increment = min(max(1, int(delta * RAMP_UP_FACTOR)), MAX_RAMP_INCREMENT)
-            ramped = active_workers + increment
-            ramped = min(ramped, target_workers)  # Don't exceed target
-            effective_workers = ramped
-            reason_suffix = f", ramped from {active_workers}"
-            _log_throttle(
-                f"RAMP UP: base_time={effective_base_time:.1f}s target={target_workers} "
-                f"active={active_workers} normalized_max={normalized_max:.1f}s < {hold_threshold:.0f}s → ramped to {effective_workers} (+{increment})"
-            )
+            if gss_probe is not None:
+                # GSS: jump directly to probe level (need data there ASAP)
+                effective_workers = target_workers
+                reason_suffix = f", GSS jump from {active_workers}"
+                _log_throttle(
+                    f"GSS JUMP: target={target_workers} active={active_workers} "
+                    f"→ jumping to {effective_workers}"
+                )
+            else:
+                # Scaling UP - ramp +1 per decision to avoid overwhelming the system
+                delta = target_workers - active_workers
+                increment = min(max(1, int(delta * RAMP_UP_FACTOR)), MAX_RAMP_INCREMENT)
+                ramped = active_workers + increment
+                ramped = min(ramped, target_workers)  # Don't exceed target
+                effective_workers = ramped
+                reason_suffix = f", ramped from {active_workers}"
+                _log_throttle(
+                    f"RAMP UP: base_time={effective_base_time:.1f}s target={target_workers} "
+                    f"active={active_workers} normalized_max={normalized_max:.1f}s < {hold_threshold:.0f}s → ramped to {effective_workers} (+{increment})"
+                )
     else:
         # Scaling DOWN, steady, or starting fresh - apply immediately
         effective_workers = target_workers
@@ -905,16 +1020,18 @@ def compute_throttle_decision(
     if should_throttle:
         peak_info = f",peak@{peak_concurrency}" if peak_concurrency is not None else ""
         explore_info = f",explore@{exploration_target}" if exploration_target is not None else ""
+        gss_info = f",GSS→{gss_probe}" if gss_probe is not None else ""
         return ThrottleDecision(
             should_throttle=True,
             current_max=current_max_runtime,
             historical_max=0,
             completed_avg=effective_base_time,
             recommended_workers=effective_workers,
-            reason=f"Throttle ({effective_workers}={int(effective_timeout)}s/{effective_base_time:.1f}s base{peak_info}{explore_info}{reason_suffix})",
+            reason=f"Throttle ({effective_workers}={int(effective_timeout)}s/{effective_base_time:.1f}s base{peak_info}{explore_info}{gss_info}{reason_suffix})",
             completion_count=completion_count,
             peak_concurrency=peak_concurrency,
             exploration_target=exploration_target,
+            gss_probe=gss_probe,
         )
     else:
         return ThrottleDecision(
@@ -927,6 +1044,7 @@ def compute_throttle_decision(
             completion_count=completion_count,
             peak_concurrency=peak_concurrency,
             exploration_target=exploration_target,
+            gss_probe=gss_probe,
         )
 
 
