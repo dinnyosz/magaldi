@@ -694,10 +694,17 @@ def compute_throttle_decision(
     normalized_max = current_max_runtime / max(active_workers, 1)
     normalized_max / tier_timeout if tier_timeout > 0 else 0.0
 
-    # Check if any task is taking too long - if so, hold at current level
-    # Uses raw max (like emergency) but with lower threshold
+    # Check if any task is taking too long - if so, hold at current level.
+    # Uses raw max (like emergency) but with lower threshold.
+    # Pre-peak: skip holds — we're exploring and need to reach higher levels fast.
+    # Peak detection will catch overload via base_time spikes. Holding pre-peak
+    # just prevents data collection, which is the opposite of what we need.
     hold_threshold = tier_timeout * RAMP_HOLD_THRESHOLD
-    should_hold = current_max_runtime > hold_threshold and active_workers > 0
+    should_hold = (
+        current_max_runtime > hold_threshold
+        and active_workers > 0
+        and peak_concurrency is not None  # Only hold post-peak (fine-tuning)
+    )
 
     # Use the larger of historical avg_base_time or normalized_max for worker calculation.
     # - Historical: average from completed tasks

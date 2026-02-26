@@ -1902,3 +1902,61 @@ class TestGeometricRamp:
             active = decision.recommended_workers
             sequence.append(active)
         assert sequence == [1, 2, 4, 8, 16, 32]
+
+    # --- Hold exemption tests ---
+
+    def test_pre_peak_skips_hold_no_data_path(self):
+        """Pre-peak: no-data path ramps even when max exceeds hold threshold.
+
+        tier_timeout=60, hold_threshold=18s, current_max=25s (>18s)
+        Without peak → hold skipped, geometric ramp fires.
+        active=4, base=32 → 4+4=8
+        """
+        decision = compute_throttle_decision(
+            current_max_runtime=25.0,  # 42% of 60s, above 30% hold threshold
+            tier_timeout=60.0,
+            base_workers=32,
+            active_workers=4,
+            throughput=0.5,
+            avg_runtime=3.0,
+            completion_count=1,
+        )
+        assert decision.recommended_workers == 8  # Geometric: 4+4, not held at 4
+
+    def test_pre_peak_skips_hold_main_ramp(self):
+        """Pre-peak: main ramp path skips hold even with long-running task.
+
+        tier_timeout=60, hold_threshold=18s, current_max=25s (>18s)
+        No peak → hold skipped, geometric ramp fires.
+        effective_base = max(0.5, 25/8=3.125) = 3.125
+        formula = int(39/3.125) = 12, target=12
+        active=8, geometric: min(8, 12-8)=4 → ramped=12
+        """
+        decision = compute_throttle_decision(
+            current_max_runtime=25.0,  # Above 30% hold threshold
+            tier_timeout=60.0,
+            base_workers=32,
+            active_workers=8,
+            avg_base_time=0.5,  # Fast base time, but normalized_max dominates
+            completion_count=30,
+        )
+        assert decision.recommended_workers == 12  # Geometric: 8+4, not held at 8
+        assert "ramped from 8" in decision.reason
+
+    def test_post_peak_holds_on_long_task(self):
+        """Post-peak: hold fires normally when max exceeds threshold.
+
+        peak=12, tier_timeout=60, hold_threshold=18s, current_max=25s
+        Peak detected → hold applies, stays at active.
+        """
+        decision = compute_throttle_decision(
+            current_max_runtime=25.0,  # Above 30% hold threshold
+            tier_timeout=60.0,
+            base_workers=32,
+            active_workers=8,
+            avg_base_time=0.5,
+            completion_count=30,
+            peak_concurrency=12,
+        )
+        assert decision.recommended_workers == 8  # Held, not ramped
+        assert "holding" in decision.reason
