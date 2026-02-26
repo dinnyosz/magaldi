@@ -492,9 +492,18 @@ class ThrottleContext:
         # Update probability map only when new data arrives (sample count changes).
         # Without this guard, the same signals compound every cycle and the
         # probabilities saturate/reset after ~30 iterations.
+        #
+        # Uses best base_time across ALL levels (partial + qualified) as the
+        # reference. Needs >=2 levels with data to have a meaningful comparison
+        # — a single level is always "best" relative to itself and would be
+        # boosted incorrectly.
         from shared.throttling import GSS_PROMISING_THRESHOLD
-        if self._prob_map is not None and level_data:
-            best_bt = min(level_data.values())
+        levels_with_data = {
+            lvl: bt for lvl, (bt, cnt) in all_levels.items()
+            if cnt >= GSS_PARTIAL_MIN_SAMPLES
+        }
+        if self._prob_map is not None and len(levels_with_data) >= 2:
+            best_bt = min(levels_with_data.values())
             for lvl, (bt, cnt) in all_levels.items():
                 if cnt >= GSS_PARTIAL_MIN_SAMPLES and cnt != self._last_pmap_counts.get(lvl, 0):
                     is_good = bt <= best_bt * GSS_PROMISING_THRESHOLD
