@@ -231,6 +231,10 @@ def _build_scoring_display(state: "ScoringProgressState", num_workers: int) -> R
             if td.peak_concurrency is not None:
                 stats_text.append(" | ", style="dim")
                 stats_text.append(f"Peak@{td.peak_concurrency}", style="magenta")
+            gss_probe = getattr(td, 'gss_probe', None)
+            if gss_probe is not None:
+                stats_text.append(" | ", style="dim")
+                stats_text.append(f"GSS→{gss_probe}", style="bright_cyan")
 
     # Build per-level throughput line (separate from stats)
     levels_text = None
@@ -629,6 +633,9 @@ def run_processing(
                 stats += f" [dim]|[/] [dim]Per Worker:[/] [yellow]{normalized_max:.1f}s[/] [dim]vs[/] [cyan]{td.completed_avg:.1f}s[/] [dim](last {td.completion_count})[/]"
                 if td.peak_concurrency is not None:
                     stats += f" [dim]|[/] [magenta]Peak@{td.peak_concurrency}[/]"
+                gss_probe = getattr(td, 'gss_probe', None)
+                if gss_probe is not None:
+                    stats += f" [dim]|[/] [bright_cyan]GSS→{gss_probe}[/]"
 
         # Build per-level throughput line (separate from stats)
         levels_line = None

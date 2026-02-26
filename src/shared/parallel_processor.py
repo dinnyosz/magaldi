@@ -25,7 +25,10 @@ from typing import TYPE_CHECKING, Generic, TypeVar
 
 from shared.ai.context_size import TIER_MAX_WORKERS, TIER_TIMEOUTS, iter_by_tier
 from shared.throttling import (
+    EXPLORE_MIN_SAMPLES,
+    GoldenSectionSearch,
     ThrottleDecision,
+    ThroughputByLevel,
     ThroughputTracker,
     compute_throttle_decision,
     get_ramp_cooldown,
@@ -401,6 +404,7 @@ class ThrottleDisplayInfo:
     completion_count: int  # Number of completions used to calculate avg_base_time
     peak_concurrency: int | None = None  # Concurrency level with peak throughput
     exploration_target: int | None = None  # Level being explored (neighbor of peak)
+    gss_probe: int | None = None  # GSS probe target (if active)
     # Per-level throughput data: level -> (throughput_per_sec, sample_count)
     all_levels: dict[int, tuple[float, int]] | None = None
 
@@ -425,6 +429,7 @@ class ThrottleContext:
     last_decision: ThrottleDecision | None = field(default=None, repr=False)
     _last_ramp_time: float = field(default=0.0, repr=False)
     _last_recommended_workers: int = field(default=0, repr=False)
+    _gss: GoldenSectionSearch | None = field(default=None, repr=False)
 
     def get_throttle_decision(
         self, active_workers: int, current_max_runtime: float,
@@ -444,8 +449,35 @@ class ThrottleContext:
             self.throughput_tracker.get_stats_with_concurrency()
         )
         peak = self.throughput_tracker.get_peak_concurrency()
-        explore = self.throughput_tracker.get_exploration_target(self.base_workers, remaining)
         all_levels = self.throughput_tracker._throughput_by_level.get_all_levels()
+        lvl_counts = {lvl: cnt for lvl, (_, cnt) in all_levels.items()} if all_levels else None
+
+        # GSS lifecycle: initialize when peak is detected, drive exploration
+        gss_probe = None
+        if peak is not None and self._gss is None:
+            # Pre-peak done, peak detected — start golden section search
+            self._gss = GoldenSectionSearch(lo=1, hi=self.base_workers)
+
+        if self._gss is not None and not self._gss.converged:
+            # Build level_data: level -> avg_base_time for qualified levels
+            level_data = {
+                lvl: bt for lvl, (bt, cnt) in all_levels.items()
+                if cnt >= ThroughputByLevel._min_samples_for_level(lvl)
+            }
+            gss_probe = self._gss.get_next_probe(level_data)
+            if self._gss.converged:
+                from shared.throttling import _log_throttle
+                _log_throttle(f"GSS CONVERGED: best_level={self._gss.best_level}")
+
+        # If GSS converged, use its best_level as the effective peak
+        effective_peak = self._gss.best_level if (self._gss and self._gss.converged) else peak
+
+        # Only use legacy exploration when GSS is not active
+        if self._gss is None or self._gss.converged:
+            explore = self.throughput_tracker.get_exploration_target(self.base_workers, remaining)
+        else:
+            explore = None  # GSS handles exploration
+
         throttle = compute_throttle_decision(
             current_max_runtime=current_max_runtime,
             tier_timeout=self.tier_timeout,
@@ -457,26 +489,30 @@ class ThrottleContext:
             avg_concurrency=avg_conc,
             avg_base_time=avg_base,
             post_warmup=self.post_warmup,
-            peak_concurrency=peak,
+            peak_concurrency=effective_peak,
             exploration_target=explore,
+            level_counts=lvl_counts,
+            gss_probe=gss_probe,
         )
         self.post_warmup = False  # Only signal once
         # Attach per-level data for display (early returns in compute_throttle_decision
         # don't set these, so we always override from the source of truth)
         throttle.all_levels = all_levels if all_levels else None
-        throttle.peak_concurrency = peak
+        throttle.peak_concurrency = effective_peak
         throttle.exploration_target = explore
+        throttle.gss_probe = gss_probe
         self.last_decision = throttle
 
         # Apply ramp cooldown (mirrors DependencyTracker.compute_throttle_decision)
+        # GSS probes bypass cooldown — need data at probe level ASAP
         recommended = throttle.recommended_workers
         now = time.time()
         cooldown_seconds = get_ramp_cooldown(self.tier)
         cooldown_elapsed = (now - self._last_ramp_time) >= cooldown_seconds
         is_ramping = recommended > self._last_recommended_workers
 
-        if is_ramping and not cooldown_elapsed:
-            # Hold at current level during cooldown
+        if is_ramping and not cooldown_elapsed and gss_probe is None:
+            # Hold at current level during cooldown (but not for GSS probes)
             allowed_workers = self._last_recommended_workers
         else:
             allowed_workers = recommended
@@ -489,8 +525,9 @@ class ThrottleContext:
             current_max=max(current_max_runtime, throttle.historical_max),
             avg_base_time=avg_base,
             completion_count=count,
-            peak_concurrency=peak,
+            peak_concurrency=effective_peak,
             exploration_target=explore,
+            gss_probe=gss_probe,
             all_levels=all_levels if all_levels else None,
         )
 
@@ -531,6 +568,7 @@ def run_throttled_tier(
     throttle_ctx.tier_timeout = tier_timeout
     throttle_ctx.base_workers = effective_workers
     throttle_ctx.tier = tier
+    throttle_ctx._gss = None  # Reset GSS on tier change
 
     pending_items = list(items)
 
