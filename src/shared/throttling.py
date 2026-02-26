@@ -124,6 +124,8 @@ class ThrottleDecision:
     gss_lo: int | None = None  # GSS bracket lower bound
     gss_hi: int | None = None  # GSS bracket upper bound
     gss_signal: str | None = None  # Signal-aware action for display
+    is_hold: bool = False  # True when ramp-up is held (>50% timeout)
+    is_emergency: bool = False  # True when emergency brake fired (>80% timeout)
     # Per-level throughput data: level -> (throughput_per_sec, sample_count)
     all_levels: dict[int, tuple[float, int]] | None = None
     # Probability map: level -> P(best) for display
@@ -1110,6 +1112,7 @@ def compute_throttle_decision(
             recommended_workers=1,
             reason="Emergency (>80% timeout)",
             completion_count=completion_count,
+            is_emergency=True,
         )
 
     # Normalize max_runtime by current workers for hold threshold comparison
@@ -1151,6 +1154,7 @@ def compute_throttle_decision(
                 recommended_workers=active_workers,
                 reason=f"No data, holding (>{RAMP_HOLD_THRESHOLD:.0%} timeout)",
                 completion_count=completion_count,
+                is_hold=True,
             )
         elif active_workers > 0:
             # Tasks running fast, safe to ramp +1
@@ -1312,6 +1316,7 @@ def compute_throttle_decision(
             peak_concurrency=peak_concurrency,
             exploration_target=exploration_target,
             gss_probe=gss_probe,
+            is_hold=should_hold,
         )
     else:
         return ThrottleDecision(
@@ -1325,6 +1330,7 @@ def compute_throttle_decision(
             peak_concurrency=peak_concurrency,
             exploration_target=exploration_target,
             gss_probe=gss_probe,
+            is_hold=should_hold,
         )
 
 

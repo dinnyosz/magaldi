@@ -233,6 +233,16 @@ def _build_scoring_display(state: ScoringProgressState, num_workers: int) -> Ren
             if td.peak_concurrency is not None:
                 stats_text.append(" | ", style="dim")
                 stats_text.append(f"Peak@{td.peak_concurrency}", style="magenta")
+            # Hold / Emergency indicators
+            is_hold = getattr(td, 'is_hold', False)
+            is_emergency = getattr(td, 'is_emergency', False)
+            if is_emergency:
+                stats_text.append(" | ", style="dim")
+                stats_text.append("⛔ EMERGENCY", style="bold bright_red")
+            elif is_hold:
+                stats_text.append(" | ", style="dim")
+                stats_text.append("⏸ HOLD", style="bold bright_yellow")
+
             gss_probe = getattr(td, 'gss_probe', None)
             if gss_probe is not None:
                 gss_lo = getattr(td, 'gss_lo', None)
@@ -644,6 +654,14 @@ def run_processing(
                 stats += f" [dim]|[/] [dim]Per Worker:[/] [yellow]{normalized_max:.1f}s[/] [dim]vs[/] [cyan]{td.completed_avg:.1f}s[/] [dim](last {td.completion_count})[/]"
                 if td.peak_concurrency is not None:
                     stats += f" [dim]|[/] [magenta]Peak@{td.peak_concurrency}[/]"
+                # Hold / Emergency indicators
+                is_hold = getattr(td, 'is_hold', False)
+                is_emergency = getattr(td, 'is_emergency', False)
+                if is_emergency:
+                    stats += " [dim]|[/] [bold bright_red]⛔ EMERGENCY[/]"
+                elif is_hold:
+                    stats += " [dim]|[/] [bold bright_yellow]⏸ HOLD[/]"
+
                 gss_probe = getattr(td, 'gss_probe', None)
                 if gss_probe is not None:
                     gss_lo = getattr(td, 'gss_lo', None)
