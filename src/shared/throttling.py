@@ -63,6 +63,17 @@ EXPLORE_SAMPLES_PER_LEVEL = 2
 # PLUS meaningful processing at the (possibly new) optimal level afterward.
 EXPLORE_BUDGET_MULTIPLIER = 3
 
+# Scoring weights for exploration target selection (sum to 1.0).
+# Each candidate level gets a weighted score across 4 dimensions.
+EXPLORE_WEIGHT_COMPLETION = 0.40  # Prefer levels with partial data (cheaper to finish)
+EXPLORE_WEIGHT_PROXIMITY = 0.25  # Prefer levels near the peak
+EXPLORE_WEIGHT_TREND = 0.25  # Prefer direction where base times improve
+EXPLORE_WEIGHT_COST = 0.10  # Prefer levels needing fewer total samples
+
+# Minimum explored levels needed for a reliable trend signal.
+# Below this, trend component is zeroed out (no directional bias).
+EXPLORE_TREND_MIN_LEVELS = 3
+
 # Ramp cooldown scales with context tier: tier // 512 seconds.
 # 2k→4s, 4k→8s, 8k→16s, 16k→32s, 32k→64s
 # Larger contexts take longer to process, so we wait longer to see impact.
@@ -387,23 +398,50 @@ class ThroughputByLevel:
         """
         return max(EXPLORE_MIN_SAMPLES, level * EXPLORE_SAMPLES_PER_LEVEL)
 
+    def _compute_trend_locked(self) -> float:
+        """Compute slope of base_time vs level (caller must hold lock).
+
+        Uses simple linear regression across explored levels.
+        Negative slope: base_time improves (decreases) at higher levels → explore up.
+        Positive slope: base_time worsens (increases) at higher levels → explore down.
+        Returns 0.0 if fewer than EXPLORE_TREND_MIN_LEVELS explored levels.
+        """
+        points: list[tuple[int, float]] = []
+        for level, dq in self._levels.items():
+            if len(dq) >= self._min_samples_for_level(level):
+                avg_base = sum(rt / level for _, rt in dq) / len(dq)
+                points.append((level, avg_base))
+
+        if len(points) < EXPLORE_TREND_MIN_LEVELS:
+            return 0.0
+
+        n = len(points)
+        sum_x = sum(x for x, _ in points)
+        sum_y = sum(y for _, y in points)
+        sum_xy = sum(x * y for x, y in points)
+        sum_x2 = sum(x * x for x, _ in points)
+
+        denom = n * sum_x2 - sum_x * sum_x
+        if denom == 0:
+            return 0.0
+
+        return (n * sum_xy - sum_x * sum_y) / denom
+
     def get_exploration_target(self, max_level: int, remaining: int | None = None) -> int | None:
-        """Find an under-explored level to collect more data.
+        """Find the most valuable under-explored level to collect data at.
 
-        Explores within ±(max_level // 3) of the peak, clamped to 1..max_level.
-        Scans outward from the peak: upward first (higher concurrency =
-        potentially more throughput), then downward.
+        Scores candidate levels within ±(max_level // 3) of the peak by:
+        - Completion: prefer levels with partial data (cheaper to finish)
+        - Proximity: prefer levels near the peak (refine understanding)
+        - Trend: prefer direction where base times are improving
+        - Cost: prefer levels needing fewer total samples
 
-        Significance is level-proportional: max(10, level * 2) samples needed.
-
-        Budget-aware: if remaining elements is known, skip exploration when
-        there aren't enough elements left to justify the cost. Requires
-        remaining >= samples_needed * EXPLORE_BUDGET_MULTIPLIER so there's
-        enough runway to collect data AND benefit from the finding.
+        Budget-aware: skips candidates when remaining elements can't cover
+        the sample cost (samples_needed * EXPLORE_BUDGET_MULTIPLIER).
 
         Args:
             max_level: Upper bound for exploration (typically base_workers).
-                Also determines radius: max_level // 3.
+                Also determines radius: max(3, max_level // 3).
             remaining: Number of elements left to process, or None if unknown.
                 When provided, skips candidates whose sample cost exceeds
                 the remaining budget.
@@ -424,33 +462,78 @@ class ThroughputByLevel:
             if peak_count < self._min_samples_for_level(peak):
                 return None
 
-            # Scan upward from peak, capped by radius and max_level
+            # Compute trend once for all candidates
+            slope = self._compute_trend_locked()
+
+            # Bounds for candidate range
             upper = min(peak + radius, max_level)
-            for candidate in range(peak + 1, upper + 1):
-                samples_needed = self._min_samples_for_level(candidate)
-                count = len(self._levels.get(candidate, deque()))
-                if count < samples_needed:
-                    # Budget check: skip if not enough remaining elements
-                    if remaining is not None:
-                        samples_left = samples_needed - count
-                        if remaining < samples_left * EXPLORE_BUDGET_MULTIPLIER:
-                            continue
-                    return candidate
-
-            # Scan downward from peak, capped by radius and 1
             lower = max(peak - radius, 1)
-            for candidate in range(peak - 1, lower - 1, -1):
-                samples_needed = self._min_samples_for_level(candidate)
-                count = len(self._levels.get(candidate, deque()))
-                if count < samples_needed:
-                    # Budget check: skip if not enough remaining elements
-                    if remaining is not None:
-                        samples_left = samples_needed - count
-                        if remaining < samples_left * EXPLORE_BUDGET_MULTIPLIER:
-                            continue
-                    return candidate
+            max_possible_cost = self._min_samples_for_level(max_level)
 
-        return None
+            best_score = -1.0
+            best_candidate = None
+
+            # Build candidate list: scan outward from peak (upward first)
+            # so ties break toward higher concurrency (more potential).
+            candidates: list[int] = []
+            for offset in range(1, radius + 1):
+                up = peak + offset
+                if up <= upper:
+                    candidates.append(up)
+                down = peak - offset
+                if down >= lower:
+                    candidates.append(down)
+
+            for candidate in candidates:
+
+                needed = self._min_samples_for_level(candidate)
+                count = len(self._levels.get(candidate, deque()))
+
+                if count >= needed:
+                    continue  # Already explored
+
+                # Budget filter (hard gate)
+                samples_left = needed - count
+                if remaining is not None:
+                    if remaining < samples_left * EXPLORE_BUDGET_MULTIPLIER:
+                        continue
+
+                # A) Completion score: partial progress = cheaper to finish
+                completion_score = count / needed if needed > 0 else 0.0
+
+                # B) Proximity score: closer to peak = more informative
+                distance = abs(candidate - peak)
+                proximity_score = 1.0 - (distance / radius) if radius > 0 else 1.0
+
+                # C) Trend score: favor the direction where base times improve
+                if slope == 0.0:
+                    trend_score = 0.5  # Neutral — no directional preference
+                elif slope < 0:
+                    # Base time decreasing at higher levels → explore upward
+                    trend_score = 1.0 if candidate > peak else 0.0
+                else:
+                    # Base time increasing at higher levels → explore downward
+                    trend_score = 1.0 if candidate < peak else 0.0
+
+                # D) Cost score: fewer remaining samples = cheaper
+                cost_score = (
+                    1.0 - (samples_left / max_possible_cost)
+                    if max_possible_cost > 0
+                    else 0.5
+                )
+
+                score = (
+                    EXPLORE_WEIGHT_COMPLETION * completion_score
+                    + EXPLORE_WEIGHT_PROXIMITY * proximity_score
+                    + EXPLORE_WEIGHT_TREND * trend_score
+                    + EXPLORE_WEIGHT_COST * cost_score
+                )
+
+                if score > best_score:
+                    best_score = score
+                    best_candidate = candidate
+
+        return best_candidate
 
     def reset(self) -> None:
         """Clear all history."""
