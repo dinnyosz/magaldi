@@ -486,7 +486,24 @@ class ThrottleContext:
             gss_probe = self._gss.get_next_probe(level_data)
             if self._gss.converged:
                 from shared.throttling import _log_throttle
-                _log_throttle(f"GSS CONVERGED: best_level={self._gss.best_level}")
+                # Boundary re-search: if best_level landed at/near the hi edge
+                # and there's room above, the bracket was too tight — extend
+                # and restart GSS from the old hi to max_workers.
+                old_hi = self._gss.hi
+                if (
+                    self._gss.best_level is not None
+                    and self._gss.best_level >= old_hi - 1
+                    and old_hi < self.base_workers
+                ):
+                    new_lo = max(1, old_hi - 2)  # overlap slightly
+                    _log_throttle(
+                        f"GSS BOUNDARY: best={self._gss.best_level} hit hi={old_hi}, "
+                        f"extending to [{new_lo}, {self.base_workers}]"
+                    )
+                    self._gss = GoldenSectionSearch(lo=new_lo, hi=self.base_workers)
+                    gss_probe = self._gss.get_next_probe(level_data)
+                else:
+                    _log_throttle(f"GSS CONVERGED: best_level={self._gss.best_level}")
 
         # If GSS converged, use its best_level as the effective peak
         effective_peak = self._gss.best_level if (self._gss and self._gss.converged) else peak
