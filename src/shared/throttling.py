@@ -641,23 +641,56 @@ class GoldenSectionSearch:
             self._finalize(level_data, partial_data)
             return None
 
+        # Step 1: Narrow bracket FIRST using any available data.
+        # Loop until we can't narrow further — ensures bracket shrinks
+        # every cycle, even when overrides would otherwise prevent it.
+        narrowing_data: dict[int, float] = dict(level_data)
+        if partial_data:
+            for lvl, (bt, _cnt) in partial_data.items():
+                if lvl not in narrowing_data:
+                    narrowing_data[lvl] = bt
+
+        while self.hi - self.lo > 5:
+            m1 = round(self.hi - (self.hi - self.lo) / PHI)
+            m2 = round(self.lo + (self.hi - self.lo) / PHI)
+            m1 = max(self.lo + 1, min(m1, self.hi - 1))
+            m2 = max(self.lo + 1, min(m2, self.hi - 1))
+            if m1 == m2:
+                m2 = min(m1 + 1, self.hi - 1)
+
+            if m1 in narrowing_data and m2 in narrowing_data:
+                old_lo, old_hi = self.lo, self.hi
+                if narrowing_data[m1] <= narrowing_data[m2]:
+                    self.hi = m2
+                else:
+                    self.lo = m1
+                _log_throttle(
+                    f"GSS NARROW: [{old_lo},{old_hi}]→[{self.lo},{self.hi}] "
+                    f"(m1={m1}:{narrowing_data[m1]:.2f}, m2={m2}:{narrowing_data[m2]:.2f})"
+                )
+            else:
+                break  # Missing data at a probe point — need to collect it
+
+        if self.hi - self.lo <= 5:
+            self._finalize(level_data, partial_data)
+            return None
+
+        # Recompute probes for current bracket
         m1 = round(self.hi - (self.hi - self.lo) / PHI)
         m2 = round(self.lo + (self.hi - self.lo) / PHI)
-
-        # Ensure probes are distinct and within bounds
         m1 = max(self.lo + 1, min(m1, self.hi - 1))
         m2 = max(self.lo + 1, min(m2, self.hi - 1))
         if m1 == m2:
             m2 = min(m1 + 1, self.hi - 1)
 
-        # Signal-aware override: use partial data to steer probes
+        # Step 2: Signal-aware override within (possibly narrowed) bracket
         if partial_data:
             probe = self._signal_aware_probe(level_data, partial_data, m1, m2)
             if probe is not None:
                 self._pending_probe = probe
                 return probe
 
-        # Probability map override: pick highest-probability unqualified level
+        # Step 3: Probability map override within bracket
         if prob_map is not None:
             qualified = set(level_data.keys())
             result = prob_map.get_best_unqualified(qualified, self.lo, self.hi)
@@ -670,32 +703,11 @@ class GoldenSectionSearch:
                 self._pending_probe = target
                 return target
 
-        # Build narrowing data: qualified data first, fall back to partial.
-        # Partial data (3+ samples) is reliable enough for directional comparison.
-        narrowing_data: dict[int, float] = dict(level_data)
-        if partial_data:
-            for lvl, (bt, _cnt) in partial_data.items():
-                if lvl not in narrowing_data:
-                    narrowing_data[lvl] = bt
-
+        # Step 4: Geometric probes for missing data
         have_m1 = m1 in narrowing_data
         have_m2 = m2 in narrowing_data
 
-        if have_m1 and have_m2:
-            # Both probes have data — narrow the bracket
-            if narrowing_data[m1] <= narrowing_data[m2]:
-                # m1 is better (lower base_time) → optimum in [lo, m2]
-                self.hi = m2
-            else:
-                # m2 is better → optimum in [m1, hi]
-                self.lo = m1
-            _log_throttle(
-                f"GSS NARROW: [{self.lo}, {self.hi}] "
-                f"(m1={m1}:{narrowing_data[m1]:.2f}, m2={m2}:{narrowing_data[m2]:.2f})"
-            )
-            # Recurse: compute new probes for narrowed bracket
-            return self.get_next_probe(level_data, partial_data, prob_map)
-        elif have_m1:
+        if have_m1:
             if prob_map is not None:
                 prob_map.record_geometric_probe()
             self._pending_probe = m2
@@ -706,7 +718,6 @@ class GoldenSectionSearch:
             self._pending_probe = m1
             return m1
         else:
-            # Neither probe has data — request m1 first (arbitrary)
             if prob_map is not None:
                 prob_map.record_geometric_probe()
             self._pending_probe = m1
