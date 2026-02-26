@@ -25,7 +25,6 @@ from typing import TYPE_CHECKING, Generic, TypeVar
 
 from shared.ai.context_size import TIER_MAX_WORKERS, TIER_TIMEOUTS, iter_by_tier
 from shared.throttling import (
-    EXPLORE_MIN_SAMPLES,
     GoldenSectionSearch,
     ThrottleDecision,
     ThroughputByLevel,

@@ -5,12 +5,14 @@ import time
 import pytest
 
 from shared.throttling import (
-    MAX_RAMP_INCREMENT,
+    PRE_PEAK_MAX_WORKERS,
+    PRE_PEAK_SAMPLES_PER_LEVEL,
+    GoldenSectionSearch,
     ThrottleDecision,
     ThroughputByLevel,
     ThroughputTracker,
     TimeoutEvent,
-    _compute_ramp_increment,
+    _compute_pre_peak_target,
     build_throughput_levels_text,
     compute_throttle_decision,
     format_throughput_levels,
@@ -197,23 +199,22 @@ class TestComputeThrottleDecision:
         assert "No data" in decision.reason
 
     def test_no_data_with_running_tasks_ramps(self):
-        """With running tasks but no completion history, ramps up geometrically.
+        """With running tasks but no completion history, ramps up gradually.
 
-        No peak → geometric doubling: increment = max(1, active) = 4
-        active=4, base=8 → ramp: 4 + min(4, 4) = 8
+        active=2, base=8, no data → ramp: 2+1=3
         """
         decision = compute_throttle_decision(
             current_max_runtime=10.0,
             tier_timeout=180.0,
             base_workers=8,
-            active_workers=4,
+            active_workers=2,
             throughput=1.0,
             avg_runtime=5.0,
             completion_count=2,  # < 3, so no throttling but still ramps
         )
         assert not decision.should_throttle
-        assert decision.recommended_workers == 8  # Geometric: 4 + 4 = 8
-        assert "ramped from 4" in decision.reason
+        assert decision.recommended_workers == 3  # Ramped from 2, capped by pre-peak
+        assert "ramped from 2" in decision.reason
 
     def test_no_data_without_running_tasks_fresh(self):
         """With no running tasks AND few completions, starts fresh with 1."""
@@ -232,15 +233,16 @@ class TestComputeThrottleDecision:
         assert "No data" in decision.reason
 
     def test_emergency_near_timeout(self):
-        """Runtime >= 60% of timeout triggers emergency throttling."""
+        """Runtime >= 80% of timeout triggers emergency throttling (post-peak)."""
         decision = compute_throttle_decision(
-            current_max_runtime=110.0,  # ~61% of 180 (threshold is 60%)
+            current_max_runtime=145.0,  # ~81% of 180 (threshold is 80%)
             tier_timeout=180.0,
             base_workers=8,
             active_workers=4,
             throughput=0.5,
             avg_runtime=5.0,
             completion_count=30,
+            peak_concurrency=6,  # Post-peak: emergency fires
         )
         assert decision.should_throttle
         assert decision.recommended_workers == 1
@@ -261,6 +263,7 @@ class TestComputeThrottleDecision:
             avg_runtime=100.0,
             completion_count=30,
             avg_base_time=20.0,  # 117/20 = 5.85 → 5 workers max
+            peak_concurrency=5,  # Post-peak to bypass pre-peak cap
         )
         assert decision.should_throttle
         assert decision.recommended_workers == 5
@@ -281,6 +284,7 @@ class TestComputeThrottleDecision:
             avg_runtime=5.0,
             completion_count=30,
             avg_base_time=0.625,  # From completion history
+            peak_concurrency=8,  # Post-peak to bypass pre-peak cap
         )
         assert not decision.should_throttle
         assert decision.recommended_workers == 8
@@ -343,9 +347,8 @@ class TestComputeThrottleDecision:
         We no longer calculate base_time from current running tasks because
         we don't know how many workers were active when each task started.
         avg_base_time=5.0s → optimal = 117/5 = 23 workers
-        No peak → geometric ramp: increment = min(8, 23-8) = min(8, 15) = 8
-        ramped = 8 + 8 = 16
-        current_max must be under 30% of timeout to allow ramp (not hold).
+        Post-peak: ramp from 8: 8+1=9
+        current_max must be under 50% of timeout to allow ramp (not hold).
         """
         decision = compute_throttle_decision(
             current_max_runtime=50.0,  # 27% of 180s, under hold threshold
@@ -356,10 +359,10 @@ class TestComputeThrottleDecision:
             avg_runtime=40.0,
             completion_count=30,
             avg_base_time=5.0,  # 117/5 = 23.4 → 23 optimal
+            peak_concurrency=23,  # Post-peak to bypass pre-peak cap
         )
         assert decision.should_throttle
-        # No peak → geometric: 8 + min(8, 15) = 16
-        assert decision.recommended_workers == 16
+        assert decision.recommended_workers == 9  # Ramped from 8: 8+1=9
         assert "Throttle" in decision.reason
         assert "ramped" in decision.reason
 
@@ -367,8 +370,7 @@ class TestComputeThrottleDecision:
         """Uses historical avg_base_time for throttle decisions.
 
         avg_base_time = 10s → optimal = 117/10 = 11.7 → 11 workers
-        No peak → geometric: increment = min(8, 11-8) = min(8, 3) = 3
-        ramped = 8 + 3 = 11
+        Post-peak: ramp from 8: 8+1=9
         """
         decision = compute_throttle_decision(
             current_max_runtime=40.0,
@@ -379,19 +381,18 @@ class TestComputeThrottleDecision:
             avg_runtime=50.0,
             completion_count=30,
             avg_base_time=10.0,  # Historical is worse than current
+            peak_concurrency=11,  # Post-peak to bypass pre-peak cap
         )
         assert decision.should_throttle
-        assert decision.recommended_workers == 11  # Geometric: 8 + min(8, 3) = 11
+        assert decision.recommended_workers == 9  # Ramped from 8: 8+1=9
         assert "Throttle" in decision.reason
 
     def test_ramp_up_during_warmup(self):
-        """During warmup, ramp up geometrically (no peak → doubling).
+        """During warmup, ramp up gradually with confidence discount.
 
-        active=2, no peak, count=5 → confidence ~0.65
-        formula = int(117/5) = 23, discounted = int(23*0.65) = 14
-        target = 14, delta = 14-2 = 12
-        geometric increment = max(1, 2) = 2, capped = min(2, 12) = 2
-        ramped = 2 + 2 = 4
+        active=2, no peak, confidence ~0.65 (5 completions)
+        formula = int(117/5) = 23 → discounted: int(23*0.65)=14
+        target=14, delta=12, ramp: 2+1=3
         """
         decision = compute_throttle_decision(
             current_max_runtime=10.0,  # 10s with 2 workers = 5s base_time
@@ -401,11 +402,11 @@ class TestComputeThrottleDecision:
             throughput=0.5,
             avg_runtime=10.0,
             completion_count=5,
-            avg_base_time=5.0,  # 117/5 = 23.4 → 23 optimal
+            avg_base_time=5.0,  # 117/5 = 23, discounted to 14
         )
         assert decision.should_throttle
-        # No peak → geometric: 2 + 2 = 4
-        assert decision.recommended_workers == 4
+        # Ramp: 2+1=3
+        assert decision.recommended_workers == 3
         assert "ramped from 2" in decision.reason
 
     def test_scale_down_immediate(self):
@@ -705,9 +706,10 @@ class TestPeakConcurrencyThrottleDecision:
     """
 
     def test_peak_none_falls_back_to_formula(self):
-        """When peak_concurrency is None, behavior is identical to formula-only.
+        """When peak_concurrency is None and pre-peak step target is active.
 
-        avg_base_time=20s → formula_optimal = 117/20 = 5
+        avg_base_time=20s → formula_optimal = 117/20 = 5, but pre-peak step=2
+        (level 1 done, level 2 not yet)
         """
         decision = compute_throttle_decision(
             current_max_runtime=0.0,
@@ -717,8 +719,9 @@ class TestPeakConcurrencyThrottleDecision:
             avg_base_time=20.0,
             completion_count=30,
             peak_concurrency=None,
+            level_counts={1: PRE_PEAK_SAMPLES_PER_LEVEL},  # level 1 done, step target=2
         )
-        assert decision.recommended_workers == 5
+        assert decision.recommended_workers == PRE_PEAK_MAX_WORKERS
         assert decision.peak_concurrency is None
 
     def test_peak_below_formula_uses_peak(self):
@@ -814,9 +817,9 @@ class TestPeakConcurrencyThrottleDecision:
         assert decision.recommended_workers == 1
 
     def test_emergency_overrides_peak(self):
-        """Emergency throttle (>60% timeout) still overrides peak."""
+        """Emergency throttle (>80% timeout) still overrides peak."""
         decision = compute_throttle_decision(
-            current_max_runtime=110.0,  # 61% of 180
+            current_max_runtime=145.0,  # 81% of 180
             tier_timeout=180.0,
             base_workers=8,
             active_workers=4,
@@ -925,7 +928,7 @@ class TestFormulaConfidence:
 
         base_time=2.1, timeout=180, base_workers=32
         raw formula = int(117/2.1) = 55, capped to 32
-        With confidence=0.30: int(55*0.30) = 16
+        With confidence=0.30: int(55*0.30) = 16, then pre-peak step → 1
         """
         decision = compute_throttle_decision(
             current_max_runtime=0.0,
@@ -934,15 +937,17 @@ class TestFormulaConfidence:
             active_workers=0,
             avg_base_time=2.1,
             completion_count=1,
+            level_counts={1: 1},  # level 1 not done → step target=1
         )
-        # Starting fresh (active=0): gets formula with confidence
-        assert decision.recommended_workers == 16
+        # Pre-peak step target dominates: min(16, 1) = 1
+        assert decision.recommended_workers == 1
         assert decision.should_throttle
 
     def test_moderate_data_widens_ceiling(self):
-        """With 10 completions (~80% confidence), formula ceiling rises.
+        """With 10 completions (~80% confidence), pre-peak step cap applies.
 
-        confidence ~= 0.80 → int(55 * 0.80) = 44 → capped to 32 → no throttle
+        confidence ~= 0.80 → int(55 * 0.80) = 44 → capped to 32
+        But pre-peak step target=2 → throttle
         """
         decision = compute_throttle_decision(
             current_max_runtime=0.0,
@@ -951,12 +956,13 @@ class TestFormulaConfidence:
             active_workers=0,
             avg_base_time=2.1,
             completion_count=10,
+            level_counts={1: PRE_PEAK_SAMPLES_PER_LEVEL},  # only level 1 done, step target=2
         )
-        assert not decision.should_throttle
-        assert decision.recommended_workers == 32
+        assert decision.should_throttle  # Pre-peak step cap forces throttle
+        assert decision.recommended_workers == 2
 
     def test_steady_state_no_discount(self):
-        """With 30+ completions, confidence=1.0, no change to behavior."""
+        """With 30+ completions but pre-peak not graduated, step cap applies."""
         decision = compute_throttle_decision(
             current_max_runtime=0.0,
             tier_timeout=180.0,
@@ -964,9 +970,10 @@ class TestFormulaConfidence:
             active_workers=0,
             avg_base_time=20.0,
             completion_count=30,
+            level_counts={1: PRE_PEAK_SAMPLES_PER_LEVEL},  # level 1 done, step target=2
         )
-        # formula = int(117/20) = 5, confidence=1.0 → 5
-        assert decision.recommended_workers == 5
+        # formula = int(117/20) = 5, confidence=1.0, but pre-peak step → 2
+        assert decision.recommended_workers == PRE_PEAK_MAX_WORKERS
         assert decision.should_throttle
 
     def test_peak_bypasses_confidence(self):
@@ -985,12 +992,12 @@ class TestFormulaConfidence:
         assert decision.should_throttle
 
     def test_ramp_respects_discounted_ceiling(self):
-        """Ramp-up is bounded by the confidence-discounted ceiling.
+        """Ramp-up is bounded by the confidence-discounted ceiling (post-peak).
 
-        active=5, count=3, confidence ~= 0.54, no peak → geometric
-        formula = 55, discounted = int(55*0.54) = 29, capped to 29
-        target=29 > active=5, geometric increment = max(1,5) = 5
-        ramped = 5+5 = 10
+        active=5, count=3, confidence ~= 0.54, peak=29
+        formula = 55, discounted = int(55*0.54) = 29 — but peak bypasses
+        confidence → formula=55→32, peak=29 → target=29
+        ramp: 5+1=6
         """
         decision = compute_throttle_decision(
             current_max_runtime=10.0,
@@ -999,16 +1006,16 @@ class TestFormulaConfidence:
             active_workers=5,
             avg_base_time=2.1,
             completion_count=3,
+            peak_concurrency=29,  # Post-peak to bypass pre-peak cap
         )
-        assert decision.recommended_workers == 10  # geometric: 5 + 5 = 10
+        assert decision.recommended_workers == 6  # ramp: 5+1=6
         assert "ramped from 5" in decision.reason
 
     def test_confidence_causes_earlier_throttle(self):
-        """Low confidence can cause throttling even when raw formula wouldn't.
+        """Low confidence with pre-peak step cap causes throttling.
 
         base_time=5.0, timeout=180, base_workers=8
-        raw formula = int(117/5) = 23 → capped to 8 → no throttle
-        With count=1, confidence=0.30: int(23*0.30) = 6 → 6 < 8 → throttle!
+        raw formula = int(117/5) = 23 → pre-peak step target=2 < 8 → throttle
         """
         decision = compute_throttle_decision(
             current_max_runtime=0.0,
@@ -1017,9 +1024,10 @@ class TestFormulaConfidence:
             active_workers=0,
             avg_base_time=5.0,
             completion_count=1,
+            level_counts={1: PRE_PEAK_SAMPLES_PER_LEVEL},  # level 1 done → step target=2
         )
         assert decision.should_throttle
-        assert decision.recommended_workers == 6
+        assert decision.recommended_workers == 2
 
     def test_negative_count_returns_min(self):
         """Defensive: negative count treated same as zero."""
@@ -1725,7 +1733,7 @@ class TestExplorationInThrottleDecision:
     def test_emergency_overrides_exploration(self):
         """Emergency throttle overrides exploration."""
         decision = compute_throttle_decision(
-            current_max_runtime=110.0,  # 61% of 180
+            current_max_runtime=145.0,  # 81% of 180
             tier_timeout=180.0,
             base_workers=8,
             active_workers=4,
@@ -1756,101 +1764,179 @@ class TestExplorationInThrottleDecision:
         assert "ramped from 3" in decision.reason
 
 
-class TestGeometricRamp:
-    """Tests for geometric ramp-up in pre-peak phase."""
+class TestPrePeakCeiling:
+    """Tests for pre-peak worker ceiling (PRE_PEAK_MAX_WORKERS)."""
 
-    # --- Unit tests for _compute_ramp_increment ---
+    def test_pre_peak_caps_formula(self):
+        """Pre-peak: formula is capped at step-wise target.
 
-    def test_pre_peak_from_zero(self):
-        """From 0 active workers, increment is 1 (max(1, 0))."""
-        assert _compute_ramp_increment(0, None) == 1
-
-    def test_pre_peak_from_one(self):
-        """From 1 active worker, doubles: increment = 1."""
-        assert _compute_ramp_increment(1, None) == 1
-
-    def test_pre_peak_from_two(self):
-        """From 2 active workers, doubles: increment = 2."""
-        assert _compute_ramp_increment(2, None) == 2
-
-    def test_pre_peak_from_four(self):
-        """From 4 active workers, doubles: increment = 4."""
-        assert _compute_ramp_increment(4, None) == 4
-
-    def test_pre_peak_from_eight(self):
-        """From 8 active workers, doubles: increment = 8."""
-        assert _compute_ramp_increment(8, None) == 8
-
-    def test_pre_peak_from_sixteen(self):
-        """From 16 active workers, doubles: increment = 16."""
-        assert _compute_ramp_increment(16, None) == 16
-
-    def test_post_peak_always_one(self):
-        """With peak detected, always returns MAX_RAMP_INCREMENT (1)."""
-        for active in [1, 2, 4, 8, 16, 32]:
-            assert _compute_ramp_increment(active, 6) == MAX_RAMP_INCREMENT
-
-    # --- Integration tests via compute_throttle_decision ---
-
-    def test_geometric_ramp_sequence_no_data(self):
-        """No-data path uses geometric ramp: 1→2→4→8.
-
-        active=1, base=32, no data → geometric: 1+1=2
-        active=2, base=32, no data → geometric: 2+2=4
-        active=4, base=32, no data → geometric: 4+4=8
+        base_time=5.0 → formula=int(117/5)=23, but pre-peak step target=2
+        (level 1 done, level 2 not yet)
         """
-        for active, expected in [(1, 2), (2, 4), (4, 8), (8, 16)]:
-            decision = compute_throttle_decision(
-                current_max_runtime=5.0,
-                tier_timeout=180.0,
-                base_workers=32,
-                active_workers=active,
-                throughput=0.5,
-                avg_runtime=3.0,
-                completion_count=1,  # No avg_base_time → no-data path
-            )
-            assert decision.recommended_workers == expected, (
-                f"active={active}: expected {expected}, got {decision.recommended_workers}"
-            )
+        decision = compute_throttle_decision(
+            current_max_runtime=0.0,
+            tier_timeout=180.0,
+            base_workers=32,
+            active_workers=0,
+            avg_base_time=5.0,
+            completion_count=30,
+            level_counts={1: PRE_PEAK_SAMPLES_PER_LEVEL},  # level 1 done, step target=2
+        )
+        assert decision.recommended_workers == PRE_PEAK_MAX_WORKERS
+        assert decision.should_throttle
 
-    def test_geometric_ramp_capped_by_base_workers(self):
-        """Geometric ramp doesn't exceed base_workers.
+    def test_post_peak_lifts_cap(self):
+        """Post-peak: cap is removed, formula/peak determine target.
 
-        active=4, base=6, no data → geometric increment=4, but delta=2 → 4+2=6
+        peak=8, formula=23 → target=8
+        """
+        decision = compute_throttle_decision(
+            current_max_runtime=0.0,
+            tier_timeout=180.0,
+            base_workers=32,
+            active_workers=0,
+            avg_base_time=5.0,
+            completion_count=30,
+            peak_concurrency=8,
+        )
+        assert decision.recommended_workers == 8
+
+    def test_no_data_path_respects_step_target(self):
+        """No-data path: ramps to step target, not beyond.
+
+        active=1, no data, step target=2 (level 1 done) → ramp: 1+1=2
         """
         decision = compute_throttle_decision(
             current_max_runtime=5.0,
             tier_timeout=180.0,
-            base_workers=6,
-            active_workers=4,
+            base_workers=32,
+            active_workers=1,
             throughput=0.5,
             avg_runtime=3.0,
             completion_count=1,
+            level_counts={1: PRE_PEAK_SAMPLES_PER_LEVEL},  # level 1 done → step target=2
         )
-        assert decision.recommended_workers == 6
+        assert decision.recommended_workers == 2
 
-    def test_geometric_ramp_capped_by_formula(self):
-        """Geometric ramp doesn't exceed formula ceiling.
+    def test_no_data_path_holds_at_step_target(self):
+        """No-data path: stays at step target when already there.
 
-        active=4, no peak, count=30 (full confidence)
-        base_time=20 → formula = int(117/20) = 5
-        target=5, delta=1, geometric increment=min(4,1)=1 → ramped=5
+        active=2, step target=2 (level 1 done, level 2 not yet) → stays at 2
+        """
+        decision = compute_throttle_decision(
+            current_max_runtime=5.0,
+            tier_timeout=180.0,
+            base_workers=32,
+            active_workers=2,
+            throughput=0.5,
+            avg_runtime=3.0,
+            completion_count=1,
+            level_counts={1: PRE_PEAK_SAMPLES_PER_LEVEL},  # level 1 done → step target=2
+        )
+        assert decision.recommended_workers == 2
+
+    def test_pre_peak_step_ramp_sequence(self):
+        """Pre-peak ramp holds at each step target.
+
+        Step target changes as levels fill: hold at 1, then advance to 2.
+        The no-data path caps at the current step target.
+        """
+        # All levels empty → step target=1, active=1 → stays at 1
+        decision = compute_throttle_decision(
+            current_max_runtime=5.0,
+            tier_timeout=180.0,
+            base_workers=32,
+            active_workers=1,
+            throughput=0.5,
+            avg_runtime=3.0,
+            completion_count=1,
+            level_counts={},  # no data → step target=1
+        )
+        assert decision.recommended_workers == 1
+
+        # Level 1 done → step target=2, active=1 → ramp to 2
+        decision = compute_throttle_decision(
+            current_max_runtime=5.0,
+            tier_timeout=180.0,
+            base_workers=32,
+            active_workers=1,
+            throughput=0.5,
+            avg_runtime=3.0,
+            completion_count=1,
+            level_counts={1: PRE_PEAK_SAMPLES_PER_LEVEL},  # level 1 done → step target=2
+        )
+        assert decision.recommended_workers == 2
+
+        # Level 1 done, active already at 2 → holds at 2
+        decision = compute_throttle_decision(
+            current_max_runtime=5.0,
+            tier_timeout=180.0,
+            base_workers=32,
+            active_workers=2,
+            throughput=0.5,
+            avg_runtime=3.0,
+            completion_count=1,
+            level_counts={1: PRE_PEAK_SAMPLES_PER_LEVEL},  # level 1 done → step target=2
+        )
+        assert decision.recommended_workers == 2
+
+    def test_emergency_works_pre_peak(self):
+        """Pre-peak: emergency still fires normally.
+
+        current_max=100s, tier_timeout=120s → 83% > 80% → emergency → 1
+        """
+        decision = compute_throttle_decision(
+            current_max_runtime=100.0,
+            tier_timeout=120.0,
+            base_workers=32,
+            active_workers=4,
+            avg_base_time=1.5,
+            completion_count=30,
+            level_counts={1: 5, 2: 3},  # pre-peak active
+        )
+        assert decision.recommended_workers == 1
+        assert "Emergency" in decision.reason
+
+    def test_hold_works_pre_peak(self):
+        """Pre-peak: hold still fires normally.
+
+        current_max=65s, tier_timeout=120s → 54% > 50% → hold
+        active=2, no data → hold at 2
+        """
+        decision = compute_throttle_decision(
+            current_max_runtime=65.0,
+            tier_timeout=120.0,
+            base_workers=32,
+            active_workers=2,
+            throughput=0.5,
+            avg_runtime=3.0,
+            completion_count=1,
+            level_counts={1: 3},  # pre-peak active
+        )
+        assert decision.recommended_workers == 2  # Held
+        assert "holding" in decision.reason
+
+    def test_exploration_lifts_cap(self):
+        """When exploration_target is set, pre-peak cap is lifted.
+
+        exploration=6, peak=4 → cap lifted, target=6
         """
         decision = compute_throttle_decision(
             current_max_runtime=10.0,
             tier_timeout=180.0,
             base_workers=32,
             active_workers=4,
-            avg_base_time=20.0,
+            avg_base_time=5.0,
             completion_count=30,
+            peak_concurrency=4,
+            exploration_target=6,
         )
-        assert decision.recommended_workers == 5
+        assert decision.recommended_workers == 5  # Ramped from 4 toward 6
 
     def test_post_peak_ramp_is_plus_one(self):
-        """With peak detected, ramp is +1 regardless of active count.
+        """Post-peak: +1 ramp toward peak target.
 
-        active=4, peak=8, formula=23, target=8
-        Post-peak → increment=1, ramped=5
+        active=4, peak=8, formula=23 → target=8, ramp: 4+1=5
         """
         decision = compute_throttle_decision(
             current_max_runtime=10.0,
@@ -1863,11 +1949,46 @@ class TestGeometricRamp:
         )
         assert decision.recommended_workers == 5
 
-    def test_post_peak_ramp_from_eight(self):
-        """Post-peak with higher active count still +1.
+    def test_step_graduation_lifts_cap(self):
+        """Once all levels 1..PRE_PEAK_MAX_WORKERS have enough data, cap lifts.
 
-        active=8, peak=16, formula=23, target=16
-        Post-peak → increment=1, ramped=9
+        All levels done → step target = PRE_PEAK_MAX_WORKERS+1 → no cap
+        formula = int(117/5) = 23 → recommended = 23
+        """
+        all_done = dict.fromkeys(range(1, PRE_PEAK_MAX_WORKERS + 1), PRE_PEAK_SAMPLES_PER_LEVEL)
+        decision = compute_throttle_decision(
+            current_max_runtime=0.0,
+            tier_timeout=180.0,
+            base_workers=32,
+            active_workers=0,
+            avg_base_time=5.0,
+            completion_count=30,
+            level_counts=all_done,
+        )
+        # Cap lifted: formula = int(117/5) = 23
+        assert decision.recommended_workers == 23
+        assert decision.should_throttle
+
+    def test_no_level_counts_skips_pre_peak(self):
+        """Without level_counts, pre-peak step-wise logic is inactive.
+
+        formula = int(117/5) = 23 → no cap applied
+        """
+        decision = compute_throttle_decision(
+            current_max_runtime=0.0,
+            tier_timeout=180.0,
+            base_workers=32,
+            active_workers=0,
+            avg_base_time=5.0,
+            completion_count=30,
+            # No level_counts → pre-peak inactive
+        )
+        assert decision.recommended_workers == 23
+
+    def test_post_peak_ramp_from_eight(self):
+        """Post-peak: +1 ramp from higher active count.
+
+        active=8, peak=16, formula=23 → target=16, ramp: 8+1=9
         """
         decision = compute_throttle_decision(
             current_max_runtime=10.0,
@@ -1880,83 +2001,183 @@ class TestGeometricRamp:
         )
         assert decision.recommended_workers == 9
 
-    def test_geometric_full_sequence_integration(self):
-        """Full geometric sequence with base_workers=32 and no peak.
 
-        Simulates consecutive decisions with increasing active_workers.
-        Each step doubles: 1→2→4→8→16→32.
-        Uses the no-data path (no avg_base_time).
-        """
-        active = 1
-        sequence = [active]
-        for _ in range(5):
-            decision = compute_throttle_decision(
-                current_max_runtime=5.0,
-                tier_timeout=180.0,
-                base_workers=32,
-                active_workers=active,
-                throughput=0.5,
-                avg_runtime=3.0,
-                completion_count=1,
-            )
-            active = decision.recommended_workers
-            sequence.append(active)
-        assert sequence == [1, 2, 4, 8, 16, 32]
+class TestPrePeakTarget:
+    """Tests for _compute_pre_peak_target helper."""
 
-    # --- Hold exemption tests ---
+    def test_none_returns_level_1(self):
+        """None level_counts → target level 1."""
+        assert _compute_pre_peak_target(None) == 1
 
-    def test_pre_peak_skips_hold_no_data_path(self):
-        """Pre-peak: no-data path ramps even when max exceeds hold threshold.
+    def test_empty_returns_level_1(self):
+        """Empty level_counts → target level 1."""
+        assert _compute_pre_peak_target({}) == 1
 
-        tier_timeout=60, hold_threshold=18s, current_max=25s (>18s)
-        Without peak → hold skipped, geometric ramp fires.
-        active=4, base=32 → 4+4=8
-        """
-        decision = compute_throttle_decision(
-            current_max_runtime=25.0,  # 42% of 60s, above 30% hold threshold
-            tier_timeout=60.0,
+    def test_level_1_partial(self):
+        """Level 1 has some data but not enough → target stays 1."""
+        assert _compute_pre_peak_target({1: PRE_PEAK_SAMPLES_PER_LEVEL - 1}) == 1
+
+    def test_level_1_done(self):
+        """Level 1 has enough data → target advances to 2."""
+        assert _compute_pre_peak_target({1: PRE_PEAK_SAMPLES_PER_LEVEL}) == 2
+
+    def test_levels_1_2_done(self):
+        """Levels 1-2 done → target advances to 3."""
+        counts = {1: PRE_PEAK_SAMPLES_PER_LEVEL, 2: PRE_PEAK_SAMPLES_PER_LEVEL}
+        assert _compute_pre_peak_target(counts) == 3
+
+    def test_all_levels_done(self):
+        """All levels 1..PRE_PEAK_MAX_WORKERS done → graduated."""
+        counts = dict.fromkeys(range(1, PRE_PEAK_MAX_WORKERS + 1), PRE_PEAK_SAMPLES_PER_LEVEL)
+        assert _compute_pre_peak_target(counts) == PRE_PEAK_MAX_WORKERS + 1
+
+    def test_gap_in_middle(self):
+        """Level 1 done, level 2 missing → target=2 (sequential)."""
+        counts = {1: PRE_PEAK_SAMPLES_PER_LEVEL, 3: PRE_PEAK_SAMPLES_PER_LEVEL}
+        assert _compute_pre_peak_target(counts) == 2
+
+    def test_extra_samples_ok(self):
+        """More than needed samples at a level still counts as done."""
+        counts = {1: PRE_PEAK_SAMPLES_PER_LEVEL + 10, 2: PRE_PEAK_SAMPLES_PER_LEVEL + 5}
+        assert _compute_pre_peak_target(counts) == 3
+
+
+class TestGoldenSectionSearch:
+    """Tests for golden section search."""
+
+    def test_converges_on_known_peak(self):
+        """GSS should find the optimal level within a few steps."""
+        # Simulate: base_time is minimal at level 8
+        # base_time(x) = |x - 8| + 1 (V-shaped, minimum at 8)
+        gss = GoldenSectionSearch(lo=1, hi=32)
+        level_data: dict[int, float] = {}
+        steps = 0
+        while not gss.converged and steps < 15:
+            probe = gss.get_next_probe(level_data)
+            if probe is None:
+                break
+            level_data[probe] = abs(probe - 8) + 1.0  # simulated base_time
+            steps += 1
+        assert gss.converged
+        assert gss.best_level is not None
+        assert abs(gss.best_level - 8) <= 2  # Within 2 of true optimum
+        assert steps <= 10  # Should converge in ~8 steps for range 32
+
+    def test_converges_with_existing_data(self):
+        """GSS should use pre-existing data from pre-peak exploration."""
+        gss = GoldenSectionSearch(lo=1, hi=32)
+        # Pre-peak already collected data at levels 1 and 2
+        level_data = {1: 5.0, 2: 3.5}  # level 2 is better
+        probe = gss.get_next_probe(level_data)
+        assert probe is not None
+        assert probe > 2  # Should probe higher since both are low
+
+    def test_small_bracket_converges_immediately(self):
+        """Bracket of size <= 2 should converge immediately."""
+        gss = GoldenSectionSearch(lo=5, hi=7)
+        level_data = {5: 3.0, 6: 2.0, 7: 4.0}
+        probe = gss.get_next_probe(level_data)
+        assert probe is None
+        assert gss.converged
+        assert gss.best_level == 6
+
+    def test_peak_at_boundary_low(self):
+        """GSS should handle peak at the lower boundary."""
+        gss = GoldenSectionSearch(lo=1, hi=16)
+        level_data: dict[int, float] = {}
+        while not gss.converged:
+            probe = gss.get_next_probe(level_data)
+            if probe is None:
+                break
+            level_data[probe] = float(probe)  # base_time increases with level
+        assert gss.best_level is not None
+        assert gss.best_level <= 3  # Should converge near 1
+
+    def test_peak_at_boundary_high(self):
+        """GSS should handle peak at the upper boundary."""
+        gss = GoldenSectionSearch(lo=1, hi=16)
+        level_data: dict[int, float] = {}
+        while not gss.converged:
+            probe = gss.get_next_probe(level_data)
+            if probe is None:
+                break
+            level_data[probe] = 16.0 - probe  # base_time decreases with level
+        assert gss.best_level is not None
+        assert gss.best_level >= 14  # Should converge near 16
+
+    def test_already_converged_returns_none(self):
+        """Calling get_next_probe after convergence should return None."""
+        gss = GoldenSectionSearch(lo=5, hi=7)
+        level_data = {5: 3.0, 6: 2.0, 7: 4.0}
+        gss.get_next_probe(level_data)
+        assert gss.converged
+        assert gss.get_next_probe(level_data) is None
+
+    def test_finalize_with_no_data_uses_midpoint(self):
+        """Finalize with no data in bracket should use midpoint."""
+        gss = GoldenSectionSearch(lo=10, hi=12)
+        level_data: dict[int, float] = {}  # No data in [10, 12]
+        gss.get_next_probe(level_data)
+        assert gss.converged
+        assert gss.best_level == 11  # midpoint of (10 + 12) // 2
+
+    def test_integration_with_throttle_decision_gss_probe(self):
+        """GSS probe should override normal ramp in throttle decision."""
+        result = compute_throttle_decision(
+            current_max_runtime=5.0,
+            tier_timeout=120.0,
             base_workers=32,
-            active_workers=4,
-            throughput=0.5,
-            avg_runtime=3.0,
-            completion_count=1,
+            active_workers=2,
+            avg_base_time=3.0,
+            completion_count=20,
+            gss_probe=12,
         )
-        assert decision.recommended_workers == 8  # Geometric: 4+4, not held at 4
+        # GSS jumps directly — should reach the probe level (capped by formula)
+        assert result.recommended_workers == 12
+        assert result.gss_probe == 12
 
-    def test_pre_peak_skips_hold_main_ramp(self):
-        """Pre-peak: main ramp path skips hold even with long-running task.
-
-        tier_timeout=60, hold_threshold=18s, current_max=25s (>18s)
-        No peak → hold skipped, geometric ramp fires.
-        effective_base = max(0.5, 25/8=3.125) = 3.125
-        formula = int(39/3.125) = 12, target=12
-        active=8, geometric: min(8, 12-8)=4 → ramped=12
-        """
-        decision = compute_throttle_decision(
-            current_max_runtime=25.0,  # Above 30% hold threshold
-            tier_timeout=60.0,
+    def test_gss_probe_respects_formula_cap(self):
+        """GSS probe should not exceed formula safety cap."""
+        result = compute_throttle_decision(
+            current_max_runtime=5.0,
+            tier_timeout=30.0,  # Short timeout → formula caps low
             base_workers=32,
-            active_workers=8,
-            avg_base_time=0.5,  # Fast base time, but normalized_max dominates
-            completion_count=30,
+            active_workers=2,
+            avg_base_time=5.0,
+            completion_count=25,
+            gss_probe=20,
         )
-        assert decision.recommended_workers == 12  # Geometric: 8+4, not held at 8
-        assert "ramped from 8" in decision.reason
+        # Formula: (30 * 0.65) / 5.0 = 3.9 → 3 workers
+        assert result.recommended_workers < 20  # Formula should cap it
+        assert result.recommended_workers <= 4
 
-    def test_post_peak_holds_on_long_task(self):
-        """Post-peak: hold fires normally when max exceeds threshold.
-
-        peak=12, tier_timeout=60, hold_threshold=18s, current_max=25s
-        Peak detected → hold applies, stays at active.
-        """
-        decision = compute_throttle_decision(
-            current_max_runtime=25.0,  # Above 30% hold threshold
-            tier_timeout=60.0,
+    def test_gss_probe_none_falls_through(self):
+        """When gss_probe is None, normal peak/exploration logic applies."""
+        result = compute_throttle_decision(
+            current_max_runtime=5.0,
+            tier_timeout=120.0,
             base_workers=32,
-            active_workers=8,
-            avg_base_time=0.5,
-            completion_count=30,
-            peak_concurrency=12,
+            active_workers=5,
+            avg_base_time=3.0,
+            completion_count=20,
+            peak_concurrency=8,
+            gss_probe=None,
         )
-        assert decision.recommended_workers == 8  # Held, not ramped
-        assert "holding" in decision.reason
+        assert result.gss_probe is None
+        # Should use peak_concurrency logic, not GSS
+
+    def test_monotonic_convergence(self):
+        """Bracket should monotonically shrink each step."""
+        gss = GoldenSectionSearch(lo=1, hi=32)
+        level_data: dict[int, float] = {}
+        prev_range = gss.hi - gss.lo
+
+        while not gss.converged:
+            probe = gss.get_next_probe(level_data)
+            if probe is None:
+                break
+            level_data[probe] = abs(probe - 15) + 1.0
+
+            current_range = gss.hi - gss.lo
+            assert current_range <= prev_range  # Never expands
+            prev_range = current_range
