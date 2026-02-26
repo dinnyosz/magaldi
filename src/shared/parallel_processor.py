@@ -27,7 +27,6 @@ from shared.ai.context_size import TIER_MAX_WORKERS, TIER_TIMEOUTS, iter_by_tier
 from shared.throttling import (
     GoldenSectionSearch,
     ThrottleDecision,
-    ThroughputByLevel,
     ThroughputTracker,
     compute_throttle_decision,
     get_ramp_cooldown,
@@ -458,10 +457,18 @@ class ThrottleContext:
             self._gss = GoldenSectionSearch(lo=1, hi=self.base_workers)
 
         if self._gss is not None and not self._gss.converged:
-            # Build level_data: level -> avg_base_time for qualified levels
+            # Build level_data: level -> avg_base_time for GSS decisions.
+            # Use flat EXPLORE_MIN_SAMPLES (not proportional) because:
+            # 1. GSS only needs directional comparisons ("is A better than B?"),
+            #    not high-confidence peak detection
+            # 2. Running at level N organically accumulates data at nearby levels
+            #    (tasks record at max(start_workers, end_workers)), so proportional
+            #    thresholds (level*2) would waste time waiting for data that's
+            #    already good enough for a comparison
+            from shared.throttling import EXPLORE_MIN_SAMPLES
             level_data = {
                 lvl: bt for lvl, (bt, cnt) in all_levels.items()
-                if cnt >= ThroughputByLevel._min_samples_for_level(lvl)
+                if cnt >= EXPLORE_MIN_SAMPLES
             }
             gss_probe = self._gss.get_next_probe(level_data)
             if self._gss.converged:
