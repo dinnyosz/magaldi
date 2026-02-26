@@ -837,14 +837,17 @@ class ProbabilityMap:
     """Independent per-level scores for probe steering.
 
     Each level has an independent score in [0.0, 1.0] indicating how likely
-    it is to be the optimal concurrency. Updated via Gaussian kernel: good
-    performance boosts a level and neighbors, bad performance penalizes them.
-    Decay falls off with distance. Scores are NOT normalized — each level
-    stands alone.
+    it is to be the optimal concurrency.
+
+    Two-pass scoring:
+    1. Measured levels get direct scores: best time → 1.0, worst → 0.0.
+    2. Unmeasured levels get Gaussian-weighted average from nearby measured
+       levels, blended with neutral (0.5) by distance. This spreads signal
+       to neighbors without compounding — each set_scores() call is a full
+       replacement.
 
     Activation guard: only activates after sufficient geometric probes to
-    prevent sequential walking from the low end. The threshold scales with
-    bracket width (sigma = max(2, bracket_width // 6)).
+    prevent sequential walking from the low end.
     """
 
     # Minimum geometric probes before probability map activates
@@ -853,10 +856,10 @@ class ProbabilityMap:
     def __init__(self, lo: int, hi: int):
         self.lo = lo
         self.hi = hi
-        self._probs: dict[int, float] = {}  # level -> probability
+        self._probs: dict[int, float] = {}  # level -> score
         self._sigma = max(2, (hi - lo) // 6)
         self._activation_threshold = max(self.ACTIVATION_MIN, self._sigma)
-        self._geometric_probes = 0  # count of GSS geometric probes completed
+        self._geometric_probes = 0
         self._initialized = False
 
     @property
@@ -874,35 +877,60 @@ class ProbabilityMap:
             self._probs = dict.fromkeys(range(self.lo, self.hi + 1), 0.5)
             self._initialized = True
 
-    # Maximum score change per update at distance=0
-    _STEP_SCALE = 0.15
+    def set_scores(self, level_base_times: dict[int, float]) -> None:
+        """Set scores from base_time data with Gaussian neighbor spread.
 
-    def update(self, level: int, is_good: bool, strength: float = 1.0) -> None:
-        """Update scores using Gaussian kernel around level.
-
-        Good performance boosts the level and its neighbors; bad performance
-        penalizes them. Effect decays with distance via Gaussian curve.
-        Scores are independent per level (not normalized to sum=1).
-
-        The step is scaled by _STEP_SCALE (0.15) so a single update doesn't
-        saturate — signals accumulate over multiple observations.
+        Pass 1: Measured levels get direct scores (best→1.0, worst→0.0).
+        Pass 2: Unmeasured levels get Gaussian-weighted average of nearby
+        measured scores, blended with neutral (0.5). Far-away unmeasured
+        levels stay near 0.5.
 
         Args:
-            level: The concurrency level with new data.
-            is_good: True = boost score, False = penalize.
-            strength: Multiplier for the effect (0.0-1.0).
+            level_base_times: Dict of level -> avg_base_time for levels with data.
         """
         self._ensure_initialized()
-        sigma = self._sigma
+        if len(level_base_times) < 2:
+            return  # Need 2+ levels for meaningful comparison
 
-        for lvl in range(self.lo, self.hi + 1):
-            dist = abs(lvl - level)
-            effect = self._STEP_SCALE * strength * math.exp(-(dist ** 2) / (2 * sigma ** 2))
+        best_bt = min(level_base_times.values())
+        worst_bt = max(level_base_times.values())
+        bt_spread = worst_bt - best_bt
 
-            if is_good:
-                self._probs[lvl] = min(1.0, self._probs.get(lvl, 0.5) + effect)
+        # Pass 1: score measured levels directly
+        measured_scores: dict[int, float] = {}
+        for lvl in level_base_times:
+            if bt_spread > 0:
+                measured_scores[lvl] = 1.0 - (level_base_times[lvl] - best_bt) / bt_spread
             else:
-                self._probs[lvl] = max(0.0, self._probs.get(lvl, 0.5) - effect)
+                measured_scores[lvl] = 0.5
+            self._probs[lvl] = measured_scores[lvl]
+
+        # Pass 2: spread to unmeasured neighbors via Gaussian kernel
+        sigma = self._sigma
+        for lvl in range(self.lo, self.hi + 1):
+            if lvl in measured_scores:
+                continue  # Already scored directly
+
+            # Gaussian-weighted average of nearby measured scores
+            weight_sum = 0.0
+            score_sum = 0.0
+            for m_lvl, m_score in measured_scores.items():
+                dist = abs(lvl - m_lvl)
+                w = math.exp(-(dist ** 2) / (2 * sigma ** 2))
+                weight_sum += w
+                score_sum += w * m_score
+
+            if weight_sum > 0:
+                neighbor_score = score_sum / weight_sum
+                # Blend with neutral — farther from any measured level = more neutral
+                max_weight = max(
+                    math.exp(-(abs(lvl - m) ** 2) / (2 * sigma ** 2))
+                    for m in measured_scores
+                )
+                # max_weight is 1.0 when adjacent, decays with distance
+                self._probs[lvl] = max_weight * neighbor_score + (1 - max_weight) * 0.5
+            else:
+                self._probs[lvl] = 0.5
 
     def get_best_unqualified(
         self, qualified_levels: set[int], bracket_lo: int, bracket_hi: int
