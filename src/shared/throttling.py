@@ -606,7 +606,7 @@ class GoldenSectionSearch:
 
         Strategy:
         - lo = max(1, best_level // 2)
-        - hi = min(max_workers, best_level * 3)
+        - hi = min(max_workers, best_level * 6)
         - Minimum bracket width of MIN_BRACKET to avoid premature convergence
 
         Falls back to [1, max_workers] if insufficient data (<2 levels).
@@ -616,11 +616,11 @@ class GoldenSectionSearch:
 
         best_level = min(level_data, key=level_data.get)  # type: ignore[arg-type]
 
-        # Asymmetric bracket: half below, triple above
-        # Wider upward because higher concurrency is common for optimum
-        # and pre-peak only explored low levels
+        # Asymmetric bracket: half below, 6x above
+        # Wide upward because pre-peak only explores levels 1-2, so
+        # best=2 just means "more is better" — real optimum could be 10+
         lo = max(1, best_level // 2)
-        hi = min(max_workers, best_level * 3)
+        hi = min(max_workers, best_level * 6)
 
         # Ensure minimum bracket width
         if hi - lo < cls.MIN_BRACKET:
