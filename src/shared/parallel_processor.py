@@ -529,7 +529,16 @@ class ThrottleContext:
                 else:
                     _log_throttle(f"GSS CONVERGED: best_level={self._gss.best_level}")
 
-        # If GSS converged, use its best_level as the effective peak
+        # If GSS converged, use its best_level as the effective peak.
+        # But keep updating it if new data shows a better level.
+        if self._gss and self._gss.converged and level_data:
+            actual_best = min(level_data, key=level_data.get)  # type: ignore[arg-type]
+            if (self._gss.best_level is None or level_data.get(actual_best, float("inf")) < level_data.get(self._gss.best_level, float("inf"))) and actual_best != self._gss.best_level:
+                    _log_throttle(
+                        f"PEAK UPDATE: {self._gss.best_level}→{actual_best} "
+                        f"(bt={level_data[actual_best]:.2f} vs {level_data.get(self._gss.best_level, 0):.2f})"
+                    )
+                    self._gss.best_level = actual_best
         effective_peak = self._gss.best_level if (self._gss and self._gss.converged) else peak
 
         # Only use legacy exploration when GSS is not active

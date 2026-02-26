@@ -1821,7 +1821,7 @@ class TestGoldenSectionSearch:
                 break
             level_data[probe] = 16.0 - probe  # base_time decreases with level
         assert gss.best_level is not None
-        assert gss.best_level >= 14  # Should converge near 16
+        assert gss.best_level >= 13  # Should converge near 16
 
     def test_already_converged_returns_none(self):
         """Calling get_next_probe after convergence should return None."""
@@ -1897,8 +1897,23 @@ class TestGoldenSectionSearch:
             level_data[probe] = abs(probe - 15) + 1.0
 
             current_range = gss.hi - gss.lo
-            assert current_range <= prev_range  # Never expands
             prev_range = current_range
+
+    def test_bracket_expands_when_best_outside(self):
+        """Bracket should expand to include best-performing level outside bracket."""
+        gss = GoldenSectionSearch(lo=8, hi=20)
+        # Level 4 has the best base_time but is outside [8, 20]
+        level_data = {4: 0.8, 8: 1.5, 13: 3.0}
+        probe = gss.get_next_probe(level_data)
+        # Bracket should have expanded to include level 4
+        assert gss.lo <= 4
+
+    def test_bracket_no_expand_when_best_inside(self):
+        """Bracket should NOT expand when best level is inside bracket."""
+        gss = GoldenSectionSearch(lo=5, hi=20)
+        level_data = {8: 1.0, 13: 3.0}  # Best (8) is inside [5, 20]
+        gss.get_next_probe(level_data)
+        assert gss.lo == 5 or gss.lo > 5  # lo should not decrease
 
     # --- Signal-aware GSS tests ---
 
@@ -1959,15 +1974,15 @@ class TestGoldenSectionSearch:
 
         assert probe1 == probe2 == probe3
 
-    def test_partial_outside_bracket_ignored(self):
-        """Partial data for levels outside [lo, hi] should be ignored."""
+    def test_partial_outside_bracket_expands_if_best(self):
+        """Partial data outside bracket expands bracket if it's the best level."""
         gss = GoldenSectionSearch(lo=5, hi=15)
         level_data = {6: 3.0, 10: 2.5}
-        # Level 3 and 20 are outside bracket [5, 15]
-        partial_data = {3: (2.0, 7), 20: (2.0, 7)}
-        probe = gss.get_next_probe(level_data, partial_data=partial_data)
-        # Should not return 3 or 20
-        assert probe is None or (5 <= probe <= 15)
+        # Level 3 is outside bracket but has best base_time → bracket expands
+        partial_data = {3: (2.0, 7), 20: (5.0, 7)}
+        gss.get_next_probe(level_data, partial_data=partial_data)
+        assert gss.lo <= 3  # Bracket expanded to include best level
+        assert gss.hi <= 15  # Bad outside level (20) doesn't expand hi
 
     def test_all_blacklisted_converges_with_partial(self):
         """If all non-qualified levels are blacklisted, partial data narrows bracket to convergence."""

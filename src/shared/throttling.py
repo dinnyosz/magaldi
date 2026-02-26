@@ -641,16 +641,51 @@ class GoldenSectionSearch:
             self._finalize(level_data, partial_data)
             return None
 
-        # Step 1: Narrow bracket FIRST using any available data.
-        # Loop until we can't narrow further — ensures bracket shrinks
-        # every cycle, even when overrides would otherwise prevent it.
-        narrowing_data: dict[int, float] = dict(level_data)
+        # Step 0: Find best level across ALL data and protect it.
+        # The bracket must always contain the best-known level.
+        all_data: dict[int, float] = dict(level_data)
         if partial_data:
             for lvl, (bt, _cnt) in partial_data.items():
-                if lvl not in narrowing_data:
-                    narrowing_data[lvl] = bt
+                if lvl not in all_data:
+                    all_data[lvl] = bt
+        _best_known: int | None = None
+        if all_data:
+            _best_known = min(all_data, key=all_data.get)  # type: ignore[arg-type]
+            if _best_known < self.lo:
+                old_lo = self.lo
+                self.lo = _best_known
+                _log_throttle(
+                    f"GSS EXPAND lo: {old_lo}→{self.lo} "
+                    f"(level {_best_known} bt={all_data[_best_known]:.2f} is best)"
+                )
+            elif _best_known > self.hi:
+                old_hi = self.hi
+                self.hi = _best_known
+                _log_throttle(
+                    f"GSS EXPAND hi: {old_hi}→{self.hi} "
+                    f"(level {_best_known} bt={all_data[_best_known]:.2f} is best)"
+                )
 
-        while self.hi - self.lo > 5:
+        # Step 1: Narrow bracket using any available data.
+        # Loop until we can't narrow further — ensures bracket shrinks
+        # every cycle, even when overrides would otherwise prevent it.
+        # CRITICAL: Never narrow past the best-known level.
+        narrowing_data = all_data
+
+        def _nearest_data(target: int, data: dict[int, float], radius: int = 2) -> tuple[int, float] | None:
+            """Find nearest level with data within ±radius of target."""
+            if target in data:
+                return (target, data[target])
+            for offset in range(1, radius + 1):
+                for candidate in [target - offset, target + offset]:
+                    if candidate in data:
+                        return (candidate, data[candidate])
+            return None
+
+        _max_narrow_iters = 20  # Safety: prevent infinite loop
+        for _narrow_iter in range(_max_narrow_iters):
+            if self.hi - self.lo <= 5:
+                break
             m1 = round(self.hi - (self.hi - self.lo) / PHI)
             m2 = round(self.lo + (self.hi - self.lo) / PHI)
             m1 = max(self.lo + 1, min(m1, self.hi - 1))
@@ -658,18 +693,40 @@ class GoldenSectionSearch:
             if m1 == m2:
                 m2 = min(m1 + 1, self.hi - 1)
 
-            if m1 in narrowing_data and m2 in narrowing_data:
+            d1 = _nearest_data(m1, narrowing_data)
+            d2 = _nearest_data(m2, narrowing_data)
+
+            if d1 is not None and d2 is not None:
+                lvl1, bt1 = d1
+                lvl2, bt2 = d2
+                if lvl1 == lvl2:
+                    break  # Both probes matched same level — need more data
                 old_lo, old_hi = self.lo, self.hi
-                if narrowing_data[m1] <= narrowing_data[m2]:
-                    self.hi = m2
+                if bt1 <= bt2:
+                    # Lower region better — discard upper: narrow hi
+                    new_hi = min(lvl2, m2)  # Use tighter of actual/geometric
+                    # Never narrow below the best-known level
+                    if _best_known is not None:
+                        new_hi = max(new_hi, _best_known)
+                    if new_hi >= self.hi:
+                        break  # No progress
+                    self.hi = new_hi
                 else:
-                    self.lo = m1
-                _log_throttle(
-                    f"GSS NARROW: [{old_lo},{old_hi}]→[{self.lo},{self.hi}] "
-                    f"(m1={m1}:{narrowing_data[m1]:.2f}, m2={m2}:{narrowing_data[m2]:.2f})"
-                )
+                    # Upper region better — discard lower: narrow lo
+                    new_lo = max(lvl1, m1)  # Use tighter of actual/geometric
+                    # Never narrow above the best-known level
+                    if _best_known is not None:
+                        new_lo = min(new_lo, _best_known)
+                    if new_lo <= self.lo:
+                        break  # No progress
+                    self.lo = new_lo
+                if self.lo != old_lo or self.hi != old_hi:
+                    _log_throttle(
+                        f"GSS NARROW: [{old_lo},{old_hi}]→[{self.lo},{self.hi}] "
+                        f"(m1~{lvl1}:{bt1:.2f}, m2~{lvl2}:{bt2:.2f})"
+                    )
             else:
-                break  # Missing data at a probe point — need to collect it
+                break  # No nearby data — need to collect it
 
         if self.hi - self.lo <= 5:
             self._finalize(level_data, partial_data)
