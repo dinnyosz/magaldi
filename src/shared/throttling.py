@@ -1545,13 +1545,18 @@ def _build_levels_table(
             exploration_target, prob_map_data, p_min, p_range,
         )
 
-    tables: list[RenderableType] = [
-        _build_levels_row(
-            chunk, all_levels, min_bt, bt_range, peak_concurrency,
-            exploration_target, prob_map_data, p_min, p_range,
-        )  # type: ignore[misc]
-        for chunk in chunks
-    ]
+    from rich.text import Text
+
+    tables: list[RenderableType] = []
+    for i, chunk in enumerate(chunks):
+        if i > 0:
+            tables.append(Text(""))  # blank line between row groups
+        tables.append(
+            _build_levels_row(
+                chunk, all_levels, min_bt, bt_range, peak_concurrency,
+                exploration_target, prob_map_data, p_min, p_range,
+            )  # type: ignore[misc]
+        )
     return Group(*tables)
 
 
