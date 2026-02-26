@@ -68,7 +68,7 @@ TIER_MAX_WORKERS = {
 # NOTE: These are used for throttle calculations; Ollama may not enforce actual timeouts
 TIER_TIMEOUTS = {
     HANDCRAFTED_TIER: 30,  # 30 seconds - no LLM, very fast
-    1024: 60,    # 1 minute - tiny elements
+    1024: 120,   # 2 minutes - tiny elements
     2048: 120,   # 2 minutes
     4096: 120,   # 2 minutes
     8192: 180,   # 3 minutes
