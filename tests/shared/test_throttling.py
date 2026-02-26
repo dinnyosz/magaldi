@@ -1310,6 +1310,177 @@ class TestExplorationTarget:
         assert tracker.get_exploration_target(max_level=30) == 14
 
 
+class TestExplorationScoring:
+    """Tests for scoring-based exploration target selection.
+
+    Verifies that the scoring formula correctly weighs completion progress,
+    proximity to peak, trend direction, and exploration cost.
+    """
+
+    def test_prefers_partially_explored_over_empty(self):
+        """Level with partial data scores higher than empty level at same distance.
+
+        Peak at 4. Level 5 has 5/10 samples (50% complete).
+        Level 3 has 0/10 (0%). Both at distance 1, but level 5 wins
+        on completion score (0.40 weight).
+        """
+        tracker = ThroughputByLevel()
+        for _ in range(12):
+            tracker.record(4, 4.0)  # peak (12 >= 10)
+        for _ in range(10):
+            tracker.record(2, 6.0)  # second level for peak detection
+        for _ in range(5):
+            tracker.record(5, 5.0)  # partial data (5/10)
+        # Level 5 at 50% completion beats level 3 at 0%
+        assert tracker.get_exploration_target(max_level=8) == 5
+
+    def test_trend_upward_prefers_higher_level(self):
+        """When base time decreases at higher levels, explore upward.
+
+        Level 2: base=3.0, Level 4: base=2.0, Level 6: base=1.5 (peak)
+        Trend is negative (improving upward) → prefer level 7 over level 5.
+        """
+        tracker = ThroughputByLevel()
+        for _ in range(10):
+            tracker.record(2, 6.0)   # base=3.0
+        for _ in range(10):
+            tracker.record(4, 8.0)   # base=2.0
+        for _ in range(12):
+            tracker.record(6, 9.0)   # base=1.5 (peak)
+        # 3 explored levels → reliable trend, slope < 0
+        # Level 7 (above peak, trend-aligned) beats level 5 (below peak)
+        result = tracker.get_exploration_target(max_level=10)
+        assert result == 7
+
+    def test_trend_downward_prefers_lower_level(self):
+        """When base time increases at higher levels, explore downward.
+
+        Level 2: base=1.0 (peak), Level 4: base=2.0, Level 6: base=3.0
+        Trend is positive (worsening upward) → prefer level 1 over level 3.
+        """
+        tracker = ThroughputByLevel()
+        for _ in range(10):
+            tracker.record(2, 2.0)   # base=1.0 (peak)
+        for _ in range(10):
+            tracker.record(4, 8.0)   # base=2.0
+        for _ in range(12):
+            tracker.record(6, 18.0)  # base=3.0
+        # Trend positive (worsening upward) → explore below peak
+        result = tracker.get_exploration_target(max_level=10)
+        assert result == 1
+
+    def test_insufficient_trend_data_no_bias(self):
+        """With only 2 explored levels, trend is neutral (score=0.5 for all).
+
+        Selection falls back to completion + proximity + cost.
+        Upward-first tiebreak applies when scores are equal.
+        """
+        tracker = ThroughputByLevel()
+        for _ in range(11):
+            tracker.record(4, 4.0)  # peak
+        for _ in range(10):
+            tracker.record(2, 6.0)  # second level
+        # Only 2 explored levels → no trend signal
+        # Level 5 (dist=1, above peak) and level 3 (dist=1, below peak)
+        # have same proximity and neutral trend → upward-first tiebreak → 5
+        result = tracker.get_exploration_target(max_level=8)
+        assert result == 5
+
+    def test_completion_dominates_when_nearly_done(self):
+        """A level at 85% completion beats a closer level at 0%.
+
+        Peak at 5. Level 7 has 12/14 data (distance=2, 85% complete).
+        Level 6 has 0/12 data (distance=1, 0% complete).
+        Completion weight (0.40) overcomes proximity advantage.
+        """
+        tracker = ThroughputByLevel()
+        for _ in range(11):
+            tracker.record(5, 5.0)  # peak
+        for _ in range(10):
+            tracker.record(3, 9.0)  # second level for peak
+        for _ in range(12):
+            tracker.record(7, 10.5)  # partial: 12/14 needed (85%)
+        # Level 7 completion=0.857 vs level 6 completion=0.0
+        # Completion advantage (0.857 * 0.40 = 0.343) beats
+        # proximity advantage (0.67 vs 0.33 → 0.34 * 0.25 = 0.085)
+        result = tracker.get_exploration_target(max_level=10)
+        assert result == 7
+
+    def test_budget_filters_before_scoring(self):
+        """Budget check eliminates candidates before scoring.
+
+        With remaining=15, levels needing 10 samples require 10*3=30 > 15 → filtered.
+        """
+        tracker = ThroughputByLevel()
+        for _ in range(11):
+            tracker.record(3, 3.0)  # peak
+        for _ in range(10):
+            tracker.record(1, 5.0)  # second level
+        # All candidates need 10 samples: 10*3=30 > 15 → all filtered
+        assert tracker.get_exploration_target(max_level=8, remaining=15) is None
+
+    def test_budget_partial_data_passes_filter(self):
+        """Partial data reduces samples_left, passing budget filter.
+
+        Level 4 needs 10 samples, has 6 → only 4 left → 4*3=12 <= 15 → passes.
+        """
+        tracker = ThroughputByLevel()
+        for _ in range(11):
+            tracker.record(3, 3.0)  # peak
+        for _ in range(10):
+            tracker.record(1, 5.0)  # second level
+        for _ in range(6):
+            tracker.record(4, 6.0)  # partial: 6/10
+        # Level 4 needs 4 more: 4*3=12 <= 15 → passes budget
+        assert tracker.get_exploration_target(max_level=8, remaining=15) == 4
+
+    def test_scoring_deterministic(self):
+        """Same input always produces same output (no randomness)."""
+        tracker = ThroughputByLevel()
+        for _ in range(11):
+            tracker.record(4, 4.0)
+        for _ in range(10):
+            tracker.record(2, 6.0)
+        results = [tracker.get_exploration_target(max_level=8) for _ in range(10)]
+        assert len(set(results)) == 1  # All identical
+
+    def test_trend_with_flat_base_times(self):
+        """All explored levels have identical base time → flat trend → neutral.
+
+        No directional bias applied. Upward-first tiebreak applies.
+        """
+        tracker = ThroughputByLevel()
+        for _ in range(10):
+            tracker.record(2, 4.0)   # base=2.0
+        for _ in range(10):
+            tracker.record(4, 8.0)   # base=2.0
+        for _ in range(12):
+            tracker.record(6, 12.0)  # base=2.0
+        # All base times equal → slope=0 → trend neutral
+        result = tracker.get_exploration_target(max_level=10)
+        assert result is not None
+
+    def test_trend_computation_uses_only_explored_levels(self):
+        """Trend ignores levels that haven't reached significance threshold.
+
+        Only levels with enough samples contribute to the trend.
+        """
+        tracker = ThroughputByLevel()
+        for _ in range(10):
+            tracker.record(2, 6.0)   # base=3.0 (explored)
+        for _ in range(10):
+            tracker.record(4, 8.0)   # base=2.0 (explored)
+        for _ in range(12):
+            tracker.record(6, 9.0)   # base=1.5 (peak, explored)
+        # Add partial data at level 8 (only 3 samples, needs 16)
+        for _ in range(3):
+            tracker.record(8, 40.0)  # base=5.0 but NOT explored (3 < 16)
+        # Trend should still be negative (improving upward) from levels 2,4,6
+        # Level 8's high base time should NOT pollute the trend
+        result = tracker.get_exploration_target(max_level=10)
+        assert result == 7  # Still prefers upward (trend-aligned)
+
+
 class TestExplorationInThrottleDecision:
     """Tests for exploration_target parameter in compute_throttle_decision."""
 

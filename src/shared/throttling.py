@@ -494,9 +494,8 @@ class ThroughputByLevel:
 
                 # Budget filter (hard gate)
                 samples_left = needed - count
-                if remaining is not None:
-                    if remaining < samples_left * EXPLORE_BUDGET_MULTIPLIER:
-                        continue
+                if remaining is not None and remaining < samples_left * EXPLORE_BUDGET_MULTIPLIER:
+                    continue
 
                 # A) Completion score: partial progress = cheaper to finish
                 completion_score = count / needed if needed > 0 else 0.0
