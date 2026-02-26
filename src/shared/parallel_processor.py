@@ -477,22 +477,17 @@ class ThrottleContext:
             if GSS_PARTIAL_MIN_SAMPLES <= cnt < EXPLORE_MIN_SAMPLES
         }
 
-        # Delay GSS until enough levels have data for meaningful comparison.
-        # The formula + confidence system ramps organically (1→2→3...),
-        # spreading data across levels. GSS starts when at least 3 levels
-        # have partial data (3+ samples each), giving the probability map
-        # enough signal to steer probes intelligently.
-        _GSS_MIN_LEVELS = 3
-        levels_with_signal = sum(
-            1 for _, cnt in all_levels.values() if cnt >= GSS_PARTIAL_MIN_SAMPLES
-        ) if all_levels else 0
-        if self._gss is None and levels_with_signal >= _GSS_MIN_LEVELS:
+        # GSS warmup: stay at level 1 until EXPLORE_MIN_SAMPLES completions,
+        # then start GSS with a solid baseline. No pre-GSS formula ramp —
+        # level 1 gets proper data, then GSS probes golden-ratio points.
+        level1_count = all_levels.get(1, (0, 0))[1] if all_levels else 0
+        if self._gss is None and level1_count >= EXPLORE_MIN_SAMPLES:
             self._gss = GoldenSectionSearch(lo=1, hi=self.base_workers)
             self._prob_map = ProbabilityMap(lo=1, hi=self.base_workers)
             from shared.throttling import _log_throttle
             _log_throttle(
                 f"GSS INIT: bracket=[{self._gss.lo}, {self._gss.hi}] "
-                f"({levels_with_signal} levels with signal, max_workers={self.base_workers})"
+                f"(level 1 has {level1_count} samples, max_workers={self.base_workers})"
             )
 
         # Update probability map: direct score mapping from base_time data.
@@ -555,6 +550,13 @@ class ThrottleContext:
             gss_probe=gss_probe,
         )
         self.post_warmup = False  # Only signal once
+
+        # Pre-GSS: cap at 1 worker to build level-1 baseline.
+        # The formula would ramp to 32 otherwise, wasting samples.
+        if self._gss is None and throttle.recommended_workers > 1:
+            throttle.recommended_workers = 1
+            throttle.reason = "Warmup (building level 1 baseline)"
+
         # Attach per-level data for display (early returns in compute_throttle_decision
         # don't set these, so we always override from the source of truth)
         throttle.all_levels = all_levels if all_levels else None
