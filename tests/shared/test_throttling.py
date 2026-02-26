@@ -1969,16 +1969,18 @@ class TestGoldenSectionSearch:
         # Should not return 3 or 20
         assert probe is None or (5 <= probe <= 15)
 
-    def test_all_blacklisted_falls_through(self):
-        """If all non-qualified levels are blacklisted, falls through to geometric."""
+    def test_all_blacklisted_converges_with_partial(self):
+        """If all non-qualified levels are blacklisted, partial data narrows bracket to convergence."""
         gss = GoldenSectionSearch(lo=1, hi=10)
         level_data = {1: 1.0}  # best = 1.0
         # Blacklist everything in range: base_time > 1.0 * 1.5 = 1.5
         partial_data = {i: (5.0, 5) for i in range(2, 11)}
         probe = gss.get_next_probe(level_data, partial_data=partial_data)
-        # Should still return something — _nearest_non_blacklisted returns None,
-        # so signal-aware returns None, falls through to geometric
-        assert probe is not None
+        # Partial data allows bracket narrowing → converges quickly
+        # with best_level near 1 (the only good level)
+        assert probe is None  # Converged
+        assert gss.converged
+        assert gss.best_level == 1
 
     def test_promoted_level_integrates_naturally(self):
         """Promising partial level that gets promoted should narrow bracket normally."""

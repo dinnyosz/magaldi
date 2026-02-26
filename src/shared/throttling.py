@@ -636,8 +636,8 @@ class GoldenSectionSearch:
         if self.converged:
             return None
 
-        if self.hi - self.lo <= 2:
-            # Bracket is small enough — pick the best known level in [lo, hi]
+        if self.hi - self.lo <= 5:
+            # Bracket narrow enough — pick best known level in [lo, hi]
             self._finalize(level_data, partial_data)
             return None
 
@@ -670,17 +670,29 @@ class GoldenSectionSearch:
                 self._pending_probe = target
                 return target
 
-        have_m1 = m1 in level_data
-        have_m2 = m2 in level_data
+        # Build narrowing data: qualified data first, fall back to partial.
+        # Partial data (3+ samples) is reliable enough for directional comparison.
+        narrowing_data: dict[int, float] = dict(level_data)
+        if partial_data:
+            for lvl, (bt, _cnt) in partial_data.items():
+                if lvl not in narrowing_data:
+                    narrowing_data[lvl] = bt
+
+        have_m1 = m1 in narrowing_data
+        have_m2 = m2 in narrowing_data
 
         if have_m1 and have_m2:
             # Both probes have data — narrow the bracket
-            if level_data[m1] <= level_data[m2]:
+            if narrowing_data[m1] <= narrowing_data[m2]:
                 # m1 is better (lower base_time) → optimum in [lo, m2]
                 self.hi = m2
             else:
                 # m2 is better → optimum in [m1, hi]
                 self.lo = m1
+            _log_throttle(
+                f"GSS NARROW: [{self.lo}, {self.hi}] "
+                f"(m1={m1}:{narrowing_data[m1]:.2f}, m2={m2}:{narrowing_data[m2]:.2f})"
+            )
             # Recurse: compute new probes for narrowed bracket
             return self.get_next_probe(level_data, partial_data, prob_map)
         elif have_m1:
