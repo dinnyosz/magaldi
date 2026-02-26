@@ -13,6 +13,7 @@ Two complementary strategies:
 
 from __future__ import annotations
 
+import math
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -73,6 +74,14 @@ EXPLORE_WEIGHT_COST = 0.10  # Prefer levels needing fewer total samples
 # Minimum explored levels needed for a reliable trend signal.
 # Below this, trend component is zeroed out (no directional bias).
 EXPLORE_TREND_MIN_LEVELS = 3
+
+# Formula confidence curve: scales down formula_optimal when completion data is sparse.
+# With few completions, base_time is unreliable and the formula produces aggressive
+# worker counts. The confidence multiplier brings it down until data firms up.
+# Logarithmic curve: count=1→0.30, count=5→0.65, count=10→0.80, count=20→1.0.
+FORMULA_CONFIDENCE_MIN = 0.30  # Floor confidence at count=1
+FORMULA_CONFIDENCE_FULL_AT = 25  # Full confidence at this many completions
+FORMULA_CONFIDENCE_THRESHOLD = 0.95  # Snap to 1.0 above this
 
 # Ramp cooldown scales with context tier: tier // 512 seconds.
 # 2k→4s, 4k→8s, 8k→16s, 16k→32s, 32k→64s
@@ -540,6 +549,53 @@ class ThroughputByLevel:
             self._levels.clear()
 
 
+def _compute_formula_confidence(
+    completion_count: int,
+    peak_concurrency: int | None = None,
+) -> float:
+    """Compute confidence multiplier for formula-based worker ceiling.
+
+    With thin data (few completions), the base_time estimate is unreliable
+    and the formula produces aggressive worker counts. Returns a multiplier
+    in [FORMULA_CONFIDENCE_MIN, 1.0] that scales down the formula ceiling
+    during the early phase.
+
+    Uses a logarithmic curve: rapid initial growth that flattens as we
+    approach full confidence. This matches intuition: first few samples
+    provide the most information about whether our estimate is reasonable.
+
+    When peak_concurrency is detected (requires >=2 levels with sufficient
+    samples each), returns 1.0 — peak data is empirical and more reliable
+    than the formula estimate.
+
+    Args:
+        completion_count: Number of completions in the tracking window.
+        peak_concurrency: If set, peak throughput data is available.
+
+    Returns:
+        Confidence multiplier in [FORMULA_CONFIDENCE_MIN, 1.0].
+    """
+    # Peak detected = empirical data, trust fully
+    if peak_concurrency is not None:
+        return 1.0
+
+    # Defensive: should not reach formula path with count=0
+    if completion_count <= 0:
+        return FORMULA_CONFIDENCE_MIN
+
+    if completion_count >= FORMULA_CONFIDENCE_FULL_AT:
+        return 1.0
+
+    # Logarithmic ramp: log(1)/log(25)=0, log(5)/log(25)=0.50, log(15)/log(25)=0.84
+    t = math.log(completion_count) / math.log(FORMULA_CONFIDENCE_FULL_AT)
+    confidence = FORMULA_CONFIDENCE_MIN + (1.0 - FORMULA_CONFIDENCE_MIN) * t
+
+    if confidence >= FORMULA_CONFIDENCE_THRESHOLD:
+        return 1.0
+
+    return confidence
+
+
 def compute_throttle_decision(
     current_max_runtime: float,
     tier_timeout: float,
@@ -683,6 +739,18 @@ def compute_throttle_decision(
     # This formula acts as a SAFETY CAP to prevent timeouts
     effective_timeout = tier_timeout * THROTTLE_SAFETY_MARGIN
     formula_optimal = int(effective_timeout / effective_base_time)
+
+    # Apply confidence discount: with thin data, scale down the formula ceiling.
+    # Early completions have optimistic base_time (low concurrency = less contention).
+    confidence = _compute_formula_confidence(completion_count, peak_concurrency)
+    if confidence < 1.0:
+        raw_formula = formula_optimal
+        formula_optimal = max(1, int(formula_optimal * confidence))
+        _log_throttle(
+            f"CONFIDENCE: {confidence:.2f} ({completion_count} completions) "
+            f"→ formula {raw_formula}→{formula_optimal}"
+        )
+
     formula_optimal = max(1, min(formula_optimal, base_workers))  # Clamp to [1, base_workers]
 
     # Apply peak throughput optimization: if we have data showing which

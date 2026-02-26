@@ -238,7 +238,7 @@ class TestComputeThrottleDecision:
             active_workers=4,
             throughput=0.5,
             avg_runtime=5.0,
-            completion_count=10,
+            completion_count=30,
         )
         assert decision.should_throttle
         assert decision.recommended_workers == 1
@@ -257,7 +257,7 @@ class TestComputeThrottleDecision:
             active_workers=0,
             throughput=1.0,
             avg_runtime=100.0,
-            completion_count=10,
+            completion_count=30,
             avg_base_time=20.0,  # 117/20 = 5.85 → 5 workers max
         )
         assert decision.should_throttle
@@ -277,7 +277,7 @@ class TestComputeThrottleDecision:
             active_workers=8,
             throughput=1.6,
             avg_runtime=5.0,
-            completion_count=10,
+            completion_count=30,
             avg_base_time=0.625,  # From completion history
         )
         assert not decision.should_throttle
@@ -297,7 +297,7 @@ class TestComputeThrottleDecision:
             active_workers=0,
             throughput=0.1,
             avg_runtime=300.0,
-            completion_count=10,
+            completion_count=30,
             avg_base_time=60.0,  # 117/60 = 1.95 → 1 worker max
         )
         assert decision.should_throttle
@@ -315,7 +315,7 @@ class TestComputeThrottleDecision:
             active_workers=0,
             throughput=0.01,
             avg_runtime=1000.0,
-            completion_count=10,
+            completion_count=30,
             avg_base_time=200.0,  # 117/200 = 0.585 → 1 worker
         )
         assert decision.should_throttle
@@ -330,7 +330,7 @@ class TestComputeThrottleDecision:
             active_workers=1,
             throughput=0.0,
             avg_runtime=500.0,
-            completion_count=10,
+            completion_count=30,
             avg_base_time=500.0,  # Would give 0.25 workers
         )
         assert decision.recommended_workers >= 1
@@ -351,7 +351,7 @@ class TestComputeThrottleDecision:
             active_workers=8,
             throughput=1.5,
             avg_runtime=40.0,
-            completion_count=10,
+            completion_count=30,
             avg_base_time=5.0,  # 117/5 = 23.4 → 23 optimal
         )
         assert decision.should_throttle
@@ -373,7 +373,7 @@ class TestComputeThrottleDecision:
             active_workers=8,
             throughput=1.0,
             avg_runtime=50.0,
-            completion_count=10,
+            completion_count=30,
             avg_base_time=10.0,  # Historical is worse than current
         )
         assert decision.should_throttle
@@ -415,7 +415,7 @@ class TestComputeThrottleDecision:
             active_workers=20,
             throughput=0.1,
             avg_runtime=100.0,
-            completion_count=10,
+            completion_count=30,
             avg_base_time=30.0,  # Historical shows 30s base → 117/30 = 3.9 → 3 optimal
         )
         assert decision.should_throttle
@@ -710,7 +710,7 @@ class TestPeakConcurrencyThrottleDecision:
             base_workers=32,
             active_workers=0,
             avg_base_time=20.0,
-            completion_count=10,
+            completion_count=30,
             peak_concurrency=None,
         )
         assert decision.recommended_workers == 5
@@ -729,7 +729,7 @@ class TestPeakConcurrencyThrottleDecision:
             base_workers=32,
             active_workers=0,
             avg_base_time=5.0,
-            completion_count=10,
+            completion_count=30,
             peak_concurrency=4,
         )
         assert decision.should_throttle
@@ -750,7 +750,7 @@ class TestPeakConcurrencyThrottleDecision:
             base_workers=32,
             active_workers=0,
             avg_base_time=20.0,
-            completion_count=10,
+            completion_count=30,
             peak_concurrency=8,
         )
         assert decision.should_throttle
@@ -769,7 +769,7 @@ class TestPeakConcurrencyThrottleDecision:
             base_workers=8,
             active_workers=8,
             avg_base_time=0.5,
-            completion_count=10,
+            completion_count=30,
             peak_concurrency=8,
         )
         assert not decision.should_throttle
@@ -787,7 +787,7 @@ class TestPeakConcurrencyThrottleDecision:
             base_workers=32,
             active_workers=3,
             avg_base_time=5.0,
-            completion_count=10,
+            completion_count=30,
             peak_concurrency=6,
         )
         assert decision.should_throttle
@@ -802,7 +802,7 @@ class TestPeakConcurrencyThrottleDecision:
             base_workers=8,
             active_workers=0,
             avg_base_time=5.0,
-            completion_count=10,
+            completion_count=30,
             peak_concurrency=1,
         )
         assert decision.should_throttle
@@ -816,7 +816,7 @@ class TestPeakConcurrencyThrottleDecision:
             base_workers=8,
             active_workers=4,
             avg_base_time=5.0,
-            completion_count=10,
+            completion_count=30,
             peak_concurrency=6,
         )
         assert decision.should_throttle
@@ -836,11 +836,189 @@ class TestPeakConcurrencyThrottleDecision:
             base_workers=8,
             active_workers=8,
             avg_base_time=0.5,
-            completion_count=10,
+            completion_count=30,
             peak_concurrency=20,
         )
         assert not decision.should_throttle
         assert decision.recommended_workers == 8
+
+
+class TestFormulaConfidence:
+    """Tests for _compute_formula_confidence() and its effect on throttle decisions.
+
+    The confidence multiplier scales down the formula-based worker ceiling
+    during the early phase (first ~25 completions) when base_time estimates
+    are unreliable. Uses a logarithmic curve from 0.30 to 1.0.
+    """
+
+    # --- Unit tests for the confidence function ---
+
+    def test_count_zero_returns_min(self):
+        """Defensive: count=0 returns minimum confidence."""
+        from shared.throttling import FORMULA_CONFIDENCE_MIN, _compute_formula_confidence
+        assert _compute_formula_confidence(0) == FORMULA_CONFIDENCE_MIN
+
+    def test_count_one_returns_min(self):
+        """count=1 → log(1)=0 → exactly minimum confidence (0.30)."""
+        from shared.throttling import FORMULA_CONFIDENCE_MIN, _compute_formula_confidence
+        assert _compute_formula_confidence(1) == FORMULA_CONFIDENCE_MIN
+
+    def test_count_monotonically_increasing(self):
+        """Confidence increases with more completions."""
+        from shared.throttling import _compute_formula_confidence
+        prev = 0.0
+        for count in [1, 2, 3, 5, 8, 10, 15, 20, 25]:
+            conf = _compute_formula_confidence(count)
+            assert conf >= prev, f"count={count}: {conf} < {prev}"
+            prev = conf
+
+    def test_count_at_full_returns_one(self):
+        """At FORMULA_CONFIDENCE_FULL_AT completions, confidence is 1.0."""
+        from shared.throttling import FORMULA_CONFIDENCE_FULL_AT, _compute_formula_confidence
+        assert _compute_formula_confidence(FORMULA_CONFIDENCE_FULL_AT) == 1.0
+
+    def test_count_above_full_returns_one(self):
+        """Beyond full_at, always 1.0."""
+        from shared.throttling import _compute_formula_confidence
+        assert _compute_formula_confidence(100) == 1.0
+        assert _compute_formula_confidence(1000) == 1.0
+
+    def test_peak_detected_returns_one(self):
+        """Peak concurrency detected → immediate full confidence."""
+        from shared.throttling import _compute_formula_confidence
+        assert _compute_formula_confidence(1, peak_concurrency=4) == 1.0
+        assert _compute_formula_confidence(5, peak_concurrency=2) == 1.0
+
+    def test_peak_none_uses_curve(self):
+        """No peak → uses curve (not 1.0 for low count)."""
+        from shared.throttling import FORMULA_CONFIDENCE_MIN, _compute_formula_confidence
+        conf = _compute_formula_confidence(3, peak_concurrency=None)
+        assert conf < 1.0
+        assert conf > FORMULA_CONFIDENCE_MIN
+
+    def test_threshold_snap_to_one(self):
+        """Confidence near threshold snaps to 1.0 (avoids cosmetic near-miss)."""
+        from shared.throttling import _compute_formula_confidence
+        # count=20 should be ~0.95 and snap to 1.0
+        assert _compute_formula_confidence(20) == 1.0
+
+    def test_mid_range_values(self):
+        """Spot-check key points on the curve."""
+        from shared.throttling import _compute_formula_confidence
+        # count=5 → ~0.65
+        conf_5 = _compute_formula_confidence(5)
+        assert 0.60 <= conf_5 <= 0.70
+
+        # count=10 → ~0.80
+        conf_10 = _compute_formula_confidence(10)
+        assert 0.75 <= conf_10 <= 0.85
+
+    # --- Integration tests: confidence effect on compute_throttle_decision ---
+
+    def test_early_phase_limits_formula_ceiling(self):
+        """With 1 completion, formula ceiling is ~30% of raw formula.
+
+        base_time=2.1, timeout=180, base_workers=32
+        raw formula = int(117/2.1) = 55, capped to 32
+        With confidence=0.30: int(55*0.30) = 16
+        """
+        decision = compute_throttle_decision(
+            current_max_runtime=0.0,
+            tier_timeout=180.0,
+            base_workers=32,
+            active_workers=0,
+            avg_base_time=2.1,
+            completion_count=1,
+        )
+        # Starting fresh (active=0): gets formula with confidence
+        assert decision.recommended_workers == 16
+        assert decision.should_throttle
+
+    def test_moderate_data_widens_ceiling(self):
+        """With 10 completions (~80% confidence), formula ceiling rises.
+
+        confidence ~= 0.80 → int(55 * 0.80) = 44 → capped to 32 → no throttle
+        """
+        decision = compute_throttle_decision(
+            current_max_runtime=0.0,
+            tier_timeout=180.0,
+            base_workers=32,
+            active_workers=0,
+            avg_base_time=2.1,
+            completion_count=10,
+        )
+        assert not decision.should_throttle
+        assert decision.recommended_workers == 32
+
+    def test_steady_state_no_discount(self):
+        """With 30+ completions, confidence=1.0, no change to behavior."""
+        decision = compute_throttle_decision(
+            current_max_runtime=0.0,
+            tier_timeout=180.0,
+            base_workers=32,
+            active_workers=0,
+            avg_base_time=20.0,
+            completion_count=30,
+        )
+        # formula = int(117/20) = 5, confidence=1.0 → 5
+        assert decision.recommended_workers == 5
+        assert decision.should_throttle
+
+    def test_peak_bypasses_confidence(self):
+        """With peak_concurrency set, confidence=1.0 regardless of count."""
+        decision = compute_throttle_decision(
+            current_max_runtime=0.0,
+            tier_timeout=180.0,
+            base_workers=32,
+            active_workers=0,
+            avg_base_time=2.1,
+            completion_count=1,
+            peak_concurrency=4,
+        )
+        # Peak=4, confidence=1.0 → formula=55→32, peak overrides to 4
+        assert decision.recommended_workers == 4
+        assert decision.should_throttle
+
+    def test_ramp_respects_discounted_ceiling(self):
+        """Ramp-up is bounded by the confidence-discounted ceiling.
+
+        active=5, count=3, confidence ~= 0.54
+        formula = 55, discounted = int(55*0.54) = 29, capped to 29
+        target=29 > active=5 → ramp: 5+1=6
+        """
+        decision = compute_throttle_decision(
+            current_max_runtime=10.0,
+            tier_timeout=180.0,
+            base_workers=32,
+            active_workers=5,
+            avg_base_time=2.1,
+            completion_count=3,
+        )
+        assert decision.recommended_workers == 6  # ramped from 5
+        assert "ramped from 5" in decision.reason
+
+    def test_confidence_causes_earlier_throttle(self):
+        """Low confidence can cause throttling even when raw formula wouldn't.
+
+        base_time=5.0, timeout=180, base_workers=8
+        raw formula = int(117/5) = 23 → capped to 8 → no throttle
+        With count=1, confidence=0.30: int(23*0.30) = 6 → 6 < 8 → throttle!
+        """
+        decision = compute_throttle_decision(
+            current_max_runtime=0.0,
+            tier_timeout=180.0,
+            base_workers=8,
+            active_workers=0,
+            avg_base_time=5.0,
+            completion_count=1,
+        )
+        assert decision.should_throttle
+        assert decision.recommended_workers == 6
+
+    def test_negative_count_returns_min(self):
+        """Defensive: negative count treated same as zero."""
+        from shared.throttling import FORMULA_CONFIDENCE_MIN, _compute_formula_confidence
+        assert _compute_formula_confidence(-1) == FORMULA_CONFIDENCE_MIN
 
 
 def _render_to_text(renderable: object) -> str:
@@ -1495,7 +1673,7 @@ class TestExplorationInThrottleDecision:
             base_workers=32,
             active_workers=0,
             avg_base_time=5.0,
-            completion_count=10,
+            completion_count=30,
             peak_concurrency=4,
             exploration_target=6,
         )
@@ -1515,7 +1693,7 @@ class TestExplorationInThrottleDecision:
             base_workers=32,
             active_workers=0,
             avg_base_time=20.0,  # formula = 117/20 = 5
-            completion_count=10,
+            completion_count=30,
             peak_concurrency=3,
             exploration_target=8,
         )
@@ -1529,7 +1707,7 @@ class TestExplorationInThrottleDecision:
             base_workers=32,
             active_workers=0,
             avg_base_time=5.0,
-            completion_count=10,
+            completion_count=30,
             peak_concurrency=4,
             exploration_target=None,
         )
@@ -1545,7 +1723,7 @@ class TestExplorationInThrottleDecision:
             base_workers=8,
             active_workers=4,
             avg_base_time=5.0,
-            completion_count=10,
+            completion_count=30,
             peak_concurrency=4,
             exploration_target=6,
         )
@@ -1563,7 +1741,7 @@ class TestExplorationInThrottleDecision:
             base_workers=32,
             active_workers=3,
             avg_base_time=5.0,
-            completion_count=10,
+            completion_count=30,
             peak_concurrency=4,
             exploration_target=6,
         )
