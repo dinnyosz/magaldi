@@ -237,11 +237,14 @@ def _build_scoring_display(state: ScoringProgressState, num_workers: int) -> Ren
             if gss_probe is not None:
                 gss_lo = getattr(td, 'gss_lo', None)
                 gss_hi = getattr(td, 'gss_hi', None)
+                gss_signal = getattr(td, 'gss_signal', None)
                 stats_text.append(" | ", style="dim")
                 if gss_lo is not None and gss_hi is not None:
                     stats_text.append(f"GSS[{gss_lo},{gss_hi}]→{gss_probe}", style="bright_cyan")
                 else:
                     stats_text.append(f"GSS→{gss_probe}", style="bright_cyan")
+                if gss_signal:
+                    stats_text.append(f" ({gss_signal})", style="bright_cyan")
 
     # Build per-level throughput line (separate from stats)
     levels_text = None
@@ -644,10 +647,13 @@ def run_processing(
                 if gss_probe is not None:
                     gss_lo = getattr(td, 'gss_lo', None)
                     gss_hi = getattr(td, 'gss_hi', None)
+                    gss_signal = getattr(td, 'gss_signal', None)
                     if gss_lo is not None and gss_hi is not None:
                         stats += f" [dim]|[/] [bright_cyan]GSS[{gss_lo},{gss_hi}]→{gss_probe}[/]"
                     else:
                         stats += f" [dim]|[/] [bright_cyan]GSS→{gss_probe}[/]"
+                    if gss_signal:
+                        stats += f" [bright_cyan]({gss_signal})[/]"
 
         # Build per-level throughput line (separate from stats)
         levels_line = None

@@ -405,6 +405,7 @@ class ThrottleDisplayInfo:
     gss_probe: int | None = None  # GSS probe target (if active)
     gss_lo: int | None = None  # GSS bracket lower bound
     gss_hi: int | None = None  # GSS bracket upper bound
+    gss_signal: str | None = None  # Signal-aware action ("promote 7" or "blacklist [5,9]")
     # Per-level throughput data: level -> (throughput_per_sec, sample_count)
     all_levels: dict[int, tuple[float, int]] | None = None
 
@@ -459,10 +460,18 @@ class ThrottleContext:
         # Flat EXPLORE_MIN_SAMPLES threshold (not proportional) because GSS
         # only needs directional comparisons and organic accumulation fills
         # nearby levels naturally.
-        from shared.throttling import EXPLORE_MIN_SAMPLES
+        from shared.throttling import EXPLORE_MIN_SAMPLES, GSS_PARTIAL_MIN_SAMPLES
         level_data = {
             lvl: bt for lvl, (bt, cnt) in all_levels.items()
             if cnt >= EXPLORE_MIN_SAMPLES
+        }
+
+        # Partial data: levels with some signal but not yet qualified.
+        # Used by GSS for signal-aware probe steering (promote promising,
+        # blacklist bad levels).
+        partial_data = {
+            lvl: (bt, cnt) for lvl, (bt, cnt) in all_levels.items()
+            if GSS_PARTIAL_MIN_SAMPLES <= cnt < EXPLORE_MIN_SAMPLES
         }
 
         if peak is not None and self._gss is None:
@@ -485,7 +494,7 @@ class ThrottleContext:
                 )
 
         if self._gss is not None and not self._gss.converged:
-            gss_probe = self._gss.get_next_probe(level_data)
+            gss_probe = self._gss.get_next_probe(level_data, partial_data=partial_data)
             if self._gss.converged:
                 from shared.throttling import _log_throttle
                 # Boundary re-search: if best_level landed at/near the hi edge
@@ -503,7 +512,7 @@ class ThrottleContext:
                         f"extending to [{new_lo}, {self.base_workers}]"
                     )
                     self._gss = GoldenSectionSearch(lo=new_lo, hi=self.base_workers)
-                    gss_probe = self._gss.get_next_probe(level_data)
+                    gss_probe = self._gss.get_next_probe(level_data, partial_data=partial_data)
                 else:
                     _log_throttle(f"GSS CONVERGED: best_level={self._gss.best_level}")
 
@@ -571,6 +580,7 @@ class ThrottleContext:
             gss_probe=gss_probe,
             gss_lo=self._gss.lo if self._gss else None,
             gss_hi=self._gss.hi if self._gss else None,
+            gss_signal=self._gss.last_signal if self._gss else None,
             all_levels=all_levels if all_levels else None,
         )
 

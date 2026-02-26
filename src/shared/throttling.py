@@ -66,6 +66,19 @@ EXPLORE_SAMPLES_PER_LEVEL = 2
 # PLUS meaningful processing at the (possibly new) optimal level afterward.
 EXPLORE_BUDGET_MULTIPLIER = 3
 
+# Signal-aware GSS: minimum samples to consider a level's partial signal.
+# 3 is the minimum for a meaningful signal; 2 is too noisy, 1 is random.
+GSS_PARTIAL_MIN_SAMPLES = 3
+
+# Promising threshold: base_time <= best_known * this factor.
+# 1.2 = within 20% of best. Generous enough to catch near-optimal levels.
+GSS_PROMISING_THRESHOLD = 1.2
+
+# Blacklist threshold: base_time > best_known * this factor.
+# 1.5 = 50% worse than best. Conservative enough to avoid false positives
+# from high-variance early samples.
+GSS_BLACKLIST_THRESHOLD = 1.5
+
 # Scoring weights for exploration target selection (sum to 1.0).
 # Each candidate level gets a weighted score across 4 dimensions.
 EXPLORE_WEIGHT_COMPLETION = 0.40  # Prefer levels with partial data (cheaper to finish)
@@ -594,6 +607,8 @@ class GoldenSectionSearch:
         # Pending probe: the level we're currently collecting data for.
         # None means we need to decide which probe to request next.
         self._pending_probe: int | None = None
+        # Last signal-aware action for display (e.g. "promote 7" or "skip [5,9]")
+        self.last_signal: str | None = None
 
     @classmethod
     def from_level_data(
@@ -633,22 +648,34 @@ class GoldenSectionSearch:
 
         return cls(lo=lo, hi=hi)
 
-    def get_next_probe(self, level_data: dict[int, float]) -> int | None:
+    def get_next_probe(
+        self,
+        level_data: dict[int, float],
+        partial_data: dict[int, tuple[float, int]] | None = None,
+    ) -> int | None:
         """Get the next level to probe, or None if converged.
+
+        Uses signal-aware override when partial_data is provided: promotes
+        promising partial levels and blacklists clearly bad ones.
 
         Args:
             level_data: Dict of level -> avg_base_time for levels with
                 sufficient data (≥ EXPLORE_MIN_SAMPLES).
+            partial_data: Dict of level -> (avg_base_time, sample_count) for
+                levels with GSS_PARTIAL_MIN_SAMPLES..EXPLORE_MIN_SAMPLES-1
+                samples. Used for signal-aware probe steering.
 
         Returns:
             Level to collect data at, or None if search is complete.
         """
+        self.last_signal = None  # Reset each call
+
         if self.converged:
             return None
 
         if self.hi - self.lo <= 2:
             # Bracket is small enough — pick the best known level in [lo, hi]
-            self._finalize(level_data)
+            self._finalize(level_data, partial_data)
             return None
 
         m1 = round(self.hi - (self.hi - self.lo) / PHI)
@@ -659,6 +686,13 @@ class GoldenSectionSearch:
         m2 = max(self.lo + 1, min(m2, self.hi - 1))
         if m1 == m2:
             m2 = min(m1 + 1, self.hi - 1)
+
+        # Signal-aware override: use partial data to steer probes
+        if partial_data:
+            probe = self._signal_aware_probe(level_data, partial_data, m1, m2)
+            if probe is not None:
+                self._pending_probe = probe
+                return probe
 
         have_m1 = m1 in level_data
         have_m2 = m2 in level_data
@@ -672,7 +706,7 @@ class GoldenSectionSearch:
                 # m2 is better → optimum in [m1, hi]
                 self.lo = m1
             # Recurse: compute new probes for narrowed bracket
-            return self.get_next_probe(level_data)
+            return self.get_next_probe(level_data, partial_data)
         elif have_m1:
             self._pending_probe = m2
             return m2
@@ -684,16 +718,136 @@ class GoldenSectionSearch:
             self._pending_probe = m1
             return m1
 
-    def _finalize(self, level_data: dict[int, float]) -> None:
+    def _signal_aware_probe(
+        self,
+        level_data: dict[int, float],
+        partial_data: dict[int, tuple[float, int]],
+        m1: int,
+        m2: int,
+    ) -> int | None:
+        """Override geometric probe using partial data signals.
+
+        Three behaviors:
+        1. If a promising partial level exists in [lo, hi], probe it instead
+           of the geometric point (accelerates convergence toward likely optimum).
+        2. If a geometric probe (m1 or m2) is blacklisted, redirect to the
+           nearest non-blacklisted level.
+        3. Returns None if no override needed (fall through to geometric).
+
+        Args:
+            level_data: Qualified levels with avg_base_time.
+            partial_data: Partial levels with (avg_base_time, sample_count).
+            m1: Lower geometric probe point.
+            m2: Upper geometric probe point.
+
+        Returns:
+            Override probe level, or None to use default geometric.
+        """
+        # Find best known base_time as reference (from all qualified levels)
+        if not level_data:
+            return None  # No reference point to judge partial data
+
+        best_bt = min(level_data.values())
+
+        # Build blacklist: partial levels clearly worse than best
+        blacklisted: set[int] = set()
+        for lvl, (bt, _cnt) in partial_data.items():
+            if self.lo <= lvl <= self.hi and bt > best_bt * GSS_BLACKLIST_THRESHOLD:
+                blacklisted.add(lvl)
+
+        if blacklisted:
+            self.last_signal = f"skip {sorted(blacklisted)}"
+            _log_throttle(
+                f"GSS SIGNAL: blacklisted {sorted(blacklisted)} "
+                f"(best_bt={best_bt:.2f}, threshold={best_bt * GSS_BLACKLIST_THRESHOLD:.2f})"
+            )
+
+        # Find promising partial levels: good base_time, not yet qualified
+        promising: list[tuple[int, float, int]] = []  # (level, base_time, count)
+        for lvl, (bt, cnt) in partial_data.items():
+            if self.lo <= lvl <= self.hi and lvl not in blacklisted and bt <= best_bt * GSS_PROMISING_THRESHOLD:
+                promising.append((lvl, bt, cnt))
+
+        # Behavior 1: probe the most promising partial level
+        # Prefer highest count (cheapest to promote), then lowest base_time
+        if promising:
+            promising.sort(key=lambda x: (-x[2], x[1]))
+            target = promising[0][0]
+            self.last_signal = f"promote {target} ({promising[0][2]}/{EXPLORE_MIN_SAMPLES})"
+            _log_throttle(
+                f"GSS SIGNAL: promoting level {target} "
+                f"(bt={promising[0][1]:.2f}, cnt={promising[0][2]}, "
+                f"best_bt={best_bt:.2f})"
+            )
+            return target
+
+        # Behavior 2: redirect blacklisted geometric probes
+        have_m1 = m1 in level_data
+        have_m2 = m2 in level_data
+
+        redirected = False
+        if not have_m1 and m1 in blacklisted:
+            new_m1 = self._nearest_non_blacklisted(m1, blacklisted)
+            if new_m1 is not None and new_m1 not in level_data:
+                self.last_signal = f"skip {m1}→{new_m1}"
+                _log_throttle(
+                    f"GSS SIGNAL: redirected probe {m1}→{new_m1} (blacklisted)"
+                )
+                return new_m1
+            redirected = True
+
+        if not have_m2 and m2 in blacklisted and not redirected:
+            new_m2 = self._nearest_non_blacklisted(m2, blacklisted)
+            if new_m2 is not None and new_m2 not in level_data:
+                self.last_signal = f"skip {m2}→{new_m2}"
+                _log_throttle(
+                    f"GSS SIGNAL: redirected probe {m2}→{new_m2} (blacklisted)"
+                )
+                return new_m2
+
+        # No override needed
+        return None
+
+    def _nearest_non_blacklisted(
+        self, target: int, blacklisted: set[int]
+    ) -> int | None:
+        """Find nearest level to target within [lo, hi] not in blacklist.
+
+        Searches outward from target in both directions simultaneously.
+
+        Returns:
+            Nearest non-blacklisted level, or None if all are blacklisted.
+        """
+        for offset in range(1, self.hi - self.lo + 1):
+            for candidate in [target + offset, target - offset]:
+                if self.lo <= candidate <= self.hi and candidate not in blacklisted:
+                    return candidate
+        return None
+
+    def _finalize(
+        self,
+        level_data: dict[int, float],
+        partial_data: dict[int, tuple[float, int]] | None = None,
+    ) -> None:
         """Mark search as converged, pick best level in final bracket."""
         self.converged = True
-        # Find best level in [lo, hi] range from available data
+        # Find best level in [lo, hi] range from qualified data
         candidates = {
             lvl: bt for lvl, bt in level_data.items()
             if self.lo <= lvl <= self.hi
         }
         if candidates:
             self.best_level = min(candidates, key=candidates.get)  # type: ignore[arg-type]
+        elif partial_data:
+            # No qualified data in bracket — use best partial level
+            partial_candidates = {
+                lvl: bt for lvl, (bt, _cnt) in partial_data.items()
+                if self.lo <= lvl <= self.hi
+            }
+            if partial_candidates:
+                self.best_level = min(partial_candidates, key=partial_candidates.get)  # type: ignore[arg-type]
+            else:
+                self.best_level = (self.lo + self.hi) // 2
         else:
             # Fallback: midpoint
             self.best_level = (self.lo + self.hi) // 2

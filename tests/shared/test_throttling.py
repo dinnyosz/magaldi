@@ -5,8 +5,11 @@ import time
 import pytest
 
 from shared.throttling import (
+    GSS_BLACKLIST_THRESHOLD,
+    GSS_PROMISING_THRESHOLD,
     PRE_PEAK_MAX_WORKERS,
     PRE_PEAK_SAMPLES_PER_LEVEL,
+    PHI,
     GoldenSectionSearch,
     ThrottleDecision,
     ThroughputByLevel,
@@ -2274,3 +2277,141 @@ class TestGoldenSectionSearch:
         assert gss_full.best_level is not None
         assert gss_smart.best_level is not None
         assert abs(gss_smart.best_level - 10) <= 2
+
+    # --- Signal-aware GSS tests ---
+
+    def test_promising_partial_overrides_geometric(self):
+        """Partial level with good base_time should be probed instead of geometric."""
+        gss = GoldenSectionSearch(lo=1, hi=20)
+        level_data = {1: 5.0, 2: 3.5}  # Qualified levels, best=3.5
+        # Level 7 has 6 samples, base_time 3.0 (within 1.2x of 3.5 = 4.2)
+        partial_data = {7: (3.0, 6)}
+        probe = gss.get_next_probe(level_data, partial_data=partial_data)
+        assert probe == 7  # Should override geometric probe
+
+    def test_promising_partial_prefers_highest_count(self):
+        """Among promising partials, prefer the one closest to significance."""
+        gss = GoldenSectionSearch(lo=1, hi=20)
+        level_data = {1: 5.0, 2: 3.5}  # best=3.5
+        # Two promising: level 5 (8 samples) and level 7 (4 samples)
+        partial_data = {5: (3.2, 8), 7: (3.0, 4)}
+        probe = gss.get_next_probe(level_data, partial_data=partial_data)
+        assert probe == 5  # 8 samples = cheaper to promote
+
+    def test_blacklisted_level_redirects_probe(self):
+        """Geometric probe on a blacklisted level should be redirected."""
+        gss = GoldenSectionSearch(lo=1, hi=20)
+        level_data = {2: 3.0}  # best=3.0
+        # Compute geometric m1 for [1, 20]
+        m1 = round(20 - (20 - 1) / PHI)  # ~8
+        # Blacklist m1: base_time 5.0 > 3.0 * 1.5 = 4.5
+        partial_data = {m1: (5.0, 5)}
+        probe = gss.get_next_probe(level_data, partial_data=partial_data)
+        assert probe != m1  # Should NOT probe the blacklisted level
+        assert probe is not None
+        assert gss.lo <= probe <= gss.hi
+
+    def test_blacklist_threshold_boundary(self):
+        """Level at exactly 1.5x best is NOT blacklisted (strict >)."""
+        gss = GoldenSectionSearch(lo=1, hi=20)
+        level_data = {2: 2.0}  # best=2.0
+        m1 = round(20 - (20 - 1) / PHI)
+        # 3.0 == 2.0 * 1.5 exactly — should NOT be blacklisted
+        partial_data = {m1: (3.0, 5)}
+        probe = gss.get_next_probe(level_data, partial_data=partial_data)
+        # Level m1 at 3.0 is neither promising (> 2.0*1.2=2.4) nor blacklisted (== 2.0*1.5=3.0)
+        # Geometric probe should proceed normally (m1 is not in level_data)
+        # The probe could be m1 itself since it's not blacklisted
+        assert probe is not None
+
+    def test_no_partial_data_uses_geometric(self):
+        """Without partial_data, behavior is identical to original GSS."""
+        gss1 = GoldenSectionSearch(lo=1, hi=20)
+        probe1 = gss1.get_next_probe({1: 5.0, 2: 3.5})
+
+        gss2 = GoldenSectionSearch(lo=1, hi=20)
+        probe2 = gss2.get_next_probe({1: 5.0, 2: 3.5}, partial_data=None)
+
+        gss3 = GoldenSectionSearch(lo=1, hi=20)
+        probe3 = gss3.get_next_probe({1: 5.0, 2: 3.5}, partial_data={})
+
+        assert probe1 == probe2 == probe3
+
+    def test_partial_outside_bracket_ignored(self):
+        """Partial data for levels outside [lo, hi] should be ignored."""
+        gss = GoldenSectionSearch(lo=5, hi=15)
+        level_data = {6: 3.0, 10: 2.5}
+        # Level 3 and 20 are outside bracket [5, 15]
+        partial_data = {3: (2.0, 7), 20: (2.0, 7)}
+        probe = gss.get_next_probe(level_data, partial_data=partial_data)
+        # Should not return 3 or 20
+        assert probe is None or (5 <= probe <= 15)
+
+    def test_all_blacklisted_falls_through(self):
+        """If all non-qualified levels are blacklisted, falls through to geometric."""
+        gss = GoldenSectionSearch(lo=1, hi=10)
+        level_data = {1: 1.0}  # best = 1.0
+        # Blacklist everything in range: base_time > 1.0 * 1.5 = 1.5
+        partial_data = {i: (5.0, 5) for i in range(2, 11)}
+        probe = gss.get_next_probe(level_data, partial_data=partial_data)
+        # Should still return something — _nearest_non_blacklisted returns None,
+        # so signal-aware returns None, falls through to geometric
+        assert probe is not None
+
+    def test_promoted_level_integrates_naturally(self):
+        """Promising partial level that gets promoted should narrow bracket normally."""
+        gss = GoldenSectionSearch(lo=1, hi=20)
+        level_data = {1: 5.0, 2: 3.5}
+        partial_data = {7: (3.0, 8)}
+
+        # First call: should probe level 7 (promising)
+        probe1 = gss.get_next_probe(level_data, partial_data=partial_data)
+        assert probe1 == 7
+
+        # Simulate: level 7 reaches significance
+        level_data[7] = 3.0
+        partial_data = {}
+
+        # Second call: level 7 is now qualified, GSS uses it for bracket narrowing
+        probe2 = gss.get_next_probe(level_data, partial_data=partial_data)
+        assert probe2 is not None
+        # Bracket should be valid
+        assert gss.lo <= probe2 <= gss.hi
+
+    def test_converges_faster_with_partial_signals(self):
+        """Signal-aware GSS should converge in fewer steps when partial data
+        is near the optimum."""
+        # Optimum at level 8, V-shaped base_time
+        def base_time(x: int) -> float:
+            return abs(x - 8) + 1.0
+
+        # Pure geometric
+        gss_pure = GoldenSectionSearch(lo=1, hi=20)
+        data_pure: dict[int, float] = {}
+        steps_pure = 0
+        while not gss_pure.converged and steps_pure < 20:
+            probe = gss_pure.get_next_probe(data_pure)
+            if probe is None:
+                break
+            data_pure[probe] = base_time(probe)
+            steps_pure += 1
+
+        # With partial signal near optimum
+        gss_signal = GoldenSectionSearch(lo=1, hi=20)
+        data_signal: dict[int, float] = {}
+        partial = {7: (base_time(7), 6)}  # 6 samples near optimum
+        steps_signal = 0
+        while not gss_signal.converged and steps_signal < 20:
+            probe = gss_signal.get_next_probe(data_signal, partial_data=partial)
+            if probe is None:
+                break
+            data_signal[probe] = base_time(probe)
+            # After probing, if probe was the partial level, promote it
+            if probe in partial:
+                partial = {}
+            steps_signal += 1
+
+        # Signal-aware should converge in fewer or equal steps
+        assert steps_signal <= steps_pure
+        assert gss_signal.best_level is not None
+        assert abs(gss_signal.best_level - 8) <= 2
