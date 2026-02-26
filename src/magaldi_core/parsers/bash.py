@@ -10,10 +10,15 @@ from typing import TYPE_CHECKING
 from magaldi_core.extractors.bash import (
     BashExtractor,
     extract_bash_calls,
-    extract_bash_imports,
     extract_top_level_bash_calls,
 )
-from magaldi_core.parsers.base import Call, CodeElement, Import, TreeSitterParser, generate_element_id
+from magaldi_core.parsers.base import (
+    Call,
+    CodeElement,
+    Import,
+    TreeSitterParser,
+    generate_element_id,
+)
 
 if TYPE_CHECKING:
     from magaldi_core.change_detection import FileInfo
@@ -29,7 +34,7 @@ class BashParser(TreeSitterParser):
     def parse(
         self,
         content: str,
-        file_info: "FileInfo",
+        file_info: FileInfo,
         scope: str,
         repository: str,
         username: str,

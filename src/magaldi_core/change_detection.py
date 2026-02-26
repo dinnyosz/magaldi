@@ -11,21 +11,20 @@ from __future__ import annotations
 
 import hashlib
 import os
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Protocol
 
-from shared.config import get_config
 from magaldi_core.discovery import (
-    SUPPORTED_EXTENSIONS,
     DiscoveryResult,
-    RepoConfig,
     _detect_file_language,
     _is_excluded_dir,
     _is_excluded_file,
 )
+from shared.config import get_config
 
 
 class ChangeDetectionError(Exception):
@@ -226,7 +225,7 @@ def compute_file_hash(file_path: Path, chunk_size: int = 65536) -> str | None:
             for chunk in iter(lambda: f.read(chunk_size), b""):
                 sha256.update(chunk)
         return sha256.hexdigest()
-    except (OSError, IOError):
+    except OSError:
         return None
 
 
@@ -259,9 +258,9 @@ def compute_hashes_parallel(
         file_info.hash = compute_file_hash(file_info.absolute_path)
         try:
             file_info.file_size = file_info.absolute_path.stat().st_size
-            with open(file_info.absolute_path, "r", encoding="utf-8", errors="replace") as f:
+            with open(file_info.absolute_path, encoding="utf-8", errors="replace") as f:
                 file_info.line_count = sum(1 for _ in f)
-        except (OSError, IOError):
+        except OSError:
             pass
         return file_info
 
@@ -270,7 +269,7 @@ def compute_hashes_parallel(
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(hash_file, f): f for f in files}
-        for future in as_completed(futures):
+        for _future in as_completed(futures):
             completed += 1
             if on_progress:
                 on_progress(completed, total)

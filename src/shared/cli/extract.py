@@ -25,6 +25,8 @@ from rich.text import Text
 from shared.cli._shared import console, format_duration
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from shared.config import MagaldiConfig
 
 
@@ -35,7 +37,7 @@ if TYPE_CHECKING:
 
 def display_tier_distribution(
     items: list[Any],
-    tier_fn: callable,
+    tier_fn: Callable[[Any], int],
 ) -> None:
     """Display tier distribution before processing.
 
@@ -138,7 +140,7 @@ def build_eta_table(
     if not eta_breakdown:
         return None
 
-    from shared.ai.context_size import CONTEXT_TIERS, TIER_ABBREV, TIER_COLORS, HANDCRAFTED_TIER
+    from shared.ai.context_size import CONTEXT_TIERS, HANDCRAFTED_TIER, TIER_ABBREV, TIER_COLORS
     tier_abbrev = TIER_ABBREV
     # Standard tiers descending + handcrafted column at the end
     all_tiers = sorted(CONTEXT_TIERS, reverse=True) + [HANDCRAFTED_TIER]
@@ -197,9 +199,9 @@ def build_worker_table(
     workers_data: dict[int, tuple],
     num_workers: int,
     allowed_workers: int,
-    model_col_width: int,
+    _model_col_width: int,
     columns: list[tuple[str, str, int]],
-    row_builder: callable,
+    row_builder: Callable,
 ) -> Table:
     """Build worker status table.
 
@@ -430,7 +432,7 @@ def run_feature_extraction(
     The actual implementation is in feature_commands.py.
     """
     from shared.cli.feature_commands import run_feature_extraction as _run_feature_extraction
-    return _run_feature_extraction(
+    return _run_feature_extraction(  # type: ignore[no-any-return]
         scope=scope,
         repository=repository,
         username=username,
@@ -456,7 +458,7 @@ def run_glossary_extraction(
     The actual implementation is in glossary_commands.py.
     """
     from shared.cli.glossary_commands import run_glossary_extraction as _run_glossary_extraction
-    return _run_glossary_extraction(
+    return _run_glossary_extraction(  # type: ignore[no-any-return]
         scope=scope,
         repository=repository,
         username=username,

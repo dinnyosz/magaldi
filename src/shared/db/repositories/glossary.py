@@ -23,7 +23,7 @@ class GlossaryRepository:
 
     def _get_bulk_timeout(self) -> int:
         """Get bulk operation timeout from config."""
-        return self._base._config.search_backend.bulk_timeout
+        return self._base._config.search_backend.bulk_timeout  # type: ignore[no-any-return]
 
     def index_glossary(
         self,
@@ -325,4 +325,4 @@ class GlossaryRepository:
             request_timeout=bulk_timeout,
         )
 
-        return response.get("deleted", 0)
+        return response.get("deleted", 0)  # type: ignore[no-any-return]

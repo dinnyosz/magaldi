@@ -61,7 +61,7 @@ def reduce_dimensions(
                 metric="cosine",
                 random_state=42,
             )
-            return reducer.fit_transform(X)
+            return reducer.fit_transform(X)  # type: ignore[no-any-return]
         except ImportError:
             # Fall back to t-SNE if UMAP not installed
             algorithm = "tsne"
@@ -77,7 +77,7 @@ def reduce_dimensions(
             random_state=42,
             n_iter=1000,
         )
-        return reducer.fit_transform(X)
+        return reducer.fit_transform(X)  # type: ignore[no-any-return]
 
     raise ValueError(f"Unknown algorithm: {algorithm}")
 

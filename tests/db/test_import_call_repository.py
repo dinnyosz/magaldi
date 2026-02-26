@@ -21,7 +21,8 @@ pytestmark = pytest.mark.integration
 class TestImportsAndCalls:
     """Tests for storing and retrieving imports and calls."""
 
-    def test_store_and_get_imports(self, repo, sample_element):
+    @pytest.mark.usefixtures("sample_element")
+    def test_store_and_get_imports(self, repo):
         """Test storing and retrieving imports for a file element."""
         # Create a file element for imports
         file_elem = CodeElement(
@@ -285,7 +286,8 @@ class TestFindElementsCalling:
         results = repo.find_elements_calling(target_id, repository="other-repo")
         assert len(results) == 0
 
-    def test_find_elements_calling_no_callers(self, repo, elements_with_calls):
+    @pytest.mark.usefixtures("elements_with_calls")
+    def test_find_elements_calling_no_callers(self, repo):
         """Test finding callers for target with no callers."""
         results = repo.find_elements_calling("nonexistent-target")
         assert len(results) == 0
@@ -377,7 +379,8 @@ class TestFindElementsImporting:
 
         repo._get_client().indices_refresh(index=INDEX_NAME)
 
-    def test_find_elements_importing(self, repo, elements_with_imports):
+    @pytest.mark.usefixtures("elements_with_imports")
+    def test_find_elements_importing(self, repo):
         """Test finding elements that import a module."""
         # Both app.py and utils.py import os (filter by scope to avoid other test data)
         results = repo.find_elements_importing("os", scope="test-imports")
@@ -385,13 +388,15 @@ class TestFindElementsImporting:
         names = {r["name"] for r in results}
         assert names == {"app.py", "utils.py"}
 
-    def test_find_elements_importing_single_importer(self, repo, elements_with_imports):
+    @pytest.mark.usefixtures("elements_with_imports")
+    def test_find_elements_importing_single_importer(self, repo):
         """Test finding elements when only one imports the module."""
         results = repo.find_elements_importing("json", scope="test-imports")
         assert len(results) == 1
         assert results[0]["name"] == "app.py"
 
-    def test_find_elements_importing_with_scope_filter(self, repo, elements_with_imports):
+    @pytest.mark.usefixtures("elements_with_imports")
+    def test_find_elements_importing_with_scope_filter(self, repo):
         """Test finding importers with scope filter."""
         # Matching scope
         results = repo.find_elements_importing("os", scope="test-imports")
@@ -401,7 +406,8 @@ class TestFindElementsImporting:
         results = repo.find_elements_importing("os", scope="other-scope")
         assert len(results) == 0
 
-    def test_find_elements_importing_with_repository_filter(self, repo, elements_with_imports):
+    @pytest.mark.usefixtures("elements_with_imports")
+    def test_find_elements_importing_with_repository_filter(self, repo):
         """Test finding importers with repository filter."""
         # Matching repository
         results = repo.find_elements_importing("os", repository="repo")
@@ -411,12 +417,14 @@ class TestFindElementsImporting:
         results = repo.find_elements_importing("os", repository="other-repo")
         assert len(results) == 0
 
-    def test_find_elements_importing_no_importers(self, repo, elements_with_imports):
+    @pytest.mark.usefixtures("elements_with_imports")
+    def test_find_elements_importing_no_importers(self, repo):
         """Test finding importers for module no one imports."""
         results = repo.find_elements_importing("nonexistent_module")
         assert len(results) == 0
 
-    def test_find_elements_importing_with_limit(self, repo, elements_with_imports):
+    @pytest.mark.usefixtures("elements_with_imports")
+    def test_find_elements_importing_with_limit(self, repo):
         """Test finding importers with limit."""
         results = repo.find_elements_importing("os", limit=1)
         assert len(results) == 1

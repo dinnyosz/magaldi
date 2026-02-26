@@ -1,10 +1,9 @@
 """Auto-generated parser test for bash_variable_types."""
 
-import pytest
 from pathlib import Path
 
-from magaldi_core.code_parser import BashParser
 from magaldi_core.change_detection import FileInfo
+from magaldi_core.code_parser import BashParser
 
 
 class TestBashVariableTypes:
@@ -27,49 +26,49 @@ class TestBashVariableTypes:
             (e for e in elements if e.name == "VERSION" and e.element_type == "constant"),
             None
         )
-        assert bash_variable_types_elem is not None, f"Expected constant 'VERSION' not found"
+        assert bash_variable_types_elem is not None, "Expected constant 'VERSION' not found"
 
         # Check for DB_HOST
         bash_variable_types_elem = next(
             (e for e in elements if e.name == "DB_HOST" and e.element_type == "constant"),
             None
         )
-        assert bash_variable_types_elem is not None, f"Expected constant 'DB_HOST' not found"
+        assert bash_variable_types_elem is not None, "Expected constant 'DB_HOST' not found"
 
         # Check for DB_PORT
         bash_variable_types_elem = next(
             (e for e in elements if e.name == "DB_PORT" and e.element_type == "constant"),
             None
         )
-        assert bash_variable_types_elem is not None, f"Expected constant 'DB_PORT' not found"
+        assert bash_variable_types_elem is not None, "Expected constant 'DB_PORT' not found"
 
         # Check for APP_NAME
         bash_variable_types_elem = next(
             (e for e in elements if e.name == "APP_NAME" and e.element_type == "constant"),
             None
         )
-        assert bash_variable_types_elem is not None, f"Expected constant 'APP_NAME' not found"
+        assert bash_variable_types_elem is not None, "Expected constant 'APP_NAME' not found"
 
         # Check for ITEMS
         bash_variable_types_elem = next(
             (e for e in elements if e.name == "ITEMS" and e.element_type == "variable"),
             None
         )
-        assert bash_variable_types_elem is not None, f"Expected variable 'ITEMS' not found"
+        assert bash_variable_types_elem is not None, "Expected variable 'ITEMS' not found"
 
         # Check for MAP
         bash_variable_types_elem = next(
             (e for e in elements if e.name == "MAP" and e.element_type == "variable"),
             None
         )
-        assert bash_variable_types_elem is not None, f"Expected variable 'MAP' not found"
+        assert bash_variable_types_elem is not None, "Expected variable 'MAP' not found"
 
         # Check for TIMESTAMP
         bash_variable_types_elem = next(
             (e for e in elements if e.name == "TIMESTAMP" and e.element_type == "constant"),
             None
         )
-        assert bash_variable_types_elem is not None, f"Expected constant 'TIMESTAMP' not found"
+        assert bash_variable_types_elem is not None, "Expected constant 'TIMESTAMP' not found"
 
         # Check element count
         # 7 variables/constants + 1 file element = 8

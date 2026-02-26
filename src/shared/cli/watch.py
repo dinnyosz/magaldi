@@ -24,9 +24,10 @@ from shared.cli._shared import check_model_availability, console, main
 from shared.config import load_config
 
 if TYPE_CHECKING:
+    from watchdog.events import FileSystemEvent
+
     from magaldi_core.discovery import DiscoveryResult
     from shared.config import MagaldiConfig
-    from watchdog.events import FileSystemEvent
 
 # Supported file extensions (from discovery.py)
 SUPPORTED_EXTENSIONS: set[str] = {
@@ -36,7 +37,7 @@ SUPPORTED_EXTENSIONS: set[str] = {
 
 def _create_file_handler(
     change_queue: queue.Queue,
-    discovery_result: "DiscoveryResult",
+    discovery_result: DiscoveryResult,
 ) -> Any:
     """Create a file handler for watchdog events.
 
@@ -51,7 +52,7 @@ def _create_file_handler(
         def __init__(
             self,
             cqueue: queue.Queue,
-            dresult: "DiscoveryResult",
+            dresult: DiscoveryResult,
         ):
             self.change_queue = cqueue
             self.discovery_result = dresult
@@ -83,16 +84,16 @@ def _create_file_handler(
 
             return True
 
-        def on_modified(self, event: "FileSystemEvent") -> None:
-            if not event.is_directory and self._should_process(event.src_path):
+        def on_modified(self, event: FileSystemEvent) -> None:
+            if not event.is_directory and self._should_process(event.src_path):  # type: ignore[arg-type]
                 self.change_queue.put(("modified", event.src_path))
 
-        def on_created(self, event: "FileSystemEvent") -> None:
-            if not event.is_directory and self._should_process(event.src_path):
+        def on_created(self, event: FileSystemEvent) -> None:
+            if not event.is_directory and self._should_process(event.src_path):  # type: ignore[arg-type]
                 self.change_queue.put(("created", event.src_path))
 
-        def on_deleted(self, event: "FileSystemEvent") -> None:
-            if not event.is_directory and self._should_process(event.src_path):
+        def on_deleted(self, event: FileSystemEvent) -> None:
+            if not event.is_directory and self._should_process(event.src_path):  # type: ignore[arg-type]
                 self.change_queue.put(("deleted", event.src_path))
 
     return MagaldiFileHandler(change_queue, discovery_result)

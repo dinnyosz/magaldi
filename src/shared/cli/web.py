@@ -29,7 +29,7 @@ def web_serve(host: str | None, port: int | None, reload: bool) -> None:
     host = host or config.web.host
     port = port or config.web.port
 
-    console.print(f"[bold blue]Starting Magaldi Web UI[/]")
+    console.print("[bold blue]Starting Magaldi Web UI[/]")
     console.print(f"  URL: http://{host}:{port}")
     console.print(f"  Auto-reload: {'enabled' if reload else 'disabled'}")
     console.print()

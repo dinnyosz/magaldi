@@ -13,7 +13,6 @@ from dataclasses import dataclass, field
 
 import requests
 
-
 # =============================================================================
 # EVALUATION CRITERIA PER ELEMENT TYPE
 # =============================================================================
@@ -278,7 +277,7 @@ def parse_evaluation_response(
         if model in evals_data:
             model_data = evals_data[model]
             scores = {}
-            for criterion in criteria.keys():
+            for criterion in criteria:
                 if criterion in model_data:
                     try:
                         score = int(model_data[criterion])
@@ -448,8 +447,8 @@ class BenchmarkClient:
         prompt: str,
         temperature: float = 0.2,
         top_p: float | None = 0.95,
-        top_k: int | None = None,
-        min_p: float | None = None,
+        _top_k: int | None = None,
+        _min_p: float | None = None,
         repetition_penalty: float | None = None,
         presence_penalty: float | None = None,
         max_tokens: int = 512,

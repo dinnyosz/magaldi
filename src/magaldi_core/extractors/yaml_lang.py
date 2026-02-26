@@ -89,8 +89,8 @@ class YamlExtractor:
         if not has_nested_mapping:
             return
 
-        line_start = node.start_point[0] + 1
-        line_end = node.end_point[0] + 1
+        line_start = node.start_point[0] + 1  # type: ignore[attr-defined]
+        line_end = node.end_point[0] + 1  # type: ignore[attr-defined]
         raw_code = "\n".join(lines[line_start - 1:line_end])
 
         elements.append(ExtractedElement(
@@ -110,7 +110,4 @@ def _has_nested_mapping(node: object) -> bool:
     """Check if a node contains a nested block_mapping."""
     if getattr(node, "type", "") == "block_mapping":
         return True
-    for child in getattr(node, "children", []):
-        if _has_nested_mapping(child):
-            return True
-    return False
+    return any(_has_nested_mapping(child) for child in getattr(node, "children", []))

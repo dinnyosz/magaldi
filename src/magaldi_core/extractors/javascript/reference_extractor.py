@@ -16,8 +16,8 @@ from magaldi_core.extractors.base import (
     get_node_text,
     walk_tree,
 )
-from magaldi_core.extractors.types import ExtractedReference
 from magaldi_core.extractors.javascript.utils import is_likely_class_name
+from magaldi_core.extractors.types import ExtractedReference
 
 
 def _find_js_containing_element(node: Node) -> str | None:
@@ -27,12 +27,12 @@ def _find_js_containing_element(node: Node) -> str | None:
         if current.type in ("function_declaration", "method_definition", "class_declaration"):
             name_node = get_child_by_field(current, "name")
             if name_node:
-                return get_node_text(name_node)
+                return get_node_text(name_node)  # type: ignore[no-any-return]
         elif current.type == "variable_declarator":
             # Arrow function assigned to variable
             name_node = get_child_by_field(current, "name")
             if name_node:
-                return get_node_text(name_node)
+                return get_node_text(name_node)  # type: ignore[no-any-return]
         current = current.parent
     return None
 

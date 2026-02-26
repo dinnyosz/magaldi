@@ -1,12 +1,11 @@
 """Tests for PHP Slim framework route extraction."""
 
-import pytest
 from pathlib import Path
 
-from magaldi_core.code_parser import PhpParser
 from magaldi_core.change_detection import FileInfo
+from magaldi_core.code_parser import PhpParser
+from magaldi_core.extractors.patterns.php.slim import extract_slim_route_groups, extract_slim_routes
 from magaldi_core.tree_sitter_manager import get_manager
-from magaldi_core.extractors.patterns.php.slim import extract_slim_routes, extract_slim_route_groups
 
 
 class TestPhpSlimRouteExtraction:

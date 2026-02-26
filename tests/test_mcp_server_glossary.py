@@ -100,7 +100,7 @@ class TestListGlossaryTool:
             {"term": "user", "total_count": 5},
         ]
 
-        result = await server._handle_tool(
+        await server._handle_tool(
             "list_glossary",
             {"min_count": 3},
         )

@@ -20,7 +20,6 @@ from magaldi_core.change_detection import (
 )
 from magaldi_core.discovery import DiscoveryResult, LanguageStats
 
-
 # =============================================================================
 # FIXTURES
 # =============================================================================

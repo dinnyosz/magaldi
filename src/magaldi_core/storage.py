@@ -7,12 +7,12 @@ This module handles:
 
 from __future__ import annotations
 
-import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
-from magaldi_core.change_detection import ChangeManifest, FileInfo
+from magaldi_core.change_detection import ChangeManifest
 from magaldi_core.code_parser import CodeElement, ParsedFile, ParsingResult
 
 
@@ -558,9 +558,7 @@ def should_embed(element: CodeElement) -> bool:
             return False
         if element.name.isupper() or "_" in element.name and element.name == element.name.upper():
             return True
-        if element.docstring:
-            return True
-        return False
+        return bool(element.docstring)
 
     return False
 

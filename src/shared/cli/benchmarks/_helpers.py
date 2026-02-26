@@ -10,10 +10,12 @@ from collections import defaultdict
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from rich.console import Console
+
     from shared.config import BenchmarkConfig, ModelConfig
 
 
-def parse_model_spec_to_config(spec: str, ollama_url: str | None = None) -> "ModelConfig":
+def parse_model_spec_to_config(spec: str, ollama_url: str | None = None) -> ModelConfig:
     """Parse CLI model specification into a ModelConfig.
 
     Formats:
@@ -48,7 +50,7 @@ def parse_model_spec_to_config(spec: str, ollama_url: str | None = None) -> "Mod
     )
 
 
-def get_model_api_config(model_config: "ModelConfig") -> dict:
+def get_model_api_config(model_config: ModelConfig) -> dict:
     """Get api_base and api_key for a ModelConfig.
 
     Returns dict with 'api_base' and 'api_key' keys for LiteLLM.
@@ -63,9 +65,9 @@ def get_model_api_config(model_config: "ModelConfig") -> dict:
 
 
 def check_backend_connections(
-    model_configs: list["ModelConfig"],
-    console,
-) -> tuple[dict[str, list[str]], list["ModelConfig"], list["ModelConfig"]]:
+    model_configs: list[ModelConfig],
+    console: Console,
+) -> tuple[dict[str, list[str]], list[ModelConfig], list[ModelConfig]]:
     """Check backend connections and determine which models are available.
 
     Args:
@@ -78,7 +80,7 @@ def check_backend_connections(
     from shared.ai.ollama_benchmark import BenchmarkClient
 
     # Group models by provider to check each backend once
-    models_by_provider: dict[str, list["ModelConfig"]] = defaultdict(list)
+    models_by_provider: dict[str, list[ModelConfig]] = defaultdict(list)
     for mc in model_configs:
         models_by_provider[mc.provider].append(mc)
 
@@ -121,8 +123,8 @@ def check_backend_connections(
             console.print(f"  [green]✓[/] {provider} (cloud API)")
 
     # Check availability of each configured model
-    missing_models: list["ModelConfig"] = []
-    models_to_test: list["ModelConfig"] = []
+    missing_models: list[ModelConfig] = []
+    models_to_test: list[ModelConfig] = []
 
     for mc in model_configs:
         available = available_models_by_provider.get(mc.provider, [])
@@ -147,10 +149,10 @@ def check_backend_connections(
 
 
 def warmup_benchmark_models(
-    models_to_test: list["ModelConfig"],
-    benchmark_config: "BenchmarkConfig",
-    console,
-) -> list["ModelConfig"]:
+    models_to_test: list[ModelConfig],
+    _benchmark_config: BenchmarkConfig,
+    console: Console,
+) -> list[ModelConfig]:
     """Warm up models and return the list of models that succeeded.
 
     Args:
@@ -163,7 +165,7 @@ def warmup_benchmark_models(
     """
     from shared.ai.ollama_benchmark import BenchmarkClient
 
-    models_failed_warmup: list["ModelConfig"] = []
+    models_failed_warmup: list[ModelConfig] = []
     for mc in models_to_test:
         display_name = f"{mc.provider}/{mc.name}"
         api_config = get_model_api_config(mc)

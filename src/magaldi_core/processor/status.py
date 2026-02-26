@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from shared.throttling import ThrottleDecision
+
     from .timing import TimingStats
 
 
@@ -91,7 +92,7 @@ class ParallelismStats:
     current_tier: int | None = None  # Current context tier (e.g., 2048, 4096)
 
     # Throttling info
-    throttle_decision: "ThrottleDecision | None" = None  # Current throttle decision
+    throttle_decision: ThrottleDecision | None = None  # Current throttle decision
     tier_changing: bool = False  # True if waiting for tier change
 
     @property
@@ -108,7 +109,7 @@ class ParallelismStats:
     def effective_limit(self) -> int:
         """Effective worker limit after throttling."""
         if self.throttle_decision and self.throttle_decision.should_throttle:
-            return self.throttle_decision.recommended_workers
+            return self.throttle_decision.recommended_workers  # type: ignore[no-any-return]
         return self.tier_limit
 
 
@@ -120,7 +121,7 @@ class ProgressState:
     completed: int  # Elements processed so far
     skipped: int  # Elements unchanged (already processed in previous run)
     failed: int
-    timing: "TimingStats"
+    timing: TimingStats
     workers: WorkerStatus
     num_workers: int = 1
     recent_errors: list[tuple[str, str]] = field(default_factory=list)  # (element_name, error)

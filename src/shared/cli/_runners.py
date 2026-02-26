@@ -7,7 +7,7 @@ of the parsing and processing pipeline.
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from rich.console import Group, RenderableType
 from rich.live import Live
@@ -26,6 +26,8 @@ from shared.cli._shared import console, format_duration, get_model_column_width
 from shared.cli.extract import build_eta_table
 
 if TYPE_CHECKING:
+    from rich.console import Console
+
     from magaldi_core.change_detection import ChangeManifest
     from magaldi_core.code_parser import ParsingResult
     from magaldi_core.discovery import DiscoveryResult
@@ -35,7 +37,7 @@ if TYPE_CHECKING:
     from shared.db.store import Repository
 
 
-def run_discovery(repo_path: str, username: str, skip_tests: bool = False) -> "DiscoveryResult":
+def run_discovery(repo_path: str, username: str, skip_tests: bool = False) -> DiscoveryResult:
     """Run Phase 1: Discovery."""
     from magaldi_core.discovery import discover
 
@@ -44,10 +46,10 @@ def run_discovery(repo_path: str, username: str, skip_tests: bool = False) -> "D
 
 
 def run_change_detection(
-    discovery_result: "DiscoveryResult",
-    config: "MagaldiConfig",
+    discovery_result: DiscoveryResult,
+    config: MagaldiConfig,
     dry_run: bool,
-) -> "ChangeManifest":
+) -> ChangeManifest:
     """Run Phase 2: Change Detection."""
     from magaldi_core.change_detection import (
         InMemoryFileStateRepository,
@@ -80,7 +82,7 @@ def run_change_detection(
         return detect_changes(discovery_result, file_state_repo, on_progress)
 
 
-def run_parsing(manifest: "ChangeManifest") -> "ParsingResult":
+def run_parsing(manifest: ChangeManifest) -> ParsingResult:
     """Run Phase 3: Parsing."""
     from magaldi_core.code_parser import parse_files
 
@@ -104,7 +106,7 @@ def run_parsing(manifest: "ChangeManifest") -> "ParsingResult":
         return parse_files(manifest, on_progress)
 
 
-def _build_scoring_display(state: "ScoringProgressState", num_workers: int) -> RenderableType:
+def _build_scoring_display(state: ScoringProgressState, num_workers: int) -> RenderableType:
     """Build Rich display for variable scoring progress."""
     # Progress bar
     pct = (state.completed_batches / state.total_batches * 100) if state.total_batches > 0 else 0
@@ -262,10 +264,10 @@ def _build_scoring_display(state: "ScoringProgressState", num_workers: int) -> R
 
 
 def run_variable_scoring(
-    parsing_result: "ParsingResult",
-    config: "MagaldiConfig",
+    parsing_result: ParsingResult,
+    config: MagaldiConfig,
     workers: int = 0,
-) -> "ScoringResult":
+) -> ScoringResult:
     """Run Phase 4: Variable Scoring.
 
     Scores all variable/constant elements using the LLM to determine
@@ -331,7 +333,7 @@ def run_variable_scoring(
     current_state = progress_state
     display_workers = effective_workers
 
-    def on_progress(state: "ScoringProgressState") -> None:
+    def on_progress(state: ScoringProgressState) -> None:
         nonlocal current_state
         current_state = state
 
@@ -386,14 +388,14 @@ def run_variable_scoring(
 
 
 def run_processing(
-    parsing_result: "ParsingResult",
-    manifest: "ChangeManifest",
-    config: "MagaldiConfig",
+    parsing_result: ParsingResult,
+    manifest: ChangeManifest,
+    config: MagaldiConfig,
     dry_run: bool,
     skip_ai: bool,
     workers: int,
     compact: bool = False,
-) -> tuple[int, int, int, float, float, float, float, "TimingStats | None", list[tuple[str, str]], int]:
+) -> tuple[int, int, int, float, float, float, float, TimingStats | None, list[tuple[str, str]], int]:
     """Run unified processing: summarize -> embed -> index.
 
     Args:
@@ -671,7 +673,7 @@ def run_processing(
         if state.recent_errors:
             error_text = Text()
             error_text.append("  Errors:\n", style="red bold")
-            for i, (elem_name, error) in enumerate(state.recent_errors):
+            for _i, (elem_name, error) in enumerate(state.recent_errors):
                 error_text.append("    ", style="dim")
                 error_text.append(f"{elem_name}", style="yellow")
                 error_text.append(":\n", style="dim")
@@ -704,7 +706,7 @@ def run_processing(
         def __rich__(self) -> RenderableType:
             return build_display(current_state, display_workers)
 
-    with Live(LiveDisplay(), console=console, refresh_per_second=4) as live:
+    with Live(LiveDisplay(), console=console, refresh_per_second=4):
         def on_progress(state: ProgressState) -> None:
             nonlocal current_state
             current_state = state
@@ -795,7 +797,7 @@ def run_hierarchy_extraction(
     scope: str,
     repository: str,
     username: str,
-    repo: "Repository",
+    repo: Repository,
     cli_entry_point: str | None = None,
     api_prefix: str = "/api/v1",
 ) -> tuple[int, int]:
@@ -939,12 +941,12 @@ def run_hierarchy_extraction(
 
 
 def run_call_resolution(
-    repo: "Repository",
+    repo: Repository,
     scope: str,
     repository: str,
     username: str,
     skip_resolve: bool = False,
-    console: "Console | None" = None,
+    console: Console | None = None,
 ) -> None:
     """Run Phase 6: Call Resolution (static + embedding + semantic relationships).
 

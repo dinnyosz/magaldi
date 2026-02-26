@@ -11,9 +11,8 @@ import os
 import pytest
 
 from magaldi_core.code_parser import CodeElement
-from shared.config import SearchBackendConfig, MagaldiConfig, reset_config
+from shared.config import MagaldiConfig, SearchBackendConfig, reset_config
 from shared.db.store import INDEX_NAME
-
 
 # Skip all tests in this directory if search backend is not available
 pytestmark = pytest.mark.integration

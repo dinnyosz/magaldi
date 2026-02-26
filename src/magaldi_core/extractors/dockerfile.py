@@ -74,5 +74,5 @@ def _instruction_name(node: object) -> str:
     first_line = text.split("\n")[0]
     # Trim to reasonable length
     if len(first_line) > 80:
-        return first_line[:77] + "..."
-    return first_line
+        return first_line[:77] + "..."  # type: ignore[no-any-return]
+    return first_line  # type: ignore[no-any-return]

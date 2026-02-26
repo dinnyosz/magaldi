@@ -5,6 +5,7 @@ Handles indexing and retrieval of feature documents and cluster management.
 
 from __future__ import annotations
 
+import contextlib
 from datetime import datetime
 from typing import Any
 
@@ -23,7 +24,7 @@ class FeatureRepository:
 
     def _get_bulk_timeout(self) -> int:
         """Get bulk operation timeout from config."""
-        return self._base._config.search_backend.bulk_timeout
+        return self._base._config.search_backend.bulk_timeout  # type: ignore[no-any-return]
 
     def index_feature(
         self,
@@ -314,7 +315,7 @@ class FeatureRepository:
             request_timeout=bulk_timeout,
         )
 
-        return response.get("deleted", 0)
+        return response.get("deleted", 0)  # type: ignore[no-any-return]
 
     def delete_subfeatures(
         self,
@@ -354,7 +355,7 @@ class FeatureRepository:
             request_timeout=bulk_timeout,
         )
 
-        return response.get("deleted", 0)
+        return response.get("deleted", 0)  # type: ignore[no-any-return]
 
     def update_cluster_assignments(
         self,
@@ -528,7 +529,7 @@ class FeatureRepository:
             request_timeout=bulk_timeout,
         )
 
-        return response.get("updated", 0)
+        return response.get("updated", 0)  # type: ignore[no-any-return]
 
     def get_features_for_element(
         self,
@@ -708,10 +709,8 @@ class FeatureRepository:
 
         finally:
             if scroll_id:
-                try:
+                with contextlib.suppress(Exception):
                     client.clear_scroll(scroll_id=scroll_id)
-                except Exception:
-                    pass
 
         if not bulk_body:
             return 0

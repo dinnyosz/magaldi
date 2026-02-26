@@ -26,7 +26,7 @@ class ElementRepository:
 
     def _get_bulk_timeout(self) -> int:
         """Get bulk operation timeout from config."""
-        return self._base._config.search_backend.bulk_timeout
+        return self._base._config.search_backend.bulk_timeout  # type: ignore[no-any-return]
 
     def index_element(
         self,
@@ -151,7 +151,7 @@ class ElementRepository:
         try:
             client = self._get_client()
             result = client.get_document(INDEX_NAME, element_id)
-            return result["_source"]
+            return result["_source"]  # type: ignore[no-any-return]
         except NotFoundError:
             return None
 
@@ -197,7 +197,7 @@ class ElementRepository:
                     "Use more characters to disambiguate."
                 )
 
-            return hits[0]["_source"]
+            return hits[0]["_source"]  # type: ignore[no-any-return]
         except ValueError:
             raise
         except Exception:
@@ -238,7 +238,7 @@ class ElementRepository:
         """
         try:
             client = self._get_client()
-            return client.exists_document(INDEX_NAME, element_id)
+            return client.exists_document(INDEX_NAME, element_id)  # type: ignore[no-any-return]
         except Exception:
             return False
 
@@ -477,7 +477,7 @@ class ElementRepository:
             for eid in element_ids
         ]
         success, _ = client.bulk_helpers(actions, raise_on_error=False, refresh=True)
-        return success
+        return success  # type: ignore[no-any-return]
 
     def delete_by_file(
         self, scope: str, repository: str, username: str, relative_path: str
@@ -503,7 +503,7 @@ class ElementRepository:
             timeout=f"{bulk_timeout}s",
             request_timeout=bulk_timeout,
         )
-        return result.get("deleted", 0)
+        return result.get("deleted", 0)  # type: ignore[no-any-return]
 
     def count_elements_by_file_hash(
         self, scope: str, repository: str, username: str, file_hash: str
@@ -530,7 +530,7 @@ class ElementRepository:
                 }
             },
         )
-        return result.get("count", 0)
+        return result.get("count", 0)  # type: ignore[no-any-return]
 
     def count_elements_by_path(
         self, scope: str, repository: str, username: str, relative_path: str
@@ -556,7 +556,7 @@ class ElementRepository:
                 }
             },
         )
-        return result.get("count", 0)
+        return result.get("count", 0)  # type: ignore[no-any-return]
 
     def delete_by_file_hash(
         self, scope: str, repository: str, username: str, file_hash: str
@@ -585,7 +585,7 @@ class ElementRepository:
             timeout=f"{bulk_timeout}s",
             request_timeout=bulk_timeout,
         )
-        return result.get("deleted", 0)
+        return result.get("deleted", 0)  # type: ignore[no-any-return]
 
     def delete_by_repository(self, scope: str, repository: str, username: str) -> int:
         """Delete all elements for a repository/user combination.
@@ -612,7 +612,7 @@ class ElementRepository:
             timeout=f"{bulk_timeout}s",
             request_timeout=bulk_timeout,
         )
-        return response.get("deleted", 0)
+        return response.get("deleted", 0)  # type: ignore[no-any-return]
 
     def update_file_hashes(
         self,

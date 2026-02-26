@@ -3,26 +3,25 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator
 
 import pytest
 
 from shared import config as config_module
 from shared.config import (
-    SearchBackendConfig,
     LLMConfig,
     LoggingConfig,
     MagaldiConfig,
     MCPConfig,
     ParserConfig,
+    SearchBackendConfig,
     SearchConfig,
     UserDataConfig,
     WebConfig,
     WorkerConfig,
     WorkersConfig,
 )
-
 
 # =============================================================================
 # PATHS

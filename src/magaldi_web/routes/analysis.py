@@ -8,10 +8,10 @@ from magaldi_web.dependencies import get_repository
 from magaldi_web.models import (
     AsyncCodeItem,
     AsyncCodeResponse,
-    CallerInfo,
-    CalleeInfo,
     CallChainNode,
     CallChainResponse,
+    CalleeInfo,
+    CallerInfo,
     CallGraphResponse,
     ComplexFunctionItem,
     ComplexFunctionsResponse,
@@ -242,7 +242,7 @@ async def get_entry_points(
         entries: list[dict],
         lookup: dict[str, str] | None = None,
     ) -> list[EntryPointItem]:
-        from magaldi_web.models import HttpRouteInfo, CliCommandInfo
+        from magaldi_web.models import CliCommandInfo, HttpRouteInfo
 
         items = []
         for e in entries:

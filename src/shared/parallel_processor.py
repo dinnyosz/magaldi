@@ -93,7 +93,7 @@ class ProcessingStats:
 
     def get_throttle_stats(self) -> tuple[float, float, int, float, float]:
         """Get stats for throttle decision."""
-        return self.throughput_tracker.get_stats_with_concurrency()
+        return self.throughput_tracker.get_stats_with_concurrency()  # type: ignore[no-any-return]
 
 
 @dataclass
@@ -473,7 +473,7 @@ class ThrottleContext:
             )
             from shared.throttling import _log_throttle
             if level_data:
-                best = min(level_data, key=level_data.get)
+                best = min(level_data, key=level_data.get)  # type: ignore[arg-type]
                 _log_throttle(
                     f"GSS INIT: bracket=[{self._gss.lo}, {self._gss.hi}] "
                     f"from {len(level_data)} levels (best={best})"

@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import logging
 import math
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from magaldi_web.dependencies import get_cached_config, get_repository
-
-logger = logging.getLogger(__name__)
 from magaldi_web.models import (
     SearchRequest,
     SearchResponse,
@@ -18,6 +17,13 @@ from magaldi_web.models import (
     SearchSummaryResponse,
 )
 from shared.db.store import INDEX_NAME, Repository
+
+if TYPE_CHECKING:
+    from typing import Any
+
+    from shared.config import MagaldiConfig
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -37,7 +43,7 @@ def cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
 def _generate_search_summary_sync(
     query: str,
     results: list,
-    config,
+    config: MagaldiConfig,
 ) -> tuple[str | None, str | None]:
     """Generate AI summary of search results (synchronous).
 
@@ -130,7 +136,7 @@ async def search(
     client = repo._get_client()
 
     # Build filters
-    filters = []
+    filters: list[dict[str, Any]] = []
 
     # Username filter - include both main and user branch
     usernames = ["main"]
@@ -191,7 +197,7 @@ async def search(
                 raise HTTPException(
                     status_code=500,
                     detail=f"Vector search failed and text search is disabled: {e}",
-                )
+                ) from e
 
     # Build query clauses
     should_clauses = []

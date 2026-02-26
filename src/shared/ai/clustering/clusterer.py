@@ -85,14 +85,14 @@ class ClusterConfig:
     @classmethod
     def from_magaldi_config(
         cls,
-        config: "MagaldiConfig",
+        config: MagaldiConfig,
         api_base: str | None = None,
         labeling_model: str | None = None,
         provider: str | None = None,
         # CLI overrides
         min_cluster_size: int | None = None,
         min_samples: int | None = None,
-    ) -> "ClusterConfig":
+    ) -> ClusterConfig:
         """Create ClusterConfig from MagaldiConfig.
 
         Args:
@@ -430,7 +430,7 @@ class FeatureClusterer:
         )
         from shared.config import ClusteringConfig
 
-        n_elements = len(valid_elements)
+        len(valid_elements)
 
         # Create progress adapter if callback provided
         def soft_progress_callback(progress: SoftClusteringProgress) -> None:
@@ -474,7 +474,7 @@ class FeatureClusterer:
         outliers: list[str] = []
         element_memberships: dict[str, list[ElementMembership]] = {}
 
-        for idx, elem in enumerate(valid_elements):
+        for _idx, elem in enumerate(valid_elements):
             elem_id = elem["element_id"]
             memberships = soft_result.element_memberships.get(elem_id, [])
 
@@ -555,7 +555,7 @@ class FeatureClusterer:
         scope: str | None = None,
         repository: str | None = None,
         username: str | None = None,
-        magaldi_config: "MagaldiConfig | None" = None,
+        magaldi_config: MagaldiConfig | None = None,
     ) -> ClusteringResult:
         """Generate labels for clusters using Ollama.
 

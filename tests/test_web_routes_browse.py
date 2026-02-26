@@ -10,7 +10,6 @@ from fastapi.testclient import TestClient
 
 from magaldi_web.routes.browse import router
 
-
 # =============================================================================
 # FIXTURES
 # =============================================================================
@@ -555,7 +554,7 @@ class TestGetElementDetails:
         # Second call: get grandparent (file)
         get_count = [0]
 
-        def get_side_effect(**kwargs):
+        def get_side_effect(**_kwargs):
             get_count[0] += 1
             if get_count[0] == 1:
                 return {
@@ -611,7 +610,7 @@ class TestGetElementDetails:
         # Search for callers
         search_count = [0]
 
-        def search_side_effect(**kwargs):
+        def search_side_effect(**_kwargs):
             search_count[0] += 1
             if search_count[0] == 1:
                 # Callers search

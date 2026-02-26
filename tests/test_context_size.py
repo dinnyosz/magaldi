@@ -2,7 +2,6 @@
 
 from shared.ai.context_size import (
     CONTEXT_TIERS,
-    PROMPT_OVERHEAD,
     compute_aggregation_num_ctx,
     compute_context_sizes,
     compute_element_num_ctx,

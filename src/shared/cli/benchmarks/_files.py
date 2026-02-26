@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from magaldi_core.discovery import DiscoveryResult
 
 
-def create_full_manifest(discovery_result: "DiscoveryResult") -> "ChangeManifest":
+def create_full_manifest(discovery_result: DiscoveryResult) -> ChangeManifest:
     """Create a ChangeManifest with all discovered files as 'new'.
 
     This skips change detection and treats all files as new.
@@ -83,7 +83,7 @@ def create_full_manifest(discovery_result: "DiscoveryResult") -> "ChangeManifest
 
 
 def select_benchmark_files(
-    parsing_result: "ParsingResult",
+    parsing_result: ParsingResult,
     forced_path: str | None,
     num_files: int = 5,
     max_per_type: int = 10,
@@ -108,7 +108,7 @@ def select_benchmark_files(
             by_type[elem.element_type].append(elem)
 
         result = []
-        for elem_type, type_elements in by_type.items():
+        for _elem_type, type_elements in by_type.items():
             if len(type_elements) > max_per_type:
                 # Randomly sample to get variety
                 result.extend(random.sample(type_elements, max_per_type))

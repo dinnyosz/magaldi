@@ -140,7 +140,7 @@ class CodeEmbeddingClient:
 
     def verify_model(self) -> bool:
         """Check if embedding model is available."""
-        return self._client.verify_model()
+        return self._client.verify_model()  # type: ignore[no-any-return]
 
     def embed_single(self, text: str, timeout: int = 30) -> list[float]:
         """Generate embedding for single text.
@@ -156,7 +156,7 @@ class CodeEmbeddingClient:
             EmbeddingError: If embedding generation fails.
         """
         try:
-            return self._client.embed(text, timeout=timeout)
+            return self._client.embed(text, timeout=timeout)  # type: ignore[no-any-return]
         except LLMError as e:
             raise EmbeddingError(str(e)) from e
 
@@ -176,7 +176,7 @@ class CodeEmbeddingClient:
             EmbeddingError: If embedding generation fails.
         """
         try:
-            return await self._client.embed_async(text, timeout=timeout)
+            return await self._client.embed_async(text, timeout=timeout)  # type: ignore[no-any-return]
         except LLMError as e:
             raise EmbeddingError(str(e)) from e
 
@@ -194,7 +194,7 @@ class CodeEmbeddingClient:
             EmbeddingError: If embedding generation fails.
         """
         try:
-            return self._client.embed_batch(texts, timeout=timeout)
+            return self._client.embed_batch(texts, timeout=timeout)  # type: ignore[no-any-return]
         except LLMError as e:
             raise EmbeddingError(str(e)) from e
 
@@ -308,12 +308,12 @@ class InMemoryEmbeddingJobRepository:
         }
 
     def get_job(
-        self, element_id: str, scope: str, repository: str, username: str
+        self, element_id: str, _scope: str, _repository: str, _username: str
     ) -> dict[str, Any] | None:
         return self._jobs.get(element_id)
 
     def claim_pending_jobs(
-        self, worker_id: str, scope: str, repository: str, username: str, batch_size: int
+        self, worker_id: str, _scope: str, _repository: str, _username: str, batch_size: int
     ) -> list[dict[str, Any]]:
         available = [
             job for job in self._jobs.values() if job["status"] == "pending"
@@ -328,14 +328,14 @@ class InMemoryEmbeddingJobRepository:
         return claimed
 
     def mark_completed(
-        self, element_id: str, scope: str, repository: str, username: str
+        self, element_id: str, _scope: str, _repository: str, _username: str
     ) -> None:
         if element_id in self._jobs:
             self._jobs[element_id]["status"] = "completed"
             self._jobs[element_id]["completed_at"] = datetime.now()
 
     def mark_failed(
-        self, element_id: str, scope: str, repository: str, username: str, error_message: str
+        self, element_id: str, _scope: str, _repository: str, _username: str, error_message: str
     ) -> None:
         if element_id in self._jobs:
             self._jobs[element_id]["status"] = "failed"
@@ -497,11 +497,7 @@ def validate_vector(vector: list[float], expected_dims: int) -> bool:
     if len(vector) != expected_dims:
         return False
 
-    for v in vector:
-        if math.isnan(v) or math.isinf(v):
-            return False
-
-    return True
+    return all(not (math.isnan(v) or math.isinf(v)) for v in vector)
 
 
 # =============================================================================

@@ -13,20 +13,19 @@ framework/library-specific code structures like routes and CLI commands.
 """
 
 # PHP patterns (AST-level extraction)
+# JavaScript/TypeScript patterns (decorator-based detection)
+from magaldi_core.extractors.patterns.javascript import (
+    detect_javascript_http_routes,
+)
 from magaldi_core.extractors.patterns.php import (
-    extract_slim_routes,
     extract_slim_route_groups,
+    extract_slim_routes,
 )
 
 # Python patterns (decorator-based detection)
 from magaldi_core.extractors.patterns.python import (
-    detect_python_http_routes,
     detect_python_cli_commands,
-)
-
-# JavaScript/TypeScript patterns (decorator-based detection)
-from magaldi_core.extractors.patterns.javascript import (
-    detect_javascript_http_routes,
+    detect_python_http_routes,
 )
 
 # Rust patterns (attribute-based detection)

@@ -9,52 +9,39 @@ This module contains:
 
 from __future__ import annotations
 
-# Suppress warnings from LiteLLM/aiohttp before any imports
 import warnings
+from typing import TYPE_CHECKING, Any
+
+import aiohttp.client
+import aiohttp.connector
+import click
+from rich.console import Console
+
+if TYPE_CHECKING:
+    from shared.config import MagaldiConfig
+
+# Suppress warnings from LiteLLM/aiohttp
 warnings.filterwarnings("ignore", category=ResourceWarning, message=".*[Uu]nclosed.*")
 warnings.filterwarnings("ignore", message="Pydantic serializer warnings")
 
 # Patch aiohttp to not emit unclosed session warnings
 # This is necessary because aiohttp uses both warnings.warn AND loop.call_exception_handler
-import aiohttp.client
-import aiohttp.connector
-
 _original_client_del = aiohttp.client.ClientSession.__del__
 _original_connector_del = aiohttp.connector.BaseConnector.__del__
 
 
-def _quiet_client_del(self, _warnings=None):
+def _quiet_client_del(self: Any, _warnings: Any = None) -> None:
     """Suppress unclosed session warning."""
     pass  # Do nothing - session will be GC'd anyway
 
 
-def _quiet_connector_del(self, _warnings=None):
+def _quiet_connector_del(self: Any, _warnings: Any = None) -> None:
     """Suppress unclosed connector warning."""
     pass  # Do nothing - connector will be GC'd anyway
 
 
-aiohttp.client.ClientSession.__del__ = _quiet_client_del
-aiohttp.connector.BaseConnector.__del__ = _quiet_connector_del
-
-import sys
-from typing import TYPE_CHECKING
-
-import click
-from rich.console import Console, Group, RenderableType
-from rich.live import Live
-from rich.progress import (
-    BarColumn,
-    Progress,
-    SpinnerColumn,
-    TaskProgressColumn,
-    TextColumn,
-    TimeElapsedColumn,
-)
-from rich.table import Table
-from rich.text import Text
-
-if TYPE_CHECKING:
-    from shared.config import MagaldiConfig
+aiohttp.client.ClientSession.__del__ = _quiet_client_del  # type: ignore[method-assign]
+aiohttp.connector.BaseConnector.__del__ = _quiet_connector_del  # type: ignore[method-assign]
 
 console = Console()
 
@@ -103,7 +90,7 @@ def validate_llm_url(url: str) -> str:
     return url.rstrip("/")
 
 
-def get_model_column_width(config: "MagaldiConfig") -> int:
+def get_model_column_width(config: MagaldiConfig) -> int:
     """Calculate the optimal width for model name columns in CLI displays.
 
     Takes into account all configured models and their potential tiered names
@@ -134,7 +121,7 @@ def get_model_column_width(config: "MagaldiConfig") -> int:
     return max(20, max(len(n) for n in model_names) + 2)
 
 
-def check_model_availability(config: "MagaldiConfig", skip_ai: bool) -> list[str]:
+def check_model_availability(config: MagaldiConfig, skip_ai: bool) -> list[str]:
     """Check if required models are available from their configured providers.
 
     For Ollama models, this also creates tiered model aliases (e.g., model-2k, model-4k)
@@ -205,7 +192,7 @@ def check_model_availability(config: "MagaldiConfig", skip_ai: bool) -> list[str
         elif model_cfg.provider == "llamacpp":
             # Check if llama-server is running
             try:
-                response = requests.get(f"{model_cfg.url.rstrip('/')}/v1/models", timeout=5)
+                requests.get(f"{model_cfg.url.rstrip('/')}/v1/models", timeout=5)
                 # llama-server returns 200 if running
             except requests.exceptions.ConnectionError:
                 errors.append(
@@ -231,7 +218,6 @@ def _warmup_ollama_tiers(models: list[tuple[str, str]]) -> None:
     Args:
         models: List of (model_name, url) tuples.
     """
-    import os
 
     from rich.console import Console
 
@@ -249,7 +235,7 @@ def _warmup_ollama_tiers(models: list[tuple[str, str]]) -> None:
         try:
             result = warmup_ollama_tiers_verbose(litellm_model, url)
             if result is None:
-                console.print(f"    [yellow]→ skipped (already tiered)[/]")
+                console.print("    [yellow]→ skipped (already tiered)[/]")
             elif result.created or result.existed:
                 # Show what was created
                 if result.created:
@@ -264,7 +250,7 @@ def _warmup_ollama_tiers(models: list[tuple[str, str]]) -> None:
                     failed_str = ", ".join(f"{t//1024}k" for t in sorted(result.failed))
                     console.print(f"    [red]→ failed:[/] {failed_str}")
             else:
-                console.print(f"    [red]→ all tiers failed[/]")
+                console.print("    [red]→ all tiers failed[/]")
         except Exception as e:
             console.print(f"    [red]→ error:[/] {e}")
 

@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from magaldi_mcp.server import MagaldiMCPServer, _format_result
-
 
 # =============================================================================
 # FIXTURES
@@ -1027,13 +1024,15 @@ class TestFormatResultFallback:
 class TestLazyInitialization:
     """Tests for lazy initialization of clients."""
 
-    def test_get_repo_returns_same_instance(self, server, mock_repo):
+    @pytest.mark.usefixtures("mock_repo")
+    def test_get_repo_returns_same_instance(self, server):
         """Test that _get_repo returns the same instance on subsequent calls."""
         result1 = server._get_repo()
         result2 = server._get_repo()
         assert result1 is result2
 
-    def test_get_embed_client_returns_same_instance(self, server, mock_embed_client):
+    @pytest.mark.usefixtures("mock_embed_client")
+    def test_get_embed_client_returns_same_instance(self, server):
         """Test that _get_embed_client returns the same instance on subsequent calls."""
         result1 = server._get_embed_client()
         result2 = server._get_embed_client()
@@ -1211,7 +1210,7 @@ class TestRunServer:
              patch.dict(os.environ, {"MAGALDI_USER": "env-user"}), \
              patch("magaldi_mcp.server.get_config", return_value=mock_config), \
              patch("magaldi_mcp.server.load_config"), \
-             patch("magaldi_mcp.server.asyncio.run") as mock_run, \
+             patch("magaldi_mcp.server.asyncio.run"), \
              patch("magaldi_mcp.server.logging"), \
              patch("magaldi_mcp.server.MagaldiMCPServer") as mock_server_class:
 
@@ -1261,7 +1260,7 @@ def integration_config():
     """Load config for ES connection in integration tests."""
     import os
 
-    from shared.config import SearchBackendConfig, MagaldiConfig, reset_config
+    from shared.config import MagaldiConfig, SearchBackendConfig, reset_config
 
     # Reset config singleton
     reset_config()

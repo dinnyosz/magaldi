@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
+
 from fastapi import APIRouter, Depends, Query
 
 from magaldi_web.dependencies import get_repository
 from shared.db.store import INDEX_NAME, Repository
+
+if TYPE_CHECKING:
+    from typing import Any
 
 router = APIRouter()
 
@@ -41,7 +46,7 @@ async def browse_elements(
     client = repo._get_client()
 
     # Build filters
-    filters = []
+    filters: list[dict[str, Any]] = []
 
     # Username filter - include both main and user branch
     usernames = ["main"]
@@ -422,7 +427,7 @@ async def get_browse_stats(
     client = repo._get_client()
 
     # Build filters
-    filters = []
+    filters: list[dict[str, Any]] = []
     usernames = ["main"]
     if username and username != "main":
         usernames.append(username)
@@ -468,7 +473,7 @@ async def get_browse_stats(
 async def get_element_details(
     hash_id: str,
     include_call_graph: bool = False,
-    username: str = "main",
+    _username: str = "main",
     repo: Repository = Depends(get_repository),
 ) -> dict:
     """Get detailed information about an element.

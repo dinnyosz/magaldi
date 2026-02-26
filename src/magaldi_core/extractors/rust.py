@@ -87,7 +87,7 @@ class RustExtractor(BaseExtractor):
 
 
 def extract_rust_elements(
-    tree: Tree, lines: list[str], file_path: str | None = None
+    tree: Tree, lines: list[str], _file_path: str | None = None
 ) -> list[ExtractedElement]:
     """Extract structs, enums, functions, and module-level variables from Rust code.
 
@@ -149,7 +149,7 @@ def extract_rust_elements(
     return elements
 
 
-def _extract_rust_struct(node: Node, lines: list[str]) -> ExtractedElement | None:
+def _extract_rust_struct(node: Node, _lines: list[str]) -> ExtractedElement | None:
     """Extract a Rust struct definition."""
     name = None
     for child in node.children:
@@ -171,7 +171,7 @@ def _extract_rust_struct(node: Node, lines: list[str]) -> ExtractedElement | Non
     )
 
 
-def _extract_rust_enum(node: Node, lines: list[str]) -> ExtractedElement | None:
+def _extract_rust_enum(node: Node, _lines: list[str]) -> ExtractedElement | None:
     """Extract a Rust enum definition."""
     name = None
     for child in node.children:
@@ -193,7 +193,7 @@ def _extract_rust_enum(node: Node, lines: list[str]) -> ExtractedElement | None:
     )
 
 
-def _extract_rust_trait(node: Node, lines: list[str]) -> ExtractedElement | None:
+def _extract_rust_trait(node: Node, _lines: list[str]) -> ExtractedElement | None:
     """Extract a Rust trait definition."""
     name = None
     for child in node.children:
@@ -215,7 +215,7 @@ def _extract_rust_trait(node: Node, lines: list[str]) -> ExtractedElement | None
     )
 
 
-def _extract_rust_use(node: Node, lines: list[str]) -> ExtractedElement | None:
+def _extract_rust_use(node: Node, _lines: list[str]) -> ExtractedElement | None:
     """Extract a Rust use declaration (import)."""
     raw_code = node.text.decode('utf-8') if node.text else ""
 
@@ -260,10 +260,8 @@ def _extract_scoped_use_list_path(node: Node) -> str:
     Returns: std::fmt
     """
     for child in node.children:
-        if child.type == "scoped_identifier":
-            return get_node_text(child)
-        elif child.type == "identifier":
-            return get_node_text(child)
+        if child.type == "scoped_identifier" or child.type == "identifier":
+            return get_node_text(child)  # type: ignore[no-any-return]
     return ""
 
 
@@ -271,9 +269,7 @@ def _extract_use_tree_path(node: Node) -> str:
     """Extract the path from a use_tree node."""
     parts = []
     for child in node.children:
-        if child.type == "identifier":
-            parts.append(get_node_text(child))
-        elif child.type == "scoped_identifier":
+        if child.type == "identifier" or child.type == "scoped_identifier":
             parts.append(get_node_text(child))
         elif child.type == "use_tree":
             inner = _extract_use_tree_path(child)
@@ -282,7 +278,7 @@ def _extract_use_tree_path(node: Node) -> str:
     return "::".join(parts) if parts else ""
 
 
-def _extract_rust_module_const(node: Node, lines: list[str]) -> ExtractedElement | None:
+def _extract_rust_module_const(node: Node, _lines: list[str]) -> ExtractedElement | None:
     """Extract a module-level const declaration.
 
     Handles patterns like:
@@ -297,7 +293,6 @@ def _extract_rust_module_const(node: Node, lines: list[str]) -> ExtractedElement
         ExtractedElement if the constant is useful, None otherwise.
     """
     name = None
-    value_node = None
     type_node = None
 
     for child in node.children:
@@ -310,7 +305,7 @@ def _extract_rust_module_const(node: Node, lines: list[str]) -> ExtractedElement
             "boolean_literal", "array_expression", "tuple_expression",
             "call_expression", "macro_invocation",
         ):
-            value_node = child
+            pass
 
     if not name:
         return None
@@ -332,7 +327,7 @@ def _extract_rust_module_const(node: Node, lines: list[str]) -> ExtractedElement
     )
 
 
-def _extract_rust_static(node: Node, lines: list[str]) -> ExtractedElement | None:
+def _extract_rust_static(node: Node, _lines: list[str]) -> ExtractedElement | None:
     """Extract a module-level static declaration.
 
     Handles patterns like:
@@ -382,7 +377,7 @@ def _extract_rust_static(node: Node, lines: list[str]) -> ExtractedElement | Non
     )
 
 
-def _extract_rust_variable(node: Node, lines: list[str]) -> ExtractedElement | None:
+def _extract_rust_variable(node: Node, _lines: list[str]) -> ExtractedElement | None:
     """Extract a Rust let declaration.
 
     Applies usefulness filter to skip transient variables like object creations
@@ -526,11 +521,11 @@ def _extract_rust_return_type(node: Node) -> str | None:
     for i, child in enumerate(node.children):
         if child.type == "->" and i + 1 < len(node.children):
             ret_type = node.children[i + 1]
-            return get_node_text(ret_type)
+            return get_node_text(ret_type)  # type: ignore[no-any-return]
     return None
 
 
-def _extract_rust_function(node: Node, lines: list[str]) -> ExtractedElement | None:
+def _extract_rust_function(node: Node, _lines: list[str]) -> ExtractedElement | None:
     """Extract a Rust function definition."""
     name = None
     is_async = False
@@ -576,7 +571,7 @@ def _extract_rust_function(node: Node, lines: list[str]) -> ExtractedElement | N
     )
 
 
-def _extract_rust_impl(node: Node, lines: list[str]) -> ExtractedElement | None:
+def _extract_rust_impl(node: Node, _lines: list[str]) -> ExtractedElement | None:
     """Extract a Rust impl block."""
     # Find the type being implemented for
     impl_type = None
@@ -663,7 +658,7 @@ def extract_rust_impl_members(
     return methods, constants
 
 
-def _extract_rust_method(node: Node, lines: list[str]) -> ExtractedElement | None:
+def _extract_rust_method(node: Node, _lines: list[str]) -> ExtractedElement | None:
     """Extract a Rust method from an impl block."""
     name = None
     is_async = False
@@ -723,7 +718,7 @@ def _extract_rust_method(node: Node, lines: list[str]) -> ExtractedElement | Non
     )
 
 
-def _extract_rust_const(node: Node, lines: list[str]) -> ExtractedElement | None:
+def _extract_rust_const(node: Node, _lines: list[str]) -> ExtractedElement | None:
     """Extract a Rust const from an impl block."""
     name = None
     for child in node.children:

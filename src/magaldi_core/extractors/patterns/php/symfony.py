@@ -18,7 +18,6 @@ from tree_sitter import Node, Tree
 from magaldi_core.extractors.base import get_node_text, walk_tree
 from magaldi_core.extractors.types import HttpRoute
 
-
 # =============================================================================
 # CONSTANTS
 # =============================================================================
@@ -99,7 +98,7 @@ def extract_symfony_controllers(tree: Tree, lines: list[str]) -> list[SymfonyCon
 # =============================================================================
 
 
-def _extract_routes_from_method(node: Node, lines: list[str]) -> list[HttpRoute]:
+def _extract_routes_from_method(node: Node, _lines: list[str]) -> list[HttpRoute]:
     """Extract routes from a method's PHP 8 attributes.
 
     Args:
@@ -340,10 +339,10 @@ def _get_string_content(node: Node) -> str:
     """Extract string content from a string node."""
     for child in node.children:
         if child.type == "string_content":
-            return get_node_text(child)
+            return get_node_text(child)  # type: ignore[no-any-return]
     # Fallback: strip quotes from the whole text
     text = get_node_text(node)
-    return text.strip("'\"")
+    return text.strip("'\"")  # type: ignore[no-any-return]
 
 
 def _extract_path_params(path: str) -> list[str]:

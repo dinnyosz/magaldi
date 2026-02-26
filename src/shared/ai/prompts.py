@@ -661,7 +661,7 @@ Description:""",
 # =============================================================================
 
 
-def build_imports_section(element: "CodeElement") -> str:
+def build_imports_section(element: CodeElement) -> str:
     """Build imports section for file prompt.
 
     Shows key external imports to indicate dependencies.
@@ -681,7 +681,7 @@ def build_imports_section(element: "CodeElement") -> str:
     return f"\nKey imports: {', '.join(external)}"
 
 
-def build_attributes_section(element: "CodeElement") -> str:
+def build_attributes_section(element: CodeElement) -> str:
     """Build attributes section for class prompt.
 
     Shows instance attributes defined in __init__.
@@ -696,7 +696,7 @@ def build_attributes_section(element: "CodeElement") -> str:
     return f"\nInstance attributes: {', '.join(attr_names)}"
 
 
-def build_base_classes_section(element: "CodeElement") -> str:
+def build_base_classes_section(element: CodeElement) -> str:
     """Build base classes section for class prompt."""
     if not element.base_classes:
         return ""
@@ -704,7 +704,7 @@ def build_base_classes_section(element: "CodeElement") -> str:
     return f"\nInherits from: {', '.join(element.base_classes)}"
 
 
-def build_collaborators_section(element: "CodeElement") -> str:
+def build_collaborators_section(element: CodeElement) -> str:
     """Build collaborators section for class prompt.
 
     Shows types this class interacts with based on calls.
@@ -724,7 +724,7 @@ def build_collaborators_section(element: "CodeElement") -> str:
     return f"\nUses: {', '.join(receivers)}"
 
 
-def build_instantiation_hints(element: "CodeElement") -> str:
+def build_instantiation_hints(element: CodeElement) -> str:
     """Build instantiation hints for class prompt.
 
     Filters context_usages for instantiation examples.
@@ -744,7 +744,7 @@ def build_instantiation_hints(element: "CodeElement") -> str:
     return "\nInstantiation examples:\n" + "\n".join(f"- {u}" for u in insts)
 
 
-def build_exceptions_section(element: "CodeElement") -> str:
+def build_exceptions_section(element: CodeElement) -> str:
     """Build exceptions section for function/method prompt."""
     if not element.exceptions_raised:
         return ""
@@ -752,7 +752,7 @@ def build_exceptions_section(element: "CodeElement") -> str:
     return f"\nRaises: {', '.join(element.exceptions_raised)}"
 
 
-def build_state_section(element: "CodeElement") -> str:
+def build_state_section(element: CodeElement) -> str:
     """Build state section for method prompt.
 
     Shows which attributes this method modifies.
@@ -763,7 +763,7 @@ def build_state_section(element: "CodeElement") -> str:
     return f"\nModifies attributes: {', '.join(element.attributes_modified)}"
 
 
-def build_usage_examples(element: "CodeElement") -> str:
+def build_usage_examples(element: CodeElement) -> str:
     """Build usage examples section for function/constant prompts."""
     if not element.context_usages:
         return ""
@@ -772,7 +772,7 @@ def build_usage_examples(element: "CodeElement") -> str:
     return "\nUsage examples:\n" + "\n".join(f"- {u}" for u in examples)
 
 
-def build_document_sections_section(element: "CodeElement") -> str:
+def build_document_sections_section(element: CodeElement) -> str:
     """Build document sections section for file prompt.
 
     Shows heading structure for markdown/doc files so the LLM
@@ -822,7 +822,7 @@ def truncate_code(code: str, max_tokens: int = 4000) -> str:
 
 
 def build_prompt(
-    element: "CodeElement",
+    element: CodeElement,
     parent_summaries: dict[str, str],
     max_code_tokens: int = 4000,
 ) -> str:
@@ -929,7 +929,7 @@ def build_prompt(
 
 
 def build_messages(
-    element: "CodeElement",
+    element: CodeElement,
     parent_summaries: dict[str, str],
     max_code_tokens: int = 4000,
 ) -> list[dict[str, str]]:

@@ -12,7 +12,6 @@ from typing import Any, cast
 
 from .base import RedisRepository
 
-
 # MCP Analytics Redis keys
 MCP_TOOL_CALLS = "magaldi:mcp:tool_calls"
 MCP_TOOL_TRANSITIONS = "magaldi:mcp:tool_transitions"
@@ -720,7 +719,7 @@ class RedisMCPAnalyticsRepository(RedisRepository):
         transitions = []
         seen_pairs: set[tuple[str, str]] = set()  # (caller_call_id, callee_call_id)
 
-        for session_id, session_calls in sessions.items():
+        for _session_id, session_calls in sessions.items():
             # Sort by start_time (oldest first)
             session_calls.sort(key=lambda x: x.get("start_time", ""))
 

@@ -15,7 +15,6 @@ from tree_sitter import Node, Tree
 from magaldi_core.extractors.base import get_node_text, walk_tree
 from magaldi_core.extractors.types import CliCommand
 
-
 # =============================================================================
 # CONSTANTS
 # =============================================================================
@@ -32,7 +31,7 @@ _LARAVEL_COMMAND_PROPERTIES = {"signature"}
 # =============================================================================
 
 
-def extract_php_cli_commands(tree: Tree, lines: list[str]) -> list[CliCommand]:
+def extract_php_cli_commands(tree: Tree, _lines: list[str]) -> list[CliCommand]:
     """Extract CLI commands from PHP code.
 
     Detects patterns like:
@@ -79,7 +78,6 @@ def _extract_symfony_command(class_node: Node) -> CliCommand | None:
         CliCommand if this is a Symfony command class, None otherwise.
     """
     command_name = None
-    description = None
 
     # Look for #[AsCommand] attribute on the class
     for child in class_node.children:
@@ -89,7 +87,6 @@ def _extract_symfony_command(class_node: Node) -> CliCommand | None:
                     name, desc = _extract_as_command_attribute(attr_group)
                     if name:
                         command_name = name
-                        description = desc
 
     if not command_name:
         return None
@@ -262,7 +259,6 @@ def _extract_laravel_command(class_node: Node) -> CliCommand | None:
         CliCommand if this is a Laravel command class, None otherwise.
     """
     signature = None
-    description = None
 
     for child in class_node.children:
         if child.type == "declaration_list":
@@ -272,7 +268,7 @@ def _extract_laravel_command(class_node: Node) -> CliCommand | None:
                     if prop_name == "signature" and prop_value:
                         signature = prop_value
                     elif prop_name == "description" and prop_value:
-                        description = prop_value
+                        pass
 
     if not signature:
         return None
@@ -359,7 +355,7 @@ def _get_method_name(method_node: Node) -> str | None:
     """Get method name from method_declaration node."""
     for child in method_node.children:
         if child.type == "name":
-            return get_node_text(child)
+            return get_node_text(child)  # type: ignore[no-any-return]
     return None
 
 
@@ -367,7 +363,7 @@ def _get_string_content(node: Node) -> str:
     """Extract string content from a string node."""
     for child in node.children:
         if child.type == "string_content":
-            return get_node_text(child)
+            return get_node_text(child)  # type: ignore[no-any-return]
     # Fallback: strip quotes from the whole text
     text = get_node_text(node)
-    return text.strip("'\"")
+    return text.strip("'\"")  # type: ignore[no-any-return]

@@ -149,7 +149,7 @@ def benchmark_models(
         available_models_by_provider, models_to_test, missing_models = check_backend_connections(model_configs, console)
 
         if missing_models:
-            console.print(f"  [yellow]Missing models (skipped):[/]")
+            console.print("  [yellow]Missing models (skipped):[/]")
             for mc in missing_models:
                 console.print(f"    [dim]✗ {mc.provider}/{mc.name}[/]")
 
@@ -189,7 +189,7 @@ def benchmark_models(
         tested_model_names = [f"{mc.provider}/{mc.name}" for mc in models_to_test]
 
         # Get eval models for reporting (same logic as in evaluate_summaries)
-        eval_model_configs: list["ModelConfig"] = []
+        eval_model_configs: list[ModelConfig] = []
         for eval_ref in benchmark_config.eval_models:
             try:
                 eval_mc = benchmark_config.get_model(eval_ref)

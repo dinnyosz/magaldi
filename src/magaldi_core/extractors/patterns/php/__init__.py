@@ -7,23 +7,23 @@ This package contains extractors for PHP web frameworks:
 - cli_commands.py - Symfony Console and Laravel Artisan commands
 """
 
-from magaldi_core.extractors.patterns.php.slim import (
-    extract_slim_routes,
-    extract_slim_route_groups,
-    SlimRouteGroup,
-)
-from magaldi_core.extractors.patterns.php.laravel import (
-    extract_laravel_routes,
-    extract_laravel_route_groups,
-    LaravelRouteGroup,
-)
-from magaldi_core.extractors.patterns.php.symfony import (
-    extract_symfony_routes,
-    extract_symfony_controllers,
-    SymfonyController,
-)
 from magaldi_core.extractors.patterns.php.cli_commands import (
     extract_php_cli_commands,
+)
+from magaldi_core.extractors.patterns.php.laravel import (
+    LaravelRouteGroup,
+    extract_laravel_route_groups,
+    extract_laravel_routes,
+)
+from magaldi_core.extractors.patterns.php.slim import (
+    SlimRouteGroup,
+    extract_slim_route_groups,
+    extract_slim_routes,
+)
+from magaldi_core.extractors.patterns.php.symfony import (
+    SymfonyController,
+    extract_symfony_controllers,
+    extract_symfony_routes,
 )
 
 __all__ = [

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 from magaldi_mcp.tools import (
     batch_get_elements,
@@ -12,7 +13,6 @@ from magaldi_mcp.tools import (
     get_context,
     get_element,
 )
-
 
 # =============================================================================
 # GET ELEMENT TESTS

@@ -103,7 +103,7 @@ class ElasticSearchClient:
         actions: list[dict[str, Any]],
         raise_on_error: bool = True,
         refresh: bool | str = False,
-    ) -> tuple[int, list[Any]]:
+    ) -> tuple[int, int | list[Any]]:
         success, errors = es_bulk(
             self._client, actions, raise_on_error=raise_on_error, refresh=refresh
         )

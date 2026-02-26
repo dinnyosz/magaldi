@@ -53,7 +53,7 @@ def find_containing_element(node: Node) -> str | None:
         if current.type in ("function_definition", "class_definition"):
             name_node = get_child_by_field(current, "name")
             if name_node:
-                return get_node_text(name_node)
+                return get_node_text(name_node)  # type: ignore[no-any-return]
         current = current.parent
     return None
 

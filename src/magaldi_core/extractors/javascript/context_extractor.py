@@ -105,9 +105,7 @@ def extract_javascript_base_class(class_node: Node) -> list[str]:
                 # TypeScript: extends clause
                 elif heritage_child.type == "extends_clause":
                     for ext_child in heritage_child.children:
-                        if ext_child.type in ("identifier", "type_identifier"):
-                            bases.append(get_node_text(ext_child))
-                        elif ext_child.type == "member_expression":
+                        if ext_child.type in ("identifier", "type_identifier") or ext_child.type == "member_expression":
                             bases.append(get_node_text(ext_child))
                         elif ext_child.type == "generic_type":
                             # Generic<T> - get the base type

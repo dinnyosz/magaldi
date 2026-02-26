@@ -81,7 +81,7 @@ def mcp_self_review(
         tool_results[tool_name].append(output)
 
     # Build tool sequence with parsed parameters
-    for idx, (pos, tool_name, params_str, is_magaldi) in enumerate(all_invocations):
+    for idx, (_pos, tool_name, params_str, is_magaldi) in enumerate(all_invocations):
         params = {}
         for param_match in re.finditer(param_pattern, params_str):
             params[param_match.group(1)] = param_match.group(2)
@@ -115,8 +115,7 @@ def mcp_self_review(
         next_tool = tool_sequence[i + 1]
 
         # Pattern 1: Magaldi search → Builtin Read/Grep (fallback pattern)
-        if current.is_magaldi and not next_tool.is_magaldi:
-            if next_tool.tool_name in ("Read", "Grep", "Glob"):
+        if current.is_magaldi and not next_tool.is_magaldi and next_tool.tool_name in ("Read", "Grep", "Glob"):
                 # What file/pattern was accessed after magaldi?
                 target = next_tool.params.get("file_path") or next_tool.params.get("pattern") or next_tool.params.get("path", "")
 
@@ -171,8 +170,7 @@ def mcp_self_review(
                         })
 
         # Pattern 2: Magaldi search → Magaldi search (refinement pattern)
-        if current.is_magaldi and next_tool.is_magaldi:
-            if current.tool_name == "search_code" and next_tool.tool_name == "search_code":
+        if current.is_magaldi and next_tool.is_magaldi and current.tool_name == "search_code" and next_tool.tool_name == "search_code":
                 current_query = current.params.get("query", "")
                 next_query = next_tool.params.get("query", "")
 
@@ -224,10 +222,14 @@ def mcp_self_review(
                         })
 
         # Pattern 3: search_code → get_element (expected but frequent = needs more detail)
-        if current.is_magaldi and next_tool.is_magaldi:
-            if current.tool_name == "search_code" and next_tool.tool_name == "get_element":
-                # This is expected flow, but if search didn't have include_code=true, note it
-                if current.params.get("include_code") != "true":
+        if (
+            current.is_magaldi
+            and next_tool.is_magaldi
+            and current.tool_name == "search_code"
+            and next_tool.tool_name == "get_element"
+            # This is expected flow, but if search didn't have include_code=true, note it
+            and current.params.get("include_code") != "true"
+        ):
                     deviation_patterns.append({
                         "type": "detail_needed",
                         "severity": "info",

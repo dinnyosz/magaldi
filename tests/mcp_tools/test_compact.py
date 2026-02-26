@@ -6,7 +6,6 @@ from magaldi_mcp.formatters._compact import (
     HASH_LEN,
     SUMMARY_MAX,
     SUMMARY_SHORT,
-    TYPE_ABBREV,
     abbrev_type,
     compact_element,
     compact_element_header,

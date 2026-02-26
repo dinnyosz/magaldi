@@ -165,14 +165,15 @@ def get_command_tree(
         return node
 
     # Build root node
-    root = {
+    children: list[dict[str, Any]] = []
+    root: dict[str, Any] = {
         "name": entry_point_name or "root",
         "is_group": True,
-        "children": [],
+        "children": children,
     }
 
     for root_hash in root_hashes:
-        root["children"].append(build_subtree(root_hash))
+        children.append(build_subtree(root_hash))
 
     return {
         "tree": root,

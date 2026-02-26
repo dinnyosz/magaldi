@@ -12,6 +12,8 @@ import threading
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from magaldi_core.code_parser import CodeElement
     from shared.config import MagaldiConfig
 
@@ -33,11 +35,11 @@ class RedisJobTracker:
 
     def __init__(
         self,
-        config: "MagaldiConfig",
+        config: MagaldiConfig,
         scope: str,
         repository: str,
         username: str,
-        should_embed_fn: callable,
+        should_embed_fn: Callable[[CodeElement], bool],
     ) -> None:
         self._scope = scope
         self._repository = repository
@@ -64,7 +66,7 @@ class RedisJobTracker:
         for key in keys_to_delete:
             client.delete(key)
 
-    def add_pending_jobs(self, elements: list["CodeElement"]) -> None:
+    def add_pending_jobs(self, elements: list[CodeElement]) -> None:
         """Add all elements as pending jobs to Redis."""
         for element in elements:
             # Add summarization job (all elements get summarized)
@@ -150,10 +152,10 @@ class SummaryCache:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._elements: dict[str, "CodeElement"] = {}
+        self._elements: dict[str, CodeElement] = {}
         self._summaries: dict[str, str] = {}
 
-    def add_element(self, element: "CodeElement") -> None:
+    def add_element(self, element: CodeElement) -> None:
         """Add element to cache."""
         self._elements[element.element_id] = element
 
@@ -162,7 +164,7 @@ class SummaryCache:
         with self._lock:
             self._summaries[element_id] = summary
 
-    def get_element(self, element_id: str) -> "CodeElement | None":
+    def get_element(self, element_id: str) -> CodeElement | None:
         """Get element from cache."""
         return self._elements.get(element_id)
 
@@ -171,7 +173,7 @@ class SummaryCache:
         with self._lock:
             return self._summaries.get(element_id)
 
-    def get_file_summary(self, element: "CodeElement") -> str | None:
+    def get_file_summary(self, element: CodeElement) -> str | None:
         """Get file summary for an element."""
         # Find file element for this path
         for eid, elem in self._elements.items():
@@ -185,7 +187,7 @@ class SummaryCache:
                 return self.get_summary(eid)
         return None
 
-    def get_class_summary(self, element: "CodeElement") -> str | None:
+    def get_class_summary(self, element: CodeElement) -> str | None:
         """Get class summary for an element (via parent_id)."""
         if element.parent_id:
             parent = self.get_element(element.parent_id)
@@ -193,7 +195,7 @@ class SummaryCache:
                 return self.get_summary(element.parent_id)
         return None
 
-    def get_parent_summaries(self, element: "CodeElement") -> dict[str, str]:
+    def get_parent_summaries(self, element: CodeElement) -> dict[str, str]:
         """Get parent summaries for context."""
         summaries: dict[str, str] = {}
 

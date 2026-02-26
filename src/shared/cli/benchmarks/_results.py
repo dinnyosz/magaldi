@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 from rich.table import Table
 
 if TYPE_CHECKING:
+    from rich.console import Console
+
     from shared.ai.ollama_benchmark import BenchmarkResult, EvaluationResult
     from shared.config import ModelConfig
 
@@ -70,7 +72,7 @@ def save_benchmark_markdown(
     def get_average(elem_idx: int, model: str, eval_model: str) -> float | None:
         eval_res = evaluation_results[elem_idx].get(eval_model)
         if eval_res and model in eval_res.evaluations:
-            return eval_res.evaluations[model].average
+            return eval_res.evaluations[model].average  # type: ignore[no-any-return]
         return None
 
     def get_notes(elem_idx: int, model: str, eval_model: str) -> str:
@@ -82,7 +84,7 @@ def save_benchmark_markdown(
     def get_criteria_scores(elem_idx: int, model: str, eval_model: str) -> dict[str, int]:
         eval_res = evaluation_results[elem_idx].get(eval_model)
         if eval_res and model in eval_res.evaluations:
-            return eval_res.evaluations[model].scores
+            return eval_res.evaluations[model].scores  # type: ignore[no-any-return]
         return {}
 
     # Build real success indices
@@ -155,7 +157,7 @@ def save_benchmark_markdown(
         lines.append(header)
         lines.append(separator)
 
-        for criterion in criteria.keys():
+        for criterion in criteria:
             row = f"| {criterion} |"
             for model in models_tested:
                 criterion_scores = []
@@ -350,12 +352,12 @@ def save_benchmark_markdown(
 
 
 def display_benchmark_summary(
-    models_to_test: list["ModelConfig"],
+    models_to_test: list[ModelConfig],
     elements: list,
-    results: dict[str, list["BenchmarkResult"]],
-    evaluation_results: dict[int, dict[str, "EvaluationResult"]],
+    results: dict[str, list[BenchmarkResult]],
+    evaluation_results: dict[int, dict[str, EvaluationResult]],
     eval_display_names: list[str],
-    console,
+    console: Console,
 ) -> None:
     """Display benchmark summary tables in the console.
 
@@ -393,14 +395,14 @@ def display_benchmark_summary(
     def get_average(elem_idx: int, model_name: str, eval_name: str) -> float | None:
         eval_res = evaluation_results[elem_idx].get(eval_name)
         if eval_res and model_name in eval_res.evaluations:
-            return eval_res.evaluations[model_name].average
+            return eval_res.evaluations[model_name].average  # type: ignore[no-any-return]
         return None
 
     # Helper to get criteria scores
     def get_criteria_scores(elem_idx: int, model_name: str, eval_name: str) -> dict[str, int]:
         eval_res = evaluation_results[elem_idx].get(eval_name)
         if eval_res and model_name in eval_res.evaluations:
-            return eval_res.evaluations[model_name].scores
+            return eval_res.evaluations[model_name].scores  # type: ignore[no-any-return]
         return {}
 
     # Show summary table per evaluator
@@ -477,7 +479,7 @@ def display_benchmark_summary(
         for model_name in tested_model_names:
             criteria_table.add_column(model_name.replace("/", "\n"), justify="center")
 
-        for criterion in criteria.keys():
+        for criterion in criteria:
             row = [criterion]
             for model_name in tested_model_names:
                 # Average this criterion across all elements of this type and all evaluators
@@ -507,7 +509,7 @@ def display_benchmark_summary(
         # Add overall row
         overall_row = ["[bold]Overall[/]"]
         for model_name in tested_model_names:
-            model_scores = []
+            overall_scores: list[float] = []
             for i in indices:
                 r = results[model_name][i]
                 if r.success and r.response.strip():
@@ -516,9 +518,9 @@ def display_benchmark_summary(
                         for e_name in eval_display_names:
                             score = get_average(i, model_name, e_name)
                             if score is not None:
-                                model_scores.append(score)
-            if model_scores:
-                avg = sum(model_scores) / len(model_scores)
+                                overall_scores.append(score)
+            if overall_scores:
+                avg = sum(overall_scores) / len(overall_scores)
                 if avg >= 8:
                     overall_row.append(f"[bold green]{avg:.1f}/10[/]")
                 elif avg >= 6:

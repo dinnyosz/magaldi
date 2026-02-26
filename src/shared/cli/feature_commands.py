@@ -16,14 +16,14 @@ from rich.table import Table
 from rich.text import Text
 
 from shared.cli._printers import print_feature_result
-from shared.cli._shared import console, format_duration, get_model_column_width, main
+from shared.cli._shared import console, get_model_column_width, main
 from shared.cli.extract import (
+    _display_tier_counts,
     _run_clustering_phase,
     _run_labeling_phase,
     build_eta_table,
     build_progress_bar,
     display_tier_distribution,
-    _display_tier_counts,
 )
 from shared.config import load_config
 
@@ -233,7 +233,7 @@ def run_feature_extraction(
                 member_summaries="\n".join(summaries_text),
             )
             prompt_chars = len(FEATURE_SYSTEM_PROMPT) + len(user_content)
-            return compute_aggregation_num_ctx(prompt_chars, task_type="feature")
+            return compute_aggregation_num_ctx(prompt_chars, task_type="feature")  # type: ignore[no-any-return]
 
         display_tier_distribution(clustering_result.clusters, estimate_feature_tier)
         console.print(f"  Processing {clustering_result.cluster_count} features with {workers} workers...")

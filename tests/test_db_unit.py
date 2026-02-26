@@ -2,19 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
-from shared.db.backends.base import NotFoundError
 
+from magaldi_core.code_parser import CodeElement
+from shared.db.backends.base import NotFoundError
 from shared.db.store import (
     Repository,
     generate_hash_id,
-    INDEX_NAME,
 )
-from magaldi_core.code_parser import CodeElement
-
 
 # =============================================================================
 # FIXTURES

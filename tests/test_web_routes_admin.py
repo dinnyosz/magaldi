@@ -8,8 +8,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from magaldi_web.routes.admin import router, format_bytes
-
+from magaldi_web.routes.admin import format_bytes, router
 
 # =============================================================================
 # FIXTURES
@@ -133,7 +132,8 @@ class TestGetHealth:
         assert "latency_ms" in data["llm"]
         assert "latency_ms" in data["redis"]
 
-    def test_get_health_includes_details(self, client, mock_repo):
+    @pytest.mark.usefixtures("mock_repo")
+    def test_get_health_includes_details(self, client):
         """Test that health check includes service details."""
         mock_config = MagicMock()
 
@@ -170,7 +170,8 @@ class TestGetHealth:
 class TestGetJobStats:
     """Tests for GET /admin/jobs endpoint."""
 
-    def test_get_job_stats_returns_zeros(self, client, mock_repo):
+    @pytest.mark.usefixtures("mock_repo")
+    def test_get_job_stats_returns_zeros(self, client):
         """Test that job stats returns zeros when Redis is empty."""
         mock_stats = {
             "summarization": {"pending": 0, "running": 0, "completed": 0, "failed": 0},
@@ -187,7 +188,8 @@ class TestGetJobStats:
         assert data["summarization"]["failed"] == 0
         assert data["embedding"]["pending"] == 0
 
-    def test_get_job_stats_returns_counts(self, client, mock_repo):
+    @pytest.mark.usefixtures("mock_repo")
+    def test_get_job_stats_returns_counts(self, client):
         """Test that job stats returns actual counts from Redis."""
         mock_stats = {
             "summarization": {"pending": 5, "running": 2, "completed": 10, "failed": 1},

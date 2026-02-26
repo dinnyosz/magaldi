@@ -2,20 +2,20 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from magaldi_web.dependencies import (
-    check_search_health,
     check_llm_health,
     check_redis_health,
+    check_search_health,
     get_cached_config,
-    get_repository,
     get_redis_queue_stats,
+    get_repository,
 )
-
 
 # =============================================================================
 # GET CACHED CONFIG TESTS
@@ -89,10 +89,8 @@ class TestGetEsRepository:
             gen = get_repository()
             next(gen)
             # Exhaust the generator
-            try:
+            with contextlib.suppress(StopIteration):
                 next(gen)
-            except StopIteration:
-                pass
             mock_repo.close.assert_called_once()
 
     def test_closrepository_on_exception(self, test_config):
@@ -229,7 +227,7 @@ class TestCheckLlmHealth:
         """Test healthy when at least one model responds ok."""
         call_count = [0]
 
-        def mock_get(url, timeout=None):
+        def mock_get(_url, timeout=None):  # noqa: ARG001
             mock = MagicMock()
             call_count[0] += 1
             if call_count[0] == 1:  # First model healthy

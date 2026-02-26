@@ -6,15 +6,17 @@ and evaluating summaries using LLM-as-judge.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from rich.console import Console
+
     from shared.ai.ollama_benchmark import BenchmarkResult, EvaluationResult
     from shared.config import BenchmarkConfig, ModelConfig
 
 
 def build_summarization_prompt(
-    element,
+    element: Any,
     parent_summaries: dict[str, str] | None = None,
 ) -> str:
     """Build a summarization prompt for an element using the same prompts as parse CLI.
@@ -31,16 +33,16 @@ def build_summarization_prompt(
     if parent_summaries is None:
         parent_summaries = {}
 
-    return build_prompt(element, parent_summaries, max_code_tokens=4000)
+    return build_prompt(element, parent_summaries, max_code_tokens=4000)  # type: ignore[no-any-return]
 
 
 def run_hierarchical_benchmarks(
-    models_to_test: list["ModelConfig"],
+    models_to_test: list[ModelConfig],
     elements: list,
     repo_path: str,
-    benchmark_config: "BenchmarkConfig",
-    console,
-) -> dict[str, list["BenchmarkResult"]]:
+    benchmark_config: BenchmarkConfig,
+    console: Console,
+) -> dict[str, list[BenchmarkResult]]:
     """Run benchmarks with hierarchical context (file -> class -> method).
 
     Args:
@@ -68,7 +70,7 @@ def run_hierarchical_benchmarks(
     element_indices = {id(elem): i for i, elem in enumerate(elements)}
 
     # Initialize results dict
-    results: dict[str, list["BenchmarkResult"]] = {f"{mc.provider}/{mc.name}": [] for mc in models_to_test}
+    results: dict[str, list[BenchmarkResult]] = {f"{mc.provider}/{mc.name}": [] for mc in models_to_test}
 
     # Test each model with hierarchical summarization
     for mc in models_to_test:
@@ -81,7 +83,7 @@ def run_hierarchical_benchmarks(
         function_summaries: dict[str, str] = {}
 
         # Process elements in hierarchical order
-        model_results: dict[int, "BenchmarkResult"] = {}
+        model_results: dict[int, BenchmarkResult] = {}
 
         for elem in sorted_elements:
             elem_name = f"{elem.element_type}:{elem.name}"
@@ -98,18 +100,15 @@ def run_hierarchical_benchmarks(
 
             # Build parent summaries based on element type
             parent_summaries: dict[str, str] = {}
-            if elem.element_type != "file":
-                if elem.relative_path in file_summaries:
-                    parent_summaries["file"] = file_summaries[elem.relative_path]
-            if elem.element_type in ("method", "variable", "constant"):
-                if elem.parent_id:
-                    for (fp, cn), summ in class_summaries.items():
-                        if fp == elem.relative_path:
-                            parent_summaries["class"] = summ
-                            break
-            if elem.element_type in ("variable", "constant"):
-                if elem.parent_id and elem.parent_id in function_summaries:
-                    parent_summaries["function"] = function_summaries[elem.parent_id]
+            if elem.element_type != "file" and elem.relative_path in file_summaries:
+                parent_summaries["file"] = file_summaries[elem.relative_path]
+            if elem.element_type in ("method", "variable", "constant") and elem.parent_id:
+                for (fp, _cn), summ in class_summaries.items():
+                    if fp == elem.relative_path:
+                        parent_summaries["class"] = summ
+                        break
+            if elem.element_type in ("variable", "constant") and elem.parent_id and elem.parent_id in function_summaries:
+                parent_summaries["function"] = function_summaries[elem.parent_id]
 
             # Build prompt with parent context
             prompt = build_summarization_prompt(elem, parent_summaries)
@@ -170,13 +169,13 @@ def run_hierarchical_benchmarks(
 
 
 def evaluate_summaries(
-    models_to_test: list["ModelConfig"],
+    models_to_test: list[ModelConfig],
     elements: list,
-    results: dict[str, list["BenchmarkResult"]],
+    results: dict[str, list[BenchmarkResult]],
     available_models_by_provider: dict[str, list[str]],
-    benchmark_config: "BenchmarkConfig",
-    console,
-) -> dict[int, dict[str, "EvaluationResult"]]:
+    benchmark_config: BenchmarkConfig,
+    console: Console,
+) -> dict[int, dict[str, EvaluationResult]]:
     """Evaluate summaries using LLM judges.
 
     Args:
@@ -202,7 +201,7 @@ def evaluate_summaries(
     from ._helpers import get_model_api_config
 
     # Get eval model configs from benchmark config
-    eval_model_configs: list["ModelConfig"] = []
+    eval_model_configs: list[ModelConfig] = []
     for eval_ref in benchmark_config.eval_models:
         try:
             eval_mc = benchmark_config.get_model(eval_ref)
@@ -219,7 +218,7 @@ def evaluate_summaries(
             console.print(f"  [yellow]Eval model {eval_ref} not configured, skipping[/]")
 
     if not eval_model_configs:
-        console.print(f"  [yellow]No eval models available, using last tested model[/]")
+        console.print("  [yellow]No eval models available, using last tested model[/]")
         eval_model_configs = [models_to_test[-1]]
 
     eval_display_names = [f"{mc.provider}/{mc.name}" for mc in eval_model_configs]
@@ -227,7 +226,7 @@ def evaluate_summaries(
 
     # Show criteria for each element type
     prompts = [(elem, None) for elem in elements]
-    element_types_in_test = set(elem.element_type for elem, _ in prompts)
+    element_types_in_test = {elem.element_type for elem, _ in prompts}
     for elem_type in sorted(element_types_in_test):
         criteria = EVALUATION_CRITERIA.get(elem_type, {})
         console.print(f"  [dim]{elem_type} criteria: {', '.join(criteria.keys())}[/]")

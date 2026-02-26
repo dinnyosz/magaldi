@@ -14,7 +14,6 @@ from shared.ai.clustering.soft_clustering import (
 )
 from shared.config import ClusteringConfig
 
-
 # =============================================================================
 # CONFIG TESTS
 # =============================================================================
@@ -237,7 +236,7 @@ class TestSoftClusteringPipeline:
         result = pipeline.fit(clustered_embeddings, element_ids)
 
         # Check that element IDs are used as keys
-        for key in result.element_memberships.keys():
+        for key in result.element_memberships:
             assert isinstance(key, str)
             assert key.startswith("element_")
 
@@ -247,7 +246,7 @@ class TestSoftClusteringPipeline:
         result = pipeline.fit(clustered_embeddings)
 
         # Check that integer indices are used as keys
-        for key in result.element_memberships.keys():
+        for key in result.element_memberships:
             assert isinstance(key, int)
 
     def test_memberships_have_primary(self, small_config, clustered_embeddings):
@@ -308,7 +307,7 @@ class TestSoftClusteringPipeline:
             progress_states.append(progress)
 
         pipeline = SoftClusteringPipeline(small_config)
-        result = pipeline.fit(clustered_embeddings, on_progress=on_progress)
+        pipeline.fit(clustered_embeddings, on_progress=on_progress)
 
         # Should have received progress callbacks
         assert len(progress_states) > 0

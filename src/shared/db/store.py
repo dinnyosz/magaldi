@@ -83,7 +83,7 @@ class FileStateRepository:
 
     def main_branch_exists(self, scope: str, repository: str) -> bool:
         """Check if main branch has been parsed."""
-        return self._repo.main_branch_exists(scope, repository)
+        return self._repo.main_branch_exists(scope, repository)  # type: ignore[no-any-return]
 
     def close(self) -> None:
         """Close connection."""
@@ -139,7 +139,7 @@ class EmbeddingStore(Repository):
         """Get summary for an element."""
         doc = self.get_document(element_id)
         if doc:
-            return doc.get("summary")
+            return doc.get("summary")  # type: ignore[no-any-return]
         return None
 
     def get_file_summary(self, element: CodeElement) -> str | None:
@@ -153,7 +153,7 @@ class EmbeddingStore(Repository):
         if element.parent_id:
             parent_doc = self.get_document(element.parent_id)
             if parent_doc and parent_doc.get("element_type") == "class":
-                return parent_doc.get("summary")
+                return parent_doc.get("summary")  # type: ignore[no-any-return]
         return None
 
     def get_parent_summaries(self, element: CodeElement) -> dict[str, str]:

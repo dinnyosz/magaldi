@@ -149,7 +149,7 @@ def _get_chain_root(node: Node) -> str | None:
     current = node
     while current:
         if current.type == "identifier":
-            return get_node_text(current)
+            return get_node_text(current)  # type: ignore[no-any-return]
         elif current.type == "call":
             func = get_child_by_field(current, "function")
             current = func

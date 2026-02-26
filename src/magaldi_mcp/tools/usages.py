@@ -104,14 +104,15 @@ def find_usages(
                 f"class {name}:"
             ):
                 continue
-        elif element_type == "method":
-            if content_stripped.startswith(f"def {name}(") or content_stripped.startswith(
+        elif element_type == "method" and (
+            content_stripped.startswith(f"def {name}(") or content_stripped.startswith(
                 f"def {name} ("
-            ):
-                continue
+            )
+        ):
+            continue
 
         # Build context from raw_code lines
-        context_before = []  # Empty for now (we only have the element, not surrounding code)
+        context_before: list[str] = []  # Empty for now (we only have the element, not surrounding code)
         context_after = lines[1:2] if len(lines) > 1 else []  # Second line if exists
 
         usages.append(

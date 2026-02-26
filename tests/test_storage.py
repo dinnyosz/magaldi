@@ -10,7 +10,6 @@ from magaldi_core.code_parser import CodeElement, ParsedFile, ParsingResult
 from magaldi_core.storage import (
     InMemoryDatabaseRepository,
     InMemorySearchRepository,
-    StorageError,
     StorageResult,
     create_embedding_jobs,
     create_summarization_jobs,
@@ -20,7 +19,6 @@ from magaldi_core.storage import (
     store_parsed_files,
     store_storage_result,
 )
-
 
 # =============================================================================
 # FIXTURES

@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from shared.ai.clustering.clusterer import ClusteringResult, ClusterResult
 from shared.ai.clustering.feature_processor import (
     FeatureProcessingConfig,
     FeatureProgressState,
@@ -19,8 +20,8 @@ from shared.ai.clustering.feature_processor import (
     SubfeatureLabelingState,
     SubfeatureProgressState,
     SubfeatureTimingStats,
-    SubfeatureWorkItem,
     SubfeatureWorkerStatus,
+    SubfeatureWorkItem,
     _embed_feature,
     _generate_feature_summary,
     _generate_subfeature_summary,
@@ -29,8 +30,6 @@ from shared.ai.clustering.feature_processor import (
     process_features,
     process_subfeatures,
 )
-from shared.ai.clustering.clusterer import ClusterResult, ClusteringResult
-
 
 # =============================================================================
 # FIXTURES

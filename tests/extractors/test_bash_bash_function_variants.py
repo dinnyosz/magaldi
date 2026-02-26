@@ -1,10 +1,9 @@
 """Auto-generated parser test for bash_function_variants."""
 
-import pytest
 from pathlib import Path
 
-from magaldi_core.code_parser import BashParser
 from magaldi_core.change_detection import FileInfo
+from magaldi_core.code_parser import BashParser
 
 
 class TestBashFunctionVariants:
@@ -27,28 +26,28 @@ class TestBashFunctionVariants:
             (e for e in elements if e.name == "die" and e.element_type == "function"),
             None
         )
-        assert bash_function_variants_elem is not None, f"Expected function 'die' not found"
+        assert bash_function_variants_elem is not None, "Expected function 'die' not found"
 
         # Check for setup
         bash_function_variants_elem = next(
             (e for e in elements if e.name == "setup" and e.element_type == "function"),
             None
         )
-        assert bash_function_variants_elem is not None, f"Expected function 'setup' not found"
+        assert bash_function_variants_elem is not None, "Expected function 'setup' not found"
 
         # Check for teardown
         bash_function_variants_elem = next(
             (e for e in elements if e.name == "teardown" and e.element_type == "function"),
             None
         )
-        assert bash_function_variants_elem is not None, f"Expected function 'teardown' not found"
+        assert bash_function_variants_elem is not None, "Expected function 'teardown' not found"
 
         # Check for process_logs
         bash_function_variants_elem = next(
             (e for e in elements if e.name == "process_logs" and e.element_type == "function"),
             None
         )
-        assert bash_function_variants_elem is not None, f"Expected function 'process_logs' not found"
+        assert bash_function_variants_elem is not None, "Expected function 'process_logs' not found"
 
         # Check element count
         # 4 functions + 1 file element = 5

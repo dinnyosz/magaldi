@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 from magaldi_mcp.tools import (
     get_feature_members,
     list_features,
     search_features,
 )
-
 
 # =============================================================================
 # SEARCH FEATURES TESTS

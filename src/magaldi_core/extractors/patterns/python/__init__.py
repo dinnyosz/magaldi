@@ -5,11 +5,11 @@ This package contains detection functions for Python web and CLI frameworks:
 - cli_commands.py - Click, Typer
 """
 
-from magaldi_core.extractors.patterns.python.web_routes import (
-    detect_python_http_routes,
-)
 from magaldi_core.extractors.patterns.python.cli_commands import (
     detect_python_cli_commands,
+)
+from magaldi_core.extractors.patterns.python.web_routes import (
+    detect_python_http_routes,
 )
 
 __all__ = [

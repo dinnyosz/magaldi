@@ -25,7 +25,7 @@ import httpx
 from shared.ai.context_size import CONTEXT_TIERS, TIER_SUFFIXES
 
 if TYPE_CHECKING:
-    from shared.config import ModelConfig
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -168,9 +168,7 @@ def model_exists_in_ollama(model_name: str, base_url: str = "http://localhost:11
         # Check exact match or with :latest suffix
         if model_name in existing_models:
             return True
-        if f"{model_name}:latest" in existing_models:
-            return True
-        return False
+        return f"{model_name}:latest" in existing_models
     except httpx.HTTPError:
         return False
 
@@ -285,7 +283,7 @@ def ensure_all_tiers_verbose(
     if is_tiered_model(base_model):
         logger.debug(f"Model {base_model} is already a tiered alias, skipping")
         return TierCreationResult(
-            tier_map={t: base_model for t in tiers},
+            tier_map=dict.fromkeys(tiers, base_model),
             created=[],
             existed=list(tiers),
             failed=[],
@@ -295,7 +293,7 @@ def ensure_all_tiers_verbose(
     if not model_exists_in_ollama(base_model, base_url):
         logger.warning(f"Base model {base_model} not found in Ollama, skipping tier creation")
         return TierCreationResult(
-            tier_map={t: base_model for t in tiers},
+            tier_map=dict.fromkeys(tiers, base_model),
             created=[],
             existed=[],
             failed=list(tiers),
@@ -307,7 +305,7 @@ def ensure_all_tiers_verbose(
     except httpx.HTTPError:
         logger.warning(f"Cannot list Ollama models, skipping tier creation for {base_model}")
         return TierCreationResult(
-            tier_map={t: base_model for t in tiers},
+            tier_map=dict.fromkeys(tiers, base_model),
             created=[],
             existed=[],
             failed=list(tiers),

@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from .types import CallCategory
 
 if TYPE_CHECKING:
-    from .types import ExtractedCall
+    pass
 
 
 class CallLike(Protocol):

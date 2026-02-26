@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import pytest
 from unittest.mock import MagicMock
 
 from magaldi_mcp.tools import (
     find_by_pattern,
     list_patterns,
 )
-
 
 # =============================================================================
 # LIST PATTERNS TESTS

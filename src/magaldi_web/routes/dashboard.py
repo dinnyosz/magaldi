@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-import time
-
 from fastapi import APIRouter, Depends
 
 from magaldi_web.dependencies import (
-    check_search_health,
     check_llm_health,
     check_redis_health,
+    check_search_health,
     get_cached_config,
-    get_repository,
     get_redis_queue_stats,
+    get_repository,
 )
 from magaldi_web.models import (
     DashboardResponse,

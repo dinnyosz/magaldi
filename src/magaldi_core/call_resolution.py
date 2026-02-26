@@ -336,10 +336,7 @@ def _is_external_module(module: str) -> bool:
         "tree_sitter", "mcp", "click", "typer", "rich", "tqdm",
     }
 
-    if first_component in third_party_prefixes:
-        return True
-
-    return False
+    return first_component in third_party_prefixes
 
 
 def _module_to_file_paths(module: str) -> list[str]:
@@ -428,7 +425,7 @@ def _lookup_method_by_type(
     )
 
     if method_doc:
-        return method_doc.get("element_id")
+        return method_doc.get("element_id")  # type: ignore[no-any-return]
 
     return None
 
@@ -467,7 +464,7 @@ def _find_element_in_file(
             username=username,
         )
         if doc:
-            return doc.get("element_id")
+            return doc.get("element_id")  # type: ignore[no-any-return]
 
     return None
 

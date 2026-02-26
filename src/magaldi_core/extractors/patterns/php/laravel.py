@@ -19,7 +19,6 @@ from tree_sitter import Node, Tree
 from magaldi_core.extractors.base import get_node_text, walk_tree
 from magaldi_core.extractors.types import HttpRoute
 
-
 # =============================================================================
 # CONSTANTS
 # =============================================================================
@@ -116,7 +115,7 @@ def extract_laravel_route_groups(
 
 
 def _extract_laravel_route_from_call(
-    node: Node, lines: list[str]
+    node: Node, _lines: list[str]
 ) -> HttpRoute | None:
     """Extract a Laravel route from a scoped_call_expression node.
 
@@ -356,10 +355,10 @@ def _get_string_content(node: Node) -> str:
     """Extract string content from a string node."""
     for child in node.children:
         if child.type == "string_content":
-            return get_node_text(child)
+            return get_node_text(child)  # type: ignore[no-any-return]
     # Fallback: strip quotes from the whole text
     text = get_node_text(node)
-    return text.strip("'\"")
+    return text.strip("'\"")  # type: ignore[no-any-return]
 
 
 def _extract_first_method_from_array(array_node: Node) -> str | None:

@@ -704,7 +704,7 @@ class TestScoreVariablesWithProgress:
         state = ScoringProgressState()
         worker_status = ScoringWorkerStatus()
 
-        result = score_variables(
+        score_variables(
             variables, mock_client, max_workers=1,
             progress_state=state,
             worker_status=worker_status,

@@ -2,24 +2,22 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
 
 from shared.cli import (
-    format_duration,
     check_model_availability,
+    format_duration,
     main,
-    print_discovery_result,
     print_change_manifest,
-    print_parsing_result,
+    print_discovery_result,
     print_feature_result,
+    print_parsing_result,
     print_processing_result,
     print_summary,
 )
-
 
 # =============================================================================
 # FIXTURES
@@ -373,6 +371,7 @@ class TestParseCommand:
     ):
         """Test parse runs --features/--glossary even when no code changes detected."""
         from datetime import datetime
+
         from magaldi_core.change_detection import ChangeManifest
 
         # Create a temp directory as repo
@@ -396,7 +395,7 @@ class TestParseCommand:
         )
         mock_run_change_detection.return_value = empty_manifest
 
-        result = cli_runner.invoke(main, [
+        cli_runner.invoke(main, [
             "parse",
             str(repo_path),
             "--user", "testuser",
@@ -437,8 +436,8 @@ class TestExtractFeaturesCommand:
     @patch("shared.cli.feature_commands.run_feature_extraction")
     def test_extract_features_no_config(
         self,
-        mock_run_feature_extraction,
-        mock_load_config,
+        _mock_run_feature_extraction,
+        _mock_load_config,
         cli_runner,
         mock_config,
         tmp_path,
@@ -448,7 +447,7 @@ class TestExtractFeaturesCommand:
         repo_path.mkdir()
         # Don't create magaldi.yaml
 
-        mock_load_config.return_value = mock_config
+        _mock_load_config.return_value = mock_config
 
         result = cli_runner.invoke(main, [
             "extract-features",
@@ -486,7 +485,7 @@ class TestExtractGlossaryCommand:
     @patch("shared.cli.glossary_commands.run_glossary_extraction")
     def test_extract_glossary_no_config(
         self,
-        mock_run_glossary_extraction,
+        _mock_run_glossary_extraction,
         mock_load_config,
         cli_runner,
         mock_config,
@@ -640,7 +639,7 @@ class TestPrintFunctions:
             16384: {"count": 0, "max_chars": 0, "max_tokens": 0, "largest": None, "by_type": {}},
             32768: {"count": 0, "max_chars": 0, "max_tokens": 0, "largest": None, "by_type": {}},
         }
-    
+
         print_parsing_result(result)
 
         captured = capsys.readouterr()
@@ -809,8 +808,8 @@ class TestPhaseRunners:
     @patch("shared.db.store.Repository", create=True)
     def test_run_processing_dry_run(
         self,
-        mock_repo_class,
-        mock_process_elements,
+        _mock_repo_class,
+        _mock_process_elements,
         mock_parsing_result,
         mock_change_manifest,
         mock_config,
@@ -950,7 +949,7 @@ class TestCliIntegration:
     @patch("shared.cli.parse.run_processing")
     def test_parse_model_check_fails(
         self,
-        mock_run_processing,
+        _mock_run_processing,
         mock_run_parsing,
         mock_check_ollama,
         mock_run_change_detection,
@@ -1003,7 +1002,7 @@ class TestEnsureRepoConfig:
     def test_creates_config_on_confirm(self, cli_runner, tmp_path):
         """Should create magaldi.yaml when user confirms with defaults."""
         # Accept defaults for scope/repo, then confirm with 'y'
-        result = cli_runner.invoke(
+        cli_runner.invoke(
             main,
             ["parse", str(tmp_path), "--user", "main", "--dry-run"],
             input="\n\ny\n",
@@ -1032,7 +1031,7 @@ class TestEnsureRepoConfig:
 
     def test_custom_values(self, cli_runner, tmp_path):
         """Should use user-provided scope and repository values."""
-        result = cli_runner.invoke(
+        cli_runner.invoke(
             main,
             ["parse", str(tmp_path), "--user", "main", "--dry-run"],
             input="myorg\nmyrepo\ny\n",

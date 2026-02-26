@@ -23,7 +23,6 @@ from magaldi_core.parsers.base import (
 from magaldi_core.tree_sitter_manager import (
     ExtractedElement,
     extract_rust_calls,
-    extract_top_level_rust_calls,
     extract_rust_elements,
     extract_rust_impl_members,
     extract_rust_impl_traits,
@@ -31,6 +30,7 @@ from magaldi_core.tree_sitter_manager import (
     extract_rust_modified_fields,
     extract_rust_panics,
     extract_rust_struct_fields,
+    extract_top_level_rust_calls,
 )
 
 if TYPE_CHECKING:
@@ -46,7 +46,7 @@ class RustParser(TreeSitterParser):
     def parse(
         self,
         content: str,
-        file_info: "FileInfo",
+        file_info: FileInfo,
         scope: str,
         repository: str,
         username: str,
@@ -117,11 +117,11 @@ class RustParser(TreeSitterParser):
     def _convert_class(
         self,
         ext: ExtractedElement,
-        file_info: "FileInfo",
+        file_info: FileInfo,
         scope: str,
         repository: str,
         username: str,
-        lines: list[str],
+        _lines: list[str],
     ) -> CodeElement:
         """Convert extracted struct/enum/impl to CodeElement."""
         class_attributes = None
@@ -159,11 +159,11 @@ class RustParser(TreeSitterParser):
     def _convert_function(
         self,
         ext: ExtractedElement,
-        file_info: "FileInfo",
+        file_info: FileInfo,
         scope: str,
         repository: str,
         username: str,
-        lines: list[str],
+        _lines: list[str],
     ) -> CodeElement:
         """Convert extracted function to CodeElement."""
         calls: list[Call] = []
@@ -210,11 +210,11 @@ class RustParser(TreeSitterParser):
         self,
         ext: ExtractedElement,
         parent_class: CodeElement,
-        file_info: "FileInfo",
+        file_info: FileInfo,
         scope: str,
         repository: str,
         username: str,
-        lines: list[str],
+        _lines: list[str],
     ) -> CodeElement:
         """Convert extracted method to CodeElement."""
         calls: list[Call] = []
@@ -264,11 +264,11 @@ class RustParser(TreeSitterParser):
     def _convert_constant(
         self,
         ext: ExtractedElement,
-        file_info: "FileInfo",
+        file_info: FileInfo,
         scope: str,
         repository: str,
         username: str,
-        lines: list[str],
+        _lines: list[str],
         parent: CodeElement | None = None,
     ) -> CodeElement:
         """Convert extracted constant to CodeElement."""

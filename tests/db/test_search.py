@@ -107,7 +107,7 @@ class TestElasticsearchVectorSearch:
 
     def test_vector_search_with_filters(self, repo, multiple_elements):
         """Test vector search with additional filters."""
-        for i, elem in enumerate(multiple_elements):
+        for _i, elem in enumerate(multiple_elements):
             repo.index_element(elem)
             embedding = [0.5] * 1024
             repo.store_embedding(elem.element_id, embedding)
@@ -160,7 +160,7 @@ class TestElasticsearchVectorSearch:
 
     def test_vector_search_default_uses_summary_embedding(self, repo, multiple_elements):
         """Test that default vector search uses summary embeddings for backwards compatibility."""
-        for i, elem in enumerate(multiple_elements):
+        for _i, elem in enumerate(multiple_elements):
             repo.index_element(elem)
             # Store both types of embeddings with different values
             summary_embedding = [0.3] * 1024
@@ -385,7 +385,8 @@ class TestPatternSearch:
         repo._get_client().indices_refresh(index="magaldi-code-elements")
         return elements
 
-    def test_search_by_regexp(self, repo, sample_elements):
+    @pytest.mark.usefixtures("sample_elements")
+    def test_search_by_regexp(self, repo):
         """Test regexp pattern search."""
         results = repo.search_by_regexp(
             pattern="add_column.*Model",
@@ -395,7 +396,8 @@ class TestPatternSearch:
         assert len(results) >= 1
         assert any("add_column" in r.get("raw_code", "") for r in results)
 
-    def test_search_by_regexp_no_match(self, repo, sample_elements):
+    @pytest.mark.usefixtures("sample_elements")
+    def test_search_by_regexp_no_match(self, repo):
         """Test regexp with no matches."""
         results = repo.search_by_regexp(
             pattern="nonexistent_function",
@@ -404,7 +406,8 @@ class TestPatternSearch:
         )
         assert len(results) == 0
 
-    def test_search_by_wildcard(self, repo, sample_elements):
+    @pytest.mark.usefixtures("sample_elements")
+    def test_search_by_wildcard(self, repo):
         """Test wildcard pattern search."""
         results = repo.search_by_wildcard(
             pattern="*column*Model*",
@@ -414,7 +417,8 @@ class TestPatternSearch:
         assert len(results) >= 1
         assert any("add_column" in r.get("name", "") for r in results)
 
-    def test_search_by_wildcard_question_mark(self, repo, sample_elements):
+    @pytest.mark.usefixtures("sample_elements")
+    def test_search_by_wildcard_question_mark(self, repo):
         """Test wildcard with ? for single character."""
         results = repo.search_by_wildcard(
             pattern="*proce??*",
@@ -423,7 +427,8 @@ class TestPatternSearch:
         )
         assert len(results) >= 1
 
-    def test_search_by_proximity(self, repo, sample_elements):
+    @pytest.mark.usefixtures("sample_elements")
+    def test_search_by_proximity(self, repo):
         """Test proximity search with slop."""
         # Search for terms that appear near each other in the raw_code
         # "def add_column(table, Model)" - "table" and "Model" are close
@@ -435,7 +440,8 @@ class TestPatternSearch:
         )
         assert len(results) >= 1
 
-    def test_search_by_proximity_exact_phrase(self, repo, sample_elements):
+    @pytest.mark.usefixtures("sample_elements")
+    def test_search_by_proximity_exact_phrase(self, repo):
         """Test proximity search with slop=0 for exact phrase."""
         results = repo.search_by_proximity(
             terms="def process",

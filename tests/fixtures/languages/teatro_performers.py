@@ -7,11 +7,10 @@ Named after Agustín Magaldi, the legendary tango singer who (legend has it)
 helped launch Eva Perón's career — and the namesake of this very project.
 """
 
-import os
 import logging
-from pathlib import Path
 from dataclasses import dataclass, field
 from enum import Enum, auto
+from pathlib import Path
 from typing import Protocol
 
 stage_manager_log = logging.getLogger(__name__)

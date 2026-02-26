@@ -2,15 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from unittest.mock import patch
-
-import pytest
 from rich.console import Console
 from rich.table import Table
-from rich.text import Text
 
-from magaldi_core.processor.status import ProgressState, WorkerStatus
 from magaldi_core.processor.timing import TimingStats
 
 
@@ -129,7 +123,7 @@ class TestPhase4EtaDisplay:
         from shared.cli.extract import build_eta_table
 
         timing = _make_timing_stats_with_tier_data()
-        breakdown = timing.get_eta_breakdown_with_avg(num_workers=2)
+        breakdown = timing.get_eta_breakdown_with_avg(_num_workers=2)
 
         # Should have breakdown data
         assert len(breakdown) > 0, "Expected per-(type, tier) breakdown data"
@@ -158,7 +152,7 @@ class TestPhase4EtaDisplay:
         from shared.cli.extract import build_eta_table
 
         timing = _make_timing_stats_no_tier_data()
-        breakdown = timing.get_eta_breakdown_with_avg(num_workers=1)
+        breakdown = timing.get_eta_breakdown_with_avg(_num_workers=1)
 
         # Without tier data, breakdown should be empty
         assert len(breakdown) == 0
@@ -170,7 +164,7 @@ class TestPhase4EtaDisplay:
     def test_eta_breakdown_has_correct_types(self):
         """ETA breakdown should include all registered (type, tier) combos."""
         timing = _make_timing_stats_with_tier_data()
-        breakdown = timing.get_eta_breakdown_with_avg(num_workers=2)
+        breakdown = timing.get_eta_breakdown_with_avg(_num_workers=2)
 
         types_in_breakdown = {item[0] for item in breakdown}
         assert "file" in types_in_breakdown
@@ -180,7 +174,7 @@ class TestPhase4EtaDisplay:
     def test_eta_breakdown_has_correct_tiers(self):
         """ETA breakdown should include all registered tiers per type."""
         timing = _make_timing_stats_with_tier_data()
-        breakdown = timing.get_eta_breakdown_with_avg(num_workers=2)
+        breakdown = timing.get_eta_breakdown_with_avg(_num_workers=2)
 
         # Build a lookup
         data = {(item[0], item[1]) for item in breakdown}
@@ -193,7 +187,7 @@ class TestPhase4EtaDisplay:
     def test_eta_breakdown_tracks_completion(self):
         """Done/total counts should match what was recorded."""
         timing = _make_timing_stats_with_tier_data()
-        breakdown = timing.get_eta_breakdown_with_avg(num_workers=2)
+        breakdown = timing.get_eta_breakdown_with_avg(_num_workers=2)
 
         # Build lookup: (type, tier) -> (avg, is_fallback, done, total)
         data = {(item[0], item[1]): (item[2], item[3], item[4], item[5]) for item in breakdown}
@@ -221,7 +215,7 @@ class TestPhase4EtaDisplay:
         from shared.cli.extract import build_eta_table
 
         timing = _make_timing_stats_with_tier_data()
-        breakdown = timing.get_eta_breakdown_with_avg(num_workers=2)
+        breakdown = timing.get_eta_breakdown_with_avg(_num_workers=2)
         type_order = ["file", "function", "method"]
         eta_table = build_eta_table(breakdown, type_order)
 
@@ -238,7 +232,7 @@ class TestPhase4EtaDisplay:
         from shared.cli.extract import build_eta_table
 
         timing = _make_timing_stats_with_tier_data()
-        breakdown = timing.get_eta_breakdown_with_avg(num_workers=2)
+        breakdown = timing.get_eta_breakdown_with_avg(_num_workers=2)
         type_order = ["file", "function", "method"]
         eta_table = build_eta_table(breakdown, type_order)
 
@@ -255,7 +249,7 @@ class TestPhase4EtaDisplay:
     def test_fallback_to_type_line_when_no_tier_data(self):
         """When no tier data, build_display should fall back to the single-line type progress."""
         timing = _make_timing_stats_no_tier_data()
-        breakdown = timing.get_eta_breakdown_with_avg(num_workers=1)
+        breakdown = timing.get_eta_breakdown_with_avg(_num_workers=1)
 
         from shared.cli.extract import build_eta_table
 
@@ -293,7 +287,7 @@ class TestPhase4EtaDisplay:
                 avg_workers=1.0,
             )
 
-        breakdown = timing.get_eta_breakdown_with_avg(num_workers=1)
+        breakdown = timing.get_eta_breakdown_with_avg(_num_workers=1)
         type_order = ["function"]
         eta_table = build_eta_table(breakdown, type_order)
 

@@ -19,7 +19,6 @@ from tree_sitter import Node, Tree
 from magaldi_core.extractors.base import get_node_text, walk_tree
 from magaldi_core.extractors.types import HttpRoute
 
-
 # =============================================================================
 # CONSTANTS
 # =============================================================================
@@ -107,7 +106,7 @@ def extract_slim_route_groups(
 
 
 def _extract_slim_route_from_call(
-    node: Node, lines: list[str]
+    node: Node, _lines: list[str]
 ) -> HttpRoute | None:
     """Extract a Slim route from a member_call_expression node.
 
@@ -185,11 +184,10 @@ def _extract_slim_group_from_call(
     for child in node.children:
         if child.type == "name":
             method_name = get_node_text(child).lower()
-        elif child.type == "arguments":
-            if method_name == "group":
-                args = _extract_call_arguments(child)
-                if args:
-                    prefix = _extract_string_value(args[0])
+        elif child.type == "arguments" and method_name == "group":
+            args = _extract_call_arguments(child)
+            if args:
+                prefix = _extract_string_value(args[0])
 
     if method_name != "group" or not prefix:
         return None
@@ -246,13 +244,13 @@ def _extract_string_value(node: Node) -> str | None:
         text = get_node_text(node)
         # Remove quotes
         if text.startswith(("'", '"')) and text.endswith(("'", '"')):
-            return text[1:-1]
-        return text
+            return text[1:-1]  # type: ignore[no-any-return]
+        return text  # type: ignore[no-any-return]
     elif node.type == "encapsed_string":
         # Double-quoted string with potential interpolation
         text = get_node_text(node)
         if text.startswith('"') and text.endswith('"'):
-            return text[1:-1]
+            return text[1:-1]  # type: ignore[no-any-return]
     return None
 
 

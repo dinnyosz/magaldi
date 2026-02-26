@@ -24,7 +24,7 @@ class TomlParser(TreeSitterParser):
     def parse(
         self,
         content: str,
-        file_info: "FileInfo",
+        file_info: FileInfo,
         scope: str,
         repository: str,
         username: str,

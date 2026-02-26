@@ -6,7 +6,7 @@ and MCP tool integration.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -18,7 +18,6 @@ from magaldi_core.call_resolution import (
 )
 from magaldi_mcp.formatters.analysis import CallGraphFormatter
 from magaldi_mcp.tools.call_graph import get_call_graph
-
 
 # =============================================================================
 # FIXTURES

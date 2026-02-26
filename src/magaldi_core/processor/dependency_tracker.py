@@ -10,7 +10,8 @@ import time
 from typing import TYPE_CHECKING
 
 from shared.ai.context_size import CONTEXT_TIERS, TIER_TIMEOUTS
-from shared.throttling import compute_throttle_decision, ThrottleDecision, get_ramp_cooldown
+from shared.throttling import ThrottleDecision, compute_throttle_decision, get_ramp_cooldown
+
 
 def _log_warmup(message: str) -> None:
     """Debug logging - disabled by default."""
@@ -19,6 +20,7 @@ def _log_warmup(message: str) -> None:
 
 if TYPE_CHECKING:
     from magaldi_core.code_parser import CodeElement
+
     from .status import ParallelismStats
 
 
@@ -43,7 +45,7 @@ class DependencyTracker:
 
     def __init__(
         self,
-        elements: list["CodeElement"],
+        elements: list[CodeElement],
         context_sizes: dict[str, int] | None = None,
         max_num_workers: int | None = None,
         timeout: float = 180.0,  # Default timeout for throttle calculations
@@ -72,7 +74,7 @@ class DependencyTracker:
         for e in elements:
             self._parents[e.element_id] = e.parent_id
 
-    def _get_level(self, element: "CodeElement") -> int:
+    def _get_level(self, element: CodeElement) -> int:
         """Get hierarchy level from element type.
 
         Level 0: files
@@ -90,7 +92,7 @@ class DependencyTracker:
         }
         return level_map.get(element.element_type, 2)
 
-    def _get_model_key(self, element: "CodeElement") -> str:
+    def _get_model_key(self, element: CodeElement) -> str:
         """Get model key for an element (for batching by model).
 
         Returns 'large' for files/classes/interfaces/type_aliases, 'small' for functions/methods/variables.
@@ -106,10 +108,10 @@ class DependencyTracker:
         # Find the tier this context size belongs to
         for tier in CONTEXT_TIERS:
             if ctx <= tier:
-                return tier
-        return CONTEXT_TIERS[-1]  # Max tier
+                return tier  # type: ignore[no-any-return]
+        return CONTEXT_TIERS[-1]  # type: ignore[no-any-return]  # Max tier
 
-    def _get_all_ready(self) -> list["CodeElement"]:
+    def _get_all_ready(self) -> list[CodeElement]:
         """Get all ready elements (parent done, not started). Must hold lock."""
         ready = []
         for eid, element in self._elements.items():
@@ -134,7 +136,7 @@ class DependencyTracker:
         self,
         max_count: int = 10,
         throttle_limit: int | None = None,
-    ) -> list["CodeElement"]:
+    ) -> list[CodeElement]:
         """Get elements ready for processing (parent done, not started).
 
         Ordering priority:
@@ -156,7 +158,7 @@ class DependencyTracker:
                 return []
 
             # First, group by hierarchy level to ensure parents processed before children
-            by_level: dict[int, list["CodeElement"]] = {}
+            by_level: dict[int, list[CodeElement]] = {}
             for elem in ready:
                 level = self._get_level(elem)
                 by_level.setdefault(level, []).append(elem)
@@ -166,7 +168,7 @@ class DependencyTracker:
             level_ready = by_level[target_level]
 
             # Within the level, group by (model, tier) for optimal batching
-            by_model_tier: dict[tuple[str, int], list["CodeElement"]] = {}
+            by_model_tier: dict[tuple[str, int], list[CodeElement]] = {}
             for elem in level_ready:
                 model_key = self._get_model_key(elem)
                 tier = self._get_tier(elem.element_id)
@@ -195,7 +197,7 @@ class DependencyTracker:
             elif self._current_model is not None:
                 # Priority 2: same model + different tier (largest first)
                 same_model_tiers = [
-                    tier for (model, tier) in by_model_tier.keys()
+                    tier for (model, tier) in by_model_tier
                     if model == self._current_model
                 ]
                 if same_model_tiers:
@@ -206,7 +208,7 @@ class DependencyTracker:
                 # Priority 3: different model, pick largest tier overall
                 # Group by model first, then pick model with largest max tier
                 models_with_max_tier = {}
-                for (model, tier) in by_model_tier.keys():
+                for (model, tier) in by_model_tier:
                     if model not in models_with_max_tier:
                         models_with_max_tier[model] = tier
                     else:
@@ -271,6 +273,7 @@ class DependencyTracker:
                 effective_limit = 1
 
             # Get elements from current (model, tier) batch
+            assert selected_tier is not None
             batch_key = (selected_model, selected_tier)
             batch_ready = by_model_tier[batch_key][:effective_limit]
 
@@ -339,7 +342,7 @@ class DependencyTracker:
                 self._tier_changing = False
                 self._warmup_task_id = None
                 self._post_warmup = True  # Signal for gradual ramp-up
-                _log_warmup(f"WARMUP COMPLETE: set post_warmup=True")
+                _log_warmup("WARMUP COMPLETE: set post_warmup=True")
 
     def mark_failed(self, element_id: str) -> None:
         """Mark element as failed (won't block children)."""
@@ -376,7 +379,7 @@ class DependencyTracker:
         self,
         max_possible: int,
         throttle_decision: ThrottleDecision | None = None,
-    ) -> "ParallelismStats":
+    ) -> ParallelismStats:
         """Get current parallelism statistics for display."""
         from .status import ParallelismStats
 

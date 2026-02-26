@@ -3,23 +3,21 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from shared.db.redis import (
-    RedisRepository,
-    RedisSummarizationJobRepository,
     RedisEmbeddingJobRepository,
-    RedisSummaryStore,
     RedisFeatureJobRepository,
     RedisLabelingJobRepository,
+    RedisRepository,
     RedisSubfeatureJobRepository,
     RedisSubfeatureLabelingJobRepository,
+    RedisSummarizationJobRepository,
+    RedisSummaryStore,
     _key,
 )
-
 
 # =============================================================================
 # FIXTURES
@@ -486,9 +484,8 @@ class TestRedisSummaryStore:
                     return json.dumps(child_data)
                 elif field == "parent_id":
                     return json.dumps(parent_data)
-            elif key == RedisSummaryStore.SUMMARIES_KEY:
-                if field == "parent_id":
-                    return "Parent summary."
+            elif key == RedisSummaryStore.SUMMARIES_KEY and field == "parent_id":
+                return "Parent summary."
             return None
 
         mock_redis_client.hget.side_effect = hget_side_effect

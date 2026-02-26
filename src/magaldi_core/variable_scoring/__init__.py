@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from shared.ai.llm_client import LLMClient
+
 from magaldi_core.variable_scoring.models import (
     ScoringProgressState,
     ScoringResult,
@@ -120,7 +122,7 @@ def _parse_scores(output: str, batch_size: int) -> list[VariableScore | None]:
 
 def _score_batch(
     batch: list[tuple[int, str, str, str, str]],
-    llm_client: object,
+    llm_client: LLMClient,
     config: VariableScoringConfig,
     num_ctx: int,
     debug_log: list[tuple[str, str]] | None = None,
@@ -195,12 +197,12 @@ def _get_context_tier(batch: list[tuple[int, str, str, str, str]]) -> int:
         if total_tokens < tier:
             num_ctx = tier
             break
-    return num_ctx
+    return num_ctx  # type: ignore[no-any-return]
 
 
 def score_variables(
     variables: list[tuple[str, str, str, str]],
-    llm_client: object,
+    llm_client: LLMClient,
     config: VariableScoringConfig | None = None,
     max_workers: int = 12,
     on_progress: Callable[[ScoringProgressState], None] | None = None,
@@ -402,7 +404,7 @@ def score_variables(
 
         def get_max_runtime() -> float:
             if worker_status is not None:
-                return worker_status.get_max_active_runtime()
+                return worker_status.get_max_active_runtime()  # type: ignore[no-any-return]
             return 0.0
 
         throttle_ctx = ThrottleContext(

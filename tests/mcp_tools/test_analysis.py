@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 from magaldi_mcp.tools import (
     find_call_chain,
@@ -13,9 +14,7 @@ from magaldi_mcp.tools import (
     find_implementations,
     find_usages,
     get_call_graph,
-    pattern_search,
 )
-
 
 # =============================================================================
 # FIND USAGES TESTS

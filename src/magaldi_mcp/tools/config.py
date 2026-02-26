@@ -422,6 +422,7 @@ def generate_skill(
         if scope == "global":
             settings_path = Path.home() / ".claude" / "settings.json"
         else:
+            assert project_root is not None
             settings_path = Path(project_root) / ".claude" / "settings.json"
 
         # Load existing settings or create new

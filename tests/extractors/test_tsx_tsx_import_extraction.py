@@ -1,10 +1,9 @@
 """Auto-generated parser test for tsx_import_extraction."""
 
-import pytest
 from pathlib import Path
 
-from magaldi_core.code_parser import JavaScriptParser
 from magaldi_core.change_detection import FileInfo
+from magaldi_core.code_parser import JavaScriptParser
 
 
 class TestTsxImportExtraction:

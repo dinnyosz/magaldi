@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import bisect
 import json
-import math
 import re
 import threading
 import time
@@ -77,7 +76,7 @@ class GlossaryTimingStats:
 
     def get_throughput_stats_with_concurrency(self) -> tuple[float, float, int, float, float]:
         """Get throughput statistics with concurrency context."""
-        return self.throughput_tracker.get_stats_with_concurrency()
+        return self.throughput_tracker.get_stats_with_concurrency()  # type: ignore[no-any-return]
 
     def _get_avg_for_tier(self, tier: int, global_avg: float) -> float:
         """Get average time for a tier with fallback."""
@@ -96,7 +95,7 @@ class GlossaryTimingStats:
 
         return global_avg
 
-    def eta_seconds(self, completed: int, total: int, num_workers: int) -> float:
+    def eta_seconds(self, completed: int, total: int, _num_workers: int) -> float:
         """Estimate time remaining based on current progress."""
         if completed == 0 or self.elapsed == 0:
             return 0.0
@@ -104,7 +103,7 @@ class GlossaryTimingStats:
         remaining = total - completed
         return remaining / rate if rate > 0 else 0.0
 
-    def get_eta_breakdown_with_avg(self, num_workers: int = 1) -> list[tuple[str, int, float, bool, int, int]]:
+    def get_eta_breakdown_with_avg(self, _num_workers: int = 1) -> list[tuple[str, int, float, bool, int, int]]:
         """Get average time per tier for display.
 
         Returns:
@@ -435,10 +434,9 @@ def parse_llm_response(response: str) -> list[str]:
                     # New format: ["term1", "term2"]
                     if _is_valid_glossary_term(item):
                         terms.append(item)
-                elif isinstance(item, dict) and "name" in item:
+                elif isinstance(item, dict) and "name" in item and _is_valid_glossary_term(item["name"]):
                     # Legacy format: [{"name": "term1", ...}]
-                    if _is_valid_glossary_term(item["name"]):
-                        terms.append(item["name"])
+                    terms.append(item["name"])
             return terms
     except json.JSONDecodeError:
         pass
@@ -876,8 +874,8 @@ def extract_glossary_from_features_concurrent(
         """Get tiered model name for Ollama models."""
         if model_config.provider == "ollama":
             from shared.ai.ollama_models import get_tiered_model_name
-            return get_tiered_model_name(model_config.name, num_ctx)
-        return model_config.name
+            return get_tiered_model_name(model_config.name, num_ctx)  # type: ignore[no-any-return]
+        return model_config.name  # type: ignore[no-any-return]
 
     def format_ctx(num_ctx: int) -> str:
         """Format context size for display."""
@@ -957,7 +955,7 @@ def extract_glossary_from_features_concurrent(
         summary = feature.get("summary", "")
         user_content = GLOSSARY_EXTRACTION_USER_PROMPT.format(label=label, summary=summary)
         prompt_chars = len(GLOSSARY_EXTRACTION_SYSTEM_PROMPT) + len(user_content)
-        return compute_aggregation_num_ctx(prompt_chars, task_type="glossary_extract")
+        return compute_aggregation_num_ctx(prompt_chars, task_type="glossary_extract")  # type: ignore[no-any-return]
 
     # Group features by tier and process each tier with appropriate max_workers
     tier_groups = list(iter_by_tier(features, estimate_feature_tier))
@@ -1052,7 +1050,7 @@ def extract_glossary_from_features_concurrent(
 
     # Emit final Phase 1 progress state before switching phases
     if on_progress:
-        state = GlossaryProgressState(
+        progress_state = GlossaryProgressState(
             total=total,
             completed=counters["completed"],
             failed=counters["failed"],
@@ -1061,7 +1059,7 @@ def extract_glossary_from_features_concurrent(
             workers=worker_status,
             num_workers=num_workers,
         )
-        on_progress(state)
+        on_progress(progress_state)
 
     # =========================================================================
     # PHASE 2: Generate holistic summaries for each merged term
@@ -1133,7 +1131,7 @@ def extract_glossary_from_features_concurrent(
             features_context=features_context,
         )
         prompt_chars = len(GLOSSARY_SUMMARY_SYSTEM_PROMPT) + len(user_content)
-        return compute_aggregation_num_ctx(prompt_chars, task_type="glossary_summary")
+        return compute_aggregation_num_ctx(prompt_chars, task_type="glossary_summary")  # type: ignore[no-any-return]
 
     # Group items by tier and process each tier with appropriate max_workers
     tier_groups = list(iter_by_tier(merged_items, estimate_term_tier))

@@ -260,5 +260,5 @@ def extract_js_return_type(node: Node) -> str | None:
         # Strip leading ': ' from type annotation
         if ret_type and ret_type.startswith(": "):
             ret_type = ret_type[2:]
-        return ret_type
+        return ret_type  # type: ignore[no-any-return]
     return None

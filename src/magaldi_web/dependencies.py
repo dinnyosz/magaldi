@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from functools import lru_cache
-from typing import TYPE_CHECKING, Generator
+from typing import TYPE_CHECKING, Any
 
 from shared.cli._shared import validate_llm_url
 from shared.config import MagaldiConfig, get_config, load_config
@@ -123,7 +124,8 @@ async def get_job_queue_totals(config: MagaldiConfig) -> dict:
 
         # Count summarization jobs by status
         for jobs_key in r.scan_iter("magaldi:summarization:jobs:*"):
-            for job_data in r.hvals(jobs_key):
+            vals: list = list(r.hvals(jobs_key))  # type: ignore[arg-type]
+            for job_data in vals:
                 try:
                     job = json.loads(job_data)
                     status = job.get("status", "pending")
@@ -134,11 +136,13 @@ async def get_job_queue_totals(config: MagaldiConfig) -> dict:
 
         # Count summarization running jobs from the running set
         for running_key in r.scan_iter("magaldi:summarization:running:*"):
-            result["summarization"]["running"] += r.scard(running_key)
+            count = int(r.scard(running_key))  # type: ignore[arg-type]
+            result["summarization"]["running"] += count
 
         # Count embedding jobs by status
         for jobs_key in r.scan_iter("magaldi:embedding:jobs:*"):
-            for job_data in r.hvals(jobs_key):
+            vals = list(r.hvals(jobs_key))  # type: ignore[arg-type]
+            for job_data in vals:
                 try:
                     job = json.loads(job_data)
                     status = job.get("status", "pending")
@@ -149,7 +153,8 @@ async def get_job_queue_totals(config: MagaldiConfig) -> dict:
 
         # Count embedding running jobs from the running set
         for running_key in r.scan_iter("magaldi:embedding:running:*"):
-            result["embedding"]["running"] += r.scard(running_key)
+            count = int(r.scard(running_key))  # type: ignore[arg-type]
+            result["embedding"]["running"] += count
 
         r.close()
     except Exception:
@@ -189,7 +194,7 @@ async def retry_failed_jobs_in_redis(config: MagaldiConfig, job_type: str) -> in
         pattern = f"magaldi:{job_type}:jobs:*"
         for jobs_key in r.scan_iter(pattern):
             # Get all jobs in this hash
-            all_jobs = r.hgetall(jobs_key)
+            all_jobs: dict = dict(r.hgetall(jobs_key))  # type: ignore[arg-type]
             for element_id, job_data_str in all_jobs.items():
                 try:
                     job = json.loads(job_data_str)
@@ -219,7 +224,7 @@ async def get_redis_queue_stats(config: MagaldiConfig) -> dict:
 
     import redis
 
-    result = {
+    result: dict[str, Any] = {
         "summarization": {},
         "embedding": {},
         "labeling": {},
@@ -249,7 +254,7 @@ async def get_redis_queue_stats(config: MagaldiConfig) -> dict:
 
                 # Count pending jobs in the hash
                 pending_count = 0
-                for job_data in r.hvals(jobs_key):
+                for job_data in list(r.hvals(jobs_key)):  # type: ignore[arg-type]
                     try:
                         job = json.loads(job_data)
                         if job.get("status") == "pending":
@@ -259,7 +264,7 @@ async def get_redis_queue_stats(config: MagaldiConfig) -> dict:
 
                 # Count running jobs
                 running_key = f"magaldi:summarization:running:{scope}:{repo}:{username}"
-                running_count = r.scard(running_key)
+                running_count = int(r.scard(running_key))  # type: ignore[arg-type]
 
                 if pending_count > 0 or running_count > 0:
                     result["summarization"][queue_id] = {
@@ -279,7 +284,7 @@ async def get_redis_queue_stats(config: MagaldiConfig) -> dict:
 
                 # Count pending jobs in the hash
                 pending_count = 0
-                for job_data in r.hvals(jobs_key):
+                for job_data in list(r.hvals(jobs_key)):  # type: ignore[arg-type]
                     try:
                         job = json.loads(job_data)
                         if job.get("status") == "pending":
@@ -289,7 +294,7 @@ async def get_redis_queue_stats(config: MagaldiConfig) -> dict:
 
                 # Count running jobs
                 running_key = f"magaldi:embedding:running:{scope}:{repo}:{username}"
-                running_count = r.scard(running_key)
+                running_count = int(r.scard(running_key))  # type: ignore[arg-type]
 
                 if pending_count > 0 or running_count > 0:
                     result["embedding"][queue_id] = {
@@ -309,7 +314,7 @@ async def get_redis_queue_stats(config: MagaldiConfig) -> dict:
 
                 # Count pending jobs in the hash
                 pending_count = 0
-                for job_data in r.hvals(jobs_key):
+                for job_data in list(r.hvals(jobs_key)):  # type: ignore[arg-type]
                     try:
                         job = json.loads(job_data)
                         if job.get("status") == "pending":
@@ -319,7 +324,7 @@ async def get_redis_queue_stats(config: MagaldiConfig) -> dict:
 
                 # Count running jobs
                 running_key = f"magaldi:labeling:running:{scope}:{repo}:{username}"
-                running_count = r.scard(running_key)
+                running_count = int(r.scard(running_key))  # type: ignore[arg-type]
 
                 if pending_count > 0 or running_count > 0:
                     result["labeling"][queue_id] = {
@@ -339,7 +344,7 @@ async def get_redis_queue_stats(config: MagaldiConfig) -> dict:
 
                 # Count pending jobs in the hash
                 pending_count = 0
-                for job_data in r.hvals(jobs_key):
+                for job_data in list(r.hvals(jobs_key)):  # type: ignore[arg-type]
                     try:
                         job = json.loads(job_data)
                         if job.get("status") == "pending":
@@ -349,7 +354,7 @@ async def get_redis_queue_stats(config: MagaldiConfig) -> dict:
 
                 # Count running jobs
                 running_key = f"magaldi:feature:running:{scope}:{repo}:{username}"
-                running_count = r.scard(running_key)
+                running_count = int(r.scard(running_key))  # type: ignore[arg-type]
 
                 if pending_count > 0 or running_count > 0:
                     result["feature"][queue_id] = {
@@ -369,7 +374,7 @@ async def get_redis_queue_stats(config: MagaldiConfig) -> dict:
 
                 # Count pending jobs in the hash
                 pending_count = 0
-                for job_data in r.hvals(jobs_key):
+                for job_data in list(r.hvals(jobs_key)):  # type: ignore[arg-type]
                     try:
                         job = json.loads(job_data)
                         if job.get("status") == "pending":
@@ -379,7 +384,7 @@ async def get_redis_queue_stats(config: MagaldiConfig) -> dict:
 
                 # Count running jobs
                 running_key = f"magaldi:subfeature:running:{scope}:{repo}:{username}"
-                running_count = r.scard(running_key)
+                running_count = int(r.scard(running_key))  # type: ignore[arg-type]
 
                 if pending_count > 0 or running_count > 0:
                     result["subfeature"][queue_id] = {
@@ -399,7 +404,7 @@ async def get_redis_queue_stats(config: MagaldiConfig) -> dict:
 
                 # Count pending jobs in the hash
                 pending_count = 0
-                for job_data in r.hvals(jobs_key):
+                for job_data in list(r.hvals(jobs_key)):  # type: ignore[arg-type]
                     try:
                         job = json.loads(job_data)
                         if job.get("status") == "pending":
@@ -409,7 +414,7 @@ async def get_redis_queue_stats(config: MagaldiConfig) -> dict:
 
                 # Count running jobs
                 running_key = f"magaldi:subfeature_labeling:running:{scope}:{repo}:{username}"
-                running_count = r.scard(running_key)
+                running_count = int(r.scard(running_key))  # type: ignore[arg-type]
 
                 if pending_count > 0 or running_count > 0:
                     result["subfeature_labeling"][queue_id] = {

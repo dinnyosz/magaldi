@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-import pytest
 from unittest.mock import MagicMock
 
+import pytest
+
 from magaldi_mcp.tools import (
-    list_glossary,
-    get_glossary_term,
-    search_glossary,
     get_feature_members,
+    get_glossary_term,
+    list_glossary,
     search_features,
+    search_glossary,
 )
 
 
@@ -47,10 +48,10 @@ class TestMCPToolsIntegration:
 
         es.get_glossary_terms.return_value = glossary_data
 
-        def get_glossary_term_mock(scope, repository, term, username):
+        def get_glossary_term_mock(scope, repository, term, username):  # noqa: ARG001
             return next((g for g in glossary_data if g["term"] == term), None)
 
-        def search_glossary_mock(scope, repository, query, username):
+        def search_glossary_mock(scope, repository, query, username):  # noqa: ARG001
             return [g for g in glossary_data if query.lower() in g["term"]]
 
         es.get_glossary_term.side_effect = get_glossary_term_mock

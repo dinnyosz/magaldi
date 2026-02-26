@@ -6,9 +6,7 @@ are detected during change detection and queued for re-processing.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from magaldi_core.change_detection import DBFileState
 

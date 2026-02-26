@@ -14,12 +14,11 @@ from magaldi_core.discovery import (
     LanguageStats,
     RepoConfig,
     discover,
+    enumerate_languages,
     load_repo_config,
     resolve_username,
     validate_path,
-    enumerate_languages,
 )
-
 
 # =============================================================================
 # FIXTURES
@@ -203,10 +202,11 @@ class TestRepoConfigDataclass:
 # =============================================================================
 
 
+@pytest.mark.usefixtures("clean_user_env")
 class TestResolveUsername:
     """Tests for username resolution."""
 
-    def test_cli_arg_takes_precedence(self, clean_user_env):
+    def test_cli_arg_takes_precedence(self):
         """CLI argument should override everything."""
         os.environ["MAGALDI_USER"] = "env-user"
         config = RepoConfig(scope="test", name="repo", user="config-user")
@@ -214,7 +214,7 @@ class TestResolveUsername:
         result = resolve_username(cli_user="cli-user", config=config)
         assert result == "cli-user"
 
-    def test_env_var_used_when_no_cli(self, clean_user_env):
+    def test_env_var_used_when_no_cli(self):
         """Environment variable should be used when no CLI arg."""
         os.environ["MAGALDI_USER"] = "env-user"
         config = RepoConfig(scope="test", name="repo", user="config-user")
@@ -222,14 +222,14 @@ class TestResolveUsername:
         result = resolve_username(cli_user=None, config=config)
         assert result == "env-user"
 
-    def test_config_used_when_no_cli_or_env(self, clean_user_env):
+    def test_config_used_when_no_cli_or_env(self):
         """Config user should be used when no CLI or env."""
         config = RepoConfig(scope="test", name="repo", user="config-user")
 
         result = resolve_username(cli_user=None, config=config)
         assert result == "config-user"
 
-    def test_missing_username_raises_error(self, clean_user_env):
+    def test_missing_username_raises_error(self):
         """Missing username from all sources should raise error."""
         config = RepoConfig(scope="test", name="repo", user=None)
 
@@ -237,14 +237,14 @@ class TestResolveUsername:
             resolve_username(cli_user=None, config=config)
         assert "username" in str(exc_info.value).lower() or "user" in str(exc_info.value).lower()
 
-    def test_main_username_accepted(self, clean_user_env):
+    def test_main_username_accepted(self):
         """'main' should be accepted as a valid username."""
         config = RepoConfig(scope="test", name="repo")
 
         result = resolve_username(cli_user="main", config=config)
         assert result == "main"
 
-    def test_whitespace_username_rejected(self, clean_user_env):
+    def test_whitespace_username_rejected(self):
         """Whitespace-only username should be rejected."""
         config = RepoConfig(scope="test", name="repo")
 
@@ -403,10 +403,11 @@ class TestDefaultExclusions:
 # =============================================================================
 
 
+@pytest.mark.usefixtures("clean_user_env")
 class TestDiscover:
     """Tests for the main discover() function."""
 
-    def test_discover_valid_repo(self, valid_repo_path: Path, clean_user_env):
+    def test_discover_valid_repo(self, valid_repo_path: Path):
         """Should successfully discover a valid repository."""
         result = discover(valid_repo_path, username="test-user")
 
@@ -416,7 +417,7 @@ class TestDiscover:
         assert result.username == "test-user"
         assert result.repo_path == valid_repo_path.resolve()
 
-    def test_discover_includes_languages(self, valid_repo_path: Path, clean_user_env):
+    def test_discover_includes_languages(self, valid_repo_path: Path):
         """Should include language statistics."""
         result = discover(valid_repo_path, username="test-user")
 
@@ -424,26 +425,26 @@ class TestDiscover:
         assert result.total_files > 0
         assert result.total_lines > 0
 
-    def test_discover_includes_config_data(self, valid_repo_path: Path, clean_user_env):
+    def test_discover_includes_config_data(self, valid_repo_path: Path):
         """Should include config data in result."""
         result = discover(valid_repo_path, username="test-user")
 
         assert result.description == "A valid test repository"
         assert "test" in result.tags
 
-    def test_discover_includes_exclusions(self, valid_repo_path: Path, clean_user_env):
+    def test_discover_includes_exclusions(self, valid_repo_path: Path):
         """Should include exclusion lists in result."""
         result = discover(valid_repo_path, username="test-user")
 
         assert len(result.exclude_directories) > 0
         assert len(result.exclude_files) > 0
 
-    def test_discover_without_config_raises_error(self, no_config_repo_path: Path, clean_user_env):
+    def test_discover_without_config_raises_error(self, no_config_repo_path: Path):
         """Should raise error if no magaldi.yaml."""
         with pytest.raises(DiscoveryError):
             discover(no_config_repo_path, username="test-user")
 
-    def test_discover_without_username_raises_error(self, valid_repo_path: Path, clean_user_env):
+    def test_discover_without_username_raises_error(self, valid_repo_path: Path):
         """Should raise error if no username provided."""
         with pytest.raises(DiscoveryError):
             discover(valid_repo_path, username=None)

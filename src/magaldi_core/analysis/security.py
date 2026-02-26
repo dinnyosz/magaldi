@@ -209,10 +209,7 @@ def _is_false_positive(kind: str, line: str, _language: str) -> bool:
             return True
 
     # Debug code: Skip test files
-    if kind == "debug_code" and "test" in line_lower:
-        return True
-
-    return False
+    return bool(kind == "debug_code" and "test" in line_lower)
 
 
 def get_severity_score(severity: str) -> int:

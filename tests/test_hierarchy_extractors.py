@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from magaldi_core.analysis.hierarchy_extractors import (
     CliHierarchyExtractor,
     ElementInfo,
@@ -16,7 +14,6 @@ from magaldi_core.analysis.relationships import (
     ExternalRefType,
     RelationshipType,
 )
-
 
 # =============================================================================
 # CLI Hierarchy Extractor Tests

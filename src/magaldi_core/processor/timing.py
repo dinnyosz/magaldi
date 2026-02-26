@@ -9,8 +9,8 @@ import threading
 import time
 from dataclasses import dataclass, field
 
+from shared.ai.context_size import HANDCRAFTED_TIER, TIER_SCALING_EXPONENT
 from shared.throttling import ThroughputTracker
-from shared.ai.context_size import TIER_SCALING_EXPONENT, HANDCRAFTED_TIER
 
 # Types that always use the small model (regardless of tier)
 _ALWAYS_SMALL_TYPES = frozenset({"function", "method", "variable", "constant"})
@@ -265,11 +265,11 @@ class TimingStats:
                 # Calculate avg wall time from type_tier data
                 type_wall_total = sum(
                     self.total_base_by_type_tier.get((t, tr), 0.0)
-                    for tr in set(tr for (typ, tr) in self.total_base_by_type_tier if typ == t)
+                    for tr in {tr for (typ, tr) in self.total_base_by_type_tier if typ == t}
                 )
                 type_count = sum(
                     self.summarize_counts_by_type_tier.get((t, tr), 0)
-                    for tr in set(tr for (typ, tr) in self.summarize_counts_by_type_tier if typ == t)
+                    for tr in {tr for (typ, tr) in self.summarize_counts_by_type_tier if typ == t}
                 )
                 avg_wall = type_wall_total / type_count if type_count > 0 else 0.0
                 result[t] = (completed, total, avg_wall, avg_summ, avg_embed)
@@ -284,7 +284,6 @@ class TimingStats:
                 "output": list of (type, avg_tokens, max_tokens, budget)
                 "has_issues": True if any overflows or tight headroom detected
         """
-        from shared.ai.context_size import PROMPT_OVERHEAD
 
         with self._lock:
             # Input overflow summary
@@ -322,7 +321,7 @@ class TimingStats:
             return {
                 "input": input_rows,
                 "output": output_rows,
-                "has_issues": has_issues,
+                "has_issues": has_issues,  # type: ignore[dict-item]
             }
 
     def record_task_runtime(self, runtime: float, concurrent_workers: int = 1) -> None:
@@ -340,7 +339,7 @@ class TimingStats:
         Returns:
             Tuple of (throughput_per_sec, avg_runtime, completion_count).
         """
-        return self.throughput_tracker.get_stats()
+        return self.throughput_tracker.get_stats()  # type: ignore[no-any-return]
 
     def get_throughput_stats_with_concurrency(self) -> tuple[float, float, int, float, float]:
         """Get throughput statistics with concurrency context.
@@ -348,11 +347,11 @@ class TimingStats:
         Returns:
             Tuple of (throughput, avg_runtime, count, avg_concurrency, avg_base_time).
         """
-        return self.throughput_tracker.get_stats_with_concurrency()
+        return self.throughput_tracker.get_stats_with_concurrency()  # type: ignore[no-any-return]
 
     def get_peak_concurrency(self) -> int | None:
         """Get concurrency level with peak throughput, or None if insufficient data."""
-        return self.throughput_tracker.get_peak_concurrency()
+        return self.throughput_tracker.get_peak_concurrency()  # type: ignore[no-any-return]
 
     def get_all_throughput_levels(self) -> dict[int, tuple[float, int]]:
         """Get throughput data for all concurrency levels.
@@ -360,7 +359,7 @@ class TimingStats:
         Returns:
             Dict of level -> (throughput_per_sec, sample_count).
         """
-        return self.throughput_tracker._throughput_by_level.get_all_levels()
+        return self.throughput_tracker._throughput_by_level.get_all_levels()  # type: ignore[no-any-return]
 
     def get_exploration_target(self, max_level: int, remaining: int | None = None) -> int | None:
         """Get a neighbor of the peak that needs more data.
@@ -373,7 +372,7 @@ class TimingStats:
         Returns:
             Level to explore, or None if no exploration needed.
         """
-        return self.throughput_tracker.get_exploration_target(max_level, remaining)
+        return self.throughput_tracker.get_exploration_target(max_level, remaining)  # type: ignore[no-any-return]
 
     def reset_throughput(self) -> None:
         """Reset throughput tracker history.
@@ -406,7 +405,7 @@ class TimingStats:
         self,
         element_type: str,
         tier: int,
-        global_avg: float,
+        _global_avg: float,
     ) -> tuple[float, bool]:
         """Get average processing time for (type, tier) with smart fallback.
 
@@ -541,7 +540,7 @@ class TimingStats:
         # 7. No data at all - return 0 (display will show "-")
         return 0.0, True
 
-    def eta_seconds(self, completed: int, total: int, num_workers: int = 1) -> float | None:
+    def eta_seconds(self, completed: int, _total: int, _num_workers: int = 1) -> float | None:
         """Calculate ETA based on per-(type, tier) API time averages.
 
         Uses tier-aware averages for more accurate estimates, with smart
@@ -596,7 +595,7 @@ class TimingStats:
             # so total_work_time is already the ETA - no further division needed
             return total_work_time
 
-    def get_eta_breakdown(self, num_workers: int = 1) -> list[tuple[str, int, int, int, float]]:
+    def get_eta_breakdown(self, _num_workers: int = 1) -> list[tuple[str, int, int, int, float]]:
         """Get ETA breakdown per (type, tier) for display.
 
         Returns:
@@ -626,7 +625,7 @@ class TimingStats:
             breakdown.sort(key=lambda x: x[4], reverse=True)
             return breakdown
 
-    def get_eta_breakdown_with_avg(self, num_workers: int = 1) -> list[tuple[str, int, float, bool, int, int]]:
+    def get_eta_breakdown_with_avg(self, _num_workers: int = 1) -> list[tuple[str, int, float, bool, int, int]]:
         """Get average time per item for each (type, tier) combination.
 
         Returns:

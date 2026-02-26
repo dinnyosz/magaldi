@@ -613,10 +613,7 @@ def load_config(
     config = MagaldiConfig()
 
     # Find and load config file
-    if config_path is not None:
-        config_path = Path(config_path)
-    else:
-        config_path = _find_config_file()
+    config_path = Path(config_path) if config_path is not None else _find_config_file()
 
     if config_path and config_path.exists():
         config = _load_from_file(config, config_path)

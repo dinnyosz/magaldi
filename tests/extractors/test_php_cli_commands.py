@@ -1,9 +1,8 @@
 """Tests for PHP CLI command extraction (Symfony Console, Laravel Artisan)."""
 
 import pytest
-from tree_sitter import Language, Parser
-
 import tree_sitter_php as ts_php
+from tree_sitter import Language, Parser
 
 from magaldi_core.extractors.patterns.php.cli_commands import (
     extract_php_cli_commands,

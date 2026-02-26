@@ -61,12 +61,12 @@ def _detect_language(file_path: str | None, code: str | None) -> str | None:
         ext = path.suffix.lower()
         lang = SUPPORTED_EXTENSIONS.get(ext)
         if lang:
-            return lang
+            return lang  # type: ignore[no-any-return]
         # Check filename match (e.g., Dockerfile, Dockerfile.prod)
         name = path.name
         for pattern, lang in SUPPORTED_FILENAMES.items():
             if name == pattern or name.startswith(f"{pattern}."):
-                return lang
+                return lang  # type: ignore[no-any-return]
         return None
 
     if code:
@@ -146,7 +146,7 @@ def _find_uncaptured_nodes(
     Returns:
         List of GapInfo for potentially uncaptured nodes.
     """
-    gaps = []
+    gaps: list[GapInfo] = []
 
     # Node types we care about (potential extraction targets)
     interesting_types = {
@@ -369,7 +369,7 @@ def parser_lab_analyze(
             result = manager.run_query(code, language, query_name)
             query_results[query_name] = len(result)
     except Exception as e:
-        query_results["error"] = str(e)
+        query_results["error"] = str(e)  # type: ignore[assignment]
 
     # Find gaps (nodes not captured by extractor)
     # Skip gap analysis for markdown — headings are captured via document_sections
@@ -410,7 +410,7 @@ def parser_lab_analyze(
             }
 
     # Build response
-    result: dict[str, Any] = {
+    response: dict[str, Any] = {
         "language": language,
         "source_lines": len(lines),
         "elements": [
@@ -450,11 +450,11 @@ def parser_lab_analyze(
 
     # Add framework patterns if any were detected
     if framework_patterns:
-        result["framework_patterns"] = framework_patterns
+        response["framework_patterns"] = framework_patterns
 
     # Add document sections for markdown
     if document_sections:
-        result["document_sections"] = document_sections
+        response["document_sections"] = document_sections
 
     if debug:
         # Include AST tree representation
@@ -471,9 +471,9 @@ def parser_lab_analyze(
                 else f"[{n.child_count} children]",
             }
 
-        result["ast_debug"] = node_to_dict(tree.root_node)
+        response["ast_debug"] = node_to_dict(tree.root_node)
 
-    return result
+    return response
 
 
 # =============================================================================

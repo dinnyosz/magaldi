@@ -20,24 +20,29 @@ if TYPE_CHECKING:
     from magaldi_core.variable_scoring.models import ScoringResult
 
 
-def print_discovery_result(result: "DiscoveryResult") -> None:
+def print_discovery_result(result: DiscoveryResult) -> None:
     """Print discovery phase results."""
     langs = ", ".join(f"{lang}({s.files})" for lang, s in sorted(result.languages.items(), key=lambda x: -x[1].files))
     console.print(f"  {result.scope}/{result.repository} @{result.username} | {result.total_files} files, {result.total_lines:,} lines | {langs}")
 
 
-def print_change_manifest(manifest: "ChangeManifest") -> None:
+def print_change_manifest(manifest: ChangeManifest) -> None:
     """Print change detection results."""
     parts = [f"scanned {manifest.total_files_scanned}"]
-    if len(manifest.new_files): parts.append(f"[green]+{len(manifest.new_files)} new[/]")
-    if len(manifest.modified_files): parts.append(f"[yellow]{len(manifest.modified_files)} modified[/]")
-    if len(manifest.deleted_files): parts.append(f"[red]-{len(manifest.deleted_files)} del[/]")
-    if manifest.unchanged_count: parts.append(f"{manifest.unchanged_count} unchanged")
-    if manifest.skipped_count: parts.append(f"skipped {manifest.skipped_count}")
+    if len(manifest.new_files):
+        parts.append(f"[green]+{len(manifest.new_files)} new[/]")
+    if len(manifest.modified_files):
+        parts.append(f"[yellow]{len(manifest.modified_files)} modified[/]")
+    if len(manifest.deleted_files):
+        parts.append(f"[red]-{len(manifest.deleted_files)} del[/]")
+    if manifest.unchanged_count:
+        parts.append(f"{manifest.unchanged_count} unchanged")
+    if manifest.skipped_count:
+        parts.append(f"skipped {manifest.skipped_count}")
     console.print(f"  {' | '.join(parts)}")
 
 
-def print_parsing_result(result: "ParsingResult") -> None:
+def print_parsing_result(result: ParsingResult) -> None:
     """Print parsing results including context size analysis."""
     # Existing summary line
     types = ", ".join(f"{t}: [green]{c}[/]" for t, c in sorted(result.elements_by_type.items()))
@@ -91,7 +96,7 @@ def print_feature_result(result: dict) -> None:
             console.print(f"    [cyan]{label}[/] ({cluster['size']} elements): {names}...")
 
 
-def print_scoring_result(result: "ScoringResult") -> None:
+def print_scoring_result(result: ScoringResult) -> None:
     """Print variable scoring results."""
     if result.total_variables == 0:
         console.print("  [dim]No variables to score[/]")
@@ -114,7 +119,7 @@ def print_scoring_result(result: "ScoringResult") -> None:
 def print_processing_result(
     processed: int, skipped: int, indexed: int, skip_ai: bool,
     avg_wall: float = 0.0, avg_summ: float = 0.0, avg_embed: float = 0.0, elapsed: float = 0.0,
-    timing_stats: "TimingStats | None" = None, num_workers: int = 4,
+    _timing_stats: TimingStats | None = None, _num_workers: int = 4,
     deleted: int = 0
 ) -> None:
     """Print processing results."""
@@ -142,8 +147,8 @@ def print_processing_result(
 
 
 def print_summary(
-    discovery: "DiscoveryResult",
-    manifest: "ChangeManifest",
+    discovery: DiscoveryResult,
+    manifest: ChangeManifest,
     processed: int,
     indexed: int,
     skip_ai: bool,

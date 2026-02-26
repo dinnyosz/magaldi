@@ -1,26 +1,27 @@
 """Tests for processor module."""
 
-import pytest
 from unittest.mock import MagicMock
 
+import pytest
+
+from magaldi_core.code_parser import CodeElement
+from magaldi_core.job_tracker import SummaryCache
 from magaldi_core.processor import (
     DependencyTracker,
+    ProcessedElement,
     ProcessingConfig,
     ProcessingResult,
+    ProgressState,
     TimingStats,
     WorkerStatus,
-    ProgressState,
-    ProcessedElement,
-    _summarize_element,
     _extract_docstring_description,
+    _generate_handcrafted_summary,
+    _generate_small_function_summary,
     _get_element_line_count,
     _is_small_function,
-    _generate_small_function_summary,
     _should_handcraft,
-    _generate_handcrafted_summary,
+    _summarize_element,
 )
-from magaldi_core.job_tracker import SummaryCache
-from magaldi_core.code_parser import CodeElement
 from shared.ai.context_size import HANDCRAFTED_TIER
 
 
@@ -304,7 +305,6 @@ class TestProcessingConfig:
 
     def test_default_values(self):
         """Test default configuration values."""
-        from shared.config import ModelConfig
 
         config = ProcessingConfig()
 
@@ -622,7 +622,7 @@ class TestTimingStats:
         stats.record(1.0, 0.5, 0.5, "function", True)
         stats.record(1.0, 0.5, 0.5, "function", True)
 
-        eta = stats.eta_seconds(2, 10, num_workers=1)
+        eta = stats.eta_seconds(2, 10, _num_workers=1)
         # Remaining: 8 elements * 1.0s avg = 8s
         assert eta is not None
         assert abs(eta - 8.0) < 0.1
@@ -638,7 +638,7 @@ class TestTimingStats:
         stats.record(1.0, 0.5, 0.5, "function", True, tier=2048, avg_workers=2.0)
         stats.record(1.0, 0.5, 0.5, "function", True, tier=2048, avg_workers=2.0)
 
-        eta = stats.eta_seconds(2, 10, num_workers=2)
+        eta = stats.eta_seconds(2, 10, _num_workers=2)
         # Remaining: 8 elements * 0.5s avg (already throughput-normalized) = 4s
         assert eta is not None
         assert abs(eta - 4.0) < 0.1
@@ -659,7 +659,7 @@ class TestTimingStats:
         stats.record(0.5, 0.3, 0.2, "function", True, tier=2048)
         stats.record(2.0, 1.5, 0.5, "function", True, tier=8192)
 
-        eta = stats.eta_seconds(3, 10, num_workers=1)
+        eta = stats.eta_seconds(3, 10, _num_workers=1)
         # avg_2k = 0.5s (wall_time), avg_8k = 2.0s (wall_time)
         # Remaining: 3 @ 2k + 4 @ 8k
         # = 3 * 0.5 + 4 * 2.0 = 1.5 + 8.0 = 9.5s
@@ -680,7 +680,7 @@ class TestTimingStats:
         stats.record(1.0, 0.6, 0.4, "function", True, tier=2048)
         stats.record(1.0, 0.6, 0.4, "function", True, tier=2048)
 
-        eta = stats.eta_seconds(2, 6, num_workers=1)
+        eta = stats.eta_seconds(2, 6, _num_workers=1)
         # avg_2k = 1.0s (wall_time)
         # 4k tier fallback: 1.0 * (4096/2048)^0.65 = 1.0 * 2^0.65 ≈ 1.569s
         # Remaining: 1 @ 2k + 3 @ 4k
@@ -702,7 +702,7 @@ class TestTimingStats:
         stats.record(1.0, 0.6, 0.4, "function", True, tier=2048)
         stats.record(1.0, 0.6, 0.4, "function", True, tier=2048)
 
-        eta = stats.eta_seconds(2, 6, num_workers=1)
+        eta = stats.eta_seconds(2, 6, _num_workers=1)
         # avg_func_2k = 1.0s (wall_time)
         # method/2k fallback to function's avg (same model group, same tier)
         # Remaining: 1 @ function/2k + 3 @ method/2k
@@ -727,7 +727,7 @@ class TestTimingStats:
         stats.record(1.0, 0.6, 0.4, "function", True, tier=2048)
         stats.record(4.0, 3.0, 1.0, "class", True, tier=4096)
 
-        eta = stats.eta_seconds(3, 9, num_workers=1)
+        eta = stats.eta_seconds(3, 9, _num_workers=1)
         assert eta is not None
 
         # file@1024 should fall back to function@2048 (same model group = small),
@@ -757,7 +757,7 @@ class TestTimingStats:
         # Only large-model file data exists
         stats.record(15.0, 10.0, 5.0, "file", True, tier=32768)
 
-        eta = stats.eta_seconds(1, 66, num_workers=1)
+        eta = stats.eta_seconds(1, 66, _num_workers=1)
         assert eta is not None
 
         # file@1024 must NOT get 15.0s (that's the large model at 32k).
@@ -785,7 +785,7 @@ class TestTimingStats:
         stats.record(2.0, 1.5, 0.5, "function", True, tier=8192)
         stats.record(1.0, 0.7, 0.3, "class", True, tier=4096)
 
-        breakdown = stats.get_eta_breakdown(num_workers=1)
+        breakdown = stats.get_eta_breakdown(_num_workers=1)
 
         # Should have 3 entries (one for each type/tier combo with remaining > 0)
         assert len(breakdown) == 3
@@ -1186,8 +1186,8 @@ class TestIndexElementImportsAndCalls:
 
     def test_file_element_with_imports_stores_imports(self):
         """File elements with imports should have imports stored in ES."""
-        from magaldi_core.processor import _index_element
         from magaldi_core.code_parser import Import
+        from magaldi_core.processor import _index_element
 
         # Create file element with imports
         file_elem = CodeElement(
@@ -1233,8 +1233,8 @@ class TestIndexElementImportsAndCalls:
 
     def test_function_element_with_calls_stores_calls(self):
         """Function elements with calls should have calls stored in ES."""
-        from magaldi_core.processor import _index_element
         from magaldi_core.code_parser import Call
+        from magaldi_core.processor import _index_element
 
         # Create function element with calls
         func_elem = CodeElement(
@@ -1284,8 +1284,8 @@ class TestIndexElementImportsAndCalls:
 
     def test_method_element_with_calls_stores_calls(self):
         """Method elements with calls should have calls stored in ES."""
-        from magaldi_core.processor import _index_element
         from magaldi_core.code_parser import Call
+        from magaldi_core.processor import _index_element
 
         # Create method element with calls
         method_elem = CodeElement(
@@ -1388,8 +1388,8 @@ class TestIndexElementImportsAndCalls:
 
     def test_class_element_does_not_store_calls(self):
         """Class elements should not store calls (only function/method do)."""
-        from magaldi_core.processor import _index_element
         from magaldi_core.code_parser import Call
+        from magaldi_core.processor import _index_element
 
         # Create class element (classes shouldn't have calls stored directly)
         class_elem = CodeElement(
@@ -1420,8 +1420,8 @@ class TestIndexElementImportsAndCalls:
 
     def test_non_file_element_does_not_store_imports(self):
         """Non-file elements should not store imports (only file does)."""
-        from magaldi_core.processor import _index_element
         from magaldi_core.code_parser import Import
+        from magaldi_core.processor import _index_element
 
         # Create function element with imports (shouldn't happen normally, but test the guard)
         func_elem = CodeElement(
@@ -1590,9 +1590,9 @@ class TestPerElementContextSize:
     def test_status_shows_context_tier(self):
         """Status should display context tier (e.g., '1K' for small elements)."""
         from magaldi_core.processor import (
-            _process_single_element,
-            WorkerStatus,
             SummaryCache,
+            WorkerStatus,
+            _process_single_element,
         )
 
         mock_llm = MagicMock()
@@ -1788,7 +1788,6 @@ class TestDynamicWorkerScaling:
 
     def test_post_warmup_gradual_ramp(self):
         """After warmup completes, throttle should recommend gradual ramp from 1."""
-        from shared.throttling import compute_throttle_decision
 
         elements = [
             CodeElement(
@@ -2393,7 +2392,7 @@ class TestHandcraftedTierETA:
         stats.set_totals_by_type_tier({
             ("import", HANDCRAFTED_TIER): 100,
         })
-        eta = stats.eta_seconds(completed=0, total=100)
+        eta = stats.eta_seconds(0, 100)
         # No data yet, but handcrafted default should provide an estimate
         # Need at least 1 completion for eta_seconds to work
         assert eta is None  # No completions yet
@@ -2412,7 +2411,7 @@ class TestHandcraftedTierETA:
             tier=HANDCRAFTED_TIER,
             avg_workers=1.0,
         )
-        eta = stats.eta_seconds(completed=1, total=10)
+        eta = stats.eta_seconds(1, 10)
         assert eta is not None
         # 9 remaining * 0.08s avg = 0.72s
         assert 0.5 < eta < 1.0

@@ -1281,7 +1281,7 @@ def _build_levels_table(
         return _build_levels_row(chunks[0], all_levels, min_bt, bt_range, peak_concurrency, exploration_target)
 
     tables: list[RenderableType] = [
-        _build_levels_row(chunk, all_levels, min_bt, bt_range, peak_concurrency, exploration_target)
+        _build_levels_row(chunk, all_levels, min_bt, bt_range, peak_concurrency, exploration_target)  # type: ignore[misc]
         for chunk in chunks
     ]
     return Group(*tables)

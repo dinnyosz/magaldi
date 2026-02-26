@@ -23,7 +23,6 @@ from magaldi_core.extractors.types import (
     ExtractedElement,
     ExtractedImport,
     ExtractedReference,
-    HttpRoute,
     ParameterInfo,
 )
 
@@ -63,8 +62,8 @@ class PHPExtractor(BaseExtractor):
 
     def extract_references(
         self,
-        tree: Tree,  # noqa: ARG002
-        lines: list[str],  # noqa: ARG002
+        _tree: Tree,
+        _lines: list[str],
     ) -> list[ExtractedReference]:
         """Extract references from PHP AST (stub - returns empty list)."""
         return []
@@ -98,7 +97,7 @@ class PHPExtractor(BaseExtractor):
 
 
 def extract_php_elements(
-    tree: Tree, lines: list[str], file_path: str | None = None
+    tree: Tree, lines: list[str], _file_path: str | None = None
 ) -> list[ExtractedElement]:
     """Extract classes, functions, and imports from PHP code.
 
@@ -164,7 +163,7 @@ def extract_php_elements(
     return elements
 
 
-def _extract_php_use_statement(node: Node, lines: list[str]) -> ExtractedElement | None:
+def _extract_php_use_statement(node: Node, _lines: list[str]) -> ExtractedElement | None:
     """Extract a PHP use statement (import) as an element.
 
     Args:
@@ -203,7 +202,7 @@ def _extract_php_use_statement(node: Node, lines: list[str]) -> ExtractedElement
     )
 
 
-def _extract_php_class(node: Node, lines: list[str]) -> ExtractedElement | None:
+def _extract_php_class(node: Node, _lines: list[str]) -> ExtractedElement | None:
     """Extract a PHP class definition with PHP 8 attributes."""
     name = None
     decorators: list[str] = []
@@ -233,7 +232,7 @@ def _extract_php_class(node: Node, lines: list[str]) -> ExtractedElement | None:
     )
 
 
-def _extract_php_interface(node: Node, lines: list[str]) -> ExtractedElement | None:
+def _extract_php_interface(node: Node, _lines: list[str]) -> ExtractedElement | None:
     """Extract a PHP interface definition."""
     name = None
 
@@ -256,7 +255,7 @@ def _extract_php_interface(node: Node, lines: list[str]) -> ExtractedElement | N
     )
 
 
-def _extract_php_trait(node: Node, lines: list[str]) -> ExtractedElement | None:
+def _extract_php_trait(node: Node, _lines: list[str]) -> ExtractedElement | None:
     """Extract a PHP trait definition."""
     name = None
 
@@ -279,7 +278,7 @@ def _extract_php_trait(node: Node, lines: list[str]) -> ExtractedElement | None:
     )
 
 
-def _extract_php_enum(node: Node, lines: list[str]) -> ExtractedElement | None:
+def _extract_php_enum(node: Node, _lines: list[str]) -> ExtractedElement | None:
     """Extract a PHP 8.1 enum definition."""
     name = None
     backing_type = None
@@ -306,7 +305,7 @@ def _extract_php_enum(node: Node, lines: list[str]) -> ExtractedElement | None:
     )
 
 
-def _extract_php_global_constants(node: Node, lines: list[str]) -> list[ExtractedElement]:
+def _extract_php_global_constants(node: Node, _lines: list[str]) -> list[ExtractedElement]:
     """Extract global PHP constants from a const_declaration node.
 
     Handles patterns like:
@@ -329,9 +328,7 @@ def _extract_php_global_constants(node: Node, lines: list[str]) -> list[Extracte
             for elem_child in child.children:
                 if elem_child.type == "name":
                     name = get_node_text(elem_child)
-                elif elem_child.type in ("string", "integer", "boolean", "float", "null"):
-                    value = get_node_text(elem_child)
-                elif elem_child.type == "array_creation_expression":
+                elif elem_child.type in ("string", "integer", "boolean", "float", "null") or elem_child.type == "array_creation_expression":
                     value = get_node_text(elem_child)
 
             if name:
@@ -349,7 +346,7 @@ def _extract_php_global_constants(node: Node, lines: list[str]) -> list[Extracte
     return constants
 
 
-def _extract_php_define_constant(node: Node, lines: list[str]) -> ExtractedElement | None:
+def _extract_php_define_constant(node: Node, _lines: list[str]) -> ExtractedElement | None:
     """Extract constants defined with define() function.
 
     Handles patterns like:
@@ -420,7 +417,7 @@ def _extract_php_define_constant(node: Node, lines: list[str]) -> ExtractedEleme
     )
 
 
-def _extract_php_assigned_callable(node: Node, lines: list[str]) -> ExtractedElement | None:
+def _extract_php_assigned_callable(node: Node, _lines: list[str]) -> ExtractedElement | None:
     """Extract arrow functions and closures assigned to variables.
 
     Handles patterns like:
@@ -466,10 +463,7 @@ def _extract_php_assigned_callable(node: Node, lines: list[str]) -> ExtractedEle
     params_str = get_node_text(params_node) if params_node else "()"
 
     # Build signature
-    if callable_type == "arrow":
-        signature = f"fn{params_str}"
-    else:
-        signature = f"function{params_str}"
+    signature = f"fn{params_str}" if callable_type == "arrow" else f"function{params_str}"
 
     return ExtractedElement(
         element_type="function",
@@ -485,7 +479,7 @@ def _extract_php_assigned_callable(node: Node, lines: list[str]) -> ExtractedEle
     )
 
 
-def _extract_php_variable(node: Node, lines: list[str]) -> ExtractedElement | None:
+def _extract_php_variable(node: Node, _lines: list[str]) -> ExtractedElement | None:
     """Extract a PHP variable assignment.
 
     Applies usefulness filter to skip transient variables like object creations
@@ -520,10 +514,7 @@ def _extract_php_variable(node: Node, lines: list[str]) -> ExtractedElement | No
     raw_code = node.text.decode("utf-8") if node.text else ""
 
     # Determine element type
-    if var_name.isupper() and len(var_name) > 1:
-        elem_type = "constant"
-    else:
-        elem_type = "variable"
+    elem_type = "constant" if var_name.isupper() and len(var_name) > 1 else "variable"
 
     return ExtractedElement(
         element_type=elem_type,
@@ -608,11 +599,11 @@ def _extract_php_return_type(node: Node) -> str | None:
     """Extract return type from PHP function/method node."""
     return_type_node = get_child_by_field(node, "return_type")
     if return_type_node:
-        return get_node_text(return_type_node)
+        return get_node_text(return_type_node)  # type: ignore[no-any-return]
     return None
 
 
-def _extract_php_function(node: Node, lines: list[str]) -> ExtractedElement | None:
+def _extract_php_function(node: Node, _lines: list[str]) -> ExtractedElement | None:
     """Extract a PHP function definition."""
     name = None
     params_node = None
@@ -726,7 +717,7 @@ def extract_php_enum_members(
     return methods, cases
 
 
-def _extract_php_enum_case(node: Node, lines: list[str]) -> ExtractedElement | None:
+def _extract_php_enum_case(node: Node, _lines: list[str]) -> ExtractedElement | None:
     """Extract a PHP enum case definition."""
     name = None
     value = None
@@ -752,7 +743,7 @@ def _extract_php_enum_case(node: Node, lines: list[str]) -> ExtractedElement | N
     )
 
 
-def _extract_php_method(node: Node, lines: list[str]) -> ExtractedElement | None:
+def _extract_php_method(node: Node, _lines: list[str]) -> ExtractedElement | None:
     """Extract a PHP method definition."""
     name = None
     visibility = "public"
@@ -798,7 +789,7 @@ def _extract_php_method(node: Node, lines: list[str]) -> ExtractedElement | None
     )
 
 
-def _extract_php_property(node: Node, lines: list[str]) -> list[ExtractedElement]:
+def _extract_php_property(node: Node, _lines: list[str]) -> list[ExtractedElement]:
     """Extract PHP property declarations."""
     properties: list[ExtractedElement] = []
     visibility = "public"
@@ -831,7 +822,7 @@ def _extract_php_property(node: Node, lines: list[str]) -> list[ExtractedElement
 
 
 def extract_php_imports(
-    tree: Tree, lines: list[str]  # noqa: ARG001
+    tree: Tree, _lines: list[str]
 ) -> list[ExtractedImport]:
     """Extract use statements from PHP code.
 
@@ -880,8 +871,8 @@ def extract_php_imports(
 
 # Re-export for backwards compatibility
 from magaldi_core.extractors.patterns.php.slim import (  # noqa: E402
-    extract_slim_routes,
     extract_slim_route_groups,
+    extract_slim_routes,
 )
 
 __all__ = [

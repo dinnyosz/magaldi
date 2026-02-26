@@ -21,13 +21,13 @@ from magaldi_core.tree_sitter_manager import (
     ExtractedElement,
     extract_php_base_class,
     extract_php_calls,
-    extract_top_level_php_calls,
     extract_php_class_members,
     extract_php_class_properties,
     extract_php_elements,
     extract_php_imports,
     extract_php_modified_properties,
     extract_php_thrown_exceptions,
+    extract_top_level_php_calls,
 )
 
 if TYPE_CHECKING:
@@ -43,7 +43,7 @@ class PhpParser(TreeSitterParser):
     def parse(
         self,
         content: str,
-        file_info: "FileInfo",
+        file_info: FileInfo,
         scope: str,
         repository: str,
         username: str,
@@ -167,7 +167,7 @@ class PhpParser(TreeSitterParser):
     def _convert_import(
         self,
         ext: ExtractedElement,
-        file_info: "FileInfo",
+        file_info: FileInfo,
         scope: str,
         repository: str,
         username: str,
@@ -196,11 +196,11 @@ class PhpParser(TreeSitterParser):
     def _convert_class(
         self,
         ext: ExtractedElement,
-        file_info: "FileInfo",
+        file_info: FileInfo,
         scope: str,
         repository: str,
         username: str,
-        lines: list[str],
+        _lines: list[str],
     ) -> CodeElement:
         """Convert extracted class to CodeElement."""
         class_attributes = None
@@ -233,11 +233,11 @@ class PhpParser(TreeSitterParser):
     def _convert_function(
         self,
         ext: ExtractedElement,
-        file_info: "FileInfo",
+        file_info: FileInfo,
         scope: str,
         repository: str,
         username: str,
-        lines: list[str],
+        _lines: list[str],
     ) -> CodeElement:
         """Convert extracted function to CodeElement."""
         calls: list[Call] = []
@@ -282,11 +282,11 @@ class PhpParser(TreeSitterParser):
         self,
         ext: ExtractedElement,
         parent_class: CodeElement,
-        file_info: "FileInfo",
+        file_info: FileInfo,
         scope: str,
         repository: str,
         username: str,
-        lines: list[str],
+        _lines: list[str],
     ) -> CodeElement:
         """Convert extracted method to CodeElement."""
         calls: list[Call] = []
@@ -335,11 +335,11 @@ class PhpParser(TreeSitterParser):
     def _convert_variable(
         self,
         ext: ExtractedElement,
-        file_info: "FileInfo",
+        file_info: FileInfo,
         scope: str,
         repository: str,
         username: str,
-        lines: list[str],
+        _lines: list[str],
         parent: CodeElement | None = None,
     ) -> CodeElement:
         """Convert extracted variable/property to CodeElement."""

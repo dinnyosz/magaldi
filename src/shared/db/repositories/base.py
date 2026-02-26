@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 from typing import TYPE_CHECKING, Any
 
-from shared.db.backends.base import SearchClient, build_vector_query, get_index_mapping
+from shared.db.backends.base import SearchClient, get_index_mapping
 from shared.db.backends.factory import create_client
 
 if TYPE_CHECKING:
@@ -478,10 +478,9 @@ def _make_relationships_mapping(backend_type: str) -> dict[str, Any]:
     import copy
 
     mapping = copy.deepcopy(RELATIONSHIPS_INDEX_MAPPING)
-    if backend_type == "opensearch":
+    if backend_type == "opensearch" and "details" in mapping["mappings"]["properties"]:  # type: ignore[index]
         # OpenSearch uses "flat_object" instead of "flattened"
-        if "details" in mapping["mappings"]["properties"]:
-            mapping["mappings"]["properties"]["details"]["type"] = "flat_object"
+        mapping["mappings"]["properties"]["details"]["type"] = "flat_object"  # type: ignore[index]
     return mapping
 
 
@@ -500,17 +499,17 @@ def _make_index_mapping(backend_type: str, dims: int = 1024) -> dict[str, Any]:
     mapping = copy.deepcopy(INDEX_MAPPING)
     vec_mapping = get_index_mapping(backend_type, dims)
     for field in ("summary_embedding", "code_embedding", "caller_embedding"):
-        mapping["mappings"]["properties"][field] = vec_mapping
+        mapping["mappings"]["properties"][field] = vec_mapping  # type: ignore[index]
 
     # OpenSearch requires knn setting for vector search
     if backend_type == "opensearch":
-        mapping["settings"]["index.knn"] = True
+        mapping["settings"]["index.knn"] = True  # type: ignore[index]
 
     return mapping
 
 
 # Backward-compatible alias
-ElasticsearchBase = None  # type: ignore[assignment]  # removed, see RepositoryBase
+ElasticsearchBase = None  # removed, see RepositoryBase
 
 
 class RepositoryBase:
@@ -528,7 +527,7 @@ class RepositoryBase:
     @property
     def backend_type(self) -> str:
         """Get the configured backend type."""
-        return self._config.search_backend.type
+        return self._config.search_backend.type  # type: ignore[no-any-return]
 
     def _get_client(self) -> SearchClient:
         """Get or create search backend client."""

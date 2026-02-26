@@ -26,14 +26,6 @@ from shared.throttling import ThroughputTracker
 
 if TYPE_CHECKING:
     from shared.config import MagaldiConfig
-from shared.ai.embedding import (
-    CodeEmbeddingClient,
-    normalize_vector,
-    validate_vector,
-)
-from shared.ai.summarization import SummarizationLLMClient
-from shared.db.store import Repository
-
 # Import shared config from common module
 from shared.ai.clustering.config import (
     FeatureProcessingConfig,
@@ -43,20 +35,27 @@ from shared.ai.clustering.config import (
 
 # Re-export subfeature types for backwards compatibility
 from shared.ai.clustering.subfeature_processor import (
+    SUBFEATURE_SUMMARY_PROMPT,
+    SUBFEATURE_SYSTEM_PROMPT,
+    SUBFEATURE_USER_PROMPT,
     ProcessedSubfeature,
     SubfeatureLabelingState,
     SubfeatureProgressState,
     SubfeatureTimingStats,
-    SubfeatureWorkItem,
     SubfeatureWorkerStatus,
-    SUBFEATURE_SUMMARY_PROMPT,
-    SUBFEATURE_SYSTEM_PROMPT,
-    SUBFEATURE_USER_PROMPT,
+    SubfeatureWorkItem,
     _build_subfeature_prompt,
     _generate_subfeature_summary,
     _process_single_subfeature,
     process_subfeatures,
 )
+from shared.ai.embedding import (
+    CodeEmbeddingClient,
+    normalize_vector,
+    validate_vector,
+)
+from shared.ai.summarization import SummarizationLLMClient
+from shared.db.store import Repository
 
 # Re-export config types for backwards compatibility
 __all__ = [
@@ -117,7 +116,7 @@ class FeatureTimingStats:
     totals_by_tier: dict[int, int] = field(default_factory=dict)
 
     # Throughput tracker for throttling (5 min window like other processors)
-    throughput_tracker: "ThroughputTracker" = field(default_factory=lambda: ThroughputTracker(window_seconds=300.0))
+    throughput_tracker: ThroughputTracker = field(default_factory=lambda: ThroughputTracker(window_seconds=300.0))
 
     def set_totals_by_tier(self, totals: dict[int, int]) -> None:
         """Set total counts by tier for ETA calculation."""
@@ -145,11 +144,11 @@ class FeatureTimingStats:
 
     def get_throughput_stats(self) -> tuple[float, float, int]:
         """Get throughput statistics for throttling."""
-        return self.throughput_tracker.get_stats()
+        return self.throughput_tracker.get_stats()  # type: ignore[no-any-return]
 
     def get_throughput_stats_with_concurrency(self) -> tuple[float, float, int, float, float]:
         """Get throughput statistics with concurrency context."""
-        return self.throughput_tracker.get_stats_with_concurrency()
+        return self.throughput_tracker.get_stats_with_concurrency()  # type: ignore[no-any-return]
 
     @property
     def avg_summarize_time(self) -> float:
@@ -210,7 +209,7 @@ class FeatureTimingStats:
                 return 0.0
             return (remaining * global_avg) / max(num_workers, 1)
 
-    def get_eta_breakdown_with_avg(self, num_workers: int = 1) -> list[tuple[str, int, float, bool, int, int]]:
+    def get_eta_breakdown_with_avg(self, _num_workers: int = 1) -> list[tuple[str, int, float, bool, int, int]]:
         """Get average time per tier for display.
 
         Returns:
@@ -464,7 +463,7 @@ def _embed_feature(
             f"got {len(embedding)}"
         )
 
-    return normalize_vector(embedding)
+    return normalize_vector(embedding)  # type: ignore[no-any-return]
 
 
 def _process_single_feature(
@@ -602,7 +601,7 @@ def process_features(
     on_status_change: Callable[[], None] | None = None,
     worker_status: FeatureWorkerStatus | None = None,
     timing_stats: FeatureTimingStats | None = None,
-    magaldi_config: "MagaldiConfig | None" = None,
+    magaldi_config: MagaldiConfig | None = None,
     on_tier_distribution: Callable[[dict[int, int]], None] | None = None,
 ) -> dict[str, Any]:
     """Process features: summarize -> embed -> index (parallel).
@@ -759,7 +758,7 @@ def process_features(
             member_summaries="\n".join(summaries_text),
         )
         prompt_chars = len(FEATURE_SYSTEM_PROMPT) + len(user_content)
-        return compute_aggregation_num_ctx(prompt_chars, task_type="feature")
+        return compute_aggregation_num_ctx(prompt_chars, task_type="feature")  # type: ignore[no-any-return]
 
     # Group clusters by tier and process each tier with appropriate max_workers
     tier_groups = iter_by_tier(clusters, estimate_cluster_tier)
@@ -800,7 +799,7 @@ def process_features(
             state["failed"] += 1
             errors.append(f"Feature {cluster.label}: {processed.error}")
 
-    def on_tick(throttle_info: "ThrottleDisplayInfo") -> None:
+    def on_tick(throttle_info: ThrottleDisplayInfo) -> None:
         """Update progress display."""
         if on_progress:
             progress_state = FeatureProgressState(
@@ -851,8 +850,6 @@ def process_features(
         failed_count = state["failed"]
 
     except KeyboardInterrupt:
-        if 'executor' in dir():
-            executor.shutdown(wait=False, cancel_futures=True)
         for wid in range(max_pool_workers):
             worker_status.clear(wid)
         raise

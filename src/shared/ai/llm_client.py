@@ -23,22 +23,23 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import contextlib
 import logging
 import random
 import signal
-import sys
 import time
 import warnings
-
-logger = logging.getLogger(__name__)
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 
 import aiohttp
 import httpx
 import litellm
 from litellm import aembedding, completion, embedding
 from litellm.llms.custom_httpx.aiohttp_handler import BaseLLMAIOHTTPHandler
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -122,13 +123,10 @@ async def _get_or_create_session_async() -> aiohttp.ClientSession:
             )
             # Configure LiteLLM to use our managed session for async calls
             # This may fail on newer LiteLLM versions with changed API
-            try:
+            with contextlib.suppress(TypeError):
                 litellm.base_llm_aiohttp_handler = BaseLLMAIOHTTPHandler(
                     client_session=_aiohttp_session
                 )
-            except TypeError:
-                # Newer LiteLLM version with different API - use default handling
-                pass
 
     return _aiohttp_session
 
@@ -184,7 +182,7 @@ async def cleanup_llm_sessions_async() -> None:
 atexit.register(cleanup_llm_sessions)
 
 
-def _sigint_handler(signum: int, frame: Any) -> None:
+def _sigint_handler(_signum: int, _frame: Any) -> None:
     """Handle SIGINT (Ctrl+C) with proper cleanup before exit.
 
     This ensures HTTP sessions are closed before Python starts
@@ -281,7 +279,7 @@ def _retry_with_backoff(
 
 
 async def _retry_with_backoff_async(
-    fn: Callable[[], T],
+    fn: Callable[[], Awaitable[T]],
     max_retries: int = 3,
     base_delay: float = 1.0,
     max_delay: float = 30.0,
@@ -575,7 +573,7 @@ class LLMClient:
             if content is None:
                 raise LLMError(f"Empty response from model '{use_model}'")
 
-            return content.strip()
+            return content.strip()  # type: ignore[no-any-return]
 
         return _retry_with_backoff(
             _do_generate,
@@ -664,7 +662,7 @@ class LLMClient:
             if content is None:
                 raise LLMError(f"Empty response from model '{use_model}'")
 
-            return content.strip()
+            return content.strip()  # type: ignore[no-any-return]
 
         return _retry_with_backoff(
             _do_generate,
@@ -793,7 +791,7 @@ class EmbeddingClient:
             if not response.data:
                 raise LLMError("No embedding returned")
 
-            return response.data[0]["embedding"]
+            return response.data[0]["embedding"]  # type: ignore[no-any-return]
 
         return _retry_with_backoff(
             _do_embed,
@@ -842,7 +840,7 @@ class EmbeddingClient:
             if not response.data:
                 raise LLMError("No embedding returned")
 
-            return response.data[0]["embedding"]
+            return response.data[0]["embedding"]  # type: ignore[no-any-return]
 
         return await _retry_with_backoff_async(
             _do_embed,

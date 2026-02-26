@@ -21,8 +21,6 @@ Tools are organized into category modules:
 """
 
 # Export tool schemas
-from magaldi_mcp.tools.schemas import ALL_TOOL_SCHEMAS
-
 # Analysis tools
 from magaldi_mcp.tools.analysis import explain_element
 
@@ -97,6 +95,7 @@ from magaldi_mcp.tools.repository import (
     list_features,
     list_repos,
 )
+from magaldi_mcp.tools.schemas import ALL_TOOL_SCHEMAS
 
 # Search tools
 from magaldi_mcp.tools.search import (

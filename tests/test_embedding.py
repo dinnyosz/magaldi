@@ -536,11 +536,11 @@ class TestInMemoryEmbeddingJobRepository:
         job_repo.add_job("job2", "scope", "repo", "main")
         job_repo.add_job("job3", "scope", "repo", "main")
 
-        claimed = job_repo.claim_pending_jobs(worker_id="w1", scope="scope", repository="repo", username="main", batch_size=2)
+        claimed = job_repo.claim_pending_jobs(worker_id="w1", _scope="scope", _repository="repo", _username="main", batch_size=2)
         assert len(claimed) == 2
 
         # Remaining jobs still pending
-        remaining = job_repo.claim_pending_jobs(worker_id="w1", scope="scope", repository="repo", username="main", batch_size=2)
+        remaining = job_repo.claim_pending_jobs(worker_id="w1", _scope="scope", _repository="repo", _username="main", batch_size=2)
         assert len(remaining) == 1
 
     def test_mark_completed(self, job_repo: InMemoryEmbeddingJobRepository):

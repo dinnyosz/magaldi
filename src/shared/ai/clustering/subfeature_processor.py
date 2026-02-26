@@ -39,7 +39,6 @@ from shared.ai.clustering.config import (
     _get_model_display_name,
 )
 
-
 # =============================================================================
 # DATA CLASSES
 # =============================================================================
@@ -91,11 +90,11 @@ class SubfeatureTimingStats:
 
     def get_throughput_stats(self) -> tuple[float, float, int]:
         """Get throughput statistics for throttling."""
-        return self.throughput_tracker.get_stats()
+        return self.throughput_tracker.get_stats()  # type: ignore[no-any-return]
 
     def get_throughput_stats_with_concurrency(self) -> tuple[float, float, int, float, float]:
         """Get throughput statistics with concurrency context."""
-        return self.throughput_tracker.get_stats_with_concurrency()
+        return self.throughput_tracker.get_stats_with_concurrency()  # type: ignore[no-any-return]
 
     @property
     def avg_summarize_time(self) -> float:
@@ -154,7 +153,7 @@ class SubfeatureTimingStats:
                 return 0.0
             return (remaining * global_avg) / max(num_workers, 1)
 
-    def get_eta_breakdown_with_avg(self, num_workers: int = 1) -> list[tuple[str, int, float, bool, int, int]]:
+    def get_eta_breakdown_with_avg(self, _num_workers: int = 1) -> list[tuple[str, int, float, bool, int, int]]:
         """Get average time per tier for display.
 
         Returns:
@@ -321,7 +320,7 @@ Summary:"""
 
 
 def _build_subfeature_prompt(
-    cluster: "ClusterResult",
+    cluster: ClusterResult,
     member_summaries: dict[str, str],
     parent_label: str,
     parent_summary: str,
@@ -375,7 +374,7 @@ def _build_subfeature_prompt(
 
 
 def _generate_subfeature_summary(
-    cluster: "ClusterResult",
+    cluster: ClusterResult,
     member_summaries: dict[str, str],
     parent_label: str,
     parent_summary: str,
@@ -541,7 +540,7 @@ def _process_single_subfeature(
 
 
 def process_subfeatures(
-    clustering_result: "ClusteringResult",
+    clustering_result: ClusteringResult,
     processed_features: dict[int, tuple[str, str]],
     scope: str,
     repository: str,
@@ -551,7 +550,7 @@ def process_subfeatures(
     subcluster_config: SubClusterConfig | None = None,
     on_progress: Callable[[SubfeatureProgressState], None] | None = None,
     on_labeling_progress: Callable[[SubfeatureLabelingState], None] | None = None,
-    magaldi_config: "MagaldiConfig | None" = None,
+    magaldi_config: MagaldiConfig | None = None,
     timing_stats: SubfeatureTimingStats | None = None,
     worker_status: SubfeatureWorkerStatus | None = None,
     on_tier_distribution: Callable[[dict[int, int]], None] | None = None,
@@ -791,7 +790,7 @@ def process_subfeatures(
         "failed": 0,
     }
 
-    def on_status_change(throttle_info: "ThrottleDisplayInfo | None" = None) -> None:
+    def on_status_change(throttle_info: ThrottleDisplayInfo | None = None) -> None:
         if throttle_info is not None:
             subfeature_state["allowed_workers"] = throttle_info.allowed_workers
             subfeature_state["current_max"] = throttle_info.current_max
@@ -870,7 +869,7 @@ def process_subfeatures(
             member_summaries="\n".join(summaries_text),
         )
         prompt_chars = len(SUBFEATURE_SYSTEM_PROMPT) + len(user_content)
-        return compute_aggregation_num_ctx(prompt_chars, task_type="subfeature")
+        return compute_aggregation_num_ctx(prompt_chars, task_type="subfeature")  # type: ignore[no-any-return]
 
     # Group work items by tier and process each tier with appropriate max_workers
     tier_groups = iter_by_tier(work_queue, estimate_subfeature_tier)
@@ -936,8 +935,6 @@ def process_subfeatures(
             )
 
     except KeyboardInterrupt:
-        if 'executor' in dir():
-            executor.shutdown(wait=False, cancel_futures=True)
         for wid in range(max_pool_workers):
             worker_status.clear(wid)
         raise

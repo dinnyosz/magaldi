@@ -148,7 +148,7 @@ class SoftClusteringPipeline:
         ...     print(f"Feature {m.feature_idx}: {m.score:.2%}")
     """
 
-    def __init__(self, config: "ClusteringConfig | None" = None):
+    def __init__(self, config: ClusteringConfig | None = None):
         """Initialize pipeline with configuration.
 
         Args:

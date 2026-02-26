@@ -24,7 +24,7 @@ class RelationshipsRepository(RepositoryBase):
 
     def _get_bulk_timeout(self) -> int:
         """Get bulk operation timeout from config."""
-        return self._config.search_backend.bulk_timeout
+        return self._config.search_backend.bulk_timeout  # type: ignore[no-any-return]
 
     # =========================================================================
     # CRUD Operations
@@ -86,7 +86,7 @@ class RelationshipsRepository(RepositoryBase):
                 "confidence": rel.confidence,
                 "line": rel.line,
                 "details": rel.details,
-                "indexed_at": now,
+                "indexed_at": now,  # type: ignore[dict-item]
             })
 
         result = client.bulk(operations=operations, refresh=True)
@@ -122,7 +122,7 @@ class RelationshipsRepository(RepositoryBase):
             timeout=f"{bulk_timeout}s",
             request_timeout=bulk_timeout,
         )
-        return result.get("deleted", 0)
+        return result.get("deleted", 0)  # type: ignore[no-any-return]
 
     # =========================================================================
     # Query Operations (with user priority)
@@ -308,7 +308,7 @@ class RelationshipsRepository(RepositoryBase):
                 "username": ref.username,
                 "usages_count": ref.usages_count,
                 "metadata": ref.metadata,
-                "indexed_at": now,
+                "indexed_at": now,  # type: ignore[dict-item]
             })
 
         result = client.bulk(operations=operations, refresh=True)
@@ -372,4 +372,4 @@ class RelationshipsRepository(RepositoryBase):
             timeout=f"{bulk_timeout}s",
             request_timeout=bulk_timeout,
         )
-        return result.get("deleted", 0)
+        return result.get("deleted", 0)  # type: ignore[no-any-return]

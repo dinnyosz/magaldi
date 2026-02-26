@@ -8,15 +8,13 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query
 
-logger = logging.getLogger(__name__)
-
 from magaldi_web.dependencies import (
-    check_search_health,
     check_llm_health,
     check_redis_health,
+    check_search_health,
     get_cached_config,
-    get_repository,
     get_job_queue_totals,
+    get_repository,
     retry_failed_jobs_in_redis,
 )
 from magaldi_web.models import (
@@ -40,13 +38,15 @@ from magaldi_web.models import (
     ToolUsageInfo,
     TransitionDetailInfo,
 )
-from shared.db.store import INDEX_NAME, Repository
 from shared.db.redis import RedisMCPAnalyticsRepository
+from shared.db.store import INDEX_NAME, Repository
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
-def format_bytes(size: int) -> str:
+def format_bytes(size: int | float) -> str:
     """Format bytes to human-readable string."""
     for unit in ["B", "KB", "MB", "GB", "TB"]:
         if size < 1024:

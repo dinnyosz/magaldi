@@ -17,12 +17,9 @@ from .base import (
     FEATURE_JOBS,
     FEATURE_QUEUE,
     FEATURE_RUNNING,
-    JobType,
-    KeyType,
     LABELING_JOBS,
     LABELING_QUEUE,
     LABELING_RUNNING,
-    RedisRepository,
     SUBFEATURE_JOBS,
     SUBFEATURE_LABELING_JOBS,
     SUBFEATURE_LABELING_QUEUE,
@@ -32,6 +29,9 @@ from .base import (
     SUMMARIZATION_JOBS,
     SUMMARIZATION_QUEUE,
     SUMMARIZATION_RUNNING,
+    JobType,
+    KeyType,
+    RedisRepository,
     _key,
     _make_key,
 )
@@ -41,13 +41,10 @@ from .job_repositories import (
     RedisEmbeddingJobRepository,
     RedisFeatureJobRepository,
     RedisLabelingJobRepository,
-    RedisSubfeatureLabelingJobRepository,
     RedisSubfeatureJobRepository,
+    RedisSubfeatureLabelingJobRepository,
     RedisSummarizationJobRepository,
 )
-
-# Summary store
-from .summary_store import RedisSummaryStore
 
 # MCP analytics
 from .mcp_analytics import (
@@ -60,6 +57,9 @@ from .mcp_analytics import (
     MCP_TOOL_TRANSITIONS,
     RedisMCPAnalyticsRepository,
 )
+
+# Summary store
+from .summary_store import RedisSummaryStore
 
 __all__ = [
     # Base

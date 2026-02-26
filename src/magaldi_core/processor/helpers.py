@@ -8,8 +8,9 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections.abc import Callable
 from datetime import datetime
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from shared.ai.context_size import compute_element_num_ctx
 from shared.ai.embedding import (
@@ -29,12 +30,13 @@ if TYPE_CHECKING:
     from shared.ai.embedding import CodeEmbeddingClient
     from shared.ai.summarization import SummarizationLLMClient
     from shared.db.store import Repository
+
     from .status import WorkerStatus
 
 logger = logging.getLogger(__name__)
 
 
-def should_embed(element: "CodeElement") -> bool:
+def should_embed(element: CodeElement) -> bool:
     """Determine if element should be embedded.
 
     Args:
@@ -44,13 +46,7 @@ def should_embed(element: "CodeElement") -> bool:
         True if element should be embedded.
     """
     # All code elements get embedded (including imports for semantic search)
-    if element.element_type in (
-        "file", "class", "interface", "type_alias", "trait", "enum",
-        "function", "method", "constant", "variable", "import"
-    ):
-        return True
-
-    return False
+    return element.element_type in ("file", "class", "interface", "type_alias", "trait", "enum", "function", "method", "constant", "variable", "import")
 
 
 # Element types that get handcrafted summaries (no LLM needed)
@@ -58,7 +54,7 @@ def should_embed(element: "CodeElement") -> bool:
 _HANDCRAFTED_SUMMARY_TYPES = frozenset({"import"})
 
 
-def _generate_import_summary(element: "CodeElement") -> str:
+def _generate_import_summary(element: CodeElement) -> str:
     """Generate a handcrafted summary for import elements.
 
     Works across languages by using the raw code directly,
@@ -120,7 +116,7 @@ def _extract_docstring_description(docstring: str) -> str:
     text = " ".join(line for line in description_lines if line)
     return text.strip()
 
-def _get_element_line_count(element: "CodeElement") -> int:
+def _get_element_line_count(element: CodeElement) -> int:
     """Get non-empty line count for an element.
 
     Uses code_metrics if available (populated by parser), otherwise
@@ -133,15 +129,15 @@ def _get_element_line_count(element: "CodeElement") -> int:
         Non-empty line count.
     """
     if element.code_metrics and "line_count" in element.code_metrics:
-        return element.code_metrics["line_count"]
+        return element.code_metrics["line_count"]  # type: ignore[no-any-return]
     if element.raw_code:
         return sum(1 for line in element.raw_code.split("\n") if line.strip())
     if element.line_end and element.line_start:
-        return max(1, element.line_end - element.line_start + 1)
+        return max(1, element.line_end - element.line_start + 1)  # type: ignore[no-any-return]
     return 0
 
 
-def _is_small_function(element: "CodeElement", threshold: int) -> bool:
+def _is_small_function(element: CodeElement, threshold: int) -> bool:
     """Check if a function/method is small enough for a handcrafted summary.
 
     Args:
@@ -158,7 +154,7 @@ def _is_small_function(element: "CodeElement", threshold: int) -> bool:
     return _get_element_line_count(element) <= threshold
 
 
-def _generate_small_function_summary(element: "CodeElement") -> str:
+def _generate_small_function_summary(element: CodeElement) -> str:
     """Generate a handcrafted summary for a small function/method.
 
     For small functions, the code itself is the best explanation. Priority:
@@ -182,7 +178,7 @@ def _generate_small_function_summary(element: "CodeElement") -> str:
 
     # Try signature
     if element.signature:
-        return element.signature.strip()
+        return element.signature.strip()  # type: ignore[no-any-return]
 
     # Fallback to raw code
     code = (element.raw_code or "").strip()
@@ -201,7 +197,7 @@ def _generate_small_function_summary(element: "CodeElement") -> str:
 # =============================================================================
 
 
-def _should_handcraft(element: "CodeElement", config: "ProcessingConfig") -> bool:
+def _should_handcraft(element: CodeElement, config: ProcessingConfig) -> bool:
     """Check if an element should use a handcrafted summary instead of LLM.
 
     Centralizes the handcrafted/LLM decision so it can be used both in
@@ -223,7 +219,7 @@ def _should_handcraft(element: "CodeElement", config: "ProcessingConfig") -> boo
     return False
 
 
-def _generate_handcrafted_summary(element: "CodeElement") -> str:
+def _generate_handcrafted_summary(element: CodeElement) -> str:
     """Generate a handcrafted summary based on element type.
 
     Dispatches to the appropriate per-type generator. Each element type
@@ -249,9 +245,9 @@ def _generate_handcrafted_summary(element: "CodeElement") -> str:
 
 
 def _summarize_element(
-    element: "CodeElement",
-    summary_cache: "SummaryCache",
-    llm_client: "SummarizationLLMClient",
+    element: CodeElement,
+    summary_cache: SummaryCache,
+    llm_client: SummarizationLLMClient,
     config: ProcessingConfig,
 ) -> tuple[str, int, int]:
     """Generate summary for an element.
@@ -294,9 +290,9 @@ def _summarize_element(
 
 
 def _embed_element(
-    element: "CodeElement",
-    summary_cache: "SummaryCache",
-    embed_client: "CodeEmbeddingClient",
+    element: CodeElement,
+    summary_cache: SummaryCache,
+    embed_client: CodeEmbeddingClient,
     config: ProcessingConfig,
     on_stage_change: Callable[[str], None] | None = None,
 ) -> tuple[list[float], list[float], list[float], float, float, float]:
@@ -373,12 +369,12 @@ def _embed_element(
 
 
 def _index_element(
-    element: "CodeElement",
+    element: CodeElement,
     summary: str,
     summary_embedding: list[float] | None,
     code_embedding: list[float] | None,
     caller_embedding: list[float] | None,
-    repo: "Repository",
+    repo: Repository,
     file_hash: str | None = None,
     element_count: int | None = None,
 ) -> bool:
@@ -437,16 +433,16 @@ def _index_element(
 
 
 def _process_single_element(
-    element: "CodeElement",
-    summary_cache: "SummaryCache",
-    llm_client: "SummarizationLLMClient | None",
-    embed_client: "CodeEmbeddingClient | None",
+    element: CodeElement,
+    summary_cache: SummaryCache,
+    llm_client: SummarizationLLMClient | None,
+    embed_client: CodeEmbeddingClient | None,
     config: ProcessingConfig,
     file_hashes: dict[str, str] | None,
     element_counts: dict[str, int] | None,
-    repo: "Repository",
+    repo: Repository,
     worker_id: int,
-    worker_status: "WorkerStatus",
+    worker_status: WorkerStatus,
     on_status_change: Callable[[], None] | None = None,
 ) -> ProcessedElement:
     """Process a single element: summarize -> embed -> index.

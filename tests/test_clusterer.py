@@ -8,13 +8,12 @@ import pytest
 
 from shared.ai.clustering.clusterer import (
     ClusterConfig,
-    ClusterResult,
-    ClusteringResult,
     ClusteringError,
-    LabelingTimingStats,
+    ClusteringResult,
+    ClusterResult,
     LabelingProgressState,
+    LabelingTimingStats,
 )
-
 
 # =============================================================================
 # CLUSTER CONFIG TESTS

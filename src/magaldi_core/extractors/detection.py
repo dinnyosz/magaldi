@@ -11,20 +11,19 @@ from __future__ import annotations
 
 from typing import Any
 
+from magaldi_core.extractors.patterns.javascript import (
+    detect_javascript_http_routes,
+)
+from magaldi_core.extractors.patterns.python import (
+    detect_python_cli_commands,
+    detect_python_http_routes,
+)
 from magaldi_core.extractors.types import (
     CliCommand,
     DecoratorInfo,
     ExtractedCall,
     HttpRoute,
 )
-from magaldi_core.extractors.patterns.python import (
-    detect_python_http_routes,
-    detect_python_cli_commands,
-)
-from magaldi_core.extractors.patterns.javascript import (
-    detect_javascript_http_routes,
-)
-
 
 # =============================================================================
 # UNIFIED HTTP ROUTE DETECTION
@@ -47,15 +46,15 @@ def detect_http_routes(
         List of detected HTTP routes.
     """
     if language == "python":
-        return detect_python_http_routes(decorators)
+        return detect_python_http_routes(decorators)  # type: ignore[no-any-return]
     elif language in ("javascript", "typescript", "tsx"):
-        return detect_javascript_http_routes(decorators)
+        return detect_javascript_http_routes(decorators)  # type: ignore[no-any-return]
     else:
         # For unknown languages, try both
         routes = detect_python_http_routes(decorators)
         if not routes:
             routes = detect_javascript_http_routes(decorators)
-        return routes
+        return routes  # type: ignore[no-any-return]
 
 
 # =============================================================================
@@ -79,7 +78,7 @@ def detect_cli_commands(
         List of detected CLI commands.
     """
     if language == "python":
-        return detect_python_cli_commands(decorators, function_name)
+        return detect_python_cli_commands(decorators, function_name)  # type: ignore[no-any-return]
     # Future: add JavaScript CLI frameworks like Commander.js, Yargs
     return []
 
@@ -125,8 +124,7 @@ _PUBLIC_API_DECORATORS = {
     "Injectable", "Inject", "Controller", "Module", "Component",
     "UseGuards", "UseInterceptors", "UsePipes",
     # Express/Fastify/Hono/Koa (method calls used as decorators)
-    "router.get", "router.post", "router.put", "router.delete", "router.patch",
-    "router.head", "router.options", "router.all",
+    "router.all",
     "express.get", "express.post", "express.put", "express.delete", "express.patch",
     "fastify.get", "fastify.post", "fastify.put", "fastify.delete", "fastify.patch",
     "hono.get", "hono.post", "hono.put", "hono.delete", "hono.patch",
@@ -142,8 +140,7 @@ _PUBLIC_API_DECORATORS = {
     # Symfony Route (PHP)
     "Route",
     # Rust Actix-web/Rocket routes
-    "get", "post", "put", "delete", "patch", "head", "options", "trace", "route",
-    "actix_web::main", "actix_rt::main", "launch", "rocket::launch",
+    "options", "trace", "actix_web::main", "actix_rt::main", "launch", "rocket::launch",
     # Rust Tokio/test
     "tokio::main", "test", "tokio::test", "actix_rt::test",
 }

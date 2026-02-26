@@ -1,9 +1,8 @@
 """Tests for React wrapper component extraction (memo, forwardRef, lazy)."""
 
 import pytest
-from tree_sitter import Language, Parser
-
 import tree_sitter_typescript as ts_tsx
+from tree_sitter import Language, Parser
 
 from magaldi_core.extractors.javascript import extract_javascript_elements
 

@@ -43,7 +43,7 @@ def list_glossary(
             "scope and repository are required. Either provide them explicitly "
             "or create a magaldi.yaml file in your project root."
         )
-    return repo.get_glossary_terms(
+    return repo.get_glossary_terms(  # type: ignore[no-any-return]
         scope=scope,
         repository=repository,
         username=username,
@@ -86,7 +86,7 @@ def get_glossary_term(
         )
     if not term:
         raise ValueError("term is required")
-    return repo.get_glossary_term(
+    return repo.get_glossary_term(  # type: ignore[no-any-return]
         scope=scope,
         repository=repository,
         term=term,
@@ -128,7 +128,7 @@ def search_glossary(
         )
     if not query:
         raise ValueError("query is required")
-    return repo.search_glossary(
+    return repo.search_glossary(  # type: ignore[no-any-return]
         scope=scope,
         repository=repository,
         query=query,

@@ -4,19 +4,18 @@ Phase 1: Same-file and self-method resolution (at parse time)
 Phase 2: Cross-file resolution via imports (after indexing)
 """
 
-import pytest
-
-from magaldi_core.code_parser import (
-    Call,
-    CodeElement,
-    PythonParser,
-    JavaScriptParser,
-    PhpParser,
-    RustParser,
-)
-from magaldi_core.change_detection import FileInfo
 from pathlib import Path
 
+import pytest
+
+from magaldi_core.change_detection import FileInfo
+from magaldi_core.code_parser import (
+    Call,
+    JavaScriptParser,
+    PhpParser,
+    PythonParser,
+    RustParser,
+)
 
 # =============================================================================
 # FIXTURES

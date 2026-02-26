@@ -7,12 +7,11 @@ import pytest
 
 from shared.ai.clustering.clusterer import (
     ClusterConfig,
-    ClusterResult,
     ClusteringError,
     ClusteringResult,
+    ClusterResult,
     FeatureClusterer,
 )
-
 
 # =============================================================================
 # FIXTURES

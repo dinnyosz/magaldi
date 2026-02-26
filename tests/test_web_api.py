@@ -6,7 +6,7 @@ with mocked dependencies.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,7 +14,6 @@ from fastapi.testclient import TestClient
 from magaldi_web.app import create_app
 from magaldi_web.dependencies import get_repository
 from shared.config import MagaldiConfig
-
 
 # =============================================================================
 # FIXTURES
@@ -61,8 +60,9 @@ def client(app) -> TestClient:
 class TestDashboardEndpoint:
     """Tests for the /api/v1/dashboard endpoint."""
 
+    @pytest.mark.usefixtures("mock_repo")
     def test_dashboard_returns_stats(
-        self, client: TestClient, mock_repo: MagicMock, mock_client: MagicMock
+        self, client: TestClient, mock_client: MagicMock
     ):
         """Test that dashboard returns repository statistics."""
         # Mock two search calls: repos aggregation and type aggregation
@@ -135,8 +135,9 @@ class TestDashboardEndpoint:
         assert data["stats"]["method_count"] == 40
         assert data["queue_status"]["total_pending"] == 0
 
+    @pytest.mark.usefixtures("mock_repo")
     def test_dashboard_empty_index(
-        self, client: TestClient, mock_repo: MagicMock, mock_client: MagicMock
+        self, client: TestClient, mock_client: MagicMock
     ):
         """Test dashboard with empty Elasticsearch index."""
         mock_client.search.side_effect = [
@@ -186,8 +187,9 @@ class TestDashboardEndpoint:
 class TestSearchEndpoint:
     """Tests for the /api/v1/search endpoint."""
 
+    @pytest.mark.usefixtures("mock_repo")
     def test_search_returns_results(
-        self, client: TestClient, mock_repo: MagicMock, mock_client: MagicMock
+        self, client: TestClient, mock_client: MagicMock
     ):
         """Test that search returns matching results."""
         mock_client.search.return_value = {
@@ -248,8 +250,9 @@ class TestSearchEndpoint:
         assert data["results"][0]["name"] == "process"
         assert data["took_ms"] == 10
 
+    @pytest.mark.usefixtures("mock_repo")
     def test_search_with_filters(
-        self, client: TestClient, mock_repo: MagicMock, mock_client: MagicMock
+        self, client: TestClient, mock_client: MagicMock
     ):
         """Test search with scope, repository, and type filters."""
         mock_client.search.return_value = {
@@ -285,8 +288,9 @@ class TestSearchEndpoint:
 class TestVectorMapEndpoints:
     """Tests for the /api/v1/repos/{scope}/{repo}/vector-map endpoint."""
 
+    @pytest.mark.usefixtures("mock_repo")
     def test_get_vector_map(
-        self, client: TestClient, mock_repo: MagicMock, mock_client: MagicMock
+        self, client: TestClient, mock_client: MagicMock
     ):
         """Test getting vector map coordinates."""
         # Create mock embeddings for 10 elements
@@ -328,8 +332,9 @@ class TestVectorMapEndpoints:
             assert "element_id" in point
             assert "name" in point
 
+    @pytest.mark.usefixtures("mock_repo")
     def test_get_vector_map_empty(
-        self, client: TestClient, mock_repo: MagicMock, mock_client: MagicMock
+        self, client: TestClient, mock_client: MagicMock
     ):
         """Test vector map with no elements."""
         mock_client.search.return_value = {
@@ -352,8 +357,9 @@ class TestVectorMapEndpoints:
 class TestClustersEndpoint:
     """Tests for the /api/v1/repos/{scope}/{repo}/clusters endpoint."""
 
+    @pytest.mark.usefixtures("mock_repo")
     def test_get_clusters(
-        self, client: TestClient, mock_repo: MagicMock, mock_client: MagicMock
+        self, client: TestClient, mock_client: MagicMock
     ):
         """Test getting HDBSCAN feature clusters."""
         mock_client.search.return_value = {
@@ -397,8 +403,9 @@ class TestClustersEndpoint:
         assert "representative" in cluster
         assert cluster["representative"]["name"] == "Authentication"
 
+    @pytest.mark.usefixtures("mock_repo")
     def test_get_clusters_empty(
-        self, client: TestClient, mock_repo: MagicMock, mock_client: MagicMock
+        self, client: TestClient, mock_client: MagicMock
     ):
         """Test clusters endpoint with no features."""
         mock_client.search.return_value = {
@@ -468,8 +475,9 @@ class TestCORS:
 class TestBrowseEndpoints:
     """Tests for /api/v1/browse/* endpoints."""
 
+    @pytest.mark.usefixtures("mock_repo")
     def test_browse_elements(
-        self, client: TestClient, mock_repo: MagicMock, mock_client: MagicMock
+        self, client: TestClient, mock_client: MagicMock
     ):
         """Test browsing code elements."""
         mock_client.search.return_value = {
@@ -514,8 +522,9 @@ class TestBrowseEndpoints:
         assert "total" in data
         assert data["total"] == 2
 
+    @pytest.mark.usefixtures("mock_repo")
     def test_browse_elements_with_filters(
-        self, client: TestClient, mock_repo: MagicMock, mock_client: MagicMock
+        self, client: TestClient, mock_client: MagicMock
     ):
         """Test browsing elements with type filter."""
         mock_client.search.return_value = {
@@ -543,8 +552,9 @@ class TestBrowseEndpoints:
 class TestReposEndpoints:
     """Tests for /api/v1/repos/* endpoints."""
 
+    @pytest.mark.usefixtures("mock_repo")
     def test_list_repositories(
-        self, client: TestClient, mock_repo: MagicMock, mock_client: MagicMock
+        self, client: TestClient, mock_client: MagicMock
     ):
         """Test listing all repositories."""
         mock_client.search.return_value = {
@@ -567,8 +577,9 @@ class TestReposEndpoints:
         data = response.json()
         assert "repos" in data
 
+    @pytest.mark.usefixtures("mock_repo")
     def test_get_repository(
-        self, client: TestClient, mock_repo: MagicMock, mock_client: MagicMock
+        self, client: TestClient, mock_client: MagicMock
     ):
         """Test getting a specific repository."""
         mock_client.search.return_value = {
@@ -604,8 +615,9 @@ class TestReposEndpoints:
 class TestAdminEndpoints:
     """Tests for /api/v1/admin/* endpoints."""
 
+    @pytest.mark.usefixtures("mock_repo")
     def test_health_check(
-        self, client: TestClient, mock_repo: MagicMock
+        self, client: TestClient
     ):
         """Test health check endpoint."""
         with patch("magaldi_web.routes.admin.check_search_health") as mock_search_health, \

@@ -12,7 +12,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from magaldi_web.routes import admin, analysis, browse, dashboard, elements, glossary, repos, search, vectormap
+from magaldi_web.routes import (
+    admin,
+    analysis,
+    browse,
+    dashboard,
+    elements,
+    glossary,
+    repos,
+    search,
+    vectormap,
+)
 from shared.config import MagaldiConfig, get_config, load_config
 
 if TYPE_CHECKING:
@@ -22,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan handler."""
     logger.info("Starting Magaldi Web UI...")
     try:

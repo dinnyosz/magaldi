@@ -252,9 +252,9 @@ def analyze_docstring(
         }
 
     # Type narrowing: at this point docstring is guaranteed to be non-empty str
-    docstring_str = docstring  # Explicitly narrow type
-    has_params = _has_param_docs(docstring_str)
-    has_return = _has_return_docs(docstring_str)
+    assert docstring is not None
+    has_params = _has_param_docs(docstring)
+    has_return = _has_return_docs(docstring)
 
     # Calculate coverage score
     # - Has docstring: base 0.5

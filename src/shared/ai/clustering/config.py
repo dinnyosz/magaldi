@@ -20,7 +20,7 @@ def _get_model_display_name(model_name: str, provider: str, num_ctx: int) -> str
     if provider == "ollama":
         from shared.ai.ollama_models import get_tiered_model_name
 
-        return get_tiered_model_name(model_name, num_ctx)
+        return get_tiered_model_name(model_name, num_ctx)  # type: ignore[no-any-return]
     return model_name
 
 

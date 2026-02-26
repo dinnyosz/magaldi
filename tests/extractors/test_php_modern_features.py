@@ -1,9 +1,8 @@
 """Tests for PHP 8+ modern feature extraction."""
 
 import pytest
-from tree_sitter import Language, Parser
-
 import tree_sitter_php as ts_php
+from tree_sitter import Language, Parser
 
 from magaldi_core.extractors.php import (
     extract_php_elements,

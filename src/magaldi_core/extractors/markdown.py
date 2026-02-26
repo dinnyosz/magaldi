@@ -37,7 +37,7 @@ def _collect_headings(node: object, sections: list[dict]) -> None:
     if getattr(node, "type", "") == "atx_heading":
         level = _heading_level(node)
         title = _heading_title(node)
-        line_start = node.start_point[0] + 1  # 1-indexed
+        line_start = node.start_point[0] + 1  # type: ignore[attr-defined]  # 1-indexed
         sections.append({
             "title": title,
             "level": level,
@@ -66,7 +66,7 @@ def _heading_title(node: object) -> str:
     """Extract the heading title text from an atx_heading node."""
     for child in getattr(node, "children", []):
         if getattr(child, "type", "") == "inline":
-            return get_node_text(child).strip()
+            return get_node_text(child).strip()  # type: ignore[no-any-return]
     return ""
 
 
@@ -77,7 +77,7 @@ class MarkdownExtractor:
     def language(self) -> str:
         return "markdown"
 
-    def extract_elements(self, tree: Tree, lines: list[str]) -> list:
+    def extract_elements(self, _tree: Tree, _lines: list[str]) -> list:
         """Extract elements from markdown. Returns empty list.
 
         Markdown sections are extracted separately via extract_markdown_sections()

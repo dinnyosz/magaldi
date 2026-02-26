@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from shared.config import ModelConfig
 
 
-def _get_model_display_name(model_config: "ModelConfig", num_ctx: int) -> str:
+def _get_model_display_name(model_config: ModelConfig, num_ctx: int) -> str:
     """Get the display name for a model, including tier suffix for Ollama models.
 
     Args:
@@ -26,8 +26,8 @@ def _get_model_display_name(model_config: "ModelConfig", num_ctx: int) -> str:
     if model_config.provider == "ollama":
         from shared.ai.ollama_models import get_tiered_model_name
 
-        return get_tiered_model_name(model_config.name, num_ctx)
-    return model_config.name
+        return get_tiered_model_name(model_config.name, num_ctx)  # type: ignore[no-any-return]
+    return model_config.name  # type: ignore[no-any-return]
 
 
 # =============================================================================
@@ -35,7 +35,7 @@ def _get_model_display_name(model_config: "ModelConfig", num_ctx: int) -> str:
 # =============================================================================
 
 
-def _default_summarize_model() -> "ModelConfig":
+def _default_summarize_model() -> ModelConfig:
     """Create default summarize model config."""
     from shared.config import ModelConfig
     return ModelConfig(
@@ -43,7 +43,7 @@ def _default_summarize_model() -> "ModelConfig":
     )
 
 
-def _default_summarize_model_small() -> "ModelConfig":
+def _default_summarize_model_small() -> ModelConfig:
     """Create default small summarize model config."""
     from shared.config import ModelConfig
     return ModelConfig(
@@ -51,7 +51,7 @@ def _default_summarize_model_small() -> "ModelConfig":
     )
 
 
-def _default_embed_model() -> "ModelConfig":
+def _default_embed_model() -> ModelConfig:
     """Create default embed model config."""
     from shared.config import ModelConfig
     return ModelConfig(
@@ -68,9 +68,9 @@ class ProcessingConfig:
 
     # Model configurations (encapsulate name + provider + url + api_key)
     # Note: Each llamacpp model needs its own server instance on a different port
-    summarize_model: "ModelConfig" = field(default_factory=_default_summarize_model)
-    summarize_model_small: "ModelConfig" = field(default_factory=_default_summarize_model_small)
-    embed_model: "ModelConfig" = field(default_factory=_default_embed_model)
+    summarize_model: ModelConfig = field(default_factory=_default_summarize_model)
+    summarize_model_small: ModelConfig = field(default_factory=_default_summarize_model_small)
+    embed_model: ModelConfig = field(default_factory=_default_embed_model)
 
     skip_ai: bool = False
 
@@ -96,7 +96,7 @@ class ProcessingConfig:
     # Context sizes per element type (for LLM num_ctx parameter)
     context_sizes: dict[str, int] = field(default_factory=dict)
 
-    def get_model_for_element_type(self, element_type: str, num_ctx: int = 0) -> "ModelConfig":
+    def get_model_for_element_type(self, element_type: str, num_ctx: int = 0) -> ModelConfig:
         """Get the appropriate model config for an element type.
 
         Uses small model for functions, methods, variables, constants.

@@ -1,9 +1,8 @@
 """Tests for PHP inheritance and trait extraction."""
 
 import pytest
-from tree_sitter import Language, Parser
-
 import tree_sitter_php as ts_php
+from tree_sitter import Language, Parser
 
 from magaldi_core.extractors.php import (
     extract_php_base_class,

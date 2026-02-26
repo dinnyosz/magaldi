@@ -2,11 +2,8 @@
 
 from pathlib import Path
 
-import pytest
-
 from magaldi_core.change_detection import FileInfo
 from magaldi_core.code_parser import JavaScriptParser
-
 
 # =============================================================================
 # JAVASCRIPT PARSER

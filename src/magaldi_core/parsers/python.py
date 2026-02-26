@@ -9,11 +9,14 @@ Extracts code elements from Python source files including:
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from magaldi_core.analysis.concurrency import detect_concurrency, detect_env_vars
-from magaldi_core.analysis.metrics import analyze_docstring, compute_code_metrics, compute_complexity
+from magaldi_core.analysis.metrics import (
+    analyze_docstring,
+    compute_code_metrics,
+    compute_complexity,
+)
 from magaldi_core.analysis.security import detect_security_issues
 from magaldi_core.parsers.base import (
     Call,
@@ -38,7 +41,6 @@ from magaldi_core.tree_sitter_manager import (
     extract_comments,
     extract_python_base_classes,
     extract_python_calls,
-    extract_top_level_python_calls,
     extract_python_class_attributes,
     extract_python_class_members,
     extract_python_elements,
@@ -48,6 +50,7 @@ from magaldi_core.tree_sitter_manager import (
     extract_section_markers,
     extract_side_effects,
     extract_todos,
+    extract_top_level_python_calls,
     extract_type_annotations,
 )
 
@@ -64,7 +67,7 @@ class PythonParser(TreeSitterParser):
     def parse(
         self,
         content: str,
-        file_info: "FileInfo",
+        file_info: FileInfo,
         scope: str,
         repository: str,
         username: str,
@@ -155,7 +158,7 @@ class PythonParser(TreeSitterParser):
         elements: list[CodeElement],
         file_element: CodeElement,
         content: str,
-        lines: list[str],
+        _lines: list[str],
     ) -> None:
         """Extract extended code intelligence for all elements."""
         # Extract file-level documentation
@@ -338,9 +341,8 @@ class PythonParser(TreeSitterParser):
                         complexities.append(child.complexity.get("cyclomatic", 1))
 
                     # Documentation
-                    if child.docstring_quality:
-                        if not child.docstring_quality.get("has_docstring", True):
-                            undocumented_count += 1
+                    if child.docstring_quality and not child.docstring_quality.get("has_docstring", True):
+                        undocumented_count += 1
 
                     # Async
                     if child.concurrency and child.concurrency.get("is_async"):
@@ -385,7 +387,7 @@ class PythonParser(TreeSitterParser):
     def _convert_class(
         self,
         ext: ExtractedElement,
-        file_info: "FileInfo",
+        file_info: FileInfo,
         scope: str,
         repository: str,
         username: str,
@@ -436,7 +438,7 @@ class PythonParser(TreeSitterParser):
     def _convert_function(
         self,
         ext: ExtractedElement,
-        file_info: "FileInfo",
+        file_info: FileInfo,
         scope: str,
         repository: str,
         username: str,
@@ -504,7 +506,7 @@ class PythonParser(TreeSitterParser):
         self,
         ext: ExtractedElement,
         parent_class: CodeElement,
-        file_info: "FileInfo",
+        file_info: FileInfo,
         scope: str,
         repository: str,
         username: str,
@@ -575,7 +577,7 @@ class PythonParser(TreeSitterParser):
     def _convert_variable(
         self,
         ext: ExtractedElement,
-        file_info: "FileInfo",
+        file_info: FileInfo,
         scope: str,
         repository: str,
         username: str,
@@ -610,7 +612,7 @@ class PythonParser(TreeSitterParser):
     def _convert_import(
         self,
         ext: ExtractedElement,
-        file_info: "FileInfo",
+        file_info: FileInfo,
         scope: str,
         repository: str,
         username: str,

@@ -7,9 +7,10 @@ queries from .scm files, enabling declarative pattern-based code extraction.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterator
+from typing import TYPE_CHECKING
 
 from tree_sitter import Language, Query, QueryCursor, Tree
 
@@ -32,21 +33,21 @@ class QueryMatch:
     """
 
     pattern_index: int
-    captures: dict[str, list["Node"]]
+    captures: dict[str, list[Node]]
 
-    def get(self, capture_name: str) -> "Node | None":
+    def get(self, capture_name: str) -> Node | None:
         """Get the first node for a capture name, or None."""
         nodes = self.captures.get(capture_name, [])
         return nodes[0] if nodes else None
 
-    def get_all(self, capture_name: str) -> list["Node"]:
+    def get_all(self, capture_name: str) -> list[Node]:
         """Get all nodes for a capture name."""
         return self.captures.get(capture_name, [])
 
     def get_text(self, capture_name: str) -> str | None:
         """Get the text of the first node for a capture name."""
         node = self.get(capture_name)
-        return node.text.decode("utf-8") if node else None
+        return node.text.decode("utf-8") if node else None  # type: ignore[union-attr]
 
     def has(self, capture_name: str) -> bool:
         """Check if a capture name is present in this match."""
@@ -159,7 +160,7 @@ class QueryRunner:
             matches=matches,
         )
 
-    def run_on_node(self, query_name: str, node: "Node") -> QueryResult:
+    def run_on_node(self, query_name: str, node: Node) -> QueryResult:
         """Run a query on a specific node (not the whole tree).
 
         Args:

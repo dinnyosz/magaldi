@@ -23,7 +23,7 @@ def list_repos(
         List of repositories with statistics.
     """
     scope, _ = _resolve_scope_repo(scope, None)
-    return repo.get_indexed_repositories(scope=scope)
+    return repo.get_indexed_repositories(scope=scope)  # type: ignore[no-any-return]
 
 
 def list_features(
@@ -70,7 +70,7 @@ def list_features(
         for f in all_features:
             f.pop("summary", None)
 
-    return all_features
+    return all_features  # type: ignore[no-any-return]
 
 
 def get_repo_stats(
@@ -97,7 +97,7 @@ def get_repo_stats(
             "scope and repository are required. Either provide them explicitly "
             "or create a magaldi.yaml file in your project root."
         )
-    return repo.get_repository_stats(scope, repository, username)
+    return repo.get_repository_stats(scope, repository, username)  # type: ignore[no-any-return]
 
 
 def get_feature_members(

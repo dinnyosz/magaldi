@@ -183,7 +183,7 @@ class SummarizationLLMClient:
 
     def verify_model(self) -> bool:
         """Check if model is available."""
-        return self._client.verify_model()
+        return self._client.verify_model()  # type: ignore[no-any-return]
 
     def generate(
         self,
@@ -226,7 +226,7 @@ class SummarizationLLMClient:
                 use_model = f"{self.provider}/{model}"
 
         try:
-            return self._client.generate(
+            return self._client.generate(  # type: ignore[no-any-return]
                 prompt=prompt,
                 temperature=temperature,
                 top_p=top_p,
@@ -281,7 +281,7 @@ class SummarizationLLMClient:
                 use_model = f"{self.provider}/{model}"
 
         try:
-            return self._client.generate_from_messages(
+            return self._client.generate_from_messages(  # type: ignore[no-any-return]
                 messages=messages,
                 temperature=temperature,
                 top_p=top_p,
@@ -417,12 +417,12 @@ class InMemoryJobRepository:
         }
 
     def get_job(
-        self, element_id: str, scope: str, repository: str, username: str
+        self, element_id: str, _scope: str, _repository: str, _username: str
     ) -> dict[str, Any] | None:
         return self._jobs.get(element_id)
 
     def claim_pending_jobs(
-        self, worker_id: str, scope: str, repository: str, username: str, batch_size: int
+        self, worker_id: str, _scope: str, _repository: str, _username: str, batch_size: int
     ) -> list[dict[str, Any]]:
         # Find pending jobs with dependencies met, sorted by level then priority
         available = [
@@ -441,14 +441,14 @@ class InMemoryJobRepository:
         return claimed
 
     def mark_completed(
-        self, element_id: str, scope: str, repository: str, username: str
+        self, element_id: str, _scope: str, _repository: str, _username: str
     ) -> None:
         if element_id in self._jobs:
             self._jobs[element_id]["status"] = "completed"
             self._jobs[element_id]["completed_at"] = datetime.now()
 
     def mark_failed(
-        self, element_id: str, scope: str, repository: str, username: str, error_message: str
+        self, element_id: str, _scope: str, _repository: str, _username: str, error_message: str
     ) -> None:
         if element_id in self._jobs:
             self._jobs[element_id]["status"] = "failed"
@@ -456,7 +456,7 @@ class InMemoryJobRepository:
             self._jobs[element_id]["completed_at"] = datetime.now()
 
     def unlock_dependencies(
-        self, parent_element_id: str, scope: str, repository: str, username: str
+        self, parent_element_id: str, _scope: str, _repository: str, _username: str
     ) -> int:
         count = 0
         for job in self._jobs.values():
@@ -591,7 +591,7 @@ def generate_summary(
     )
 
     # Clean and return
-    return clean_summary(raw_summary)
+    return clean_summary(raw_summary)  # type: ignore[no-any-return]
 
 
 def process_summarization_job(

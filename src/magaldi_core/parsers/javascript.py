@@ -22,13 +22,13 @@ from magaldi_core.tree_sitter_manager import (
     ExtractedElement,
     extract_javascript_base_class,
     extract_javascript_calls,
-    extract_top_level_javascript_calls,
     extract_javascript_class_fields,
     extract_javascript_class_members,
     extract_javascript_elements,
     extract_javascript_imports,
     extract_javascript_modified_properties,
     extract_javascript_thrown_exceptions,
+    extract_top_level_javascript_calls,
 )
 
 if TYPE_CHECKING:
@@ -44,7 +44,7 @@ class JavaScriptParser(TreeSitterParser):
     def parse(
         self,
         content: str,
-        file_info: "FileInfo",
+        file_info: FileInfo,
         scope: str,
         repository: str,
         username: str,
@@ -129,7 +129,7 @@ class JavaScriptParser(TreeSitterParser):
     def _convert_type_definition(
         self,
         ext: ExtractedElement,
-        file_info: "FileInfo",
+        file_info: FileInfo,
         scope: str,
         repository: str,
         username: str,
@@ -158,7 +158,7 @@ class JavaScriptParser(TreeSitterParser):
     def _convert_import(
         self,
         ext: ExtractedElement,
-        file_info: "FileInfo",
+        file_info: FileInfo,
         scope: str,
         repository: str,
         username: str,
@@ -187,11 +187,11 @@ class JavaScriptParser(TreeSitterParser):
     def _convert_class(
         self,
         ext: ExtractedElement,
-        file_info: "FileInfo",
+        file_info: FileInfo,
         scope: str,
         repository: str,
         username: str,
-        lines: list[str],
+        _lines: list[str],
     ) -> CodeElement:
         """Convert extracted class to CodeElement."""
         # Extract class fields and base class from AST
@@ -225,11 +225,11 @@ class JavaScriptParser(TreeSitterParser):
     def _convert_function(
         self,
         ext: ExtractedElement,
-        file_info: "FileInfo",
+        file_info: FileInfo,
         scope: str,
         repository: str,
         username: str,
-        lines: list[str],
+        _lines: list[str],
     ) -> CodeElement:
         """Convert extracted function to CodeElement."""
         # Extract calls and exceptions from function body
@@ -279,11 +279,11 @@ class JavaScriptParser(TreeSitterParser):
         self,
         ext: ExtractedElement,
         parent_class: CodeElement,
-        file_info: "FileInfo",
+        file_info: FileInfo,
         scope: str,
         repository: str,
         username: str,
-        lines: list[str],
+        _lines: list[str],
     ) -> CodeElement:
         """Convert extracted method to CodeElement."""
         # Extract calls, exceptions, and modified properties from method body
@@ -336,11 +336,11 @@ class JavaScriptParser(TreeSitterParser):
     def _convert_variable(
         self,
         ext: ExtractedElement,
-        file_info: "FileInfo",
+        file_info: FileInfo,
         scope: str,
         repository: str,
         username: str,
-        lines: list[str],
+        _lines: list[str],
         parent: CodeElement | None = None,
     ) -> CodeElement:
         """Convert extracted variable/field to CodeElement."""

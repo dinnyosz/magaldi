@@ -1,9 +1,8 @@
 """Tests for JavaScript/TypeScript inheritance and DI pattern extraction."""
 
 import pytest
-from tree_sitter import Language, Parser
-
 import tree_sitter_typescript as ts_typescript
+from tree_sitter import Language, Parser
 
 from magaldi_core.extractors.javascript import (
     extract_javascript_base_class,

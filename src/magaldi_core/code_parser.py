@@ -24,10 +24,8 @@ from typing import TYPE_CHECKING
 # Re-export classes from parsers package for backward compatibility
 from magaldi_core.parsers import (
     BashParser,
-    Call,
     CodeElement,
     DockerfileParser,
-    Import,
     JavaScriptParser,
     MarkdownParser,
     PhpParser,
@@ -37,7 +35,6 @@ from magaldi_core.parsers import (
     TomlParser,
     TreeSitterParser,
     YamlParser,
-    generate_element_id,
 )
 from magaldi_core.tree_sitter_manager import (
     ExtractedReference,
@@ -98,10 +95,7 @@ def is_test_path(relative_path: str, language: str) -> bool:
         True if the path matches test file patterns.
     """
     patterns = TEST_PATH_PATTERNS.get(language, [])
-    for pattern in patterns:
-        if re.search(pattern, relative_path):
-            return True
-    return False
+    return any(re.search(pattern, relative_path) for pattern in patterns)
 
 
 def is_test_element(name: str, decorators: list[str], language: str) -> bool:
@@ -146,7 +140,7 @@ def is_test_element(name: str, decorators: list[str], language: str) -> bool:
 class ParsedFile:
     """Result of parsing a single file."""
 
-    file_info: "FileInfo"
+    file_info: FileInfo
     elements: list[CodeElement] = field(default_factory=list)
     references: list[ExtractedReference] = field(default_factory=list)  # Cross-file refs
     parse_errors: list[str] = field(default_factory=list)
@@ -162,7 +156,7 @@ class ParsingResult:
     username: str
 
     parsed_files: list[ParsedFile] = field(default_factory=list)
-    failed_files: list[tuple["FileInfo", str]] = field(default_factory=list)
+    failed_files: list[tuple[FileInfo, str]] = field(default_factory=list)
 
 
     @property
@@ -234,8 +228,8 @@ class ParsingResult:
         """
         from shared.ai.context_size import (
             CONTEXT_TIERS,
-            PROMPT_OVERHEAD,
             DEFAULT_OVERHEAD,
+            PROMPT_OVERHEAD,
             compute_element_num_ctx,
         )
 
@@ -317,7 +311,7 @@ def get_parser(language: str) -> TreeSitterParser | PlainTextParser | None:
 
 
 def parse_file(
-    file_info: "FileInfo",
+    file_info: FileInfo,
     scope: str,
     repository: str,
     username: str,
@@ -476,7 +470,7 @@ def link_references(result: ParsingResult) -> None:
 
 
 def parse_files(
-    manifest: "ChangeManifest",
+    manifest: ChangeManifest,
     on_progress: Callable[[int, int], None] | None = None,
 ) -> ParsingResult:
     """Parse all files in a change manifest.

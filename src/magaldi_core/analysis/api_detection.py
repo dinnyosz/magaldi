@@ -13,10 +13,10 @@ This module provides functions for detecting:
 
 # Re-export everything from the new location for backwards compatibility
 from magaldi_core.extractors.detection import (
-    detect_http_routes,
     detect_cli_commands,
-    detect_public_api,
+    detect_http_routes,
     detect_patterns,
+    detect_public_api,
 )
 
 __all__ = [

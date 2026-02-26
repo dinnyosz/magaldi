@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -15,7 +15,6 @@ from shared.ai.llm_client import (
     create_embedding_client_from_config,
     create_llm_client_from_config,
 )
-
 
 # =============================================================================
 # LLM ERROR TESTS
@@ -291,17 +290,15 @@ class TestLLMClient:
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = None
 
-        with patch("shared.ai.llm_client.completion", return_value=mock_response):
-            with pytest.raises(LLMError, match="Empty response"):
-                client.generate("Test")
+        with patch("shared.ai.llm_client.completion", return_value=mock_response), pytest.raises(LLMError, match="Empty response"):
+            client.generate("Test")
 
     def test_generate_raises_on_exception(self):
         """Test that LLMError is raised on exception."""
         client = LLMClient(model="test-model", max_retries=0)
 
-        with patch("shared.ai.llm_client.completion", side_effect=Exception("Connection error")):
-            with pytest.raises(LLMError, match="LLM generation"):
-                client.generate("Test")
+        with patch("shared.ai.llm_client.completion", side_effect=Exception("Connection error")), pytest.raises(LLMError, match="LLM generation"):
+            client.generate("Test")
 
     def test_verify_model_returns_true_on_success(self):
         """Test verify_model returns True when model is available."""
@@ -428,17 +425,15 @@ class TestEmbeddingClient:
         mock_response = MagicMock()
         mock_response.data = []
 
-        with patch("shared.ai.llm_client.embedding", return_value=mock_response):
-            with pytest.raises(LLMError, match="No embedding returned"):
-                client.embed("Test")
+        with patch("shared.ai.llm_client.embedding", return_value=mock_response), pytest.raises(LLMError, match="No embedding returned"):
+            client.embed("Test")
 
     def test_embed_raises_on_exception(self):
         """Test that LLMError is raised on exception."""
         client = EmbeddingClient(model="test-model", max_retries=0)
 
-        with patch("shared.ai.llm_client.embedding", side_effect=Exception("Connection error")):
-            with pytest.raises(LLMError, match="Embedding generation"):
-                client.embed("Test")
+        with patch("shared.ai.llm_client.embedding", side_effect=Exception("Connection error")), pytest.raises(LLMError, match="Embedding generation"):
+            client.embed("Test")
 
     @pytest.mark.asyncio
     async def test_embed_async_success(self):
@@ -538,9 +533,8 @@ class TestEmbeddingClient:
         """Test that LLMError is raised on batch exception."""
         client = EmbeddingClient(model="test-model", max_retries=0)
 
-        with patch("shared.ai.llm_client.embedding", side_effect=Exception("Connection error")):
-            with pytest.raises(LLMError, match="Batch embedding generation"):
-                client.embed_batch(["Test"])
+        with patch("shared.ai.llm_client.embedding", side_effect=Exception("Connection error")), pytest.raises(LLMError, match="Batch embedding generation"):
+            client.embed_batch(["Test"])
 
     def test_verify_model_returns_true_on_success(self):
         """Test verify_model returns True when model is available."""

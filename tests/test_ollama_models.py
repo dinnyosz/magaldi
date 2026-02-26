@@ -1,6 +1,5 @@
 """Tests for Ollama model alias management."""
 
-import pytest
 
 from shared.ai.ollama_models import (
     CONTEXT_TIERS,
@@ -104,7 +103,7 @@ class TestContextTiers:
 
     def test_tiers_are_sorted(self):
         """Tiers should be in ascending order."""
-        assert CONTEXT_TIERS == sorted(CONTEXT_TIERS)
+        assert sorted(CONTEXT_TIERS) == CONTEXT_TIERS
 
     def test_suffixes_match_tiers(self):
         """All tiers should have corresponding suffixes."""

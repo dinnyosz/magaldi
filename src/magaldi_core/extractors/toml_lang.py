@@ -40,8 +40,8 @@ class TomlExtractor:
         if not table_name:
             return
 
-        line_start = node.start_point[0] + 1
-        line_end = node.end_point[0] + 1
+        line_start = node.start_point[0] + 1  # type: ignore[attr-defined]
+        line_end = node.end_point[0] + 1  # type: ignore[attr-defined]
         raw_code = "\n".join(lines[line_start - 1:line_end])
 
         elements.append(ExtractedElement(
@@ -61,7 +61,7 @@ class TomlExtractor:
         for child in getattr(node, "children", []):
             child_type = getattr(child, "type", "")
             if child_type == "bare_key":
-                return get_node_text(child)
+                return get_node_text(child)  # type: ignore[no-any-return]
             if child_type == "dotted_key":
                 return self._get_dotted_key(child)
         return ""

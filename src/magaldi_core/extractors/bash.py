@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from tree_sitter import Node, Tree
 
-from magaldi_core.extractors.base import get_children_by_type, get_node_text, walk_top_level, walk_tree
+from magaldi_core.extractors.base import (
+    get_children_by_type,
+    get_node_text,
+    walk_top_level,
+    walk_tree,
+)
 from magaldi_core.extractors.types import ExtractedCall, ExtractedElement, ExtractedImport
 
 # Shell builtins that should not be recorded as calls
@@ -215,7 +220,7 @@ def _extract_function_body_variables(
     return variables
 
 
-def extract_bash_imports(tree: Tree, lines: list[str]) -> list[ExtractedImport]:
+def extract_bash_imports(tree: Tree, _lines: list[str]) -> list[ExtractedImport]:
     """Extract source/. import commands from a Bash AST."""
     imports: list[ExtractedImport] = []
 

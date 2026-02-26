@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 from magaldi_mcp.tools import (
     dependency_graph,
     find_dependencies,
     find_dependents,
 )
-
 
 # =============================================================================
 # FIND DEPENDENCIES TESTS
@@ -70,7 +70,7 @@ class TestFindDependencies:
         # Second call: get file paths for internal import detection
         call_count = [0]
 
-        def search_side_effect(**kwargs):
+        def search_side_effect(**_kwargs):
             call_count[0] += 1
             if call_count[0] == 1:
                 # File element search
@@ -235,7 +235,7 @@ class TestFindDependents:
         """Test find_dependents passes limit to ES."""
         mock_repo.find_elements_importing.return_value = []
 
-        result = find_dependents(
+        find_dependents(
             repo=mock_repo,
             module="utils",
             scope="scope",

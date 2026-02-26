@@ -382,26 +382,20 @@ def _walk_files(repo_path: Path, config: RepoConfig) -> list[Path]:
 
 def _is_excluded_dir(dirname: str, exclude_patterns: list[str]) -> bool:
     """Check if a directory name matches any exclusion pattern."""
-    for pattern in exclude_patterns:
-        if fnmatch.fnmatch(dirname, pattern):
-            return True
-    return False
+    return any(fnmatch.fnmatch(dirname, pattern) for pattern in exclude_patterns)
 
 
 def _is_excluded_file(filename: str, exclude_patterns: list[str]) -> bool:
     """Check if a filename matches any exclusion pattern."""
-    for pattern in exclude_patterns:
-        if fnmatch.fnmatch(filename, pattern):
-            return True
-    return False
+    return any(fnmatch.fnmatch(filename, pattern) for pattern in exclude_patterns)
 
 
 def _count_lines(file_path: Path) -> int:
     """Count lines in a file, handling encoding errors gracefully."""
     try:
-        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+        with open(file_path, encoding="utf-8", errors="replace") as f:
             return sum(1 for _ in f)
-    except (OSError, IOError):
+    except OSError:
         return 0
 
 

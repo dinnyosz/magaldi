@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 import queue
-import tempfile
-import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
 
-from shared.cli.watch import _create_file_handler, SUPPORTED_EXTENSIONS
+from shared.cli.watch import SUPPORTED_EXTENSIONS, _create_file_handler
 
 
 class TestMagaldiFileHandler:
@@ -88,7 +86,8 @@ class TestMagaldiFileHandler:
         test_file = tmp_path / "src" / "modules" / "utils.py"
         assert handler._should_process(str(test_file)) is True
 
-    def test_should_not_process_outside_repo(self, handler, tmp_path: Path):
+    @pytest.mark.usefixtures("tmp_path")
+    def test_should_not_process_outside_repo(self, handler):
         """Test that files outside repo are not processed."""
         test_file = Path("/some/other/path/test.py")
         assert handler._should_process(str(test_file)) is False

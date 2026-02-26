@@ -357,7 +357,7 @@ def determine_visibility(name: str) -> str:
     return "public"
 
 
-def build_extracted_calls(elem_calls: list[Call] | None) -> list["ExtractedCall"]:
+def build_extracted_calls(elem_calls: list[Call] | None) -> list[ExtractedCall]:
     """Build list of ExtractedCall objects from element calls for purity analysis."""
     from magaldi_core.tree_sitter_manager import ExtractedCall
 
@@ -388,7 +388,7 @@ class TreeSitterParser:
     def parse(
         self,
         content: str,
-        file_info: "FileInfo",
+        file_info: FileInfo,
         scope: str,
         repository: str,
         username: str,
@@ -399,7 +399,7 @@ class TreeSitterParser:
     def _create_file_element(
         self,
         content: str,
-        file_info: "FileInfo",
+        file_info: FileInfo,
         scope: str,
         repository: str,
         username: str,

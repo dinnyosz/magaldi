@@ -1,10 +1,9 @@
 """Auto-generated parser test for bash_calls_and_imports."""
 
-import pytest
 from pathlib import Path
 
-from magaldi_core.code_parser import BashParser
 from magaldi_core.change_detection import FileInfo
+from magaldi_core.code_parser import BashParser
 
 
 class TestBashCallsAndImports:
@@ -27,4 +26,4 @@ class TestBashCallsAndImports:
             (e for e in elements if e.name == "deploy" and e.element_type == "function"),
             None
         )
-        assert bash_calls_and_imports_elem is not None, f"Expected function 'deploy' not found"
+        assert bash_calls_and_imports_elem is not None, "Expected function 'deploy' not found"

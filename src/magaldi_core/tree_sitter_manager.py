@@ -253,7 +253,7 @@ class TreeSitterManager:
 
         tree = self.parse(source.encode("utf-8"), language)
         lines = source.split("\n")
-        return extractor.extract_elements(tree, lines)
+        return extractor.extract_elements(tree, lines)  # type: ignore[no-any-return]
 
     def get_query_runner(self, language: str) -> QueryRunner:
         """Get a query runner for executing SCM queries on a language.
@@ -318,7 +318,7 @@ class TreeSitterManager:
             List of query names (without .scm extension).
         """
         runner = self.get_query_runner(language)
-        return runner.list_queries()
+        return runner.list_queries()  # type: ignore[no-any-return]
 
 
 # =============================================================================

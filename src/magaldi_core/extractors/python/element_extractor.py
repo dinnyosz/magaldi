@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 def extract_python_elements(
-    tree: Tree, lines: list[str], file_path: str | None = None
+    tree: Tree, lines: list[str], _file_path: str | None = None
 ) -> list[ExtractedElement]:
     """Extract code elements from a Python AST using SCM queries.
 

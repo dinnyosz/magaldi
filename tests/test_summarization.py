@@ -1,7 +1,6 @@
 """Tests for the summarization module (Phase 5)."""
 
-from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -9,8 +8,8 @@ from magaldi_core.code_parser import CodeElement
 from shared.ai.summarization import (
     InMemoryJobRepository,
     InMemorySummaryStore,
-    SummarizationLLMClient,
     SummarizationConfig,
+    SummarizationLLMClient,
     SummarizationResult,
     build_prompt,
     clean_summary,
@@ -19,7 +18,6 @@ from shared.ai.summarization import (
     truncate_code,
     update_dependencies_after_completion,
 )
-
 
 # =============================================================================
 # FIXTURES
@@ -268,7 +266,7 @@ class TestInMemoryJobRepository:
         job_repo.add_job("level1:job", scope="scope", repository="repo", username="main", level=1, parent_id="level0:job", dependencies_met=False)
 
         # Should only get level 0 job (dependencies met)
-        claimed = job_repo.claim_pending_jobs(worker_id="w1", scope="scope", repository="repo", username="main", batch_size=10)
+        claimed = job_repo.claim_pending_jobs(worker_id="w1", _scope="scope", _repository="repo", _username="main", batch_size=10)
         assert len(claimed) == 1
         assert claimed[0]["element_id"] == "level0:job"
 
@@ -449,7 +447,7 @@ class TestGenerateSummary:
         mock_ollama = MagicMock()
         mock_ollama.generate_from_messages.return_value = "User service class."
 
-        summary = generate_summary(
+        generate_summary(
             element=class_element,
             summary_store=summary_store,
             llm_client=mock_ollama,

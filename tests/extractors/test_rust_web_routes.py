@@ -1,12 +1,11 @@
 """Tests for Rust web framework route detection (Actix-web, Rocket)."""
 
-import pytest
 
-from magaldi_core.extractors.types import DecoratorInfo
 from magaldi_core.extractors.patterns.rust.web_routes import (
     detect_rust_http_routes,
     is_rust_entry_point,
 )
+from magaldi_core.extractors.types import DecoratorInfo
 
 
 class TestActixWebRoutes:

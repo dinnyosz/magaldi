@@ -19,22 +19,22 @@ from magaldi_core.extractors.base import (
     get_node_text,
     walk_tree,
 )
-from magaldi_core.extractors.types import (
-    DecoratorInfo,
-    ExtractedElement,
-)
 from magaldi_core.extractors.javascript.utils import (
+    REACT_WRAPPERS,
     extract_js_parameters,
     extract_js_return_type,
     get_js_decorators,
     get_preceding_decorators,
     is_react_hook,
-    REACT_WRAPPERS,
+)
+from magaldi_core.extractors.types import (
+    DecoratorInfo,
+    ExtractedElement,
 )
 
 
 def extract_javascript_elements(
-    tree: Tree, lines: list[str], file_path: str | None = None
+    tree: Tree, lines: list[str], _file_path: str | None = None
 ) -> list[ExtractedElement]:
     """Extract code elements from a JavaScript/TypeScript AST.
 
@@ -132,7 +132,7 @@ def extract_javascript_elements(
 
 def _extract_js_class(
     node: Node,
-    lines: list[str],
+    _lines: list[str],
     decorators: list[str] | None = None,
     decorator_details: list[DecoratorInfo] | None = None,
     decorated_node: Node | None = None,
@@ -169,7 +169,7 @@ def _extract_js_class(
     )
 
 
-def _extract_js_function(node: Node, lines: list[str]) -> ExtractedElement:
+def _extract_js_function(node: Node, _lines: list[str]) -> ExtractedElement:
     """Extract a JavaScript function."""
     name_node = get_child_by_field(node, "name")
     name = get_node_text(name_node) if name_node else "unknown"
@@ -213,7 +213,7 @@ def _extract_js_function(node: Node, lines: list[str]) -> ExtractedElement:
     )
 
 
-def _extract_js_arrow_function(node: Node, name: str, lines: list[str]) -> ExtractedElement:
+def _extract_js_arrow_function(node: Node, name: str, _lines: list[str]) -> ExtractedElement:
     """Extract a JavaScript arrow function.
 
     Args:
@@ -250,7 +250,7 @@ def _extract_js_variable(
     decl_node: Node,
     name: str,
     value_node: Node,
-    lines: list[str],
+    _lines: list[str],
     is_const: bool = False,
 ) -> ExtractedElement | None:
     """Extract a JavaScript/TypeScript variable or constant.
@@ -275,9 +275,7 @@ def _extract_js_variable(
     raw_code = decl_node.text.decode("utf-8") if decl_node.text else ""
 
     # Determine element type: constant if UPPER_CASE or const with literal
-    if name.isupper() and len(name) > 1:
-        elem_type = "constant"
-    elif is_const and value_type in ("string", "number", "true", "false", "null"):
+    if name.isupper() and len(name) > 1 or is_const and value_type in ("string", "number", "true", "false", "null"):
         elem_type = "constant"
     else:
         elem_type = "variable"
@@ -294,7 +292,7 @@ def _extract_js_variable(
 
 
 def _extract_react_wrapped_component(
-    decl_node: Node, name: str, call_node: Node, lines: list[str]
+    decl_node: Node, name: str, call_node: Node, _lines: list[str]
 ) -> ExtractedElement | None:
     """Extract a React component wrapped in memo, forwardRef, or lazy.
 
@@ -361,7 +359,7 @@ def _extract_react_wrapped_component(
 # =============================================================================
 
 
-def _extract_ts_interface(node: Node, lines: list[str]) -> ExtractedElement:
+def _extract_ts_interface(node: Node, _lines: list[str]) -> ExtractedElement:
     """Extract a TypeScript interface declaration.
 
     Args:
@@ -398,7 +396,7 @@ def _extract_ts_interface(node: Node, lines: list[str]) -> ExtractedElement:
     )
 
 
-def _extract_ts_type_alias(node: Node, lines: list[str]) -> ExtractedElement:
+def _extract_ts_type_alias(node: Node, _lines: list[str]) -> ExtractedElement:
     """Extract a TypeScript type alias declaration.
 
     Args:
@@ -437,7 +435,7 @@ def _extract_ts_type_alias(node: Node, lines: list[str]) -> ExtractedElement:
     )
 
 
-def _extract_ts_enum(node: Node, lines: list[str]) -> ExtractedElement:
+def _extract_ts_enum(node: Node, _lines: list[str]) -> ExtractedElement:
     """Extract a TypeScript enum declaration.
 
     Args:
@@ -472,7 +470,7 @@ def _extract_ts_enum(node: Node, lines: list[str]) -> ExtractedElement:
     )
 
 
-def _extract_js_import(node: Node, lines: list[str]) -> ExtractedElement:
+def _extract_js_import(node: Node, _lines: list[str]) -> ExtractedElement:
     """Extract an import statement as an element.
 
     Args:
@@ -509,7 +507,7 @@ def _extract_js_import(node: Node, lines: list[str]) -> ExtractedElement:
 
 
 def extract_javascript_class_members(
-    class_node: Node, lines: list[str]
+    class_node: Node, _lines: list[str]
 ) -> tuple[list[ExtractedElement], list[ExtractedElement]]:
     """Extract methods and class fields from a JavaScript class."""
     methods: list[ExtractedElement] = []

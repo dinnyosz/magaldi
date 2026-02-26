@@ -14,45 +14,47 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
-from typing import Any, Callable, TYPE_CHECKING
+from collections.abc import Callable
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from shared.config import MagaldiConfig
+    from shared.throttling import ThrottleDecision
 
-from shared.ai.context_size import compute_element_num_ctx, CONTEXT_TIERS, HANDCRAFTED_TIER
+from magaldi_core.code_parser import CodeElement, ParsedFile
+from magaldi_core.job_tracker import RedisJobTracker, SummaryCache
+from shared.ai.context_size import CONTEXT_TIERS, HANDCRAFTED_TIER, compute_element_num_ctx
 from shared.ai.embedding import CodeEmbeddingClient
 from shared.ai.summarization import SummarizationLLMClient
 from shared.db.store import Repository
 
-from magaldi_core.code_parser import CodeElement, ParsedFile
-from magaldi_core.job_tracker import RedisJobTracker, SummaryCache
+from .dependency_tracker import DependencyTracker
+from .helpers import (
+    _HANDCRAFTED_SUMMARY_TYPES,
+    _embed_element,
+    _extract_docstring_description,
+    _generate_handcrafted_summary,
+    _generate_import_summary,
+    _generate_small_function_summary,
+    _get_element_line_count,
+    _index_element,
+    _is_small_function,
+    _process_single_element,
+    _should_handcraft,
+    _summarize_element,
+    should_embed,
+)
 
 # Import from submodules
 from .models import (
+    ProcessedElement,
     ProcessingConfig,
     ProcessingResult,
-    ProcessedElement,
     _get_model_display_name,
 )
+from .status import ParallelismStats, ProgressState, WorkerStatus
 from .timing import TimingStats
-from .status import WorkerStatus, ParallelismStats, ProgressState
-from .dependency_tracker import DependencyTracker
-from .helpers import (
-    should_embed,
-    _HANDCRAFTED_SUMMARY_TYPES,
-    _generate_import_summary,
-    _extract_docstring_description,
-    _get_element_line_count,
-    _is_small_function,
-    _generate_small_function_summary,
-    _should_handcraft,
-    _generate_handcrafted_summary,
-    _summarize_element,
-    _embed_element,
-    _index_element,
-    _process_single_element,
-)
 
 # Re-export all public classes for backward compatibility
 __all__ = [
@@ -106,7 +108,7 @@ def process_elements(
     on_status_change: Callable[[], None] | None = None,
     worker_status: WorkerStatus | None = None,
     timing_stats: TimingStats | None = None,
-    magaldi_config: "MagaldiConfig | None" = None,
+    magaldi_config: MagaldiConfig | None = None,
 ) -> ProcessingResult:
     """Process elements: summarize -> embed -> index (atomic per element).
 
@@ -304,10 +306,9 @@ def process_elements(
     files_to_update: dict[str, str] = {}
     if file_hashes and skipped_by_file:
         for rel_path, skipped_count in skipped_by_file.items():
-            if skipped_count == elements_per_file.get(rel_path, 0):
+            if skipped_count == elements_per_file.get(rel_path, 0) and rel_path in file_hashes:
                 # All elements in this file were skipped - update file_hash
-                if rel_path in file_hashes:
-                    files_to_update[rel_path] = file_hashes[rel_path]
+                files_to_update[rel_path] = file_hashes[rel_path]
 
         if files_to_update:
             # Pass element_counts so FILE elements also get updated element_count
@@ -487,7 +488,7 @@ def process_elements(
     future_to_allowed_at_start: dict[Any, int] = {}
 
     # Track current throttle decision for display
-    current_throttle: "ThrottleDecision | None" = None
+    current_throttle: ThrottleDecision | None = None
     # Interval for wait() timeout - allows periodic display updates
     HISTORY_RECORD_INTERVAL = 2.0  # Refresh display every 2 seconds
 
@@ -497,7 +498,7 @@ def process_elements(
             current_max_runtime = worker_status.get_max_active_runtime()
 
             # Get current time and active worker count for throttle decisions
-            now = time.time()
+            time.time()
             active_workers = worker_status.active_count()
 
             # Get throughput-based stats for adaptive throttling (with concurrency context)

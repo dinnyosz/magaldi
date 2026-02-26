@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 from magaldi_mcp.tools import (
     find_files,
@@ -11,7 +12,6 @@ from magaldi_mcp.tools import (
     get_repo_stats,
     list_repos,
 )
-
 
 # =============================================================================
 # LIST REPOS TESTS
@@ -176,7 +176,7 @@ class TestGetFileStructure:
         # Second search: find all elements in file
         call_count = [0]
 
-        def search_side_effect(**kwargs):
+        def search_side_effect(**_kwargs):
             call_count[0] += 1
             if call_count[0] == 1:
                 # File element

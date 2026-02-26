@@ -28,7 +28,7 @@ class MetadataRepository:
         try:
             client = self._get_client()
             result = client.get_document(INDEX_NAME, element_id)
-            return result["_source"]
+            return result["_source"]  # type: ignore[no-any-return]
         except NotFoundError:
             return None
 
@@ -77,7 +77,7 @@ class MetadataRepository:
 
         hits = result.get("hits", {}).get("hits", [])
         if hits:
-            return hits[0]["_source"]
+            return hits[0]["_source"]  # type: ignore[no-any-return]
         return None
 
     def get_document_by_name_only(
@@ -122,7 +122,7 @@ class MetadataRepository:
 
         hits = result.get("hits", {}).get("hits", [])
         if hits:
-            return hits[0]["_source"]
+            return hits[0]["_source"]  # type: ignore[no-any-return]
         return None
 
     def get_method_by_class(
@@ -166,7 +166,7 @@ class MetadataRepository:
 
         hits = result.get("hits", {}).get("hits", [])
         if hits:
-            return hits[0]["_source"]
+            return hits[0]["_source"]  # type: ignore[no-any-return]
         return None
 
     def store_embedding(
@@ -548,7 +548,7 @@ class MetadataRepository:
             },
         )
 
-        return result["count"] > 0
+        return result["count"] > 0  # type: ignore[no-any-return]
 
     def update_file_element_count(
         self,
@@ -597,7 +597,7 @@ class MetadataRepository:
             refresh=True,
         )
 
-        return result.get("updated", 0) > 0
+        return result.get("updated", 0) > 0  # type: ignore[no-any-return]
 
     def find_files_with_incomplete_elements(
         self,

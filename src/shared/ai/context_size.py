@@ -12,7 +12,10 @@ Two approaches are supported:
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 T = TypeVar("T")
 
@@ -253,7 +256,7 @@ def get_max_workers_for_tier(tier: int) -> int:
     return TIER_MAX_WORKERS.get(tier, 1)
 
 
-def group_by_tier(items: list[T], tier_fn: callable) -> dict[int, list[T]]:
+def group_by_tier(items: list[T], tier_fn: Callable[[T], int]) -> dict[int, list[T]]:
     """Group items by their context tier.
 
     Args:
@@ -272,7 +275,7 @@ def group_by_tier(items: list[T], tier_fn: callable) -> dict[int, list[T]]:
 
 def iter_by_tier(
     items: list[T],
-    tier_fn: callable,
+    tier_fn: Callable[[T], int],
 ) -> list[tuple[int, int, list[T]]]:
     """Iterate items grouped by tier with max_workers.
 

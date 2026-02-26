@@ -16,7 +16,6 @@ import re
 
 from magaldi_core.extractors.types import DecoratorInfo, HttpRoute
 
-
 # =============================================================================
 # HTTP ROUTE PATTERNS
 # =============================================================================

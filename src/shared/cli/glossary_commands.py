@@ -271,7 +271,7 @@ def run_glossary_extraction(
                 levels_text = build_throughput_levels_text(state.all_levels, state.peak_concurrency, max_workers=num_workers, exploration_target=explore)
 
             # Build group with optional eta_table
-            elements = [phase_text, bar_text]
+            elements: list[RenderableType] = [phase_text, bar_text]
             if eta_table:
                 elements.append(eta_table)
             if not compact:
@@ -314,7 +314,7 @@ def run_glossary_extraction(
             summary = feature.get("summary", "")
             user_content = GLOSSARY_EXTRACTION_USER_PROMPT.format(label=label, summary=summary)
             prompt_chars = len(GLOSSARY_EXTRACTION_SYSTEM_PROMPT) + len(user_content)
-            return compute_aggregation_num_ctx(prompt_chars, task_type="glossary_extract")
+            return compute_aggregation_num_ctx(prompt_chars, task_type="glossary_extract")  # type: ignore[no-any-return]
 
         display_tier_distribution(all_features, estimate_glossary_tier)
 

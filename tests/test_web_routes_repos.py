@@ -10,7 +10,6 @@ from fastapi.testclient import TestClient
 
 from magaldi_web.routes.repos import router
 
-
 # =============================================================================
 # FIXTURES
 # =============================================================================
@@ -162,7 +161,7 @@ class TestGetRepoDetail:
         # Second call: active users
         call_count = [0]
 
-        def search_side_effect(**kwargs):
+        def search_side_effect(**_kwargs):
             call_count[0] += 1
             if call_count[0] == 1:
                 return {
@@ -222,7 +221,7 @@ class TestGetRepoDetail:
 
         call_count = [0]
 
-        def search_side_effect(**kwargs):
+        def search_side_effect(**_kwargs):
             call_count[0] += 1
             if call_count[0] == 1:
                 return {
@@ -398,9 +397,9 @@ class TestGetFileDetail:
 
         call_count = [0]
 
-        def search_side_effect(**kwargs):
+        def search_side_effect(**_kwargs):
             call_count[0] += 1
-            body = kwargs.get("body", {})
+            _kwargs.get("body", {})
 
             if call_count[0] == 1:
                 # File element query
@@ -495,7 +494,7 @@ class TestGetFileDetail:
 
         call_count = [0]
 
-        def search_side_effect(**kwargs):
+        def search_side_effect(**_kwargs):
             call_count[0] += 1
             if call_count[0] == 1:
                 return {
@@ -540,7 +539,7 @@ class TestGetFileDetail:
 
         call_count = [0]
 
-        def search_side_effect(**kwargs):
+        def search_side_effect(**_kwargs):
             call_count[0] += 1
             if call_count[0] == 1:
                 return {
@@ -588,7 +587,7 @@ class TestGetFileDetail:
 
         call_count = [0]
 
-        def search_side_effect(**kwargs):
+        def search_side_effect(**_kwargs):
             call_count[0] += 1
             if call_count[0] == 1:
                 return {
@@ -620,7 +619,7 @@ class TestGetFileDetail:
 
         call_count = [0]
 
-        def search_side_effect(**kwargs):
+        def search_side_effect(**_kwargs):
             call_count[0] += 1
             if call_count[0] == 1:
                 return {
