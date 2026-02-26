@@ -435,6 +435,7 @@ class ThrottleContext:
     _last_recommended_workers: int = field(default=0, repr=False)
     _gss: GoldenSectionSearch | None = field(default=None, repr=False)
     _prob_map: ProbabilityMap | None = field(default=None, repr=False)
+    _last_pmap_counts: dict[int, int] = field(default_factory=dict, repr=False)
 
     def get_throttle_decision(
         self, active_workers: int, current_max_runtime: float,
@@ -488,15 +489,18 @@ class ThrottleContext:
                 f"(full range, max_workers={self.base_workers})"
             )
 
-        # Update probability map with all available level data
+        # Update probability map only when new data arrives (sample count changes).
+        # Without this guard, the same signals compound every cycle and the
+        # probabilities saturate/reset after ~30 iterations.
         from shared.throttling import GSS_PROMISING_THRESHOLD
         if self._prob_map is not None and level_data:
             best_bt = min(level_data.values())
             for lvl, (bt, cnt) in all_levels.items():
-                if cnt >= GSS_PARTIAL_MIN_SAMPLES:
+                if cnt >= GSS_PARTIAL_MIN_SAMPLES and cnt != self._last_pmap_counts.get(lvl, 0):
                     is_good = bt <= best_bt * GSS_PROMISING_THRESHOLD
                     strength = min(1.0, cnt / EXPLORE_MIN_SAMPLES)
                     self._prob_map.update(lvl, is_good=is_good, strength=strength)
+                    self._last_pmap_counts[lvl] = cnt
 
         if self._gss is not None and not self._gss.converged:
             gss_probe = self._gss.get_next_probe(
