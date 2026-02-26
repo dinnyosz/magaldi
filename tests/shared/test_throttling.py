@@ -5,10 +5,12 @@ import time
 import pytest
 
 from shared.throttling import (
+    MAX_RAMP_INCREMENT,
     ThrottleDecision,
     ThroughputByLevel,
     ThroughputTracker,
     TimeoutEvent,
+    _compute_ramp_increment,
     build_throughput_levels_text,
     compute_throttle_decision,
     format_throughput_levels,
@@ -195,10 +197,10 @@ class TestComputeThrottleDecision:
         assert "No data" in decision.reason
 
     def test_no_data_with_running_tasks_ramps(self):
-        """With running tasks but no completion history, ramps up gradually.
+        """With running tasks but no completion history, ramps up geometrically.
 
-        Even without enough data, we ramp up instead of jumping to max.
-        active=4, base=8 → ramp: 4 + min(max(1, 1), 3) = 5
+        No peak → geometric doubling: increment = max(1, active) = 4
+        active=4, base=8 → ramp: 4 + min(4, 4) = 8
         """
         decision = compute_throttle_decision(
             current_max_runtime=10.0,
@@ -210,7 +212,7 @@ class TestComputeThrottleDecision:
             completion_count=2,  # < 3, so no throttling but still ramps
         )
         assert not decision.should_throttle
-        assert decision.recommended_workers == 5  # Ramped from 4
+        assert decision.recommended_workers == 8  # Geometric: 4 + 4 = 8
         assert "ramped from 4" in decision.reason
 
     def test_no_data_without_running_tasks_fresh(self):
@@ -341,7 +343,8 @@ class TestComputeThrottleDecision:
         We no longer calculate base_time from current running tasks because
         we don't know how many workers were active when each task started.
         avg_base_time=5.0s → optimal = 117/5 = 23 workers
-        Ramp-up applies: 8 + 1 = 9 workers (MAX_RAMP_INCREMENT=1)
+        No peak → geometric ramp: increment = min(8, 23-8) = min(8, 15) = 8
+        ramped = 8 + 8 = 16
         current_max must be under 30% of timeout to allow ramp (not hold).
         """
         decision = compute_throttle_decision(
@@ -355,8 +358,8 @@ class TestComputeThrottleDecision:
             avg_base_time=5.0,  # 117/5 = 23.4 → 23 optimal
         )
         assert decision.should_throttle
-        # Optimal is 23, ramp from 8: 8 + 1 = 9 (MAX_RAMP_INCREMENT=1)
-        assert decision.recommended_workers == 9
+        # No peak → geometric: 8 + min(8, 15) = 16
+        assert decision.recommended_workers == 16
         assert "Throttle" in decision.reason
         assert "ramped" in decision.reason
 
@@ -364,7 +367,8 @@ class TestComputeThrottleDecision:
         """Uses historical avg_base_time for throttle decisions.
 
         avg_base_time = 10s → optimal = 117/10 = 11.7 → 11 workers
-        Ramp-up applies: 8 + min(max(1, int(3*0.25)), 3) = 8 + 1 = 9 workers
+        No peak → geometric: increment = min(8, 11-8) = min(8, 3) = 3
+        ramped = 8 + 3 = 11
         """
         decision = compute_throttle_decision(
             current_max_runtime=40.0,
@@ -377,16 +381,17 @@ class TestComputeThrottleDecision:
             avg_base_time=10.0,  # Historical is worse than current
         )
         assert decision.should_throttle
-        assert decision.recommended_workers == 9  # Ramped from 8 toward 11
+        assert decision.recommended_workers == 11  # Geometric: 8 + min(8, 3) = 11
         assert "Throttle" in decision.reason
 
     def test_ramp_up_during_warmup(self):
-        """During warmup, ramp up gradually instead of jumping to optimal.
+        """During warmup, ramp up geometrically (no peak → doubling).
 
-        With 2 active workers and base_time suggesting 23 optimal:
-        delta = 23 - 2 = 21
-        increment = min(max(1, int(21*0.25)), 1) = 1 (MAX_RAMP_INCREMENT=1)
-        ramped = 2 + 1 = 3
+        active=2, no peak, count=5 → confidence ~0.65
+        formula = int(117/5) = 23, discounted = int(23*0.65) = 14
+        target = 14, delta = 14-2 = 12
+        geometric increment = max(1, 2) = 2, capped = min(2, 12) = 2
+        ramped = 2 + 2 = 4
         """
         decision = compute_throttle_decision(
             current_max_runtime=10.0,  # 10s with 2 workers = 5s base_time
@@ -399,8 +404,8 @@ class TestComputeThrottleDecision:
             avg_base_time=5.0,  # 117/5 = 23.4 → 23 optimal
         )
         assert decision.should_throttle
-        # Optimal is 23, but we ramp with max increment of 1: 2 + 1 = 3
-        assert decision.recommended_workers == 3
+        # No peak → geometric: 2 + 2 = 4
+        assert decision.recommended_workers == 4
         assert "ramped from 2" in decision.reason
 
     def test_scale_down_immediate(self):
@@ -982,9 +987,10 @@ class TestFormulaConfidence:
     def test_ramp_respects_discounted_ceiling(self):
         """Ramp-up is bounded by the confidence-discounted ceiling.
 
-        active=5, count=3, confidence ~= 0.54
+        active=5, count=3, confidence ~= 0.54, no peak → geometric
         formula = 55, discounted = int(55*0.54) = 29, capped to 29
-        target=29 > active=5 → ramp: 5+1=6
+        target=29 > active=5, geometric increment = max(1,5) = 5
+        ramped = 5+5 = 10
         """
         decision = compute_throttle_decision(
             current_max_runtime=10.0,
@@ -994,7 +1000,7 @@ class TestFormulaConfidence:
             avg_base_time=2.1,
             completion_count=3,
         )
-        assert decision.recommended_workers == 6  # ramped from 5
+        assert decision.recommended_workers == 10  # geometric: 5 + 5 = 10
         assert "ramped from 5" in decision.reason
 
     def test_confidence_causes_earlier_throttle(self):
@@ -1164,8 +1170,9 @@ class TestFormatThroughputLevels:
 
     def test_color_consistent_across_chunks(self):
         """Color scaling is consistent across wrapped rows (uses global min/max)."""
-        from shared.throttling import _build_levels_table
         from rich.console import Group
+
+        from shared.throttling import _build_levels_table
         # 20 levels: level 1 = 1.0s (best), level 20 = 20.0s (worst)
         levels = {i: (float(i), 3) for i in range(1, 21)}
         result = _build_levels_table(levels, max_workers=20)
@@ -1747,3 +1754,151 @@ class TestExplorationInThrottleDecision:
         )
         assert decision.recommended_workers == 4  # Ramped from 3 toward 6
         assert "ramped from 3" in decision.reason
+
+
+class TestGeometricRamp:
+    """Tests for geometric ramp-up in pre-peak phase."""
+
+    # --- Unit tests for _compute_ramp_increment ---
+
+    def test_pre_peak_from_zero(self):
+        """From 0 active workers, increment is 1 (max(1, 0))."""
+        assert _compute_ramp_increment(0, None) == 1
+
+    def test_pre_peak_from_one(self):
+        """From 1 active worker, doubles: increment = 1."""
+        assert _compute_ramp_increment(1, None) == 1
+
+    def test_pre_peak_from_two(self):
+        """From 2 active workers, doubles: increment = 2."""
+        assert _compute_ramp_increment(2, None) == 2
+
+    def test_pre_peak_from_four(self):
+        """From 4 active workers, doubles: increment = 4."""
+        assert _compute_ramp_increment(4, None) == 4
+
+    def test_pre_peak_from_eight(self):
+        """From 8 active workers, doubles: increment = 8."""
+        assert _compute_ramp_increment(8, None) == 8
+
+    def test_pre_peak_from_sixteen(self):
+        """From 16 active workers, doubles: increment = 16."""
+        assert _compute_ramp_increment(16, None) == 16
+
+    def test_post_peak_always_one(self):
+        """With peak detected, always returns MAX_RAMP_INCREMENT (1)."""
+        for active in [1, 2, 4, 8, 16, 32]:
+            assert _compute_ramp_increment(active, 6) == MAX_RAMP_INCREMENT
+
+    # --- Integration tests via compute_throttle_decision ---
+
+    def test_geometric_ramp_sequence_no_data(self):
+        """No-data path uses geometric ramp: 1→2→4→8.
+
+        active=1, base=32, no data → geometric: 1+1=2
+        active=2, base=32, no data → geometric: 2+2=4
+        active=4, base=32, no data → geometric: 4+4=8
+        """
+        for active, expected in [(1, 2), (2, 4), (4, 8), (8, 16)]:
+            decision = compute_throttle_decision(
+                current_max_runtime=5.0,
+                tier_timeout=180.0,
+                base_workers=32,
+                active_workers=active,
+                throughput=0.5,
+                avg_runtime=3.0,
+                completion_count=1,  # No avg_base_time → no-data path
+            )
+            assert decision.recommended_workers == expected, (
+                f"active={active}: expected {expected}, got {decision.recommended_workers}"
+            )
+
+    def test_geometric_ramp_capped_by_base_workers(self):
+        """Geometric ramp doesn't exceed base_workers.
+
+        active=4, base=6, no data → geometric increment=4, but delta=2 → 4+2=6
+        """
+        decision = compute_throttle_decision(
+            current_max_runtime=5.0,
+            tier_timeout=180.0,
+            base_workers=6,
+            active_workers=4,
+            throughput=0.5,
+            avg_runtime=3.0,
+            completion_count=1,
+        )
+        assert decision.recommended_workers == 6
+
+    def test_geometric_ramp_capped_by_formula(self):
+        """Geometric ramp doesn't exceed formula ceiling.
+
+        active=4, no peak, count=30 (full confidence)
+        base_time=20 → formula = int(117/20) = 5
+        target=5, delta=1, geometric increment=min(4,1)=1 → ramped=5
+        """
+        decision = compute_throttle_decision(
+            current_max_runtime=10.0,
+            tier_timeout=180.0,
+            base_workers=32,
+            active_workers=4,
+            avg_base_time=20.0,
+            completion_count=30,
+        )
+        assert decision.recommended_workers == 5
+
+    def test_post_peak_ramp_is_plus_one(self):
+        """With peak detected, ramp is +1 regardless of active count.
+
+        active=4, peak=8, formula=23, target=8
+        Post-peak → increment=1, ramped=5
+        """
+        decision = compute_throttle_decision(
+            current_max_runtime=10.0,
+            tier_timeout=180.0,
+            base_workers=32,
+            active_workers=4,
+            avg_base_time=5.0,
+            completion_count=30,
+            peak_concurrency=8,
+        )
+        assert decision.recommended_workers == 5
+
+    def test_post_peak_ramp_from_eight(self):
+        """Post-peak with higher active count still +1.
+
+        active=8, peak=16, formula=23, target=16
+        Post-peak → increment=1, ramped=9
+        """
+        decision = compute_throttle_decision(
+            current_max_runtime=10.0,
+            tier_timeout=180.0,
+            base_workers=32,
+            active_workers=8,
+            avg_base_time=5.0,
+            completion_count=30,
+            peak_concurrency=16,
+        )
+        assert decision.recommended_workers == 9
+
+    def test_geometric_full_sequence_integration(self):
+        """Full geometric sequence with base_workers=32 and no peak.
+
+        Simulates consecutive decisions with increasing active_workers.
+        Each step doubles: 1→2→4→8→16→32.
+        Uses the no-data path (no avg_base_time).
+        """
+        active = 1
+        sequence = [active]
+        for _ in range(5):
+            decision = compute_throttle_decision(
+                current_max_runtime=5.0,
+                tier_timeout=180.0,
+                base_workers=32,
+                active_workers=active,
+                throughput=0.5,
+                avg_runtime=3.0,
+                completion_count=1,
+            )
+            active = decision.recommended_workers
+            sequence.append(active)
+        assert sequence == [1, 2, 4, 8, 16, 32]

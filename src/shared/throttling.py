@@ -83,6 +83,29 @@ FORMULA_CONFIDENCE_MIN = 0.30  # Floor confidence at count=1
 FORMULA_CONFIDENCE_FULL_AT = 25  # Full confidence at this many completions
 FORMULA_CONFIDENCE_THRESHOLD = 0.95  # Snap to 1.0 above this
 
+# Geometric ramp-up for pre-peak phase. Before a peak is detected, we double
+# the worker count each step (1→2→4→8→16→32) so each level accumulates enough
+# samples for statistical significance. With +1 increments, 90 completions
+# spread across ~30 levels (1-2 samples each) — none reach significance.
+# With geometric doubling, 6 levels get ~15 samples each — well above threshold.
+# After peak detection, revert to +1 for fine-grained tuning.
+
+
+def _compute_ramp_increment(active_workers: int, peak_concurrency: int | None) -> int:
+    """Compute ramp increment based on phase.
+
+    Pre-peak (no peak detected): geometric doubling — ``max(1, active_workers)``.
+    Post-peak (peak detected): conservative +1 (``MAX_RAMP_INCREMENT``).
+
+    The caller is responsible for capping the result so it doesn't overshoot
+    the target (``min(increment, delta)`` or ``min(ramped, target)``).
+    """
+    if peak_concurrency is not None:
+        return MAX_RAMP_INCREMENT
+    # Geometric: 0→1, 1→+1=2, 2→+2=4, 4→+4=8, 8→+8=16, 16→+16=32
+    return max(1, active_workers)
+
+
 # Ramp cooldown scales with context tier: tier // 512 seconds.
 # 2k→4s, 4k→8s, 8k→16s, 16k→32s, 32k→64s
 # Larger contexts take longer to process, so we wait longer to see impact.
@@ -127,7 +150,7 @@ class ThroughputTracker:
         """
         self.window_seconds = window_seconds
         # Store (timestamp, runtime, concurrent_workers) for each completion
-        self.completions: deque[tuple[float, float, int]] = deque()
+        self.completions: deque[tuple[float, float, float]] = deque()
         self._lock = Lock()
         # Track throughput at each concurrency level for peak detection
         self._throughput_by_level = ThroughputByLevel(window_seconds=window_seconds)
@@ -306,7 +329,7 @@ class ThroughputByLevel:
     With only 1 level, there's no slope to compare — returns None.
     """
 
-    def __init__(self, window_seconds: float = 300.0):
+    def __init__(self, window_seconds: float = 300.0):  # noqa: ARG002
         """Initialize throughput-by-level tracker.
 
         Data is kept for the entire tier lifetime (no time-based pruning).
@@ -601,10 +624,10 @@ def compute_throttle_decision(
     tier_timeout: float,
     base_workers: int,
     active_workers: int,
-    throughput: float = 0.0,
+    throughput: float = 0.0,  # noqa: ARG001
     avg_runtime: float = 0.0,
     completion_count: int = 0,
-    avg_concurrency: float = 0.0,
+    avg_concurrency: float = 0.0,  # noqa: ARG001
     avg_base_time: float = 0.0,
     post_warmup: bool = False,
     peak_concurrency: int | None = None,
@@ -669,7 +692,7 @@ def compute_throttle_decision(
     # Normalize max_runtime by current workers for hold threshold comparison
     # This puts it on the same scale as base_time (per-worker cost)
     normalized_max = current_max_runtime / max(active_workers, 1)
-    max_ratio = normalized_max / tier_timeout if tier_timeout > 0 else 0.0
+    normalized_max / tier_timeout if tier_timeout > 0 else 0.0
 
     # Check if any task is taking too long - if so, hold at current level
     # Uses raw max (like emergency) but with lower threshold
@@ -704,9 +727,9 @@ def compute_throttle_decision(
                 completion_count=completion_count,
             )
         elif active_workers > 0:
-            # Tasks running fast, safe to ramp
+            # Tasks running fast, safe to ramp (geometric pre-peak, +1 post-peak)
             delta = base_workers - active_workers
-            increment = min(max(1, int(delta * RAMP_UP_FACTOR)), MAX_RAMP_INCREMENT)
+            increment = min(_compute_ramp_increment(active_workers, None), delta)
             ramped = active_workers + increment
             ramped = min(ramped, base_workers)
             _log_throttle(
@@ -724,7 +747,7 @@ def compute_throttle_decision(
             )
         else:
             # Fresh start with no data - start with 1 worker for warmup
-            _log_throttle(f"NO DATA FRESH: starting at 1 worker")
+            _log_throttle("NO DATA FRESH: starting at 1 worker")
             return ThrottleDecision(
                 should_throttle=False,
                 current_max=current_max_runtime,
@@ -792,10 +815,9 @@ def compute_throttle_decision(
                 f"> {RAMP_HOLD_THRESHOLD:.0%} threshold, holding at {active_workers} (target={target_workers})"
             )
         else:
-            # Scaling UP - ramp gradually to avoid overwhelming during warmup
-            # Cap increment to MAX_RAMP_INCREMENT to handle optimistic base_time estimates
+            # Scaling UP - geometric doubling pre-peak, +1 post-peak
             delta = target_workers - active_workers
-            increment = min(max(1, int(delta * RAMP_UP_FACTOR)), MAX_RAMP_INCREMENT)
+            increment = min(_compute_ramp_increment(active_workers, peak_concurrency), delta)
             ramped = active_workers + increment
             ramped = min(ramped, target_workers)  # Don't exceed target
             effective_workers = ramped
@@ -1027,7 +1049,7 @@ def _build_levels_table(
     Returns:
         A Rich renderable (Table for ≤16 levels, Group of Tables for >16).
     """
-    from rich.console import Group
+    from rich.console import Group, RenderableType
 
     max_level = max_workers if max_workers > 0 else max(all_levels.keys())
 
@@ -1046,7 +1068,7 @@ def _build_levels_table(
     if len(chunks) == 1:
         return _build_levels_row(chunks[0], all_levels, min_bt, bt_range, peak_concurrency, exploration_target)
 
-    tables = [
+    tables: list[RenderableType] = [
         _build_levels_row(chunk, all_levels, min_bt, bt_range, peak_concurrency, exploration_target)
         for chunk in chunks
     ]
