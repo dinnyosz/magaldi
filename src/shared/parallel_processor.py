@@ -477,15 +477,18 @@ class ThrottleContext:
             if GSS_PARTIAL_MIN_SAMPLES <= cnt < EXPLORE_MIN_SAMPLES
         }
 
-        if self._gss is None:
-            # Start GSS immediately with full bracket [1, max_workers].
-            # No pre-peak walk — first geometric probes are widely spaced.
+        # Delay GSS until we have enough completions for reliable base_time.
+        # Before this threshold, the formula + confidence system ramps
+        # organically (1→2→3...), letting early levels accumulate data.
+        _GSS_MIN_COMPLETIONS = EXPLORE_MIN_SAMPLES
+        total_completions = sum(cnt for _, cnt in all_levels.values()) if all_levels else 0
+        if self._gss is None and total_completions >= _GSS_MIN_COMPLETIONS:
             self._gss = GoldenSectionSearch(lo=1, hi=self.base_workers)
             self._prob_map = ProbabilityMap(lo=1, hi=self.base_workers)
             from shared.throttling import _log_throttle
             _log_throttle(
                 f"GSS INIT: bracket=[{self._gss.lo}, {self._gss.hi}] "
-                f"(full range, max_workers={self.base_workers})"
+                f"(after {total_completions} completions, max_workers={self.base_workers})"
             )
 
         # Update probability map: direct score mapping from base_time data.
