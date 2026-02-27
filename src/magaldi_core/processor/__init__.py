@@ -512,7 +512,7 @@ def process_elements(
             current_throttle = dependency_tracker.compute_throttle_decision(
                 current_max_runtime, active_workers, throughput, avg_runtime, completion_count,
                 avg_concurrency, high_load_avg,
-                all_levels=all_levels if all_levels else None,
+                all_levels=all_levels,
                 remaining=remaining,
             )
 
@@ -573,7 +573,7 @@ def process_elements(
                     fresh_throttle = dependency_tracker.compute_throttle_decision(
                         fresh_current_max, fresh_active, fresh_throughput, fresh_avg, fresh_count,
                         fresh_avg_conc, fresh_high_load, is_display_call=True,
-                        all_levels=fresh_all_levels if fresh_all_levels else None,
+                        all_levels=fresh_all_levels,
                         remaining=fresh_remaining,
                     )
                     progress_state = ProgressState(
@@ -676,7 +676,7 @@ def process_elements(
                     fresh_throttle = dependency_tracker.compute_throttle_decision(
                         fresh_current_max, fresh_active, fresh_throughput, fresh_avg, fresh_count,
                         fresh_avg_conc, fresh_high_load,
-                        all_levels=fresh_all_levels if fresh_all_levels else None,
+                        all_levels=fresh_all_levels,
                         remaining=fresh_remaining,
                     )
                     progress_state = ProgressState(
