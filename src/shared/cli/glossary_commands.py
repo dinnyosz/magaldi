@@ -272,12 +272,18 @@ def run_glossary_extraction(
                     stats.append(" | ", style="dim")
                     stats.append(f"Peak@{state.peak_concurrency}", style="magenta")
 
+                exploration_status = getattr(state, 'exploration_status', None)
+                if exploration_status:
+                    stats.append(" | ", style="dim")
+                    stats.append(exploration_status, style="bright_cyan")
+
             # Build per-level throughput line (separate from stats)
             levels_text = None
             if hasattr(state, 'all_levels') and state.all_levels:
                 from shared.throttling import build_throughput_levels_text
                 explore = getattr(state, 'exploration_target', None)
-                levels_text = build_throughput_levels_text(state.all_levels, state.peak_concurrency, max_workers=num_workers, exploration_target=explore)
+                prob_data = getattr(state, 'prob_map_data', None)
+                levels_text = build_throughput_levels_text(state.all_levels, state.peak_concurrency, max_workers=num_workers, exploration_target=explore, prob_map_data=prob_data)
 
             # Build group with optional eta_table
             elements: list[RenderableType] = [phase_text, bar_text]

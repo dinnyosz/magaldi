@@ -319,12 +319,17 @@ def run_feature_extraction(
                 if state.peak_concurrency is not None:
                     stats += f" [dim]|[/] [magenta]Peak@{state.peak_concurrency}[/]"
 
+                exploration_status = getattr(state, 'exploration_status', None)
+                if exploration_status:
+                    stats += f" [dim]|[/] [bright_cyan]{exploration_status}[/]"
+
             # Build per-level throughput line (separate from stats)
             levels_line = None
             if hasattr(state, 'all_levels') and state.all_levels:
                 from shared.throttling import format_throughput_levels
                 explore = getattr(state, 'exploration_target', None)
-                levels_line = format_throughput_levels(state.all_levels, state.peak_concurrency, max_workers=num_workers, exploration_target=explore)
+                prob_data = getattr(state, 'prob_map_data', None)
+                levels_line = format_throughput_levels(state.all_levels, state.peak_concurrency, max_workers=num_workers, exploration_target=explore, prob_map_data=prob_data)
 
             elements = [bar_text]
             if eta_table:
@@ -547,12 +552,18 @@ def run_feature_extraction(
                             stats_text.append(" | ", style="dim")
                             stats_text.append(f"Peak@{state.peak_concurrency}", style="magenta")
 
+                        exploration_status = getattr(state, 'exploration_status', None)
+                        if exploration_status:
+                            stats_text.append(" | ", style="dim")
+                            stats_text.append(exploration_status, style="bright_cyan")
+
                 # Build per-level throughput line (separate from stats)
                 levels_text = None
                 if hasattr(state, 'all_levels') and state.all_levels:
                     from shared.throttling import build_throughput_levels_text
                     explore = getattr(state, 'exploration_target', None)
-                    levels_text = build_throughput_levels_text(state.all_levels, state.peak_concurrency, max_workers=num_workers, exploration_target=explore)
+                    prob_data = getattr(state, 'prob_map_data', None)
+                    levels_text = build_throughput_levels_text(state.all_levels, state.peak_concurrency, max_workers=num_workers, exploration_target=explore, prob_map_data=prob_data)
 
                 elements = [header_text, bar_text]
                 if eta_table:

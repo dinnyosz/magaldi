@@ -252,18 +252,10 @@ def _build_scoring_display(state: ScoringProgressState, num_workers: int) -> Ren
                 stats_text.append(" | ", style="dim")
                 stats_text.append("⏸ HOLD", style="bold bright_yellow")
 
-            gss_probe = getattr(td, 'gss_probe', None)
-            if gss_probe is not None:
-                gss_lo = getattr(td, 'gss_lo', None)
-                gss_hi = getattr(td, 'gss_hi', None)
-                gss_signal = getattr(td, 'gss_signal', None)
+            exploration_status = getattr(td, 'exploration_status', None)
+            if exploration_status:
                 stats_text.append(" | ", style="dim")
-                if gss_lo is not None and gss_hi is not None:
-                    stats_text.append(f"GSS[{gss_lo},{gss_hi}]→{gss_probe}", style="bright_cyan")
-                else:
-                    stats_text.append(f"GSS→{gss_probe}", style="bright_cyan")
-                if gss_signal:
-                    stats_text.append(f" ({gss_signal})", style="bright_cyan")
+                stats_text.append(exploration_status, style="bright_cyan")
 
     # Build per-level throughput line (separate from stats)
     levels_text = None
@@ -678,17 +670,9 @@ def run_processing(
                 elif is_hold:
                     stats += " [dim]|[/] [bold bright_yellow]⏸ HOLD[/]"
 
-                gss_probe = getattr(td, 'gss_probe', None)
-                if gss_probe is not None:
-                    gss_lo = getattr(td, 'gss_lo', None)
-                    gss_hi = getattr(td, 'gss_hi', None)
-                    gss_signal = getattr(td, 'gss_signal', None)
-                    if gss_lo is not None and gss_hi is not None:
-                        stats += f" [dim]|[/] [bright_cyan]GSS[{gss_lo},{gss_hi}]→{gss_probe}[/]"
-                    else:
-                        stats += f" [dim]|[/] [bright_cyan]GSS→{gss_probe}[/]"
-                    if gss_signal:
-                        stats += f" [bright_cyan]({gss_signal})[/]"
+                exploration_status = getattr(td, 'exploration_status', None)
+                if exploration_status:
+                    stats += f" [dim]|[/] [bright_cyan]{exploration_status}[/]"
 
         # Build per-level throughput line (separate from stats)
         levels_line = None
