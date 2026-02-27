@@ -25,8 +25,7 @@ from typing import TYPE_CHECKING, Generic, TypeVar
 
 from shared.ai.context_size import TIER_MAX_WORKERS, get_tier_timeout, iter_by_tier
 from shared.throttling import (
-    GoldenSectionSearch,
-    ProbabilityMap,
+    ExplorationOrchestrator,
     ThrottleDecision,
     ThroughputTracker,
     compute_throttle_decision,
@@ -434,8 +433,11 @@ class ThrottleContext:
     last_decision: ThrottleDecision | None = field(default=None, repr=False)
     _last_ramp_time: float = field(default=0.0, repr=False)
     _last_recommended_workers: int = field(default=0, repr=False)
-    _gss: GoldenSectionSearch | None = field(default=None, repr=False)
-    _prob_map: ProbabilityMap | None = field(default=None, repr=False)
+    _exploration: ExplorationOrchestrator = field(default=None, repr=False)  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self._exploration is None:
+            self._exploration = ExplorationOrchestrator(self.base_workers)
 
     def get_throttle_decision(
         self, active_workers: int, current_max_runtime: float,
@@ -457,110 +459,13 @@ class ThrottleContext:
         peak = self.throughput_tracker.get_peak_concurrency()
         all_levels = self.throughput_tracker._throughput_by_level.get_all_levels()
 
-        # GSS lifecycle: initialize immediately with full bracket, drive exploration
-        from shared.throttling import _log_throttle
-        gss_probe = None
-
-        # Build level_data once: used for both GSS init and ongoing probes.
-        # Flat EXPLORE_MIN_SAMPLES threshold (not proportional) because GSS
-        # only needs directional comparisons and organic accumulation fills
-        # nearby levels naturally.
-        from shared.throttling import EXPLORE_MIN_SAMPLES, GSS_PARTIAL_MIN_SAMPLES
-        level_data = {
-            lvl: bt for lvl, (bt, cnt) in all_levels.items()
-            if cnt >= EXPLORE_MIN_SAMPLES
-        }
-
-        # Partial data: levels with some signal but not yet qualified.
-        # Used by GSS for signal-aware probe steering (promote promising,
-        # blacklist bad levels).
-        partial_data = {
-            lvl: (bt, cnt) for lvl, (bt, cnt) in all_levels.items()
-            if GSS_PARTIAL_MIN_SAMPLES <= cnt < EXPLORE_MIN_SAMPLES
-        }
-
-        # Two-phase warmup before GSS:
-        # Phase A: run at level 1 until EXPLORE_MIN_SAMPLES → solid low-end baseline
-        # Phase B: run at high probe (~2/3 of max) until EXPLORE_MIN_SAMPLES → high-end reference
-        # Then GSS starts with data at both ends, avoiding blind sequential walk.
-        _WARMUP_HIGH_PROBE = max(2, int(self.base_workers * 2 / 3))
-        level1_count = all_levels.get(1, (0, 0))[1] if all_levels else 0
-        high_probe_count = all_levels.get(_WARMUP_HIGH_PROBE, (0, 0))[1] if all_levels else 0
-
-        if self._gss is None and level1_count >= EXPLORE_MIN_SAMPLES and high_probe_count >= EXPLORE_MIN_SAMPLES:
-            self._gss = GoldenSectionSearch(lo=1, hi=self.base_workers)
-            self._prob_map = ProbabilityMap(lo=1, hi=self.base_workers)
-            _log_throttle(
-                f"GSS INIT: bracket=[{self._gss.lo}, {self._gss.hi}] "
-                f"(level 1={level1_count}, level {_WARMUP_HIGH_PROBE}={high_probe_count} samples)"
-            )
-
-        # Update probability map: direct score mapping from base_time data.
-        # Best base_time → 1.0, worst → 0.0, no data → 0.5 (neutral).
-        # Recomputed each cycle — no accumulation, no compounding artifacts.
-        if self._prob_map is not None and all_levels:
-            level_base_times = {lvl: bt for lvl, (bt, _cnt) in all_levels.items()}
-            self._prob_map.set_scores(level_base_times)
-
-        if self._gss is not None and not self._gss.converged:
-            gss_probe = self._gss.get_next_probe(
-                level_data, partial_data=partial_data, prob_map=self._prob_map,
-            )
-            if self._gss.converged:
-                # Boundary re-search: if best_level landed at/near the hi edge
-                # and there's room above, the bracket was too tight — extend
-                # and restart GSS from the old hi to max_workers.
-                old_hi = self._gss.hi
-                if (
-                    self._gss.best_level is not None
-                    and self._gss.best_level >= old_hi - 1
-                    and old_hi < self.base_workers
-                ):
-                    new_lo = max(1, old_hi - 2)  # overlap slightly
-                    _log_throttle(
-                        f"GSS BOUNDARY: best={self._gss.best_level} hit hi={old_hi}, "
-                        f"extending to [{new_lo}, {self.base_workers}]"
-                    )
-                    self._gss = GoldenSectionSearch(lo=new_lo, hi=self.base_workers)
-                    self._prob_map = ProbabilityMap(lo=new_lo, hi=self.base_workers)
-                    gss_probe = self._gss.get_next_probe(
-                        level_data, partial_data=partial_data, prob_map=self._prob_map,
-                    )
-                else:
-                    _log_throttle(f"GSS CONVERGED: best_level={self._gss.best_level}")
-
-        # If GSS converged, use its best_level as the effective peak.
-        # But keep updating it if new data shows a better level.
-        # Hold: require max(5, level // 2) samples before accepting a new peak,
-        # so noisy exploration data can't yank the peak after 1-2 measurements.
-        if self._gss and self._gss.converged and level_data:
-            actual_best = min(level_data, key=level_data.get)  # type: ignore[arg-type]
-            if (self._gss.best_level is None or level_data.get(actual_best, float("inf")) < level_data.get(self._gss.best_level, float("inf"))) and actual_best != self._gss.best_level:
-                    # Check sample count before switching peak
-                    min_hold = max(5, actual_best // 2)
-                    best_count = all_levels.get(actual_best, (0, 0))[1]
-                    if best_count >= min_hold:
-                        _log_throttle(
-                            f"PEAK UPDATE: {self._gss.best_level}→{actual_best} "
-                            f"(bt={level_data[actual_best]:.2f} vs "
-                            f"{level_data.get(self._gss.best_level, 0):.2f}, "
-                            f"samples={best_count}≥{min_hold})"
-                        )
-                        self._gss.best_level = actual_best
-                    else:
-                        _log_throttle(
-                            f"PEAK HOLD: {actual_best} looks better "
-                            f"(bt={level_data[actual_best]:.2f}) but only "
-                            f"{best_count}/{min_hold} samples — keeping "
-                            f"{self._gss.best_level}"
-                        )
-        effective_peak = self._gss.best_level if (self._gss and self._gss.converged) else peak
-
-        # Only use legacy exploration when GSS is not active
-        if self._gss is None or self._gss.converged:
-            explore = self.throughput_tracker.get_exploration_target(self.base_workers, remaining)
-        else:
-            explore = None  # GSS handles exploration
+        # Delegate GSS lifecycle to ExplorationOrchestrator
+        expl = self._exploration.orchestrate(
+            all_levels, peak, self.throughput_tracker, remaining
+        )
+        gss_probe = expl.gss_probe
+        effective_peak = expl.effective_peak
+        explore = expl.exploration_target
 
         throttle = compute_throttle_decision(
             current_max_runtime=current_max_runtime,
@@ -579,36 +484,23 @@ class ThrottleContext:
         )
         self.post_warmup = False  # Only signal once
 
-        # Pre-GSS warmup: force specific levels to collect baseline data.
-        # Phase A: level 1 until 10 samples, Phase B: high probe until 10 samples.
-        if self._gss is None:
-            _WARMUP_HIGH = max(2, int(self.base_workers * 2 / 3))
-            l1_cnt = all_levels.get(1, (0, 0))[1] if all_levels else 0
-            if l1_cnt < EXPLORE_MIN_SAMPLES:
-                # Phase A: collect level-1 baseline
-                throttle.recommended_workers = 1
-                throttle.reason = f"Warmup A: level 1 ({l1_cnt}/{EXPLORE_MIN_SAMPLES})"
-            else:
-                # Phase B: collect high-end reference
-                hi_cnt = all_levels.get(_WARMUP_HIGH, (0, 0))[1] if all_levels else 0
-                throttle.recommended_workers = _WARMUP_HIGH
-                throttle.reason = f"Warmup B: level {_WARMUP_HIGH} ({hi_cnt}/{EXPLORE_MIN_SAMPLES})"
+        # Apply warmup override from orchestrator (pre-GSS phases)
+        if expl.warmup_override is not None:
+            throttle.recommended_workers = expl.warmup_override
+            throttle.reason = expl.warmup_reason or throttle.reason
 
-        # Attach per-level data for display (early returns in compute_throttle_decision
-        # don't set these, so we always override from the source of truth)
+        # Attach per-level data for display
         throttle.all_levels = all_levels if all_levels else None
         throttle.peak_concurrency = effective_peak
         throttle.exploration_target = explore
         throttle.gss_probe = gss_probe
-        if self._gss is not None:
-            throttle.gss_lo = self._gss.lo
-            throttle.gss_hi = self._gss.hi
-            throttle.gss_signal = self._gss.last_signal
-        throttle.prob_map_data = self._prob_map.get_probabilities() if self._prob_map else None
+        throttle.gss_lo = expl.gss_lo
+        throttle.gss_hi = expl.gss_hi
+        throttle.gss_signal = expl.gss_signal
+        throttle.prob_map_data = expl.prob_map_data
         self.last_decision = throttle
 
-        # Apply ramp cooldown (mirrors DependencyTracker.compute_throttle_decision)
-        # GSS probes bypass cooldown — need data at probe level ASAP
+        # Apply ramp cooldown — GSS probes bypass cooldown
         recommended = throttle.recommended_workers
         now = time.time()
         cooldown_seconds = get_ramp_cooldown(self.tier)
@@ -616,7 +508,6 @@ class ThrottleContext:
         is_ramping = recommended > self._last_recommended_workers
 
         if is_ramping and not cooldown_elapsed and gss_probe is None:
-            # Hold at current level during cooldown (but not for GSS probes)
             allowed_workers = self._last_recommended_workers
         else:
             allowed_workers = recommended
@@ -632,11 +523,11 @@ class ThrottleContext:
             peak_concurrency=effective_peak,
             exploration_target=explore,
             gss_probe=gss_probe,
-            gss_lo=self._gss.lo if self._gss else None,
-            gss_hi=self._gss.hi if self._gss else None,
-            gss_signal=self._gss.last_signal if self._gss else None,
+            gss_lo=expl.gss_lo,
+            gss_hi=expl.gss_hi,
+            gss_signal=expl.gss_signal,
             all_levels=all_levels if all_levels else None,
-            prob_map_data=self._prob_map.get_probabilities() if self._prob_map else None,
+            prob_map_data=expl.prob_map_data,
         )
 
 
@@ -676,8 +567,7 @@ def run_throttled_tier(
     throttle_ctx.tier_timeout = tier_timeout
     throttle_ctx.base_workers = effective_workers
     throttle_ctx.tier = tier
-    throttle_ctx._gss = None  # Reset GSS on tier change
-    throttle_ctx._prob_map = None  # Reset probability map
+    throttle_ctx._exploration = ExplorationOrchestrator(effective_workers)  # Reset on tier change
     throttle_ctx.throughput_tracker.reset()  # Reset level metrics (stale data from prev tier)
     throttle_ctx._last_ramp_time = 0.0  # Reset ramp cooldown
     throttle_ctx._last_recommended_workers = 0  # Reset recommended workers
