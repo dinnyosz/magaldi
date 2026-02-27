@@ -23,7 +23,7 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Generic, TypeVar
 
-from shared.ai.context_size import TIER_MAX_WORKERS, TIER_TIMEOUTS, iter_by_tier
+from shared.ai.context_size import TIER_MAX_WORKERS, get_tier_timeout, iter_by_tier
 from shared.throttling import (
     GoldenSectionSearch,
     ProbabilityMap,
@@ -277,7 +277,7 @@ class ThrottledParallelProcessor(Generic[T, R]):
         try:
             for tier, tier_max_workers, tier_items in tier_groups:
                 effective_workers = min(self.max_workers, tier_max_workers)
-                tier_timeout = TIER_TIMEOUTS.get(tier, 360)
+                tier_timeout = get_tier_timeout(tier, effective_workers)
 
                 # Reset worker ID pool for this tier
                 with self._worker_id_lock:
@@ -671,7 +671,7 @@ def run_throttled_tier(
     if not items:
         return
 
-    tier_timeout = TIER_TIMEOUTS.get(tier, 360)
+    tier_timeout = get_tier_timeout(tier, effective_workers)
     throttle_ctx.tier_timeout = tier_timeout
     throttle_ctx.base_workers = effective_workers
     throttle_ctx.tier = tier

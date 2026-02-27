@@ -947,7 +947,12 @@ def extract_glossary_from_features_concurrent(
     total = len(features)
 
     # Pre-compute context tier for each feature
-    from shared.ai.context_size import TIER_MAX_WORKERS, compute_aggregation_num_ctx, iter_by_tier
+    from shared.ai.context_size import (
+        TIER_MAX_WORKERS,
+        compute_aggregation_num_ctx,
+        get_tier_timeout,
+        iter_by_tier,
+    )
 
     def estimate_feature_tier(feature: dict[str, Any]) -> int:
         """Estimate context tier for a feature based on prompt size."""
@@ -1020,7 +1025,7 @@ def extract_glossary_from_features_concurrent(
 
     # Create throttle context
     throttle_ctx = ThrottleContext(
-        tier_timeout=180,
+        tier_timeout=get_tier_timeout(2048, max_pool_workers),
         base_workers=max_pool_workers,
         throughput_tracker=timing_stats.throughput_tracker,
     )
@@ -1229,7 +1234,7 @@ def extract_glossary_from_features_concurrent(
     # Create throttle context for Phase 2
     # Note: reusing the same throughput_tracker for continuity
     throttle_ctx_phase2 = ThrottleContext(
-        tier_timeout=180,
+        tier_timeout=get_tier_timeout(2048, max_pool_workers),
         base_workers=max_pool_workers,
         throughput_tracker=timing_stats.throughput_tracker,
     )

@@ -11,6 +11,7 @@ Two approaches are supported:
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from typing import TYPE_CHECKING, TypeVar
 
@@ -63,18 +64,45 @@ TIER_MAX_WORKERS = {
     32768: 1,  # Very large - sequential to avoid OOM
 }
 
-# Timeout per tier in seconds (scales with context size)
-# Larger contexts take proportionally longer to process
-# NOTE: These are used for throttle calculations; Ollama may not enforce actual timeouts
-TIER_TIMEOUTS = {
-    HANDCRAFTED_TIER: 60,  # 1 minute - no LLM, very fast
-    1024: 360,   # 6 minutes - tiny elements
-    2048: 360,   # 6 minutes
-    4096: 360,   # 6 minutes
-    8192: 480,   # 8 minutes
-    16384: 600,  # 10 minutes
-    32768: 600,  # 10 minutes
+# Base timeout per tier in seconds (for 1 worker).
+# Actual timeout scales with sqrt(base_workers) via get_tier_timeout().
+# Derived from previous fixed values: old_timeout / sqrt(TIER_MAX_WORKERS[tier]).
+# NOTE: These are used for throttle calculations; Ollama may not enforce actual timeouts.
+TIER_BASE_TIMEOUTS = {
+    HANDCRAFTED_TIER: 15,   # No LLM - very fast even solo
+    1024: 90,    # 1.5 minutes solo
+    2048: 104,   # ~1.7 minutes solo
+    4096: 127,   # ~2.1 minutes solo
+    8192: 240,   # 4 minutes solo
+    16384: 425,  # ~7 minutes solo
+    32768: 600,  # 10 minutes solo (max workers=1, no scaling)
 }
+
+DEFAULT_BASE_TIMEOUT = 104  # Fallback (2048-tier equivalent)
+
+
+def get_tier_timeout(tier: int, base_workers: int) -> float:
+    """Get timeout for a tier scaled by worker count.
+
+    Formula: base_timeout * sqrt(base_workers)
+
+    With 1 worker, you get the base timeout (tight budget — you're the
+    entire pipeline). With 16 workers, you get 4x the base (parallelism
+    absorbs individual slow tasks).
+
+    Uses base_workers (configured maximum), NOT dynamic active count,
+    to avoid circular dependency with the throttle formula that computes
+    recommended workers FROM the timeout.
+
+    Args:
+        tier: Context tier (e.g., 2048, 4096).
+        base_workers: Configured maximum worker count.
+
+    Returns:
+        Timeout in seconds.
+    """
+    base = TIER_BASE_TIMEOUTS.get(tier, DEFAULT_BASE_TIMEOUT)
+    return base * math.sqrt(max(1, base_workers))
 
 # Estimated prompt overhead per element type (tokens), EXCLUDING raw code.
 # Includes: system prompt + user template + typical variable content + output budget.

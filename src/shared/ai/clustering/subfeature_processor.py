@@ -848,7 +848,12 @@ def process_subfeatures(
             release_worker_id(wid)
 
     # Pre-compute context tier for each work item based on prompt size
-    from shared.ai.context_size import TIER_MAX_WORKERS, compute_aggregation_num_ctx, iter_by_tier
+    from shared.ai.context_size import (
+        TIER_MAX_WORKERS,
+        compute_aggregation_num_ctx,
+        get_tier_timeout,
+        iter_by_tier,
+    )
 
     def estimate_subfeature_tier(work_item: SubfeatureWorkItem) -> int:
         """Estimate context tier for a subfeature work item."""
@@ -912,7 +917,7 @@ def process_subfeatures(
 
     # Create throttle context
     throttle_ctx = ThrottleContext(
-        tier_timeout=180,
+        tier_timeout=get_tier_timeout(2048, max_pool_workers),
         base_workers=max_pool_workers,
         throughput_tracker=timing_stats.throughput_tracker,
     )

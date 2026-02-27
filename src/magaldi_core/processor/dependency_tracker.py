@@ -9,7 +9,7 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
-from shared.ai.context_size import CONTEXT_TIERS, TIER_TIMEOUTS
+from shared.ai.context_size import CONTEXT_TIERS, get_tier_timeout
 from shared.throttling import ThrottleDecision, compute_throttle_decision, get_ramp_cooldown
 
 
@@ -320,10 +320,10 @@ class DependencyTracker:
                 self._post_warmup = False
 
     def get_current_tier_timeout(self) -> float:
-        """Get timeout for the current tier (scales with context size)."""
+        """Get timeout for the current tier, scaled by worker count."""
         with self._lock:
-            if self._current_tier and self._current_tier in TIER_TIMEOUTS:
-                return float(TIER_TIMEOUTS[self._current_tier])
+            if self._current_tier is not None:
+                return float(get_tier_timeout(self._current_tier, self._max_num_workers))
             return self._timeout  # Fallback to default
 
     def get_current_model(self) -> str | None:

@@ -1,11 +1,19 @@
 """Tests for context size computation utilities."""
 
+import math
+
+import pytest
+
 from shared.ai.context_size import (
     CONTEXT_TIERS,
+    DEFAULT_BASE_TIMEOUT,
+    HANDCRAFTED_TIER,
+    TIER_BASE_TIMEOUTS,
     compute_aggregation_num_ctx,
     compute_context_sizes,
     compute_element_num_ctx,
     compute_num_ctx,
+    get_tier_timeout,
 )
 
 
@@ -222,3 +230,61 @@ class TestComputeAggregationNumCtx:
         # 100000 chars / 3.5 = 28571 tokens + overhead > 32768
         result = compute_aggregation_num_ctx(100000)
         assert result == CONTEXT_TIERS[-1]
+
+
+class TestGetTierTimeout:
+    """Tests for worker-scaled tier timeouts."""
+
+    def test_1_worker_returns_base_timeout(self):
+        """With 1 worker, timeout equals the base timeout."""
+        for tier, base in TIER_BASE_TIMEOUTS.items():
+            assert get_tier_timeout(tier, 1) == pytest.approx(float(base))
+
+    def test_scales_with_sqrt_of_workers(self):
+        """Timeout scales with sqrt(base_workers)."""
+        t1 = get_tier_timeout(2048, 1)
+        t4 = get_tier_timeout(2048, 4)
+        t16 = get_tier_timeout(2048, 16)
+        assert t4 == pytest.approx(t1 * 2.0)   # sqrt(4) = 2
+        assert t16 == pytest.approx(t1 * 4.0)  # sqrt(16) = 4
+
+    def test_16_workers_at_1024_matches_old_360(self):
+        """16 workers at 1024 tier should reproduce the original 360s value.
+
+        Old TIER_TIMEOUTS[1024] was 360. Base is 90, sqrt(16)=4, 90*4=360.
+        """
+        assert get_tier_timeout(1024, 16) == pytest.approx(360.0)
+
+    def test_unknown_tier_uses_default_base(self):
+        """Unknown tier falls back to DEFAULT_BASE_TIMEOUT."""
+        t = get_tier_timeout(9999, 4)
+        assert t == pytest.approx(DEFAULT_BASE_TIMEOUT * math.sqrt(4))
+
+    def test_handcrafted_tier(self):
+        """Handcrafted tier has a very short base timeout."""
+        t = get_tier_timeout(HANDCRAFTED_TIER, 1)
+        assert t == pytest.approx(15.0)
+
+    def test_32768_single_worker(self):
+        """32768 tier with 1 worker stays at 600s (max workers is 1 for this tier)."""
+        assert get_tier_timeout(32768, 1) == pytest.approx(600.0)
+
+    def test_zero_workers_treated_as_1(self):
+        """0 or negative workers should be clamped to 1."""
+        assert get_tier_timeout(2048, 0) == get_tier_timeout(2048, 1)
+        assert get_tier_timeout(2048, -5) == get_tier_timeout(2048, 1)
+
+    def test_monotonically_increases_with_workers(self):
+        """More workers should always mean a higher (or equal) timeout."""
+        for tier in TIER_BASE_TIMEOUTS:
+            prev = 0.0
+            for workers in [1, 2, 4, 8, 16, 32]:
+                t = get_tier_timeout(tier, workers)
+                assert t >= prev, f"tier={tier}, workers={workers}: {t} < {prev}"
+                prev = t
+
+    def test_larger_tiers_have_higher_base_timeouts(self):
+        """Larger context tiers should have higher or equal base timeouts."""
+        tiers = sorted(TIER_BASE_TIMEOUTS.keys())
+        for i in range(1, len(tiers)):
+            assert TIER_BASE_TIMEOUTS[tiers[i]] >= TIER_BASE_TIMEOUTS[tiers[i - 1]]
