@@ -411,6 +411,7 @@ class ThrottleDisplayInfo:
     all_levels: dict[int, tuple[float, int]] | None = None
     # Probability map: level -> P(best) for display
     prob_map_data: dict[int, float] | None = None
+    exploration_status: str | None = None  # Lifecycle status for constant feedback
 
 
 @dataclass
@@ -528,6 +529,7 @@ class ThrottleContext:
             gss_signal=expl.gss_signal,
             all_levels=all_levels if all_levels else None,
             prob_map_data=expl.prob_map_data,
+            exploration_status=expl.exploration_status,
         )
 
 

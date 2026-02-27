@@ -142,6 +142,7 @@ class ThrottleDecision:
     all_levels: dict[int, tuple[float, int]] | None = None
     # Probability map: level -> P(best) for display
     prob_map_data: dict[int, float] | None = None
+    exploration_status: str | None = None  # Lifecycle status for constant feedback
 
 
 class ThroughputTracker:
@@ -1148,6 +1149,7 @@ class ExplorationState:
     gss_hi: int | None = None
     gss_signal: str | None = None
     prob_map_data: dict[int, float] | None = None
+    exploration_status: str | None = None  # Lifecycle status for constant feedback
 
 
 class ExplorationOrchestrator:
@@ -1309,6 +1311,9 @@ class ExplorationOrchestrator:
                 state.warmup_reason = (
                     f"Warmup A: level 1 ({l1_cnt}/{EXPLORE_MIN_SAMPLES})"
                 )
+                state.exploration_status = (
+                    f"WarmA 1 ({l1_cnt}/{EXPLORE_MIN_SAMPLES})"
+                )
             else:
                 hi_cnt = (
                     all_levels.get(warmup_high_probe, (0, 0))[1]
@@ -1320,6 +1325,9 @@ class ExplorationOrchestrator:
                     f"Warmup B: level {warmup_high_probe} "
                     f"({hi_cnt}/{EXPLORE_MIN_SAMPLES})"
                 )
+                state.exploration_status = (
+                    f"WarmB {warmup_high_probe} ({hi_cnt}/{EXPLORE_MIN_SAMPLES})"
+                )
 
         # Populate state
         state.gss_probe = gss_probe
@@ -1329,6 +1337,14 @@ class ExplorationOrchestrator:
             state.gss_lo = self._gss.lo
             state.gss_hi = self._gss.hi
             state.gss_signal = self._gss.last_signal
+            # Set exploration_status for GSS phases
+            if self._gss.converged:
+                best = self._gss.best_level
+                state.exploration_status = f"Peak@{best} \u2713"
+            elif gss_probe is not None:
+                state.exploration_status = (
+                    f"GSS[{self._gss.lo},{self._gss.hi}]\u2192{gss_probe}"
+                )
         state.prob_map_data = (
             self._prob_map.get_probabilities() if self._prob_map else None
         )

@@ -281,6 +281,13 @@ class FeatureProgressState:
     completion_count: int = 0  # Number of completions used for avg_base_time
     peak_concurrency: int | None = None  # Concurrency level with peak throughput
     all_levels: dict[int, tuple[float, int]] | None = None  # Per-level throughput data
+    exploration_status: str | None = None  # Lifecycle status for constant feedback
+    gss_probe: int | None = None  # GSS probe target (if active)
+    gss_lo: int | None = None  # GSS bracket lower bound
+    gss_hi: int | None = None  # GSS bracket upper bound
+    gss_signal: str | None = None  # Signal-aware action
+    exploration_target: int | None = None  # Level being explored
+    prob_map_data: dict[int, float] | None = None  # Probability map data
 
 
 @dataclass
@@ -820,6 +827,13 @@ def process_features(
                 completion_count=throttle_info.completion_count,
                 peak_concurrency=throttle_info.peak_concurrency,
                 all_levels=throttle_info.all_levels,
+                exploration_status=throttle_info.exploration_status,
+                gss_probe=throttle_info.gss_probe,
+                gss_lo=throttle_info.gss_lo,
+                gss_hi=throttle_info.gss_hi,
+                gss_signal=throttle_info.gss_signal,
+                exploration_target=throttle_info.exploration_target,
+                prob_map_data=throttle_info.prob_map_data,
             )
             on_progress(progress_state)
 
