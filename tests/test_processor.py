@@ -2641,3 +2641,65 @@ class TestCrossTierThroughputLeak:
             "Model change (large→small) should trigger tier_just_changed "
             "so throughput gets reset"
         )
+
+    def test_handcrafted_elements_excluded_from_throughput(self):
+        """Handcrafted elements (imports, small functions) complete near-
+        instantly without LLM calls. Their timings should NOT be recorded
+        in the throughput tracker since they'd skew the level table with
+        artificially fast measurements.
+
+        This tests the guard: if _should_handcraft(element, config): skip.
+        """
+        from magaldi_core.processor import ProcessingConfig, _should_handcraft
+
+        config = ProcessingConfig(
+            summarize_model="test-model",
+            embed_model="test-embed",
+        )
+
+        # Import element — always handcrafted
+        import_elem = make_element(
+            "s:r:u:a.py:import:os:1", "import", None, 2
+        )
+        assert _should_handcraft(import_elem, config), "imports should be handcrafted"
+
+        # Regular function — not handcrafted (would need LLM)
+        func_elem = make_element(
+            "s:r:u:a.py:function:process_data:10", "function", None, 2
+        )
+        # Make it large enough to not be handcrafted
+        func_elem.raw_code = "def process_data():\n" + "    x = 1\n" * 50
+        assert not _should_handcraft(func_elem, config), (
+            "large function should not be handcrafted"
+        )
+
+        stats = TimingStats()
+
+        # Simulate: handcrafted import completes in 0.01s — should NOT record
+        is_handcrafted = _should_handcraft(import_elem, config)
+        submitted_model, submitted_tier = "large", 2048
+        active_model, active_tier = "large", 2048
+        if (
+            not is_handcrafted
+            and submitted_model == active_model
+            and submitted_tier == active_tier
+        ):
+            stats.record_task_runtime(0.01, 4)
+
+        levels = stats.get_all_throughput_levels()
+        assert len(levels) == 0, (
+            "Handcrafted element should not pollute level table"
+        )
+
+        # Simulate: regular function completes in 2.0s — SHOULD record
+        is_handcrafted = _should_handcraft(func_elem, config)
+        if (
+            not is_handcrafted
+            and submitted_model == active_model
+            and submitted_tier == active_tier
+        ):
+            stats.record_task_runtime(2.0, 4)
+
+        levels = stats.get_all_throughput_levels()
+        assert 4 in levels, "Regular LLM element should be recorded"
+        assert levels[4][1] == 1

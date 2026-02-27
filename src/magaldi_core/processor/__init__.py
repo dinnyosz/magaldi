@@ -638,13 +638,21 @@ def process_elements(
                     response_tokens=processed.response_tokens,
                     assigned_tier=processed.assigned_tier,
                 )
-                # Only record to throughput tracker if this task belongs to the
-                # current (model, tier). Cross-tier or cross-model in-flight
-                # tasks would pollute the new level table data (e.g. large@2048
-                # measurements bleeding into small@2048's throughput display).
+                # Only record to throughput tracker if this task:
+                # 1. Belongs to the current (model, tier) — cross-tier/model
+                #    in-flight tasks would pollute the new level table data
+                # 2. Is NOT handcrafted — handcrafted elements (imports, small
+                #    functions) complete near-instantly (~0.01s) without LLM
+                #    calls, so they'd skew the level table with artificially
+                #    fast measurements that don't reflect actual GPU throughput
+                is_handcrafted = _should_handcraft(element, config)
                 active_model = dependency_tracker.get_current_model()
                 active_tier = dependency_tracker.get_current_tier()
-                if submitted_model == active_model and submitted_tier == active_tier:
+                if (
+                    not is_handcrafted
+                    and submitted_model == active_model
+                    and submitted_tier == active_tier
+                ):
                     timing_stats.record_task_runtime(processed.wall_time, avg_workers)
 
                 was_embedded = should_embed(element)
