@@ -10,7 +10,13 @@ import time
 from typing import TYPE_CHECKING
 
 from shared.ai.context_size import CONTEXT_TIERS, get_tier_timeout
-from shared.throttling import ThrottleDecision, compute_throttle_decision, get_ramp_cooldown
+from shared.throttling import (
+    ExplorationOrchestrator,
+    ThrottleDecision,
+    ThroughputTracker,
+    compute_throttle_decision,
+    get_ramp_cooldown,
+)
 
 
 def _log_warmup(message: str) -> None:
@@ -69,10 +75,19 @@ class DependencyTracker:
         self._max_num_workers = max_num_workers if max_num_workers else self.DEFAULT_WORKERS
         self._timeout = timeout  # Timeout for throttle calculations
 
+        # GSS exploration orchestrator (shared with ThrottleContext)
+        self._exploration = ExplorationOrchestrator(self._max_num_workers)
+        # Throughput tracker reference — set by caller via set_throughput_tracker()
+        self._throughput_tracker: ThroughputTracker | None = None
+
         # Build parent lookup: element_id -> parent_element_id
         self._parents: dict[str, str | None] = {}
         for e in elements:
             self._parents[e.element_id] = e.parent_id
+
+    def set_throughput_tracker(self, tracker: ThroughputTracker) -> None:
+        """Set the throughput tracker reference for GSS exploration."""
+        self._throughput_tracker = tracker
 
     def _get_level(self, element: CodeElement) -> int:
         """Get hierarchy level from element type.
@@ -295,15 +310,15 @@ class DependencyTracker:
         """Check if tier just changed (for throughput reset).
 
         Returns True once per tier change, then clears the flag.
-        Also resets ramp cooldown state so the new tier starts fresh
-        without stale _last_ramp_time or _last_recommended_workers
-        from the previous tier affecting ramp-up decisions.
+        Also resets ramp cooldown state and exploration orchestrator
+        so the new tier starts fresh.
         """
         with self._lock:
             if self._tier_just_changed:
                 self._tier_just_changed = False
                 self._last_ramp_time = 0.0
                 self._last_recommended_workers = 0
+                self._exploration.reset()
                 return True
             return False
 
@@ -405,14 +420,15 @@ class DependencyTracker:
         avg_concurrency: float = 0.0,
         avg_base_time: float = 0.0,
         is_display_call: bool = False,
-        peak_concurrency: int | None = None,
-        exploration_target: int | None = None,
         all_levels: dict[int, tuple[float, int]] | None = None,
+        remaining: int | None = None,
     ) -> ThrottleDecision:
-        """Compute throttle decision based on base_time (normalized by concurrency).
+        """Compute throttle decision with GSS exploration.
 
         Key insight: runtime scales linearly with concurrent workers (GPU contention).
         base_time = runtime / workers is the normalized per-worker cost.
+
+        Uses ExplorationOrchestrator for GSS lifecycle (warmup → GSS → converge).
 
         Args:
             current_max_runtime: Max runtime of currently active workers.
@@ -423,8 +439,8 @@ class DependencyTracker:
             avg_concurrency: Average workers active at task start.
             avg_base_time: Average of (runtime/workers) from completions.
             is_display_call: If True, don't apply cooldown (display only, not actual throttle).
-            peak_concurrency: Concurrency level with peak throughput, or None.
-            exploration_target: Level to explore (neighbor of peak lacking data), or None.
+            all_levels: Per-level throughput data from ThroughputTracker.
+            remaining: Elements left to process (for budget-aware exploration).
 
         Returns:
             ThrottleDecision with recommended action.
@@ -432,10 +448,24 @@ class DependencyTracker:
         with self._lock:
             # Note: post_warmup is NOT consumed here - it must be explicitly cleared
             # via clear_post_warmup() after the main throttle calculation.
-            # This prevents display calls from consuming it before the main call.
             post_warmup = self._post_warmup
             if post_warmup:
                 _log_warmup(f"THROTTLE: post_warmup=True, active_workers={active_workers}")
+
+            # Run GSS exploration orchestration
+            peak_concurrency: int | None = None
+            exploration_target: int | None = None
+            gss_probe: int | None = None
+            expl = None
+
+            if all_levels is not None and self._throughput_tracker is not None:
+                legacy_peak = self._throughput_tracker.get_peak_concurrency()
+                expl = self._exploration.orchestrate(
+                    all_levels, legacy_peak, self._throughput_tracker, remaining
+                )
+                gss_probe = expl.gss_probe
+                peak_concurrency = expl.effective_peak
+                exploration_target = expl.exploration_target
 
             decision = compute_throttle_decision(
                 current_max_runtime=current_max_runtime,
@@ -450,26 +480,30 @@ class DependencyTracker:
                 post_warmup=post_warmup,
                 peak_concurrency=peak_concurrency,
                 exploration_target=exploration_target,
+                gss_probe=gss_probe,
             )
 
-            # Apply ramp cooldown: scales with context tier (2k→2s, 4k→4s, 8k→8s, etc.)
-            # Larger contexts take longer to process, so we wait longer to see impact.
-            # in_cooldown = True means "we WANT more workers but can't ramp yet"
+            # Apply warmup override from orchestrator (pre-GSS phases)
+            if expl is not None and expl.warmup_override is not None:
+                decision.recommended_workers = expl.warmup_override
+                decision.reason = expl.warmup_reason or decision.reason
+
+            # Apply ramp cooldown: scales with context tier
+            # GSS probes bypass cooldown — need data at probe level ASAP
             now = time.time()
             cooldown_seconds = get_ramp_cooldown(self._current_tier or 2048)
             cooldown_elapsed = (now - self._last_ramp_time) >= cooldown_seconds
 
-            # Check if we want to ramp up
             is_ramping = decision.recommended_workers > self._last_recommended_workers
 
-            if is_ramping and not cooldown_elapsed:
-                # Want to ramp but can't due to cooldown - hold at current level
+            if is_ramping and not cooldown_elapsed and gss_probe is None:
+                # Hold at current level during cooldown (but not for GSS probes)
                 from shared.throttling import _log_throttle
-                remaining = cooldown_seconds - (now - self._last_ramp_time)
+                cooldown_remaining = cooldown_seconds - (now - self._last_ramp_time)
                 if not is_display_call:
                     _log_throttle(
                         f"RAMP COOLDOWN: want {decision.recommended_workers} but holding at "
-                        f"{self._last_recommended_workers} ({remaining:.1f}s remaining, tier={self._current_tier})"
+                        f"{self._last_recommended_workers} ({cooldown_remaining:.1f}s remaining, tier={self._current_tier})"
                     )
                 decision = ThrottleDecision(
                     should_throttle=decision.should_throttle,
@@ -482,20 +516,22 @@ class DependencyTracker:
                 )
 
             if not is_display_call:
-                # Only update timers for non-display calls
                 if is_ramping and cooldown_elapsed:
-                    # Ramping up, reset cooldown timer
                     self._last_ramp_time = now
                     self._last_recommended_workers = decision.recommended_workers
                 elif decision.recommended_workers != self._last_recommended_workers:
-                    # Scale down or other change, update tracking
                     self._last_recommended_workers = decision.recommended_workers
 
-            # Attach per-level data for display (early returns in compute_throttle_decision
-            # don't set these, so we always override from the source of truth)
+            # Attach per-level data and GSS display fields
             decision.all_levels = all_levels if all_levels else None
             decision.peak_concurrency = peak_concurrency
             decision.exploration_target = exploration_target
+            decision.gss_probe = gss_probe
+            if expl is not None:
+                decision.gss_lo = expl.gss_lo
+                decision.gss_hi = expl.gss_hi
+                decision.gss_signal = expl.gss_signal
+                decision.prob_map_data = expl.prob_map_data
             return decision
 
     def get_tier_stats(self) -> dict[int, tuple[int, int]]:
