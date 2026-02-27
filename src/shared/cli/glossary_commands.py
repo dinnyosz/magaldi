@@ -202,15 +202,21 @@ def run_glossary_extraction(
             # Use allowed_workers from throttle decision (0 = use num_workers)
             allowed_workers = state.allowed_workers if state.allowed_workers > 0 else num_workers
 
-            for wid in range(num_workers):
-                if wid in workers_data:
-                    item_label, model, ctx_size = workers_data[wid]
-                    stage = "summarizing" if "summar" in phase.lower() else "extracting"
-                    worker_table.add_row(f"[{wid}]", stage, model, ctx_size, item_label)
-                elif wid < allowed_workers:
-                    worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "", "")
-                else:
-                    worker_table.add_row(f"[{wid}]", "[dim yellow]throttled[/]", "", "", "")
+            active_count = len(workers_data)
+            idle_slots = max(0, allowed_workers - active_count)
+            throttled_slots = max(0, num_workers - allowed_workers)
+
+            # Show active workers first (sorted by wid)
+            for wid in sorted(workers_data.keys()):
+                item_label, model, ctx_size = workers_data[wid]
+                stage = "summarizing" if "summar" in phase.lower() else "extracting"
+                worker_table.add_row(f"[{wid}]", stage, model, ctx_size, item_label)
+            # Then idle slots (allowed but not active)
+            for _i in range(idle_slots):
+                worker_table.add_row(f"[{'·'}]", "[dim]idle[/]", "", "", "")
+            # Then throttled slots (beyond allowed limit)
+            for _i in range(throttled_slots):
+                worker_table.add_row(f"[{'·'}]", "[dim yellow]throttled[/]", "", "", "")
 
             # Stats line - different labels for each phase
             avg_api = state.timing.avg_api_time

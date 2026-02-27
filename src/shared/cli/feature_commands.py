@@ -281,16 +281,22 @@ def run_feature_extraction(
             worker_table.add_column("Time", style="green", width=6)
             worker_table.add_column("Feature")
 
-            for wid in range(num_workers):
-                if wid in workers_data:
-                    feature_name, stage, model, ctx_size, start_time = workers_data[wid]
-                    elapsed = now - start_time if start_time > 0 else 0
-                    elapsed_str = f"{elapsed:.1f}s" if elapsed > 0 else ""
-                    worker_table.add_row(f"[{wid}]", stage, model, ctx_size, elapsed_str, feature_name)
-                elif wid < allowed_workers:
-                    worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "", "", "")
-                else:
-                    worker_table.add_row(f"[{wid}]", "[dim yellow]throttled[/]", "", "", "", "")
+            active_count = len(workers_data)
+            idle_slots = max(0, allowed_workers - active_count)
+            throttled_slots = max(0, num_workers - allowed_workers)
+
+            # Show active workers first (sorted by wid)
+            for wid in sorted(workers_data.keys()):
+                feature_name, stage, model, ctx_size, start_time = workers_data[wid]
+                elapsed = now - start_time if start_time > 0 else 0
+                elapsed_str = f"{elapsed:.1f}s" if elapsed > 0 else ""
+                worker_table.add_row(f"[{wid}]", stage, model, ctx_size, elapsed_str, feature_name)
+            # Then idle slots (allowed but not active)
+            for _i in range(idle_slots):
+                worker_table.add_row(f"[{'·'}]", "[dim]idle[/]", "", "", "", "")
+            # Then throttled slots (beyond allowed limit)
+            for _i in range(throttled_slots):
+                worker_table.add_row(f"[{'·'}]", "[dim yellow]throttled[/]", "", "", "", "")
 
             # Stats line
             avg_api = state.timing.avg_summarize_time + state.timing.avg_embed_time
@@ -471,18 +477,24 @@ def run_feature_extraction(
                 worker_table.add_column("Parent", style="magenta", width=28)
                 worker_table.add_column("Subfeature")
 
-                for wid in range(num_workers):
-                    if wid in workers_data:
-                        parent_feature, stage, model, subfeature, ctx_size, start_time = workers_data[wid]
-                        elapsed = now - start_time if start_time > 0 else 0
-                        elapsed_str = f"{elapsed:.1f}s" if elapsed > 0 else ""
-                        display_parent = parent_feature[:25] + "..." if len(parent_feature) > 28 else parent_feature
-                        display_sub = subfeature[:35] + "..." if len(subfeature) > 38 else subfeature
-                        worker_table.add_row(f"[{wid}]", stage, model, ctx_size, elapsed_str, display_parent, display_sub)
-                    elif wid < allowed_workers:
-                        worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "", "", "", "")
-                    else:
-                        worker_table.add_row(f"[{wid}]", "[dim yellow]throttled[/]", "", "", "", "", "")
+                active_count = len(workers_data)
+                idle_slots = max(0, allowed_workers - active_count)
+                throttled_slots = max(0, num_workers - allowed_workers)
+
+                # Show active workers first (sorted by wid)
+                for wid in sorted(workers_data.keys()):
+                    parent_feature, stage, model, subfeature, ctx_size, start_time = workers_data[wid]
+                    elapsed = now - start_time if start_time > 0 else 0
+                    elapsed_str = f"{elapsed:.1f}s" if elapsed > 0 else ""
+                    display_parent = parent_feature[:25] + "..." if len(parent_feature) > 28 else parent_feature
+                    display_sub = subfeature[:35] + "..." if len(subfeature) > 38 else subfeature
+                    worker_table.add_row(f"[{wid}]", stage, model, ctx_size, elapsed_str, display_parent, display_sub)
+                # Then idle slots (allowed but not active)
+                for _i in range(idle_slots):
+                    worker_table.add_row(f"[{'·'}]", "[dim]idle[/]", "", "", "", "", "")
+                # Then throttled slots (beyond allowed limit)
+                for _i in range(throttled_slots):
+                    worker_table.add_row(f"[{'·'}]", "[dim yellow]throttled[/]", "", "", "", "", "")
 
                 # Stats line
                 avg_api = state.timing.avg_summarize_time + state.timing.avg_embed_time

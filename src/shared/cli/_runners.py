@@ -167,21 +167,27 @@ def _build_scoring_display(state: ScoringProgressState, num_workers: int) -> Ren
     now = time_mod.time()
 
     allowed = state.allowed_workers if state.allowed_workers is not None else num_workers
-    for wid in range(num_workers):
-        if wid in workers_data:
-            batch_num, batch_size, start_time = workers_data[wid]
-            worker_elapsed = now - start_time if start_time > 0 else 0
-            worker_table.add_row(
-                f"[{wid}]",
-                "scoring",
-                f"batch#{batch_num}",
-                f"{batch_size} vars",
-                f"{worker_elapsed:.1f}s",
-            )
-        elif wid < allowed:
-            worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "", "")
-        else:
-            worker_table.add_row(f"[{wid}]", "[dim yellow]throttled[/]", "", "", "")
+    active_count = len(workers_data)
+    idle_slots = max(0, allowed - active_count)
+    throttled_slots = max(0, num_workers - allowed)
+
+    # Show active workers first (sorted by wid)
+    for wid in sorted(workers_data.keys()):
+        batch_num, batch_size, start_time = workers_data[wid]
+        worker_elapsed = now - start_time if start_time > 0 else 0
+        worker_table.add_row(
+            f"[{wid}]",
+            "scoring",
+            f"batch#{batch_num}",
+            f"{batch_size} vars",
+            f"{worker_elapsed:.1f}s",
+        )
+    # Then idle slots (allowed but not active)
+    for _i in range(idle_slots):
+        worker_table.add_row(f"[{'·'}]", "[dim]idle[/]", "", "", "")
+    # Then throttled slots (beyond allowed limit)
+    for _i in range(throttled_slots):
+        worker_table.add_row(f"[{'·'}]", "[dim yellow]throttled[/]", "", "", "")
 
     # Throughput stats
     stats_text = Text()
@@ -553,18 +559,22 @@ def run_processing(
         else:
             allowed_workers = num_workers
 
-        for wid in range(num_workers):
-            if wid in workers_data:
-                elem, stage, model, ctx_size, start_time = workers_data[wid]
-                elapsed = now - start_time if start_time > 0 else 0
-                elapsed_str = f"{elapsed:.1f}s" if elapsed > 0 else ""
-                worker_table.add_row(f"[{wid}]", stage, model, ctx_size, elapsed_str, elem)
-            elif wid < allowed_workers:
-                # Worker could run but no tasks available
-                worker_table.add_row(f"[{wid}]", "[dim]idle[/]", "", "", "", "")
-            else:
-                # Worker is throttled - not allowed to run
-                worker_table.add_row(f"[{wid}]", "[dim yellow]throttled[/]", "", "", "", "")
+        active_count = len(workers_data)
+        idle_slots = max(0, allowed_workers - active_count)
+        throttled_slots = max(0, num_workers - allowed_workers)
+
+        # Show active workers first (sorted by wid)
+        for wid in sorted(workers_data.keys()):
+            elem, stage, model, ctx_size, start_time = workers_data[wid]
+            elapsed = now - start_time if start_time > 0 else 0
+            elapsed_str = f"{elapsed:.1f}s" if elapsed > 0 else ""
+            worker_table.add_row(f"[{wid}]", stage, model, ctx_size, elapsed_str, elem)
+        # Then idle slots (allowed but not active)
+        for _i in range(idle_slots):
+            worker_table.add_row(f"[{'·'}]", "[dim]idle[/]", "", "", "", "")
+        # Then throttled slots (beyond allowed limit)
+        for _i in range(throttled_slots):
+            worker_table.add_row(f"[{'·'}]", "[dim yellow]throttled[/]", "", "", "", "")
 
         # Per-type-per-tier ETA breakdown table
         type_colors = {

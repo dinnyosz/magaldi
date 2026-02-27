@@ -225,16 +225,22 @@ def build_worker_table(
 
     now = time_mod.time()
 
-    for wid in range(num_workers):
-        if wid in workers_data:
-            row = row_builder(wid, workers_data, now)
-            worker_table.add_row(f"[{wid}]", *row)
-        elif wid < allowed_workers:
-            idle_row = ["[dim]idle[/]"] + [""] * (len(columns) - 1)
-            worker_table.add_row(f"[{wid}]", *idle_row)
-        else:
-            throttled_row = ["[dim yellow]throttled[/]"] + [""] * (len(columns) - 1)
-            worker_table.add_row(f"[{wid}]", *throttled_row)
+    active_count = len(workers_data)
+    idle_slots = max(0, allowed_workers - active_count)
+    throttled_slots = max(0, num_workers - allowed_workers)
+
+    # Show active workers first (sorted by wid)
+    for wid in sorted(workers_data.keys()):
+        row = row_builder(wid, workers_data, now)
+        worker_table.add_row(f"[{wid}]", *row)
+    # Then idle slots (allowed but not active)
+    for _i in range(idle_slots):
+        idle_row = ["[dim]idle[/]"] + [""] * (len(columns) - 1)
+        worker_table.add_row(f"[{'·'}]", *idle_row)
+    # Then throttled slots (beyond allowed limit)
+    for _i in range(throttled_slots):
+        throttled_row = ["[dim yellow]throttled[/]"] + [""] * (len(columns) - 1)
+        worker_table.add_row(f"[{'·'}]", *throttled_row)
 
     return worker_table
 
