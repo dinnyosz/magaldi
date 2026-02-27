@@ -1919,7 +1919,7 @@ def _build_levels_row(
                 row2_cells.append(Text(bt_str.center(_LEVEL_COL_WIDTH), style=capped_style))
                 row3_cells.append(Text(str(count).center(_LEVEL_COL_WIDTH), style=capped_style))
             else:
-                row2_cells.append(Text("—".center(_LEVEL_COL_WIDTH), style=capped_style))
+                row2_cells.append(Text(".X.".center(_LEVEL_COL_WIDTH), style=capped_style))
                 row3_cells.append(Text(" ".center(_LEVEL_COL_WIDTH)))
             continue
 

@@ -1263,8 +1263,8 @@ class TestExploreCap:
         assert "1" in text
         assert "2" in text
         assert "3" in text
-        # Capped levels show "—" (em-dash), not "···"
-        assert "—" in text
+        # Capped levels show ".X.", not "···"
+        assert ".X." in text
         assert "···" not in text
 
     def test_uncapped_no_data_shows_dots(self):
@@ -1275,7 +1275,7 @@ class TestExploreCap:
         table = _build_levels_row(range(1, 4), levels, 2.0, 0.0, None, explore_cap=None)
         text = _render_to_text(table)
         assert "···" in text
-        assert "—" not in text
+        assert ".X." not in text
 
     def test_format_throughput_levels_passes_cap(self):
         """format_throughput_levels accepts and passes explore_cap."""
