@@ -2452,3 +2452,192 @@ class TestHandcraftedTierETA:
         # Should be 0.1s default, NOT extrapolated from 2.5s LLM time
         assert avg_time == pytest.approx(0.1)
         assert is_fallback is True
+
+
+class TestCrossTierThroughputLeak:
+    """Tests for cross-tier/cross-model throughput data isolation.
+
+    When processing switches from one (model, tier) to another, in-flight
+    tasks from the old combo should NOT pollute the new level table.
+    This was a bug where the last measurements from one tier leaked into
+    the next tier's display data.
+    """
+
+    def test_reset_throughput_clears_level_table(self):
+        """After reset_throughput(), all level data should be empty."""
+        stats = TimingStats()
+        # Record some measurements
+        stats.record_task_runtime(1.0, 4)
+        stats.record_task_runtime(2.0, 4)
+        levels_before = stats.get_all_throughput_levels()
+        assert len(levels_before) > 0, "Should have level data before reset"
+
+        stats.reset_throughput()
+        levels_after = stats.get_all_throughput_levels()
+        assert len(levels_after) == 0, "Level data should be empty after reset"
+
+    def test_cross_tier_tasks_excluded_from_throughput(self):
+        """Tasks submitted in tier A should not record throughput after
+        a tier change to tier B.
+
+        Simulates the guard: if submitted_tier != active_tier, skip.
+        """
+        stats = TimingStats()
+
+        # Simulate tier A: record some tasks
+        stats.record_task_runtime(1.0, 4)
+        stats.record_task_runtime(1.5, 4)
+        levels_tier_a = stats.get_all_throughput_levels()
+        assert 4 in levels_tier_a
+        assert levels_tier_a[4][1] == 2  # 2 samples at level 4
+
+        # Simulate tier change: reset throughput
+        stats.reset_throughput()
+        levels_after_reset = stats.get_all_throughput_levels()
+        assert len(levels_after_reset) == 0, "Should be clean after reset"
+
+        # Simulate: cross-tier task completes but is GUARDED (not recorded)
+        submitted_model, submitted_tier = "large", 2048
+        active_model, active_tier = "large", 4096
+        if submitted_model == active_model and submitted_tier == active_tier:
+            stats.record_task_runtime(5.0, 4)  # This should NOT run
+
+        # Verify no stale data leaked
+        levels_after_guard = stats.get_all_throughput_levels()
+        assert len(levels_after_guard) == 0, (
+            "Cross-tier task should not leak into new tier's level table"
+        )
+
+    def test_cross_model_tasks_excluded_from_throughput(self):
+        """Tasks submitted with model A should not record throughput after
+        a model change to model B (even within the same tier).
+
+        E.g. large@2048 data must not bleed into small@2048's level table.
+        """
+        stats = TimingStats()
+
+        # Simulate large@2048: record some tasks
+        stats.record_task_runtime(3.0, 4)
+        levels_before = stats.get_all_throughput_levels()
+        assert 4 in levels_before
+        assert levels_before[4][1] == 1
+
+        # Simulate model change (same tier): reset throughput
+        stats.reset_throughput()
+
+        # Cross-model task completes: submitted as large, but now active is small
+        submitted_model, submitted_tier = "large", 2048
+        active_model, active_tier = "small", 2048
+        if submitted_model == active_model and submitted_tier == active_tier:
+            stats.record_task_runtime(3.0, 4)  # Should NOT run
+
+        levels_after = stats.get_all_throughput_levels()
+        assert len(levels_after) == 0, (
+            "Cross-model task should not leak into new model's level table"
+        )
+
+    def test_same_model_tier_tasks_still_recorded(self):
+        """Tasks from the current (model, tier) should still be recorded."""
+        stats = TimingStats()
+
+        # Simulate tier change and reset
+        stats.reset_throughput()
+
+        # Task from the current (model, tier) completes
+        submitted_model, submitted_tier = "small", 4096
+        active_model, active_tier = "small", 4096
+        if submitted_model == active_model and submitted_tier == active_tier:
+            stats.record_task_runtime(2.0, 3)
+
+        levels = stats.get_all_throughput_levels()
+        assert 3 in levels
+        assert levels[3][1] == 1  # 1 sample at level 3
+
+    def test_tier_tracking_with_dependency_tracker(self):
+        """DependencyTracker tier detection integrates with throughput guard.
+
+        Elements in different tiers trigger tier changes, which should
+        reset throughput and update the submit (model, tier) tracking.
+
+        The tracker processes tiers largest-first within a level, so we use
+        two separate files to force sequential tier processing.
+        """
+        # Two files: one in tier 1024, one in tier 4096
+        file_a = make_element("s:r:u:a.py:file:a.py:1", "file", None, 0)
+        file_b = make_element("s:r:u:b.py:file:b.py:1", "file", None, 0)
+
+        # Assign different context sizes to force different tiers
+        # Files are level 0, so they go through warmup → tier selection
+        context_sizes = {
+            file_a.element_id: 4096,   # tier 4096 (processed first: largest)
+            file_b.element_id: 1024,   # tier 1024 (processed second)
+        }
+
+        tracker = DependencyTracker(
+            [file_a, file_b],
+            context_sizes=context_sizes,
+        )
+
+        # First call: warmup returns 1 element from largest tier (4096)
+        ready = tracker.get_ready_elements(max_count=10)
+        assert len(ready) == 1
+        assert ready[0].element_id == file_a.element_id
+        assert tracker.get_current_tier() == 4096
+        assert tracker.get_current_model() == "large"  # file → large model
+
+        # Consume the initial tier_just_changed flag (set on first tier selection)
+        tracker.did_tier_just_change()
+
+        # Complete file_a
+        tracker.mark_complete(file_a.element_id)
+
+        # Next call: should select file_b (tier 1024) — triggers tier change
+        ready = tracker.get_ready_elements(max_count=10)
+        assert len(ready) == 1
+        assert ready[0].element_id == file_b.element_id
+        tier_changed = tracker.did_tier_just_change()
+        assert tier_changed, "Tier should change from 4096 to 1024"
+        assert tracker.get_current_tier() == 1024
+        assert tracker.get_current_model() == "large"  # still files → large
+
+    def test_model_change_triggers_tier_just_changed(self):
+        """When model changes (e.g. large→small within same level),
+        did_tier_just_change() should fire so throughput gets reset.
+        """
+        # file (large model) and function (small model), same tier
+        file_elem = make_element("s:r:u:a.py:file:a.py:1", "file", None, 0)
+        func_elem = make_element(
+            "s:r:u:a.py:function:fn:5", "function", file_elem.element_id, 2
+        )
+
+        context_sizes = {
+            file_elem.element_id: 2048,
+            func_elem.element_id: 2048,
+        }
+
+        tracker = DependencyTracker(
+            [file_elem, func_elem],
+            context_sizes=context_sizes,
+        )
+
+        # Get file (large@2048)
+        ready = tracker.get_ready_elements(max_count=10)
+        assert len(ready) == 1
+        assert tracker.get_current_model() == "large"
+        assert tracker.get_current_tier() == 2048
+        tracker.did_tier_just_change()  # consume initial flag
+
+        tracker.mark_complete(file_elem.element_id)
+
+        # Get function (small@2048) — model changes, tier stays same
+        ready = tracker.get_ready_elements(max_count=10)
+        assert len(ready) == 1
+        assert tracker.get_current_model() == "small"
+        assert tracker.get_current_tier() == 2048
+
+        # Model change should trigger the flag (line 249 checks model_changing)
+        tier_changed = tracker.did_tier_just_change()
+        assert tier_changed, (
+            "Model change (large→small) should trigger tier_just_changed "
+            "so throughput gets reset"
+        )

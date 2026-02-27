@@ -489,6 +489,14 @@ def process_elements(
     # Track allowed workers at task start for averaging with end value
     future_to_allowed_at_start: dict[Any, int] = {}
 
+    # Track which (model, tier) each future was submitted under, so we can
+    # skip record_task_runtime for cross-tier/cross-model in-flight tasks.
+    # This prevents stale measurements from leaking into the new level table
+    # (e.g. large@2048 data bleeding into small@2048's throughput display).
+    future_to_model_tier: dict[Any, tuple[str | None, int | None]] = {}
+    current_submit_model: str | None = dependency_tracker.get_current_model()
+    current_submit_tier: int | None = dependency_tracker.get_current_tier()
+
     # Track current throttle decision for display
     current_throttle: ThrottleDecision | None = None
     # Interval for wait() timeout - allows periodic display updates
@@ -536,6 +544,8 @@ def process_elements(
             # from a different tier doesn't pollute throttling decisions
             if dependency_tracker.did_tier_just_change():
                 timing_stats.reset_throughput()
+                current_submit_model = dependency_tracker.get_current_model()
+                current_submit_tier = dependency_tracker.get_current_tier()
 
             # Submit new tasks for ready elements
             # Track allowed workers at start for throughput calculation
@@ -543,6 +553,7 @@ def process_elements(
                 future = executor.submit(process_wrapper, element)
                 future_to_element[future] = element
                 future_to_allowed_at_start[future] = throttle_limit
+                future_to_model_tier[future] = (current_submit_model, current_submit_tier)
 
             if not future_to_element:
                 # No futures pending and not complete - shouldn't happen
@@ -604,6 +615,9 @@ def process_elements(
                 # Use peak allowed workers for throughput calculation
                 # max(start, end) reflects the peak concurrency the element competed with
                 allowed_at_start = future_to_allowed_at_start.pop(future, throttle_limit)
+                submitted_model, submitted_tier = future_to_model_tier.pop(
+                    future, (None, None)
+                )
                 allowed_at_end = throttle_limit
                 avg_workers = max(allowed_at_start, allowed_at_end)
 
@@ -624,7 +638,14 @@ def process_elements(
                     response_tokens=processed.response_tokens,
                     assigned_tier=processed.assigned_tier,
                 )
-                timing_stats.record_task_runtime(processed.wall_time, avg_workers)
+                # Only record to throughput tracker if this task belongs to the
+                # current (model, tier). Cross-tier or cross-model in-flight
+                # tasks would pollute the new level table data (e.g. large@2048
+                # measurements bleeding into small@2048's throughput display).
+                active_model = dependency_tracker.get_current_model()
+                active_tier = dependency_tracker.get_current_tier()
+                if submitted_model == active_model and submitted_tier == active_tier:
+                    timing_stats.record_task_runtime(processed.wall_time, avg_workers)
 
                 was_embedded = should_embed(element)
                 if processed.success:
