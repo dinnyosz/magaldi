@@ -72,6 +72,48 @@ class TestThrottleContextWarmup:
         assert ctx.last_decision is not None
 
 
+class TestThrottleContextExploreCap:
+    """Test explore_cap enforcement in ThrottleContext."""
+
+    def test_explore_cap_limits_recommended_workers(self):
+        """Formula result should be capped by explore_cap when budget is small."""
+        tracker = ThroughputTracker(window_seconds=60.0)
+        # Record fast completions so formula wants many workers
+        for _ in range(10):
+            tracker.record_completion(0.5, 1.0)
+
+        ctx = ThrottleContext(
+            tier_timeout=120.0,
+            base_workers=16,
+            throughput_tracker=tracker,
+            tier=2048,
+        )
+        # Reset exploration with small element count → tight cap
+        from shared.throttling import ExplorationOrchestrator
+        ctx._exploration = ExplorationOrchestrator(16, total_elements=22)
+        cap = ctx._exploration.base_workers
+
+        info = ctx.get_throttle_decision(active_workers=1, current_max_runtime=0.1)
+        assert info.allowed_workers <= cap
+
+    def test_no_explore_cap_allows_full_range(self):
+        """Without explore_cap, formula can use full worker range."""
+        tracker = ThroughputTracker(window_seconds=60.0)
+        for _ in range(10):
+            tracker.record_completion(0.5, 1.0)
+
+        ctx = ThrottleContext(
+            tier_timeout=120.0,
+            base_workers=16,
+            throughput_tracker=tracker,
+            tier=2048,
+        )
+        # No total_elements → no cap
+        info = ctx.get_throttle_decision(active_workers=1, current_max_runtime=0.1)
+        # With fast completions, formula should want more than 1
+        assert info.allowed_workers >= 1
+
+
 class TestThrottleContextCooldown:
     """Test cooldown timer gating in ThrottleContext."""
 

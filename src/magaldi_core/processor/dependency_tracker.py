@@ -500,6 +500,12 @@ class DependencyTracker:
                 decision.recommended_workers = expl.warmup_override
                 decision.reason = expl.warmup_reason or decision.reason
 
+            # Cap by explore_cap — formula must respect the exploration budget
+            if expl is not None and expl.explore_cap is not None:
+                decision.recommended_workers = min(
+                    decision.recommended_workers, expl.explore_cap
+                )
+
             # Apply ramp cooldown: scales with context tier
             # GSS probes bypass cooldown — need data at probe level ASAP
             now = time.time()

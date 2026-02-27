@@ -491,6 +491,12 @@ class ThrottleContext:
             throttle.recommended_workers = expl.warmup_override
             throttle.reason = expl.warmup_reason or throttle.reason
 
+        # Cap by explore_cap — formula must respect the exploration budget
+        if expl.explore_cap is not None:
+            throttle.recommended_workers = min(
+                throttle.recommended_workers, expl.explore_cap
+            )
+
         # Attach per-level data for display
         throttle.all_levels = all_levels if all_levels else None
         throttle.peak_concurrency = effective_peak
