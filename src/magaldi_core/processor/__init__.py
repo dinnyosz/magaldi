@@ -388,6 +388,8 @@ def process_elements(
     if timing_stats is None:
         timing_stats = TimingStats()
     timing_stats.phase_start = time.time()
+    # Wire throughput tracker so DependencyTracker can drive GSS exploration
+    dependency_tracker.set_throughput_tracker(timing_stats.throughput_tracker)
     if worker_status is None:
         worker_status = WorkerStatus()
 
@@ -505,15 +507,13 @@ def process_elements(
             throughput, avg_runtime, completion_count, avg_concurrency, high_load_avg = (
                 timing_stats.get_throughput_stats_with_concurrency()
             )
-            peak_concurrency = timing_stats.get_peak_concurrency()
             remaining = dependency_tracker.pending_count()
-            exploration_target = timing_stats.get_exploration_target(max_workers, remaining)
             all_levels = timing_stats.get_all_throughput_levels()
             current_throttle = dependency_tracker.compute_throttle_decision(
                 current_max_runtime, active_workers, throughput, avg_runtime, completion_count,
-                avg_concurrency, high_load_avg, peak_concurrency=peak_concurrency,
-                exploration_target=exploration_target,
+                avg_concurrency, high_load_avg,
                 all_levels=all_levels if all_levels else None,
+                remaining=remaining,
             )
 
             # Always use recommended_workers as the limit (includes ramp-up logic)
@@ -568,16 +568,13 @@ def process_elements(
                     fresh_throughput, fresh_avg, fresh_count, fresh_avg_conc, fresh_high_load = (
                         timing_stats.get_throughput_stats_with_concurrency()
                     )
-                    fresh_peak = timing_stats.get_peak_concurrency()
                     fresh_remaining = dependency_tracker.pending_count()
-                    fresh_explore = timing_stats.get_exploration_target(max_workers, fresh_remaining)
                     fresh_all_levels = timing_stats.get_all_throughput_levels()
                     fresh_throttle = dependency_tracker.compute_throttle_decision(
                         fresh_current_max, fresh_active, fresh_throughput, fresh_avg, fresh_count,
                         fresh_avg_conc, fresh_high_load, is_display_call=True,
-                        peak_concurrency=fresh_peak,
-                        exploration_target=fresh_explore,
                         all_levels=fresh_all_levels if fresh_all_levels else None,
+                        remaining=fresh_remaining,
                     )
                     progress_state = ProgressState(
                         total=total,
@@ -674,15 +671,13 @@ def process_elements(
                         timing_stats.get_throughput_stats_with_concurrency()
                     )
                     fresh_active = worker_status.active_count()
-                    fresh_peak = timing_stats.get_peak_concurrency()
                     fresh_remaining = dependency_tracker.pending_count()
-                    fresh_explore = timing_stats.get_exploration_target(max_workers, fresh_remaining)
                     fresh_all_levels = timing_stats.get_all_throughput_levels()
                     fresh_throttle = dependency_tracker.compute_throttle_decision(
                         fresh_current_max, fresh_active, fresh_throughput, fresh_avg, fresh_count,
-                        fresh_avg_conc, fresh_high_load, peak_concurrency=fresh_peak,
-                        exploration_target=fresh_explore,
+                        fresh_avg_conc, fresh_high_load,
                         all_levels=fresh_all_levels if fresh_all_levels else None,
+                        remaining=fresh_remaining,
                     )
                     progress_state = ProgressState(
                         total=total,
