@@ -225,6 +225,13 @@ class SubfeatureProgressState:
     completion_count: int = 0  # Number of completions used for avg_base_time
     peak_concurrency: int | None = None  # Concurrency level with peak throughput
     all_levels: dict[int, tuple[float, int]] | None = None  # Per-level throughput data
+    exploration_status: str | None = None  # Lifecycle status for constant feedback
+    gss_probe: int | None = None  # GSS probe target (if active)
+    gss_lo: int | None = None  # GSS bracket lower bound
+    gss_hi: int | None = None  # GSS bracket upper bound
+    gss_signal: str | None = None  # Signal-aware action
+    exploration_target: int | None = None  # Level being explored
+    prob_map_data: dict[int, float] | None = None  # Probability map data
 
 
 @dataclass
@@ -798,6 +805,13 @@ def process_subfeatures(
             subfeature_state["completion_count"] = throttle_info.completion_count
             subfeature_state["peak_concurrency"] = throttle_info.peak_concurrency
             subfeature_state["all_levels"] = throttle_info.all_levels
+            subfeature_state["exploration_status"] = throttle_info.exploration_status
+            subfeature_state["gss_probe"] = throttle_info.gss_probe
+            subfeature_state["gss_lo"] = throttle_info.gss_lo
+            subfeature_state["gss_hi"] = throttle_info.gss_hi
+            subfeature_state["gss_signal"] = throttle_info.gss_signal
+            subfeature_state["exploration_target"] = throttle_info.exploration_target
+            subfeature_state["prob_map_data"] = throttle_info.prob_map_data
         if on_progress:
             on_progress(SubfeatureProgressState(
                 total=total,
@@ -812,6 +826,13 @@ def process_subfeatures(
                 completion_count=subfeature_state["completion_count"],
                 peak_concurrency=subfeature_state.get("peak_concurrency"),
                 all_levels=subfeature_state.get("all_levels"),
+                exploration_status=subfeature_state.get("exploration_status"),
+                gss_probe=subfeature_state.get("gss_probe"),
+                gss_lo=subfeature_state.get("gss_lo"),
+                gss_hi=subfeature_state.get("gss_hi"),
+                gss_signal=subfeature_state.get("gss_signal"),
+                exploration_target=subfeature_state.get("exploration_target"),
+                prob_map_data=subfeature_state.get("prob_map_data"),
             ))
 
     def process_wrapper(work_item: SubfeatureWorkItem) -> ProcessedSubfeature:
