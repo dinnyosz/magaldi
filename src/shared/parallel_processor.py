@@ -279,10 +279,11 @@ class ThrottledParallelProcessor(Generic[T, R]):
                 effective_workers = min(self.max_workers, tier_max_workers)
                 tier_timeout = get_tier_timeout(tier, effective_workers)
 
-                # Reset worker ID pool for this tier
+                # Reset worker ID pool and level metrics for this tier
                 with self._worker_id_lock:
                     self._available_worker_ids.clear()
                     self._available_worker_ids.extend(range(effective_workers))
+                self.stats.throughput_tracker.reset()
 
                 executor = ThreadPoolExecutor(max_workers=effective_workers)
                 futures: dict = {}
@@ -676,6 +677,10 @@ def run_throttled_tier(
     throttle_ctx.base_workers = effective_workers
     throttle_ctx.tier = tier
     throttle_ctx._gss = None  # Reset GSS on tier change
+    throttle_ctx._prob_map = None  # Reset probability map
+    throttle_ctx.throughput_tracker.reset()  # Reset level metrics (stale data from prev tier)
+    throttle_ctx._last_ramp_time = 0.0  # Reset ramp cooldown
+    throttle_ctx._last_recommended_workers = 0  # Reset recommended workers
 
     pending_items = list(items)
 

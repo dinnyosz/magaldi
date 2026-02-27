@@ -336,6 +336,59 @@ class TestRunThrottledTierWarmup:
 
         assert completed == [42]
 
+    def test_tier_change_resets_level_metrics(self):
+        """Switching tiers via run_throttled_tier should reset level metrics.
+
+        When processing moves from one context tier to another, stale per-level
+        throughput data from the previous tier should be cleared so GSS decisions
+        in the new tier start fresh.
+        """
+        tracker = ThroughputTracker(window_seconds=60.0)
+        ctx = ThrottleContext(
+            tier_timeout=120.0,
+            base_workers=4,
+            throughput_tracker=tracker,
+            tier=2048,
+        )
+
+        # Process first tier — seeds throughput tracker with level metrics
+        run_throttled_tier(
+            items=[1, 2, 3],
+            tier=2048,
+            effective_workers=4,
+            process_fn=lambda x: x,
+            throttle_ctx=ctx,
+            get_max_runtime=lambda: 0.0,
+            on_complete=lambda _i, _r, _w, _rt: None,
+            warmup=True,
+        )
+
+        # Verify data exists after first tier
+        _, _, count_before, _, _ = tracker.get_stats_with_concurrency()
+        assert count_before == 3
+
+        # Process second tier — should start with fresh level metrics
+        run_throttled_tier(
+            items=[10, 20],
+            tier=4096,
+            effective_workers=2,
+            process_fn=lambda x: x,
+            throttle_ctx=ctx,
+            get_max_runtime=lambda: 0.0,
+            on_complete=lambda _i, _r, _w, _rt: None,
+            warmup=True,
+        )
+
+        # Level metrics should reflect ONLY the new tier's data (2 items),
+        # not carry over from the previous tier (3 items)
+        _, _, count_after, _, _ = tracker.get_stats_with_concurrency()
+        assert count_after == 2  # Only current tier, not 3+2=5
+
+        # GSS and prob_map should have been reset (processing may re-init, but
+        # for 2 items there's not enough data to trigger GSS initialization)
+        assert ctx._gss is None
+        assert ctx._prob_map is None
+
     def test_on_tick_called_during_processing(self):
         """on_tick should be called during the processing loop."""
         tick_calls: list[ThrottleDisplayInfo] = []
