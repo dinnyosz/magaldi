@@ -76,7 +76,10 @@ class DependencyTracker:
         self._timeout = timeout  # Timeout for throttle calculations
 
         # GSS exploration orchestrator (shared with ThrottleContext)
-        self._exploration = ExplorationOrchestrator(self._max_num_workers)
+        # Pass total element count so exploration range is capped for small workloads
+        self._exploration = ExplorationOrchestrator(
+            self._max_num_workers, total_elements=len(elements)
+        )
         # Throughput tracker reference — set by caller via set_throughput_tracker()
         self._throughput_tracker: ThroughputTracker | None = None
 

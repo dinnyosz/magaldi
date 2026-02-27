@@ -5,6 +5,7 @@ import time
 import pytest
 
 from shared.throttling import (
+    EXPLORE_BUDGET_FRACTION,
     EXPLORE_MIN_SAMPLES,
     EXPLORE_SAMPLES_PER_LEVEL,
     GSS_PARTIAL_MIN_SAMPLES,
@@ -17,6 +18,7 @@ from shared.throttling import (
     ThroughputTracker,
     TimeoutEvent,
     build_throughput_levels_text,
+    compute_effective_base_workers,
     compute_throttle_decision,
     format_throughput_levels,
 )
@@ -2625,3 +2627,237 @@ class TestExplorationOrchestrator:
         # prob_map_data should be populated
         assert state.prob_map_data is not None
         assert len(state.prob_map_data) > 0
+
+    # --- exploration_status lifecycle tests ---
+
+    def test_exploration_status_warmup_a(self):
+        """During warmup A, exploration_status shows WarmA with progress."""
+        orch = ExplorationOrchestrator(base_workers=8)
+        tracker = self._make_tracker()
+
+        state = orch.orchestrate({}, None, tracker)
+        assert state.exploration_status is not None
+        assert state.exploration_status.startswith("WarmA")
+        assert "0/10" in state.exploration_status
+
+    def test_exploration_status_warmup_a_partial(self):
+        """Warmup A shows progress as samples accumulate."""
+        orch = ExplorationOrchestrator(base_workers=8)
+        tracker = self._make_tracker()
+
+        all_levels: dict[int, tuple[float, int]] = {1: (5.0, 5)}
+        state = orch.orchestrate(all_levels, None, tracker)
+        assert state.exploration_status is not None
+        assert "WarmA" in state.exploration_status
+        assert "5/10" in state.exploration_status
+
+    def test_exploration_status_warmup_b(self):
+        """During warmup B, exploration_status shows WarmB with progress."""
+        orch = ExplorationOrchestrator(base_workers=12)
+        tracker = self._make_tracker()
+        warmup_high = max(2, int(12 * 2 / 3))  # = 8
+
+        all_levels: dict[int, tuple[float, int]] = {
+            1: (5.0, EXPLORE_MIN_SAMPLES),
+            warmup_high: (3.0, 3),
+        }
+        state = orch.orchestrate(all_levels, None, tracker)
+        assert state.exploration_status is not None
+        assert "WarmB" in state.exploration_status
+        assert f"{warmup_high}" in state.exploration_status
+        assert "3/10" in state.exploration_status
+
+    def test_exploration_status_gss_active(self):
+        """During active GSS, exploration_status shows bracket and probe."""
+        orch = ExplorationOrchestrator(base_workers=20)
+        tracker = self._make_tracker()
+        warmup_high = max(2, int(20 * 2 / 3))  # = 13
+
+        all_levels: dict[int, tuple[float, int]] = {
+            1: (5.0, EXPLORE_MIN_SAMPLES),
+            warmup_high: (3.0, EXPLORE_MIN_SAMPLES),
+        }
+        state = orch.orchestrate(all_levels, None, tracker)
+
+        assert state.gss_probe is not None
+        assert state.exploration_status is not None
+        assert "GSS" in state.exploration_status
+        assert str(state.gss_probe) in state.exploration_status
+
+    def test_exploration_status_converged(self):
+        """After GSS converges, exploration_status shows Peak with checkmark."""
+        orch = ExplorationOrchestrator(base_workers=10)
+        tracker = self._make_tracker()
+
+        # Provide data at all levels so GSS can converge
+        all_levels: dict[int, tuple[float, int]] = {
+            i: (abs(i - 4) + 1.0, EXPLORE_MIN_SAMPLES)
+            for i in range(1, 11)
+        }
+
+        for _ in range(30):
+            state = orch.orchestrate(all_levels, None, tracker)
+            if orch._gss and orch._gss.converged:
+                break
+
+        assert orch._gss is not None
+        assert orch._gss.converged
+        assert state.exploration_status is not None
+        assert "Peak@" in state.exploration_status
+        assert "\u2713" in state.exploration_status  # checkmark
+
+    def test_exploration_status_always_set(self):
+        """exploration_status is set in every lifecycle phase."""
+        orch = ExplorationOrchestrator(base_workers=20)
+        tracker = self._make_tracker()
+        warmup_high = max(2, int(20 * 2 / 3))
+
+        # Phase: Warmup A
+        state = orch.orchestrate({}, None, tracker)
+        assert state.exploration_status is not None
+
+        # Phase: Warmup B
+        all_levels: dict[int, tuple[float, int]] = {
+            1: (5.0, EXPLORE_MIN_SAMPLES),
+        }
+        state = orch.orchestrate(all_levels, None, tracker)
+        assert state.exploration_status is not None
+
+        # Phase: GSS active
+        all_levels[warmup_high] = (3.0, EXPLORE_MIN_SAMPLES)
+        state = orch.orchestrate(all_levels, None, tracker)
+        assert state.exploration_status is not None
+
+        # Phase: Converged
+        all_levels_full = {
+            i: (abs(i - 7) + 1.0, EXPLORE_MIN_SAMPLES)
+            for i in range(1, 21)
+        }
+        for _ in range(30):
+            state = orch.orchestrate(all_levels_full, None, tracker)
+            if orch._gss and orch._gss.converged:
+                break
+        assert state.exploration_status is not None
+
+
+class TestComputeEffectiveBaseWorkers:
+    """Tests for budget-capped exploration range."""
+
+    def test_single_worker_unchanged(self):
+        """base_workers=1 should always stay 1."""
+        assert compute_effective_base_workers(1, 10) == 1
+        assert compute_effective_base_workers(1, 1000) == 1
+
+    def test_large_element_count_no_cap(self):
+        """With many elements, full base_workers is returned."""
+        # Sum of _min_samples_for_level(1..16) = 10*5 + 12+14+16+18+20+22+24+26+28+30+32 = 292
+        # Budget for 1000 = 500, for 5000 = 2500 — both fit easily
+        assert compute_effective_base_workers(16, 1000) == 16
+        assert compute_effective_base_workers(32, 5000) == 32
+
+    def test_small_element_count_caps_workers(self):
+        """With few elements, workers are capped."""
+        # 30 elements → budget = 15. Warmup A alone costs 10.
+        result = compute_effective_base_workers(16, 30)
+        assert result < 16
+        assert result >= 1
+
+    def test_cap_scales_with_elements(self):
+        """More elements should allow more workers."""
+        cap_30 = compute_effective_base_workers(16, 30)
+        cap_100 = compute_effective_base_workers(16, 100)
+        cap_300 = compute_effective_base_workers(16, 300)
+        assert cap_30 <= cap_100 <= cap_300
+
+    def test_cap_never_exceeds_base(self):
+        """Effective workers should never exceed base_workers."""
+        for elements in [10, 50, 100, 500, 5000]:
+            for workers in [4, 8, 16, 32]:
+                result = compute_effective_base_workers(workers, elements)
+                assert result <= workers
+                assert result >= 1
+
+    def test_budget_fraction_respected(self):
+        """Cumulative level cost should fit within EXPLORE_BUDGET_FRACTION of total."""
+        for elements in [20, 40, 80, 160, 320]:
+            cap = compute_effective_base_workers(16, elements)
+            budget = int(elements * EXPLORE_BUDGET_FRACTION)
+            # Sum of _min_samples_for_level(1..cap) should fit in budget
+            total_cost = sum(
+                ThroughputByLevel._min_samples_for_level(lvl)
+                for lvl in range(1, cap + 1)
+            )
+            assert total_cost <= budget
+
+    def test_medium_element_count_partial_cap(self):
+        """100 elements with 16 workers should be partially capped."""
+        cap = compute_effective_base_workers(16, 100)
+        # Budget = 50. Cost at cap=8 is ~40, at cap=12 is ~50.
+        # Should allow a decent range but not full 16.
+        assert 1 < cap < 16
+
+    def test_240_elements_with_16_workers(self):
+        """240 elements with 16 workers: cap scales with per-level cost."""
+        cap = compute_effective_base_workers(16, 240)
+        # Budget = 120. Per-level cost: levels 1-5 cost 10 each, then scales up.
+        # Should get a decent range but not necessarily full 16.
+        assert cap > 5
+
+    def test_high_base_workers_needs_more_elements(self):
+        """32 workers needs more elements than 16 workers."""
+        cap_32 = compute_effective_base_workers(32, 200)
+        cap_16 = compute_effective_base_workers(16, 200)
+        # 32 workers has higher exploration cost than 16
+        assert cap_32 <= cap_16 or cap_16 == 16
+
+
+class TestExplorationOrchestratorCap:
+    """Tests for ExplorationOrchestrator with total_elements capping."""
+
+    def test_no_total_elements_no_cap(self):
+        """Without total_elements, base_workers is unchanged."""
+        orch = ExplorationOrchestrator(16)
+        assert orch.base_workers == 16
+
+    def test_total_elements_none_no_cap(self):
+        """Explicit None total_elements means no cap."""
+        orch = ExplorationOrchestrator(16, total_elements=None)
+        assert orch.base_workers == 16
+
+    def test_large_total_elements_no_cap(self):
+        """Many elements should not cap workers."""
+        orch = ExplorationOrchestrator(16, total_elements=1000)
+        assert orch.base_workers == 16
+
+    def test_small_total_elements_caps(self):
+        """Few elements should cap workers."""
+        orch = ExplorationOrchestrator(16, total_elements=30)
+        assert orch.base_workers < 16
+        assert orch.base_workers >= 1
+
+    def test_original_base_workers_preserved(self):
+        """The original base_workers is stored for reference."""
+        orch = ExplorationOrchestrator(16, total_elements=30)
+        assert orch._original_base_workers == 16
+
+    def test_small_elements_skip_exploration(self):
+        """With very few elements and cap=1, orchestrate skips exploration entirely."""
+        orch = ExplorationOrchestrator(16, total_elements=10)
+        tracker = ThroughputTracker(window_seconds=300.0)
+        assert orch.base_workers <= 1
+        state = orch.orchestrate({}, None, tracker)
+        # Should skip: no warmup override, no GSS, just status
+        assert state.warmup_override is None
+        assert state.gss_probe is None
+        assert state.exploration_status is not None
+        assert "Skip" in state.exploration_status
+
+    def test_capped_but_not_skipped(self):
+        """With moderate elements, exploration runs at capped range."""
+        orch = ExplorationOrchestrator(16, total_elements=100)
+        tracker = ThroughputTracker(window_seconds=300.0)
+        # Should be capped but still > 1, so exploration runs
+        assert 1 < orch.base_workers < 16
+        state = orch.orchestrate({}, None, tracker)
+        # Should enter warmup phase (not skip)
+        assert state.warmup_override is not None

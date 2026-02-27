@@ -78,6 +78,11 @@ EXPLORE_SAMPLES_PER_LEVEL = 2
 # PLUS meaningful processing at the (possibly new) optimal level afterward.
 EXPLORE_BUDGET_MULTIPLIER = 3
 
+# Exploration budget: at most this fraction of total elements is spent on
+# warmup + GSS probing. The rest runs at the discovered peak.
+# 0.5 = spend at most half exploring, half at the optimum.
+EXPLORE_BUDGET_FRACTION = 0.5
+
 # Signal-aware GSS: minimum samples to consider a level's partial signal.
 # 3 is the minimum for a meaningful signal; 2 is too noisy, 1 is random.
 GSS_PARTIAL_MIN_SAMPLES = 3
@@ -1152,6 +1157,37 @@ class ExplorationState:
     exploration_status: str | None = None  # Lifecycle status for constant feedback
 
 
+def compute_effective_base_workers(base_workers: int, total_elements: int) -> int:
+    """Cap base_workers so exploration costs at most half the total elements.
+
+    Budget = total_elements / 2. Walk from level 1 to base_workers,
+    accumulating the sample cost per level (_min_samples_for_level).
+    Stop when the next level would overflow the budget.
+
+    Args:
+        base_workers: Original max workers (from config or tier).
+        total_elements: Total elements to process in this tier/batch.
+
+    Returns:
+        Effective base_workers, capped to fit the exploration budget.
+    """
+    if base_workers <= 1:
+        return base_workers
+
+    budget = int(total_elements * EXPLORE_BUDGET_FRACTION)
+    cost = 0
+    cap = 0
+
+    for level in range(1, base_workers + 1):
+        level_cost = ThroughputByLevel._min_samples_for_level(level)
+        if cost + level_cost > budget:
+            break
+        cost += level_cost
+        cap = level
+
+    return max(1, cap)
+
+
 class ExplorationOrchestrator:
     """Manages GSS-based worker count exploration.
 
@@ -1159,10 +1195,26 @@ class ExplorationOrchestrator:
 
     Shared between ThrottleContext (phases 4/7/8) and DependencyTracker (phase 5)
     to avoid duplicating the GSS orchestration logic.
+
+    When total_elements is provided, base_workers is capped so that exploration
+    (warmup + GSS) costs at most EXPLORE_BUDGET_FRACTION of total elements.
+    The remaining elements run at the discovered peak for actual throughput.
     """
 
-    def __init__(self, base_workers: int):
-        self.base_workers = base_workers
+    def __init__(self, base_workers: int, total_elements: int | None = None):
+        if total_elements is not None:
+            effective = compute_effective_base_workers(base_workers, total_elements)
+            if effective < base_workers:
+                _log_throttle(
+                    f"EXPLORE CAP: {base_workers}→{effective} workers "
+                    f"(budget={int(total_elements * EXPLORE_BUDGET_FRACTION)} "
+                    f"from {total_elements} elements)"
+                )
+            self.base_workers = effective
+        else:
+            self.base_workers = base_workers
+        self._original_base_workers = base_workers
+        self._total_elements = total_elements
         self._gss: GoldenSectionSearch | None = None
         self._prob_map: ProbabilityMap | None = None
 
@@ -1191,6 +1243,13 @@ class ExplorationOrchestrator:
         """
         state = ExplorationState()
         gss_probe = None
+
+        # Skip exploration when budget is too small for meaningful data collection.
+        # base_workers=1 means compute_effective_base_workers couldn't fit even
+        # the minimum exploration cost — fall through to formula-based throttling.
+        if self.base_workers <= 1 and self._total_elements is not None:
+            state.exploration_status = f"Skip ({self._total_elements} elem)"
+            return state
 
         # Build level_data: levels with enough samples for GSS decisions.
         level_data = {

@@ -569,7 +569,9 @@ def run_throttled_tier(
     throttle_ctx.tier_timeout = tier_timeout
     throttle_ctx.base_workers = effective_workers
     throttle_ctx.tier = tier
-    throttle_ctx._exploration = ExplorationOrchestrator(effective_workers)  # Reset on tier change
+    throttle_ctx._exploration = ExplorationOrchestrator(  # Reset on tier change
+        effective_workers, total_elements=len(items)
+    )
     throttle_ctx.throughput_tracker.reset()  # Reset level metrics (stale data from prev tier)
     throttle_ctx._last_ramp_time = 0.0  # Reset ramp cooldown
     throttle_ctx._last_recommended_workers = 0  # Reset recommended workers
