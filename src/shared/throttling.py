@@ -1220,10 +1220,27 @@ class ExplorationOrchestrator:
         self._gss: GoldenSectionSearch | None = None
         self._prob_map: ProbabilityMap | None = None
 
-    def reset(self) -> None:
-        """Reset on tier change."""
+    def reset(self, total_elements: int | None = None) -> None:
+        """Reset on tier change.
+
+        Args:
+            total_elements: If provided, recalculates base_workers cap for the
+                new tier's element count.  When omitted the previous cap is kept.
+        """
         self._gss = None
         self._prob_map = None
+        if total_elements is not None:
+            self._total_elements = total_elements
+            effective = compute_effective_base_workers(
+                self._original_base_workers, total_elements
+            )
+            if effective != self.base_workers:
+                _log_throttle(
+                    f"EXPLORE CAP RESET: {self.base_workers}→{effective} workers "
+                    f"(budget={int(total_elements * EXPLORE_BUDGET_FRACTION)} "
+                    f"from {total_elements} elements)"
+                )
+            self.base_workers = effective
 
     def orchestrate(
         self,

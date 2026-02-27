@@ -314,14 +314,23 @@ class DependencyTracker:
 
         Returns True once per tier change, then clears the flag.
         Also resets ramp cooldown state and exploration orchestrator
-        so the new tier starts fresh.
+        so the new tier starts fresh with a budget cap based on the
+        number of elements in the new tier.
         """
         with self._lock:
             if self._tier_just_changed:
                 self._tier_just_changed = False
                 self._last_ramp_time = 0.0
                 self._last_recommended_workers = 0
-                self._exploration.reset()
+                # Count pending elements in the new tier for budget cap
+                tier_elements = 0
+                if self._current_tier is not None:
+                    for eid in self._elements:
+                        if eid not in self._completed and self._get_tier(eid) == self._current_tier:
+                            tier_elements += 1
+                self._exploration.reset(
+                    total_elements=tier_elements if tier_elements > 0 else None
+                )
                 return True
             return False
 

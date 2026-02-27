@@ -2929,6 +2929,37 @@ class TestExplorationOrchestratorCap:
         assert state.exploration_status is not None
         assert "Skip" in state.exploration_status
 
+    def test_reset_recalculates_cap_for_new_tier(self):
+        """reset(total_elements) recalculates base_workers for the new tier."""
+        orch = ExplorationOrchestrator(16, total_elements=1000)
+        assert orch.base_workers == 16  # 1000 elements — no cap
+
+        # Simulate tier change to a tier with only 30 elements
+        orch.reset(total_elements=30)
+        assert orch.base_workers < 16
+        assert orch.base_workers >= 1
+        # GSS and prob_map should also be cleared
+        assert orch._gss is None
+        assert orch._prob_map is None
+
+    def test_reset_without_total_elements_keeps_cap(self):
+        """reset() without total_elements preserves existing cap."""
+        orch = ExplorationOrchestrator(16, total_elements=30)
+        capped = orch.base_workers
+        assert capped < 16
+
+        orch.reset()
+        assert orch.base_workers == capped  # Unchanged
+
+    def test_reset_widens_cap_for_larger_tier(self):
+        """reset() with more elements can widen the exploration range."""
+        orch = ExplorationOrchestrator(16, total_elements=30)
+        small_cap = orch.base_workers
+
+        orch.reset(total_elements=1000)
+        assert orch.base_workers == 16  # Uncapped for 1000 elements
+        assert orch.base_workers > small_cap
+
     def test_capped_but_not_skipped(self):
         """With moderate elements, exploration runs at capped range."""
         orch = ExplorationOrchestrator(16, total_elements=100)
