@@ -229,10 +229,10 @@ def build_worker_table(
     idle_slots = max(0, allowed_workers - active_count)
     throttled_slots = max(0, num_workers - allowed_workers)
 
-    # Show active workers first (sorted by wid)
-    for wid in sorted(workers_data.keys()):
+    # Show active workers first (renumbered 1..N for consistent display)
+    for display_id, wid in enumerate(sorted(workers_data.keys()), start=1):
         row = row_builder(wid, workers_data, now)
-        worker_table.add_row(f"[{wid}]", *row)
+        worker_table.add_row(f"[{display_id}]", *row)
     # Then idle slots (allowed but not active)
     for _i in range(idle_slots):
         idle_row = ["[dim]idle[/]"] + [""] * (len(columns) - 1)

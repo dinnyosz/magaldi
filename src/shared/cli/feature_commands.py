@@ -285,12 +285,12 @@ def run_feature_extraction(
             idle_slots = max(0, allowed_workers - active_count)
             throttled_slots = max(0, num_workers - allowed_workers)
 
-            # Show active workers first (sorted by wid)
-            for wid in sorted(workers_data.keys()):
+            # Show active workers first (renumbered 1..N for consistent display)
+            for display_id, wid in enumerate(sorted(workers_data.keys()), start=1):
                 feature_name, stage, model, ctx_size, start_time = workers_data[wid]
                 elapsed = now - start_time if start_time > 0 else 0
                 elapsed_str = f"{elapsed:.1f}s" if elapsed > 0 else ""
-                worker_table.add_row(f"[{wid}]", stage, model, ctx_size, elapsed_str, feature_name)
+                worker_table.add_row(f"[{display_id}]", stage, model, ctx_size, elapsed_str, feature_name)
             # Then idle slots (allowed but not active)
             for _i in range(idle_slots):
                 worker_table.add_row(f"[{'·'}]", "[dim]idle[/]", "", "", "", "")
@@ -481,14 +481,14 @@ def run_feature_extraction(
                 idle_slots = max(0, allowed_workers - active_count)
                 throttled_slots = max(0, num_workers - allowed_workers)
 
-                # Show active workers first (sorted by wid)
-                for wid in sorted(workers_data.keys()):
+                # Show active workers first (renumbered 1..N for consistent display)
+                for display_id, wid in enumerate(sorted(workers_data.keys()), start=1):
                     parent_feature, stage, model, subfeature, ctx_size, start_time = workers_data[wid]
                     elapsed = now - start_time if start_time > 0 else 0
                     elapsed_str = f"{elapsed:.1f}s" if elapsed > 0 else ""
                     display_parent = parent_feature[:25] + "..." if len(parent_feature) > 28 else parent_feature
                     display_sub = subfeature[:35] + "..." if len(subfeature) > 38 else subfeature
-                    worker_table.add_row(f"[{wid}]", stage, model, ctx_size, elapsed_str, display_parent, display_sub)
+                    worker_table.add_row(f"[{display_id}]", stage, model, ctx_size, elapsed_str, display_parent, display_sub)
                 # Then idle slots (allowed but not active)
                 for _i in range(idle_slots):
                     worker_table.add_row(f"[{'·'}]", "[dim]idle[/]", "", "", "", "", "")

@@ -171,12 +171,12 @@ def _build_scoring_display(state: ScoringProgressState, num_workers: int) -> Ren
     idle_slots = max(0, allowed - active_count)
     throttled_slots = max(0, num_workers - allowed)
 
-    # Show active workers first (sorted by wid)
-    for wid in sorted(workers_data.keys()):
+    # Show active workers first (renumbered 1..N for consistent display)
+    for display_id, wid in enumerate(sorted(workers_data.keys()), start=1):
         batch_num, batch_size, start_time = workers_data[wid]
         worker_elapsed = now - start_time if start_time > 0 else 0
         worker_table.add_row(
-            f"[{wid}]",
+            f"[{display_id}]",
             "scoring",
             f"batch#{batch_num}",
             f"{batch_size} vars",
@@ -563,12 +563,12 @@ def run_processing(
         idle_slots = max(0, allowed_workers - active_count)
         throttled_slots = max(0, num_workers - allowed_workers)
 
-        # Show active workers first (sorted by wid)
-        for wid in sorted(workers_data.keys()):
+        # Show active workers first (renumbered 1..N for consistent display)
+        for display_id, wid in enumerate(sorted(workers_data.keys()), start=1):
             elem, stage, model, ctx_size, start_time = workers_data[wid]
             elapsed = now - start_time if start_time > 0 else 0
             elapsed_str = f"{elapsed:.1f}s" if elapsed > 0 else ""
-            worker_table.add_row(f"[{wid}]", stage, model, ctx_size, elapsed_str, elem)
+            worker_table.add_row(f"[{display_id}]", stage, model, ctx_size, elapsed_str, elem)
         # Then idle slots (allowed but not active)
         for _i in range(idle_slots):
             worker_table.add_row(f"[{'·'}]", "[dim]idle[/]", "", "", "", "")

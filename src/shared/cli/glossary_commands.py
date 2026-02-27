@@ -206,11 +206,11 @@ def run_glossary_extraction(
             idle_slots = max(0, allowed_workers - active_count)
             throttled_slots = max(0, num_workers - allowed_workers)
 
-            # Show active workers first (sorted by wid)
-            for wid in sorted(workers_data.keys()):
+            # Show active workers first (renumbered 1..N for consistent display)
+            for display_id, wid in enumerate(sorted(workers_data.keys()), start=1):
                 item_label, model, ctx_size = workers_data[wid]
                 stage = "summarizing" if "summar" in phase.lower() else "extracting"
-                worker_table.add_row(f"[{wid}]", stage, model, ctx_size, item_label)
+                worker_table.add_row(f"[{display_id}]", stage, model, ctx_size, item_label)
             # Then idle slots (allowed but not active)
             for _i in range(idle_slots):
                 worker_table.add_row(f"[{'·'}]", "[dim]idle[/]", "", "", "")
