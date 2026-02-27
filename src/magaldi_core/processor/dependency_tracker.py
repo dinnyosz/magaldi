@@ -48,7 +48,7 @@ class DependencyTracker:
         elements: list[CodeElement],
         context_sizes: dict[str, int] | None = None,
         max_num_workers: int | None = None,
-        timeout: float = 180.0,  # Default timeout for throttle calculations
+        timeout: float = 360.0,  # Default timeout for throttle calculations
     ) -> None:
         # RLock for reentrant calls (get_parallelism_stats -> get_current_max_workers)
         self._lock = threading.RLock()

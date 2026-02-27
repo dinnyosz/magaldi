@@ -277,7 +277,7 @@ class ThrottledParallelProcessor(Generic[T, R]):
         try:
             for tier, tier_max_workers, tier_items in tier_groups:
                 effective_workers = min(self.max_workers, tier_max_workers)
-                tier_timeout = TIER_TIMEOUTS.get(tier, 180)
+                tier_timeout = TIER_TIMEOUTS.get(tier, 360)
 
                 # Reset worker ID pool for this tier
                 with self._worker_id_lock:
@@ -457,6 +457,7 @@ class ThrottleContext:
         all_levels = self.throughput_tracker._throughput_by_level.get_all_levels()
 
         # GSS lifecycle: initialize immediately with full bracket, drive exploration
+        from shared.throttling import _log_throttle
         gss_probe = None
 
         # Build level_data once: used for both GSS init and ongoing probes.
@@ -488,7 +489,6 @@ class ThrottleContext:
         if self._gss is None and level1_count >= EXPLORE_MIN_SAMPLES and high_probe_count >= EXPLORE_MIN_SAMPLES:
             self._gss = GoldenSectionSearch(lo=1, hi=self.base_workers)
             self._prob_map = ProbabilityMap(lo=1, hi=self.base_workers)
-            from shared.throttling import _log_throttle
             _log_throttle(
                 f"GSS INIT: bracket=[{self._gss.lo}, {self._gss.hi}] "
                 f"(level 1={level1_count}, level {_WARMUP_HIGH_PROBE}={high_probe_count} samples)"
@@ -506,7 +506,6 @@ class ThrottleContext:
                 level_data, partial_data=partial_data, prob_map=self._prob_map,
             )
             if self._gss.converged:
-                from shared.throttling import _log_throttle
                 # Boundary re-search: if best_level landed at/near the hi edge
                 # and there's room above, the bracket was too tight — extend
                 # and restart GSS from the old hi to max_workers.
@@ -531,14 +530,29 @@ class ThrottleContext:
 
         # If GSS converged, use its best_level as the effective peak.
         # But keep updating it if new data shows a better level.
+        # Hold: require max(5, level // 2) samples before accepting a new peak,
+        # so noisy exploration data can't yank the peak after 1-2 measurements.
         if self._gss and self._gss.converged and level_data:
             actual_best = min(level_data, key=level_data.get)  # type: ignore[arg-type]
             if (self._gss.best_level is None or level_data.get(actual_best, float("inf")) < level_data.get(self._gss.best_level, float("inf"))) and actual_best != self._gss.best_level:
-                    _log_throttle(
-                        f"PEAK UPDATE: {self._gss.best_level}→{actual_best} "
-                        f"(bt={level_data[actual_best]:.2f} vs {level_data.get(self._gss.best_level, 0):.2f})"
-                    )
-                    self._gss.best_level = actual_best
+                    # Check sample count before switching peak
+                    min_hold = max(5, actual_best // 2)
+                    best_count = all_levels.get(actual_best, (0, 0))[1]
+                    if best_count >= min_hold:
+                        _log_throttle(
+                            f"PEAK UPDATE: {self._gss.best_level}→{actual_best} "
+                            f"(bt={level_data[actual_best]:.2f} vs "
+                            f"{level_data.get(self._gss.best_level, 0):.2f}, "
+                            f"samples={best_count}≥{min_hold})"
+                        )
+                        self._gss.best_level = actual_best
+                    else:
+                        _log_throttle(
+                            f"PEAK HOLD: {actual_best} looks better "
+                            f"(bt={level_data[actual_best]:.2f}) but only "
+                            f"{best_count}/{min_hold} samples — keeping "
+                            f"{self._gss.best_level}"
+                        )
         effective_peak = self._gss.best_level if (self._gss and self._gss.converged) else peak
 
         # Only use legacy exploration when GSS is not active
@@ -657,7 +671,7 @@ def run_throttled_tier(
     if not items:
         return
 
-    tier_timeout = TIER_TIMEOUTS.get(tier, 180)
+    tier_timeout = TIER_TIMEOUTS.get(tier, 360)
     throttle_ctx.tier_timeout = tier_timeout
     throttle_ctx.base_workers = effective_workers
     throttle_ctx.tier = tier

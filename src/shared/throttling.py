@@ -14,15 +14,27 @@ Two complementary strategies:
 from __future__ import annotations
 
 import math
+import os
 import time
 from collections import deque
 from dataclasses import dataclass, field
 from threading import Lock
 
+_throttle_log_initialized = False
+
 
 def _log_throttle(message: str) -> None:
-    """Debug logging - writes to /tmp/throttle.log."""
-    with open("/tmp/throttle.log", "a") as f:
+    """Debug logging - writes to /tmp/throttle.log.
+
+    Truncates the file on the first call per process to avoid
+    unbounded growth across runs.
+    """
+    global _throttle_log_initialized  # noqa: PLW0603
+    mode = "a" if _throttle_log_initialized else "w"
+    with open("/tmp/throttle.log", mode) as f:
+        if not _throttle_log_initialized:
+            f.write(f"{time.time():.3f} --- throttle log start (pid={os.getpid()}) ---\n")
+            _throttle_log_initialized = True
         f.write(f"{time.time():.3f} {message}\n")
 
 
@@ -271,13 +283,13 @@ class ThroughputTracker:
     def get_exploration_target(self, max_level: int, remaining: int | None = None) -> int | None:
         """Get a level that needs more data.
 
-        If the peak is confident but any level within ±(max_level // 3) of
+        If the peak is confident but any level within ±radius of
         the peak lacks samples, returns the nearest under-explored level
         (scanning outward from peak: upward first, then downward).
 
         Args:
             max_level: Upper bound for exploration (typically base_workers).
-                Also determines radius: max(3, max_level // 3).
+                Also determines radius: min(5, max(3, max_level // 4)).
             remaining: Number of elements left to process, or None if unknown.
                 When provided, skips exploration if the budget is too small.
 
@@ -463,7 +475,7 @@ class ThroughputByLevel:
     def get_exploration_target(self, max_level: int, remaining: int | None = None) -> int | None:
         """Find the most valuable under-explored level to collect data at.
 
-        Scores candidate levels within ±(max_level // 3) of the peak by:
+        Scores candidate levels within ±min(5, max(3, max_level // 4)) of the peak by:
         - Completion: prefer levels with partial data (cheaper to finish)
         - Proximity: prefer levels near the peak (refine understanding)
         - Trend: prefer direction where base times are improving
@@ -474,7 +486,7 @@ class ThroughputByLevel:
 
         Args:
             max_level: Upper bound for exploration (typically base_workers).
-                Also determines radius: max(3, max_level // 3).
+                Also determines radius: min(5, max(3, max_level // 4)).
             remaining: Number of elements left to process, or None if unknown.
                 When provided, skips candidates whose sample cost exceeds
                 the remaining budget.
@@ -487,7 +499,7 @@ class ThroughputByLevel:
             return None
 
         peak, _ = peak_result
-        radius = max(3, max_level // 3)
+        radius = min(5, max(3, max_level // 4))
 
         with self._lock:
             # Peak must be confident before we explore from it
@@ -517,6 +529,10 @@ class ThroughputByLevel:
                 if down >= lower:
                     candidates.append(down)
 
+            # Peak base_time for early bail-out of bad candidates
+            peak_dq = self._levels.get(peak, deque())
+            peak_bt = (sum(rt / peak for _, rt in peak_dq) / len(peak_dq)) if peak_dq else None
+
             for candidate in candidates:
 
                 needed = self._min_samples_for_level(candidate)
@@ -524,6 +540,17 @@ class ThroughputByLevel:
 
                 if count >= needed:
                     continue  # Already explored
+
+                # Early bail-out: if candidate already has some data and its
+                # base_time is much worse than peak, don't waste more samples.
+                # Uses GSS_BLACKLIST_THRESHOLD (1.5x) for consistency.
+                # Min samples scales with level: higher concurrency = noisier.
+                bail_min = max(GSS_PARTIAL_MIN_SAMPLES, candidate)
+                if peak_bt is not None and count >= bail_min:
+                    cand_dq = self._levels[candidate]
+                    cand_bt = sum(rt / candidate for _, rt in cand_dq) / len(cand_dq)
+                    if cand_bt > peak_bt * GSS_BLACKLIST_THRESHOLD:
+                        continue  # Clearly worse — skip
 
                 # Budget filter (hard gate)
                 samples_left = needed - count
@@ -586,9 +613,6 @@ class GoldenSectionSearch:
     for broad coverage, with signal-aware and probability map overrides.
     """
 
-    # Minimum bracket width to avoid premature convergence on noisy data
-    MIN_BRACKET = 6
-
     def __init__(self, lo: int, hi: int):
         """Initialize with search bracket.
 
@@ -605,6 +629,11 @@ class GoldenSectionSearch:
         self._pending_probe: int | None = None
         # Last signal-aware action for display (e.g. "promote 7" or "skip [5,9]")
         self.last_signal: str | None = None
+        # Scale convergence threshold with search space size.
+        # ~30% of initial range, floored at 2 (tiny spaces still explore),
+        # capped at 8 (huge spaces don't over-explore).
+        self._initial_range = hi - lo
+        self._min_bracket = max(2, min(8, round(self._initial_range * 0.3)))
 
     def get_next_probe(
         self,
@@ -636,7 +665,33 @@ class GoldenSectionSearch:
         if self.converged:
             return None
 
-        if self.hi - self.lo <= 5:
+        _log_throttle(
+            f"GSS STATE: bracket=[{self.lo},{self.hi}] min_bracket={self._min_bracket} "
+            f"level_data={sorted(level_data.keys())} "
+            f"partial={sorted((partial_data or {}).keys())}"
+        )
+
+        # Probe stickiness: keep collecting at the current probe until it has
+        # enough samples for meaningful signal. Scales with concurrency level
+        # because higher parallelism = more variance per sample.
+        # Without this, pmap/signal overrides bounce between levels after 1
+        # sample, never accumulating enough data at any single level.
+        if self._pending_probe is not None:
+            pending = self._pending_probe
+            if pending not in level_data:  # Not yet fully qualified
+                count = 0
+                if partial_data and pending in partial_data:
+                    count = partial_data[pending][1]
+                # Scale with level: at level 1, need 3; at level 13, need 13.
+                # Same EXPLORE_SAMPLES_PER_LEVEL ratio as full qualification.
+                min_sticky = max(GSS_PARTIAL_MIN_SAMPLES, pending * EXPLORE_SAMPLES_PER_LEVEL)
+                if count < min_sticky:
+                    self.last_signal = f"sticky {pending} ({count}/{min_sticky})"
+                    return pending
+            # Probe reached minimum samples or is qualified — release it
+            self._pending_probe = None
+
+        if self.hi - self.lo <= self._min_bracket:
             # Bracket narrow enough — pick best known level in [lo, hi]
             self._finalize(level_data, partial_data)
             return None
@@ -672,7 +727,11 @@ class GoldenSectionSearch:
         # CRITICAL: Never narrow past the best-known level.
         narrowing_data = all_data
 
-        def _nearest_data(target: int, data: dict[int, float], radius: int = 2) -> tuple[int, float] | None:
+        # Scale fuzzy-match radius with current bracket width.
+        # Small brackets (8): radius=2, large brackets (64): radius=6, cap at 6.
+        _radius = max(2, min(6, (self.hi - self.lo) // 5))
+
+        def _nearest_data(target: int, data: dict[int, float], radius: int = _radius) -> tuple[int, float] | None:
             """Find nearest level with data within ±radius of target."""
             if target in data:
                 return (target, data[target])
@@ -684,7 +743,7 @@ class GoldenSectionSearch:
 
         _max_narrow_iters = 20  # Safety: prevent infinite loop
         for _narrow_iter in range(_max_narrow_iters):
-            if self.hi - self.lo <= 5:
+            if self.hi - self.lo <= self._min_bracket:
                 break
             m1 = round(self.hi - (self.hi - self.lo) / PHI)
             m2 = round(self.lo + (self.hi - self.lo) / PHI)
@@ -728,7 +787,7 @@ class GoldenSectionSearch:
             else:
                 break  # No nearby data — need to collect it
 
-        if self.hi - self.lo <= 5:
+        if self.hi - self.lo <= self._min_bracket:
             self._finalize(level_data, partial_data)
             return None
 
@@ -764,7 +823,17 @@ class GoldenSectionSearch:
         have_m1 = m1 in narrowing_data
         have_m2 = m2 in narrowing_data
 
-        if have_m1:
+        if have_m1 and have_m2:
+            # Both probes have data but narrowing couldn't make progress
+            # (same-level fuzzy match, best_known protection, etc.).
+            # Converge rather than endlessly re-probing known levels.
+            _log_throttle(
+                f"GSS STALL: both m1={m1} and m2={m2} have data but "
+                f"narrowing stalled — forcing convergence"
+            )
+            self._finalize(level_data, partial_data)
+            return None
+        elif have_m1:
             if prob_map is not None:
                 prob_map.record_geometric_probe()
             self._pending_probe = m2

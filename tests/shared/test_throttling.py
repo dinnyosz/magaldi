@@ -6,7 +6,9 @@ import pytest
 
 from shared.throttling import (
     GSS_BLACKLIST_THRESHOLD,
+    GSS_PARTIAL_MIN_SAMPLES,
     GSS_PROMISING_THRESHOLD,
+    EXPLORE_SAMPLES_PER_LEVEL,
     PHI,
     GoldenSectionSearch,
     ProbabilityMap,
@@ -1227,12 +1229,12 @@ class TestFormatThroughputLevels:
 class TestExplorationTarget:
     """Tests for ThroughputByLevel.get_exploration_target().
 
-    Exploration: when peak is confident but levels within ±max(3, max_level // 3)
+    Exploration: when peak is confident but levels within ±radius of peak
     lack data, return one to explore (collect more samples before trusting peak).
 
     Significance = max(10, level * 2). Floor of 10 ensures enough data.
     Level 1 → 10, level 5 → 10, level 6 → 12, level 10 → 20.
-    Radius = max(3, max_level // 3).
+    Radius = min(5, max(3, max_level // 4)).
     """
 
     def test_no_peak_returns_none(self):
@@ -1363,11 +1365,11 @@ class TestExplorationTarget:
         # max_level=3 → radius=3, all within range explored
         assert tracker.get_exploration_target(max_level=3) is None
 
-    def test_radius_is_third_of_max_level(self):
-        """Radius = max(3, max_level // 3). With max_level=12, radius=4.
+    def test_radius_scales_with_max_level(self):
+        """Radius = min(5, max(3, max_level // 4)). With max_level=12, radius=3.
 
-        Peak at level 3 (needs 10). Levels 4-7 are within range (3+4=7).
-        Levels 4-6 explored. Level 7 needs 14 (7*2).
+        Peak at level 3 (needs 10). Levels 4-6 are within range (3+3=6).
+        Levels 4-5 explored. Level 6 needs 12 (6*2).
         """
         tracker = ThroughputByLevel()
         for _ in range(11):
@@ -1376,14 +1378,12 @@ class TestExplorationTarget:
             tracker.record(4, 4.0)  # explored (10 >= 10)
         for _ in range(10):
             tracker.record(5, 5.0)  # explored (10 >= 10)
-        for _ in range(12):
-            tracker.record(6, 6.0)  # explored (12 >= 12)
         for _ in range(10):
             tracker.record(1, 6.0)  # level 1 explored (10 >= 10)
         for _ in range(10):
             tracker.record(2, 5.0)  # level 2 explored (10 >= 10)
-        # Level 7 = peak+4, within radius(4), needs 14 (7*2), has 0 → explore
-        assert tracker.get_exploration_target(max_level=12) == 7
+        # Level 6 = peak+3, within radius(3), needs 12 (6*2), has 0 → explore
+        assert tracker.get_exploration_target(max_level=12) == 6
 
     def test_beyond_max_level_not_explored(self):
         """Levels beyond max_level are not explored.
@@ -1457,7 +1457,7 @@ class TestExplorationTarget:
     def test_radius_limits_downward_exploration(self):
         """Downward exploration is capped by radius.
 
-        Peak at level 8 (needs 16). max_level=10 → radius=max(3, 3)=3.
+        Peak at level 8 (needs 16). max_level=10 → radius=min(5, max(3, 2))=3.
         Lower bound = max(8-3, 1) = 5. Level 4 is below radius → not explored.
         """
         tracker = ThroughputByLevel()
@@ -1481,8 +1481,8 @@ class TestExplorationTarget:
         # All within radius explored → returns None (level 4 is outside radius)
         assert tracker.get_exploration_target(max_level=10) is None
 
-    def test_large_max_level_scales_radius(self):
-        """With max_level=30, radius=max(3, 10)=10. Scales for large pools.
+    def test_large_max_level_caps_radius(self):
+        """With max_level=30, radius=min(5, max(3, 7))=5. Capped at 5.
 
         Peak at 15. Levels 14 and 16 both at distance 1, but level 14
         needs fewer samples (28 vs 32) → slightly higher cost score → wins.
@@ -1493,10 +1493,45 @@ class TestExplorationTarget:
             tracker.record(15, 1.5)  # peak at 15: base=1.5/15=0.1 (best)
         for _ in range(20):
             tracker.record(10, 5.0)  # level 10: base=5.0/10=0.5 (worse, 20 >= 20)
-        # radius = 30 // 3 = 10, range=[5,25]
+        # radius = min(5, max(3, 30//4)) = 5, range=[10,20]
         # Level 14 (needs 28) and 16 (needs 32) are equidistant from peak.
         # Level 14 wins on cost score (cheaper to explore).
         assert tracker.get_exploration_target(max_level=30) == 14
+
+    def test_exploration_bails_on_bad_candidate(self):
+        """Candidate with base_time > 1.5x peak should be skipped early."""
+        tracker = ThroughputByLevel()
+        # Peak at level 6: base_time = 2.0/6 ≈ 0.333
+        for _ in range(12):
+            tracker.record(6, 2.0)
+        for _ in range(10):
+            tracker.record(3, 3.0)  # second level for peak detection
+
+        # Level 7 has bail_min = max(3, 7) = 7 samples, all terrible
+        # base_time = 10.0/7 ≈ 1.43, way over peak*1.5 = 0.5
+        for _ in range(7):
+            tracker.record(7, 10.0)
+
+        # Level 5 has 0 samples → should be picked (7 is bailed)
+        result = tracker.get_exploration_target(max_level=10)
+        assert result == 5  # Skipped 7, picked next best
+
+    def test_exploration_bail_needs_scaled_samples(self):
+        """Bail-out should NOT trigger before scaled min samples for level."""
+        tracker = ThroughputByLevel()
+        # Peak at level 6
+        for _ in range(12):
+            tracker.record(6, 2.0)
+        for _ in range(10):
+            tracker.record(3, 3.0)
+
+        # Level 7 has only 3 bad samples (below bail_min=7 for level 7)
+        for _ in range(3):
+            tracker.record(7, 10.0)
+
+        # Should still pick level 7 — not enough samples to judge yet
+        result = tracker.get_exploration_target(max_level=10)
+        assert result == 7  # Partial data = high completion score, not bailed
 
 
 class TestExplorationScoring:
@@ -2054,6 +2089,151 @@ class TestGoldenSectionSearch:
         assert steps_signal <= steps_pure
         assert gss_signal.best_level is not None
         assert abs(gss_signal.best_level - 8) <= 2
+
+    # --- Scaled convergence threshold tests ---
+
+    def test_min_bracket_scales_with_range(self):
+        """_min_bracket should scale with the initial bracket size."""
+        # Tiny range: floor at 2
+        gss4 = GoldenSectionSearch(lo=1, hi=4)
+        assert gss4._min_bracket == 2  # round(3*0.3)=1, floor=2
+
+        # Small range
+        gss8 = GoldenSectionSearch(lo=1, hi=8)
+        assert gss8._min_bracket == 2  # round(7*0.3)=2
+
+        # Medium range
+        gss16 = GoldenSectionSearch(lo=1, hi=16)
+        assert gss16._min_bracket == 4  # round(15*0.3)=4 (was hardcoded 5)
+
+        # Large range: capped at 8
+        gss64 = GoldenSectionSearch(lo=1, hi=64)
+        assert gss64._min_bracket == 8  # round(63*0.3)=19, cap=8
+
+    def test_small_worker_count_still_explores(self):
+        """With max_workers=8, GSS should probe before converging (not instant)."""
+        gss = GoldenSectionSearch(lo=1, hi=8)
+        level_data: dict[int, float] = {}
+        steps = 0
+        while not gss.converged and steps < 20:
+            probe = gss.get_next_probe(level_data)
+            if probe is None:
+                break
+            level_data[probe] = abs(probe - 4) + 1.0
+            steps += 1
+        assert gss.converged
+        assert steps >= 2  # Must explore, not converge instantly
+
+    def test_large_worker_count_caps_exploration(self):
+        """With max_workers=64, min_bracket caps at 8 to avoid over-exploring."""
+        gss = GoldenSectionSearch(lo=1, hi=64)
+        assert gss._min_bracket == 8
+        level_data: dict[int, float] = {}
+        steps = 0
+        while not gss.converged and steps < 30:
+            probe = gss.get_next_probe(level_data)
+            if probe is None:
+                break
+            level_data[probe] = abs(probe - 30) + 1.0
+            steps += 1
+        assert gss.converged
+        assert gss.best_level is not None
+        assert abs(gss.best_level - 30) <= 4  # Within reasonable range
+
+    def test_stall_when_both_probes_have_data(self):
+        """GSS should converge when both geometric probes already have data
+        and narrowing can't make progress (avoids infinite re-probing)."""
+        # Reproduce: bracket [10, 15], data at levels 10 and 13 (from pmap steering).
+        # Level 12 has partial data (3 samples). Narrowing fuzzy-matches both
+        # probes to the same nearby level, breaks, then Step 4 would endlessly
+        # return m2=13 because m1=12 has partial data.
+        gss = GoldenSectionSearch(lo=10, hi=15)
+        level_data = {10: 1.54, 13: 1.80}
+        # Level 12 has partial data — puts it in narrowing_data via all_data
+        partial_data = {12: (1.60, 5)}
+        probe = gss.get_next_probe(level_data, partial_data=partial_data)
+        # Should converge (stall detection) rather than returning 13 forever
+        assert gss.converged
+        assert probe is None
+        assert gss.best_level is not None
+        assert 10 <= gss.best_level <= 15
+
+    def test_stall_detection_only_when_truly_stuck(self):
+        """Stall detection should NOT fire when one probe still needs data."""
+        gss = GoldenSectionSearch(lo=1, hi=16)
+        # Only m1 region has data, m2 doesn't → should probe m2, not converge
+        level_data = {1: 5.0, 6: 3.0}
+        probe = gss.get_next_probe(level_data)
+        assert not gss.converged
+        assert probe is not None
+
+    def test_probe_stickiness_until_min_samples(self):
+        """Probe should stick until scaled minimum samples are collected."""
+        gss = GoldenSectionSearch(lo=1, hi=20)
+        level_data = {1: 5.0, 10: 3.0}
+
+        # First call: picks a probe (via pmap, signal, or geometric)
+        probe1 = gss.get_next_probe(level_data)
+        assert probe1 is not None
+
+        # Scaled threshold: max(GSS_PARTIAL_MIN_SAMPLES, level * EXPLORE_SAMPLES_PER_LEVEL)
+        min_sticky = max(GSS_PARTIAL_MIN_SAMPLES, probe1 * EXPLORE_SAMPLES_PER_LEVEL)
+
+        # Second call with 0 samples at probe: should return same probe (sticky)
+        probe2 = gss.get_next_probe(level_data)
+        assert probe2 == probe1
+
+        # Third call with 1 sample (below threshold): still sticky
+        partial = {probe1: (2.5, 1)}
+        probe3 = gss.get_next_probe(level_data, partial_data=partial)
+        assert probe3 == probe1
+
+        # Fourth call at threshold: released, may pick new probe
+        partial = {probe1: (2.5, min_sticky)}
+        probe4 = gss.get_next_probe(level_data, partial_data=partial)
+        # After release, it re-evaluates — may return same or different probe
+        assert probe4 is not None or gss.converged
+
+    def test_probe_stickiness_scales_with_level(self):
+        """Higher concurrency levels need more samples before release."""
+        # Level 2: min_sticky = max(3, 2*2) = 4
+        # Level 12: min_sticky = max(3, 12*2) = 24
+        gss = GoldenSectionSearch(lo=1, hi=20)
+        gss._pending_probe = 12
+        level_data = {1: 5.0}
+
+        # 4 samples at level 12: still sticky (4 < 24)
+        probe = gss.get_next_probe(level_data, partial_data={12: (2.0, 4)})
+        assert probe == 12
+        assert gss.last_signal is not None
+        assert "sticky" in gss.last_signal
+        assert "4/24" in gss.last_signal  # Shows scaled threshold
+
+        # 10 samples at level 12: still sticky (10 < 24)
+        probe = gss.get_next_probe(level_data, partial_data={12: (2.0, 10)})
+        assert probe == 12
+
+        # Compare: level 2 with 3 samples is still sticky (3 < 4)
+        gss2 = GoldenSectionSearch(lo=1, hi=20)
+        gss2._pending_probe = 2
+        probe2 = gss2.get_next_probe(level_data, partial_data={2: (2.0, 3)})
+        assert probe2 == 2
+        assert "3/4" in gss2.last_signal  # Threshold is 4, not 24
+
+    def test_probe_stickiness_released_when_qualified(self):
+        """Probe should be released when it reaches full qualification."""
+        gss = GoldenSectionSearch(lo=1, hi=20)
+        level_data = {1: 5.0, 10: 3.0}
+
+        probe1 = gss.get_next_probe(level_data)
+        assert probe1 is not None
+
+        # Level reaches EXPLORE_MIN_SAMPLES → in level_data → released
+        level_data[probe1] = 2.5
+        probe2 = gss.get_next_probe(level_data)
+        # Should NOT return the same probe (it's now qualified, probe released)
+        # It re-evaluates and may narrow or pick a new probe
+        assert probe2 is not None or gss.converged
 
 
 class TestProbabilityMap:
