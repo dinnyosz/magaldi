@@ -148,6 +148,7 @@ class ThrottleDecision:
     # Probability map: level -> P(best) for display
     prob_map_data: dict[int, float] | None = None
     exploration_status: str | None = None  # Lifecycle status for constant feedback
+    explore_cap: int | None = None  # Effective base_workers after budget cap
 
 
 class ThroughputTracker:
@@ -1155,6 +1156,7 @@ class ExplorationState:
     gss_signal: str | None = None
     prob_map_data: dict[int, float] | None = None
     exploration_status: str | None = None  # Lifecycle status for constant feedback
+    explore_cap: int | None = None  # Effective base_workers after budget cap
 
 
 def compute_effective_base_workers(base_workers: int, total_elements: int) -> int:
@@ -1243,6 +1245,10 @@ class ExplorationOrchestrator:
         """
         state = ExplorationState()
         gss_probe = None
+
+        # Set explore_cap for display when budget capping is active
+        if self._total_elements is not None and self.base_workers < self._original_base_workers:
+            state.explore_cap = self.base_workers
 
         # Skip exploration when budget is too small for meaningful data collection.
         # base_workers=1 means compute_effective_base_workers couldn't fit even
@@ -1827,6 +1833,7 @@ def _build_levels_row(
     prob_map_data: dict[int, float] | None = None,
     prob_min: float = 0.0,
     prob_range: float = 0.0,
+    explore_cap: int | None = None,
 ) -> object:
     """Build a single Rich Table for a chunk of levels (three rows: number + time + count).
 
@@ -1834,6 +1841,7 @@ def _build_levels_row(
     Row 2 (base time): colored by base_time performance (green=fast, red=slow).
     Row 3 (sample count): same coloring as row 2.
     Peak level is underlined. Exploration target is marked with "?" prefix.
+    Levels beyond explore_cap are dimmed (out of exploration range).
 
     Args:
         levels_range: Range of level numbers to display in this row.
@@ -1845,6 +1853,7 @@ def _build_levels_row(
         prob_map_data: Dict of level -> P(best) for probability display, or None.
         prob_min: Minimum probability across ALL levels (for consistent color scaling).
         prob_range: max_prob - min_prob across ALL levels.
+        explore_cap: Max level reachable by exploration, or None if uncapped.
 
     Returns:
         A rich.table.Table renderable.
@@ -1873,12 +1882,28 @@ def _build_levels_row(
     for level in levels_range:
         is_peak = peak_concurrency is not None and level == peak_concurrency
         is_explore = exploration_target is not None and level == exploration_target
+        is_capped = explore_cap is not None and level > explore_cap
 
         # Build level label with probability
         level_label = f"?{level}" if is_explore else str(level)
         if prob_map_data and level in prob_map_data:
             prob = prob_map_data[level]
             level_label = f"{level_label} .{int(prob * 100):02d}"
+
+        # Levels beyond explore_cap are dimmed with strikethrough
+        if is_capped:
+            level_str = level_label.center(_LEVEL_COL_WIDTH)
+            capped_style = "dim strike"
+            row1_cells.append(Text(level_str, style=capped_style))
+            if level in all_levels:
+                avg_bt, count = all_levels[level]
+                bt_str = f"{avg_bt:.1f}s" if avg_bt < 100 else f"{avg_bt:.0f}s"
+                row2_cells.append(Text(bt_str.center(_LEVEL_COL_WIDTH), style=capped_style))
+                row3_cells.append(Text(str(count).center(_LEVEL_COL_WIDTH), style=capped_style))
+            else:
+                row2_cells.append(Text("···".center(_LEVEL_COL_WIDTH), style=capped_style))
+                row3_cells.append(Text(" ".center(_LEVEL_COL_WIDTH), style=capped_style))
+            continue
 
         if level in all_levels:
             avg_bt, count = all_levels[level]
@@ -1953,6 +1978,7 @@ def _build_levels_table(
     max_workers: int = 0,
     exploration_target: int | None = None,
     prob_map_data: dict[int, float] | None = None,
+    explore_cap: int | None = None,
 ) -> object:
     """Build color-graded level blocks, wrapping every _LEVELS_PER_ROW levels.
 
@@ -1962,6 +1988,7 @@ def _build_levels_table(
     - Row 3: sample count (colored by base_time)
 
     Peak level is underlined. Exploration target is marked with "?" prefix.
+    Levels beyond explore_cap are dimmed with strikethrough.
 
     Args:
         all_levels: Dict of level -> (avg_base_time_seconds, sample_count). Must be non-empty.
@@ -1969,6 +1996,7 @@ def _build_levels_table(
         max_workers: Total worker slots (1..max_workers). If 0, uses max level in data.
         exploration_target: Level being explored, or None.
         prob_map_data: Dict of level -> P(best) for probability display, or None.
+        explore_cap: Max level reachable by exploration, or None if uncapped.
 
     Returns:
         A Rich renderable (Table for single row, Group of Tables for multiple).
@@ -2002,7 +2030,7 @@ def _build_levels_table(
     if len(chunks) == 1:
         return _build_levels_row(
             chunks[0], all_levels, min_bt, bt_range, peak_concurrency,
-            exploration_target, prob_map_data, p_min, p_range,
+            exploration_target, prob_map_data, p_min, p_range, explore_cap,
         )
 
     from rich.text import Text
@@ -2014,7 +2042,7 @@ def _build_levels_table(
         tables.append(
             _build_levels_row(
                 chunk, all_levels, min_bt, bt_range, peak_concurrency,
-                exploration_target, prob_map_data, p_min, p_range,
+                exploration_target, prob_map_data, p_min, p_range, explore_cap,
             )  # type: ignore[misc]
         )
     return Group(*tables)
@@ -2026,6 +2054,7 @@ def format_throughput_levels(
     max_workers: int = 0,
     exploration_target: int | None = None,
     prob_map_data: dict[int, float] | None = None,
+    explore_cap: int | None = None,
 ) -> object | str:
     """Build a color-graded level table (Rich renderable).
 
@@ -2039,6 +2068,7 @@ def format_throughput_levels(
         max_workers: Total worker slots to display (1..max_workers). If 0, uses max level.
         exploration_target: Level being explored, or None.
         prob_map_data: Dict of level -> P(best) for probability display, or None.
+        explore_cap: Max level reachable by exploration, or None if uncapped.
 
     Returns:
         Rich Table renderable, or empty string if no data.
@@ -2046,7 +2076,7 @@ def format_throughput_levels(
     if not all_levels:
         return ""
 
-    return _build_levels_table(all_levels, peak_concurrency, max_workers, exploration_target, prob_map_data)
+    return _build_levels_table(all_levels, peak_concurrency, max_workers, exploration_target, prob_map_data, explore_cap)
 
 
 def build_throughput_levels_text(
@@ -2055,6 +2085,7 @@ def build_throughput_levels_text(
     max_workers: int = 0,
     exploration_target: int | None = None,
     prob_map_data: dict[int, float] | None = None,
+    explore_cap: int | None = None,
 ) -> object | None:
     """Build a color-graded level table (Rich renderable).
 
@@ -2070,6 +2101,7 @@ def build_throughput_levels_text(
         max_workers: Total worker slots to display (1..max_workers). If 0, uses max level.
         exploration_target: Level being explored, or None.
         prob_map_data: Dict of level -> P(best) for probability display, or None.
+        explore_cap: Max level reachable by exploration, or None if uncapped.
 
     Returns:
         A Rich Table renderable, or None if no data.
@@ -2077,4 +2109,4 @@ def build_throughput_levels_text(
     if not all_levels:
         return None
 
-    return _build_levels_table(all_levels, peak_concurrency, max_workers, exploration_target, prob_map_data)
+    return _build_levels_table(all_levels, peak_concurrency, max_workers, exploration_target, prob_map_data, explore_cap)

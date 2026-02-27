@@ -322,6 +322,9 @@ def run_feature_extraction(
                 exploration_status = getattr(state, 'exploration_status', None)
                 if exploration_status:
                     stats += f" [dim]|[/] [bright_cyan]{exploration_status}[/]"
+                explore_cap = getattr(state, 'explore_cap', None)
+                if explore_cap is not None:
+                    stats += f" [dim]|[/] [dim]Range:[/] [bright_cyan]1‥{explore_cap}[/][dim]/{num_workers}[/]"
 
             # Build per-level throughput line (separate from stats)
             levels_line = None
@@ -329,7 +332,8 @@ def run_feature_extraction(
                 from shared.throttling import format_throughput_levels
                 explore = getattr(state, 'exploration_target', None)
                 prob_data = getattr(state, 'prob_map_data', None)
-                levels_line = format_throughput_levels(state.all_levels, state.peak_concurrency, max_workers=num_workers, exploration_target=explore, prob_map_data=prob_data)
+                ecap = getattr(state, 'explore_cap', None)
+                levels_line = format_throughput_levels(state.all_levels, state.peak_concurrency, max_workers=num_workers, exploration_target=explore, prob_map_data=prob_data, explore_cap=ecap)
 
             elements = [bar_text]
             if eta_table:

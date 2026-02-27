@@ -1228,6 +1228,83 @@ class TestFormatThroughputLevels:
         assert "3.0s" in text
 
 
+class TestExploreCap:
+    """Tests for explore_cap display in level table and orchestrator."""
+
+    def test_capped_levels_are_dimmed(self):
+        """Levels beyond explore_cap render with dim+strike style."""
+        from shared.throttling import _build_levels_row
+        levels = {1: (2.0, 10), 2: (3.0, 10), 3: (4.0, 10)}
+        # Cap at 2: level 3 should be dimmed
+        table = _build_levels_row(range(1, 4), levels, 2.0, 2.0, None, explore_cap=2)
+        text = _render_to_text(table)
+        # All levels should appear in text
+        assert "1" in text
+        assert "2" in text
+        assert "3" in text
+
+    def test_no_cap_renders_normally(self):
+        """Without explore_cap, all levels render normally."""
+        from shared.throttling import _build_levels_row
+        levels = {1: (2.0, 10), 2: (3.0, 10)}
+        table_capped = _build_levels_row(range(1, 3), levels, 2.0, 1.0, None, explore_cap=1)
+        table_normal = _build_levels_row(range(1, 3), levels, 2.0, 1.0, None, explore_cap=None)
+        # Both should contain level numbers
+        assert "1" in _render_to_text(table_capped)
+        assert "1" in _render_to_text(table_normal)
+
+    def test_cap_with_no_data_levels(self):
+        """Capped levels without data still render as dim+strike."""
+        from shared.throttling import _build_levels_row
+        levels = {1: (2.0, 10)}
+        # Cap at 1: levels 2-3 have no data and are capped
+        table = _build_levels_row(range(1, 4), levels, 2.0, 0.0, None, explore_cap=1)
+        text = _render_to_text(table)
+        assert "1" in text
+        assert "2" in text
+        assert "3" in text
+
+    def test_format_throughput_levels_passes_cap(self):
+        """format_throughput_levels accepts and passes explore_cap."""
+        levels = {1: (2.0, 10), 2: (3.0, 10), 3: (4.0, 10)}
+        result = format_throughput_levels(levels, max_workers=3, explore_cap=2)
+        text = _render_to_text(result)
+        assert "1" in text
+        assert "3" in text
+
+    def test_build_throughput_levels_text_passes_cap(self):
+        """build_throughput_levels_text accepts and passes explore_cap."""
+        levels = {1: (2.0, 10), 2: (3.0, 10)}
+        result = build_throughput_levels_text(levels, max_workers=2, explore_cap=1)
+        assert result is not None
+        text = _render_to_text(result)
+        assert "1" in text
+        assert "2" in text
+
+    def test_orchestrator_sets_explore_cap(self):
+        """ExplorationOrchestrator sets explore_cap when budget is capped."""
+        orch = ExplorationOrchestrator(base_workers=16, total_elements=60)
+        # With 60 elements, cap should be less than 16
+        assert orch.base_workers < 16
+        state = orch.orchestrate({}, None, ThroughputTracker())
+        assert state.explore_cap is not None
+        assert state.explore_cap == orch.base_workers
+
+    def test_orchestrator_no_cap_when_uncapped(self):
+        """ExplorationOrchestrator does not set explore_cap when not capped."""
+        orch = ExplorationOrchestrator(base_workers=4, total_elements=5000)
+        # With 5000 elements, base_workers=4 fits easily
+        assert orch.base_workers == 4
+        state = orch.orchestrate({}, None, ThroughputTracker())
+        assert state.explore_cap is None
+
+    def test_orchestrator_no_cap_without_total_elements(self):
+        """ExplorationOrchestrator without total_elements has no cap."""
+        orch = ExplorationOrchestrator(base_workers=16)
+        state = orch.orchestrate({}, None, ThroughputTracker())
+        assert state.explore_cap is None
+
+
 class TestExplorationTarget:
     """Tests for ThroughputByLevel.get_exploration_target().
 

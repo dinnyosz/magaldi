@@ -412,6 +412,7 @@ class ThrottleDisplayInfo:
     # Probability map: level -> P(best) for display
     prob_map_data: dict[int, float] | None = None
     exploration_status: str | None = None  # Lifecycle status for constant feedback
+    explore_cap: int | None = None  # Effective base_workers after budget cap
 
 
 @dataclass
@@ -530,6 +531,7 @@ class ThrottleContext:
             all_levels=all_levels if all_levels else None,
             prob_map_data=expl.prob_map_data,
             exploration_status=expl.exploration_status,
+            explore_cap=expl.explore_cap,
         )
 
 
