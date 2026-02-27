@@ -1907,10 +1907,10 @@ def _build_levels_row(
             prob = prob_map_data[level]
             level_label = f"{level_label} .{int(prob * 100):02d}"
 
-        # Levels beyond explore_cap are dimmed with strikethrough
+        # Levels beyond explore_cap: visually distinct from "no data yet"
         if is_capped:
-            level_str = level_label.center(_LEVEL_COL_WIDTH)
             capped_style = "dim strike"
+            level_str = level_label.center(_LEVEL_COL_WIDTH)
             row1_cells.append(Text(level_str, style=capped_style))
             if level in all_levels:
                 avg_bt, count = all_levels[level]
@@ -1918,8 +1918,8 @@ def _build_levels_row(
                 row2_cells.append(Text(bt_str.center(_LEVEL_COL_WIDTH), style=capped_style))
                 row3_cells.append(Text(str(count).center(_LEVEL_COL_WIDTH), style=capped_style))
             else:
-                row2_cells.append(Text("···".center(_LEVEL_COL_WIDTH), style=capped_style))
-                row3_cells.append(Text(" ".center(_LEVEL_COL_WIDTH), style=capped_style))
+                row2_cells.append(Text("—".center(_LEVEL_COL_WIDTH), style=capped_style))
+                row3_cells.append(Text(" ".center(_LEVEL_COL_WIDTH)))
             continue
 
         if level in all_levels:
