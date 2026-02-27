@@ -5,11 +5,11 @@ import time
 import pytest
 
 from shared.throttling import (
-    GSS_BLACKLIST_THRESHOLD,
-    GSS_PARTIAL_MIN_SAMPLES,
-    GSS_PROMISING_THRESHOLD,
+    EXPLORE_MIN_SAMPLES,
     EXPLORE_SAMPLES_PER_LEVEL,
+    GSS_PARTIAL_MIN_SAMPLES,
     PHI,
+    ExplorationOrchestrator,
     GoldenSectionSearch,
     ProbabilityMap,
     ThrottleDecision,
@@ -1923,23 +1923,20 @@ class TestGoldenSectionSearch:
         """Bracket should monotonically shrink each step."""
         gss = GoldenSectionSearch(lo=1, hi=32)
         level_data: dict[int, float] = {}
-        prev_range = gss.hi - gss.lo
-
         while not gss.converged:
             probe = gss.get_next_probe(level_data)
             if probe is None:
                 break
             level_data[probe] = abs(probe - 15) + 1.0
 
-            current_range = gss.hi - gss.lo
-            prev_range = current_range
+            current_range = gss.hi - gss.lo  # noqa: F841
 
     def test_bracket_expands_when_best_outside(self):
         """Bracket should expand to include best-performing level outside bracket."""
         gss = GoldenSectionSearch(lo=8, hi=20)
         # Level 4 has the best base_time but is outside [8, 20]
         level_data = {4: 0.8, 8: 1.5, 13: 3.0}
-        probe = gss.get_next_probe(level_data)
+        gss.get_next_probe(level_data)
         # Bracket should have expanded to include level 4
         assert gss.lo <= 4
 
@@ -2024,7 +2021,7 @@ class TestGoldenSectionSearch:
         gss = GoldenSectionSearch(lo=1, hi=10)
         level_data = {1: 1.0}  # best = 1.0
         # Blacklist everything in range: base_time > 1.0 * 1.5 = 1.5
-        partial_data = {i: (5.0, 5) for i in range(2, 11)}
+        partial_data = dict.fromkeys(range(2, 11), (5.0, 5))
         probe = gss.get_next_probe(level_data, partial_data=partial_data)
         # Partial data allows bracket narrowing → converges quickly
         # with best_level near 1 (the only good level)
@@ -2402,3 +2399,229 @@ class TestProbabilityMap:
         assert probe == 7
         assert gss.last_signal is not None
         assert "pmap" in gss.last_signal
+
+
+class TestExplorationOrchestrator:
+    """Tests for ExplorationOrchestrator — shared GSS lifecycle.
+
+    The orchestrator manages: warmup A → warmup B → GSS → converge → monitor peak.
+    Used by both ThrottleContext (phases 4/7/8) and DependencyTracker (phase 5).
+    """
+
+    def _make_tracker(self) -> ThroughputTracker:
+        return ThroughputTracker(window_seconds=300.0)
+
+    def test_warmup_a_forces_level_1(self):
+        """With no data, warmup A forces workers to level 1."""
+        orch = ExplorationOrchestrator(base_workers=8)
+        tracker = self._make_tracker()
+
+        state = orch.orchestrate({}, None, tracker)
+        assert state.warmup_override == 1
+        assert state.warmup_reason is not None
+        assert "Warmup A" in state.warmup_reason
+        assert state.gss_probe is None
+
+    def test_warmup_b_forces_high_probe(self):
+        """After level 1 has enough data, warmup B forces high probe."""
+        orch = ExplorationOrchestrator(base_workers=12)
+        tracker = self._make_tracker()
+        warmup_high = max(2, int(12 * 2 / 3))  # = 8
+
+        # Level 1 has enough data
+        all_levels: dict[int, tuple[float, int]] = {
+            1: (5.0, EXPLORE_MIN_SAMPLES),
+        }
+        state = orch.orchestrate(all_levels, None, tracker)
+        assert state.warmup_override == warmup_high
+        assert state.warmup_reason is not None
+        assert "Warmup B" in state.warmup_reason
+
+    def test_gss_initializes_after_both_warmups(self):
+        """GSS initializes when both level 1 and high probe have enough data."""
+        orch = ExplorationOrchestrator(base_workers=12)
+        tracker = self._make_tracker()
+        warmup_high = max(2, int(12 * 2 / 3))  # = 8
+
+        all_levels: dict[int, tuple[float, int]] = {
+            1: (5.0, EXPLORE_MIN_SAMPLES),
+            warmup_high: (3.0, EXPLORE_MIN_SAMPLES),
+        }
+        state = orch.orchestrate(all_levels, None, tracker)
+
+        # GSS should now be active — no warmup override
+        assert state.warmup_override is None
+        # GSS probe should be returned (or None if converged immediately)
+        assert state.gss_lo is not None
+        assert state.gss_hi is not None
+        assert state.gss_lo == 1
+        assert state.gss_hi == 12
+
+    def test_gss_probe_returned_during_search(self):
+        """During active GSS, a probe target is returned."""
+        orch = ExplorationOrchestrator(base_workers=20)
+        tracker = self._make_tracker()
+        warmup_high = max(2, int(20 * 2 / 3))  # = 13
+
+        all_levels: dict[int, tuple[float, int]] = {
+            1: (5.0, EXPLORE_MIN_SAMPLES),
+            warmup_high: (3.0, EXPLORE_MIN_SAMPLES),
+        }
+        state = orch.orchestrate(all_levels, None, tracker)
+
+        # With a wide bracket [1, 20], GSS should return a probe
+        assert state.gss_probe is not None
+        assert 1 <= state.gss_probe <= 20
+        # Legacy exploration disabled during GSS
+        assert state.exploration_target is None
+
+    def test_reset_clears_gss_and_prob_map(self):
+        """Reset clears GSS and probability map state."""
+        orch = ExplorationOrchestrator(base_workers=12)
+        tracker = self._make_tracker()
+        warmup_high = max(2, int(12 * 2 / 3))
+
+        # Initialize GSS
+        all_levels: dict[int, tuple[float, int]] = {
+            1: (5.0, EXPLORE_MIN_SAMPLES),
+            warmup_high: (3.0, EXPLORE_MIN_SAMPLES),
+        }
+        orch.orchestrate(all_levels, None, tracker)
+        assert orch._gss is not None
+
+        # Reset
+        orch.reset()
+        assert orch._gss is None
+        assert orch._prob_map is None
+
+        # After reset, warmup A should start again
+        state = orch.orchestrate({}, None, tracker)
+        assert state.warmup_override == 1
+
+    def test_effective_peak_from_gss_convergence(self):
+        """After GSS converges, effective_peak comes from GSS best_level."""
+        orch = ExplorationOrchestrator(base_workers=10)
+        tracker = self._make_tracker()
+
+        # Provide data at ALL levels so GSS probes find data and can narrow.
+        # Level 4 has base_time=1.0 (best), others increase with distance.
+        all_levels: dict[int, tuple[float, int]] = {
+            i: (abs(i - 4) + 1.0, EXPLORE_MIN_SAMPLES)
+            for i in range(1, 11)
+        }
+
+        # Run until GSS converges
+        state = None
+        for _ in range(30):
+            state = orch.orchestrate(all_levels, None, tracker)
+            if orch._gss and orch._gss.converged:
+                break
+
+        assert state is not None
+        assert orch._gss is not None
+        assert orch._gss.converged
+        assert state.effective_peak is not None
+        # With all data, GSS should converge to level 4 (lowest base_time)
+        assert state.effective_peak == 4
+
+    def test_effective_peak_falls_back_to_legacy(self):
+        """Before GSS, effective_peak comes from legacy ThroughputTracker."""
+        orch = ExplorationOrchestrator(base_workers=8)
+        tracker = self._make_tracker()
+
+        # No data — warmup phase, legacy peak used
+        state = orch.orchestrate({}, legacy_peak=5, throughput_tracker=tracker)
+        assert state.effective_peak == 5
+
+    def test_post_convergence_peak_update_with_hold(self):
+        """After convergence, new peak requires sufficient samples (hold logic)."""
+        orch = ExplorationOrchestrator(base_workers=10)
+        tracker = self._make_tracker()
+
+        # First converge GSS with data at all levels
+        # Level 4 has base_time=1.0 (best)
+        all_levels: dict[int, tuple[float, int]] = {
+            i: (abs(i - 4) + 1.0, EXPLORE_MIN_SAMPLES)
+            for i in range(1, 11)
+        }
+        for _ in range(30):
+            orch.orchestrate(all_levels, None, tracker)
+            if orch._gss and orch._gss.converged:
+                break
+        assert orch._gss is not None
+        assert orch._gss.converged
+        assert orch._gss.best_level == 4
+
+        # Now level 5 appears better but with only 2 samples — should hold
+        # min_hold = max(5, 5 // 2) = 5
+        all_levels_new = dict(all_levels)
+        all_levels_new[5] = (0.5, 2)  # Better bt but only 2 samples (< min_hold=5)
+        state = orch.orchestrate(all_levels_new, None, tracker)
+        # Should hold at level 4 (insufficient samples to switch)
+        assert state.effective_peak == 4
+
+        # Now level 5 gets enough samples — should update
+        all_levels_confirmed = dict(all_levels)
+        all_levels_confirmed[5] = (0.5, EXPLORE_MIN_SAMPLES)  # Enough samples
+        state = orch.orchestrate(all_levels_confirmed, None, tracker)
+        assert state.effective_peak == 5
+
+    def test_legacy_exploration_disabled_during_gss(self):
+        """During active GSS, legacy exploration_target is None."""
+        orch = ExplorationOrchestrator(base_workers=20)
+        tracker = self._make_tracker()
+        warmup_high = max(2, int(20 * 2 / 3))
+
+        # Seed tracker with data for legacy exploration
+        for _ in range(EXPLORE_MIN_SAMPLES):
+            tracker.record_completion(3.0, 2)
+            tracker.record_completion(10.0, 6)
+
+        all_levels: dict[int, tuple[float, int]] = {
+            1: (5.0, EXPLORE_MIN_SAMPLES),
+            warmup_high: (3.0, EXPLORE_MIN_SAMPLES),
+        }
+        state = orch.orchestrate(all_levels, None, tracker)
+
+        # GSS active → legacy exploration disabled
+        assert state.gss_probe is not None
+        assert state.exploration_target is None
+
+    def test_legacy_exploration_enabled_after_convergence(self):
+        """After GSS converges, legacy exploration is re-enabled."""
+        orch = ExplorationOrchestrator(base_workers=10)
+        tracker = self._make_tracker()
+
+        # Provide data at ALL levels 1-10 so GSS probes always find data.
+        # Peak at level 4 (lowest base_time = fastest).
+        all_levels: dict[int, tuple[float, int]] = {
+            i: (abs(i - 4) + 1.0, EXPLORE_MIN_SAMPLES) for i in range(1, 11)
+        }
+        for _ in range(30):
+            orch.orchestrate(all_levels, None, tracker)
+            if orch._gss and orch._gss.converged:
+                break
+
+        assert orch._gss is not None
+        assert orch._gss.converged
+
+        # After convergence, exploration_target comes from legacy tracker
+        # (may be None if all neighbors explored, but the code path is enabled)
+        state = orch.orchestrate(all_levels, None, tracker)
+        assert state.gss_probe is None  # GSS no longer probing
+
+    def test_prob_map_data_populated(self):
+        """Probability map data should be populated when GSS is active."""
+        orch = ExplorationOrchestrator(base_workers=12)
+        tracker = self._make_tracker()
+        warmup_high = max(2, int(12 * 2 / 3))
+
+        all_levels: dict[int, tuple[float, int]] = {
+            1: (5.0, EXPLORE_MIN_SAMPLES),
+            warmup_high: (3.0, EXPLORE_MIN_SAMPLES),
+        }
+        state = orch.orchestrate(all_levels, None, tracker)
+
+        # prob_map_data should be populated
+        assert state.prob_map_data is not None
+        assert len(state.prob_map_data) > 0

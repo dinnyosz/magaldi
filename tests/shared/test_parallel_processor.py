@@ -384,10 +384,10 @@ class TestRunThrottledTierWarmup:
         _, _, count_after, _, _ = tracker.get_stats_with_concurrency()
         assert count_after == 2  # Only current tier, not 3+2=5
 
-        # GSS and prob_map should have been reset (processing may re-init, but
-        # for 2 items there's not enough data to trigger GSS initialization)
-        assert ctx._gss is None
-        assert ctx._prob_map is None
+        # ExplorationOrchestrator should have been reset (processing may re-init,
+        # but for 2 items there's not enough data to trigger GSS initialization)
+        assert ctx._exploration._gss is None
+        assert ctx._exploration._prob_map is None
 
     def test_on_tick_called_during_processing(self):
         """on_tick should be called during the processing loop."""
