@@ -536,7 +536,7 @@ class DependencyTracker:
                 decision.gss_signal = expl.gss_signal
                 decision.prob_map_data = expl.prob_map_data
                 decision.exploration_status = expl.exploration_status
-                decision.explore_cap = expl.explore_cap
+                decision.explore_cap = getattr(expl, 'explore_cap', None)
             return decision
 
     def get_tier_stats(self) -> dict[int, tuple[int, int]]:

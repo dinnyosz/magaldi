@@ -531,7 +531,7 @@ class ThrottleContext:
             all_levels=all_levels if all_levels else None,
             prob_map_data=expl.prob_map_data,
             exploration_status=expl.exploration_status,
-            explore_cap=expl.explore_cap,
+            explore_cap=getattr(expl, 'explore_cap', None),
         )
 
 
