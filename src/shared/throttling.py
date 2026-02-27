@@ -1908,8 +1908,9 @@ def _build_levels_row(
             level_label = f"{level_label} .{int(prob * 100):02d}"
 
         # Levels beyond explore_cap: visually distinct from "no data yet"
+        # Use "dim" only (no strike — strikethrough bleeds into padding spaces)
         if is_capped:
-            capped_style = "dim strike"
+            capped_style = "dim"
             level_str = level_label.center(_LEVEL_COL_WIDTH)
             row1_cells.append(Text(level_str, style=capped_style))
             if level in all_levels:

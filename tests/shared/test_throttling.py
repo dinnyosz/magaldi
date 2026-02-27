@@ -1232,7 +1232,7 @@ class TestExploreCap:
     """Tests for explore_cap display in level table and orchestrator."""
 
     def test_capped_levels_are_dimmed(self):
-        """Levels beyond explore_cap render with dim+strike style."""
+        """Levels beyond explore_cap render with dim style."""
         from shared.throttling import _build_levels_row
         levels = {1: (2.0, 10), 2: (3.0, 10), 3: (4.0, 10)}
         # Cap at 2: level 3 should be dimmed
