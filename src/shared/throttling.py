@@ -1134,6 +1134,208 @@ class ProbabilityMap:
         return dict(self._probs)
 
 
+@dataclass
+class ExplorationState:
+    """Result of exploration orchestration."""
+
+    gss_probe: int | None = None
+    effective_peak: int | None = None
+    exploration_target: int | None = None
+    warmup_override: int | None = None  # Force workers to this level (warmup phases)
+    warmup_reason: str | None = None  # Reason string for display
+    # Display fields
+    gss_lo: int | None = None
+    gss_hi: int | None = None
+    gss_signal: str | None = None
+    prob_map_data: dict[int, float] | None = None
+
+
+class ExplorationOrchestrator:
+    """Manages GSS-based worker count exploration.
+
+    Lifecycle: warmup A (level 1) → warmup B (high probe) → GSS → converge → monitor peak
+
+    Shared between ThrottleContext (phases 4/7/8) and DependencyTracker (phase 5)
+    to avoid duplicating the GSS orchestration logic.
+    """
+
+    def __init__(self, base_workers: int):
+        self.base_workers = base_workers
+        self._gss: GoldenSectionSearch | None = None
+        self._prob_map: ProbabilityMap | None = None
+
+    def reset(self) -> None:
+        """Reset on tier change."""
+        self._gss = None
+        self._prob_map = None
+
+    def orchestrate(
+        self,
+        all_levels: dict[int, tuple[float, int]],
+        legacy_peak: int | None,
+        throughput_tracker: ThroughputTracker,
+        remaining: int | None = None,
+    ) -> ExplorationState:
+        """Run one cycle of the exploration state machine.
+
+        Args:
+            all_levels: Per-level throughput data: level -> (avg_base_time, sample_count).
+            legacy_peak: Peak concurrency from ThroughputTracker (used as fallback).
+            throughput_tracker: For legacy exploration target when GSS is not active.
+            remaining: Elements left to process (for budget-aware exploration).
+
+        Returns:
+            ExplorationState with all fields populated for the caller.
+        """
+        state = ExplorationState()
+        gss_probe = None
+
+        # Build level_data: levels with enough samples for GSS decisions.
+        level_data = {
+            lvl: bt
+            for lvl, (bt, cnt) in all_levels.items()
+            if cnt >= EXPLORE_MIN_SAMPLES
+        }
+
+        # Partial data: levels with some signal but not yet qualified.
+        partial_data = {
+            lvl: (bt, cnt)
+            for lvl, (bt, cnt) in all_levels.items()
+            if GSS_PARTIAL_MIN_SAMPLES <= cnt < EXPLORE_MIN_SAMPLES
+        }
+
+        # Two-phase warmup before GSS:
+        # Phase A: run at level 1 until EXPLORE_MIN_SAMPLES → solid low-end baseline
+        # Phase B: run at high probe (~2/3 of max) until EXPLORE_MIN_SAMPLES → high-end reference
+        warmup_high_probe = max(2, int(self.base_workers * 2 / 3))
+        level1_count = all_levels.get(1, (0, 0))[1] if all_levels else 0
+        high_probe_count = (
+            all_levels.get(warmup_high_probe, (0, 0))[1] if all_levels else 0
+        )
+
+        if (
+            self._gss is None
+            and level1_count >= EXPLORE_MIN_SAMPLES
+            and high_probe_count >= EXPLORE_MIN_SAMPLES
+        ):
+            self._gss = GoldenSectionSearch(lo=1, hi=self.base_workers)
+            self._prob_map = ProbabilityMap(lo=1, hi=self.base_workers)
+            _log_throttle(
+                f"GSS INIT: bracket=[{self._gss.lo}, {self._gss.hi}] "
+                f"(level 1={level1_count}, level {warmup_high_probe}={high_probe_count} samples)"
+            )
+
+        # Update probability map: direct score mapping from base_time data.
+        if self._prob_map is not None and all_levels:
+            level_base_times = {lvl: bt for lvl, (bt, _cnt) in all_levels.items()}
+            self._prob_map.set_scores(level_base_times)
+
+        if self._gss is not None and not self._gss.converged:
+            gss_probe = self._gss.get_next_probe(
+                level_data,
+                partial_data=partial_data,
+                prob_map=self._prob_map,
+            )
+            if self._gss.converged:
+                # Boundary re-search: if best_level landed at/near the hi edge
+                # and there's room above, extend and restart GSS.
+                old_hi = self._gss.hi
+                if (
+                    self._gss.best_level is not None
+                    and self._gss.best_level >= old_hi - 1
+                    and old_hi < self.base_workers
+                ):
+                    new_lo = max(1, old_hi - 2)  # overlap slightly
+                    _log_throttle(
+                        f"GSS BOUNDARY: best={self._gss.best_level} hit hi={old_hi}, "
+                        f"extending to [{new_lo}, {self.base_workers}]"
+                    )
+                    self._gss = GoldenSectionSearch(lo=new_lo, hi=self.base_workers)
+                    self._prob_map = ProbabilityMap(lo=new_lo, hi=self.base_workers)
+                    gss_probe = self._gss.get_next_probe(
+                        level_data,
+                        partial_data=partial_data,
+                        prob_map=self._prob_map,
+                    )
+                else:
+                    _log_throttle(
+                        f"GSS CONVERGED: best_level={self._gss.best_level}"
+                    )
+
+        # Post-convergence peak update with hold logic
+        if self._gss and self._gss.converged and level_data:
+            actual_best = min(level_data, key=level_data.get)  # type: ignore[arg-type]
+            if (
+                self._gss.best_level is None
+                or level_data.get(actual_best, float("inf"))
+                < level_data.get(self._gss.best_level, float("inf"))
+            ) and actual_best != self._gss.best_level:
+                # Check sample count before switching peak
+                min_hold = max(5, actual_best // 2)
+                best_count = all_levels.get(actual_best, (0, 0))[1]
+                if best_count >= min_hold:
+                    _log_throttle(
+                        f"PEAK UPDATE: {self._gss.best_level}→{actual_best} "
+                        f"(bt={level_data[actual_best]:.2f} vs "
+                        f"{level_data.get(self._gss.best_level, 0):.2f}, "
+                        f"samples={best_count}≥{min_hold})"
+                    )
+                    self._gss.best_level = actual_best
+                else:
+                    _log_throttle(
+                        f"PEAK HOLD: {actual_best} looks better "
+                        f"(bt={level_data[actual_best]:.2f}) but only "
+                        f"{best_count}/{min_hold} samples — keeping "
+                        f"{self._gss.best_level}"
+                    )
+
+        effective_peak = (
+            self._gss.best_level if (self._gss and self._gss.converged) else legacy_peak
+        )
+
+        # Only use legacy exploration when GSS is not active
+        if self._gss is None or self._gss.converged:
+            explore = throughput_tracker.get_exploration_target(
+                self.base_workers, remaining
+            )
+        else:
+            explore = None  # GSS handles exploration
+
+        # Pre-GSS warmup: force specific levels to collect baseline data.
+        if self._gss is None:
+            l1_cnt = all_levels.get(1, (0, 0))[1] if all_levels else 0
+            if l1_cnt < EXPLORE_MIN_SAMPLES:
+                state.warmup_override = 1
+                state.warmup_reason = (
+                    f"Warmup A: level 1 ({l1_cnt}/{EXPLORE_MIN_SAMPLES})"
+                )
+            else:
+                hi_cnt = (
+                    all_levels.get(warmup_high_probe, (0, 0))[1]
+                    if all_levels
+                    else 0
+                )
+                state.warmup_override = warmup_high_probe
+                state.warmup_reason = (
+                    f"Warmup B: level {warmup_high_probe} "
+                    f"({hi_cnt}/{EXPLORE_MIN_SAMPLES})"
+                )
+
+        # Populate state
+        state.gss_probe = gss_probe
+        state.effective_peak = effective_peak
+        state.exploration_target = explore
+        if self._gss is not None:
+            state.gss_lo = self._gss.lo
+            state.gss_hi = self._gss.hi
+            state.gss_signal = self._gss.last_signal
+        state.prob_map_data = (
+            self._prob_map.get_probabilities() if self._prob_map else None
+        )
+
+        return state
+
+
 def _compute_formula_confidence(
     completion_count: int,
     peak_concurrency: int | None = None,
