@@ -211,12 +211,15 @@ def run_glossary_extraction(
                 item_label, model, ctx_size = workers_data[wid]
                 stage = "summarizing" if "summar" in phase.lower() else "extracting"
                 worker_table.add_row(f"[{display_id}]", stage, model, ctx_size, item_label)
+            # Continue numbering for idle and throttled slots
+            next_id = active_count + 1
             # Then idle slots (allowed but not active)
-            for _i in range(idle_slots):
-                worker_table.add_row(f"[{'·'}]", "[dim]idle[/]", "", "", "")
+            for i in range(idle_slots):
+                worker_table.add_row(f"[{next_id + i}]", "[dim]idle[/]", "", "", "")
+            next_id += idle_slots
             # Then throttled slots (beyond allowed limit)
-            for _i in range(throttled_slots):
-                worker_table.add_row(f"[{'·'}]", "[dim yellow]throttled[/]", "", "", "")
+            for i in range(throttled_slots):
+                worker_table.add_row(f"[{next_id + i}]", "[dim yellow]throttled[/]", "", "", "")
 
             # Stats line - different labels for each phase
             avg_api = state.timing.avg_api_time

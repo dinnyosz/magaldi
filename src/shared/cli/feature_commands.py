@@ -291,12 +291,15 @@ def run_feature_extraction(
                 elapsed = now - start_time if start_time > 0 else 0
                 elapsed_str = f"{elapsed:.1f}s" if elapsed > 0 else ""
                 worker_table.add_row(f"[{display_id}]", stage, model, ctx_size, elapsed_str, feature_name)
+            # Continue numbering for idle and throttled slots
+            next_id = active_count + 1
             # Then idle slots (allowed but not active)
-            for _i in range(idle_slots):
-                worker_table.add_row(f"[{'·'}]", "[dim]idle[/]", "", "", "", "")
+            for i in range(idle_slots):
+                worker_table.add_row(f"[{next_id + i}]", "[dim]idle[/]", "", "", "", "")
+            next_id += idle_slots
             # Then throttled slots (beyond allowed limit)
-            for _i in range(throttled_slots):
-                worker_table.add_row(f"[{'·'}]", "[dim yellow]throttled[/]", "", "", "", "")
+            for i in range(throttled_slots):
+                worker_table.add_row(f"[{next_id + i}]", "[dim yellow]throttled[/]", "", "", "", "")
 
             # Stats line
             avg_api = state.timing.avg_summarize_time + state.timing.avg_embed_time
@@ -489,12 +492,15 @@ def run_feature_extraction(
                     display_parent = parent_feature[:25] + "..." if len(parent_feature) > 28 else parent_feature
                     display_sub = subfeature[:35] + "..." if len(subfeature) > 38 else subfeature
                     worker_table.add_row(f"[{display_id}]", stage, model, ctx_size, elapsed_str, display_parent, display_sub)
+                # Continue numbering for idle and throttled slots
+                next_id = active_count + 1
                 # Then idle slots (allowed but not active)
-                for _i in range(idle_slots):
-                    worker_table.add_row(f"[{'·'}]", "[dim]idle[/]", "", "", "", "", "")
+                for i in range(idle_slots):
+                    worker_table.add_row(f"[{next_id + i}]", "[dim]idle[/]", "", "", "", "", "")
+                next_id += idle_slots
                 # Then throttled slots (beyond allowed limit)
-                for _i in range(throttled_slots):
-                    worker_table.add_row(f"[{'·'}]", "[dim yellow]throttled[/]", "", "", "", "", "")
+                for i in range(throttled_slots):
+                    worker_table.add_row(f"[{next_id + i}]", "[dim yellow]throttled[/]", "", "", "", "", "")
 
                 # Stats line
                 avg_api = state.timing.avg_summarize_time + state.timing.avg_embed_time
