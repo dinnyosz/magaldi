@@ -1645,6 +1645,91 @@ class TestPerElementContextSize:
         assert "2K" in ctx_sizes
 
 
+class TestHandcraftedTierBatching:
+    """Tests for handcrafted tier (HANDCRAFTED_TIER=0) batching in DependencyTracker."""
+
+    def test_handcrafted_elements_get_tier_zero(self):
+        """Elements with context_size=0 should return tier 0 from _get_tier."""
+        import_elem = make_element("s:r:u:a.py:import:os:1", "import", None, 0)
+        func_elem = make_element("s:r:u:a.py:function:small:10", "function", None, 2)
+
+        context_sizes = {
+            import_elem.element_id: 0,   # HANDCRAFTED_TIER
+            func_elem.element_id: 2048,  # Regular LLM tier
+        }
+
+        tracker = DependencyTracker([import_elem, func_elem], context_sizes)
+        assert tracker._get_tier(import_elem.element_id) == 0
+        assert tracker._get_tier(func_elem.element_id) == 2048
+
+    def test_handcrafted_elements_get_handcrafted_model_key(self):
+        """Elements with context_size=0 should return 'handcrafted' model key."""
+        import_elem = make_element("s:r:u:a.py:import:os:1", "import", None, 0)
+        small_func = make_element("s:r:u:a.py:function:small:10", "function", None, 2)
+        small_func.raw_code = "def small(): pass"
+        large_func = make_element("s:r:u:a.py:function:big:20", "function", None, 2)
+        large_func.raw_code = "def big():\n" + "    x = 1\n" * 50
+
+        context_sizes = {
+            import_elem.element_id: 0,     # HANDCRAFTED_TIER
+            small_func.element_id: 0,      # Small function also handcrafted
+            large_func.element_id: 2048,   # Regular LLM tier
+        }
+
+        tracker = DependencyTracker(
+            [import_elem, small_func, large_func], context_sizes
+        )
+        assert tracker._get_model_key(import_elem) == "handcrafted"
+        assert tracker._get_model_key(small_func) == "handcrafted"
+        assert tracker._get_model_key(large_func) == "small"
+
+    def test_handcrafted_batched_separately_from_llm(self):
+        """Handcrafted elements should form their own (model, tier) batch,
+        separate from LLM elements even at the same hierarchy level."""
+        file_elem = make_element("s:r:u:a.py:file:a.py:1", "file", None, 0)
+        import_elem = make_element("s:r:u:a.py:import:os:2", "import", "s:r:u:a.py:file:a.py:1", 0)
+
+        context_sizes = {
+            file_elem.element_id: 2048,    # Regular LLM tier
+            import_elem.element_id: 0,      # HANDCRAFTED_TIER
+        }
+
+        tracker = DependencyTracker([file_elem, import_elem], context_sizes)
+
+        # First batch: file at tier 2048 (larger tier preferred first)
+        ready = tracker.get_ready_elements(max_count=10)
+        assert len(ready) == 1
+        assert ready[0].element_type == "file"
+
+    def test_handcrafted_tier_processed_last(self):
+        """HANDCRAFTED_TIER (0) is the smallest tier, so it should be
+        processed after all LLM tiers (which use max() for priority)."""
+        # Two level-0 elements: a file (LLM) and an import (handcrafted)
+        # Both have no parent, so both are ready
+        file_elem = make_element("s:r:u:a.py:file:a.py:1", "file", None, 0)
+        import_elem = make_element("s:r:u:b.py:import:os:2", "import", None, 0)
+
+        context_sizes = {
+            file_elem.element_id: 2048,
+            import_elem.element_id: 0,
+        }
+
+        tracker = DependencyTracker([file_elem, import_elem], context_sizes)
+
+        # First dispatch: largest tier first → file at 2048
+        ready = tracker.get_ready_elements(max_count=10)
+        assert len(ready) == 1
+        assert ready[0].element_id == file_elem.element_id
+
+        # Complete the file
+        tracker.mark_complete(file_elem.element_id)
+
+        # Second dispatch: import at tier 0
+        ready = tracker.get_ready_elements(max_count=10)
+        assert len(ready) == 1
+        assert ready[0].element_id == import_elem.element_id
+
+
 class TestDynamicWorkerScaling:
     """Tests for dynamic worker scaling with tier-based batching and warmup."""
 
@@ -2643,12 +2728,14 @@ class TestCrossTierThroughputLeak:
         )
 
     def test_handcrafted_elements_excluded_from_throughput(self):
-        """Handcrafted elements (imports, small functions) complete near-
-        instantly without LLM calls. Their timings should NOT be recorded
-        in the throughput tracker since they'd skew the level table with
-        artificially fast measurements.
+        """Handcrafted elements (imports, small functions) have their own
+        tier (HANDCRAFTED_TIER=0) and model key ("handcrafted"). Their
+        completions are recorded to their own level table but don't pollute
+        LLM tier throughput data because the model/tier mismatch guard
+        excludes cross-tier recordings.
 
-        This tests the guard: if _should_handcraft(element, config): skip.
+        This tests the guard: submitted_model == active_model and
+        submitted_tier == active_tier.
         """
         from magaldi_core.processor import ProcessingConfig, _should_handcraft
 
@@ -2675,31 +2762,51 @@ class TestCrossTierThroughputLeak:
 
         stats = TimingStats()
 
-        # Simulate: handcrafted import completes in 0.01s — should NOT record
-        is_handcrafted = _should_handcraft(import_elem, config)
-        submitted_model, submitted_tier = "large", 2048
-        active_model, active_tier = "large", 2048
+        # Simulate: handcrafted import submitted under ("handcrafted", 0)
+        # but active tier is ("small", 2048) — model/tier mismatch excludes it
+        submitted_model, submitted_tier = "handcrafted", 0
+        active_model, active_tier = "small", 2048
         if (
-            not is_handcrafted
-            and submitted_model == active_model
+            submitted_model == active_model
             and submitted_tier == active_tier
         ):
             stats.record_task_runtime(0.01, 4)
 
         levels = stats.get_all_throughput_levels()
         assert len(levels) == 0, (
-            "Handcrafted element should not pollute level table"
+            "Handcrafted element should not pollute LLM tier level table"
         )
 
         # Simulate: regular function completes in 2.0s — SHOULD record
-        is_handcrafted = _should_handcraft(func_elem, config)
+        submitted_model, submitted_tier = "small", 2048
         if (
-            not is_handcrafted
-            and submitted_model == active_model
+            submitted_model == active_model
             and submitted_tier == active_tier
         ):
             stats.record_task_runtime(2.0, 4)
 
         levels = stats.get_all_throughput_levels()
         assert 4 in levels, "Regular LLM element should be recorded"
+        assert levels[4][1] == 1
+
+    def test_handcrafted_elements_record_to_own_tier(self):
+        """Handcrafted elements record to their own level table when
+        they are the active tier. This enables GSS exploration for the
+        handcrafted tier instead of being stuck at 1 worker.
+        """
+        stats = TimingStats()
+
+        # Simulate: handcrafted tier is active, import completes
+        submitted_model, submitted_tier = "handcrafted", 0
+        active_model, active_tier = "handcrafted", 0
+        if (
+            submitted_model == active_model
+            and submitted_tier == active_tier
+        ):
+            stats.record_task_runtime(0.01, 4)
+
+        levels = stats.get_all_throughput_levels()
+        assert 4 in levels, (
+            "Handcrafted element should record to its own level table"
+        )
         assert levels[4][1] == 1
