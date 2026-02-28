@@ -10,12 +10,12 @@ import pytest
 
 from magaldi_core.change_detection import FileInfo
 from magaldi_core.code_parser import (
-    Call,
     JavaScriptParser,
     PhpParser,
     PythonParser,
     RustParser,
 )
+from magaldi_core.parsers.base import Call
 
 # =============================================================================
 # FIXTURES
@@ -340,11 +340,61 @@ class TestPhase2Resolution:
         assert "magaldi_core/storage.py" in paths
 
     def test_relative_import_skipped(self):
-        """Test that relative imports are skipped (hard to resolve)."""
+        """Test that relative imports are skipped without caller_path."""
         from magaldi_core.call_resolution import _module_to_file_paths
 
-        paths = _module_to_file_paths("./utils")
+        paths = _module_to_file_paths(".utils")
         assert len(paths) == 0
+
+
+# =============================================================================
+# FIX 2: TYPE UNWRAPPING TESTS
+# =============================================================================
+
+
+class TestUnwrapType:
+    """Tests for _unwrap_type() helper."""
+
+    def test_plain_type(self):
+        from magaldi_core.call_resolution import _unwrap_type
+
+        assert _unwrap_type("Repository") == "Repository"
+
+    def test_optional(self):
+        from magaldi_core.call_resolution import _unwrap_type
+
+        assert _unwrap_type("Optional[Repository]") == "Repository"
+
+    def test_union_with_none(self):
+        from magaldi_core.call_resolution import _unwrap_type
+
+        assert _unwrap_type("Union[Repository, None]") == "Repository"
+
+    def test_generic(self):
+        from magaldi_core.call_resolution import _unwrap_type
+
+        assert _unwrap_type("list[str]") == "list"
+
+    def test_qualified_name(self):
+        from magaldi_core.call_resolution import _unwrap_type
+
+        assert _unwrap_type("db.Repository") == "Repository"
+
+    def test_optional_qualified(self):
+        from magaldi_core.call_resolution import _unwrap_type
+
+        assert _unwrap_type("Optional[db.Repository]") == "Repository"
+
+    def test_whitespace(self):
+        from magaldi_core.call_resolution import _unwrap_type
+
+        assert _unwrap_type("  Repository  ") == "Repository"
+
+    def test_union_multiple_non_none(self):
+        """Union with multiple non-None types keeps the Union prefix."""
+        from magaldi_core.call_resolution import _unwrap_type
+
+        assert _unwrap_type("Union[str, int]") == "Union"
 
 
 # =============================================================================

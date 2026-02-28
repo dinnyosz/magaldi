@@ -369,6 +369,42 @@ def _module_to_file_paths(module: str) -> list[str]:
     return paths
 
 
+def _unwrap_type(type_name: str) -> str:
+    """Unwrap wrapper types to get the base class name.
+
+    Handles Optional, Union, generics, and qualified names.
+
+    Examples:
+        "Optional[Repository]" -> "Repository"
+        "Union[Repository, None]" -> "Repository"
+        "list[str]" -> "list"
+        "db.Repository" -> "Repository"
+        "Repository" -> "Repository"
+    """
+    stripped = type_name.strip()
+
+    # Strip Optional[] wrapper
+    if stripped.startswith("Optional[") and stripped.endswith("]"):
+        stripped = stripped[9:-1].strip()
+
+    # Strip Union[X, None] pattern (common for Optional in older Python)
+    if stripped.startswith("Union[") and stripped.endswith("]"):
+        inner = stripped[6:-1]
+        parts = [p.strip() for p in inner.split(",")]
+        non_none = [p for p in parts if p != "None"]
+        if len(non_none) == 1:
+            stripped = non_none[0]
+
+    # Strip remaining generics: "list[str]" -> "list"
+    base_type = stripped.split("[")[0].strip()
+
+    # Handle qualified names: "db.Repository" -> "Repository"
+    if "." in base_type:
+        base_type = base_type.split(".")[-1]
+
+    return base_type
+
+
 def _lookup_method_by_type(
     repo: Repository,
     type_name: str,
@@ -392,12 +428,7 @@ def _lookup_method_by_type(
     Returns:
         Element ID of the method if found, None otherwise.
     """
-    # Strip generic parameters (e.g., "list[str]" -> "list")
-    base_type = type_name.split("[")[0].strip()
-
-    # Handle qualified names (e.g., "db.Repository" -> "Repository")
-    if "." in base_type:
-        base_type = base_type.split(".")[-1]
+    base_type = _unwrap_type(type_name)
 
     # Look up the class by name (without path since we only have the type name)
     class_doc = repo.get_document_by_name_only(
@@ -423,6 +454,28 @@ def _lookup_method_by_type(
         repository=repository,
         username=username,
     )
+
+    # Fallback: try base classes (single-level inheritance)
+    if not method_doc:
+        base_classes = class_doc.get("base_classes") or []
+        for base_name in base_classes:
+            base_class_doc = repo.get_document_by_name_only(
+                name=base_name,
+                element_type="class",
+                scope=scope,
+                repository=repository,
+                username=username,
+            )
+            if base_class_doc and base_class_doc.get("element_id"):
+                method_doc = repo.get_method_by_class(
+                    class_id=base_class_doc["element_id"],
+                    method_name=method_name,
+                    scope=scope,
+                    repository=repository,
+                    username=username,
+                )
+                if method_doc:
+                    break
 
     if method_doc:
         return method_doc.get("element_id")  # type: ignore[no-any-return]
