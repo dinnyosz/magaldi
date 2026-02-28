@@ -12,11 +12,13 @@ import pytest
 
 from magaldi_core.call_resolution import (
     _build_constructor_type_map,
+    _build_resolved_maps,
     _cosine_similarity,
     _is_likely_class_name,
     _merge_candidates,
     _receiver_class_affinity,
     _resolve_via_constructors,
+    _resolve_via_scope_bindings,
     _score_candidates_rrf,
     compute_semantic_relationships,
     resolve_calls_by_embedding,
@@ -1103,3 +1105,290 @@ class TestScoreCandidatesRRF:
 
         # c1 should win on embedding signal
         assert results[0][0]["element_id"] == "c1"
+
+
+# =============================================================================
+# SCOPE BINDING RESOLUTION TESTS (Strategy 5.7)
+# =============================================================================
+
+
+class TestBuildResolvedMaps:
+    """Tests for _build_resolved_maps helper."""
+
+    def test_bare_calls_mapped(self):
+        calls = [
+            {"name": "get_user", "receiver": None, "resolved_id": "target1"},
+        ]
+        result = _build_resolved_maps(calls)
+        assert result == {"get_user": "target1"}
+
+    def test_receiver_calls_mapped(self):
+        calls = [
+            {"name": "connect", "receiver": "db", "resolved_id": "target2"},
+        ]
+        result = _build_resolved_maps(calls)
+        assert result == {"db.connect": "target2"}
+
+    def test_unresolved_calls_excluded(self):
+        calls = [
+            {"name": "foo", "receiver": "bar", "resolved_id": None},
+        ]
+        result = _build_resolved_maps(calls)
+        assert result == {}
+
+    def test_mixed_calls(self):
+        calls = [
+            {"name": "get_user", "receiver": None, "resolved_id": "t1"},
+            {"name": "connect", "receiver": "db", "resolved_id": "t2"},
+            {"name": "foo", "receiver": "bar", "resolved_id": None},
+        ]
+        result = _build_resolved_maps(calls)
+        assert result == {"get_user": "t1", "db.connect": "t2"}
+
+
+class TestResolveViaScopeBindings:
+    """Tests for _resolve_via_scope_bindings (Strategy 5.7)."""
+
+    @pytest.fixture
+    def mock_repo(self):
+        repo = MagicMock()
+        repo.get_document.return_value = None
+        repo.get_document_by_name_only.return_value = None
+        repo.get_method_by_class.return_value = None
+        repo.store_calls.return_value = True
+        return repo
+
+    def test_method_return_chain(self, mock_repo):
+        """conn = db.connect(); conn.cursor() resolves when connect() is
+        already resolved with return_type."""
+        raw_code = (
+            "def process():\n"
+            "    conn = db.connect()\n"
+            "    conn.cursor()\n"
+        )
+        elements = [
+            {
+                "element_id": "func1",
+                "calls": [
+                    {"name": "connect", "receiver": "db", "resolved_id": "db_connect_id",
+                     "category": "resolved"},
+                    {"name": "cursor", "receiver": "conn", "resolved_id": None,
+                     "category": "untyped"},
+                ],
+            }
+        ]
+
+        # get_document for the element itself
+        mock_repo.get_document.side_effect = lambda eid: {
+            "func1": {
+                "element_id": "func1",
+                "raw_code": raw_code,
+                "language": "python",
+                "parameters": [],
+                "calls": elements[0]["calls"].copy(),
+            },
+            # get_document for db.connect() target — has return_type
+            "db_connect_id": {
+                "element_id": "db_connect_id",
+                "return_type": "Connection",
+            },
+        }.get(eid)
+
+        mock_repo.get_document_by_name_only.return_value = {
+            "element_id": "class_connection",
+            "name": "Connection",
+        }
+        mock_repo.get_method_by_class.return_value = {
+            "element_id": "connection_cursor_method",
+            "return_type": "Cursor",
+        }
+
+        count = _resolve_via_scope_bindings(
+            mock_repo, elements, "s", "r", "main"
+        )
+
+        assert count == 1
+        mock_repo.store_calls.assert_called_once()
+        stored = mock_repo.store_calls.call_args[0][1]
+        resolved_call = next(c for c in stored if c["name"] == "cursor")
+        assert resolved_call["resolved_id"] == "connection_cursor_method"
+        assert resolved_call["category"] == "scope_resolved"
+
+    def test_except_as_resolution(self, mock_repo):
+        """except ValueError as e: e.args resolves to ValueError.args."""
+        raw_code = (
+            "def process():\n"
+            "    try:\n"
+            "        pass\n"
+            "    except ValueError as e:\n"
+            "        e.args\n"
+        )
+        calls = [
+            {"name": "args", "receiver": "e", "resolved_id": None,
+             "category": "untyped"},
+        ]
+        elements = [{"element_id": "func1", "calls": calls}]
+
+        mock_repo.get_document.return_value = {
+            "element_id": "func1",
+            "raw_code": raw_code,
+            "language": "python",
+            "parameters": [],
+            "calls": calls.copy(),
+        }
+        mock_repo.get_document_by_name_only.return_value = {
+            "element_id": "class_valueerror",
+            "name": "ValueError",
+        }
+        mock_repo.get_method_by_class.return_value = {
+            "element_id": "valueerror_args",
+        }
+
+        count = _resolve_via_scope_bindings(
+            mock_repo, elements, "s", "r", "main"
+        )
+
+        assert count == 1
+
+    def test_with_as_resolution(self, mock_repo):
+        """with open(f) as handle: handle.read() resolves."""
+        raw_code = (
+            "def process():\n"
+            "    with open('f') as handle:\n"
+            "        handle.read()\n"
+        )
+        calls = [
+            {"name": "open", "receiver": None, "resolved_id": "builtin_open",
+             "category": "resolved"},
+            {"name": "read", "receiver": "handle", "resolved_id": None,
+             "category": "untyped"},
+        ]
+        elements = [{"element_id": "func1", "calls": calls}]
+
+        mock_repo.get_document.side_effect = lambda eid: {
+            "func1": {
+                "element_id": "func1",
+                "raw_code": raw_code,
+                "language": "python",
+                "parameters": [],
+                "calls": calls.copy(),
+            },
+            "builtin_open": {
+                "element_id": "builtin_open",
+                "return_type": "TextIOWrapper",
+            },
+        }.get(eid)
+
+        mock_repo.get_document_by_name_only.return_value = {
+            "element_id": "class_textio",
+            "name": "TextIOWrapper",
+        }
+        mock_repo.get_method_by_class.return_value = {
+            "element_id": "textio_read",
+        }
+
+        count = _resolve_via_scope_bindings(
+            mock_repo, elements, "s", "r", "main"
+        )
+
+        assert count == 1
+
+    def test_non_python_skipped(self, mock_repo):
+        """Non-Python elements are skipped."""
+        elements = [
+            {
+                "element_id": "func1",
+                "calls": [
+                    {"name": "foo", "receiver": "obj", "category": "untyped",
+                     "resolved_id": None},
+                ],
+            }
+        ]
+
+        mock_repo.get_document.return_value = {
+            "element_id": "func1",
+            "raw_code": "function process() { obj.foo() }",
+            "language": "javascript",
+            "parameters": [],
+            "calls": elements[0]["calls"],
+        }
+
+        count = _resolve_via_scope_bindings(
+            mock_repo, elements, "s", "r", "main"
+        )
+
+        assert count == 0
+
+    def test_no_unresolved_receiver_calls(self, mock_repo):
+        """Elements with all resolved calls are skipped."""
+        elements = [
+            {
+                "element_id": "func1",
+                "calls": [
+                    {"name": "get", "receiver": "repo", "category": "resolved",
+                     "resolved_id": "existing"},
+                ],
+            }
+        ]
+
+        count = _resolve_via_scope_bindings(
+            mock_repo, elements, "s", "r", "main"
+        )
+
+        assert count == 0
+        mock_repo.get_document.assert_not_called()
+
+    def test_param_type_used_for_receiver(self, mock_repo):
+        """Receiver type from param annotations enables method return type lookup."""
+        raw_code = (
+            "def process(db: Database):\n"
+            "    conn = db.connect()\n"
+            "    conn.cursor()\n"
+        )
+        calls = [
+            {"name": "connect", "receiver": "db", "resolved_id": None,
+             "category": "untyped"},
+            {"name": "cursor", "receiver": "conn", "resolved_id": None,
+             "category": "untyped"},
+        ]
+        elements = [{"element_id": "func1", "calls": calls}]
+
+        mock_repo.get_document.return_value = {
+            "element_id": "func1",
+            "raw_code": raw_code,
+            "language": "python",
+            "parameters": [{"name": "db", "type": "Database"}],
+            "calls": calls.copy(),
+        }
+
+        # db.connect() lookup: Database class -> connect method with return_type
+        mock_repo.get_document_by_name_only.return_value = {
+            "element_id": "class_database",
+            "name": "Database",
+        }
+
+        def method_by_class(class_id, method_name, **_kw):
+            if class_id == "class_database" and method_name == "connect":
+                return {"element_id": "db_connect", "return_type": "Connection"}
+            if class_id == "class_connection" and method_name == "cursor":
+                return {"element_id": "conn_cursor"}
+            return None
+
+        mock_repo.get_method_by_class.side_effect = method_by_class
+
+        # For the second pass, also need to look up Connection class
+        def doc_by_name(name, element_type, **_kw):  # noqa: ARG001
+            if name == "Database":
+                return {"element_id": "class_database", "name": "Database"}
+            if name == "Connection":
+                return {"element_id": "class_connection", "name": "Connection"}
+            return None
+
+        mock_repo.get_document_by_name_only.side_effect = doc_by_name
+
+        count = _resolve_via_scope_bindings(
+            mock_repo, elements, "s", "r", "main"
+        )
+
+        # Should resolve at least conn.cursor() via chained resolution
+        assert count >= 1

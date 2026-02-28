@@ -6,8 +6,6 @@ from tree-sitter AST for scope-aware call resolution (Strategy 5.7).
 
 from __future__ import annotations
 
-import pytest
-
 from magaldi_core.scope_bindings import (
     SOURCE_ASSIGNMENT_CALL,
     SOURCE_ASSIGNMENT_METHOD_CALL,
@@ -15,10 +13,8 @@ from magaldi_core.scope_bindings import (
     SOURCE_EXCEPT_AS,
     SOURCE_FOR_IN,
     SOURCE_WITH_AS,
-    BindingInfo,
     extract_variable_bindings,
 )
-
 
 # =============================================================================
 # ASSIGNMENT BINDINGS
