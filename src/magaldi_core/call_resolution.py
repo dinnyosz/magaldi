@@ -13,6 +13,7 @@ Strategy 3-5 (this module, resolve_all_calls):
 - Type-annotated calls (repo: Repository; repo.get_document())
 - Return-type propagation (result = get_user(); result.save())
 - Constructor-based inference (repo = Repository(); repo.get())
+- Scope-aware binding (conn = db.connect(); conn.cursor(); with/for/except)
 
 Strategy 6 (this module, resolve_calls_by_embedding):
 - RRF-scored embedding + name + receiver affinity for untyped calls
@@ -38,7 +39,7 @@ def resolve_all_calls(
     scope: str,
     repository: str,
     username: str = "main",
-) -> tuple[int, int, int, int]:
+) -> tuple[int, int, int, int, int]:
     """Full call resolution pass - re-resolves ALL calls in the repository.
 
     Used during partial parsing to ensure call graphs are complete even when
@@ -53,7 +54,7 @@ def resolve_all_calls(
 
     Returns:
         Tuple of (total_calls_processed, import_resolved, type_resolved,
-        constructor_resolved).
+        constructor_resolved, scope_resolved).
     """
     total_processed = 0
     import_resolved = 0
@@ -144,15 +145,24 @@ def resolve_all_calls(
         repo, elements, scope, repository, username
     )
 
+    # Strategy 5.7: Scope-aware type binding (AST-based)
+    # Re-fetch elements to get updated calls after 5.6
+    elements = repo.find_all_elements_with_calls(scope, repository, username)
+    scope_count = _resolve_via_scope_bindings(
+        repo, elements, scope, repository, username
+    )
+
     total_resolved = (
-        import_resolved + type_resolved + return_type_count + constructor_count
+        import_resolved + type_resolved + return_type_count
+        + constructor_count + scope_count
     )
     logger.info(
         f"Full resolution: resolved {total_resolved}/{total_processed} calls "
         f"({import_resolved} via imports, {type_resolved} via type annotations, "
-        f"{return_type_count} via return-type, {constructor_count} via constructors)"
+        f"{return_type_count} via return-type, {constructor_count} via constructors, "
+        f"{scope_count} via scope analysis)"
     )
-    return total_processed, import_resolved, type_resolved, constructor_count
+    return total_processed, import_resolved, type_resolved, constructor_count, scope_count
 
 
 def resolve_cross_file_calls(
@@ -263,11 +273,27 @@ def resolve_cross_file_calls(
         repo, all_elements, scope, repository, username
     )
 
-    total_resolved = import_resolved + type_resolved + return_type_count
+    # Strategy 5.6: Constructor-based type inference
+    all_elements = repo.find_all_elements_with_calls(scope, repository, username)
+    constructor_count = _resolve_via_constructors(
+        repo, all_elements, scope, repository, username
+    )
+
+    # Strategy 5.7: Scope-aware type binding (AST-based)
+    all_elements = repo.find_all_elements_with_calls(scope, repository, username)
+    scope_count = _resolve_via_scope_bindings(
+        repo, all_elements, scope, repository, username
+    )
+
+    total_resolved = (
+        import_resolved + type_resolved + return_type_count
+        + constructor_count + scope_count
+    )
     logger.info(
         f"Resolved {total_resolved}/{total_processed} cross-file calls "
         f"({import_resolved} via imports, {type_resolved} via type annotations, "
-        f"{return_type_count} via return-type propagation)"
+        f"{return_type_count} via return-type, {constructor_count} via constructors, "
+        f"{scope_count} via scope analysis)"
     )
     return total_processed, import_resolved, type_resolved
 
@@ -846,6 +872,407 @@ def _resolve_via_constructors(
         )
 
     return constructor_resolved
+
+
+def _resolve_via_scope_bindings(
+    repo: Repository,
+    elements: list[dict],
+    scope: str,
+    repository: str,
+    username: str,
+    max_passes: int = 3,
+) -> int:
+    """Strategy 5.7: Resolve calls using AST-based scope analysis.
+
+    Re-parses each element's raw_code with tree-sitter to extract ALL
+    variable binding patterns (assignments, with-as, for-in, except-as),
+    then resolves unresolved receiver calls where the receiver matches
+    a bound variable with a known type.
+
+    Handles patterns that regex-based strategies 5.5/5.6 miss:
+    - var = receiver.method()  (method return type propagation)
+    - with expr() as var:      (context manager bindings)
+    - for var in expr:         (loop variable bindings)
+    - except ExcType as var:   (exception handler bindings)
+    - Chained resolution via multi-pass (up to max_passes)
+
+    Args:
+        repo: Repository instance.
+        elements: Elements with calls (from find_all_elements_with_calls).
+        scope: Repository scope.
+        repository: Repository name.
+        username: Username branch.
+        max_passes: Maximum resolution passes per element for chaining.
+
+    Returns:
+        Number of calls resolved via scope analysis.
+    """
+    from magaldi_core.scope_bindings import extract_variable_bindings
+
+    scope_resolved = 0
+
+    # Find elements with unresolved receiver calls
+    candidates: list[str] = []
+    for elem in elements:
+        calls = elem.get("calls", [])
+        has_unresolved_receiver = any(
+            c.get("receiver")
+            and not c.get("resolved_id")
+            and c.get("category") in ("untyped", "unknown", "type_resolvable")
+            for c in calls
+        )
+        if has_unresolved_receiver:
+            candidates.append(elem.get("element_id", ""))
+
+    if not candidates:
+        return 0
+
+    logger.info(f"Scope binding resolution: {len(candidates)} candidate elements")
+
+    for elem_id in candidates:
+        if not elem_id:
+            continue
+
+        doc = repo.get_document(elem_id)
+        if not doc:
+            continue
+
+        raw_code = doc.get("raw_code", "")
+        language = doc.get("language", "")
+        calls = doc.get("calls", [])
+        parameters = doc.get("parameters", [])
+
+        if not raw_code or language != "python":
+            continue
+
+        # Extract variable bindings from AST
+        bindings = extract_variable_bindings(raw_code, language)
+        if not bindings:
+            continue
+
+        # Build param type map from function parameters
+        param_types: dict[str, str] = {}
+        if parameters:
+            for p in parameters:
+                if p.get("type"):
+                    param_types[p["name"]] = p["type"]
+
+        # Multi-pass resolution: each pass may discover new types
+        # that enable further resolution in the next pass
+        updated = False
+        for _pass_num in range(max_passes):
+            pass_resolved = 0
+
+            # Build resolved call maps from current state
+            resolved_calls = _build_resolved_maps(calls)
+
+            # Resolve binding types
+            binding_types: dict[str, str] = {}
+            for binding in bindings:
+                var = binding.variable
+                inferred_type = _resolve_binding_type(
+                    binding, resolved_calls, param_types, binding_types, repo,
+                    scope, repository, username,
+                )
+                if inferred_type:
+                    binding_types[var] = inferred_type
+
+            # Try to resolve unresolved receiver calls using binding types
+            for call in calls:
+                if call.get("resolved_id") or not call.get("receiver"):
+                    continue
+                receiver = call["receiver"]
+                if receiver in binding_types:
+                    resolved_id = _lookup_method_by_type(
+                        repo,
+                        binding_types[receiver],
+                        call["name"],
+                        scope,
+                        repository,
+                        username,
+                    )
+                    if resolved_id:
+                        call["resolved_id"] = resolved_id
+                        call["category"] = "scope_resolved"
+                        scope_resolved += 1
+                        pass_resolved += 1
+                        updated = True
+
+            # Stop if no progress in this pass
+            if pass_resolved == 0:
+                break
+
+        if updated:
+            repo.store_calls(elem_id, calls)
+
+    if scope_resolved:
+        logger.info(f"Scope binding resolution: resolved {scope_resolved} calls")
+
+    return scope_resolved
+
+
+def _build_resolved_maps(calls: list[dict]) -> dict[str, str]:
+    """Build a map from call key to resolved_id for resolved calls.
+
+    Maps both bare calls (name -> resolved_id) and receiver calls
+    ((receiver, name) -> resolved_id).
+
+    Returns:
+        Dict with string keys: "name" for bare calls,
+        "receiver.name" for receiver calls.
+    """
+    resolved: dict[str, str] = {}
+    for c in calls:
+        if c.get("resolved_id"):
+            if c.get("receiver"):
+                key = f"{c['receiver']}.{c['name']}"
+                resolved[key] = c["resolved_id"]
+            else:
+                resolved[c["name"]] = c["resolved_id"]
+    return resolved
+
+
+def _resolve_binding_type(
+    binding: object,  # BindingInfo
+    resolved_calls: dict[str, str],
+    param_types: dict[str, str],
+    binding_types: dict[str, str],
+    repo: Repository,
+    scope: str,
+    repository: str,
+    username: str,
+) -> str | None:
+    """Determine the type of a variable from its binding pattern.
+
+    Uses resolved call targets, parameter types, and previously-resolved
+    binding types to infer the type of a variable.
+
+    Args:
+        binding: BindingInfo object.
+        resolved_calls: Map of call keys to resolved element IDs.
+        param_types: Map of parameter names to type annotations.
+        binding_types: Map of already-resolved variable names to types.
+        repo: Repository instance.
+        scope: Repository scope.
+        repository: Repository name.
+        username: Username branch.
+
+    Returns:
+        Type name string if determined, None otherwise.
+    """
+    from magaldi_core.scope_bindings import (
+        SOURCE_ASSIGNMENT_CALL,
+        SOURCE_ASSIGNMENT_METHOD_CALL,
+        SOURCE_CONSTRUCTOR,
+        SOURCE_EXCEPT_AS,
+        SOURCE_FOR_IN,
+        SOURCE_WITH_AS,
+        BindingInfo,
+    )
+
+    if not isinstance(binding, BindingInfo):
+        return None
+
+    source = binding.source
+
+    # Direct type bindings — type is known immediately
+    if source == SOURCE_EXCEPT_AS and binding.type_name:
+        return binding.type_name
+
+    if source == SOURCE_CONSTRUCTOR and binding.type_name:
+        return binding.type_name
+
+    # Call-based bindings — need to look up return_type
+    if source == SOURCE_ASSIGNMENT_CALL and binding.call_name:
+        # var = func() — look up func's return_type
+        resolved_id = resolved_calls.get(binding.call_name)
+        if resolved_id:
+            return _get_return_type(repo, resolved_id)
+
+    if source == SOURCE_ASSIGNMENT_METHOD_CALL and binding.call_name and binding.call_receiver:
+        # var = receiver.method() — need receiver's type, then look up method's return_type
+        return _resolve_method_call_type(
+            binding.call_receiver,
+            binding.call_name,
+            resolved_calls,
+            param_types,
+            binding_types,
+            repo,
+            scope,
+            repository,
+            username,
+        )
+
+    if source == SOURCE_WITH_AS:
+        # with expr() as var: — type comes from expression's return_type
+        if binding.call_name and binding.call_receiver:
+            return _resolve_method_call_type(
+                binding.call_receiver,
+                binding.call_name,
+                resolved_calls,
+                param_types,
+                binding_types,
+                repo,
+                scope,
+                repository,
+                username,
+            )
+        if binding.call_name:
+            resolved_id = resolved_calls.get(binding.call_name)
+            if resolved_id:
+                return _get_return_type(repo, resolved_id)
+
+    if source == SOURCE_FOR_IN:
+        # for var in expr(): — need to unwrap generic return type
+        return_type = None
+        if binding.call_name and binding.call_receiver:
+            return_type = _resolve_method_call_type(
+                binding.call_receiver,
+                binding.call_name,
+                resolved_calls,
+                param_types,
+                binding_types,
+                repo,
+                scope,
+                repository,
+                username,
+            )
+        elif binding.call_name:
+            resolved_id = resolved_calls.get(binding.call_name)
+            if resolved_id:
+                return_type = _get_return_type(repo, resolved_id)
+        if return_type:
+            return _unwrap_iterable_type(return_type)
+
+    return None
+
+
+def _resolve_method_call_type(
+    receiver: str,
+    method_name: str,
+    resolved_calls: dict[str, str],
+    param_types: dict[str, str],
+    binding_types: dict[str, str],
+    repo: Repository,
+    scope: str,
+    repository: str,
+    username: str,
+) -> str | None:
+    """Resolve the return type of a receiver.method() call.
+
+    Checks three sources for the receiver's type:
+    1. Already-resolved binding types (from earlier bindings or passes)
+    2. Parameter type annotations
+    3. Already-resolved receiver.method() calls
+
+    Args:
+        receiver: The receiver variable name.
+        method_name: The method name being called.
+        resolved_calls: Map of call keys to resolved IDs.
+        param_types: Map of parameter names to types.
+        binding_types: Map of already-resolved variable names to types.
+        repo: Repository instance.
+        scope: Repository scope.
+        repository: Repository name.
+        username: Username branch.
+
+    Returns:
+        Return type of the method if determinable, None otherwise.
+    """
+    # Check if receiver.method() is already resolved directly
+    call_key = f"{receiver}.{method_name}"
+    resolved_id = resolved_calls.get(call_key)
+    if resolved_id:
+        return _get_return_type(repo, resolved_id)
+
+    # Check if receiver's type is known (from bindings, params, or prior resolution)
+    receiver_type = binding_types.get(receiver) or param_types.get(receiver)
+    if not receiver_type:
+        return None
+
+    # Look up method on the receiver's type to get its return_type
+    base_type = _unwrap_type(receiver_type)
+    class_doc = repo.get_document_by_name_only(
+        name=base_type,
+        element_type="class",
+        scope=scope,
+        repository=repository,
+        username=username,
+    )
+    if not class_doc:
+        return None
+
+    class_id = class_doc.get("element_id")
+    if not class_id:
+        return None
+
+    method_doc = repo.get_method_by_class(
+        class_id=class_id,
+        method_name=method_name,
+        scope=scope,
+        repository=repository,
+        username=username,
+    )
+
+    if method_doc:
+        return method_doc.get("return_type")
+
+    return None
+
+
+def _get_return_type(repo: Repository, element_id: str) -> str | None:
+    """Look up an element's return_type from the index.
+
+    Args:
+        repo: Repository instance.
+        element_id: Element ID to look up.
+
+    Returns:
+        The return_type string if available, None otherwise.
+    """
+    doc = repo.get_document(element_id)
+    if doc:
+        return doc.get("return_type")
+    return None
+
+
+def _unwrap_iterable_type(type_name: str) -> str | None:
+    """Extract element type from an iterable type annotation.
+
+    Handles: list[Item] -> Item, List[Item] -> Item,
+    Iterable[Item] -> Item, Iterator[Item] -> Item,
+    Sequence[Item] -> Item, set[Item] -> Item.
+
+    Args:
+        type_name: Type annotation string.
+
+    Returns:
+        Element type if extractable, None otherwise.
+    """
+    if not type_name:
+        return None
+
+    # Match generic collection types: list[X], List[X], etc.
+    import re
+
+    match = re.match(
+        r"(?:list|List|Iterable|Iterator|Sequence|set|Set|frozenset|"
+        r"FrozenSet|tuple|Tuple|Generator|AsyncGenerator|AsyncIterator|"
+        r"AsyncIterable|Collection|Deque|deque)\[(.+)\]$",
+        type_name,
+    )
+    if match:
+        inner = match.group(1)
+        # Handle Union types in generics: list[Item | None] -> Item
+        if "|" in inner:
+            parts = [p.strip() for p in inner.split("|") if p.strip() != "None"]
+            return parts[0] if parts else None
+        # Handle nested generics: skip them
+        if "[" in inner:
+            return None
+        return inner
+
+    return None
 
 
 def _find_element_in_file(

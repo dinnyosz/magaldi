@@ -1005,15 +1005,21 @@ def run_call_resolution(
 
         console.print("\n  [bold]Static Call Resolution[/]")
         try:
-            total_calls, import_resolved, type_resolved, constructor_resolved = (
-                resolve_all_calls(repo, scope, repository, username)
+            (
+                total_calls,
+                import_resolved,
+                type_resolved,
+                constructor_resolved,
+                scope_resolved,
+            ) = resolve_all_calls(repo, scope, repository, username)
+            total_resolved = (
+                import_resolved + type_resolved + constructor_resolved + scope_resolved
             )
-            total_resolved = import_resolved + type_resolved + constructor_resolved
             console.print(f"  Full pass: {total_resolved}/{total_calls} resolved")
-            console.print(
-                f"    via imports: {import_resolved}, via types: {type_resolved}, "
-                f"via constructors: {constructor_resolved}"
-            )
+            console.print(f"    via imports: {import_resolved}")
+            console.print(f"    via types: {type_resolved}")
+            console.print(f"    via constructors: {constructor_resolved}")
+            console.print(f"    via scope: {scope_resolved}")
         except Exception as e:
             console.print(f"  [yellow]Warning: Static call resolution failed: {e}[/]")
 
@@ -1027,7 +1033,8 @@ def run_call_resolution(
             )
             total_resolved = single_resolved + embedding_resolved
             console.print(f"  Resolved: {total_resolved}/{total_processed} untyped calls")
-            console.print(f"    single match: {single_resolved}, via similarity: {embedding_resolved}")
+            console.print(f"    single match: {single_resolved}")
+            console.print(f"    via RRF similarity: {embedding_resolved}")
         except Exception as e:
             console.print(f"  [yellow]Warning: Embedding call resolution failed: {e}[/]")
     else:
