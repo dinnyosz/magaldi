@@ -11,9 +11,11 @@ Strategy 3-5 (this module, resolve_all_calls):
 - Import-based calls (from utils import process; process())
 - Module method calls (import utils; utils.process())
 - Type-annotated calls (repo: Repository; repo.get_document())
+- Return-type propagation (result = get_user(); result.save())
+- Constructor-based inference (repo = Repository(); repo.get())
 
 Strategy 6 (this module, resolve_calls_by_embedding):
-- Embedding similarity for remaining untyped calls with receiver
+- RRF-scored embedding + name + receiver affinity for untyped calls
 
 Semantic relationships (compute_semantic_relationships):
 - Pre-compute top-K similar functions for each element via vector similarity
@@ -36,7 +38,7 @@ def resolve_all_calls(
     scope: str,
     repository: str,
     username: str = "main",
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, int]:
     """Full call resolution pass - re-resolves ALL calls in the repository.
 
     Used during partial parsing to ensure call graphs are complete even when
@@ -50,7 +52,8 @@ def resolve_all_calls(
         username: Username branch.
 
     Returns:
-        Tuple of (total_calls_processed, import_resolved, type_resolved).
+        Tuple of (total_calls_processed, import_resolved, type_resolved,
+        constructor_resolved).
     """
     total_processed = 0
     import_resolved = 0
@@ -134,13 +137,22 @@ def resolve_all_calls(
         repo, elements, scope, repository, username
     )
 
-    total_resolved = import_resolved + type_resolved + return_type_count
+    # Strategy 5.6: Constructor-based type inference
+    # Re-fetch elements to get updated calls after 5.5
+    elements = repo.find_all_elements_with_calls(scope, repository, username)
+    constructor_count = _resolve_via_constructors(
+        repo, elements, scope, repository, username
+    )
+
+    total_resolved = (
+        import_resolved + type_resolved + return_type_count + constructor_count
+    )
     logger.info(
         f"Full resolution: resolved {total_resolved}/{total_processed} calls "
         f"({import_resolved} via imports, {type_resolved} via type annotations, "
-        f"{return_type_count} via return-type propagation)"
+        f"{return_type_count} via return-type, {constructor_count} via constructors)"
     )
-    return total_processed, import_resolved, type_resolved
+    return total_processed, import_resolved, type_resolved, constructor_count
 
 
 def resolve_cross_file_calls(
@@ -684,6 +696,156 @@ def _resolve_via_return_types(
         )
 
     return return_type_resolved
+
+
+# Pattern: var = [await] [module.]ClassName(
+# Captures: (var_name, optional_module, ClassName)
+_CONSTRUCTOR_PATTERN = re.compile(
+    r"(\w+)\s*=\s*(?:await\s+)?(?:\w+\.)?([A-Z]\w*)\s*\(", re.MULTILINE
+)
+
+# Names that look like classes but are built-in constructors (not user types)
+_BUILTIN_CONSTRUCTORS: set[str] = {
+    "Exception", "ValueError", "TypeError", "KeyError", "IndexError",
+    "AttributeError", "RuntimeError", "StopIteration", "NotImplementedError",
+    "OSError", "IOError", "FileNotFoundError", "PermissionError",
+    "ConnectionError", "TimeoutError", "UnicodeError",
+    # Built-in types that are PascalCase
+    "True", "False", "None",
+}
+
+
+def _is_likely_class_name(name: str) -> bool:
+    """Check if name looks like a class (PascalCase, not all-caps)."""
+    if not name or len(name) < 2:
+        return False
+    return name[0].isupper() and not name.isupper()
+
+
+def _build_constructor_type_map(raw_code: str) -> dict[str, str]:
+    """Build map from variable name to class name via constructor calls.
+
+    For patterns like `repo = Repository()`, maps "repo" -> "Repository".
+
+    Args:
+        raw_code: Source code of the function.
+
+    Returns:
+        Dict mapping variable name to class name.
+    """
+    type_map: dict[str, str] = {}
+
+    for match in _CONSTRUCTOR_PATTERN.finditer(raw_code):
+        var_name = match.group(1)
+        class_name = match.group(2)
+
+        if not _is_likely_class_name(class_name):
+            continue
+
+        if class_name in _BUILTIN_CONSTRUCTORS:
+            continue
+
+        type_map[var_name] = class_name
+
+    return type_map
+
+
+def _resolve_via_constructors(
+    repo: Repository,
+    elements: list[dict],
+    scope: str,
+    repository: str,
+    username: str,
+) -> int:
+    """Strategy 5.6: Resolve calls using constructor-based type inference.
+
+    For patterns like `repo = Repository(); repo.get()`, infers the type
+    of `repo` from the constructor call `Repository()`, then resolves
+    `get()` on that class.
+
+    Unlike Strategy 5.5, this does NOT require the constructor call to be
+    resolved — it uses PascalCase pattern matching to identify constructors.
+
+    Args:
+        repo: Repository instance.
+        elements: Elements with calls (from find_all_elements_with_calls).
+        scope: Repository scope.
+        repository: Repository name.
+        username: Username branch.
+
+    Returns:
+        Number of calls resolved via constructor type inference.
+    """
+    constructor_resolved = 0
+
+    # Find elements with unresolved receiver calls
+    candidates: list[str] = []
+    for elem in elements:
+        calls = elem.get("calls", [])
+        has_unresolved_receiver = any(
+            c.get("receiver")
+            and not c.get("resolved_id")
+            and c.get("category") in ("untyped", "unknown", "type_resolvable")
+            for c in calls
+        )
+        if has_unresolved_receiver:
+            candidates.append(elem.get("element_id", ""))
+
+    if not candidates:
+        return 0
+
+    logger.info(f"Constructor resolution: {len(candidates)} candidate elements")
+
+    for elem_id in candidates:
+        if not elem_id:
+            continue
+
+        doc = repo.get_document(elem_id)
+        if not doc:
+            continue
+
+        raw_code = doc.get("raw_code", "")
+        calls = doc.get("calls", [])
+
+        if not raw_code:
+            continue
+
+        # Build constructor type map: var_name -> ClassName
+        constructor_types = _build_constructor_type_map(raw_code)
+
+        if not constructor_types:
+            continue
+
+        # Try to resolve unresolved receiver calls using constructor types
+        updated = False
+        for call in calls:
+            if call.get("resolved_id") or not call.get("receiver"):
+                continue
+            receiver = call["receiver"]
+            if receiver in constructor_types:
+                resolved_id = _lookup_method_by_type(
+                    repo,
+                    constructor_types[receiver],
+                    call["name"],
+                    scope,
+                    repository,
+                    username,
+                )
+                if resolved_id:
+                    call["resolved_id"] = resolved_id
+                    call["category"] = "constructor_resolved"
+                    constructor_resolved += 1
+                    updated = True
+
+        if updated:
+            repo.store_calls(elem_id, calls)
+
+    if constructor_resolved:
+        logger.info(
+            f"Constructor resolution: resolved {constructor_resolved} calls"
+        )
+
+    return constructor_resolved
 
 
 def _find_element_in_file(

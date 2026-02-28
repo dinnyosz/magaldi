@@ -1005,12 +1005,15 @@ def run_call_resolution(
 
         console.print("\n  [bold]Static Call Resolution[/]")
         try:
-            total_calls, import_resolved, type_resolved = resolve_all_calls(
-                repo, scope, repository, username,
+            total_calls, import_resolved, type_resolved, constructor_resolved = (
+                resolve_all_calls(repo, scope, repository, username)
             )
-            total_resolved = import_resolved + type_resolved
+            total_resolved = import_resolved + type_resolved + constructor_resolved
             console.print(f"  Full pass: {total_resolved}/{total_calls} resolved")
-            console.print(f"    via imports: {import_resolved}, via type annotations: {type_resolved}")
+            console.print(
+                f"    via imports: {import_resolved}, via types: {type_resolved}, "
+                f"via constructors: {constructor_resolved}"
+            )
         except Exception as e:
             console.print(f"  [yellow]Warning: Static call resolution failed: {e}[/]")
 

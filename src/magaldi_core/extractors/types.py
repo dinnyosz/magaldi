@@ -110,6 +110,7 @@ class CallCategory:
     UNKNOWN = "unknown"  # Default/fallback
     EMBEDDING_RESOLVED = "embedding_resolved"  # Resolved via embedding similarity (probable)
     RETURN_TYPE_RESOLVED = "return_type_resolved"  # Resolved via return-type propagation
+    CONSTRUCTOR_RESOLVED = "constructor_resolved"  # Resolved via constructor type inference
 
 
 @dataclass
