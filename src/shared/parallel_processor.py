@@ -507,6 +507,7 @@ class ThrottleContext:
         throttle.gss_signal = expl.gss_signal
         throttle.prob_map_data = expl.prob_map_data
         throttle.exploration_status = expl.exploration_status
+        throttle.explore_cap = getattr(expl, 'explore_cap', None)
         self.last_decision = throttle
 
         # Apply ramp cooldown — GSS probes bypass cooldown
