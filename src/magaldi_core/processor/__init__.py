@@ -368,12 +368,17 @@ def process_elements(
 
     # Pre-compute context sizes for all elements (for tier batching)
     # This enables DependencyTracker to group elements by context tier
+    # Handcrafted elements (imports, small functions) get HANDCRAFTED_TIER (0)
+    # so they batch separately from LLM elements and get their own exploration cycle
     element_context_sizes: dict[str, int] = {}
     for elem in elements_to_process:
-        char_count = len(elem.raw_code or "")
-        element_context_sizes[elem.element_id] = compute_element_num_ctx(
-            elem.element_type, char_count
-        )
+        if _should_handcraft(elem, config):
+            element_context_sizes[elem.element_id] = HANDCRAFTED_TIER
+        else:
+            char_count = len(elem.raw_code or "")
+            element_context_sizes[elem.element_id] = compute_element_num_ctx(
+                elem.element_type, char_count
+            )
 
     # Initialize tracking structures (use provided or create new)
     # Pass per-element context sizes for tier batching (minimizes model reloads)
@@ -400,13 +405,13 @@ def process_elements(
     timing_stats.set_totals_by_type(totals_by_type)
 
     # Count elements by (type, tier) for tier-aware ETA
-    # Handcrafted elements get HANDCRAFTED_TIER (0) instead of a context tier
+    # element_context_sizes already has HANDCRAFTED_TIER (0) for handcrafted elements
     totals_by_type_tier: dict[tuple[str, int], int] = {}
     for elem in elements_to_process:
-        if _should_handcraft(elem, config):
-            key = (elem.element_type, HANDCRAFTED_TIER)
+        ctx_size = element_context_sizes.get(elem.element_id, 2048)
+        if ctx_size == HANDCRAFTED_TIER:
+            tier = HANDCRAFTED_TIER
         else:
-            ctx_size = element_context_sizes.get(elem.element_id, 2048)
             # Snap to standard tier
             tier = 2048
             for t in CONTEXT_TIERS:
@@ -415,7 +420,7 @@ def process_elements(
                     break
             else:
                 tier = CONTEXT_TIERS[-1]
-            key = (elem.element_type, tier)
+        key = (elem.element_type, tier)
         totals_by_type_tier[key] = totals_by_type_tier.get(key, 0) + 1
     timing_stats.set_totals_by_type_tier(totals_by_type_tier)
 
@@ -622,8 +627,7 @@ def process_elements(
                 avg_workers = max(allowed_at_start, allowed_at_end)
 
                 # Record timing with element type, tier, and avg_workers (for throughput)
-                # Handcrafted elements use HANDCRAFTED_TIER (0) for their own ETA column
-                record_tier = HANDCRAFTED_TIER if _should_handcraft(element, config) else element_tier
+                # element_tier is already HANDCRAFTED_TIER (0) for handcrafted elements
                 timing_stats.record(
                     processed.wall_time,
                     processed.summarize_time,
@@ -632,25 +636,22 @@ def process_elements(
                     was_embedded=should_embed(element),
                     summary_embed_time=processed.summary_embed_time,
                     code_embed_time=processed.code_embed_time,
-                    tier=record_tier,
+                    tier=element_tier,
                     avg_workers=avg_workers,
                     prompt_tokens=processed.prompt_tokens,
                     response_tokens=processed.response_tokens,
                     assigned_tier=processed.assigned_tier,
                 )
-                # Only record to throughput tracker if this task:
-                # 1. Belongs to the current (model, tier) — cross-tier/model
-                #    in-flight tasks would pollute the new level table data
-                # 2. Is NOT handcrafted — handcrafted elements (imports, small
-                #    functions) complete near-instantly (~0.01s) without LLM
-                #    calls, so they'd skew the level table with artificially
-                #    fast measurements that don't reflect actual GPU throughput
-                is_handcrafted = _should_handcraft(element, config)
+                # Only record to throughput tracker if this task belongs to the
+                # current (model, tier) — cross-tier/model in-flight tasks
+                # would pollute the new level table data.
+                # Handcrafted elements are now their own tier (HANDCRAFTED_TIER=0),
+                # so their fast completions feed their own level table without
+                # polluting LLM tier throughput data.
                 active_model = dependency_tracker.get_current_model()
                 active_tier = dependency_tracker.get_current_tier()
                 if (
-                    not is_handcrafted
-                    and submitted_model == active_model
+                    submitted_model == active_model
                     and submitted_tier == active_tier
                 ):
                     timing_stats.record_task_runtime(processed.wall_time, avg_workers)

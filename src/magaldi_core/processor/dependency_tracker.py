@@ -113,9 +113,15 @@ class DependencyTracker:
     def _get_model_key(self, element: CodeElement) -> str:
         """Get model key for an element (for batching by model).
 
-        Returns 'large' for files/classes/interfaces/type_aliases, 'small' for functions/methods/variables.
-        This matches ProcessingConfig.get_model_for_element_type().
+        Returns 'handcrafted' for elements that skip LLM (tier 0),
+        'large' for files/classes/interfaces/type_aliases,
+        'small' for functions/methods/variables.
+        This matches ProcessingConfig.get_model_for_element_type() for LLM elements.
         """
+        # Handcrafted elements don't use LLM — group them together
+        # regardless of element type for maximum parallelism
+        if self._context_sizes.get(element.element_id) == 0:
+            return "handcrafted"
         if element.element_type in ("function", "method", "variable", "constant"):
             return "small"
         return "large"
@@ -123,6 +129,8 @@ class DependencyTracker:
     def _get_tier(self, element_id: str) -> int:
         """Get the context tier for an element (snaps to standard tiers)."""
         ctx = self._context_sizes.get(element_id, 2048)
+        if ctx == 0:  # HANDCRAFTED_TIER — no LLM, own exploration cycle
+            return 0
         # Find the tier this context size belongs to
         for tier in CONTEXT_TIERS:
             if ctx <= tier:
