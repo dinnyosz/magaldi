@@ -43,7 +43,8 @@ docker compose up -d
 source .venv/bin/activate
 
 # Pull Ollama models (if using local Ollama)
-ollama pull qwen2.5-coder:7b
+ollama pull qwen3:4b-instruct
+ollama pull qwen3:1.7b
 ollama pull qwen3-embedding:0.6b
 
 # Run tests to verify installation
@@ -236,8 +237,9 @@ docker compose logs opensearch    # View logs
 
 **Ollama Models:**
 ```bash
-ollama pull qwen2.5-coder:7b          # Summarization model
-ollama pull qwen3-embedding:0.6b   # Embedding model
+ollama pull qwen3:4b-instruct         # Summarization model (large)
+ollama pull qwen3:1.7b                # Summarization model (small)
+ollama pull qwen3-embedding:0.6b      # Embedding model
 ollama list                           # List installed models
 ```
 
@@ -274,7 +276,7 @@ ollama list                           # List installed models
 | Storage & Search | OpenSearch 2.19.0 |
 | Job Queues | Redis |
 | Dashboard | OpenSearch Dashboards 2.19.0 |
-| AI Models | Ollama (qwen2.5-coder:7b, qwen3-embedding:0.6b) |
+| AI Models | Ollama (qwen3:4b-instruct, qwen3:1.7b, qwen3-embedding:0.6b) |
 | Web Framework | FastAPI |
 | MCP | Python MCP SDK |
 
@@ -330,7 +332,8 @@ docker compose up -d
 curl http://localhost:11434/api/tags
 
 # Pull models manually
-ollama pull qwen2.5-coder:7b
+ollama pull qwen3:4b-instruct
+ollama pull qwen3:1.7b
 ollama pull qwen3-embedding:0.6b
 ```
 

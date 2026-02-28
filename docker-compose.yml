@@ -97,8 +97,11 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        echo "Pulling summarization model (qwen2.5-coder:7b)..."
-        curl -sf -X POST http://ollama:11434/api/pull -d '{"name": "qwen2.5-coder:7b"}' || exit 1
+        echo "Pulling summarization model (qwen3:4b-instruct)..."
+        curl -sf -X POST http://ollama:11434/api/pull -d '{"name": "qwen3:4b-instruct"}' || exit 1
+        echo ""
+        echo "Pulling small summarization model (qwen3:1.7b)..."
+        curl -sf -X POST http://ollama:11434/api/pull -d '{"name": "qwen3:1.7b"}' || exit 1
         echo ""
         echo "Pulling embedding model (qwen3-embedding:0.6b)..."
         curl -sf -X POST http://ollama:11434/api/pull -d '{"name": "qwen3-embedding:0.6b"}' || exit 1
