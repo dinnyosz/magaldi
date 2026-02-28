@@ -897,6 +897,168 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return sum(x * y for x, y in zip(a, b))
 
 
+def _receiver_class_affinity(receiver: str, candidate: dict) -> float:
+    """Score how well a receiver variable name relates to a candidate's class context.
+
+    Heuristic scoring:
+    - "repo" → parent class "Repository" (prefix match) → 1.0
+    - "es_repo" → parent class "ElasticsearchRepository" (substring) → 0.8
+    - "client" → file "http_client.py" (substring in path) → 0.6
+    - No match → 0.0
+
+    Args:
+        receiver: The receiver variable name (e.g., "repo", "client").
+        candidate: Candidate element dict with parent_id and relative_path.
+
+    Returns:
+        Affinity score between 0.0 and 1.0.
+    """
+    receiver_lower = receiver.lower()
+
+    # Extract class name from parent_id if available
+    # parent_id format: {scope}:{repo}:{user}:{path}:class:{ClassName}:{line}
+    parent_id = candidate.get("parent_id", "") or ""
+    parent_class = ""
+    if ":class:" in parent_id:
+        parts = parent_id.split(":")
+        try:
+            class_idx = parts.index("class")
+            if class_idx + 1 < len(parts):
+                parent_class = parts[class_idx + 1]
+        except ValueError:
+            pass
+
+    parent_lower = parent_class.lower()
+    path_lower = (candidate.get("relative_path", "") or "").lower()
+
+    # Extract filename stem from path (e.g., "repositories/search.py" → "search")
+    path_stem = path_lower.rsplit("/", 1)[-1].removesuffix(".py").removesuffix(".js").removesuffix(".ts")
+
+    best_score = 0.0
+
+    if parent_lower:
+        # Exact prefix: "repo" is prefix of "repository"
+        if parent_lower.startswith(receiver_lower) and len(receiver_lower) >= 3:
+            best_score = max(best_score, 1.0)
+        # Substring: "search" in "searchrepository"
+        elif receiver_lower in parent_lower and len(receiver_lower) >= 3:
+            best_score = max(best_score, 0.8)
+        # Abbreviation: "sr" doesn't match, but "search_repo" contains "repo"
+        # Split by underscore and check parts
+        elif any(
+            parent_lower.startswith(part) or part in parent_lower
+            for part in receiver_lower.split("_")
+            if len(part) >= 3
+        ):
+            best_score = max(best_score, 0.7)
+
+    # File path matching
+    if path_stem:
+        if path_stem.startswith(receiver_lower) and len(receiver_lower) >= 3:
+            best_score = max(best_score, 0.6)
+        elif receiver_lower in path_stem and len(receiver_lower) >= 3:
+            best_score = max(best_score, 0.5)
+        elif any(
+            part in path_stem
+            for part in receiver_lower.split("_")
+            if len(part) >= 3
+        ):
+            best_score = max(best_score, 0.4)
+
+    return best_score
+
+
+def _score_candidates_rrf(
+    call: dict,
+    candidates: list[dict],
+    caller_embedding: list[float] | None,
+    k: int = 60,
+) -> list[tuple[dict, float]]:
+    """Score candidates using Reciprocal Rank Fusion across multiple signals.
+
+    Fuses three ranking signals:
+    1. Receiver-to-class-name affinity (name heuristics)
+    2. Embedding cosine similarity (semantic match)
+    3. Path context match (file proximity hints)
+
+    RRF formula: score = sum(1 / (k + rank_i)) for each signal.
+
+    Args:
+        call: The unresolved call dict (with receiver, name).
+        candidates: List of candidate element dicts.
+        caller_embedding: The calling element's caller_embedding, or None.
+        k: RRF smoothing constant (default 60, standard value).
+
+    Returns:
+        List of (candidate, rrf_score) tuples sorted descending by score.
+    """
+    receiver = call.get("receiver", "") or ""
+    n = len(candidates)
+
+    if n == 0:
+        return []
+
+    # Signal 1: Receiver-class affinity
+    affinity_scores = [
+        (i, _receiver_class_affinity(receiver, c)) for i, c in enumerate(candidates)
+    ]
+    affinity_ranked = sorted(affinity_scores, key=lambda x: -x[1])
+
+    # Signal 2: Embedding similarity
+    if caller_embedding:
+        embed_scores = []
+        for i, c in enumerate(candidates):
+            c_emb = c.get("summary_embedding")
+            if c_emb:
+                score = _cosine_similarity(caller_embedding, c_emb)
+            else:
+                score = -1.0
+            embed_scores.append((i, score))
+        embed_ranked = sorted(embed_scores, key=lambda x: -x[1])
+    else:
+        # No embedding available — all get same rank
+        embed_ranked = [(i, 0.0) for i in range(n)]
+
+    # Signal 3: Path context — does receiver appear in candidate's path?
+    # Lighter signal: just check if any receiver part appears in the path
+    path_scores = []
+    receiver_lower = receiver.lower()
+    receiver_parts = [p for p in receiver_lower.split("_") if len(p) >= 3]
+    for i, c in enumerate(candidates):
+        path = (c.get("relative_path", "") or "").lower()
+        score = 0.0
+        if receiver_lower in path and len(receiver_lower) >= 3:
+            score = 1.0
+        elif any(part in path for part in receiver_parts):
+            score = 0.5
+        path_scores.append((i, score))
+    path_ranked = sorted(path_scores, key=lambda x: -x[1])
+
+    # Build rank maps (1-indexed)
+    def _build_rank_map(ranked: list[tuple[int, float]]) -> dict[int, int]:
+        rank_map: dict[int, int] = {}
+        for rank, (idx, _score) in enumerate(ranked, 1):
+            rank_map[idx] = rank
+        return rank_map
+
+    affinity_ranks = _build_rank_map(affinity_ranked)
+    embed_ranks = _build_rank_map(embed_ranked)
+    path_ranks = _build_rank_map(path_ranked)
+
+    # Compute RRF scores
+    results: list[tuple[dict, float]] = []
+    for i, c in enumerate(candidates):
+        rrf = (
+            1.0 / (k + affinity_ranks[i])
+            + 1.0 / (k + embed_ranks[i])
+            + 1.0 / (k + path_ranks[i])
+        )
+        results.append((c, rrf))
+
+    results.sort(key=lambda x: -x[1])
+    return results
+
+
 def _merge_candidates(
     user_candidates: list[dict],
     main_candidates: list[dict],
@@ -918,12 +1080,13 @@ def resolve_calls_by_embedding(
     scope: str,
     repository: str,
     username: str = "main",
-    similarity_threshold: float = 0.7,
+    min_rrf_score: float = 0.045,
 ) -> tuple[int, int, int]:
-    """Strategy 6: Resolve untyped calls using embedding similarity.
+    """Strategy 6: Resolve untyped calls using RRF-scored multi-signal matching.
 
     For calls with a receiver but no type annotation, finds candidate
-    functions/methods by name, then uses embedding cosine similarity
+    functions/methods by name, then uses Reciprocal Rank Fusion across
+    receiver-class affinity, embedding similarity, and path context
     to pick the best match when multiple candidates exist.
 
     Queries both the user's index and "main" to get a complete view,
@@ -934,10 +1097,10 @@ def resolve_calls_by_embedding(
         scope: Repository scope.
         repository: Repository name.
         username: Username branch.
-        similarity_threshold: Minimum cosine similarity to accept a match.
+        min_rrf_score: Minimum RRF score to accept a match (default 0.045).
 
     Returns:
-        Tuple of (total_processed, single_match_resolved, embedding_resolved).
+        Tuple of (total_processed, single_match_resolved, rrf_resolved).
     """
     total_processed = 0
     single_resolved = 0
@@ -1011,31 +1174,19 @@ def resolve_calls_by_embedding(
                 updated = True
                 continue
 
-            # Multiple candidates — use embedding similarity
-            # Get caller's embedding (cached) — uses caller_embedding for asymmetric matching
+            # Multiple candidates — use RRF-scored multi-signal matching
+            # Get caller's embedding (cached) — used as one signal in RRF
             if element_id not in embedding_cache:
                 caller_embedding = repo.get_embedding(element_id, "caller")
                 embedding_cache[element_id] = caller_embedding
             caller_embedding = embedding_cache[element_id]
 
-            if not caller_embedding:
-                continue  # Caller has no embedding
+            # RRF works even without embeddings (falls back to name/path signals)
+            scored = _score_candidates_rrf(call, candidates, caller_embedding)
 
-            best_score = -1.0
-            best_candidate_id = None
-
-            for candidate in candidates:
-                candidate_embedding = candidate.get("summary_embedding")
-                if not candidate_embedding:
-                    continue
-
-                score = _cosine_similarity(caller_embedding, candidate_embedding)
-                if score > best_score:
-                    best_score = score
-                    best_candidate_id = candidate.get("element_id")
-
-            if best_score >= similarity_threshold and best_candidate_id:
-                call["resolved_id"] = best_candidate_id
+            if scored and scored[0][1] >= min_rrf_score:
+                best_candidate, best_score = scored[0]
+                call["resolved_id"] = best_candidate.get("element_id")
                 call["category"] = "embedding_resolved"
                 embedding_resolved += 1
                 updated = True
@@ -1045,8 +1196,8 @@ def resolve_calls_by_embedding(
 
     total_resolved = single_resolved + embedding_resolved
     logger.info(
-        f"Embedding resolution: resolved {total_resolved}/{total_processed} calls "
-        f"({single_resolved} single match, {embedding_resolved} via similarity)"
+        f"RRF resolution: resolved {total_resolved}/{total_processed} calls "
+        f"({single_resolved} single match, {embedding_resolved} via RRF scoring)"
     )
     return total_processed, single_resolved, embedding_resolved
 

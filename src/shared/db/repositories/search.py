@@ -657,6 +657,7 @@ class SearchRepository:
                     "element_type",
                     "relative_path",
                     "line_start",
+                    "parent_id",
                 ],
             },
         )
