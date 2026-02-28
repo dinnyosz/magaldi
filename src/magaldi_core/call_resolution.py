@@ -92,7 +92,8 @@ def resolve_all_calls(
             if receiver is None and name in import_map:
                 import_info = import_map[name]
                 resolved_id = _lookup_element_by_import(
-                    repo, import_info, name, scope, repository, username
+                    repo, import_info, name, scope, repository, username,
+                    caller_path=relative_path,
                 )
                 if resolved_id:
                     import_resolved += 1
@@ -101,7 +102,8 @@ def resolve_all_calls(
             elif receiver and receiver in import_map:
                 import_info = import_map[receiver]
                 resolved_id = _lookup_element_by_import(
-                    repo, import_info, name, scope, repository, username
+                    repo, import_info, name, scope, repository, username,
+                    caller_path=relative_path,
                 )
                 if resolved_id:
                     import_resolved += 1
@@ -198,7 +200,8 @@ def resolve_cross_file_calls(
             if receiver is None and name in import_map:
                 import_info = import_map[name]
                 resolved_id = _lookup_element_by_import(
-                    repo, import_info, name, scope, repository, username
+                    repo, import_info, name, scope, repository, username,
+                    caller_path=relative_path,
                 )
                 if resolved_id:
                     import_resolved += 1
@@ -208,7 +211,8 @@ def resolve_cross_file_calls(
             elif receiver and receiver in import_map:
                 import_info = import_map[receiver]
                 resolved_id = _lookup_element_by_import(
-                    repo, import_info, name, scope, repository, username
+                    repo, import_info, name, scope, repository, username,
+                    caller_path=relative_path,
                 )
                 if resolved_id:
                     import_resolved += 1
@@ -264,6 +268,7 @@ def _lookup_element_by_import(
     scope: str,
     repository: str,
     username: str,
+    caller_path: str | None = None,
 ) -> str | None:
     """Look up element ID for an imported name.
 
@@ -274,6 +279,8 @@ def _lookup_element_by_import(
         scope: Repository scope.
         repository: Repository name.
         username: Username branch.
+        caller_path: Relative path of the calling file, needed for
+            resolving relative imports.
 
     Returns:
         Element ID if found, None otherwise.
@@ -284,7 +291,7 @@ def _lookup_element_by_import(
 
     # Convert module path to possible file paths
     # e.g., "magaldi_core.storage" -> "src/magaldi_core/storage.py"
-    # e.g., "./utils" -> relative import
+    # e.g., ".utils" -> relative import (needs caller_path)
     # e.g., "os" -> external module (skip)
 
     # Skip external/stdlib modules (no dots or starts with common stdlib names)
@@ -292,7 +299,7 @@ def _lookup_element_by_import(
         return None
 
     # Try to find the element
-    possible_paths = _module_to_file_paths(module)
+    possible_paths = _module_to_file_paths(module, caller_path)
 
     for file_path in possible_paths:
         # Look for function with this name in the file
@@ -339,11 +346,15 @@ def _is_external_module(module: str) -> bool:
     return first_component in third_party_prefixes
 
 
-def _module_to_file_paths(module: str) -> list[str]:
+def _module_to_file_paths(
+    module: str, caller_path: str | None = None
+) -> list[str]:
     """Convert module path to possible file paths.
 
     Args:
-        module: Module path like "magaldi_core.storage" or "./utils".
+        module: Module path like "magaldi_core.storage" or ".utils".
+        caller_path: Relative path of the file making the import,
+            needed for resolving relative imports.
 
     Returns:
         List of possible file paths to try.
@@ -351,8 +362,42 @@ def _module_to_file_paths(module: str) -> list[str]:
     paths: list[str] = []
 
     if module.startswith("."):
-        # Relative import - harder to resolve without context
-        # For now, skip relative imports
+        if not caller_path:
+            return paths
+
+        # Count leading dots to determine relative depth
+        # 1 dot = current package, 2 dots = parent package, etc.
+        dots = 0
+        for ch in module:
+            if ch == ".":
+                dots += 1
+            else:
+                break
+
+        # Get base directory from caller's path
+        from pathlib import PurePosixPath
+
+        caller_dir = str(PurePosixPath(caller_path).parent)
+
+        # Go up (dots - 1) directories
+        base_dir = caller_dir
+        for _ in range(dots - 1):
+            parent = str(PurePosixPath(base_dir).parent)
+            if parent == base_dir:
+                break
+            base_dir = parent
+
+        # Get the remaining module path after dots
+        remaining = module[dots:]  # e.g., "utils" from ".utils"
+
+        if remaining:
+            sub_path = remaining.replace(".", "/")
+            paths.append(f"{base_dir}/{sub_path}.py")
+            paths.append(f"{base_dir}/{sub_path}/__init__.py")
+        else:
+            # from . import foo -> look in current package's __init__.py
+            paths.append(f"{base_dir}/__init__.py")
+
         return paths
 
     # Convert dots to path separators

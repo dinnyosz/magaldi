@@ -339,12 +339,61 @@ class TestPhase2Resolution:
         assert "src/magaldi_core/storage.py" in paths
         assert "magaldi_core/storage.py" in paths
 
-    def test_relative_import_skipped(self):
-        """Test that relative imports are skipped without caller_path."""
+    def test_relative_import_no_caller_path(self):
+        """Test that relative imports return empty when no caller_path."""
         from magaldi_core.call_resolution import _module_to_file_paths
 
         paths = _module_to_file_paths(".utils")
         assert len(paths) == 0
+
+    def test_relative_import_single_dot(self):
+        """Test resolving single-dot relative import."""
+        from magaldi_core.call_resolution import _module_to_file_paths
+
+        paths = _module_to_file_paths(
+            ".utils", caller_path="src/magaldi_core/parsers/base.py"
+        )
+        assert "src/magaldi_core/parsers/utils.py" in paths
+        assert "src/magaldi_core/parsers/utils/__init__.py" in paths
+
+    def test_relative_import_double_dot(self):
+        """Test resolving double-dot relative import (parent dir)."""
+        from magaldi_core.call_resolution import _module_to_file_paths
+
+        paths = _module_to_file_paths(
+            "..common", caller_path="src/magaldi_core/parsers/base.py"
+        )
+        assert "src/magaldi_core/common.py" in paths
+        assert "src/magaldi_core/common/__init__.py" in paths
+
+    def test_relative_import_bare_dot(self):
+        """Test resolving bare dot import (from . import foo)."""
+        from magaldi_core.call_resolution import _module_to_file_paths
+
+        paths = _module_to_file_paths(
+            ".", caller_path="src/magaldi_core/parsers/base.py"
+        )
+        assert "src/magaldi_core/parsers/__init__.py" in paths
+
+    def test_relative_import_triple_dot(self):
+        """Test resolving triple-dot relative import (grandparent dir)."""
+        from magaldi_core.call_resolution import _module_to_file_paths
+
+        paths = _module_to_file_paths(
+            "...helpers", caller_path="src/magaldi_core/parsers/python/base.py"
+        )
+        assert "src/magaldi_core/helpers.py" in paths
+        assert "src/magaldi_core/helpers/__init__.py" in paths
+
+    def test_relative_import_submodule(self):
+        """Test resolving relative import with submodule path."""
+        from magaldi_core.call_resolution import _module_to_file_paths
+
+        paths = _module_to_file_paths(
+            ".extractors.python", caller_path="src/magaldi_core/parsers/base.py"
+        )
+        assert "src/magaldi_core/parsers/extractors/python.py" in paths
+        assert "src/magaldi_core/parsers/extractors/python/__init__.py" in paths
 
 
 # =============================================================================
