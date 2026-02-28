@@ -98,6 +98,17 @@ EXPLORE_WEIGHT_COST = 0.10  # Prefer levels needing fewer total samples
 # Below this, trend component is zeroed out (no directional bias).
 EXPLORE_TREND_MIN_LEVELS = 3
 
+# Promising outlier: when all in-radius levels are explored, check levels
+# outside the radius that have partial data with base times better than the peak.
+# Minimum samples to consider an outlier "promising" (same as GSS partial).
+EXPLORE_OUTLIER_MIN_SAMPLES = GSS_PARTIAL_MIN_SAMPLES  # 3
+
+# True significance: after all exploration (in-radius + outliers) is done,
+# if budget remains, re-explore the best 30% of levels with a higher threshold.
+# Multiplier on top of _min_samples_for_level() for true significance.
+EXPLORE_TRUE_SIGNIFICANCE_MULTIPLIER = 2.0
+EXPLORE_TRUE_SIGNIFICANCE_TOP_FRACTION = 0.30
+
 # Formula confidence curve: scales down formula_optimal when completion data is sparse.
 # With few completions, base_time is unreliable and the formula produces aggressive
 # worker counts. The confidence multiplier brings it down until data firms up.
@@ -352,6 +363,9 @@ class ThroughputByLevel:
         # level -> deque of (timestamp, runtime) for all completions in this tier
         self._levels: dict[int, deque[tuple[float, float]]] = {}
         self._lock = Lock()
+        # Set by get_exploration_target to indicate which pass found the target:
+        # "radius" (in-range), "outlier" (promising outlier), "verify" (true significance)
+        self.exploration_phase: str | None = None
 
     def record(self, concurrency: int, runtime: float) -> None:
         """Record a completion at this concurrency level.
@@ -473,14 +487,24 @@ class ThroughputByLevel:
     def get_exploration_target(self, max_level: int, remaining: int | None = None) -> int | None:
         """Find the most valuable under-explored level to collect data at.
 
-        Scores candidate levels within ±min(5, max(3, max_level // 4)) of the peak by:
-        - Completion: prefer levels with partial data (cheaper to finish)
-        - Proximity: prefer levels near the peak (refine understanding)
-        - Trend: prefer direction where base times are improving
-        - Cost: prefer levels needing fewer total samples
+        Three-pass exploration:
+
+        Pass 1 (radius): Score candidate levels within ±min(5, max(3, max_level // 4))
+        of the peak by completion, proximity, trend, and cost.
+
+        Pass 2 (outlier): When all in-radius levels are explored, scan ALL levels
+        for promising outliers — levels outside the radius with partial data
+        (≥ EXPLORE_OUTLIER_MIN_SAMPLES) and better base times than the peak.
+
+        Pass 3 (verify): When no outliers remain, if budget allows, re-explore
+        the top EXPLORE_TRUE_SIGNIFICANCE_TOP_FRACTION of explored levels with
+        a higher sample threshold (EXPLORE_TRUE_SIGNIFICANCE_MULTIPLIER × normal).
 
         Budget-aware: skips candidates when remaining elements can't cover
         the sample cost (samples_needed * EXPLORE_BUDGET_MULTIPLIER).
+
+        Sets self.exploration_phase to "radius", "outlier", or "verify" to
+        indicate which pass found the target.
 
         Args:
             max_level: Upper bound for exploration (typically base_workers).
@@ -492,6 +516,8 @@ class ThroughputByLevel:
         Returns:
             Level to explore, or None if all levels in range are significant.
         """
+        self.exploration_phase = None
+
         peak_result = self.get_peak_level()
         if peak_result is None:
             return None
@@ -516,6 +542,7 @@ class ThroughputByLevel:
             best_score = -1.0
             best_candidate = None
 
+            # ── Pass 1: In-radius exploration ──
             # Build candidate list: scan outward from peak (upward first)
             # so ties break toward higher concurrency (more potential).
             candidates: list[int] = []
@@ -575,7 +602,91 @@ class ThroughputByLevel:
                     best_score = score
                     best_candidate = candidate
 
-        return best_candidate
+            if best_candidate is not None:
+                self.exploration_phase = "radius"
+                return best_candidate
+
+            # ── Pass 2: Promising outliers ──
+            # All in-radius levels are explored. Check levels OUTSIDE the radius
+            # that have partial data with base times better than the peak.
+            peak_dq = self._levels.get(peak, deque())
+            peak_bt: float | None = None
+            if peak_dq:
+                peak_bt = sum(rt / peak for _, rt in peak_dq) / len(peak_dq)
+
+            if peak_bt is not None:
+                outlier_candidates: list[tuple[int, float]] = []
+                for level, dq in self._levels.items():
+                    if lower <= level <= upper:
+                        continue  # Inside radius — already handled
+                    if level == peak:
+                        continue
+                    count = len(dq)
+                    if count < EXPLORE_OUTLIER_MIN_SAMPLES:
+                        continue  # Too little data to judge
+                    needed = self._min_samples_for_level(level)
+                    if count >= needed:
+                        continue  # Already fully explored
+                    # Check if base time is better than peak
+                    avg_bt = sum(rt / level for _, rt in dq) / len(dq)
+                    if avg_bt >= peak_bt:
+                        continue  # Not better than peak
+                    # Budget filter
+                    samples_left = needed - count
+                    if remaining is not None and remaining < samples_left * EXPLORE_BUDGET_MULTIPLIER:
+                        continue
+                    # Score by how much better + completion progress
+                    improvement = (peak_bt - avg_bt) / peak_bt  # 0..1
+                    completion = count / needed
+                    outlier_score = 0.6 * improvement + 0.4 * completion
+                    outlier_candidates.append((level, outlier_score))
+
+                if outlier_candidates:
+                    best_candidate = max(outlier_candidates, key=lambda x: x[1])[0]
+                    self.exploration_phase = "outlier"
+                    return best_candidate
+
+            # ── Pass 3: True significance verification ──
+            # All levels (in-radius + outliers) are explored. If budget remains,
+            # verify the top 30% of explored levels with a higher sample threshold
+            # (2× normal) to increase confidence in the best levels.
+            if remaining is not None and remaining > 0:
+                explored: list[tuple[int, float, int]] = []
+                for level, dq in self._levels.items():
+                    count = len(dq)
+                    needed = self._min_samples_for_level(level)
+                    if count >= needed:
+                        avg_bt = sum(rt / level for _, rt in dq) / len(dq)
+                        explored.append((level, avg_bt, count))
+
+                if explored:
+                    # Sort by base time (best first), take top 30%
+                    explored.sort(key=lambda x: x[1])
+                    top_n = max(1, int(len(explored) * EXPLORE_TRUE_SIGNIFICANCE_TOP_FRACTION))
+                    top_levels = explored[:top_n]
+
+                    # Check which need more samples for true significance
+                    best_verify_score = -1.0
+                    for level, _avg_bt, count in top_levels:
+                        true_needed = int(
+                            self._min_samples_for_level(level) * EXPLORE_TRUE_SIGNIFICANCE_MULTIPLIER
+                        )
+                        if count >= true_needed:
+                            continue  # Already truly significant
+                        samples_left = true_needed - count
+                        if remaining < samples_left * EXPLORE_BUDGET_MULTIPLIER:
+                            continue  # Not enough budget
+                        # Score: prefer closest to completion (cheapest to verify)
+                        completion = count / true_needed
+                        if completion > best_verify_score:
+                            best_verify_score = completion
+                            best_candidate = level
+
+                    if best_candidate is not None:
+                        self.exploration_phase = "verify"
+                        return best_candidate
+
+        return None
 
     def reset(self) -> None:
         """Clear all history."""
@@ -1019,6 +1130,7 @@ class ExplorationState:
     prob_map_data: dict[int, float] | None = None
     exploration_status: str | None = None  # Lifecycle status for constant feedback
     explore_cap: int | None = None  # Effective base_workers after budget cap
+    exploration_phase: str | None = None  # "radius", "outlier", or "verify"
 
 
 def compute_effective_base_workers(base_workers: int, total_elements: int) -> int:
@@ -1240,10 +1352,12 @@ class ExplorationOrchestrator:
         )
 
         # Only use legacy exploration when GSS is not active
+        explore_phase: str | None = None
         if self._gss is None or self._gss.converged:
             explore = throughput_tracker.get_exploration_target(
                 self.base_workers, remaining
             )
+            explore_phase = throughput_tracker._throughput_by_level.exploration_phase
         else:
             explore = None  # GSS handles exploration
 
@@ -1277,6 +1391,7 @@ class ExplorationOrchestrator:
         state.gss_probe = gss_probe
         state.effective_peak = effective_peak
         state.exploration_target = explore
+        state.exploration_phase = explore_phase
         if self._gss is not None:
             state.gss_lo = self._gss.lo
             state.gss_hi = self._gss.hi
@@ -1284,7 +1399,14 @@ class ExplorationOrchestrator:
             # Set exploration_status for GSS phases
             if self._gss.converged:
                 best = self._gss.best_level
-                state.exploration_status = f"Peak@{best} \u2713"
+                if explore_phase == "outlier":
+                    state.exploration_status = f"Peak@{best} outlier→{explore}"
+                elif explore_phase == "verify":
+                    state.exploration_status = f"Peak@{best} verify→{explore}"
+                elif explore is not None:
+                    state.exploration_status = f"Peak@{best} →{explore}"
+                else:
+                    state.exploration_status = f"Peak@{best} \u2713"
             elif gss_probe is not None:
                 state.exploration_status = (
                     f"GSS[{self._gss.lo},{self._gss.hi}]\u2192{gss_probe}"

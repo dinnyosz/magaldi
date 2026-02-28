@@ -1760,6 +1760,295 @@ class TestExplorationScoring:
         assert result == 7  # Still prefers upward (trend-aligned)
 
 
+class TestPromisingOutlierExploration:
+    """Tests for Pass 2: promising outlier exploration outside the radius."""
+
+    def test_outlier_explored_when_radius_exhausted(self):
+        """Peak at 8, all in-radius levels (5-11) explored. Level 3 has 5 samples
+        with better base time than peak → returns 3 as outlier.
+        """
+        tracker = ThroughputByLevel()
+        # Peak at 8: base=0.5 (4.0/8), needs max(10, 16)=16
+        for _ in range(17):
+            tracker.record(8, 4.0)
+        # Second level for peak detection
+        for _ in range(18):
+            tracker.record(9, 5.4)  # base=0.6 (worse than peak)
+        # Fill all in-radius levels: radius=min(5,max(3,10//4))=3, range=[5,11]
+        for level in [5, 6, 7, 10]:
+            needed = max(10, level * 2) + 1
+            for _ in range(needed):
+                tracker.record(level, float(level) * 0.6)  # base=0.6
+        # Level 3 (outside radius) with better base time: 5 samples, base=0.33
+        for _ in range(5):
+            tracker.record(3, 1.0)  # base=1.0/3=0.33, better than peak 0.5
+        result = tracker.get_exploration_target(max_level=10)
+        assert result == 3
+        assert tracker.exploration_phase == "outlier"
+
+    def test_outlier_requires_min_samples(self):
+        """Level outside radius with only 1 sample (< OUTLIER_MIN=3) is not explored."""
+        tracker = ThroughputByLevel()
+        for _ in range(17):
+            tracker.record(8, 4.0)  # peak at 8
+        for _ in range(18):
+            tracker.record(9, 5.4)
+        for level in [5, 6, 7, 10]:
+            needed = max(10, level * 2) + 1
+            for _ in range(needed):
+                tracker.record(level, float(level) * 0.6)
+        # Level 2: only 1 sample (below OUTLIER_MIN_SAMPLES=3)
+        tracker.record(2, 0.2)  # great base time but not enough data
+        assert tracker.get_exploration_target(max_level=10) is None
+
+    def test_outlier_requires_better_base_time(self):
+        """Level outside radius with worse base time than peak is not explored."""
+        tracker = ThroughputByLevel()
+        for _ in range(17):
+            tracker.record(8, 4.0)  # peak: base=0.5
+        for _ in range(18):
+            tracker.record(9, 5.4)
+        for level in [5, 6, 7, 10]:
+            needed = max(10, level * 2) + 1
+            for _ in range(needed):
+                tracker.record(level, float(level) * 0.6)
+        # Level 3: 5 samples but WORSE base time than peak
+        for _ in range(5):
+            tracker.record(3, 3.0)  # base=3.0/3=1.0 > peak 0.5
+        assert tracker.get_exploration_target(max_level=10) is None
+
+    def test_outlier_budget_filter(self):
+        """Level outside radius with good base time but not enough remaining budget."""
+        tracker = ThroughputByLevel()
+        for _ in range(17):
+            tracker.record(8, 4.0)
+        for _ in range(18):
+            tracker.record(9, 5.4)
+        for level in [5, 6, 7, 10]:
+            needed = max(10, level * 2) + 1
+            for _ in range(needed):
+                tracker.record(level, float(level) * 0.6)
+        # Level 3: 5 samples, needs 10 total, so 5 left. Budget = 5*3=15.
+        for _ in range(5):
+            tracker.record(3, 1.0)
+        # remaining=10 < 5*3=15 → filtered out
+        assert tracker.get_exploration_target(max_level=10, remaining=10) is None
+
+    def test_outlier_prefers_better_improvement(self):
+        """When multiple outliers exist, prefer the one with greater improvement."""
+        tracker = ThroughputByLevel()
+        for _ in range(17):
+            tracker.record(8, 4.0)  # peak: base=0.5
+        for _ in range(18):
+            tracker.record(9, 5.4)
+        for level in [5, 6, 7, 10]:
+            needed = max(10, level * 2) + 1
+            for _ in range(needed):
+                tracker.record(level, float(level) * 0.6)
+        # Level 2: base=0.5/2=0.25, improvement=(0.5-0.25)/0.5=0.5
+        for _ in range(4):
+            tracker.record(2, 0.5)
+        # Level 3: base=0.6/3=0.2, improvement=(0.5-0.2)/0.5=0.6
+        for _ in range(4):
+            tracker.record(3, 0.6)
+        result = tracker.get_exploration_target(max_level=10)
+        assert result == 3  # Better improvement wins
+        assert tracker.exploration_phase == "outlier"
+
+    def test_outlier_skips_fully_explored(self):
+        """Level outside radius that is fully explored is not returned."""
+        tracker = ThroughputByLevel()
+        for _ in range(17):
+            tracker.record(8, 4.0)
+        for _ in range(18):
+            tracker.record(9, 5.4)
+        for level in [5, 6, 7, 10]:
+            needed = max(10, level * 2) + 1
+            for _ in range(needed):
+                tracker.record(level, float(level) * 0.6)
+        # Level 3: fully explored (10 >= 10), base=2.0 (worse than peak 0.5)
+        # Even if base were better, fully explored = skip in outlier pass.
+        for _ in range(10):
+            tracker.record(3, 6.0)  # base=6.0/3=2.0
+        assert tracker.get_exploration_target(max_level=10) is None
+
+    def test_radius_pass_before_outlier(self):
+        """In-radius levels are preferred over outliers (pass 1 before pass 2)."""
+        tracker = ThroughputByLevel()
+        for _ in range(17):
+            tracker.record(8, 4.0)
+        for _ in range(18):
+            tracker.record(9, 5.4)
+        # Fill most in-radius levels but leave level 7 unexplored
+        for level in [5, 6, 10]:
+            needed = max(10, level * 2) + 1
+            for _ in range(needed):
+                tracker.record(level, float(level) * 0.6)
+        # Level 3 (outside radius) has amazing base time
+        for _ in range(5):
+            tracker.record(3, 0.3)
+        # Level 7 (in radius) still unexplored → should be preferred
+        result = tracker.get_exploration_target(max_level=10)
+        assert result == 7  # In-radius wins
+        assert tracker.exploration_phase == "radius"
+
+
+class TestTrueSignificanceVerification:
+    """Tests for Pass 3: true significance verification of top levels."""
+
+    def _build_fully_explored_tracker(self) -> ThroughputByLevel:
+        """Build a tracker where all in-radius levels are fully explored.
+
+        Peak at 5 (base=1.0). max_level=10 → radius=3 → range=[2,8].
+        All levels 2-8 have enough samples for normal significance.
+        """
+        tracker = ThroughputByLevel()
+        # Level 2: needs 10, base=4.0
+        for _ in range(10):
+            tracker.record(2, 8.0)
+        # Level 3: needs 10, base=3.0
+        for _ in range(10):
+            tracker.record(3, 9.0)
+        # Level 4: needs 10, base=1.5
+        for _ in range(10):
+            tracker.record(4, 6.0)
+        # Level 5: needs 10, base=1.0 (peak)
+        for _ in range(11):
+            tracker.record(5, 5.0)
+        # Level 6: needs 12, base=1.5
+        for _ in range(12):
+            tracker.record(6, 9.0)
+        # Level 7: needs 14, base=2.0
+        for _ in range(14):
+            tracker.record(7, 14.0)
+        # Level 8: needs 16, base=2.5
+        for _ in range(16):
+            tracker.record(8, 20.0)
+        return tracker
+
+    def test_true_significance_top_30_percent(self):
+        """When all levels explored and budget remains, verify top 30%.
+
+        6 explored levels → top 30% = max(1, int(6*0.3)) = 1 level (level 5, best bt).
+        Level 5 has 11 samples, needs 11*2=22 for true significance.
+        """
+        tracker = self._build_fully_explored_tracker()
+        result = tracker.get_exploration_target(max_level=10, remaining=100)
+        assert result == 5
+        assert tracker.exploration_phase == "verify"
+
+    def test_true_significance_respects_budget(self):
+        """True significance skipped when budget is too tight."""
+        tracker = self._build_fully_explored_tracker()
+        # Level 5: true_needed=int(10*2.0)=20, has 11, needs 9 more. Budget=9*3=27.
+        # remaining=20 < 27 → filtered out. Other levels need even more.
+        result = tracker.get_exploration_target(max_level=10, remaining=20)
+        assert result is None
+
+    def test_true_significance_skips_already_verified(self):
+        """Levels already at 2x threshold are not re-explored.
+
+        Peak at 5, all in-radius levels (2-8) explored. Level 5 already
+        at 2x threshold (20 samples). Next best base time should be targeted.
+        """
+        tracker = ThroughputByLevel()
+        # Cover all in-radius levels (radius=3, range=[2,8])
+        for _ in range(10):
+            tracker.record(2, 8.0)   # base=4.0
+        for _ in range(10):
+            tracker.record(3, 9.0)   # base=3.0
+        for _ in range(10):
+            tracker.record(4, 6.0)   # base=1.5
+        # Level 5 with 20 samples (needs 10, true needs 20) — already verified
+        for _ in range(20):
+            tracker.record(5, 5.0)   # base=1.0 (peak)
+        for _ in range(12):
+            tracker.record(6, 9.0)   # base=1.5
+        for _ in range(14):
+            tracker.record(7, 14.0)  # base=2.0
+        for _ in range(16):
+            tracker.record(8, 20.0)  # base=2.5
+        result = tracker.get_exploration_target(max_level=10, remaining=100)
+        # Level 5 already at 2x, so next best (level 4 or 6) should be targeted
+        assert result is not None
+        assert result != 5
+        assert tracker.exploration_phase == "verify"
+
+    def test_true_significance_none_without_remaining(self):
+        """True significance requires remaining to be provided."""
+        tracker = self._build_fully_explored_tracker()
+        # remaining=None → pass 3 doesn't activate
+        result = tracker.get_exploration_target(max_level=10, remaining=None)
+        assert result is None
+
+    def test_true_significance_prefers_closest_to_completion(self):
+        """Among top levels needing verification, prefer closest to done.
+
+        Peak at 5. All in-radius levels (2-8) explored. Level 4 has 15 samples
+        (true=20, 75% done) vs level 5 with 11 (true=20, 55% done).
+        Both are top levels by base time → level 4 wins (closer to completion).
+        """
+        tracker = ThroughputByLevel()
+        # Cover all in-radius levels. Peak at 5, radius=3, range=[2,8].
+        for _ in range(10):
+            tracker.record(2, 8.0)   # base=4.0
+        for _ in range(10):
+            tracker.record(3, 9.0)   # base=3.0
+        # Level 4: 15 samples (needs 10, true=20, completion=15/20=0.75)
+        for _ in range(15):
+            tracker.record(4, 6.0)   # base=1.5
+        # Level 5: 11 samples (needs 10, true=20, completion=11/20=0.55)
+        for _ in range(11):
+            tracker.record(5, 5.0)   # base=1.0 (peak)
+        for _ in range(12):
+            tracker.record(6, 12.0)  # base=2.0
+        for _ in range(14):
+            tracker.record(7, 14.0)  # base=2.0
+        for _ in range(16):
+            tracker.record(8, 24.0)  # base=3.0
+        # 7 explored levels → top 30% = max(1, int(7*0.3)) = 2 levels
+        # Level 5 (base=1.0, 11/20=0.55) and level 4 (base=1.5, 15/20=0.75)
+        # Level 4 has higher completion → wins
+        result = tracker.get_exploration_target(max_level=10, remaining=100)
+        assert result == 4  # Closer to completion
+        assert tracker.exploration_phase == "verify"
+
+
+class TestExplorationPhaseTracking:
+    """Tests for exploration_phase attribute tracking."""
+
+    def test_phase_radius_for_in_range(self):
+        """Normal in-radius exploration sets phase to 'radius'."""
+        tracker = ThroughputByLevel()
+        for _ in range(12):
+            tracker.record(4, 4.0)
+        for _ in range(10):
+            tracker.record(2, 6.0)
+        result = tracker.get_exploration_target(max_level=8)
+        assert result is not None
+        assert tracker.exploration_phase == "radius"
+
+    def test_phase_none_when_nothing_to_explore(self):
+        """No exploration target → phase stays None."""
+        tracker = ThroughputByLevel()
+        for level in range(1, 8):
+            needed = max(10, level * 2) + 2
+            for _ in range(needed):
+                tracker.record(level, float(level) * 2)
+        result = tracker.get_exploration_target(max_level=8)
+        assert result is None
+        assert tracker.exploration_phase is None
+
+    def test_phase_none_when_no_peak(self):
+        """No peak detected → phase stays None."""
+        tracker = ThroughputByLevel()
+        for _ in range(5):
+            tracker.record(1, 1.0)
+        result = tracker.get_exploration_target(max_level=8)
+        assert result is None
+        assert tracker.exploration_phase is None
+
+
 class TestExplorationInThrottleDecision:
     """Tests for exploration_target parameter in compute_throttle_decision."""
 
