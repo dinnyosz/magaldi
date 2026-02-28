@@ -22,6 +22,7 @@ Semantic relationships (compute_semantic_relationships):
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -126,10 +127,18 @@ def resolve_all_calls(
         if updated:
             repo.store_calls(element_id, calls)
 
-    total_resolved = import_resolved + type_resolved
+    # Strategy 5.5: Return-type propagation
+    # Re-fetch elements to get updated calls after strategies 3-5
+    elements = repo.find_all_elements_with_calls(scope, repository, username)
+    return_type_count = _resolve_via_return_types(
+        repo, elements, scope, repository, username
+    )
+
+    total_resolved = import_resolved + type_resolved + return_type_count
     logger.info(
         f"Full resolution: resolved {total_resolved}/{total_processed} calls "
-        f"({import_resolved} via imports, {type_resolved} via type annotations)"
+        f"({import_resolved} via imports, {type_resolved} via type annotations, "
+        f"{return_type_count} via return-type propagation)"
     )
     return total_processed, import_resolved, type_resolved
 
@@ -235,10 +244,18 @@ def resolve_cross_file_calls(
         if updated:
             repo.store_calls(element_id, calls)
 
-    total_resolved = import_resolved + type_resolved
+    # Strategy 5.5: Return-type propagation
+    # Re-fetch elements to get updated calls after strategies 3-5
+    all_elements = repo.find_all_elements_with_calls(scope, repository, username)
+    return_type_count = _resolve_via_return_types(
+        repo, all_elements, scope, repository, username
+    )
+
+    total_resolved = import_resolved + type_resolved + return_type_count
     logger.info(
         f"Resolved {total_resolved}/{total_processed} cross-file calls "
-        f"({import_resolved} via imports, {type_resolved} via type annotations)"
+        f"({import_resolved} via imports, {type_resolved} via type annotations, "
+        f"{return_type_count} via return-type propagation)"
     )
     return total_processed, import_resolved, type_resolved
 
@@ -526,6 +543,147 @@ def _lookup_method_by_type(
         return method_doc.get("element_id")  # type: ignore[no-any-return]
 
     return None
+
+
+_ASSIGNMENT_PATTERN = re.compile(r"(\w+)\s*=\s*(?:await\s+)?(\w+)\s*\(", re.MULTILINE)
+
+
+def _build_receiver_type_map(
+    raw_code: str,
+    resolved_calls: dict[str, str],
+    repo: Repository,
+) -> dict[str, str]:
+    """Build map from variable name to inferred type via return_type.
+
+    For patterns like `result = get_user()`, if get_user is resolved
+    and its target has a return_type, maps "result" -> return_type.
+
+    Args:
+        raw_code: Source code of the function.
+        resolved_calls: Map of call name -> resolved element_id.
+        repo: Repository instance.
+
+    Returns:
+        Dict mapping variable name to inferred type name.
+    """
+    type_map: dict[str, str] = {}
+
+    for match in _ASSIGNMENT_PATTERN.finditer(raw_code):
+        var_name = match.group(1)
+        func_name = match.group(2)
+
+        if func_name in resolved_calls:
+            resolved_id = resolved_calls[func_name]
+            doc = repo.get_document(resolved_id)
+            if doc and doc.get("return_type"):
+                type_map[var_name] = doc["return_type"]
+
+    return type_map
+
+
+def _resolve_via_return_types(
+    repo: Repository,
+    elements: list[dict],
+    scope: str,
+    repository: str,
+    username: str,
+) -> int:
+    """Strategy 5.5: Resolve calls using return-type propagation.
+
+    For patterns like `result = get_user(); result.save()`, infers the
+    type of `result` from `get_user()`'s return_type, then resolves
+    `save()` on that type.
+
+    Args:
+        repo: Repository instance.
+        elements: Elements with calls (from find_all_elements_with_calls).
+        scope: Repository scope.
+        repository: Repository name.
+        username: Username branch.
+
+    Returns:
+        Number of calls resolved via return-type propagation.
+    """
+    return_type_resolved = 0
+
+    # Find elements that could benefit from return-type propagation:
+    # must have both unresolved receiver calls AND resolved bare calls
+    candidates: list[str] = []
+    for elem in elements:
+        calls = elem.get("calls", [])
+        has_unresolved_receiver = any(
+            c.get("receiver")
+            and not c.get("resolved_id")
+            and c.get("category") in ("untyped", "unknown", "type_resolvable")
+            for c in calls
+        )
+        has_resolved_bare = any(
+            not c.get("receiver") and c.get("resolved_id") for c in calls
+        )
+        if has_unresolved_receiver and has_resolved_bare:
+            candidates.append(elem.get("element_id", ""))
+
+    if not candidates:
+        return 0
+
+    logger.info(f"Return-type propagation: {len(candidates)} candidate elements")
+
+    for elem_id in candidates:
+        if not elem_id:
+            continue
+
+        doc = repo.get_document(elem_id)
+        if not doc:
+            continue
+
+        raw_code = doc.get("raw_code", "")
+        calls = doc.get("calls", [])
+
+        if not raw_code:
+            continue
+
+        # Build resolved bare call map: func_name -> resolved_id
+        resolved_bare: dict[str, str] = {}
+        for c in calls:
+            if not c.get("receiver") and c.get("resolved_id"):
+                resolved_bare[c["name"]] = c["resolved_id"]
+
+        # Infer types from return types
+        inferred_types = _build_receiver_type_map(raw_code, resolved_bare, repo)
+
+        if not inferred_types:
+            continue
+
+        # Try to resolve unresolved receiver calls using inferred types
+        updated = False
+        for call in calls:
+            if call.get("resolved_id") or not call.get("receiver"):
+                continue
+            receiver = call["receiver"]
+            if receiver in inferred_types:
+                resolved_id = _lookup_method_by_type(
+                    repo,
+                    inferred_types[receiver],
+                    call["name"],
+                    scope,
+                    repository,
+                    username,
+                )
+                if resolved_id:
+                    call["resolved_id"] = resolved_id
+                    call["category"] = "return_type_resolved"
+                    return_type_resolved += 1
+                    updated = True
+
+        if updated:
+            repo.store_calls(elem_id, calls)
+
+    if return_type_resolved:
+        logger.info(
+            f"Return-type propagation: resolved {return_type_resolved} calls"
+        )
+
+    return return_type_resolved
 
 
 def _find_element_in_file(

@@ -447,6 +447,99 @@ class TestUnwrapType:
 
 
 # =============================================================================
+# FIX 3: RETURN-TYPE PROPAGATION TESTS
+# =============================================================================
+
+
+class TestBuildReceiverTypeMap:
+    """Tests for _build_receiver_type_map() helper."""
+
+    def test_simple_assignment(self):
+        from unittest.mock import MagicMock
+
+        from magaldi_core.call_resolution import _build_receiver_type_map
+
+        repo = MagicMock()
+        repo.get_document.return_value = {"return_type": "User"}
+
+        raw_code = "result = get_user()\nresult.save()"
+        resolved_calls = {"get_user": "scope:repo:main:path:function:get_user:10"}
+
+        type_map = _build_receiver_type_map(raw_code, resolved_calls, repo)
+
+        assert type_map == {"result": "User"}
+        repo.get_document.assert_called_once_with(
+            "scope:repo:main:path:function:get_user:10"
+        )
+
+    def test_no_return_type(self):
+        from unittest.mock import MagicMock
+
+        from magaldi_core.call_resolution import _build_receiver_type_map
+
+        repo = MagicMock()
+        repo.get_document.return_value = {"return_type": None}
+
+        raw_code = "result = get_user()\nresult.save()"
+        resolved_calls = {"get_user": "some:id"}
+
+        type_map = _build_receiver_type_map(raw_code, resolved_calls, repo)
+
+        assert type_map == {}
+
+    def test_unresolved_function(self):
+        from unittest.mock import MagicMock
+
+        from magaldi_core.call_resolution import _build_receiver_type_map
+
+        repo = MagicMock()
+
+        raw_code = "result = unknown_func()\nresult.save()"
+        resolved_calls = {}  # unknown_func not resolved
+
+        type_map = _build_receiver_type_map(raw_code, resolved_calls, repo)
+
+        assert type_map == {}
+        repo.get_document.assert_not_called()
+
+    def test_await_assignment(self):
+        from unittest.mock import MagicMock
+
+        from magaldi_core.call_resolution import _build_receiver_type_map
+
+        repo = MagicMock()
+        repo.get_document.return_value = {"return_type": "Response"}
+
+        raw_code = "result = await fetch_data()\nresult.json()"
+        resolved_calls = {"fetch_data": "some:id"}
+
+        type_map = _build_receiver_type_map(raw_code, resolved_calls, repo)
+
+        assert type_map == {"result": "Response"}
+
+    def test_multiple_assignments(self):
+        from unittest.mock import MagicMock
+
+        from magaldi_core.call_resolution import _build_receiver_type_map
+
+        repo = MagicMock()
+        repo.get_document.side_effect = [
+            {"return_type": "User"},
+            {"return_type": "Session"},
+        ]
+
+        raw_code = "user = get_user()\nsession = create_session()\nuser.save()\nsession.commit()"
+        resolved_calls = {
+            "get_user": "id:1",
+            "create_session": "id:2",
+        }
+
+        type_map = _build_receiver_type_map(raw_code, resolved_calls, repo)
+
+        assert type_map == {"user": "User", "session": "Session"}
+
+
+# =============================================================================
 # INTEGRATION TESTS
 # =============================================================================
 
