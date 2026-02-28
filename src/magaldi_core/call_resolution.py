@@ -1009,10 +1009,7 @@ def _score_candidates_rrf(
         embed_scores = []
         for i, c in enumerate(candidates):
             c_emb = c.get("summary_embedding")
-            if c_emb:
-                score = _cosine_similarity(caller_embedding, c_emb)
-            else:
-                score = -1.0
+            score = _cosine_similarity(caller_embedding, c_emb) if c_emb else -1.0
             embed_scores.append((i, score))
         embed_ranked = sorted(embed_scores, key=lambda x: -x[1])
     else:
