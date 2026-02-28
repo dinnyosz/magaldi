@@ -11,8 +11,13 @@ from unittest.mock import MagicMock
 import pytest
 
 from magaldi_core.call_resolution import (
+    _build_constructor_type_map,
     _cosine_similarity,
+    _is_likely_class_name,
     _merge_candidates,
+    _receiver_class_affinity,
+    _resolve_via_constructors,
+    _score_candidates_rrf,
     compute_semantic_relationships,
     resolve_calls_by_embedding,
 )
@@ -146,8 +151,8 @@ class TestResolveCallsByEmbedding:
         assert stored_calls[0]["resolved_id"] == "target1"
         assert stored_calls[0]["category"] == "embedding_resolved"
 
-    def test_multiple_candidates_best_embedding_wins(self, mock_es):
-        """With multiple candidates, highest similarity wins."""
+    def test_multiple_candidates_rrf_picks_best(self, mock_es):
+        """With multiple candidates, RRF-scored best match wins."""
         caller_emb = [0.8, 0.6, 0.0]
 
         mock_es.find_all_elements_with_calls.return_value = [
@@ -159,8 +164,11 @@ class TestResolveCallsByEmbedding:
             }
         ]
         mock_es.find_candidates_by_name.return_value = [
-            {"element_id": "bad_match", "name": "process", "element_type": "method", "summary_embedding": [0.0, 0.0, 1.0]},
-            {"element_id": "good_match", "name": "process", "element_type": "method", "summary_embedding": [0.7, 0.7, 0.0]},
+            {"element_id": "bad_match", "name": "process", "element_type": "method",
+             "summary_embedding": [0.0, 0.0, 1.0], "parent_id": "", "relative_path": "a.py"},
+            {"element_id": "good_match", "name": "process", "element_type": "method",
+             "summary_embedding": [0.7, 0.7, 0.0], "parent_id": "x:r:main:svc.py:class:Service:1",
+             "relative_path": "svc.py"},
         ]
         mock_es.get_embedding.return_value = caller_emb
 
@@ -175,7 +183,7 @@ class TestResolveCallsByEmbedding:
         mock_es.get_embedding.assert_called_with("caller1", "caller")
 
     def test_below_threshold_stays_unresolved(self, mock_es):
-        """Candidates below similarity threshold are not resolved."""
+        """Candidates below RRF threshold are not resolved."""
         mock_es.find_all_elements_with_calls.return_value = [
             {
                 "element_id": "caller1",
@@ -185,13 +193,14 @@ class TestResolveCallsByEmbedding:
             }
         ]
         mock_es.find_candidates_by_name.return_value = [
-            {"element_id": "c1", "name": "run", "element_type": "method", "summary_embedding": [0.0, 1.0, 0.0]},
-            {"element_id": "c2", "name": "run", "element_type": "method", "summary_embedding": [0.0, 0.0, 1.0]},
+            {"element_id": "c1", "name": "run", "element_type": "method", "summary_embedding": [0.0, 1.0, 0.0], "parent_id": "", "relative_path": "a.py"},
+            {"element_id": "c2", "name": "run", "element_type": "method", "summary_embedding": [0.0, 0.0, 1.0], "parent_id": "", "relative_path": "b.py"},
         ]
         # Caller embedding is very different from both candidates
         mock_es.get_embedding.return_value = [1.0, 0.0, 0.0]
 
-        total, single, embedding = resolve_calls_by_embedding(mock_es, "s", "r", "main", similarity_threshold=0.9)
+        # Use an impossibly high threshold to force rejection
+        total, single, embedding = resolve_calls_by_embedding(mock_es, "s", "r", "main", min_rrf_score=1.0)
 
         assert total == 1
         assert single == 0
@@ -231,8 +240,8 @@ class TestResolveCallsByEmbedding:
         assert total == 0
         mock_es.store_calls.assert_not_called()
 
-    def test_caller_without_embedding_skips_comparison(self, mock_es):
-        """When caller has no embedding, multi-candidate matching is skipped."""
+    def test_caller_without_embedding_uses_name_signals(self, mock_es):
+        """When caller has no embedding, RRF still works via name/path signals."""
         mock_es.find_all_elements_with_calls.return_value = [
             {
                 "element_id": "caller1",
@@ -242,16 +251,21 @@ class TestResolveCallsByEmbedding:
             }
         ]
         mock_es.find_candidates_by_name.return_value = [
-            {"element_id": "c1", "name": "process", "element_type": "method", "summary_embedding": [1.0]},
-            {"element_id": "c2", "name": "process", "element_type": "method", "summary_embedding": [0.0]},
+            {"element_id": "c1", "name": "process", "element_type": "method",
+             "summary_embedding": [1.0], "parent_id": "", "relative_path": "a.py"},
+            {"element_id": "c2", "name": "process", "element_type": "method",
+             "summary_embedding": [0.0], "parent_id": "x:r:main:svc.py:class:Service:1",
+             "relative_path": "svc.py"},
         ]
         mock_es.get_embedding.return_value = None  # No embedding for caller
 
         total, single, embedding = resolve_calls_by_embedding(mock_es, "s", "r", "main")
 
         assert total == 1
-        assert embedding == 0
-        mock_es.store_calls.assert_not_called()
+        # RRF uses name/path signals even without embedding — c2 matches "svc"
+        assert embedding == 1
+        stored_calls = mock_es.store_calls.call_args[0][1]
+        assert stored_calls[0]["resolved_id"] == "c2"
 
     def test_no_candidates_found(self, mock_es):
         """When no candidates exist for a name, call stays unresolved."""
@@ -663,3 +677,429 @@ class TestCallGraphFormatterSemanticRelated:
         output = formatter.format(result)
 
         assert "Semantically Related" not in output
+
+
+# =============================================================================
+# CONSTRUCTOR-BASED TYPE INFERENCE TESTS (Strategy 5.6)
+# =============================================================================
+
+
+class TestIsLikelyClassName:
+    """Tests for _is_likely_class_name helper."""
+
+    def test_pascal_case(self):
+        assert _is_likely_class_name("Repository") is True
+
+    def test_multi_word_pascal(self):
+        assert _is_likely_class_name("HttpClient") is True
+
+    def test_lowercase(self):
+        assert _is_likely_class_name("repository") is False
+
+    def test_all_caps(self):
+        """All-caps names are constants, not classes."""
+        assert _is_likely_class_name("HTTP") is False
+
+    def test_single_char(self):
+        assert _is_likely_class_name("R") is False
+
+    def test_empty(self):
+        assert _is_likely_class_name("") is False
+
+
+class TestBuildConstructorTypeMap:
+    """Tests for _build_constructor_type_map."""
+
+    def test_simple_constructor(self):
+        code = "repo = Repository(config)"
+        result = _build_constructor_type_map(code)
+        assert result == {"repo": "Repository"}
+
+    def test_module_prefixed_constructor(self):
+        """var = module.ClassName() should capture ClassName."""
+        code = "parser = db.Parser()"
+        result = _build_constructor_type_map(code)
+        assert result == {"parser": "Parser"}
+
+    def test_await_constructor(self):
+        code = "client = await AsyncClient()"
+        result = _build_constructor_type_map(code)
+        assert result == {"client": "AsyncClient"}
+
+    def test_lowercase_not_captured(self):
+        """Lowercase function calls are not constructors."""
+        code = "result = get_data()"
+        result = _build_constructor_type_map(code)
+        assert result == {}
+
+    def test_builtin_constructor_excluded(self):
+        """Built-in exception types are excluded."""
+        code = "err = ValueError('bad')"
+        result = _build_constructor_type_map(code)
+        assert result == {}
+
+    def test_all_caps_excluded(self):
+        """ALL_CAPS names are constants, not classes."""
+        code = "x = HTTP()"
+        result = _build_constructor_type_map(code)
+        assert result == {}
+
+    def test_multiple_constructors(self):
+        code = """
+repo = Repository()
+client = HttpClient(base_url)
+state = AppState(config)
+"""
+        result = _build_constructor_type_map(code)
+        assert result == {
+            "repo": "Repository",
+            "client": "HttpClient",
+            "state": "AppState",
+        }
+
+    def test_reassignment_last_wins(self):
+        code = """
+x = Foo()
+x = Bar()
+"""
+        result = _build_constructor_type_map(code)
+        assert result == {"x": "Bar"}
+
+
+class TestResolveViaConstructors:
+    """Tests for _resolve_via_constructors (Strategy 5.6)."""
+
+    @pytest.fixture
+    def mock_repo(self):
+        repo = MagicMock()
+        repo.get_document.return_value = None
+        repo.get_document_by_name_only.return_value = None
+        repo.get_method_by_class.return_value = None
+        repo.store_calls.return_value = True
+        return repo
+
+    def test_simple_constructor_resolution(self, mock_repo):
+        """repo = Repository(); repo.get() resolves to Repository.get."""
+        elements = [
+            {
+                "element_id": "func1",
+                "calls": [
+                    {"name": "get", "receiver": "repo", "category": "untyped", "resolved_id": None},
+                ],
+            }
+        ]
+
+        mock_repo.get_document.return_value = {
+            "element_id": "func1",
+            "raw_code": "repo = Repository()\nrepo.get()",
+            "calls": [
+                {"name": "get", "receiver": "repo", "category": "untyped", "resolved_id": None},
+            ],
+        }
+        mock_repo.get_document_by_name_only.return_value = {
+            "element_id": "class_repo",
+            "name": "Repository",
+        }
+        mock_repo.get_method_by_class.return_value = {
+            "element_id": "repo_get_method",
+        }
+
+        count = _resolve_via_constructors(
+            mock_repo, elements, "s", "r", "main"
+        )
+
+        assert count == 1
+        mock_repo.store_calls.assert_called_once()
+        stored = mock_repo.store_calls.call_args[0][1]
+        assert stored[0]["resolved_id"] == "repo_get_method"
+        assert stored[0]["category"] == "constructor_resolved"
+
+    def test_module_prefixed_constructor(self, mock_repo):
+        """repo = db.Repository(); repo.get() resolves."""
+        elements = [
+            {
+                "element_id": "func1",
+                "calls": [
+                    {"name": "get", "receiver": "repo", "category": "untyped", "resolved_id": None},
+                ],
+            }
+        ]
+
+        mock_repo.get_document.return_value = {
+            "element_id": "func1",
+            "raw_code": "repo = db.Repository()\nrepo.get()",
+            "calls": [
+                {"name": "get", "receiver": "repo", "category": "untyped", "resolved_id": None},
+            ],
+        }
+        mock_repo.get_document_by_name_only.return_value = {
+            "element_id": "class_repo",
+            "name": "Repository",
+        }
+        mock_repo.get_method_by_class.return_value = {
+            "element_id": "repo_get_method",
+        }
+
+        count = _resolve_via_constructors(
+            mock_repo, elements, "s", "r", "main"
+        )
+
+        assert count == 1
+
+    def test_lowercase_func_not_treated_as_constructor(self, mock_repo):
+        """result = get_data(); result.process() should NOT be resolved."""
+        elements = [
+            {
+                "element_id": "func1",
+                "calls": [
+                    {"name": "process", "receiver": "result", "category": "untyped", "resolved_id": None},
+                ],
+            }
+        ]
+
+        mock_repo.get_document.return_value = {
+            "element_id": "func1",
+            "raw_code": "result = get_data()\nresult.process()",
+            "calls": [
+                {"name": "process", "receiver": "result", "category": "untyped", "resolved_id": None},
+            ],
+        }
+
+        count = _resolve_via_constructors(
+            mock_repo, elements, "s", "r", "main"
+        )
+
+        assert count == 0
+        mock_repo.store_calls.assert_not_called()
+
+    def test_class_not_found_stays_unresolved(self, mock_repo):
+        """Constructor for unknown class stays unresolved."""
+        elements = [
+            {
+                "element_id": "func1",
+                "calls": [
+                    {"name": "foo", "receiver": "obj", "category": "untyped", "resolved_id": None},
+                ],
+            }
+        ]
+
+        mock_repo.get_document.return_value = {
+            "element_id": "func1",
+            "raw_code": "obj = NonExistent()\nobj.foo()",
+            "calls": [
+                {"name": "foo", "receiver": "obj", "category": "untyped", "resolved_id": None},
+            ],
+        }
+        mock_repo.get_document_by_name_only.return_value = None  # Class not found
+
+        count = _resolve_via_constructors(
+            mock_repo, elements, "s", "r", "main"
+        )
+
+        assert count == 0
+        mock_repo.store_calls.assert_not_called()
+
+    def test_already_resolved_calls_skipped(self, mock_repo):
+        """Calls that are already resolved should not be re-resolved."""
+        elements = [
+            {
+                "element_id": "func1",
+                "calls": [
+                    {"name": "get", "receiver": "repo", "category": "resolved", "resolved_id": "existing"},
+                ],
+            }
+        ]
+
+        mock_repo.get_document.return_value = {
+            "element_id": "func1",
+            "raw_code": "repo = Repository()\nrepo.get()",
+            "calls": [
+                {"name": "get", "receiver": "repo", "category": "resolved", "resolved_id": "existing"},
+            ],
+        }
+
+        count = _resolve_via_constructors(
+            mock_repo, elements, "s", "r", "main"
+        )
+
+        assert count == 0
+
+    def test_no_raw_code_skipped(self, mock_repo):
+        """Elements without raw_code are skipped."""
+        elements = [
+            {
+                "element_id": "func1",
+                "calls": [
+                    {"name": "get", "receiver": "repo", "category": "untyped", "resolved_id": None},
+                ],
+            }
+        ]
+
+        mock_repo.get_document.return_value = {
+            "element_id": "func1",
+            "raw_code": "",
+            "calls": [
+                {"name": "get", "receiver": "repo", "category": "untyped", "resolved_id": None},
+            ],
+        }
+
+        count = _resolve_via_constructors(
+            mock_repo, elements, "s", "r", "main"
+        )
+
+        assert count == 0
+
+
+# =============================================================================
+# RRF SCORING TESTS
+# =============================================================================
+
+
+class TestReceiverClassAffinity:
+    """Tests for _receiver_class_affinity helper."""
+
+    def test_prefix_match(self):
+        """'repo' is prefix of parent class 'Repository' → 1.0."""
+        candidate = {
+            "parent_id": "s:r:main:file.py:class:Repository:1",
+            "relative_path": "file.py",
+        }
+        assert _receiver_class_affinity("repo", candidate) == 1.0
+
+    def test_substring_match(self):
+        """'search' is prefix of 'SearchRepository' (lowercased) → 1.0."""
+        candidate = {
+            "parent_id": "s:r:main:file.py:class:SearchRepository:1",
+            "relative_path": "file.py",
+        }
+        # "search" is a prefix of "searchrepository" (lowercased), so 1.0
+        assert _receiver_class_affinity("search", candidate) == 1.0
+
+    def test_true_substring_match(self):
+        """'meta' in 'ElementMetadata' → 0.8 (substring but not prefix)."""
+        candidate = {
+            "parent_id": "s:r:main:file.py:class:ElementMetadata:1",
+            "relative_path": "file.py",
+        }
+        assert _receiver_class_affinity("meta", candidate) == 0.8
+
+    def test_underscore_part_match(self):
+        """'es_repo' splits to ['repo'] which is prefix of 'Repository' → 0.7."""
+        candidate = {
+            "parent_id": "s:r:main:file.py:class:Repository:1",
+            "relative_path": "file.py",
+        }
+        score = _receiver_class_affinity("es_repo", candidate)
+        assert score >= 0.7
+
+    def test_path_match(self):
+        """'repo' in path 'repository.py' → at least 0.5."""
+        candidate = {
+            "parent_id": "",
+            "relative_path": "src/repository.py",
+        }
+        score = _receiver_class_affinity("repo", candidate)
+        assert score >= 0.5
+
+    def test_no_match(self):
+        """No relationship → 0.0."""
+        candidate = {
+            "parent_id": "s:r:main:file.py:class:HttpClient:1",
+            "relative_path": "client.py",
+        }
+        assert _receiver_class_affinity("repo", candidate) == 0.0
+
+    def test_short_receiver_ignored(self):
+        """Very short receivers (< 3 chars) don't match to avoid noise."""
+        candidate = {
+            "parent_id": "s:r:main:file.py:class:Repository:1",
+            "relative_path": "repository.py",
+        }
+        assert _receiver_class_affinity("re", candidate) == 0.0
+
+    def test_no_parent_id(self):
+        """Candidate without parent_id can still match on path."""
+        candidate = {
+            "parent_id": None,
+            "relative_path": "src/repository.py",
+        }
+        score = _receiver_class_affinity("repo", candidate)
+        assert score >= 0.5
+
+
+class TestScoreCandidatesRRF:
+    """Tests for _score_candidates_rrf."""
+
+    def test_single_candidate_gets_max_score(self):
+        """Single candidate gets rank 1 in all signals."""
+        call = {"receiver": "repo", "name": "get"}
+        candidates = [
+            {"element_id": "c1", "parent_id": "s:r:main:f.py:class:Repository:1",
+             "relative_path": "repository.py", "summary_embedding": [1.0, 0.0]},
+        ]
+        caller_emb = [0.9, 0.1]
+
+        results = _score_candidates_rrf(call, candidates, caller_emb)
+
+        assert len(results) == 1
+        assert results[0][0]["element_id"] == "c1"
+        # Score should be 3 * 1/(60+1) ≈ 0.049
+        assert abs(results[0][1] - 3 / 61) < 0.001
+
+    def test_receiver_affinity_breaks_tie(self):
+        """When embeddings are similar, receiver-class affinity disambiguates."""
+        call = {"receiver": "repo", "name": "save"}
+        candidates = [
+            {"element_id": "wrong", "parent_id": "s:r:main:f.py:class:HttpClient:1",
+             "relative_path": "client.py", "summary_embedding": [0.7, 0.7]},
+            {"element_id": "right", "parent_id": "s:r:main:f.py:class:Repository:1",
+             "relative_path": "repository.py", "summary_embedding": [0.7, 0.7]},
+        ]
+        # Same embedding for both candidates — tie on embedding signal
+        caller_emb = [0.7, 0.7]
+
+        results = _score_candidates_rrf(call, candidates, caller_emb)
+
+        # "right" should score higher due to receiver-class affinity
+        assert results[0][0]["element_id"] == "right"
+        assert results[0][1] > results[1][1]
+
+    def test_no_embedding_still_scores(self):
+        """Without caller embedding, name/path signals still produce scores."""
+        call = {"receiver": "repo", "name": "get"}
+        candidates = [
+            {"element_id": "c1", "parent_id": "", "relative_path": "a.py",
+             "summary_embedding": [1.0]},
+            {"element_id": "c2", "parent_id": "s:r:main:repo.py:class:Repository:1",
+             "relative_path": "repo.py", "summary_embedding": [0.5]},
+        ]
+
+        results = _score_candidates_rrf(call, candidates, caller_embedding=None)
+
+        assert len(results) == 2
+        # c2 should score higher (receiver "repo" matches parent "Repository")
+        assert results[0][0]["element_id"] == "c2"
+
+    def test_empty_candidates(self):
+        """Empty candidates list returns empty."""
+        results = _score_candidates_rrf(
+            {"receiver": "x", "name": "y"}, [], [1.0]
+        )
+        assert results == []
+
+    def test_embedding_signal_contributes(self):
+        """Strong embedding match boosts score."""
+        call = {"receiver": "thing", "name": "do"}
+        candidates = [
+            {"element_id": "c1", "parent_id": "", "relative_path": "a.py",
+             "summary_embedding": [1.0, 0.0]},
+            {"element_id": "c2", "parent_id": "", "relative_path": "b.py",
+             "summary_embedding": [0.0, 1.0]},
+        ]
+        # Embedding strongly prefers c1
+        caller_emb = [0.99, 0.01]
+
+        results = _score_candidates_rrf(call, candidates, caller_emb)
+
+        # c1 should win on embedding signal
+        assert results[0][0]["element_id"] == "c1"
