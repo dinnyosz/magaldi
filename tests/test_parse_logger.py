@@ -278,6 +278,68 @@ class TestParseRunLogger:
         assert "qwen3:1.7b-2k" in summary["token_usage"]["by_model"]
 
 
+    def test_get_summary_returns_dict(self, tmp_path: Path) -> None:
+        """get_summary() returns a dict with all expected keys."""
+        logger = ParseRunLogger(str(tmp_path), "test-scope", "test-repo", "main")
+        logger.start_phase("Phase 1: Discovery")
+        time.sleep(0.01)
+        logger.end_phase({"files": 10})
+        logger.log_processing_stats(
+            processed=50, skipped=10, indexed=40, deleted=0,
+            failed_elements=[], elapsed=30.0,
+        )
+
+        summary = logger.get_summary()
+        assert summary["scope"] == "test-scope"
+        assert summary["repository"] == "test-repo"
+        assert summary["username"] == "main"
+        assert summary["mode"] == "parse"
+        assert summary["error_count"] == 0
+        assert "Phase 1: Discovery" in summary["phase_timings"]
+        assert summary["processing"]["processed"] == 50
+        assert summary["processing"]["indexed"] == 40
+        assert summary["token_usage"]["total"] == 0
+
+    def test_write_creates_last_run_json(self, tmp_path: Path) -> None:
+        """write() creates a _last_run.json alongside the log file."""
+        logger = ParseRunLogger(str(tmp_path), "test-scope", "test-repo", "main")
+        logger.log_processing_stats(
+            processed=20, skipped=5, indexed=15, deleted=0,
+            failed_elements=[], elapsed=10.0,
+        )
+
+        logger.write()
+
+        json_path = tmp_path / "logs" / "_last_run.json"
+        assert json_path.exists()
+
+        summary = json.loads(json_path.read_text())
+        assert summary["scope"] == "test-scope"
+        assert summary["repository"] == "test-repo"
+        assert summary["processing"]["processed"] == 20
+        assert summary["processing"]["indexed"] == 15
+
+    def test_last_run_json_matches_embedded_json(self, tmp_path: Path) -> None:
+        """_last_run.json content matches the JSON embedded in the log."""
+        logger = ParseRunLogger(str(tmp_path), "s", "r", "u")
+        logger.start_phase("Test")
+        time.sleep(0.01)
+        logger.end_phase()
+
+        log_path = logger.write()
+
+        # Read embedded JSON from log
+        content = log_path.read_text()
+        json_start = content.index("{", content.index("JSON SUMMARY"))
+        json_end = content.rindex("}") + 1
+        embedded = json.loads(content[json_start:json_end])
+
+        # Read standalone JSON
+        standalone = json.loads((tmp_path / "logs" / "_last_run.json").read_text())
+
+        assert embedded == standalone
+
+
 class TestFormatDurationPrecise:
     """Tests for _format_duration_precise."""
 

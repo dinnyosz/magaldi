@@ -129,33 +129,18 @@ repository: $name
 EOF
 }
 
-# ── Extract JSON summary from parse log ────────────────────────────
+# ── Get JSON summary ───────────────────────────────────────────────
 
-extract_json_summary() {
-  # Find the most recent parse log for this repo and extract the JSON block
+get_json_summary() {
+  # Read the _last_run.json written by ParseRunLogger after each parse
   local repo_dir="$1"
-  local name="$2"
-  local log_dir="$repo_dir/logs"
+  local json_file="$repo_dir/logs/_last_run.json"
 
-  if [[ ! -d "$log_dir" ]]; then
+  if [[ -f "$json_file" ]]; then
+    cat "$json_file"
+  else
     return 1
   fi
-
-  # Get newest parse log
-  local newest_log
-  newest_log=$(ls -t "$log_dir"/parse_*.log 2>/dev/null | head -1)
-  if [[ -z "$newest_log" ]]; then
-    return 1
-  fi
-
-  # Extract JSON block (everything after "JSON SUMMARY" marker)
-  local json_block
-  json_block=$(sed -n '/^JSON SUMMARY/,$ p' "$newest_log" | tail -n +3)
-  if [[ -z "$json_block" ]]; then
-    return 1
-  fi
-
-  echo "$json_block"
 }
 
 # ── Main ───────────────────────────────────────────────────────────
@@ -269,7 +254,7 @@ for i in "${!MATCHING[@]}"; do
   fi
 
   # Extract JSON summary from parse log regardless of pass/fail
-  if json=$(extract_json_summary "$repo_dir" "$name"); then
+  if json=$(get_json_summary "$repo_dir"); then
     echo "$json" > "$RESULTS_DIR/${name}.json"
   fi
 

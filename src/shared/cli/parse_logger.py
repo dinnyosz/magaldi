@@ -266,6 +266,41 @@ class ParseRunLogger:
         return merged
 
     # =========================================================================
+    # Summary
+    # =========================================================================
+
+    def get_summary(self) -> dict[str, Any]:
+        """Build a machine-readable summary dict of the run.
+
+        Contains key metrics: timing, processing stats, token usage, errors.
+        This is what gets written to _last_run.json and embedded in the log.
+        """
+        total_elapsed = self.get_total_elapsed()
+        token_totals = self.get_token_totals()
+        return {
+            "run_start": self.run_start_dt.isoformat(),
+            "mode": self.mode,
+            "scope": self.scope,
+            "repository": self.repository,
+            "username": self.username,
+            "total_elapsed_seconds": round(total_elapsed, 2),
+            "phase_timings": {
+                name: round(end - start, 3)
+                for name, start, end, _ in self._phase_timings
+            },
+            "error_count": len(self._errors),
+            "budget_exceeded": len(self._budget_exceeded) > 0,
+            "processing": self._processing_stats,
+            "token_usage": {
+                "total_input": token_totals["input"],
+                "total_output": token_totals["output"],
+                "total": token_totals["input"] + token_totals["output"],
+                "elements": token_totals["count"],
+                "by_model": self.get_model_totals(),
+            },
+        }
+
+    # =========================================================================
     # Write Log File
     # =========================================================================
 
@@ -438,34 +473,17 @@ class ParseRunLogger:
         lines.append("-" * 70)
         lines.append("JSON SUMMARY (machine-readable)")
         lines.append("-" * 70)
-        token_totals = self.get_token_totals()
-        summary = {
-            "run_start": self.run_start_dt.isoformat(),
-            "mode": self.mode,
-            "scope": self.scope,
-            "repository": self.repository,
-            "username": self.username,
-            "total_elapsed_seconds": round(total_elapsed, 2),
-            "phase_timings": {
-                name: round(end - start, 3)
-                for name, start, end, _ in self._phase_timings
-            },
-            "error_count": len(self._errors),
-            "budget_exceeded": len(self._budget_exceeded) > 0,
-            "processing": self._processing_stats,
-            "token_usage": {
-                "total_input": token_totals["input"],
-                "total_output": token_totals["output"],
-                "total": token_totals["input"] + token_totals["output"],
-                "elements": token_totals["count"],
-                "by_model": self.get_model_totals(),
-            },
-        }
+        summary = self.get_summary()
         lines.append(json.dumps(summary, indent=2))
         lines.append("")
 
-        # Write
+        # Write full log
         self.log_path.write_text("\n".join(lines), encoding="utf-8")
+
+        # Always write standalone JSON summary for easy programmatic access
+        json_path = self.log_path.parent / "_last_run.json"
+        json_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+
         return self.log_path
 
     @property
