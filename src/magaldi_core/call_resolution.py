@@ -93,6 +93,20 @@ def resolve_all_calls(
             old_resolved_id = call.get("resolved_id")
             resolved_id = None
 
+            # Reset resolved categories back to their base category so
+            # strategies 5.5/5.6/5.7 can re-process them on subsequent runs
+            if category in (
+                "resolved", "return_type_resolved", "constructor_resolved",
+                "scope_resolved", "embedding_resolved",
+            ):
+                if receiver is None:
+                    category = "unknown"
+                elif param_types and receiver in param_types:
+                    category = "type_resolvable"
+                else:
+                    category = "untyped"
+                call["category"] = category
+
             # Strategy 3: Bare call matching an import
             if receiver is None and name in import_map:
                 import_info = import_map[name]
@@ -666,11 +680,14 @@ def _resolve_via_return_types(
 
     logger.info(f"Return-type propagation: {len(candidates)} candidate elements")
 
+    # Batch fetch full documents for all candidates
+    docs = repo.get_documents_batch(candidates)
+
     for elem_id in candidates:
         if not elem_id:
             continue
 
-        doc = repo.get_document(elem_id)
+        doc = docs.get(elem_id)
         if not doc:
             continue
 
@@ -822,11 +839,14 @@ def _resolve_via_constructors(
 
     logger.info(f"Constructor resolution: {len(candidates)} candidate elements")
 
+    # Batch fetch full documents for all candidates
+    docs = repo.get_documents_batch(candidates)
+
     for elem_id in candidates:
         if not elem_id:
             continue
 
-        doc = repo.get_document(elem_id)
+        doc = docs.get(elem_id)
         if not doc:
             continue
 
@@ -929,11 +949,14 @@ def _resolve_via_scope_bindings(
 
     logger.info(f"Scope binding resolution: {len(candidates)} candidate elements")
 
+    # Batch fetch full documents for all candidates
+    docs = repo.get_documents_batch(candidates)
+
     for elem_id in candidates:
         if not elem_id:
             continue
 
-        doc = repo.get_document(elem_id)
+        doc = docs.get(elem_id)
         if not doc:
             continue
 

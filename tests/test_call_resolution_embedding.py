@@ -778,6 +778,17 @@ class TestResolveViaConstructors:
         repo.get_document_by_name_only.return_value = None
         repo.get_method_by_class.return_value = None
         repo.store_calls.return_value = True
+
+        # Delegate batch fetch to individual get_document calls
+        def _batch_fetch(ids):
+            result = {}
+            for eid in ids:
+                doc = repo.get_document(eid)
+                if doc:
+                    result[eid] = doc
+            return result
+
+        repo.get_documents_batch.side_effect = _batch_fetch
         return repo
 
     def test_simple_constructor_resolution(self, mock_repo):
@@ -1156,6 +1167,17 @@ class TestResolveViaScopeBindings:
         repo.get_document_by_name_only.return_value = None
         repo.get_method_by_class.return_value = None
         repo.store_calls.return_value = True
+
+        # Delegate batch fetch to individual get_document calls
+        def _batch_fetch(ids):
+            result = {}
+            for eid in ids:
+                doc = repo.get_document(eid)
+                if doc:
+                    result[eid] = doc
+            return result
+
+        repo.get_documents_batch.side_effect = _batch_fetch
         return repo
 
     def test_method_return_chain(self, mock_repo):
