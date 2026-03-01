@@ -294,6 +294,29 @@ def parse(
                 "errors": scoring_result.errors,
             })
             run_logger.log_scoring_stats(scoring_result)
+            # Log token usage for variable scoring
+            if scoring_result.prompt_tokens > 0 or scoring_result.response_tokens > 0:
+                run_logger.log_token_usage("Phase 4: Variable Scoring", {
+                    "by_type": {
+                        "variable": {
+                            "input": scoring_result.prompt_tokens,
+                            "output": scoring_result.response_tokens,
+                            "count": scoring_result.batch_count,
+                        },
+                    },
+                    "by_model": {
+                        scoring_model: {
+                            "input": scoring_result.prompt_tokens,
+                            "output": scoring_result.response_tokens,
+                            "count": scoring_result.batch_count,
+                        },
+                    },
+                    "totals": {
+                        "input": scoring_result.prompt_tokens,
+                        "output": scoring_result.response_tokens,
+                        "count": scoring_result.batch_count,
+                    },
+                })
         elif skip_ai:
             console.print("\n[bold blue]Phase 4:[/] Variable Scoring [dim](skipped: --skip-ai)[/]")
 

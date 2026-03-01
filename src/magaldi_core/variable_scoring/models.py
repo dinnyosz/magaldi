@@ -65,6 +65,10 @@ class ScoringResult:
     elapsed: float = 0.0
     errors: int = 0
     scores: dict[str, VariableScore] = field(default_factory=dict)
+    # Token usage tracking (estimated, same as Phase 5)
+    prompt_tokens: int = 0  # Total input tokens across all batches
+    response_tokens: int = 0  # Total output tokens across all batches
+    model_name: str = ""  # Model used for scoring
     # Debug: (user_prompt, llm_output) for first successful batch
     debug_log: list[tuple[str, str]] = field(default_factory=list)
     # Debug: batch-level samples for display

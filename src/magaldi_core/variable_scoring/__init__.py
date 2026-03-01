@@ -126,7 +126,7 @@ def _score_batch(
     config: VariableScoringConfig,
     num_ctx: int,
     debug_log: list[tuple[str, str]] | None = None,
-) -> dict[str, VariableScore]:
+) -> tuple[dict[str, VariableScore], int, int]:
     """Score a single batch of variables using the LLM.
 
     Args:
@@ -138,7 +138,7 @@ def _score_batch(
             the first batch that completes successfully (for debug display).
 
     Returns:
-        Dict mapping element_id to VariableScore.
+        Tuple of (scores_dict, prompt_tokens, response_tokens).
     """
     # Build the prompt
     prompt_vars = [(idx, fp, name, code) for idx, _eid, fp, name, code in batch]
@@ -148,6 +148,10 @@ def _score_batch(
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_prompt},
     ]
+
+    # Estimate prompt tokens (system + user message, ~4 chars/token)
+    prompt_chars = len(SYSTEM_PROMPT) + len(user_prompt)
+    prompt_tokens = prompt_chars // 4
 
     # Output budget: ~20 tokens per variable (number + 4 scores + commas + newline + slack)
     output_budget = len(batch) * 20 + 50
@@ -162,10 +166,14 @@ def _score_batch(
     except Exception:
         logger.warning("LLM scoring failed for batch of %d variables, defaulting to keep", len(batch))
         # Default: score 5 on general_usefulness (pass threshold)
-        return {
-            eid: VariableScore(general_usefulness=5)
-            for _, eid, _, _, _ in batch
-        }
+        return (
+            {eid: VariableScore(general_usefulness=5) for _, eid, _, _, _ in batch},
+            prompt_tokens,
+            0,
+        )
+
+    # Estimate response tokens
+    response_tokens = len(output) // 4
 
     # Capture debug output for the first successful batch
     if debug_log is not None and len(debug_log) == 0:
@@ -182,7 +190,7 @@ def _score_batch(
             # Unparseable: default to score 5 (keep)
             result[element_id] = VariableScore(general_usefulness=5)
 
-    return result
+    return result, prompt_tokens, response_tokens
 
 
 def _get_context_tier(batch: list[tuple[int, str, str, str, str]]) -> int:
@@ -307,6 +315,10 @@ def score_variables(
     if progress_state is not None:
         progress_state.num_workers = effective_workers
 
+    # Accumulate token counts across all batches
+    total_prompt_tokens = 0
+    total_response_tokens = 0
+
     if effective_workers <= 1:
         # Sequential processing for single batch
         for batch_num, batch in enumerate(batches):
@@ -314,8 +326,10 @@ def score_variables(
             if worker_status is not None:
                 worker_status.set(0, batch_num + 1, len(batch))
             batch_start = time.time()
-            batch_scores = _score_batch(batch, llm_client, config, num_ctx, debug_log)
+            batch_scores, batch_prompt_tok, batch_resp_tok = _score_batch(batch, llm_client, config, num_ctx, debug_log)
             batch_time = time.time() - batch_start
+            total_prompt_tokens += batch_prompt_tok
+            total_response_tokens += batch_resp_tok
             all_scores.update(batch_scores)
             _collect_batch_sample(batch, batch_scores)
             if worker_status is not None:
@@ -355,7 +369,7 @@ def score_variables(
 
         def process_fn(
             item: tuple[list, int, int],
-        ) -> dict[str, VariableScore]:
+        ) -> tuple[dict[str, VariableScore], int, int]:
             """Process a single batch with worker status tracking."""
             batch, batch_num, num_ctx = item
             wid = _get_worker_id()
@@ -377,12 +391,16 @@ def score_variables(
 
         def on_complete(
             item: tuple[list, int, int],
-            batch_scores: dict[str, VariableScore],
+            batch_result: tuple[dict[str, VariableScore], int, int],
             _avg_workers: float,
             runtime: float,
         ) -> None:
             """Handle batch completion: update scores and progress."""
+            nonlocal total_prompt_tokens, total_response_tokens
             batch = item[0]
+            batch_scores, batch_prompt_tok, batch_resp_tok = batch_result
+            total_prompt_tokens += batch_prompt_tok
+            total_response_tokens += batch_resp_tok
             _sync_throttle_to_progress()
             try:
                 all_scores.update(batch_scores)
@@ -436,6 +454,8 @@ def score_variables(
 
     result.scores = all_scores
     result.elapsed = time.time() - start
+    result.prompt_tokens = total_prompt_tokens
+    result.response_tokens = total_response_tokens
     result.debug_log = debug_log
     result.batch_samples = batch_samples
 

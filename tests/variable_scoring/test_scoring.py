@@ -363,12 +363,14 @@ class TestScoreBatch:
         mock_client.generate_from_messages.return_value = "1. 9,2,1,8\n2. 1,1,1,1"
 
         config = VariableScoringConfig()
-        result = _score_batch(batch, mock_client, config, num_ctx=1024)
+        result, prompt_tok, resp_tok = _score_batch(batch, mock_client, config, num_ctx=1024)
 
         assert "eid1" in result
         assert result["eid1"].config_value == 9
         assert "eid2" in result
         assert result["eid2"].config_value == 1
+        assert prompt_tok > 0
+        assert resp_tok > 0
 
     def test_llm_error_defaults_to_keep(self):
         batch = [
@@ -378,10 +380,12 @@ class TestScoreBatch:
         mock_client.generate_from_messages.side_effect = RuntimeError("LLM unavailable")
 
         config = VariableScoringConfig()
-        result = _score_batch(batch, mock_client, config, num_ctx=1024)
+        result, prompt_tok, resp_tok = _score_batch(batch, mock_client, config, num_ctx=1024)
 
         assert "eid1" in result
         assert result["eid1"].general_usefulness == 5  # Default keep score
+        assert prompt_tok > 0
+        assert resp_tok == 0  # No response on error
 
     def test_unparseable_output_defaults_to_keep(self):
         batch = [
@@ -391,7 +395,7 @@ class TestScoreBatch:
         mock_client.generate_from_messages.return_value = "I cannot score this variable."
 
         config = VariableScoringConfig()
-        result = _score_batch(batch, mock_client, config, num_ctx=1024)
+        result, _prompt_tok, _resp_tok = _score_batch(batch, mock_client, config, num_ctx=1024)
 
         assert "eid1" in result
         assert result["eid1"].general_usefulness == 5  # Default keep score
@@ -406,6 +410,21 @@ class TestScoreBatch:
 
         call_kwargs = mock_client.generate_from_messages.call_args
         assert call_kwargs.kwargs["temperature"] == 0.3
+
+    def test_token_counts_returned(self):
+        """Token counts are estimated from prompt and response."""
+        batch = [
+            (1, "eid1", "src/config.py", "MAX_RETRIES", "MAX_RETRIES = 3"),
+        ]
+        mock_client = MagicMock()
+        mock_client.generate_from_messages.return_value = "1. 9,2,1,8"
+
+        config = VariableScoringConfig()
+        _result, prompt_tok, resp_tok = _score_batch(batch, mock_client, config, num_ctx=1024)
+
+        # Prompt includes system prompt + user prompt, estimated at ~4 chars/token
+        assert prompt_tok > 100  # System prompt alone is ~660 tokens
+        assert resp_tok > 0
 
 
 # =============================================================================
@@ -478,6 +497,20 @@ class TestScoreVariables:
         assert "eid1" in result.scores
         assert result.scores["eid1"].config_value == 7
         assert result.scores["eid1"].general_usefulness == 6
+
+    def test_token_counts_aggregated(self):
+        """Token counts are accumulated across batches."""
+        variables = [
+            ("eid1", "f.py", "MAX_RETRIES", "MAX_RETRIES = 3"),
+            ("eid2", "f.py", "DB_URL", "DB_URL = 'postgres://...'"),
+        ]
+        mock_client = MagicMock()
+        mock_client.generate_from_messages.return_value = "1. 9,2,1,8\n2. 8,9,1,7"
+
+        result = score_variables(variables, mock_client, max_workers=1)
+
+        assert result.prompt_tokens > 0
+        assert result.response_tokens > 0
 
     def test_parallel_processing(self):
         """Test that parallel processing works with multiple batches."""
