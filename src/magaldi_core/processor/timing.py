@@ -8,6 +8,7 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 from shared.ai.context_size import HANDCRAFTED_TIER, TIER_SCALING_EXPONENT
 from shared.throttling import ThroughputTracker
@@ -75,6 +76,15 @@ class TimingStats:
     output_tokens_max: dict[str, int] = field(default_factory=dict)
     output_sample_counts: dict[str, int] = field(default_factory=dict)
 
+    # Input token tracking: per-type prompt token stats (total input to LLM)
+    input_tokens_sum: dict[str, int] = field(default_factory=dict)
+    input_sample_counts: dict[str, int] = field(default_factory=dict)
+
+    # Per-model token tracking: model_name -> {input_sum, output_sum, count}
+    model_input_tokens: dict[str, int] = field(default_factory=dict)
+    model_output_tokens: dict[str, int] = field(default_factory=dict)
+    model_sample_counts: dict[str, int] = field(default_factory=dict)
+
     def set_totals_by_type(self, totals: dict[str, int]) -> None:
         """Set total element counts by type."""
         with self._lock:
@@ -125,6 +135,7 @@ class TimingStats:
         prompt_tokens: int = 0,
         response_tokens: int = 0,
         assigned_tier: int = 0,
+        model_name: str = "",
     ) -> None:
         """Record timing for a completed element.
 
@@ -141,6 +152,7 @@ class TimingStats:
             prompt_tokens: Estimated tokens in the full prompt.
             response_tokens: Estimated tokens in the LLM response.
             assigned_tier: Context tier assigned to this element.
+            model_name: Display name of the model used for summarization.
         """
         with self._lock:
             if element_type:
@@ -200,6 +212,17 @@ class TimingStats:
                     self.output_tokens_sum[element_type] = self.output_tokens_sum.get(element_type, 0) + response_tokens
                     if element_type not in self.output_tokens_max or response_tokens > self.output_tokens_max[element_type]:
                         self.output_tokens_max[element_type] = response_tokens
+
+                # Track input token usage per type
+                if prompt_tokens > 0 and element_type:
+                    self.input_sample_counts[element_type] = self.input_sample_counts.get(element_type, 0) + 1
+                    self.input_tokens_sum[element_type] = self.input_tokens_sum.get(element_type, 0) + prompt_tokens
+
+                # Track per-model token usage (only when model actually used)
+                if model_name and (prompt_tokens > 0 or response_tokens > 0):
+                    self.model_input_tokens[model_name] = self.model_input_tokens.get(model_name, 0) + prompt_tokens
+                    self.model_output_tokens[model_name] = self.model_output_tokens.get(model_name, 0) + response_tokens
+                    self.model_sample_counts[model_name] = self.model_sample_counts.get(model_name, 0) + 1
 
     @property
     def total_summarize_count(self) -> int:
@@ -322,6 +345,59 @@ class TimingStats:
                 "input": input_rows,
                 "output": output_rows,
                 "has_issues": has_issues,  # type: ignore[dict-item]
+            }
+
+    def get_token_usage_summary(self) -> dict[str, Any]:
+        """Get per-type and per-model token usage (input + output) for display.
+
+        Returns:
+            Dict with keys:
+                "by_type": {type: {"input": total_input, "output": total_output, "count": count}}
+                "by_model": {model: {"input": total_input, "output": total_output, "count": count}}
+                "totals": {"input": total_input, "output": total_output, "count": count}
+        """
+        with self._lock:
+            by_type: dict[str, dict[str, int]] = {}
+
+            # Merge input and output token data by type
+            all_types = set(self.input_sample_counts.keys()) | set(self.output_sample_counts.keys())
+            for elem_type in sorted(all_types):
+                input_tokens = self.input_tokens_sum.get(elem_type, 0)
+                output_tokens = self.output_tokens_sum.get(elem_type, 0)
+                count = max(
+                    self.input_sample_counts.get(elem_type, 0),
+                    self.output_sample_counts.get(elem_type, 0),
+                )
+                by_type[elem_type] = {
+                    "input": input_tokens,
+                    "output": output_tokens,
+                    "count": count,
+                }
+
+            # Per-model token usage
+            by_model: dict[str, dict[str, int]] = {}
+            for model in sorted(self.model_sample_counts.keys()):
+                by_model[model] = {
+                    "input": self.model_input_tokens.get(model, 0),
+                    "output": self.model_output_tokens.get(model, 0),
+                    "count": self.model_sample_counts.get(model, 0),
+                }
+
+            total_input = sum(self.input_tokens_sum.values())
+            total_output = sum(self.output_tokens_sum.values())
+            total_count = sum(
+                max(self.input_sample_counts.get(t, 0), self.output_sample_counts.get(t, 0))
+                for t in all_types
+            )
+
+            return {
+                "by_type": by_type,
+                "by_model": by_model,
+                "totals": {
+                    "input": total_input,
+                    "output": total_output,
+                    "count": total_count,
+                },
             }
 
     def record_task_runtime(self, runtime: float, concurrent_workers: int = 1) -> None:

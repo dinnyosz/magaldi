@@ -183,19 +183,77 @@ def print_phase_timings(run_logger: ParseRunLogger) -> None:
         return
 
     total_elapsed = run_logger.get_total_elapsed()
+    token_totals = run_logger.get_token_totals()
+    has_tokens = token_totals["count"] > 0
 
     console.print()
     table = Table(show_header=True, box=None, padding=(0, 2))
     table.add_column("Phase", style="cyan", min_width=30)
     table.add_column("Duration", style="green", justify="right", min_width=10)
     table.add_column("%", style="dim", justify="right", min_width=6)
+    if has_tokens:
+        table.add_column("In tokens", style="yellow", justify="right", min_width=10)
+        table.add_column("Out tokens", style="magenta", justify="right", min_width=10)
 
     for name, duration in timings:
         pct = (duration / total_elapsed * 100) if total_elapsed > 0 else 0
-        table.add_row(name, format_duration(duration), f"{pct:.0f}%")
+        if has_tokens:
+            # Look up token usage for this phase
+            phase_usage = run_logger._token_usage.get(name, {})
+            phase_totals = phase_usage.get("totals", {})
+            in_tok = phase_totals.get("input", 0)
+            out_tok = phase_totals.get("output", 0)
+            in_str = f"{in_tok:,}" if in_tok > 0 else "[dim]—[/]"
+            out_str = f"{out_tok:,}" if out_tok > 0 else "[dim]—[/]"
+            table.add_row(name, format_duration(duration), f"{pct:.0f}%", in_str, out_str)
+        else:
+            table.add_row(name, format_duration(duration), f"{pct:.0f}%")
 
     # Total row
-    table.add_row("─" * 30, "─" * 10, "─" * 6)
-    table.add_row("[bold]Total[/]", f"[bold]{format_duration(total_elapsed)}[/]", "")
+    if has_tokens:
+        table.add_row("─" * 30, "─" * 10, "─" * 6, "─" * 10, "─" * 10)
+        table.add_row(
+            "[bold]Total[/]",
+            f"[bold]{format_duration(total_elapsed)}[/]",
+            "",
+            f"[bold]{token_totals['input']:,}[/]",
+            f"[bold]{token_totals['output']:,}[/]",
+        )
+    else:
+        table.add_row("─" * 30, "─" * 10, "─" * 6)
+        table.add_row("[bold]Total[/]", f"[bold]{format_duration(total_elapsed)}[/]", "")
 
     console.print(table)
+
+    # Per-model token usage table (one row per model + totals)
+    model_totals = run_logger.get_model_totals()
+    if model_totals:
+        console.print()
+        model_table = Table(show_header=True, box=None, padding=(0, 2))
+        model_table.add_column("Model", style="cyan", min_width=30)
+        model_table.add_column("Elements", style="dim", justify="right", min_width=10)
+        model_table.add_column("In tokens", style="yellow", justify="right", min_width=12)
+        model_table.add_column("Out tokens", style="magenta", justify="right", min_width=12)
+
+        grand_input = 0
+        grand_output = 0
+        grand_count = 0
+        for model, data in sorted(model_totals.items()):
+            model_table.add_row(
+                model,
+                f"{data['count']:,}",
+                f"{data['input']:,}",
+                f"{data['output']:,}",
+            )
+            grand_input += data["input"]
+            grand_output += data["output"]
+            grand_count += data["count"]
+
+        model_table.add_row("─" * 30, "─" * 10, "─" * 12, "─" * 12)
+        model_table.add_row(
+            "[bold]Total[/]",
+            f"[bold]{grand_count:,}[/]",
+            f"[bold]{grand_input:,}[/]",
+            f"[bold]{grand_output:,}[/]",
+        )
+        console.print(model_table)

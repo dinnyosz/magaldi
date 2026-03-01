@@ -153,4 +153,5 @@ class ProcessedElement:
     prompt_tokens: int = 0  # Estimated tokens in full prompt
     response_tokens: int = 0  # Estimated tokens in LLM response
     assigned_tier: int = 0  # Context tier assigned to this element
+    model_name: str = ""  # Model used for summarization (display name)
     error: str | None = None

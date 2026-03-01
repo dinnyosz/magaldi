@@ -587,6 +587,7 @@ def _process_single_element(
             prompt_tokens=prompt_tokens,
             response_tokens=response_tokens,
             assigned_tier=num_ctx,
+            model_name=model_display,
         )
 
     except Exception as e:
@@ -603,5 +604,6 @@ def _process_single_element(
             prompt_tokens=prompt_tokens,
             response_tokens=response_tokens,
             assigned_tier=num_ctx,
+            model_name=model_display,
             error=str(e),
         )

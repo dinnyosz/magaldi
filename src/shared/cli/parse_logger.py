@@ -54,6 +54,9 @@ class ParseRunLogger:
         # Processing stats
         self._processing_stats: dict[str, Any] = {}
 
+        # Token usage per phase: {phase_name: {by_type: {...}, totals: {...}}}
+        self._token_usage: dict[str, dict[str, Any]] = {}
+
         # Discovery/manifest info
         self._discovery_info: dict[str, Any] = {}
         self._manifest_info: dict[str, Any] = {}
@@ -217,6 +220,52 @@ class ParseRunLogger:
         }
 
     # =========================================================================
+    # Token Usage
+    # =========================================================================
+
+    def log_token_usage(self, phase: str, token_summary: dict[str, Any]) -> None:
+        """Log token usage (input/output) for a phase.
+
+        Args:
+            phase: Phase name (e.g., "Phase 5: Processing").
+            token_summary: Result from TimingStats.get_token_usage_summary().
+        """
+        self._token_usage[phase] = token_summary
+
+    def get_token_totals(self) -> dict[str, int]:
+        """Get grand total token usage across all phases.
+
+        Returns:
+            {"input": total_input, "output": total_output, "count": total_count}
+        """
+        total_input = 0
+        total_output = 0
+        total_count = 0
+        for usage in self._token_usage.values():
+            totals = usage.get("totals", {})
+            total_input += totals.get("input", 0)
+            total_output += totals.get("output", 0)
+            total_count += totals.get("count", 0)
+        return {"input": total_input, "output": total_output, "count": total_count}
+
+    def get_model_totals(self) -> dict[str, dict[str, int]]:
+        """Get per-model token usage across all phases.
+
+        Returns:
+            {model_name: {"input": total_input, "output": total_output, "count": count}}
+        """
+        merged: dict[str, dict[str, int]] = {}
+        for usage in self._token_usage.values():
+            by_model = usage.get("by_model", {})
+            for model, data in by_model.items():
+                if model not in merged:
+                    merged[model] = {"input": 0, "output": 0, "count": 0}
+                merged[model]["input"] += data.get("input", 0)
+                merged[model]["output"] += data.get("output", 0)
+                merged[model]["count"] += data.get("count", 0)
+        return merged
+
+    # =========================================================================
     # Write Log File
     # =========================================================================
 
@@ -333,10 +382,63 @@ class ParseRunLogger:
                         lines.append(f"    {k}: {v}")
             lines.append("")
 
+        # Token Usage (per-phase and total)
+        if self._token_usage:
+            lines.append("-" * 70)
+            lines.append("TOKEN USAGE (LLM)")
+            lines.append("-" * 70)
+            for phase_name, usage in self._token_usage.items():
+                lines.append(f"  {phase_name}:")
+                by_type = usage.get("by_type", {})
+                for elem_type, data in by_type.items():
+                    inp = data.get("input", 0)
+                    out = data.get("output", 0)
+                    count = data.get("count", 0)
+                    avg_in = inp // count if count > 0 else 0
+                    avg_out = out // count if count > 0 else 0
+                    lines.append(
+                        f"    {elem_type:<15s} "
+                        f"input: {inp:>8,} ({avg_in:>5,}/item)  "
+                        f"output: {out:>8,} ({avg_out:>5,}/item)  "
+                        f"n={count}"
+                    )
+                totals = usage.get("totals", {})
+                lines.append(
+                    f"    {'TOTAL':<15s} "
+                    f"input: {totals.get('input', 0):>8,}  "
+                    f"output: {totals.get('output', 0):>8,}  "
+                    f"n={totals.get('count', 0)}"
+                )
+                lines.append("")
+
+            # Per-model breakdown across all phases
+            model_totals = self.get_model_totals()
+            if model_totals:
+                lines.append("  Per-Model Totals:")
+                for model, data in sorted(model_totals.items()):
+                    lines.append(
+                        f"    {model:<35s} "
+                        f"input: {data['input']:>8,}  "
+                        f"output: {data['output']:>8,}  "
+                        f"n={data['count']}"
+                    )
+
+            # Grand totals across all phases
+            grand = self.get_token_totals()
+            if grand["count"] > 0:
+                lines.append(
+                    f"  Grand Total: "
+                    f"input={grand['input']:,} + output={grand['output']:,} "
+                    f"= {grand['input'] + grand['output']:,} tokens "
+                    f"({grand['count']} elements)"
+                )
+                lines.append("")
+
         # Machine-readable JSON summary at the end
         lines.append("-" * 70)
         lines.append("JSON SUMMARY (machine-readable)")
         lines.append("-" * 70)
+        token_totals = self.get_token_totals()
         summary = {
             "run_start": self.run_start_dt.isoformat(),
             "mode": self.mode,
@@ -351,6 +453,13 @@ class ParseRunLogger:
             "error_count": len(self._errors),
             "budget_exceeded": len(self._budget_exceeded) > 0,
             "processing": self._processing_stats,
+            "token_usage": {
+                "total_input": token_totals["input"],
+                "total_output": token_totals["output"],
+                "total": token_totals["input"] + token_totals["output"],
+                "elements": token_totals["count"],
+                "by_model": self.get_model_totals(),
+            },
         }
         lines.append(json.dumps(summary, indent=2))
         lines.append("")

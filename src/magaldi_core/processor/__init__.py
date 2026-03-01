@@ -641,6 +641,7 @@ def process_elements(
                     prompt_tokens=processed.prompt_tokens,
                     response_tokens=processed.response_tokens,
                     assigned_tier=processed.assigned_tier,
+                    model_name=processed.model_name,
                 )
                 # Only record to throughput tracker if this task belongs to the
                 # current (model, tier) — cross-tier/model in-flight tasks

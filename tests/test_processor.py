@@ -878,6 +878,64 @@ class TestTimingStats:
         assert stats.output_tokens_sum["function"] == 260  # 80 + 120 + 60
         assert stats.output_tokens_max["function"] == 120
 
+    def test_per_model_token_tracking(self):
+        """Test per-model token aggregation."""
+        stats = TimingStats()
+        stats.set_totals_by_type({"function": 2, "class": 1})
+
+        # Two functions with small model
+        stats.record(1.0, 0.5, 0.3, "function", True,
+                     prompt_tokens=500, response_tokens=80, assigned_tier=2048,
+                     model_name="qwen3:1.7b-2k")
+        stats.record(1.0, 0.5, 0.3, "function", True,
+                     prompt_tokens=600, response_tokens=90, assigned_tier=2048,
+                     model_name="qwen3:1.7b-2k")
+        # One class with large model
+        stats.record(2.0, 1.0, 0.5, "class", True,
+                     prompt_tokens=3000, response_tokens=200, assigned_tier=4096,
+                     model_name="qwen3:4b-instruct-4k")
+
+        assert stats.model_sample_counts["qwen3:1.7b-2k"] == 2
+        assert stats.model_input_tokens["qwen3:1.7b-2k"] == 1100
+        assert stats.model_output_tokens["qwen3:1.7b-2k"] == 170
+        assert stats.model_sample_counts["qwen3:4b-instruct-4k"] == 1
+        assert stats.model_input_tokens["qwen3:4b-instruct-4k"] == 3000
+        assert stats.model_output_tokens["qwen3:4b-instruct-4k"] == 200
+
+    def test_per_model_in_token_usage_summary(self):
+        """get_token_usage_summary includes per-model breakdown."""
+        stats = TimingStats()
+        stats.set_totals_by_type({"function": 2})
+
+        stats.record(1.0, 0.5, 0.3, "function", True,
+                     prompt_tokens=500, response_tokens=80, assigned_tier=2048,
+                     model_name="qwen3:1.7b-2k")
+        stats.record(1.0, 0.5, 0.3, "function", True,
+                     prompt_tokens=600, response_tokens=90, assigned_tier=2048,
+                     model_name="qwen3:1.7b-2k")
+
+        summary = stats.get_token_usage_summary()
+        assert "by_model" in summary
+        assert "qwen3:1.7b-2k" in summary["by_model"]
+        model_data = summary["by_model"]["qwen3:1.7b-2k"]
+        assert model_data["input"] == 1100
+        assert model_data["output"] == 170
+        assert model_data["count"] == 2
+
+    def test_model_tokens_skipped_for_handcrafted(self):
+        """Handcrafted elements (no model) don't get model token tracking."""
+        stats = TimingStats()
+        stats.set_totals_by_type({"import": 1})
+
+        # No model_name, no prompt_tokens — handcrafted
+        stats.record(0.1, 0.0, 0.05, "import", True,
+                     prompt_tokens=0, response_tokens=0, assigned_tier=0,
+                     model_name="")
+
+        assert len(stats.model_sample_counts) == 0
+        summary = stats.get_token_usage_summary()
+        assert summary["by_model"] == {}
+
     def test_tier_accuracy_summary_no_issues(self):
         """Summary should show has_issues=False when everything is within bounds."""
         stats = TimingStats()

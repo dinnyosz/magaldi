@@ -316,13 +316,15 @@ def parse(
         )
         print_processing_result(processed, skipped, indexed, skip_ai, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, workers, deleted)
 
-        # Check for token budget exceeded and log details
+        # Check for token budget exceeded and log details + token usage
         if timing_stats is not None:
             tier_summary = timing_stats.get_tier_accuracy_summary()
             if tier_summary.get("has_issues"):
                 input_rows = tier_summary.get("input", [])
                 output_rows = tier_summary.get("output", [])
                 run_logger.log_budget_exceeded(input_rows, output_rows)
+            # Log token usage for this phase
+            run_logger.log_token_usage("Phase 5: Processing", timing_stats.get_token_usage_summary())
 
         # Display errors if any
         if failed_elements:

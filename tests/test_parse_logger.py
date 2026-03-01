@@ -201,6 +201,82 @@ class TestParseRunLogger:
         assert "org_team" in logger.log_path.name
         assert "my_repo" in logger.log_path.name
 
+    def test_token_usage_logging(self, tmp_path: Path) -> None:
+        """Token usage is logged per phase with type and model breakdowns."""
+        logger = ParseRunLogger(str(tmp_path), "s", "r", "u")
+        token_summary = {
+            "by_type": {
+                "function": {"input": 5000, "output": 1000, "count": 10},
+                "class": {"input": 8000, "output": 2000, "count": 5},
+            },
+            "by_model": {
+                "qwen3:1.7b-2k": {"input": 5000, "output": 1000, "count": 10},
+                "qwen3:4b-instruct-4k": {"input": 8000, "output": 2000, "count": 5},
+            },
+            "totals": {"input": 13000, "output": 3000, "count": 15},
+        }
+        logger.log_token_usage("Phase 5: Processing", token_summary)
+
+        totals = logger.get_token_totals()
+        assert totals["input"] == 13000
+        assert totals["output"] == 3000
+        assert totals["count"] == 15
+
+    def test_model_totals(self, tmp_path: Path) -> None:
+        """Per-model token totals are aggregated across phases."""
+        logger = ParseRunLogger(str(tmp_path), "s", "r", "u")
+        logger.log_token_usage("Phase 5: Processing", {
+            "by_model": {
+                "qwen3:1.7b-2k": {"input": 5000, "output": 1000, "count": 10},
+                "qwen3:4b-instruct-4k": {"input": 8000, "output": 2000, "count": 5},
+            },
+            "totals": {"input": 13000, "output": 3000, "count": 15},
+        })
+        logger.log_token_usage("Phase 4: Variable Scoring", {
+            "by_model": {
+                "qwen3:1.7b-2k": {"input": 2000, "output": 500, "count": 4},
+            },
+            "totals": {"input": 2000, "output": 500, "count": 4},
+        })
+
+        model_totals = logger.get_model_totals()
+        assert "qwen3:1.7b-2k" in model_totals
+        assert model_totals["qwen3:1.7b-2k"]["input"] == 7000
+        assert model_totals["qwen3:1.7b-2k"]["output"] == 1500
+        assert model_totals["qwen3:1.7b-2k"]["count"] == 14
+        assert "qwen3:4b-instruct-4k" in model_totals
+        assert model_totals["qwen3:4b-instruct-4k"]["input"] == 8000
+
+    def test_model_totals_empty(self, tmp_path: Path) -> None:
+        """get_model_totals returns empty dict when no token usage logged."""
+        logger = ParseRunLogger(str(tmp_path), "s", "r", "u")
+        assert logger.get_model_totals() == {}
+
+    def test_write_includes_model_data(self, tmp_path: Path) -> None:
+        """write() includes per-model token data in log and JSON summary."""
+        logger = ParseRunLogger(str(tmp_path), "s", "r", "u")
+        logger.log_token_usage("Phase 5: Processing", {
+            "by_type": {"function": {"input": 5000, "output": 1000, "count": 10}},
+            "by_model": {
+                "qwen3:1.7b-2k": {"input": 5000, "output": 1000, "count": 10},
+            },
+            "totals": {"input": 5000, "output": 1000, "count": 10},
+        })
+
+        log_path = logger.write()
+        content = log_path.read_text()
+
+        # Check per-model section exists
+        assert "Per-Model Totals" in content
+        assert "qwen3:1.7b-2k" in content
+
+        # Check JSON summary includes by_model
+        json_start = content.index("{", content.index("JSON SUMMARY"))
+        json_end = content.rindex("}") + 1
+        summary = json.loads(content[json_start:json_end])
+        assert "by_model" in summary["token_usage"]
+        assert "qwen3:1.7b-2k" in summary["token_usage"]["by_model"]
+
 
 class TestFormatDurationPrecise:
     """Tests for _format_duration_precise."""
