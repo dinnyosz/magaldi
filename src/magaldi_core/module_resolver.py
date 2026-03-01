@@ -250,11 +250,10 @@ class JavaScriptModuleResolver(ModuleResolver):
         # - Hash paths (e.g., "#utils")
         if module.startswith("~") or module.startswith("#"):
             return False
-        if any(module.endswith(ext) for ext in self._EXTENSIONS):
-            return False
 
-        # Unknown bare specifiers are likely npm packages
-        return True
+        # Unknown bare specifiers are likely npm packages;
+        # imports ending with a known extension are likely internal
+        return not any(module.endswith(ext) for ext in self._EXTENSIONS)
 
     def module_to_file_paths(
         self, module: str, caller_path: str | None = None

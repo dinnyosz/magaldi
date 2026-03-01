@@ -330,7 +330,7 @@ def resolve_cross_file_calls(
 
 def _build_import_map(
     imports: list[dict],
-    repo: "Repository | None" = None,
+    repo: Repository | None = None,
     scope: str = "",
     repository: str = "",
     username: str = "main",
@@ -376,7 +376,7 @@ def _build_import_map(
 def _expand_wildcard_import(
     import_map: dict[str, dict],
     wildcard_import: dict,
-    repo: "Repository",
+    repo: Repository,
     scope: str,
     repository: str,
     username: str,
@@ -529,7 +529,7 @@ def _lookup_element_by_import(
     # Try following re-exports through __init__.py files
     element_id = _follow_init_reexports(
         repo, possible_paths, element_name, scope, repository, username,
-        language=language, caller_path=caller_path,
+        language=language,
     )
     if element_id:
         logger.debug(
@@ -1549,7 +1549,6 @@ def _follow_init_reexports(
     repository: str,
     username: str,
     language: str = "python",
-    caller_path: str | None = None,
     _depth: int = 0,
 ) -> str | None:
     """Follow re-exports through __init__.py files.
@@ -1566,7 +1565,6 @@ def _follow_init_reexports(
         repository: Repository name.
         username: Username branch.
         language: Programming language.
-        caller_path: Caller's relative path (for relative import resolution).
         _depth: Recursion depth guard (max 3).
 
     Returns:
@@ -1629,7 +1627,7 @@ def _follow_init_reexports(
                 element_id = _follow_init_reexports(
                     repo, reexport_paths, search_name,
                     scope, repository, username,
-                    language=language, caller_path=file_path,
+                    language=language,
                     _depth=_depth + 1,
                 )
                 if element_id:

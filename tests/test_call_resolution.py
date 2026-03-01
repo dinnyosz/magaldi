@@ -763,3 +763,313 @@ class TestMultiLanguageConstructorPatterns:
         code = "let repo: Repository = Repository::new()"
         result = _build_constructor_type_map(code, language="rust")
         assert result == {"repo": "Repository"}
+
+
+# =============================================================================
+# WILDCARD IMPORT EXPANSION TESTS
+# =============================================================================
+
+
+class TestBuildImportMapWildcard:
+    """Tests for wildcard import expansion in _build_import_map."""
+
+    def test_non_wildcard_imports_unchanged(self):
+        """Basic imports work exactly as before when no repo provided."""
+        from magaldi_core.call_resolution import _build_import_map
+
+        imports = [
+            {"name": "process", "module": "utils", "alias": None, "line": 1},
+            {"name": "pandas", "module": "pandas", "alias": "pd", "line": 2},
+        ]
+
+        result = _build_import_map(imports)
+
+        assert "process" in result
+        assert "pd" in result
+
+    def test_wildcard_import_not_expanded_without_repo(self):
+        """Wildcard imports are not expanded when no repo is available."""
+        from magaldi_core.call_resolution import _build_import_map
+
+        imports = [
+            {"name": "*", "module": "utils", "alias": None, "line": 1},
+            {"name": "foo", "module": "bar", "alias": None, "line": 2},
+        ]
+
+        result = _build_import_map(imports)
+
+        # Without repo, wildcard stays as "*" (harmless, no function named "*")
+        # and foo is still present
+        assert "foo" in result
+        assert len(result) == 2  # "*" and "foo"
+
+    def test_wildcard_import_expanded_with_repo(self):
+        """Wildcard import expands to all elements in the target file."""
+        from unittest.mock import MagicMock
+
+        from magaldi_core.call_resolution import _build_import_map
+
+        repo = MagicMock()
+        repo.get_elements_by_file.return_value = [
+            {"name": "process", "element_type": "function", "element_id": "id:1"},
+            {"name": "validate", "element_type": "function", "element_id": "id:2"},
+            {"name": "MyClass", "element_type": "class", "element_id": "id:3"},
+        ]
+
+        imports = [
+            {"name": "*", "module": ".utils", "alias": None, "line": 1},
+        ]
+
+        result = _build_import_map(
+            imports, repo, "scope", "repo", "main",
+            language="python", caller_path="src/app/views.py",
+        )
+
+        assert "process" in result
+        assert "validate" in result
+        assert "MyClass" in result
+        assert result["process"]["module"] == ".utils"
+
+    def test_wildcard_skips_private_names_python(self):
+        """Python wildcard import doesn't include _private names."""
+        from unittest.mock import MagicMock
+
+        from magaldi_core.call_resolution import _build_import_map
+
+        repo = MagicMock()
+        repo.get_elements_by_file.return_value = [
+            {"name": "public_func", "element_type": "function", "element_id": "id:1"},
+            {"name": "_private_func", "element_type": "function", "element_id": "id:2"},
+            {"name": "__dunder", "element_type": "function", "element_id": "id:3"},
+        ]
+
+        imports = [
+            {"name": "*", "module": ".utils", "alias": None, "line": 1},
+        ]
+
+        result = _build_import_map(
+            imports, repo, "scope", "repo", "main",
+            language="python", caller_path="src/app/views.py",
+        )
+
+        assert "public_func" in result
+        assert "_private_func" not in result
+        assert "__dunder" not in result
+
+    def test_wildcard_skips_variables_and_files(self):
+        """Wildcard import doesn't include file or variable elements."""
+        from unittest.mock import MagicMock
+
+        from magaldi_core.call_resolution import _build_import_map
+
+        repo = MagicMock()
+        repo.get_elements_by_file.return_value = [
+            {"name": "process", "element_type": "function", "element_id": "id:1"},
+            {"name": "MY_CONST", "element_type": "variable", "element_id": "id:2"},
+            {"name": "utils.py", "element_type": "file", "element_id": "id:3"},
+        ]
+
+        imports = [
+            {"name": "*", "module": ".utils", "alias": None, "line": 1},
+        ]
+
+        result = _build_import_map(
+            imports, repo, "scope", "repo", "main",
+            language="python", caller_path="src/app/views.py",
+        )
+
+        assert "process" in result
+        assert "MY_CONST" not in result
+        assert "utils.py" not in result
+
+    def test_wildcard_does_not_overwrite_explicit_imports(self):
+        """Explicit imports take precedence over wildcard-expanded names."""
+        from unittest.mock import MagicMock
+
+        from magaldi_core.call_resolution import _build_import_map
+
+        repo = MagicMock()
+        repo.get_elements_by_file.return_value = [
+            {"name": "process", "element_type": "function", "element_id": "id:1"},
+        ]
+
+        imports = [
+            {"name": "process", "module": "other_module", "alias": None, "line": 1},
+            {"name": "*", "module": ".utils", "alias": None, "line": 2},
+        ]
+
+        result = _build_import_map(
+            imports, repo, "scope", "repo", "main",
+            language="python", caller_path="src/app/views.py",
+        )
+
+        # Explicit import came first and should not be overwritten
+        assert result["process"]["module"] == "other_module"
+
+    def test_wildcard_external_module_skipped(self):
+        """Wildcard import of external module is skipped."""
+        from unittest.mock import MagicMock
+
+        from magaldi_core.call_resolution import _build_import_map
+
+        repo = MagicMock()
+
+        imports = [
+            {"name": "*", "module": "numpy", "alias": None, "line": 1},
+        ]
+
+        result = _build_import_map(
+            imports, repo, "scope", "repo", "main",
+            language="python", caller_path="src/app/views.py",
+        )
+
+        # Should not have expanded anything
+        assert len(result) == 0
+        repo.get_elements_by_file.assert_not_called()
+
+
+# =============================================================================
+# RE-EXPORT FOLLOWING TESTS
+# =============================================================================
+
+
+class TestFollowInitReexports:
+    """Tests for _follow_init_reexports."""
+
+    def test_follows_reexport_from_init(self):
+        """Resolves element re-exported through __init__.py."""
+        from unittest.mock import MagicMock
+
+        from magaldi_core.call_resolution import _follow_init_reexports
+
+        repo = MagicMock()
+        # __init__.py has: from .models import User
+        repo.get_file_imports.return_value = [
+            {"name": "User", "module": ".models", "alias": None, "line": 1},
+        ]
+        # User found in models.py
+        repo.get_document_by_name.side_effect = lambda name, element_type, relative_path, **kw: (
+            {"element_id": "scope:repo:main:src/mypackage/models.py:class:User:10"}
+            if name == "User" and "models" in relative_path
+            else None
+        )
+
+        result = _follow_init_reexports(
+            repo,
+            ["src/mypackage/__init__.py"],
+            "User",
+            "scope", "repo", "main",
+            language="python",
+        )
+
+        assert result == "scope:repo:main:src/mypackage/models.py:class:User:10"
+
+    def test_skips_non_init_files(self):
+        """Only processes __init__.py files for re-exports."""
+        from unittest.mock import MagicMock
+
+        from magaldi_core.call_resolution import _follow_init_reexports
+
+        repo = MagicMock()
+
+        result = _follow_init_reexports(
+            repo,
+            ["src/utils.py", "src/helpers.py"],
+            "SomeFunc",
+            "scope", "repo", "main",
+        )
+
+        assert result is None
+        repo.get_file_imports.assert_not_called()
+
+    def test_returns_none_when_no_matching_reexport(self):
+        """Returns None when __init__.py doesn't re-export the element."""
+        from unittest.mock import MagicMock
+
+        from magaldi_core.call_resolution import _follow_init_reexports
+
+        repo = MagicMock()
+        repo.get_file_imports.return_value = [
+            {"name": "OtherClass", "module": ".models", "alias": None, "line": 1},
+        ]
+
+        result = _follow_init_reexports(
+            repo,
+            ["src/mypackage/__init__.py"],
+            "User",
+            "scope", "repo", "main",
+        )
+
+        assert result is None
+
+    def test_depth_limit_prevents_infinite_recursion(self):
+        """Recursion stops at depth 3."""
+        from unittest.mock import MagicMock
+
+        from magaldi_core.call_resolution import _follow_init_reexports
+
+        repo = MagicMock()
+
+        result = _follow_init_reexports(
+            repo,
+            ["src/pkg/__init__.py"],
+            "Foo",
+            "scope", "repo", "main",
+            _depth=3,
+        )
+
+        assert result is None
+        repo.get_file_imports.assert_not_called()
+
+
+# =============================================================================
+# FALLBACK NAME LOOKUP TESTS
+# =============================================================================
+
+
+class TestFallbackNameLookup:
+    """Tests for _fallback_name_lookup."""
+
+    def test_single_candidate_resolves(self):
+        """Returns element ID when exactly one candidate exists."""
+        from unittest.mock import MagicMock
+
+        from magaldi_core.call_resolution import _fallback_name_lookup
+
+        repo = MagicMock()
+        repo.find_candidates_by_name.return_value = [
+            {"element_id": "scope:repo:main:path:function:process:10"},
+        ]
+
+        result = _fallback_name_lookup(repo, "process", "scope", "repo", "main")
+
+        assert result == "scope:repo:main:path:function:process:10"
+
+    def test_multiple_candidates_returns_none(self):
+        """Returns None when multiple candidates exist (ambiguous)."""
+        from unittest.mock import MagicMock
+
+        from magaldi_core.call_resolution import _fallback_name_lookup
+
+        repo = MagicMock()
+        repo.find_candidates_by_name.return_value = [
+            {"element_id": "id:1"},
+            {"element_id": "id:2"},
+        ]
+
+        result = _fallback_name_lookup(repo, "get", "scope", "repo", "main")
+
+        assert result is None
+
+    def test_no_candidates_returns_none(self):
+        """Returns None when no candidates exist."""
+        from unittest.mock import MagicMock
+
+        from magaldi_core.call_resolution import _fallback_name_lookup
+
+        repo = MagicMock()
+        repo.find_candidates_by_name.return_value = []
+
+        result = _fallback_name_lookup(repo, "nonexistent", "scope", "repo", "main")
+
+        assert result is None

@@ -158,6 +158,29 @@ class TestJavaScriptExternalModule:
         assert resolver.is_external_module("../lib/foo") is False
         assert resolver.is_external_module("/absolute/path") is False
 
+    def test_tilde_import_is_internal(self, resolver: JavaScriptModuleResolver) -> None:
+        """Tilde imports (common path alias) are internal."""
+        assert resolver.is_external_module("~/utils") is False
+        assert resolver.is_external_module("~/components/Button") is False
+
+    def test_hash_import_is_internal(self, resolver: JavaScriptModuleResolver) -> None:
+        """Hash imports (Node.js subpath imports) are internal."""
+        assert resolver.is_external_module("#utils") is False
+        assert resolver.is_external_module("#lib/helpers") is False
+
+    def test_import_with_extension_is_internal(self, resolver: JavaScriptModuleResolver) -> None:
+        """Imports ending with a known extension are internal."""
+        assert resolver.is_external_module("utils.ts") is False
+        assert resolver.is_external_module("helpers.js") is False
+        assert resolver.is_external_module("component.tsx") is False
+
+    def test_node_builtins_and_npm_checks_not_shortcircuited(self, resolver: JavaScriptModuleResolver) -> None:
+        """Builtins and npm checks are actually evaluated (not short-circuited by or True)."""
+        # These should match _NODE_BUILTINS specifically
+        assert resolver.is_external_module("fs") is True
+        # These should match _NPM_PACKAGES specifically
+        assert resolver.is_external_module("react") is True
+
 
 class TestJavaScriptModulePaths:
     """Test JS/TS module → file path conversion."""
