@@ -993,6 +993,100 @@ class TestBuildScoringDisplay:
         display = _build_scoring_display(state, num_workers=6)
         assert display is not None
 
+    def test_display_budget_disabled_workers(self):
+        """Verify workers beyond explore_cap are collapsed into summary line."""
+        import re
+        from io import StringIO
+
+        from rich.console import Console
+
+        from shared.cli._runners import _build_scoring_display
+        from shared.throttling import ThrottleDecision
+
+        ws = ScoringWorkerStatus()
+        ws.set(0, 1, 10)
+        ws.set(1, 2, 8)
+
+        state = ScoringProgressState(
+            total_variables=50,
+            total_batches=10,
+            completed_batches=2,
+            completed_variables=15,
+            kept=10,
+            dropped=5,
+            num_workers=16,
+            start_time=time.time() - 5.0,
+            batch_times=[2.5] * 2,
+            workers=ws,
+            allowed_workers=5,
+            throttle_decision=ThrottleDecision(
+                should_throttle=True,
+                current_max=5.0,
+                historical_max=0.0,
+                completed_avg=2.5,
+                recommended_workers=5,
+                reason="test",
+                completion_count=10,
+                explore_cap=7,  # Only 7 workers reachable, 9 disabled
+            ),
+        )
+
+        display = _build_scoring_display(state, num_workers=16)
+        assert display is not None
+
+        # Render to string and strip ANSI to verify the budget summary line appears
+        buf = StringIO()
+        console = Console(file=buf, width=200, force_terminal=True)
+        console.print(display)
+        output = buf.getvalue()
+        # Strip ANSI escape codes and collapse whitespace for matching
+        clean = re.sub(r'\x1b\[[0-9;]*m', '', output)
+        clean = ' '.join(clean.split())
+        # Text may be truncated by Rich column widths, so match key fragments
+        assert "9 workers disabled" in clean
+        assert "budget)" in clean
+        # Budget-disabled workers should NOT show as individual rows
+        assert "[8]" not in clean  # Workers 8-16 should not appear
+        # Workers within explore_cap should still show (active/idle/throttled)
+        assert "[1]" in clean
+        assert "[7]" in clean
+
+    def test_display_no_budget_line_without_explore_cap(self):
+        """Verify no budget line when explore_cap is not set."""
+        import re
+        from io import StringIO
+
+        from rich.console import Console
+
+        from shared.cli._runners import _build_scoring_display
+
+        ws = ScoringWorkerStatus()
+        ws.set(0, 1, 10)
+
+        state = ScoringProgressState(
+            total_variables=50,
+            total_batches=10,
+            completed_batches=2,
+            completed_variables=15,
+            kept=10,
+            dropped=5,
+            num_workers=8,
+            start_time=time.time() - 5.0,
+            batch_times=[2.5] * 2,
+            workers=ws,
+            allowed_workers=4,
+        )
+
+        display = _build_scoring_display(state, num_workers=8)
+        assert display is not None
+
+        buf = StringIO()
+        console = Console(file=buf, width=200, force_terminal=True)
+        console.print(display)
+        output = buf.getvalue()
+        clean = re.sub(r'\x1b\[[0-9;]*m', '', output)
+        assert "exploration budget" not in clean
+
 
 # =============================================================================
 # Throttle integration tests

@@ -1277,21 +1277,33 @@ class TestExploreCap:
         assert ".X." not in text
 
     def test_format_throughput_levels_passes_cap(self):
-        """format_throughput_levels accepts and passes explore_cap."""
+        """format_throughput_levels hides levels beyond explore_cap and shows summary."""
         levels = {1: (2.0, 10), 2: (3.0, 10), 3: (4.0, 10)}
         result = format_throughput_levels(levels, max_workers=3, explore_cap=2)
         text = _render_to_text(result)
         assert "1" in text
-        assert "3" in text
+        assert "2" in text
+        # Level 3 should be hidden (not shown as individual column)
+        # but a summary note should appear
+        assert "1 levels disabled (exploration budget)" in text
+
+    def test_format_throughput_levels_cap_hides_many_levels(self):
+        """format_throughput_levels hides multiple levels beyond explore_cap."""
+        levels = {1: (2.0, 10), 2: (3.0, 10)}
+        result = format_throughput_levels(levels, max_workers=10, explore_cap=2)
+        text = _render_to_text(result)
+        assert "1" in text
+        assert "2" in text
+        assert "8 levels disabled (exploration budget)" in text
 
     def test_build_throughput_levels_text_passes_cap(self):
-        """build_throughput_levels_text accepts and passes explore_cap."""
+        """build_throughput_levels_text hides levels beyond explore_cap."""
         levels = {1: (2.0, 10), 2: (3.0, 10)}
         result = build_throughput_levels_text(levels, max_workers=2, explore_cap=1)
         assert result is not None
         text = _render_to_text(result)
         assert "1" in text
-        assert "2" in text
+        assert "1 levels disabled (exploration budget)" in text
 
     def test_orchestrator_sets_explore_cap(self):
         """ExplorationOrchestrator sets explore_cap when budget is capped."""

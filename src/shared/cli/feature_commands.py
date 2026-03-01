@@ -281,9 +281,17 @@ def run_feature_extraction(
             worker_table.add_column("Time", style="green", width=6)
             worker_table.add_column("Feature")
 
+            # Determine exploration budget cap
+            ecap = getattr(state, 'explore_cap', None)
+            budget_disabled = 0
+            display_total = num_workers
+            if ecap is not None and ecap < num_workers:
+                budget_disabled = num_workers - ecap
+                display_total = ecap
+
             active_count = len(workers_data)
             idle_slots = max(0, allowed_workers - active_count)
-            throttled_slots = max(0, num_workers - allowed_workers)
+            throttled_slots = max(0, display_total - allowed_workers)
 
             # Show active workers first (renumbered 1..N for consistent display)
             for display_id, wid in enumerate(sorted(workers_data.keys()), start=1):
@@ -297,9 +305,12 @@ def run_feature_extraction(
             for i in range(idle_slots):
                 worker_table.add_row(f"[{next_id + i}]", "[dim]idle[/]", "", "", "", "")
             next_id += idle_slots
-            # Then throttled slots (beyond allowed limit)
+            # Then throttled slots (beyond allowed limit but within budget)
             for i in range(throttled_slots):
                 worker_table.add_row(f"[{next_id + i}]", "[dim yellow]throttled[/]", "", "", "", "")
+            # Summary line for workers disabled by exploration budget
+            if budget_disabled > 0:
+                worker_table.add_row("", f"[dim]{budget_disabled} workers disabled (exploration budget)[/]", "", "", "", "")
 
             # Stats line
             avg_api = state.timing.avg_summarize_time + state.timing.avg_embed_time
@@ -489,9 +500,17 @@ def run_feature_extraction(
                 worker_table.add_column("Parent", style="magenta", width=28)
                 worker_table.add_column("Subfeature")
 
+                # Determine exploration budget cap
+                ecap = getattr(state, 'explore_cap', None)
+                budget_disabled = 0
+                display_total = num_workers
+                if ecap is not None and ecap < num_workers:
+                    budget_disabled = num_workers - ecap
+                    display_total = ecap
+
                 active_count = len(workers_data)
                 idle_slots = max(0, allowed_workers - active_count)
-                throttled_slots = max(0, num_workers - allowed_workers)
+                throttled_slots = max(0, display_total - allowed_workers)
 
                 # Show active workers first (renumbered 1..N for consistent display)
                 for display_id, wid in enumerate(sorted(workers_data.keys()), start=1):
@@ -507,9 +526,12 @@ def run_feature_extraction(
                 for i in range(idle_slots):
                     worker_table.add_row(f"[{next_id + i}]", "[dim]idle[/]", "", "", "", "", "")
                 next_id += idle_slots
-                # Then throttled slots (beyond allowed limit)
+                # Then throttled slots (beyond allowed limit but within budget)
                 for i in range(throttled_slots):
                     worker_table.add_row(f"[{next_id + i}]", "[dim yellow]throttled[/]", "", "", "", "", "")
+                # Summary line for workers disabled by exploration budget
+                if budget_disabled > 0:
+                    worker_table.add_row("", f"[dim]{budget_disabled} workers disabled (exploration budget)[/]", "", "", "", "", "")
 
                 # Stats line
                 avg_api = state.timing.avg_summarize_time + state.timing.avg_embed_time

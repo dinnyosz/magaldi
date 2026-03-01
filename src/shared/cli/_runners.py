@@ -167,9 +167,20 @@ def _build_scoring_display(state: ScoringProgressState, num_workers: int) -> Ren
     now = time_mod.time()
 
     allowed = state.allowed_workers if state.allowed_workers is not None else num_workers
+
+    # Determine exploration budget cap — workers beyond this are permanently
+    # disabled for this tier, so collapse them into a single summary line.
+    td = state.throttle_decision
+    explore_cap = getattr(td, 'explore_cap', None) if td is not None else None
+    budget_disabled = 0
+    display_total = num_workers
+    if explore_cap is not None and explore_cap < num_workers:
+        budget_disabled = num_workers - explore_cap
+        display_total = explore_cap
+
     active_count = len(workers_data)
     idle_slots = max(0, allowed - active_count)
-    throttled_slots = max(0, num_workers - allowed)
+    throttled_slots = max(0, display_total - allowed)
 
     # Show active workers first (renumbered 1..N for consistent display)
     for display_id, wid in enumerate(sorted(workers_data.keys()), start=1):
@@ -188,9 +199,12 @@ def _build_scoring_display(state: ScoringProgressState, num_workers: int) -> Ren
     for i in range(idle_slots):
         worker_table.add_row(f"[{next_id + i}]", "[dim]idle[/]", "", "", "")
     next_id += idle_slots
-    # Then throttled slots (beyond allowed limit)
+    # Then throttled slots (beyond allowed limit but within budget)
     for i in range(throttled_slots):
         worker_table.add_row(f"[{next_id + i}]", "[dim yellow]throttled[/]", "", "", "")
+    # Summary line for workers disabled by exploration budget
+    if budget_disabled > 0:
+        worker_table.add_row("", f"[dim]{budget_disabled} workers disabled (exploration budget)[/]", "", "", "")
 
     # Throughput stats
     stats_text = Text()
@@ -561,9 +575,21 @@ def run_processing(
         else:
             allowed_workers = num_workers
 
+        # Determine exploration budget cap — workers beyond this are permanently
+        # disabled for this tier, so collapse them into a single summary line
+        # instead of showing individual rows.
+        explore_cap = None
+        if parallelism and parallelism.throttle_decision:
+            explore_cap = getattr(parallelism.throttle_decision, 'explore_cap', None)
+        budget_disabled = 0
+        display_total = num_workers
+        if explore_cap is not None and explore_cap < num_workers:
+            budget_disabled = num_workers - explore_cap
+            display_total = explore_cap
+
         active_count = len(workers_data)
         idle_slots = max(0, allowed_workers - active_count)
-        throttled_slots = max(0, num_workers - allowed_workers)
+        throttled_slots = max(0, display_total - allowed_workers)
 
         # Show active workers first (renumbered 1..N for consistent display)
         for display_id, wid in enumerate(sorted(workers_data.keys()), start=1):
@@ -577,9 +603,12 @@ def run_processing(
         for i in range(idle_slots):
             worker_table.add_row(f"[{next_id + i}]", "[dim]idle[/]", "", "", "", "")
         next_id += idle_slots
-        # Then throttled slots (beyond allowed limit)
+        # Then throttled slots (beyond allowed limit but within budget)
         for i in range(throttled_slots):
             worker_table.add_row(f"[{next_id + i}]", "[dim yellow]throttled[/]", "", "", "", "")
+        # Summary line for workers disabled by exploration budget
+        if budget_disabled > 0:
+            worker_table.add_row("", f"[dim]{budget_disabled} workers disabled (exploration budget)[/]", "", "", "", "")
 
         # Per-type-per-tier ETA breakdown table
         type_colors = {

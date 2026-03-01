@@ -1990,7 +1990,8 @@ def _build_levels_table(
     - Row 3: sample count (colored by base_time)
 
     Peak level is underlined. Exploration target is marked with "?" prefix.
-    Levels beyond explore_cap are dimmed with strikethrough.
+    When explore_cap is set, only levels 1..explore_cap are shown, with a
+    summary note for the remaining disabled levels.
 
     Args:
         all_levels: Dict of level -> (avg_base_time_seconds, sample_count). Must be non-empty.
@@ -2005,7 +2006,15 @@ def _build_levels_table(
     """
     from rich.console import Group, RenderableType
 
-    max_level = max_workers if max_workers > 0 else max(all_levels.keys())
+    full_max = max_workers if max_workers > 0 else max(all_levels.keys())
+
+    # Cap displayed levels to explore_cap when budget limits exploration
+    budget_disabled_levels = 0
+    if explore_cap is not None and explore_cap < full_max:
+        budget_disabled_levels = full_max - explore_cap
+        max_level = explore_cap
+    else:
+        max_level = full_max
 
     # Find min/max base times for color scaling (consistent across all chunks)
     base_times = {lvl: bt for lvl, (bt, _) in all_levels.items()}
@@ -2029,10 +2038,11 @@ def _build_levels_table(
         end = min(start + _LEVELS_PER_ROW, max_level + 1)
         chunks.append(range(start, end))
 
-    if len(chunks) == 1:
+    # No explore_cap passed to _build_levels_row since we already capped max_level
+    if len(chunks) == 1 and budget_disabled_levels == 0:
         return _build_levels_row(
             chunks[0], all_levels, min_bt, bt_range, peak_concurrency,
-            exploration_target, prob_map_data, p_min, p_range, explore_cap,
+            exploration_target, prob_map_data, p_min, p_range, None,
         )
 
     from rich.text import Text
@@ -2044,9 +2054,16 @@ def _build_levels_table(
         tables.append(
             _build_levels_row(
                 chunk, all_levels, min_bt, bt_range, peak_concurrency,
-                exploration_target, prob_map_data, p_min, p_range, explore_cap,
+                exploration_target, prob_map_data, p_min, p_range, None,
             )  # type: ignore[misc]
         )
+
+    # Append summary for levels disabled by exploration budget
+    if budget_disabled_levels > 0:
+        budget_text = Text()
+        budget_text.append(f"  {budget_disabled_levels} levels disabled (exploration budget)", style="dim")
+        tables.append(budget_text)
+
     return Group(*tables)
 
 

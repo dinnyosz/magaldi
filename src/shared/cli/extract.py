@@ -202,6 +202,7 @@ def build_worker_table(
     _model_col_width: int,
     columns: list[tuple[str, str, int]],
     row_builder: Callable,
+    explore_cap: int | None = None,
 ) -> Table:
     """Build worker status table.
 
@@ -212,6 +213,7 @@ def build_worker_table(
         model_col_width: Width of model column.
         columns: List of (name, style, width) for columns.
         row_builder: Function(wid, workers_data) -> list of row values.
+        explore_cap: If set, workers beyond this are disabled by exploration budget.
 
     Returns:
         Rich Table with worker status.
@@ -225,9 +227,16 @@ def build_worker_table(
 
     now = time_mod.time()
 
+    # Determine exploration budget cap
+    budget_disabled = 0
+    display_total = num_workers
+    if explore_cap is not None and explore_cap < num_workers:
+        budget_disabled = num_workers - explore_cap
+        display_total = explore_cap
+
     active_count = len(workers_data)
     idle_slots = max(0, allowed_workers - active_count)
-    throttled_slots = max(0, num_workers - allowed_workers)
+    throttled_slots = max(0, display_total - allowed_workers)
 
     # Show active workers first (renumbered 1..N for consistent display)
     for display_id, wid in enumerate(sorted(workers_data.keys()), start=1):
@@ -240,10 +249,14 @@ def build_worker_table(
         idle_row = ["[dim]idle[/]"] + [""] * (len(columns) - 1)
         worker_table.add_row(f"[{next_id + i}]", *idle_row)
     next_id += idle_slots
-    # Then throttled slots (beyond allowed limit)
+    # Then throttled slots (beyond allowed limit but within budget)
     for i in range(throttled_slots):
         throttled_row = ["[dim yellow]throttled[/]"] + [""] * (len(columns) - 1)
         worker_table.add_row(f"[{next_id + i}]", *throttled_row)
+    # Summary line for workers disabled by exploration budget
+    if budget_disabled > 0:
+        budget_row = [f"[dim]{budget_disabled} workers disabled (exploration budget)[/]"] + [""] * (len(columns) - 1)
+        worker_table.add_row("", *budget_row)
 
     return worker_table
 

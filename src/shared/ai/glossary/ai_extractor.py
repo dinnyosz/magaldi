@@ -191,6 +191,7 @@ class GlossaryProgressState:
     gss_signal: str | None = None  # Signal-aware action
     exploration_target: int | None = None  # Level being explored
     prob_map_data: dict[int, float] | None = None  # Probability map data
+    explore_cap: int | None = None  # Effective base_workers after budget cap
 
 
 # =============================================================================
@@ -1034,6 +1035,7 @@ def extract_glossary_from_features_concurrent(
                 gss_signal=throttle_info.gss_signal,
                 exploration_target=throttle_info.exploration_target,
                 prob_map_data=throttle_info.prob_map_data,
+                explore_cap=throttle_info.explore_cap,
             )
             on_progress(progress_state)
 
@@ -1249,6 +1251,7 @@ def extract_glossary_from_features_concurrent(
                 gss_signal=throttle_info.gss_signal,
                 exploration_target=throttle_info.exploration_target,
                 prob_map_data=throttle_info.prob_map_data,
+                explore_cap=throttle_info.explore_cap,
             )
             on_progress(progress_state)
 

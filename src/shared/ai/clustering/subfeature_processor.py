@@ -232,6 +232,7 @@ class SubfeatureProgressState:
     gss_signal: str | None = None  # Signal-aware action
     exploration_target: int | None = None  # Level being explored
     prob_map_data: dict[int, float] | None = None  # Probability map data
+    explore_cap: int | None = None  # Effective base_workers after budget cap
 
 
 @dataclass
@@ -812,6 +813,7 @@ def process_subfeatures(
             subfeature_state["gss_signal"] = throttle_info.gss_signal
             subfeature_state["exploration_target"] = throttle_info.exploration_target
             subfeature_state["prob_map_data"] = throttle_info.prob_map_data
+            subfeature_state["explore_cap"] = throttle_info.explore_cap
         if on_progress:
             on_progress(SubfeatureProgressState(
                 total=total,
@@ -833,6 +835,7 @@ def process_subfeatures(
                 gss_signal=subfeature_state.get("gss_signal"),
                 exploration_target=subfeature_state.get("exploration_target"),
                 prob_map_data=subfeature_state.get("prob_map_data"),
+                explore_cap=subfeature_state.get("explore_cap"),
             ))
 
     def process_wrapper(work_item: SubfeatureWorkItem) -> ProcessedSubfeature:
