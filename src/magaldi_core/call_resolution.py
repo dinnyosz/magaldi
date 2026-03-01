@@ -67,6 +67,7 @@ def resolve_all_calls(
     for elem in elements:
         element_id = elem.get("element_id", "")
         relative_path = elem.get("relative_path", "")
+        language = elem.get("language", "python")
         parameters = elem.get("parameters", [])
 
         # Build param type map for type-based resolution
@@ -113,6 +114,7 @@ def resolve_all_calls(
                 resolved_id = _lookup_element_by_import(
                     repo, import_info, name, scope, repository, username,
                     caller_path=relative_path,
+                    language=language,
                 )
                 if resolved_id:
                     import_resolved += 1
@@ -124,6 +126,7 @@ def resolve_all_calls(
                 resolved_id = _lookup_element_by_import(
                     repo, import_info, name, scope, repository, username,
                     caller_path=relative_path,
+                    language=language,
                 )
                 if resolved_id:
                     import_resolved += 1
@@ -215,6 +218,7 @@ def resolve_cross_file_calls(
     for elem in elements:
         element_id = elem.get("element_id", "")
         relative_path = elem.get("relative_path", "")
+        language = elem.get("language", "python")
         parameters = elem.get("parameters", [])
 
         # Build param type map for type-based resolution
@@ -249,6 +253,7 @@ def resolve_cross_file_calls(
                 resolved_id = _lookup_element_by_import(
                     repo, import_info, name, scope, repository, username,
                     caller_path=relative_path,
+                    language=language,
                 )
                 if resolved_id:
                     import_resolved += 1
@@ -261,6 +266,7 @@ def resolve_cross_file_calls(
                 resolved_id = _lookup_element_by_import(
                     repo, import_info, name, scope, repository, username,
                     caller_path=relative_path,
+                    language=language,
                 )
                 if resolved_id:
                     import_resolved += 1
@@ -342,6 +348,7 @@ def _lookup_element_by_import(
     repository: str,
     username: str,
     caller_path: str | None = None,
+    language: str = "python",
 ) -> str | None:
     """Look up element ID for an imported name.
 
@@ -354,28 +361,30 @@ def _lookup_element_by_import(
         username: Username branch.
         caller_path: Relative path of the calling file, needed for
             resolving relative imports.
+        language: Programming language of the importing file.
 
     Returns:
         Element ID if found, None otherwise.
     """
+    from magaldi_core.module_resolver import get_module_resolver
+
     module = import_info.get("module", "")
     if not module:
         return None
 
-    # Convert module path to possible file paths
-    # e.g., "magaldi_core.storage" -> "src/magaldi_core/storage.py"
-    # e.g., ".utils" -> relative import (needs caller_path)
-    # e.g., "os" -> external module (skip)
-
-    # Skip external/stdlib modules (no dots or starts with common stdlib names)
-    if _is_external_module(module):
-        return None
-
-    # Try to find the element
-    possible_paths = _module_to_file_paths(module, caller_path)
+    # Use language-specific module resolver
+    resolver = get_module_resolver(language)
+    if resolver:
+        if resolver.is_external_module(module):
+            return None
+        possible_paths = resolver.module_to_file_paths(module, caller_path)
+    else:
+        # Fallback: use Python resolver for unknown languages
+        if _is_external_module(module):
+            return None
+        possible_paths = _module_to_file_paths(module, caller_path)
 
     for file_path in possible_paths:
-        # Look for function with this name in the file
         element_id = _find_element_in_file(
             repo, file_path, element_name, scope, repository, username
         )
@@ -1323,10 +1332,8 @@ def _find_element_in_file(
     Returns:
         Element ID if found, None otherwise.
     """
-    # Build possible element IDs for function or class
-    for elem_type in ["function", "class"]:
-        # We don't know the exact line number, so we need to search
-        # Try to find by querying
+    # Search for function, class, method, interface, trait, enum
+    for elem_type in ["function", "class", "method", "interface", "trait", "enum"]:
         doc = repo.get_document_by_name(
             name=element_name,
             element_type=elem_type,
