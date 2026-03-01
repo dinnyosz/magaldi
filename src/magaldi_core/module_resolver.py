@@ -220,7 +220,12 @@ class JavaScriptModuleResolver(ModuleResolver):
     )
 
     def is_external_module(self, module: str) -> bool:
-        """External if bare specifier (no ./ or ../ prefix)."""
+        """External if known builtin/npm package or likely external bare specifier.
+
+        Bare specifiers (no ./ or ../ prefix) are npm packages by convention,
+        but we check for common internal patterns first to avoid false positives
+        with workspace packages and path aliases.
+        """
         # Relative imports are always internal
         if module.startswith(".") or module.startswith("/"):
             return False
@@ -233,12 +238,23 @@ class JavaScriptModuleResolver(ModuleResolver):
         # @scope/package -> scope/package
         base = module.lstrip("@").split("/")[0]
 
-        return (
-            base in self._NODE_BUILTINS
-            or base in self._NPM_PACKAGES
-            # Bare specifiers without ./ are npm packages by convention
-            or True
-        )
+        if base in self._NODE_BUILTINS:
+            return True
+        if base in self._NPM_PACKAGES:
+            return True
+
+        # Bare specifiers without ./ are npm packages by convention,
+        # but common internal patterns should be treated as internal:
+        # - Paths with extensions (e.g., "utils.js")
+        # - Tilde paths (e.g., "~/utils")
+        # - Hash paths (e.g., "#utils")
+        if module.startswith("~") or module.startswith("#"):
+            return False
+        if any(module.endswith(ext) for ext in self._EXTENSIONS):
+            return False
+
+        # Unknown bare specifiers are likely npm packages
+        return True
 
     def module_to_file_paths(
         self, module: str, caller_path: str | None = None

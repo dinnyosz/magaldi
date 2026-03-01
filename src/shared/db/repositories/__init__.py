@@ -298,6 +298,18 @@ class Repository:
             class_id, method_name, scope, repository, username
         )
 
+    def get_elements_by_file(
+        self,
+        relative_path: str,
+        scope: str,
+        repository: str,
+        username: str = "main",
+    ) -> list[dict[str, Any]]:
+        """Get all elements defined in a file."""
+        return self._metadata.get_elements_by_file(
+            relative_path, scope, repository, username
+        )
+
     def get_summaries_batch(self, element_ids: list[str]) -> dict[str, str]:
         """Get summaries for multiple elements in batch."""
         return self._metadata.get_summaries_batch(element_ids)

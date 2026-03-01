@@ -125,6 +125,52 @@ class MetadataRepository:
             return hits[0]["_source"]  # type: ignore[no-any-return]
         return None
 
+    def get_elements_by_file(
+        self,
+        relative_path: str,
+        scope: str,
+        repository: str,
+        username: str = "main",
+    ) -> list[dict[str, Any]]:
+        """Get all elements defined in a file.
+
+        Returns functions, classes, methods, etc. for wildcard import expansion.
+
+        Args:
+            relative_path: Relative file path.
+            scope: Repository scope.
+            repository: Repository name.
+            username: Username branch.
+
+        Returns:
+            List of element dicts with name, element_type, element_id.
+        """
+        client = self._get_client()
+        query = {
+            "bool": {
+                "must": [
+                    {"term": {"relative_path": relative_path}},
+                    {"term": {"scope": scope}},
+                    {"term": {"repository": repository}},
+                    {"term": {"username": username}},
+                ],
+                "must_not": [
+                    {"term": {"element_type": "file"}},
+                ],
+            }
+        }
+
+        result = client.search(
+            index=INDEX_NAME,
+            body={
+                "query": query,
+                "size": 500,
+                "_source": ["name", "element_type", "element_id"],
+            },
+        )
+
+        return [hit["_source"] for hit in result.get("hits", {}).get("hits", [])]
+
     def get_method_by_class(
         self,
         class_id: str,

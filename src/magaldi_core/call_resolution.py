@@ -79,7 +79,10 @@ def resolve_all_calls(
 
         # Get file's imports
         file_imports = repo.get_file_imports(relative_path, scope, repository, username)
-        import_map = _build_import_map(file_imports) if file_imports else {}
+        import_map = _build_import_map(
+            file_imports, repo, scope, repository, username,
+            language=language, caller_path=relative_path,
+        ) if file_imports else {}
 
         calls = elem.get("calls", [])
         updated = False
@@ -230,7 +233,10 @@ def resolve_cross_file_calls(
 
         # Get file's imports
         file_imports = repo.get_file_imports(relative_path, scope, repository, username)
-        import_map = _build_import_map(file_imports) if file_imports else {}
+        import_map = _build_import_map(
+            file_imports, repo, scope, repository, username,
+            language=language, caller_path=relative_path,
+        ) if file_imports else {}
 
         calls = elem.get("calls", [])
         updated = False
@@ -322,22 +328,127 @@ def resolve_cross_file_calls(
     return total_processed, import_resolved, type_resolved
 
 
-def _build_import_map(imports: list[dict]) -> dict[str, dict]:
+def _build_import_map(
+    imports: list[dict],
+    repo: "Repository | None" = None,
+    scope: str = "",
+    repository: str = "",
+    username: str = "main",
+    language: str = "python",
+    caller_path: str | None = None,
+) -> dict[str, dict]:
     """Build a map from local name to import info.
+
+    Handles wildcard imports (`from module import *`) by querying the index
+    for all elements defined in the imported module's file and adding them
+    to the import map.
 
     Args:
         imports: List of import dicts with keys: name, module, alias, line.
+        repo: Repository instance (needed for wildcard expansion).
+        scope: Repository scope (needed for wildcard expansion).
+        repository: Repository name (needed for wildcard expansion).
+        username: Username branch (needed for wildcard expansion).
+        language: Programming language.
+        caller_path: Caller's relative path (for relative import resolution).
 
     Returns:
         Dict mapping local name (alias or name) to full import info.
     """
     result: dict[str, dict] = {}
     for imp in imports:
+        name = imp.get("name", "")
+        # Handle wildcard imports: from module import *
+        if name == "*" and repo:
+            _expand_wildcard_import(
+                result, imp, repo, scope, repository, username,
+                language=language, caller_path=caller_path,
+            )
+            continue
+
         # Use alias if available, otherwise use the imported name
-        local_name = imp.get("alias") or imp.get("name")
+        local_name = imp.get("alias") or name
         if local_name:
             result[local_name] = imp
     return result
+
+
+def _expand_wildcard_import(
+    import_map: dict[str, dict],
+    wildcard_import: dict,
+    repo: "Repository",
+    scope: str,
+    repository: str,
+    username: str,
+    language: str = "python",
+    caller_path: str | None = None,
+) -> None:
+    """Expand a wildcard import into the import map.
+
+    For `from utils import *`, queries the index for all elements defined
+    in the utils module file and adds them to the import map.
+
+    Args:
+        import_map: Import map to populate (modified in place).
+        wildcard_import: The wildcard import dict (name="*").
+        repo: Repository instance.
+        scope: Repository scope.
+        repository: Repository name.
+        username: Username branch.
+        language: Programming language.
+        caller_path: Caller's relative path.
+    """
+    from magaldi_core.module_resolver import get_module_resolver
+
+    module = wildcard_import.get("module", "")
+    if not module:
+        return
+
+    # Resolve module to file paths
+    resolver = get_module_resolver(language)
+    if resolver:
+        if resolver.is_external_module(module):
+            return
+        possible_paths = resolver.module_to_file_paths(module, caller_path)
+    else:
+        if _is_external_module(module):
+            return
+        possible_paths = _module_to_file_paths(module, caller_path)
+
+    if not possible_paths:
+        return
+
+    # Query index for all elements in these files
+    for file_path in possible_paths:
+        elements = repo.get_elements_by_file(
+            file_path, scope, repository, username
+        )
+        if not elements:
+            continue
+
+        for elem in elements:
+            elem_name = elem.get("name", "")
+            elem_type = elem.get("element_type", "")
+
+            # Only include functions, classes, and methods (not files/variables)
+            if not elem_name or elem_type in ("file", "variable"):
+                continue
+
+            # Skip private names (Python convention)
+            if language == "python" and elem_name.startswith("_"):
+                continue
+
+            # Add to import map with the module info from the wildcard import
+            if elem_name not in import_map:
+                import_map[elem_name] = {
+                    "name": elem_name,
+                    "module": module,
+                    "alias": None,
+                    "line": wildcard_import.get("line", 0),
+                }
+
+        # Found elements in this file path, no need to try others
+        break
 
 
 def _lookup_element_by_import(
@@ -370,27 +481,78 @@ def _lookup_element_by_import(
 
     module = import_info.get("module", "")
     if not module:
+        logger.debug(
+            "Import lookup skip: no module for element '%s' in %s",
+            element_name, caller_path,
+        )
         return None
 
     # Use language-specific module resolver
     resolver = get_module_resolver(language)
     if resolver:
         if resolver.is_external_module(module):
+            logger.debug(
+                "Import lookup skip: external module '%s' for '%s' in %s",
+                module, element_name, caller_path,
+            )
             return None
         possible_paths = resolver.module_to_file_paths(module, caller_path)
     else:
         # Fallback: use Python resolver for unknown languages
         if _is_external_module(module):
+            logger.debug(
+                "Import lookup skip: external module '%s' for '%s' in %s",
+                module, element_name, caller_path,
+            )
             return None
         possible_paths = _module_to_file_paths(module, caller_path)
+
+    if not possible_paths:
+        logger.debug(
+            "Import lookup fail: no file paths resolved for module '%s' "
+            "(element '%s', caller %s, language %s)",
+            module, element_name, caller_path, language,
+        )
+        return None
 
     for file_path in possible_paths:
         element_id = _find_element_in_file(
             repo, file_path, element_name, scope, repository, username
         )
         if element_id:
+            logger.debug(
+                "Import lookup hit: '%s' found in %s (module '%s')",
+                element_name, file_path, module,
+            )
             return element_id
 
+    # Try following re-exports through __init__.py files
+    element_id = _follow_init_reexports(
+        repo, possible_paths, element_name, scope, repository, username,
+        language=language, caller_path=caller_path,
+    )
+    if element_id:
+        logger.debug(
+            "Import lookup hit via re-export: '%s' from module '%s'",
+            element_name, module,
+        )
+        return element_id
+
+    # Fallback: name-only lookup when path resolution fails
+    element_id = _fallback_name_lookup(
+        repo, element_name, scope, repository, username,
+    )
+    if element_id:
+        logger.debug(
+            "Import lookup hit via name fallback: '%s' from module '%s'",
+            element_name, module,
+        )
+        return element_id
+
+    logger.debug(
+        "Import lookup fail: '%s' not found in any of %s (module '%s', caller %s)",
+        element_name, possible_paths, module, caller_path,
+    )
     return None
 
 
@@ -1376,6 +1538,134 @@ def _unwrap_iterable_type(type_name: str) -> str | None:
             return None
         return inner
 
+    return None
+
+
+def _follow_init_reexports(
+    repo: Repository,
+    possible_paths: list[str],
+    element_name: str,
+    scope: str,
+    repository: str,
+    username: str,
+    language: str = "python",
+    caller_path: str | None = None,
+    _depth: int = 0,
+) -> str | None:
+    """Follow re-exports through __init__.py files.
+
+    When `from mypackage import Foo` is used and Foo is not defined in
+    mypackage/__init__.py but is re-exported via
+    `from .submodule import Foo` inside __init__.py, follow the chain.
+
+    Args:
+        repo: Repository instance.
+        possible_paths: File paths already tried.
+        element_name: Name of the element to find.
+        scope: Repository scope.
+        repository: Repository name.
+        username: Username branch.
+        language: Programming language.
+        caller_path: Caller's relative path (for relative import resolution).
+        _depth: Recursion depth guard (max 3).
+
+    Returns:
+        Element ID if found via re-export, None otherwise.
+    """
+    if _depth >= 3:
+        return None
+
+    from magaldi_core.module_resolver import get_module_resolver
+
+    for file_path in possible_paths:
+        if not file_path.endswith("__init__.py"):
+            continue
+
+        # Get imports from this __init__.py file
+        init_imports = repo.get_file_imports(
+            file_path, scope, repository, username
+        )
+        if not init_imports:
+            continue
+
+        # Look for a re-export of element_name
+        for imp in init_imports:
+            imp_name = imp.get("name", "")
+            imp_alias = imp.get("alias")
+            imp_module = imp.get("module", "")
+
+            # Match: the import brings in the element we're looking for
+            exported_name = imp_alias or imp_name
+            if exported_name != element_name:
+                continue
+
+            # Resolve the re-export's module to file paths
+            resolver = get_module_resolver(language)
+            if resolver:
+                if resolver.is_external_module(imp_module):
+                    continue
+                reexport_paths = resolver.module_to_file_paths(
+                    imp_module, file_path
+                )
+            else:
+                if _is_external_module(imp_module):
+                    continue
+                reexport_paths = _module_to_file_paths(
+                    imp_module, file_path
+                )
+
+            # Search for the element in the re-export target files
+            search_name = imp_name  # Use original name, not alias
+            for reexport_path in reexport_paths:
+                element_id = _find_element_in_file(
+                    repo, reexport_path, search_name,
+                    scope, repository, username,
+                )
+                if element_id:
+                    return element_id
+
+            # Recurse: the re-export target might itself be an __init__.py
+            if reexport_paths:
+                element_id = _follow_init_reexports(
+                    repo, reexport_paths, search_name,
+                    scope, repository, username,
+                    language=language, caller_path=file_path,
+                    _depth=_depth + 1,
+                )
+                if element_id:
+                    return element_id
+
+    return None
+
+
+def _fallback_name_lookup(
+    repo: Repository,
+    element_name: str,
+    scope: str,
+    repository: str,
+    username: str,
+) -> str | None:
+    """Last-resort lookup by element name only (no path constraint).
+
+    Used when path-based resolution fails. Only returns a result if
+    exactly one element with that name exists in the repository, to
+    avoid ambiguous matches.
+
+    Args:
+        repo: Repository instance.
+        element_name: Name of the element to find.
+        scope: Repository scope.
+        repository: Repository name.
+        username: Username branch.
+
+    Returns:
+        Element ID if exactly one match found, None otherwise.
+    """
+    candidates = repo.find_candidates_by_name(
+        element_name, scope, repository, username
+    )
+    if len(candidates) == 1:
+        return candidates[0].get("element_id")
     return None
 
 
