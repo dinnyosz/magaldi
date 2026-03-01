@@ -16,7 +16,8 @@ magaldi/
 │   ├── zod/
 │   └── ...
 └── tools/
-    └── clone-test-repos.sh
+    ├── clone-test-repos.sh
+    └── parse-test-repos.sh
 ```
 
 ## Quick Start
@@ -25,15 +26,18 @@ magaldi/
 # Clone all test repos at once
 ./tools/clone-test-repos.sh
 
-# Or clone a single one manually
-git clone --depth 1 https://github.com/pallets/click.git test_repos/click
-cat > test_repos/click/magaldi.yaml <<EOF
-scope: test
-repository: click
-EOF
+# Parse all cloned repos (scope=test-repo, user=test)
+./tools/parse-test-repos.sh
 
-# Parse it
-magaldi parse test_repos/click --user test
+# Or just the smallest ones
+./tools/clone-test-repos.sh --tier 1
+./tools/parse-test-repos.sh --tier 1
+
+# Parse a single repo
+./tools/parse-test-repos.sh click
+
+# Dry run (no DB needed)
+./tools/parse-test-repos.sh --dry-run click
 ```
 
 ---

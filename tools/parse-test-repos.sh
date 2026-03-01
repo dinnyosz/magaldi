@@ -126,40 +126,6 @@ repository: $name
 EOF
 }
 
-# ── Build repo list ────────────────────────────────────────────────
-
-get_matching_repos() {
-  local matches=()
-  for entry in "${REPOS[@]}"; do
-    IFS='|' read -r name tier lang <<< "$entry"
-
-    # Filter by specific repos if given
-    if [[ ${#SPECIFIC_REPOS[@]} -gt 0 ]]; then
-      local found=false
-      for specific in "${SPECIFIC_REPOS[@]}"; do
-        if [[ "$name" == "$specific" ]]; then
-          found=true
-          break
-        fi
-      done
-      if ! $found; then
-        continue
-      fi
-    fi
-
-    # Apply tier/lang filters
-    if [[ -n "$TIER_FILTER" && "$tier" -gt "$TIER_FILTER" ]]; then
-      continue
-    fi
-    if [[ -n "$LANG_FILTER" && "$lang" != "$LANG_FILTER" ]]; then
-      continue
-    fi
-
-    matches+=("$entry")
-  done
-  echo "${matches[@]}"
-}
-
 # ── Main ───────────────────────────────────────────────────────────
 
 if [[ ! -d "$DEST" ]]; then
@@ -250,7 +216,7 @@ for i in "${!MATCHING[@]}"; do
 
   repo_start=$SECONDS
 
-  if magaldi parse "$repo_dir" --user "$USER" "${EXTRA_ARGS[@]}"; then
+  if magaldi parse "$repo_dir" --user "$USER" ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}; then
     elapsed=$((SECONDS - repo_start))
     echo ""
     echo "[$idx/$total] PASS $name (${elapsed}s)"
