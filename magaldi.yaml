@@ -1,2 +1,5 @@
 scope: magaldi
 repository: magaldi
+
+exclude_directories:
+  - test_repos
