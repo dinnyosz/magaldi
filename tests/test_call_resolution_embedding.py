@@ -160,6 +160,7 @@ class TestResolveCallsByEmbedding:
         mock_es.find_all_elements_with_calls.return_value = [
             {
                 "element_id": "caller1",
+                "relative_path": "src/main.py",
                 "calls": [
                     {"name": "process", "receiver": "svc", "category": "untyped", "resolved_id": None},
                 ],
@@ -247,6 +248,7 @@ class TestResolveCallsByEmbedding:
         mock_es.find_all_elements_with_calls.return_value = [
             {
                 "element_id": "caller1",
+                "relative_path": "src/main.py",
                 "calls": [
                     {"name": "process", "receiver": "svc", "category": "untyped", "resolved_id": None},
                 ],
@@ -1414,3 +1416,150 @@ class TestResolveViaScopeBindings:
 
         # Should resolve at least conn.cursor() via chained resolution
         assert count >= 1
+
+
+# =============================================================================
+# TEST FIXTURE FILTERING TESTS
+# =============================================================================
+
+
+class TestFilterCandidatesForCaller:
+    """Tests for _filter_candidates_for_caller."""
+
+    def test_production_caller_excludes_fixture_candidates(self):
+        from magaldi_core.call_resolution import _filter_candidates_for_caller
+
+        candidates = [
+            {"element_id": "prod1", "relative_path": "src/utils.py"},
+            {"element_id": "fixture1", "relative_path": "tests/fixtures/repos/utils.py"},
+        ]
+        result = _filter_candidates_for_caller(candidates, "src/main.py")
+        assert len(result) == 1
+        assert result[0]["element_id"] == "prod1"
+
+    def test_test_caller_keeps_all_candidates(self):
+        from magaldi_core.call_resolution import _filter_candidates_for_caller
+
+        candidates = [
+            {"element_id": "prod1", "relative_path": "src/utils.py"},
+            {"element_id": "fixture1", "relative_path": "tests/fixtures/repos/utils.py"},
+        ]
+        result = _filter_candidates_for_caller(candidates, "tests/test_main.py")
+        assert len(result) == 2
+
+    def test_production_caller_keeps_non_fixture_test(self):
+        """Regular test files (not fixtures) are NOT excluded."""
+        from magaldi_core.call_resolution import _filter_candidates_for_caller
+
+        candidates = [
+            {"element_id": "test1", "relative_path": "tests/test_utils.py"},
+            {"element_id": "prod1", "relative_path": "src/utils.py"},
+        ]
+        result = _filter_candidates_for_caller(candidates, "src/main.py")
+        assert len(result) == 2
+
+    def test_all_candidates_filtered_returns_empty(self):
+        from magaldi_core.call_resolution import _filter_candidates_for_caller
+
+        candidates = [
+            {"element_id": "f1", "relative_path": "tests/fixtures/a.py"},
+            {"element_id": "f2", "relative_path": "test/fixtures/b.py"},
+        ]
+        result = _filter_candidates_for_caller(candidates, "src/main.py")
+        assert len(result) == 0
+
+
+class TestTestFixturePaths:
+    """Tests for _is_test_fixture_path and _is_test_path helpers."""
+
+    def test_fixture_paths_detected(self):
+        from magaldi_core.call_resolution import _is_test_fixture_path
+
+        assert _is_test_fixture_path("tests/fixtures/repos/valid_repo/src/utils.py")
+        assert _is_test_fixture_path("test/fixtures/data.json")
+        assert _is_test_fixture_path("src/__fixtures__/mock.ts")
+        assert _is_test_fixture_path("tests/fixture/sample.py")
+
+    def test_non_fixture_paths_not_detected(self):
+        from magaldi_core.call_resolution import _is_test_fixture_path
+
+        assert not _is_test_fixture_path("src/utils.py")
+        assert not _is_test_fixture_path("tests/test_utils.py")
+        assert not _is_test_fixture_path("src/shared/db/repositories/search.py")
+
+    def test_test_paths_detected(self):
+        from magaldi_core.call_resolution import _is_test_path
+
+        assert _is_test_path("tests/test_main.py")
+        assert _is_test_path("test/test_utils.py")
+        assert _is_test_path("src/tests/test_config.py")
+        assert _is_test_path("tests/unit/test_parser.py")
+
+    def test_production_paths_not_test(self):
+        from magaldi_core.call_resolution import _is_test_path
+
+        assert not _is_test_path("src/main.py")
+        assert not _is_test_path("src/shared/config.py")
+        assert not _is_test_path("lib/utils.py")
+
+
+# =============================================================================
+# FIXTURE FILTERING IN EMBEDDING RESOLUTION E2E
+# =============================================================================
+
+
+class TestEmbeddingResolutionFixtureFiltering:
+    """E2E tests: fixture candidates are excluded for production callers."""
+
+    def test_fixture_candidate_excluded_for_production_caller(self, mock_es):
+        """Production code calling .add() should not resolve to test fixture."""
+        mock_es.find_all_elements_with_calls.return_value = [
+            {
+                "element_id": "caller1",
+                "relative_path": "src/processor.py",
+                "calls": [
+                    {"name": "add", "receiver": "tracker", "category": "untyped", "resolved_id": None},
+                ],
+            }
+        ]
+        # One real candidate, one fixture
+        mock_es.find_candidates_by_name.return_value = [
+            {"element_id": "fixture_add", "name": "add", "element_type": "function",
+             "summary_embedding": [0.9, 0.1], "parent_id": "",
+             "relative_path": "tests/fixtures/repos/valid_repo/src/utils.py"},
+            {"element_id": "real_add", "name": "add", "element_type": "method",
+             "summary_embedding": [0.5, 0.5], "parent_id": "x:r:main:tracker.py:class:Tracker:1",
+             "relative_path": "src/tracker.py"},
+        ]
+        mock_es.get_embedding.return_value = [0.7, 0.3]
+
+        total, single, embedding = resolve_calls_by_embedding(mock_es, "s", "r", "main")
+
+        # Fixture filtered out, only real_add remains as single candidate
+        assert single == 1 or embedding == 1
+        stored_calls = mock_es.store_calls.call_args[0][1]
+        assert stored_calls[0]["resolved_id"] == "real_add"
+
+    def test_test_caller_can_resolve_to_fixture(self, mock_es):
+        """Test code calling .add() CAN resolve to test fixture."""
+        mock_es.find_all_elements_with_calls.return_value = [
+            {
+                "element_id": "test_caller",
+                "relative_path": "tests/test_processor.py",
+                "calls": [
+                    {"name": "add", "receiver": "tracker", "category": "untyped", "resolved_id": None},
+                ],
+            }
+        ]
+        mock_es.find_candidates_by_name.return_value = [
+            {"element_id": "fixture_add", "name": "add", "element_type": "function",
+             "summary_embedding": [0.9, 0.1], "parent_id": "",
+             "relative_path": "tests/fixtures/repos/valid_repo/src/utils.py"},
+        ]
+
+        total, single, embedding = resolve_calls_by_embedding(mock_es, "s", "r", "main")
+
+        # Test caller: fixture NOT filtered out, single candidate resolves
+        assert single == 1
+        stored_calls = mock_es.store_calls.call_args[0][1]
+        assert stored_calls[0]["resolved_id"] == "fixture_add"

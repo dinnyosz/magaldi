@@ -116,6 +116,7 @@ def resolve_all_calls(
                 )
                 if resolved_id:
                     import_resolved += 1
+                    call["category"] = "resolved"
 
             # Strategy 4: Method call on imported module
             elif receiver and receiver in import_map:
@@ -126,6 +127,7 @@ def resolve_all_calls(
                 )
                 if resolved_id:
                     import_resolved += 1
+                    call["category"] = "resolved"
 
             # Strategy 5: Type-annotated method call
             elif receiver and category == "type_resolvable" and receiver in param_types:
@@ -250,6 +252,7 @@ def resolve_cross_file_calls(
                 )
                 if resolved_id:
                     import_resolved += 1
+                    call["category"] = "resolved"
 
             # Strategy 4: Method call on imported module
             # e.g., import utils; utils.process()
@@ -261,6 +264,7 @@ def resolve_cross_file_calls(
                 )
                 if resolved_id:
                     import_resolved += 1
+                    call["category"] = "resolved"
 
             # Strategy 5: Type-annotated method call
             # e.g., def foo(repo: Repository): repo.get_document()
@@ -1522,12 +1526,66 @@ def _merge_candidates(
     return list(seen.values())
 
 
+# Path segments that indicate test fixtures — candidates from these paths
+# are excluded when the caller is production code, to avoid mis-resolution
+# (e.g. dict.get() → tests/fixtures/teatro_production.ts:method:get).
+_TEST_FIXTURE_SEGMENTS = frozenset({
+    "tests/fixtures",
+    "test/fixtures",
+    "tests/fixture",
+    "test/fixture",
+    "__fixtures__",
+    "__mocks__",
+})
+
+
+def _is_test_fixture_path(path: str) -> bool:
+    """Check if a path is under a test fixture directory."""
+    path_lower = path.lower()
+    return any(seg in path_lower for seg in _TEST_FIXTURE_SEGMENTS)
+
+
+def _is_test_path(path: str) -> bool:
+    """Check if a path is a test file or under a test directory."""
+    path_lower = path.lower()
+    # Check directory-level test paths
+    if "/tests/" in path_lower or "/test/" in path_lower:
+        return True
+    # Check file-level test patterns
+    parts = path_lower.rsplit("/", 1)
+    filename = parts[-1] if parts else path_lower
+    return filename.startswith("test_") or filename.endswith("_test.py")
+
+
+def _filter_candidates_for_caller(
+    candidates: list[dict],
+    caller_path: str,
+) -> list[dict]:
+    """Filter candidates based on caller context.
+
+    When the caller is production code, exclude test fixture candidates
+    to prevent mis-resolution (e.g., dict.get() resolving to a test fixture
+    method named "get").
+
+    Test code can resolve to anything (fixtures, production, etc.).
+    """
+    if _is_test_path(caller_path):
+        # Test code can reference anything
+        return candidates
+
+    # Production code: exclude test fixture candidates
+    return [
+        c for c in candidates
+        if not _is_test_fixture_path(c.get("relative_path", ""))
+    ]
+
+
 def resolve_calls_by_embedding(
     repo: Repository,
     scope: str,
     repository: str,
     username: str = "main",
-    min_rrf_score: float = 0.045,
+    min_rrf_score: float = 0.048,
 ) -> tuple[int, int, int]:
     """Strategy 6: Resolve untyped calls using RRF-scored multi-signal matching.
 
@@ -1539,12 +1597,15 @@ def resolve_calls_by_embedding(
     Queries both the user's index and "main" to get a complete view,
     with user's elements taking priority.
 
+    Filters out test fixture candidates when the caller is production code
+    to prevent mis-resolution (e.g., add() → test fixture function).
+
     Args:
         repo: Repository instance.
         scope: Repository scope.
         repository: Repository name.
         username: Username branch.
-        min_rrf_score: Minimum RRF score to accept a match (default 0.045).
+        min_rrf_score: Minimum RRF score to accept a match (default 0.048).
 
     Returns:
         Tuple of (total_processed, single_match_resolved, rrf_resolved).
@@ -1575,6 +1636,7 @@ def resolve_calls_by_embedding(
 
     for elem in elements:
         element_id = elem.get("element_id", "")
+        caller_path = elem.get("relative_path", "")
         calls = elem.get("calls", [])
         updated = False
 
@@ -1608,7 +1670,10 @@ def resolve_calls_by_embedding(
                     candidates = _merge_candidates(candidates, main_candidates)
                 name_cache[name] = candidates
 
-            candidates = name_cache[name]
+            # Filter out test fixture candidates when caller is production code
+            candidates = _filter_candidates_for_caller(
+                name_cache[name], caller_path
+            )
 
             if not candidates:
                 continue
