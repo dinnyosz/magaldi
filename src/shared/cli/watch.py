@@ -21,6 +21,7 @@ import click
 from shared.cli._printers import print_parsing_result
 from shared.cli._runners import run_change_detection, run_discovery, run_processing
 from shared.cli._shared import check_model_availability, console, main
+from shared.cli.parse_logger import ParseRunLogger
 from shared.config import load_config
 
 if TYPE_CHECKING:
@@ -110,6 +111,7 @@ def process_file_changes(
     workers: int,
     features: bool,
     glossary: bool,
+    run_logger: ParseRunLogger | None = None,
 ) -> None:
     """Process accumulated file changes through the parse pipeline."""
     from magaldi_core.change_detection import ChangeManifest, FileInfo
@@ -139,7 +141,9 @@ def process_file_changes(
         try:
             content = path.read_bytes()
             file_hash = hashlib.sha256(content).hexdigest()
-        except Exception:
+        except Exception as e:
+            if run_logger:
+                run_logger.log_error("watch_hash", f"Cannot read file: {e}", {"file": file_path})
             continue  # Skip files we can't read
 
         file_info = FileInfo(
@@ -187,12 +191,16 @@ def process_file_changes(
         repo = Repository(config)
         total_deleted = 0
         for file_info in deleted_infos:
-            count = repo.delete_by_file(
-                discovery_result.scope, discovery_result.repository, user, file_info.relative_path
-            )
-            if count > 0:
-                console.print(f"  [red]Deleted[/] {count} elements from {file_info.relative_path}")
-                total_deleted += count
+            try:
+                count = repo.delete_by_file(
+                    discovery_result.scope, discovery_result.repository, user, file_info.relative_path
+                )
+                if count > 0:
+                    console.print(f"  [red]Deleted[/] {count} elements from {file_info.relative_path}")
+                    total_deleted += count
+            except Exception as e:
+                if run_logger:
+                    run_logger.log_error("watch_delete", str(e), {"file": file_info.relative_path})
         if total_deleted == 0 and not new_or_modified:
             console.print("  [dim]No indexed elements found for deleted files[/]")
 
@@ -214,10 +222,14 @@ def process_file_changes(
     )
 
     console.print(f"  [bold blue]Parsing[/] {len(new_or_modified)} file(s)")
+    if run_logger:
+        run_logger.start_phase("Parsing")
 
     # Phase 3: Parsing
     parsing_result = parse_files(manifest)
     print_parsing_result(parsing_result)
+    if run_logger:
+        run_logger.end_phase({"files": len(new_or_modified), "elements": parsing_result.total_elements})
 
     if parsing_result.total_elements == 0:
         console.print("  [dim]No elements extracted[/]")
@@ -228,10 +240,15 @@ def process_file_changes(
         model_errors = check_model_availability(config, skip_ai)
         if model_errors:
             console.print("  [yellow]AI models unavailable, skipping AI processing[/]")
+            if run_logger:
+                for err in model_errors:
+                    run_logger.log_error("watch_preflight", err)
             skip_ai = True
 
     # Phase 5: Processing
     console.print("  [bold blue]Processing[/]")
+    if run_logger:
+        run_logger.start_phase("Processing")
 
     # Build file hashes dict
     file_hashes: dict[str, str] = {}
@@ -242,45 +259,92 @@ def process_file_changes(
         parsing_result, manifest, config, dry_run=False, skip_ai=skip_ai, workers=workers, compact=True
     )
 
+    if run_logger:
+        run_logger.end_phase({"processed": processed, "indexed": indexed, "failed": len(failed_elements)})
+        run_logger.log_processing_stats(
+            processed, skipped, indexed, deleted, failed_elements,
+            avg_wall, avg_summ, avg_embed, elapsed,
+        )
+        # Check for token budget exceeded
+        if timing_stats is not None:
+            tier_summary = timing_stats.get_tier_accuracy_summary()
+            if tier_summary.get("has_issues"):
+                run_logger.log_budget_exceeded(
+                    tier_summary.get("input", []),
+                    tier_summary.get("output", []),
+                )
+
     console.print(f"  Processed {processed} elements, indexed {indexed}")
+
+    # Log failed elements
+    if failed_elements and run_logger:
+        for element_id, error in failed_elements:
+            run_logger.log_error("watch_processing", error, {"element_id": element_id})
 
     # Call Resolution
     if indexed > 0:
         from shared.cli._runners import run_call_resolution
         from shared.db.store import Repository
         repo = Repository(config)
-        run_call_resolution(
-            repo,
-            discovery_result.scope,
-            discovery_result.repository,
-            user,
-            skip_resolve=skip_resolve,
-            console=console,
-        )
+        if run_logger:
+            run_logger.start_phase("Call Resolution")
+        try:
+            run_call_resolution(
+                repo,
+                discovery_result.scope,
+                discovery_result.repository,
+                user,
+                skip_resolve=skip_resolve,
+                console=console,
+            )
+        except Exception as e:
+            if run_logger:
+                run_logger.log_error("watch_call_resolution", str(e))
+        finally:
+            if run_logger:
+                run_logger.end_phase()
 
     # Feature extraction (if requested and we processed elements)
     if features and not skip_ai and processed > 0:
         console.print("  [bold blue]Feature Extraction[/]")
-        run_feature_extraction(
-            discovery_result.scope,
-            discovery_result.repository,
-            user,
-            config,
-            workers=workers,
-            compact=True,
-        )
+        if run_logger:
+            run_logger.start_phase("Feature Extraction")
+        try:
+            run_feature_extraction(
+                discovery_result.scope,
+                discovery_result.repository,
+                user,
+                config,
+                workers=workers,
+                compact=True,
+            )
+        except Exception as e:
+            if run_logger:
+                run_logger.log_error("watch_feature_extraction", str(e))
+        finally:
+            if run_logger:
+                run_logger.end_phase()
 
     # Glossary extraction (if requested)
     if glossary and not skip_ai and processed > 0:
         console.print("  [bold blue]Glossary Extraction[/]")
-        run_glossary_extraction(
-            scope=discovery_result.scope,
-            repository=discovery_result.repository,
-            username=user,
-            config=config,
-            workers=workers,
-            compact=True,
-        )
+        if run_logger:
+            run_logger.start_phase("Glossary Extraction")
+        try:
+            run_glossary_extraction(
+                scope=discovery_result.scope,
+                repository=discovery_result.repository,
+                username=user,
+                config=config,
+                workers=workers,
+                compact=True,
+            )
+        except Exception as e:
+            if run_logger:
+                run_logger.log_error("watch_glossary_extraction", str(e))
+        finally:
+            if run_logger:
+                run_logger.end_phase()
 
 
 def watch_loop(
@@ -295,11 +359,13 @@ def watch_loop(
     features: bool,
     glossary: bool,
     stop_event: threading.Event,
+    run_logger: ParseRunLogger | None = None,
 ) -> None:
     """Main watch loop - collect changes and process in batches."""
     changed_files: set[str] = set()
     deleted_files: set[str] = set()
     last_change_time = 0.0
+    batch_count = 0
 
     while not stop_event.is_set():
         try:
@@ -345,8 +411,13 @@ def watch_loop(
                         console.print(f"  [dim](atomic save detected)[/] [cyan]Modified:[/] {rel_path}")
 
                 # Process batch
+                batch_count += 1
                 total = len(changed_files) + len(deleted_files)
                 console.print(f"\n[bold cyan]Processing {total} file(s)...[/]")
+
+                # Start a new phase for this batch
+                if run_logger:
+                    run_logger.start_phase(f"Watch Batch #{batch_count}")
 
                 try:
                     process_file_changes(
@@ -360,9 +431,23 @@ def watch_loop(
                         workers,
                         features,
                         glossary,
+                        run_logger,
                     )
                 except Exception as e:
                     console.print(f"  [red]Error processing changes:[/] {e}")
+                    if run_logger:
+                        run_logger.log_error("watch_batch", str(e), {
+                            "batch": batch_count,
+                            "changed_files": list(changed_files),
+                            "deleted_files": list(deleted_files),
+                        })
+
+                if run_logger:
+                    run_logger.end_phase({"files": total})
+                    # Write log after each batch (so we don't lose data on crash)
+                    if run_logger.has_errors or run_logger.has_budget_exceeded:
+                        log_path = run_logger.write()
+                        console.print(f"  [dim]Log:[/] {log_path}")
 
                 changed_files.clear()
                 deleted_files.clear()
@@ -374,6 +459,7 @@ def watch_loop(
 def _shutdown_watch(
     observer: Any | None = None,
     stop_event: threading.Event | None = None,
+    run_logger: ParseRunLogger | None = None,
 ) -> None:
     """Clean shutdown on Ctrl+C, avoiding thread-join hangs."""
     console.print("\n[yellow]Stopping watch...[/]")
@@ -382,6 +468,13 @@ def _shutdown_watch(
     if observer is not None:
         observer.stop()
         observer.join(timeout=2.0)
+    # Write final log
+    if run_logger is not None:
+        try:
+            log_path = run_logger.write()
+            console.print(f"  [dim]Log:[/] {log_path}")
+        except Exception:
+            pass
     # Restore default SIGINT so shutdown doesn't re-enter our handler
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     # Skip Python's threading shutdown which hangs on orphan ThreadPoolExecutor threads
@@ -436,6 +529,8 @@ def watch(
 
     console.print("[bold blue]Magaldi Watch Mode[/]\n")
 
+    run_logger: ParseRunLogger | None = None
+
     try:
         # Phase 1: Discovery
         console.print("[bold blue]Discovery[/]")
@@ -445,10 +540,19 @@ def watch(
         console.print(f"  Path: [dim]{discovery_result.repo_path}[/]")
         console.print(f"  Files: [cyan]{discovery_result.total_files}[/]")
 
+        # Initialize run logger now that we have scope/repo
+        run_logger = ParseRunLogger(
+            repo_path, discovery_result.scope, discovery_result.repository, user, mode="watch"
+        )
+        run_logger.log_discovery(discovery_result)
+
         # Initial scan and processing (optional)
         if not no_initial_scan:
             console.print("\n[bold blue]Change Detection[/]")
+            run_logger.start_phase("Initial Change Detection")
             manifest = run_change_detection(discovery_result, config, dry_run=False)
+            run_logger.end_phase()
+            run_logger.log_manifest(manifest)
 
             if manifest.files_to_parse > 0:
                 console.print(f"  Found {manifest.files_to_parse} file(s) to parse")
@@ -458,6 +562,8 @@ def watch(
                     model_errors = check_model_availability(config, skip_ai)
                     if model_errors:
                         console.print("  [yellow]AI models unavailable, skipping AI processing[/]")
+                        for err in model_errors:
+                            run_logger.log_error("watch_preflight", err)
                         skip_ai = True
 
                 # Phase 3: Parsing
@@ -465,21 +571,39 @@ def watch(
                 from shared.cli._runners import run_hierarchy_extraction, run_parsing
 
                 console.print("\n[bold blue]Parsing[/]")
+                run_logger.start_phase("Initial Parsing")
                 parsing_result = run_parsing(manifest)
                 print_parsing_result(parsing_result)
+                run_logger.end_phase({"files": len(parsing_result.parsed_files), "elements": parsing_result.total_elements})
 
                 if parsing_result.total_elements > 0:
                     # Phase 5: Processing
                     console.print("\n[bold blue]Processing[/]")
+                    run_logger.start_phase("Initial Processing")
                     processed, skipped, indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, failed_elements, deleted = run_processing(
                         parsing_result, manifest, config, dry_run=False, skip_ai=skip_ai, workers=workers, compact=True
                     )
+                    run_logger.end_phase({"processed": processed, "indexed": indexed, "failed": len(failed_elements)})
+                    run_logger.log_processing_stats(
+                        processed, skipped, indexed, deleted, failed_elements,
+                        avg_wall, avg_summ, avg_embed, elapsed,
+                    )
                     print_processing_result(processed, skipped, indexed, skip_ai, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, workers, deleted)
+
+                    # Check for token budget exceeded
+                    if timing_stats is not None:
+                        tier_summary = timing_stats.get_tier_accuracy_summary()
+                        if tier_summary.get("has_issues"):
+                            run_logger.log_budget_exceeded(
+                                tier_summary.get("input", []),
+                                tier_summary.get("output", []),
+                            )
 
                     # Hierarchy Extraction
                     if indexed > 0:
                         from shared.db.store import Repository
                         repo = Repository(config)
+                        run_logger.start_phase("Initial Hierarchy Extraction")
                         console.print("\n  [bold]Hierarchy Extraction[/]")
                         try:
                             cli_entry_point = discovery_result.repository
@@ -494,43 +618,60 @@ def watch(
                                 console.print(f"  Indexed {rel_indexed} relationships, {ref_indexed} external refs")
                         except Exception as e:
                             console.print(f"  [yellow]Warning: Hierarchy extraction failed: {e}[/]")
+                            run_logger.log_error("watch_hierarchy", str(e))
+                        run_logger.end_phase()
 
                         # Call Resolution
                         from shared.cli._runners import run_call_resolution
-                        run_call_resolution(
-                            repo,
-                            discovery_result.scope,
-                            discovery_result.repository,
-                            user,
-                            skip_resolve=skip_resolve,
-                            console=console,
-                        )
+                        run_logger.start_phase("Initial Call Resolution")
+                        try:
+                            run_call_resolution(
+                                repo,
+                                discovery_result.scope,
+                                discovery_result.repository,
+                                user,
+                                skip_resolve=skip_resolve,
+                                console=console,
+                            )
+                        except Exception as e:
+                            run_logger.log_error("watch_call_resolution", str(e))
+                        run_logger.end_phase()
 
                     # Feature extraction (if requested)
                     if features and not skip_ai and processed > 0:
                         from shared.cli.feature_commands import run_feature_extraction
                         console.print("\n[bold blue]Feature Extraction[/]")
-                        run_feature_extraction(
-                            discovery_result.scope,
-                            discovery_result.repository,
-                            user,
-                            config,
-                            workers=workers,
-                            compact=True,
-                        )
+                        run_logger.start_phase("Initial Feature Extraction")
+                        try:
+                            run_feature_extraction(
+                                discovery_result.scope,
+                                discovery_result.repository,
+                                user,
+                                config,
+                                workers=workers,
+                                compact=True,
+                            )
+                        except Exception as e:
+                            run_logger.log_error("watch_feature_extraction", str(e))
+                        run_logger.end_phase()
 
                     # Glossary extraction (if requested)
                     if glossary and not skip_ai and processed > 0:
                         from shared.cli.glossary_commands import run_glossary_extraction
                         console.print("\n[bold blue]Glossary Extraction[/]")
-                        run_glossary_extraction(
-                            discovery_result.scope,
-                            discovery_result.repository,
-                            user,
-                            config,
-                            workers=workers,
-                            compact=True,
-                        )
+                        run_logger.start_phase("Initial Glossary Extraction")
+                        try:
+                            run_glossary_extraction(
+                                scope=discovery_result.scope,
+                                repository=discovery_result.repository,
+                                username=user,
+                                config=config,
+                                workers=workers,
+                                compact=True,
+                            )
+                        except Exception as e:
+                            run_logger.log_error("watch_glossary_extraction", str(e))
+                        run_logger.end_phase()
             else:
                 console.print("  [green]Repository is up to date[/]")
 
@@ -561,16 +702,25 @@ def watch(
                 features,
                 glossary,
                 stop_event,
+                run_logger,
             )
         except KeyboardInterrupt:
-            _shutdown_watch(observer, stop_event)
+            _shutdown_watch(observer, stop_event, run_logger)
 
     except KeyboardInterrupt:
         # Ctrl+C during initial scan or setup
-        _shutdown_watch()
+        _shutdown_watch(run_logger=run_logger)
     except DiscoveryError as e:
         console.print(f"\n[red]Discovery error:[/] {e}")
+        if run_logger:
+            run_logger.log_error("watch_discovery", str(e))
+            log_path = run_logger.write()
+            console.print(f"  [dim]Log:[/] {log_path}")
         sys.exit(1)
     except Exception as e:
         console.print(f"\n[red]Error:[/] {e}")
+        if run_logger:
+            run_logger.log_error("watch", str(e))
+            log_path = run_logger.write()
+            console.print(f"  [dim]Log:[/] {log_path}")
         sys.exit(1)

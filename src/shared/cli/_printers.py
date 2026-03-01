@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from magaldi_core.discovery import DiscoveryResult
     from magaldi_core.processor import TimingStats
     from magaldi_core.variable_scoring.models import ScoringResult
+    from shared.cli.parse_logger import ParseRunLogger
 
 
 def print_discovery_result(result: DiscoveryResult) -> None:
@@ -173,3 +174,28 @@ def print_summary(
 
     console.print(table)
     console.print()
+
+
+def print_phase_timings(run_logger: ParseRunLogger) -> None:
+    """Print phase timing breakdown table at end of parse run."""
+    timings = run_logger.get_phase_timings()
+    if not timings:
+        return
+
+    total_elapsed = run_logger.get_total_elapsed()
+
+    console.print()
+    table = Table(show_header=True, box=None, padding=(0, 2))
+    table.add_column("Phase", style="cyan", min_width=30)
+    table.add_column("Duration", style="green", justify="right", min_width=10)
+    table.add_column("%", style="dim", justify="right", min_width=6)
+
+    for name, duration in timings:
+        pct = (duration / total_elapsed * 100) if total_elapsed > 0 else 0
+        table.add_row(name, format_duration(duration), f"{pct:.0f}%")
+
+    # Total row
+    table.add_row("─" * 30, "─" * 10, "─" * 6)
+    table.add_row("[bold]Total[/]", f"[bold]{format_duration(total_elapsed)}[/]", "")
+
+    console.print(table)
