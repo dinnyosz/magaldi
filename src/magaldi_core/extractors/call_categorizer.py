@@ -1,7 +1,8 @@
 """Call categorization logic for classifying function/method calls.
 
 This module provides utilities to categorize calls as:
-- builtin: Python built-ins (len, str, print, etc.)
+- builtin: Language built-ins — bare functions (len, str) and standard type
+  methods (dict.get, list.append, Array.push, Vec.iter, etc.)
 - stdlib: Standard library (os.path, json.dumps, etc.)
 - external: Third-party libraries (logger.info, requests.get, etc.)
 - type_resolvable: Could be resolved via type annotation
@@ -55,6 +56,149 @@ BUILTINS: set[str] = {
     "Exception", "ValueError", "TypeError", "KeyError", "IndexError",
     "AttributeError", "RuntimeError", "StopIteration", "NotImplementedError",
 }
+
+# Language-specific built-in methods that should never go through embedding
+# resolution. These are methods on standard/primitive types (dict, list, str,
+# Array, Vec, etc.) that exist in every program and would match random codebase
+# elements by name if sent to Strategy 6.
+#
+# NOTE: If the receiver is a typed parameter (e.g. repo: Repository), the call
+# will still be categorized as TYPE_RESOLVABLE so Strategy 5 can resolve it.
+BUILTIN_METHODS: dict[str, set[str] | None] = {
+    "python": {
+        # dict
+        "get", "keys", "values", "items", "pop", "update", "setdefault",
+        "clear", "copy", "fromkeys",
+        # list
+        "append", "extend", "insert", "remove", "sort", "reverse",
+        "index", "count",
+        # str
+        "split", "join", "strip", "lstrip", "rstrip", "replace", "find",
+        "rfind", "startswith", "endswith", "upper", "lower", "title",
+        "format", "encode", "decode",
+        # set
+        "add", "discard", "union", "intersection", "difference",
+        "symmetric_difference", "issubset", "issuperset",
+        # file / io
+        "close", "read", "write", "seek", "tell", "flush",
+        # Future / Task
+        "result", "cancel", "done", "exception",
+        # Executor
+        "submit", "shutdown",
+        # Lock / Condition / Event
+        "acquire", "release", "wait", "notify",
+        # Queue
+        "put", "empty", "full", "qsize",
+        # logging (receiver = logger)
+        "debug", "info", "warning", "error", "critical",
+    },
+    "javascript": {
+        # Array
+        "push", "pop", "shift", "unshift", "splice", "slice", "concat",
+        "join", "reverse", "sort", "indexOf", "lastIndexOf", "find",
+        "findIndex", "filter", "map", "reduce", "reduceRight", "forEach",
+        "some", "every", "includes", "flat", "flatMap", "fill", "entries",
+        "keys", "values", "at", "from",
+        # String
+        "split", "trim", "trimStart", "trimEnd", "replace", "replaceAll",
+        "match", "matchAll", "search", "startsWith", "endsWith",
+        "charAt", "charCodeAt", "substring", "toLowerCase", "toUpperCase",
+        "padStart", "padEnd", "repeat", "normalize",
+        # Object
+        "hasOwnProperty", "toString", "valueOf", "toLocaleString",
+        # Map / Set
+        "get", "set", "has", "delete", "clear",
+        # Promise
+        "then", "catch", "finally",
+        # JSON / console (receiver-based)
+        "parse", "stringify", "log", "warn", "error", "info", "debug",
+        # DOM
+        "addEventListener", "removeEventListener", "querySelector",
+        "querySelectorAll", "getElementById", "setAttribute",
+        "getAttribute", "appendChild", "removeChild",
+    },
+    # TypeScript and TSX inherit from JavaScript
+    "typescript": None,
+    "tsx": None,
+    "php": {
+        # Array-like
+        "push", "pop", "shift", "unshift", "count", "merge",
+        "map", "filter", "reduce", "keys", "values", "slice",
+        "splice", "sort", "reverse", "search", "unique", "flip",
+        "combine", "chunk", "pad", "fill", "column",
+        # String
+        "trim", "replace", "split", "join", "substr", "substring",
+        "indexOf", "contains", "startsWith", "endsWith",
+        "toUpper", "toLower", "length", "format",
+        # Collection (Laravel / common)
+        "get", "set", "has", "all", "first", "last", "each",
+        "where", "pluck", "groupBy", "sortBy", "toArray", "toJson",
+        "isEmpty", "isNotEmpty", "flatten", "collapse",
+        # Common object
+        "save", "delete", "update", "create", "find", "findOrFail",
+        "close", "read", "write", "flush",
+        # Logging
+        "debug", "info", "warning", "error", "critical", "log",
+    },
+    "rust": {
+        # Option / Result
+        "unwrap", "unwrap_or", "unwrap_or_else", "unwrap_or_default",
+        "expect", "is_some", "is_none", "is_ok", "is_err",
+        "ok", "err", "map", "map_err", "map_or", "map_or_else",
+        "and_then", "or_else", "filter",
+        # Iterator
+        "iter", "into_iter", "iter_mut", "next",
+        "fold", "collect", "enumerate", "zip",
+        "skip", "take", "chain", "flatten", "flat_map",
+        "any", "all", "find", "position", "count", "sum",
+        "min", "max", "cloned", "copied", "rev", "peekable",
+        "for_each",
+        # Vec
+        "push", "pop", "len", "is_empty", "contains", "insert",
+        "remove", "retain", "clear", "extend", "drain", "truncate",
+        "sort", "sort_by", "sort_by_key", "dedup", "split_at",
+        # String / &str
+        "to_string", "as_str", "to_owned", "to_lowercase", "to_uppercase",
+        "trim", "starts_with", "ends_with", "replace",
+        "split", "chars", "bytes", "parse",
+        "push_str", "as_bytes", "format",
+        # HashMap (insert already in Vec)
+        "get", "contains_key", "keys", "values",
+        "entry", "or_insert", "or_insert_with",
+        # Common trait methods
+        "clone", "fmt", "eq", "cmp", "partial_cmp", "hash",
+        "into", "from", "try_from", "try_into", "as_ref", "as_mut",
+        "borrow", "borrow_mut", "deref", "deref_mut",
+        "default", "drop",
+        # I/O
+        "read", "write", "flush", "close", "seek",
+        "read_to_string", "write_all",
+        # Logging (log crate)
+        "debug", "info", "warn", "error", "trace",
+    },
+    "bash": set(),  # Bash doesn't have method calls
+}
+
+# Resolved set for languages that inherit from another
+_BUILTIN_METHODS_CACHE: dict[str, set[str]] = {}
+
+
+def _get_builtin_methods(language: str) -> set[str]:
+    """Get builtin methods for a language, resolving inheritance."""
+    if language in _BUILTIN_METHODS_CACHE:
+        return _BUILTIN_METHODS_CACHE[language]
+
+    methods = BUILTIN_METHODS.get(language)
+    if methods is None:
+        # Inherit: tsx/typescript -> javascript
+        if language in ("typescript", "tsx"):
+            methods = BUILTIN_METHODS.get("javascript") or set()
+        else:
+            methods = set()
+
+    _BUILTIN_METHODS_CACHE[language] = methods
+    return methods
+
 
 # Standard library module prefixes
 STDLIB_MODULES: set[str] = {
@@ -194,9 +338,17 @@ def categorize_call(
     if receiver in EXTERNAL_MODULES or receiver.split(".")[0] in EXTERNAL_MODULES:
         return CallCategory.EXTERNAL
 
-    # Check if receiver matches a typed parameter
+    # Check if receiver matches a typed parameter — takes priority over
+    # builtin methods because typed receivers might have project-specific
+    # methods (e.g. repo.get() on Repository class).
     if param_types and receiver in param_types:
         return CallCategory.TYPE_RESOLVABLE
+
+    # Check for language-specific built-in methods (dict.get, list.append, etc.)
+    # Only when the receiver is NOT a typed parameter (checked above).
+    builtin_methods = _get_builtin_methods(language)
+    if name in builtin_methods:
+        return CallCategory.BUILTIN
 
     # Method call on object without type info
     return CallCategory.UNTYPED

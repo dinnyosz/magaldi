@@ -101,7 +101,7 @@ class CallCategory:
     """Categories for unresolved calls."""
 
     RESOLVED = "resolved"  # Successfully resolved to an element
-    BUILTIN = "builtin"  # Python built-in (len, str, print, etc.)
+    BUILTIN = "builtin"  # Language built-in: bare functions (len, str) and standard type methods (dict.get, list.append)
     STDLIB = "stdlib"  # Standard library (os.path, json.dumps, etc.)
     EXTERNAL = "external"  # Third-party library (logger.info, requests.get, etc.)
     TYPE_RESOLVABLE = "type_resolvable"  # Could be resolved via type annotation
