@@ -2868,13 +2868,13 @@ class TestExplorationOrchestrator:
     # --- exploration_status lifecycle tests ---
 
     def test_exploration_status_warmup_a(self):
-        """During warmup A, exploration_status shows WarmA with progress."""
+        """During warmup A, exploration_status shows baseline warmup with progress."""
         orch = ExplorationOrchestrator(base_workers=8)
         tracker = self._make_tracker()
 
         state = orch.orchestrate({}, None, tracker)
         assert state.exploration_status is not None
-        assert state.exploration_status.startswith("WarmA")
+        assert state.exploration_status.startswith("Warmup: baseline")
         assert "0/10" in state.exploration_status
 
     def test_exploration_status_warmup_a_partial(self):
@@ -2885,11 +2885,11 @@ class TestExplorationOrchestrator:
         all_levels: dict[int, tuple[float, int]] = {1: (5.0, 5)}
         state = orch.orchestrate(all_levels, None, tracker)
         assert state.exploration_status is not None
-        assert "WarmA" in state.exploration_status
+        assert "Warmup: baseline" in state.exploration_status
         assert "5/10" in state.exploration_status
 
     def test_exploration_status_warmup_b(self):
-        """During warmup B, exploration_status shows WarmB with progress."""
+        """During warmup B, exploration_status shows level warmup with progress."""
         orch = ExplorationOrchestrator(base_workers=12)
         tracker = self._make_tracker()
         warmup_high = max(2, int(12 * 2 / 3))  # = 8
@@ -2900,12 +2900,12 @@ class TestExplorationOrchestrator:
         }
         state = orch.orchestrate(all_levels, None, tracker)
         assert state.exploration_status is not None
-        assert "WarmB" in state.exploration_status
+        assert "Warmup: level" in state.exploration_status
         assert f"{warmup_high}" in state.exploration_status
         assert "3/10" in state.exploration_status
 
     def test_exploration_status_gss_active(self):
-        """During active GSS, exploration_status shows bracket and probe."""
+        """During active GSS, exploration_status shows search bracket and probe."""
         orch = ExplorationOrchestrator(base_workers=20)
         tracker = self._make_tracker()
         warmup_high = max(2, int(20 * 2 / 3))  # = 13
@@ -2918,11 +2918,12 @@ class TestExplorationOrchestrator:
 
         assert state.gss_probe is not None
         assert state.exploration_status is not None
-        assert "GSS" in state.exploration_status
+        assert "Searching" in state.exploration_status
+        assert "testing" in state.exploration_status
         assert str(state.gss_probe) in state.exploration_status
 
     def test_exploration_status_converged(self):
-        """After GSS converges, exploration_status shows Peak with checkmark."""
+        """After GSS converges, exploration_status shows Converged with checkmark."""
         orch = ExplorationOrchestrator(base_workers=10)
         tracker = self._make_tracker()
 
@@ -2940,8 +2941,8 @@ class TestExplorationOrchestrator:
         assert orch._gss is not None
         assert orch._gss.converged
         assert state.exploration_status is not None
-        assert "Peak@" in state.exploration_status
-        assert "\u2713" in state.exploration_status  # checkmark
+        assert "Converged" in state.exploration_status or "Exploring" in state.exploration_status
+        assert "\u2713" in state.exploration_status or "→" in state.exploration_status
 
     def test_exploration_status_always_set(self):
         """exploration_status is set in every lifecycle phase."""

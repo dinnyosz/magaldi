@@ -1245,7 +1245,7 @@ class ExplorationOrchestrator:
         # base_workers=1 means compute_effective_base_workers couldn't fit even
         # the minimum exploration cost — fall through to formula-based throttling.
         if self.base_workers <= 1 and self._total_elements is not None:
-            state.exploration_status = f"Skip ({self._total_elements} elem)"
+            state.exploration_status = f"Skipped ({self._total_elements} elements)"
             return state
 
         # Build level_data: levels with enough samples for GSS decisions.
@@ -1370,7 +1370,7 @@ class ExplorationOrchestrator:
                     f"Warmup A: level 1 ({l1_cnt}/{EXPLORE_MIN_SAMPLES})"
                 )
                 state.exploration_status = (
-                    f"WarmA 1 ({l1_cnt}/{EXPLORE_MIN_SAMPLES})"
+                    f"Warmup: baseline ({l1_cnt}/{EXPLORE_MIN_SAMPLES})"
                 )
             else:
                 hi_cnt = (
@@ -1384,7 +1384,7 @@ class ExplorationOrchestrator:
                     f"({hi_cnt}/{EXPLORE_MIN_SAMPLES})"
                 )
                 state.exploration_status = (
-                    f"WarmB {warmup_high_probe} ({hi_cnt}/{EXPLORE_MIN_SAMPLES})"
+                    f"Warmup: level {warmup_high_probe} ({hi_cnt}/{EXPLORE_MIN_SAMPLES})"
                 )
 
         # Populate state
@@ -1397,19 +1397,20 @@ class ExplorationOrchestrator:
             state.gss_hi = self._gss.hi
             state.gss_signal = self._gss.last_signal
             # Set exploration_status for GSS phases
+            # Note: Peak@ is already shown separately in the stats line,
+            # so exploration_status only describes the current activity.
             if self._gss.converged:
-                best = self._gss.best_level
                 if explore_phase == "outlier":
-                    state.exploration_status = f"Peak@{best} outlier→{explore}"
+                    state.exploration_status = f"Checking outlier →{explore}"
                 elif explore_phase == "verify":
-                    state.exploration_status = f"Peak@{best} verify→{explore}"
+                    state.exploration_status = f"Verifying →{explore}"
                 elif explore is not None:
-                    state.exploration_status = f"Peak@{best} →{explore}"
+                    state.exploration_status = f"Exploring →{explore}"
                 else:
-                    state.exploration_status = f"Peak@{best} \u2713"
+                    state.exploration_status = "Converged ✓"
             elif gss_probe is not None:
                 state.exploration_status = (
-                    f"GSS[{self._gss.lo},{self._gss.hi}]\u2192{gss_probe}"
+                    f"Searching [{self._gss.lo}–{self._gss.hi}] → testing {gss_probe}"
                 )
         state.prob_map_data = (
             self._prob_map.get_probabilities() if self._prob_map else None
