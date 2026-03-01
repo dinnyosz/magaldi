@@ -566,3 +566,200 @@ class TestCallResolutionIntegration:
 
         call_with_id = ExtractedCall(name="test", receiver=None, line=1, resolved_id="some:id")
         assert call_with_id.resolved_id == "some:id"
+
+
+# =============================================================================
+# MULTI-LANGUAGE REGEX PATTERN TESTS
+# =============================================================================
+
+
+class TestMultiLanguageAssignmentPatterns:
+    """Test per-language assignment patterns for Strategy 5.5."""
+
+    def test_javascript_const_assignment(self):
+        from unittest.mock import MagicMock
+
+        from magaldi_core.call_resolution import _build_receiver_type_map
+
+        repo = MagicMock()
+        repo.get_document.return_value = {"return_type": "User"}
+
+        raw_code = "const result = getUser()\nresult.save()"
+        resolved_calls = {"getUser": "some:id"}
+
+        type_map = _build_receiver_type_map(
+            raw_code, resolved_calls, repo, language="javascript",
+        )
+        assert type_map == {"result": "User"}
+
+    def test_javascript_let_assignment(self):
+        from unittest.mock import MagicMock
+
+        from magaldi_core.call_resolution import _build_receiver_type_map
+
+        repo = MagicMock()
+        repo.get_document.return_value = {"return_type": "Response"}
+
+        raw_code = "let data = fetchData()\ndata.json()"
+        resolved_calls = {"fetchData": "some:id"}
+
+        type_map = _build_receiver_type_map(
+            raw_code, resolved_calls, repo, language="javascript",
+        )
+        assert type_map == {"data": "Response"}
+
+    def test_javascript_await_assignment(self):
+        from unittest.mock import MagicMock
+
+        from magaldi_core.call_resolution import _build_receiver_type_map
+
+        repo = MagicMock()
+        repo.get_document.return_value = {"return_type": "Response"}
+
+        raw_code = "const response = await fetch()\nresponse.json()"
+        resolved_calls = {"fetch": "some:id"}
+
+        type_map = _build_receiver_type_map(
+            raw_code, resolved_calls, repo, language="javascript",
+        )
+        assert type_map == {"response": "Response"}
+
+    def test_php_assignment(self):
+        from unittest.mock import MagicMock
+
+        from magaldi_core.call_resolution import _build_receiver_type_map
+
+        repo = MagicMock()
+        repo.get_document.return_value = {"return_type": "User"}
+
+        raw_code = "$result = getUser()\n$result->save()"
+        resolved_calls = {"getUser": "some:id"}
+
+        type_map = _build_receiver_type_map(
+            raw_code, resolved_calls, repo, language="php",
+        )
+        assert type_map == {"result": "User"}
+
+    def test_rust_let_assignment(self):
+        from unittest.mock import MagicMock
+
+        from magaldi_core.call_resolution import _build_receiver_type_map
+
+        repo = MagicMock()
+        repo.get_document.return_value = {"return_type": "User"}
+
+        raw_code = "let result = get_user()\nresult.save()"
+        resolved_calls = {"get_user": "some:id"}
+
+        type_map = _build_receiver_type_map(
+            raw_code, resolved_calls, repo, language="rust",
+        )
+        assert type_map == {"result": "User"}
+
+    def test_rust_let_mut_assignment(self):
+        from unittest.mock import MagicMock
+
+        from magaldi_core.call_resolution import _build_receiver_type_map
+
+        repo = MagicMock()
+        repo.get_document.return_value = {"return_type": "Connection"}
+
+        raw_code = "let mut conn = connect()\nconn.query()"
+        resolved_calls = {"connect": "some:id"}
+
+        type_map = _build_receiver_type_map(
+            raw_code, resolved_calls, repo, language="rust",
+        )
+        assert type_map == {"conn": "Connection"}
+
+    def test_rust_typed_let_assignment(self):
+        from unittest.mock import MagicMock
+
+        from magaldi_core.call_resolution import _build_receiver_type_map
+
+        repo = MagicMock()
+        repo.get_document.return_value = {"return_type": "Config"}
+
+        raw_code = "let cfg: Config = load_config()\ncfg.validate()"
+        resolved_calls = {"load_config": "some:id"}
+
+        type_map = _build_receiver_type_map(
+            raw_code, resolved_calls, repo, language="rust",
+        )
+        assert type_map == {"cfg": "Config"}
+
+
+class TestMultiLanguageConstructorPatterns:
+    """Test per-language constructor patterns for Strategy 5.6."""
+
+    def test_javascript_new_constructor(self):
+        from magaldi_core.call_resolution import _build_constructor_type_map
+
+        code = "const repo = new Repository()"
+        result = _build_constructor_type_map(code, language="javascript")
+        assert result == {"repo": "Repository"}
+
+    def test_javascript_await_new(self):
+        from magaldi_core.call_resolution import _build_constructor_type_map
+
+        code = "const client = await new ApiClient()"
+        result = _build_constructor_type_map(code, language="javascript")
+        assert result == {"client": "ApiClient"}
+
+    def test_javascript_no_match_without_new(self):
+        from magaldi_core.call_resolution import _build_constructor_type_map
+
+        # Without "new", JS constructor pattern should NOT match
+        code = "const repo = Repository()"
+        result = _build_constructor_type_map(code, language="javascript")
+        assert result == {}
+
+    def test_javascript_builtin_excluded(self):
+        from magaldi_core.call_resolution import _build_constructor_type_map
+
+        code = "const err = new Error('msg')"
+        result = _build_constructor_type_map(code, language="javascript")
+        assert result == {}
+
+    def test_php_new_constructor(self):
+        from magaldi_core.call_resolution import _build_constructor_type_map
+
+        code = "$repo = new Repository()"
+        result = _build_constructor_type_map(code, language="php")
+        assert result == {"repo": "Repository"}
+
+    def test_php_namespaced_constructor(self):
+        from magaldi_core.call_resolution import _build_constructor_type_map
+
+        # Backslash before class name should be handled
+        code = "$user = new \\User()"
+        result = _build_constructor_type_map(code, language="php")
+        assert result == {"user": "User"}
+
+    def test_rust_new_constructor(self):
+        from magaldi_core.call_resolution import _build_constructor_type_map
+
+        code = "let repo = Repository::new()"
+        result = _build_constructor_type_map(code, language="rust")
+        assert result == {"repo": "Repository"}
+
+    def test_rust_mut_constructor(self):
+        from magaldi_core.call_resolution import _build_constructor_type_map
+
+        code = "let mut builder = Builder::new()"
+        result = _build_constructor_type_map(code, language="rust")
+        assert result == {"builder": "Builder"}
+
+    def test_rust_builtin_excluded(self):
+        from magaldi_core.call_resolution import _build_constructor_type_map
+
+        code = "let map = HashMap::new()"
+        result = _build_constructor_type_map(code, language="rust")
+        assert result == {}
+
+    def test_rust_typed_constructor(self):
+        from magaldi_core.call_resolution import _build_constructor_type_map
+
+        code = "let repo: Repository = Repository::new()"
+        result = _build_constructor_type_map(code, language="rust")
+        assert result == {"repo": "Repository"}

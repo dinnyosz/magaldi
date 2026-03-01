@@ -610,13 +610,35 @@ def _lookup_method_by_type(
     return None
 
 
-_ASSIGNMENT_PATTERN = re.compile(r"(\w+)\s*=\s*(?:await\s+)?(\w+)\s*\(", re.MULTILINE)
+# Per-language assignment patterns for Strategy 5.5 (return-type propagation).
+# Each pattern captures: (variable_name, function_name)
+_ASSIGNMENT_PATTERNS: dict[str, re.Pattern[str]] = {
+    "python": re.compile(
+        r"(\w+)\s*=\s*(?:await\s+)?(\w+)\s*\(", re.MULTILINE,
+    ),
+    "javascript": re.compile(
+        r"(?:const|let|var)\s+(\w+)\s*=\s*(?:await\s+)?(\w+)\s*[<(]", re.MULTILINE,
+    ),
+    "php": re.compile(
+        r"\$(\w+)\s*=\s*(\w+)\s*\(", re.MULTILINE,
+    ),
+    "rust": re.compile(
+        r"let\s+(?:mut\s+)?(\w+)\s*(?::\s*\w+)?\s*=\s*(\w+)\s*\(", re.MULTILINE,
+    ),
+}
+# TypeScript/TSX share the JavaScript pattern
+_ASSIGNMENT_PATTERNS["typescript"] = _ASSIGNMENT_PATTERNS["javascript"]
+_ASSIGNMENT_PATTERNS["tsx"] = _ASSIGNMENT_PATTERNS["javascript"]
+
+# Keep backward-compatible alias
+_ASSIGNMENT_PATTERN = _ASSIGNMENT_PATTERNS["python"]
 
 
 def _build_receiver_type_map(
     raw_code: str,
     resolved_calls: dict[str, str],
     repo: Repository,
+    language: str = "python",
 ) -> dict[str, str]:
     """Build map from variable name to inferred type via return_type.
 
@@ -627,13 +649,15 @@ def _build_receiver_type_map(
         raw_code: Source code of the function.
         resolved_calls: Map of call name -> resolved element_id.
         repo: Repository instance.
+        language: Programming language.
 
     Returns:
         Dict mapping variable name to inferred type name.
     """
+    pattern = _ASSIGNMENT_PATTERNS.get(language, _ASSIGNMENT_PATTERN)
     type_map: dict[str, str] = {}
 
-    for match in _ASSIGNMENT_PATTERN.finditer(raw_code):
+    for match in pattern.finditer(raw_code):
         var_name = match.group(1)
         func_name = match.group(2)
 
@@ -705,6 +729,7 @@ def _resolve_via_return_types(
             continue
 
         raw_code = doc.get("raw_code", "")
+        language = doc.get("language", "python")
         calls = doc.get("calls", [])
 
         if not raw_code:
@@ -717,7 +742,9 @@ def _resolve_via_return_types(
                 resolved_bare[c["name"]] = c["resolved_id"]
 
         # Infer types from return types
-        inferred_types = _build_receiver_type_map(raw_code, resolved_bare, repo)
+        inferred_types = _build_receiver_type_map(
+            raw_code, resolved_bare, repo, language=language,
+        )
 
         if not inferred_types:
             continue
@@ -754,11 +781,33 @@ def _resolve_via_return_types(
     return return_type_resolved
 
 
-# Pattern: var = [await] [module.]ClassName(
-# Captures: (var_name, optional_module, ClassName)
-_CONSTRUCTOR_PATTERN = re.compile(
-    r"(\w+)\s*=\s*(?:await\s+)?(?:\w+\.)?([A-Z]\w*)\s*\(", re.MULTILINE
-)
+# Per-language constructor patterns for Strategy 5.6 (constructor inference).
+# Each pattern captures: (variable_name, ClassName)
+_CONSTRUCTOR_PATTERNS: dict[str, re.Pattern[str]] = {
+    # Python: repo = Repository(), repo = db.Repository()
+    "python": re.compile(
+        r"(\w+)\s*=\s*(?:await\s+)?(?:\w+\.)?([A-Z]\w*)\s*\(", re.MULTILINE,
+    ),
+    # JS/TS: const repo = new Repository()
+    "javascript": re.compile(
+        r"(?:const|let|var)\s+(\w+)\s*=\s*(?:await\s+)?new\s+([A-Z]\w*)\s*\(",
+        re.MULTILINE,
+    ),
+    # PHP: $repo = new Repository()
+    "php": re.compile(
+        r"\$(\w+)\s*=\s*new\s+\\?([A-Z]\w*)\s*\(", re.MULTILINE,
+    ),
+    # Rust: let repo = Repository::new()
+    "rust": re.compile(
+        r"let\s+(?:mut\s+)?(\w+)\s*(?::\s*\w+)?\s*=\s*([A-Z]\w*)::new\s*\(",
+        re.MULTILINE,
+    ),
+}
+_CONSTRUCTOR_PATTERNS["typescript"] = _CONSTRUCTOR_PATTERNS["javascript"]
+_CONSTRUCTOR_PATTERNS["tsx"] = _CONSTRUCTOR_PATTERNS["javascript"]
+
+# Keep backward-compatible alias
+_CONSTRUCTOR_PATTERN = _CONSTRUCTOR_PATTERNS["python"]
 
 # Names that look like classes but are built-in constructors (not user types)
 _BUILTIN_CONSTRUCTORS: set[str] = {
@@ -768,6 +817,17 @@ _BUILTIN_CONSTRUCTORS: set[str] = {
     "ConnectionError", "TimeoutError", "UnicodeError",
     # Built-in types that are PascalCase
     "True", "False", "None",
+    # JS/TS built-ins
+    "Error", "Array", "Map", "Set", "Promise", "Date", "RegExp",
+    "Object", "Function", "Symbol", "WeakMap", "WeakSet",
+    "Int8Array", "Uint8Array", "Float32Array", "Float64Array",
+    "ArrayBuffer", "SharedArrayBuffer", "DataView",
+    "URL", "URLSearchParams", "Headers", "Request", "Response",
+    "FormData", "Blob", "File", "ReadableStream", "WritableStream",
+    # Rust stdlib types (PascalCase but not user types)
+    "String", "Vec", "Box", "Rc", "Arc", "Mutex", "RwLock",
+    "HashMap", "HashSet", "BTreeMap", "BTreeSet",
+    "Cell", "RefCell", "Cow",
 }
 
 
@@ -778,20 +838,25 @@ def _is_likely_class_name(name: str) -> bool:
     return name[0].isupper() and not name.isupper()
 
 
-def _build_constructor_type_map(raw_code: str) -> dict[str, str]:
+def _build_constructor_type_map(
+    raw_code: str,
+    language: str = "python",
+) -> dict[str, str]:
     """Build map from variable name to class name via constructor calls.
 
     For patterns like `repo = Repository()`, maps "repo" -> "Repository".
 
     Args:
         raw_code: Source code of the function.
+        language: Programming language.
 
     Returns:
         Dict mapping variable name to class name.
     """
+    pattern = _CONSTRUCTOR_PATTERNS.get(language, _CONSTRUCTOR_PATTERN)
     type_map: dict[str, str] = {}
 
-    for match in _CONSTRUCTOR_PATTERN.finditer(raw_code):
+    for match in pattern.finditer(raw_code):
         var_name = match.group(1)
         class_name = match.group(2)
 
@@ -864,13 +929,14 @@ def _resolve_via_constructors(
             continue
 
         raw_code = doc.get("raw_code", "")
+        language = doc.get("language", "python")
         calls = doc.get("calls", [])
 
         if not raw_code:
             continue
 
         # Build constructor type map: var_name -> ClassName
-        constructor_types = _build_constructor_type_map(raw_code)
+        constructor_types = _build_constructor_type_map(raw_code, language=language)
 
         if not constructor_types:
             continue
