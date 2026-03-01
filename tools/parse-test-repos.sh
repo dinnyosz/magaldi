@@ -17,7 +17,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 DEST="$PROJECT_ROOT/test_repos"
 SCOPE="test-repo"
-USER="test"
+USER="main"
 
 # ── Repo definitions (mirrors clone-test-repos.sh) ─────────────────
 # Format: "dirname|tier|language"
