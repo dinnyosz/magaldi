@@ -1044,7 +1044,9 @@ def _resolve_via_scope_bindings(
         calls = doc.get("calls", [])
         parameters = doc.get("parameters", [])
 
-        if not raw_code or language != "python":
+        if not raw_code or language not in (
+            "python", "javascript", "typescript", "tsx", "php", "rust",
+        ):
             continue
 
         # Extract variable bindings from AST
