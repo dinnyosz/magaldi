@@ -544,6 +544,7 @@ class SearchRepository:
                 "_source": [
                     "element_id",
                     "relative_path",
+                    "language",
                     "parameters",
                     "calls",
                 ],
