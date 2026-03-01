@@ -202,9 +202,11 @@ def _build_scoring_display(state: ScoringProgressState, num_workers: int) -> Ren
     # Then throttled slots (beyond allowed limit but within budget)
     for i in range(throttled_slots):
         worker_table.add_row(f"[{next_id + i}]", "[dim yellow]throttled[/]", "", "", "")
-    # Summary line for workers disabled by exploration budget
+    # Budget summary text (rendered outside the table so it's not constrained by column widths)
+    budget_text = None
     if budget_disabled > 0:
-        worker_table.add_row("", f"[dim]{budget_disabled} workers disabled (exploration budget)[/]", "", "", "")
+        budget_text = Text()
+        budget_text.append(f"  {budget_disabled} workers disabled (exploration budget)", style="dim")
 
     # Throughput stats
     stats_text = Text()
@@ -291,6 +293,8 @@ def _build_scoring_display(state: ScoringProgressState, num_workers: int) -> Ren
     if score_text.plain:
         parts.append(score_text)
     parts.append(worker_table)
+    if budget_text is not None:
+        parts.append(budget_text)
     if stats_text.plain:
         parts.append(stats_text)
     if levels_text is not None:
@@ -606,9 +610,11 @@ def run_processing(
         # Then throttled slots (beyond allowed limit but within budget)
         for i in range(throttled_slots):
             worker_table.add_row(f"[{next_id + i}]", "[dim yellow]throttled[/]", "", "", "", "")
-        # Summary line for workers disabled by exploration budget
+        # Budget summary text (rendered outside the table so it's not constrained by column widths)
+        budget_text = None
         if budget_disabled > 0:
-            worker_table.add_row("", f"[dim]{budget_disabled} workers disabled (exploration budget)[/]", "", "", "", "")
+            budget_text = Text()
+            budget_text.append(f"  {budget_disabled} workers disabled (exploration budget)", style="dim")
 
         # Per-type-per-tier ETA breakdown table
         type_colors = {
@@ -731,6 +737,8 @@ def run_processing(
             parts.append(type_line)
         if not compact:
             parts.append(worker_table)
+        if budget_text is not None:
+            parts.append(budget_text)
         parts.append(stats)
         if levels_line:
             parts.append(levels_line)

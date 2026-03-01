@@ -228,9 +228,11 @@ def run_glossary_extraction(
             # Then throttled slots (beyond allowed limit but within budget)
             for i in range(throttled_slots):
                 worker_table.add_row(f"[{next_id + i}]", "[dim yellow]throttled[/]", "", "", "")
-            # Summary line for workers disabled by exploration budget
+            # Budget summary text (rendered outside the table so it's not constrained by column widths)
+            budget_text = None
             if budget_disabled > 0:
-                worker_table.add_row("", f"[dim]{budget_disabled} workers disabled (exploration budget)[/]", "", "", "")
+                budget_text = Text()
+                budget_text.append(f"  {budget_disabled} workers disabled (exploration budget)", style="dim")
 
             # Stats line - different labels for each phase
             avg_api = state.timing.avg_api_time
@@ -309,6 +311,8 @@ def run_glossary_extraction(
                 elements.append(eta_table)
             if not compact:
                 elements.append(worker_table)
+            if budget_text is not None:
+                elements.append(budget_text)
             elements.append(stats)
             if levels_text is not None:
                 elements.append(levels_text)

@@ -203,7 +203,7 @@ def build_worker_table(
     columns: list[tuple[str, str, int]],
     row_builder: Callable,
     explore_cap: int | None = None,
-) -> Table:
+) -> tuple[Table, Text | None]:
     """Build worker status table.
 
     Args:
@@ -216,7 +216,9 @@ def build_worker_table(
         explore_cap: If set, workers beyond this are disabled by exploration budget.
 
     Returns:
-        Rich Table with worker status.
+        Tuple of (Rich Table with worker status, optional budget Text).
+        The budget Text is a separate renderable so it's not constrained
+        by table column widths.
     """
     import time as time_mod
 
@@ -253,12 +255,14 @@ def build_worker_table(
     for i in range(throttled_slots):
         throttled_row = ["[dim yellow]throttled[/]"] + [""] * (len(columns) - 1)
         worker_table.add_row(f"[{next_id + i}]", *throttled_row)
-    # Summary line for workers disabled by exploration budget
-    if budget_disabled > 0:
-        budget_row = [f"[dim]{budget_disabled} workers disabled (exploration budget)[/]"] + [""] * (len(columns) - 1)
-        worker_table.add_row("", *budget_row)
 
-    return worker_table
+    # Budget summary as separate Text (not in table, to avoid column width wrapping)
+    budget_text = None
+    if budget_disabled > 0:
+        budget_text = Text()
+        budget_text.append(f"  {budget_disabled} workers disabled (exploration budget)", style="dim")
+
+    return worker_table, budget_text
 
 
 # =============================================================================
