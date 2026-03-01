@@ -2,6 +2,8 @@
 # Parse all cloned test repositories one by one.
 # Each repo uses scope=test-repo and repository=<dirname>.
 # Ensures magaldi.yaml exists with the right values before parsing.
+# After all repos are parsed, extracts JSON summaries from parse logs
+# and writes a comparison report to test_repos/_results/.
 #
 # Usage:
 #   ./tools/parse-test-repos.sh                  # Parse all cloned repos
@@ -16,6 +18,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 DEST="$PROJECT_ROOT/test_repos"
+RESULTS_DIR="$DEST/_results"
 SCOPE="test-repo"
 USER="main"
 
@@ -96,8 +99,8 @@ while [[ $# -gt 0 ]]; do
       echo "Positional args are repo directory names to parse (e.g., click ripgrep)."
       echo "If none given, all matching repos are parsed."
       echo ""
-      echo "Repos are expected in: $DEST"
-      echo "Run ./tools/clone-test-repos.sh first to clone them."
+      echo "Results saved to: $RESULTS_DIR"
+      echo "Run ./tools/clone-test-repos.sh first to clone repos."
       exit 0
       ;;
     -*)
@@ -124,6 +127,35 @@ ensure_config() {
 scope: $SCOPE
 repository: $name
 EOF
+}
+
+# ── Extract JSON summary from parse log ────────────────────────────
+
+extract_json_summary() {
+  # Find the most recent parse log for this repo and extract the JSON block
+  local repo_dir="$1"
+  local name="$2"
+  local log_dir="$repo_dir/logs"
+
+  if [[ ! -d "$log_dir" ]]; then
+    return 1
+  fi
+
+  # Get newest parse log
+  local newest_log
+  newest_log=$(ls -t "$log_dir"/parse_*.log 2>/dev/null | head -1)
+  if [[ -z "$newest_log" ]]; then
+    return 1
+  fi
+
+  # Extract JSON block (everything after "JSON SUMMARY" marker)
+  local json_block
+  json_block=$(sed -n '/^JSON SUMMARY/,$ p' "$newest_log" | tail -n +3)
+  if [[ -z "$json_block" ]]; then
+    return 1
+  fi
+
+  echo "$json_block"
 }
 
 # ── Main ───────────────────────────────────────────────────────────
@@ -175,11 +207,16 @@ if $LIST_ONLY; then
   exit 0
 fi
 
+# Set up results directory
+RUN_TS=$(date +%Y%m%d_%H%M%S)
+mkdir -p "$RESULTS_DIR"
+
 total=${#MATCHING[@]}
 passed=0
 failed=0
 skipped=0
 failed_repos=()
+parsed_repos=()
 
 echo ""
 echo "╔══════════════════════════════════════════════════════════════╗"
@@ -221,12 +258,19 @@ for i in "${!MATCHING[@]}"; do
     echo ""
     echo "[$idx/$total] PASS $name (${elapsed}s)"
     ((passed++))
+    parsed_repos+=("$name|$lang|$tier|pass|$elapsed")
   else
     elapsed=$((SECONDS - repo_start))
     echo ""
     echo "[$idx/$total] FAIL $name (${elapsed}s)"
     ((failed++))
     failed_repos+=("$name")
+    parsed_repos+=("$name|$lang|$tier|fail|$elapsed")
+  fi
+
+  # Extract JSON summary from parse log regardless of pass/fail
+  if json=$(extract_json_summary "$repo_dir" "$name"); then
+    echo "$json" > "$RESULTS_DIR/${name}.json"
   fi
 
   echo ""
@@ -234,12 +278,132 @@ done
 
 total_time=$((SECONDS - start_time))
 
-echo "════════════════════════════════════════════════════════════════"
-echo "  RESULTS: $passed passed, $failed failed, $skipped skipped ($total_time seconds)"
-if [[ ${#failed_repos[@]} -gt 0 ]]; then
-  echo "  FAILED:  ${failed_repos[*]}"
-fi
-echo "════════════════════════════════════════════════════════════════"
+# ── Generate comparison report ─────────────────────────────────────
+
+REPORT="$RESULTS_DIR/run_${RUN_TS}.txt"
+
+{
+  echo "Magaldi Parse Test Results — $(date '+%Y-%m-%d %H:%M:%S')"
+  echo "═══════════════════════════════════════════════════════════"
+  echo ""
+
+  # Header
+  printf "%-16s %-12s %5s %7s %7s %8s %8s %7s %7s %9s\n" \
+    "REPO" "LANG" "TIER" "STATUS" "TIME" "FILES" "ELEMS" "INDEXD" "ERRORS" "TOKENS"
+  printf "%-16s %-12s %5s %7s %7s %8s %8s %7s %7s %9s\n" \
+    "────" "────" "────" "──────" "─────" "─────" "─────" "─────" "──────" "──────"
+
+  for entry in "${parsed_repos[@]}"; do
+    IFS='|' read -r name lang tier status elapsed <<< "$entry"
+
+    json_file="$RESULTS_DIR/${name}.json"
+    if [[ -f "$json_file" ]]; then
+      # Extract key metrics using python (available in magaldi venv)
+      read -r files elems indexed errors tokens < <(
+        python3 -c "
+import json, sys
+with open('$json_file') as f:
+    d = json.load(f)
+p = d.get('processing', {})
+t = d.get('token_usage', {})
+print(
+    p.get('processed', 0) + p.get('skipped', 0),
+    p.get('processed', 0),
+    p.get('indexed', 0),
+    d.get('error_count', 0),
+    t.get('total', 0),
+)
+" 2>/dev/null || echo "- - - - -"
+      )
+    else
+      files="-"; elems="-"; indexed="-"; errors="-"; tokens="-"
+    fi
+
+    printf "%-16s %-12s %5s %7s %5ss %8s %8s %7s %7s %9s\n" \
+      "$name" "$lang" "$tier" "$status" "$elapsed" "$files" "$elems" "$indexed" "$errors" "$tokens"
+  done
+
+  echo ""
+  echo "───────────────────────────────────────────────────────────"
+  echo "TOTAL: $passed passed, $failed failed, $skipped skipped (${total_time}s)"
+  if [[ ${#failed_repos[@]} -gt 0 ]]; then
+    echo "FAILED: ${failed_repos[*]}"
+  fi
+  echo ""
+
+  # Phase timing breakdown per repo (from JSON files)
+  echo ""
+  echo "Phase Timing Breakdown (seconds)"
+  echo "═══════════════════════════════════════════════════════════"
+  printf "%-16s %8s %8s %8s %8s %8s %8s %8s\n" \
+    "REPO" "DISCOV" "CHANGE" "PARSE" "SCORE" "PROCESS" "RESOLVE" "TOTAL"
+  printf "%-16s %8s %8s %8s %8s %8s %8s %8s\n" \
+    "────" "──────" "──────" "─────" "─────" "───────" "───────" "─────"
+
+  for entry in "${parsed_repos[@]}"; do
+    IFS='|' read -r name lang tier status elapsed <<< "$entry"
+
+    json_file="$RESULTS_DIR/${name}.json"
+    if [[ -f "$json_file" ]]; then
+      read -r discov change parse score process resolve total_e < <(
+        python3 -c "
+import json, sys
+with open('$json_file') as f:
+    d = json.load(f)
+pt = d.get('phase_timings', {})
+def g(prefix):
+    for k, v in pt.items():
+        if prefix.lower() in k.lower():
+            return round(v, 1)
+    return 0
+print(
+    g('discovery'), g('change'), g('parsing'), g('scoring'),
+    g('processing'), g('call resolution'), round(d.get('total_elapsed_seconds', 0), 1)
+)
+" 2>/dev/null || echo "- - - - - - -"
+      )
+    else
+      discov="-"; change="-"; parse="-"; score="-"; process="-"; resolve="-"; total_e="-"
+    fi
+
+    printf "%-16s %8s %8s %8s %8s %8s %8s %8s\n" \
+      "$name" "$discov" "$change" "$parse" "$score" "$process" "$resolve" "$total_e"
+  done
+
+  echo ""
+} > "$REPORT"
+
+# Print summary to terminal too
+cat "$REPORT"
+
+echo "Results saved to:"
+echo "  Report:     $REPORT"
+echo "  Per-repo:   $RESULTS_DIR/<name>.json"
+echo ""
+
+# Also save a combined JSON for programmatic comparison
+COMBINED="$RESULTS_DIR/run_${RUN_TS}.json"
+python3 -c "
+import json, glob, os
+
+results = {}
+for f in sorted(glob.glob('$RESULTS_DIR/*.json')):
+    name = os.path.splitext(os.path.basename(f))[0]
+    if name.startswith('run_'):
+        continue
+    with open(f) as fh:
+        results[name] = json.load(fh)
+
+with open('$COMBINED', 'w') as fh:
+    json.dump({
+        'timestamp': '$(date -u +%Y-%m-%dT%H:%M:%SZ)',
+        'repos': results,
+    }, fh, indent=2)
+" 2>/dev/null && echo "  Combined:   $COMBINED" || true
+
+# Symlink latest
+ln -sf "run_${RUN_TS}.txt" "$RESULTS_DIR/latest.txt" 2>/dev/null || true
+ln -sf "run_${RUN_TS}.json" "$RESULTS_DIR/latest.json" 2>/dev/null || true
 
 # Exit with failure if any repo failed
 [[ $failed -eq 0 ]]
