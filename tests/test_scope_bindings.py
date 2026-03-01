@@ -312,10 +312,11 @@ class TestEdgeCases:
         """Empty raw_code returns no bindings."""
         assert extract_variable_bindings("", "python") == []
 
-    def test_non_python_returns_empty(self):
-        """Non-Python language returns no bindings."""
+    def test_unsupported_language_returns_empty(self):
+        """Unsupported languages return no bindings."""
         code = "def f():\n    x = Foo()\n"
-        assert extract_variable_bindings(code, "javascript") == []
+        assert extract_variable_bindings(code, "bash") == []
+        assert extract_variable_bindings(code, "unknown") == []
 
     def test_reassignment_both_extracted(self):
         """Multiple assignments to same variable are all extracted (last wins at resolution)."""
@@ -385,3 +386,482 @@ class TestUnwrapIterableType:
         from magaldi_core.call_resolution import _unwrap_iterable_type
 
         assert _unwrap_iterable_type("list[dict[str, int]]") is None
+
+
+# =============================================================================
+# JAVASCRIPT / TYPESCRIPT BINDINGS
+# =============================================================================
+
+
+class TestJSAssignmentBindings:
+    """Tests for JS/TS assignment-based variable bindings."""
+
+    def test_const_bare_call(self):
+        """const x = func() creates an assignment_call binding."""
+        code = "function f() {\n    const result = getUser();\n}\n"
+        bindings = extract_variable_bindings(code, "javascript")
+        assert len(bindings) == 1
+        b = bindings[0]
+        assert b.variable == "result"
+        assert b.source == SOURCE_ASSIGNMENT_CALL
+        assert b.call_name == "getUser"
+        assert b.call_receiver is None
+
+    def test_let_bare_call(self):
+        """let x = func() creates an assignment_call binding."""
+        code = "function f() {\n    let result = getUser();\n}\n"
+        bindings = extract_variable_bindings(code, "javascript")
+        assert len(bindings) == 1
+        assert bindings[0].variable == "result"
+        assert bindings[0].source == SOURCE_ASSIGNMENT_CALL
+
+    def test_method_call(self):
+        """const x = obj.method() creates an assignment_method_call binding."""
+        code = "function f() {\n    const conn = db.connect();\n}\n"
+        bindings = extract_variable_bindings(code, "javascript")
+        assert len(bindings) == 1
+        b = bindings[0]
+        assert b.variable == "conn"
+        assert b.source == SOURCE_ASSIGNMENT_METHOD_CALL
+        assert b.call_name == "connect"
+        assert b.call_receiver == "db"
+
+    def test_new_constructor(self):
+        """const x = new Class() creates a constructor binding."""
+        code = "function f() {\n    const repo = new Repository();\n}\n"
+        bindings = extract_variable_bindings(code, "javascript")
+        assert len(bindings) == 1
+        b = bindings[0]
+        assert b.variable == "repo"
+        assert b.source == SOURCE_CONSTRUCTOR
+        assert b.type_name == "Repository"
+        assert b.call_name == "Repository"
+
+    def test_await_bare_call(self):
+        """const x = await func() extracts through await."""
+        code = "async function f() {\n    const data = await fetchData();\n}\n"
+        bindings = extract_variable_bindings(code, "javascript")
+        assert len(bindings) == 1
+        b = bindings[0]
+        assert b.variable == "data"
+        assert b.source == SOURCE_ASSIGNMENT_CALL
+        assert b.call_name == "fetchData"
+
+    def test_await_new_constructor(self):
+        """const x = await new Class() extracts through await."""
+        code = "async function f() {\n    const db = await new Database();\n}\n"
+        bindings = extract_variable_bindings(code, "javascript")
+        assert len(bindings) == 1
+        b = bindings[0]
+        assert b.variable == "db"
+        assert b.source == SOURCE_CONSTRUCTOR
+        assert b.type_name == "Database"
+
+    def test_this_receiver(self):
+        """const x = this.method() captures 'this' as receiver."""
+        code = "function f() {\n    const result = this.getData();\n}\n"
+        bindings = extract_variable_bindings(code, "javascript")
+        assert len(bindings) == 1
+        assert bindings[0].call_receiver == "this"
+        assert bindings[0].call_name == "getData"
+
+    def test_reassignment(self):
+        """Reassignment x = func() creates binding (without const/let)."""
+        code = "function f() {\n    let x = getUser();\n    x = getAdmin();\n}\n"
+        bindings = extract_variable_bindings(code, "javascript")
+        assert len(bindings) == 2
+        assert bindings[0].call_name == "getUser"
+        assert bindings[1].call_name == "getAdmin"
+
+    def test_pascalcase_without_new_is_regular_call(self):
+        """PascalCase() without 'new' is a regular call in JS, not constructor."""
+        code = "function f() {\n    const result = CreateUser();\n}\n"
+        bindings = extract_variable_bindings(code, "javascript")
+        assert len(bindings) == 1
+        assert bindings[0].source == SOURCE_ASSIGNMENT_CALL
+        assert bindings[0].type_name is None
+
+    def test_non_call_skipped(self):
+        """const x = value (not a call) is skipped."""
+        code = "function f() {\n    const x = someVar;\n    const y = 42;\n}\n"
+        bindings = extract_variable_bindings(code, "javascript")
+        assert len(bindings) == 0
+
+
+class TestJSForBindings:
+    """Tests for JS for-of/for-in bindings."""
+
+    def test_for_of_with_call(self):
+        """for (const item of getItems()) creates a for_in binding."""
+        code = "function f() {\n    for (const item of getItems()) {}\n}\n"
+        bindings = extract_variable_bindings(code, "javascript")
+        assert len(bindings) == 1
+        b = bindings[0]
+        assert b.variable == "item"
+        assert b.source == SOURCE_FOR_IN
+        assert b.call_name == "getItems"
+
+    def test_for_of_with_identifier(self):
+        """for (const item of items) creates a for_in binding."""
+        code = "function f() {\n    for (const item of items) {}\n}\n"
+        bindings = extract_variable_bindings(code, "javascript")
+        assert len(bindings) == 1
+        b = bindings[0]
+        assert b.variable == "item"
+        assert b.source == SOURCE_FOR_IN
+        assert b.call_receiver == "items"
+
+    def test_for_in_statement(self):
+        """for (const key in obj) creates a for_in binding."""
+        code = "function f() {\n    for (const key in obj) {}\n}\n"
+        bindings = extract_variable_bindings(code, "javascript")
+        assert len(bindings) == 1
+        assert bindings[0].variable == "key"
+        assert bindings[0].source == SOURCE_FOR_IN
+
+
+class TestJSCatchBindings:
+    """Tests for JS catch clause bindings."""
+
+    def test_catch_parameter(self):
+        """catch (e) {} creates an except_as binding without type."""
+        code = "function f() {\n    try {} catch (e) {}\n}\n"
+        bindings = extract_variable_bindings(code, "javascript")
+        assert len(bindings) == 1
+        b = bindings[0]
+        assert b.variable == "e"
+        assert b.source == SOURCE_EXCEPT_AS
+        assert b.type_name is None
+
+
+class TestJSEdgeCases:
+    """Tests for JS-specific edge cases."""
+
+    def test_nested_function_excluded(self):
+        """Bindings inside nested functions are NOT extracted."""
+        code = (
+            "function outer() {\n"
+            "    const x = getFoo();\n"
+            "    function inner() {\n"
+            "        const y = getBar();\n"
+            "    }\n"
+            "    const z = getBaz();\n"
+            "}\n"
+        )
+        bindings = extract_variable_bindings(code, "javascript")
+        assert len(bindings) == 2
+        assert {b.variable for b in bindings} == {"x", "z"}
+
+    def test_nested_arrow_function_excluded(self):
+        """Bindings inside nested arrow functions are NOT extracted."""
+        code = (
+            "function outer() {\n"
+            "    const x = getFoo();\n"
+            "    const inner = () => {\n"
+            "        const y = getBar();\n"
+            "    };\n"
+            "    const z = getBaz();\n"
+            "}\n"
+        )
+        bindings = extract_variable_bindings(code, "javascript")
+        assert len(bindings) == 2
+        # x (from getFoo) and z (from getBaz) — inner is excluded
+        assert {b.variable for b in bindings} == {"x", "z"}
+
+    def test_export_default_function(self):
+        """export default function works."""
+        code = "export default function handler() {\n    const result = getData();\n}\n"
+        bindings = extract_variable_bindings(code, "javascript")
+        assert len(bindings) == 1
+        assert bindings[0].variable == "result"
+
+    def test_typescript_same_as_js(self):
+        """TypeScript uses same extraction as JavaScript."""
+        code = "function f() {\n    const result = getUser();\n}\n"
+        js_bindings = extract_variable_bindings(code, "javascript")
+        ts_bindings = extract_variable_bindings(code, "typescript")
+        tsx_bindings = extract_variable_bindings(code, "tsx")
+        assert len(js_bindings) == len(ts_bindings) == len(tsx_bindings) == 1
+        assert js_bindings[0].variable == ts_bindings[0].variable == tsx_bindings[0].variable
+
+    def test_all_patterns_combined(self):
+        """All JS binding patterns in one function."""
+        code = (
+            "function process() {\n"
+            "    const conn = db.connect();\n"
+            "    const result = getUser();\n"
+            "    const repo = new Repository();\n"
+            "    for (const item of getItems()) {}\n"
+            "    try {} catch (e) {}\n"
+            "}\n"
+        )
+        bindings = extract_variable_bindings(code, "javascript")
+        variables = {b.variable for b in bindings}
+        assert variables == {"conn", "result", "repo", "item", "e"}
+
+
+# =============================================================================
+# PHP BINDINGS
+# =============================================================================
+
+
+class TestPHPAssignmentBindings:
+    """Tests for PHP assignment-based variable bindings."""
+
+    def test_bare_call(self):
+        """$var = func() creates an assignment_call binding."""
+        code = "<?php\nfunction f() {\n    $result = getUser();\n}\n"
+        bindings = extract_variable_bindings(code, "php")
+        assert len(bindings) == 1
+        b = bindings[0]
+        assert b.variable == "result"
+        assert b.source == SOURCE_ASSIGNMENT_CALL
+        assert b.call_name == "getUser"
+
+    def test_method_call(self):
+        """$var = $obj->method() creates an assignment_method_call binding."""
+        code = "<?php\nfunction f() {\n    $conn = $db->connect();\n}\n"
+        bindings = extract_variable_bindings(code, "php")
+        assert len(bindings) == 1
+        b = bindings[0]
+        assert b.variable == "conn"
+        assert b.source == SOURCE_ASSIGNMENT_METHOD_CALL
+        assert b.call_name == "connect"
+        assert b.call_receiver == "db"
+
+    def test_new_constructor(self):
+        """$var = new Class() creates a constructor binding."""
+        code = "<?php\nfunction f() {\n    $repo = new Repository();\n}\n"
+        bindings = extract_variable_bindings(code, "php")
+        assert len(bindings) == 1
+        b = bindings[0]
+        assert b.variable == "repo"
+        assert b.source == SOURCE_CONSTRUCTOR
+        assert b.type_name == "Repository"
+        assert b.call_name == "Repository"
+
+    def test_dollar_stripped_from_variable(self):
+        """$ prefix is stripped from PHP variable names."""
+        code = "<?php\nfunction f() {\n    $result = getUser();\n}\n"
+        bindings = extract_variable_bindings(code, "php")
+        assert bindings[0].variable == "result"
+        assert not bindings[0].variable.startswith("$")
+
+    def test_non_call_skipped(self):
+        """$x = value (not a call) is skipped."""
+        code = "<?php\nfunction f() {\n    $x = $someVar;\n    $y = 42;\n}\n"
+        bindings = extract_variable_bindings(code, "php")
+        assert len(bindings) == 0
+
+
+class TestPHPForeachBindings:
+    """Tests for PHP foreach bindings."""
+
+    def test_foreach_simple(self):
+        """foreach ($items as $item) creates a for_in binding."""
+        code = "<?php\nfunction f() {\n    foreach ($items as $item) {}\n}\n"
+        bindings = extract_variable_bindings(code, "php")
+        assert len(bindings) == 1
+        b = bindings[0]
+        assert b.variable == "item"
+        assert b.source == SOURCE_FOR_IN
+
+    def test_foreach_with_call(self):
+        """foreach (getItems() as $item) creates a for_in binding with call info."""
+        code = "<?php\nfunction f() {\n    foreach (getItems() as $item) {}\n}\n"
+        bindings = extract_variable_bindings(code, "php")
+        assert len(bindings) == 1
+        b = bindings[0]
+        assert b.variable == "item"
+        assert b.source == SOURCE_FOR_IN
+        assert b.call_name == "getItems"
+
+
+class TestPHPCatchBindings:
+    """Tests for PHP catch clause bindings."""
+
+    def test_catch_with_type(self):
+        """catch (Exception $e) creates an except_as binding with type."""
+        code = "<?php\nfunction f() {\n    try {} catch (RuntimeException $e) {}\n}\n"
+        bindings = extract_variable_bindings(code, "php")
+        assert len(bindings) == 1
+        b = bindings[0]
+        assert b.variable == "e"
+        assert b.source == SOURCE_EXCEPT_AS
+        assert b.type_name == "RuntimeException"
+
+
+class TestPHPEdgeCases:
+    """Tests for PHP-specific edge cases."""
+
+    def test_nested_function_excluded(self):
+        """Bindings inside nested functions are NOT extracted."""
+        code = (
+            "<?php\n"
+            "function outer() {\n"
+            "    $x = getFoo();\n"
+            "    function inner() {\n"
+            "        $y = getBar();\n"
+            "    }\n"
+            "    $z = getBaz();\n"
+            "}\n"
+        )
+        bindings = extract_variable_bindings(code, "php")
+        assert len(bindings) == 2
+        assert {b.variable for b in bindings} == {"x", "z"}
+
+    def test_all_patterns_combined(self):
+        """All PHP binding patterns in one function."""
+        code = (
+            "<?php\n"
+            "function process() {\n"
+            "    $conn = $db->connect();\n"
+            "    $result = getUser();\n"
+            "    $repo = new Repository();\n"
+            "    foreach ($items as $item) {}\n"
+            "    try {} catch (RuntimeException $e) {}\n"
+            "}\n"
+        )
+        bindings = extract_variable_bindings(code, "php")
+        variables = {b.variable for b in bindings}
+        assert variables == {"conn", "result", "repo", "item", "e"}
+
+
+# =============================================================================
+# RUST BINDINGS
+# =============================================================================
+
+
+class TestRustLetBindings:
+    """Tests for Rust let-binding variable bindings."""
+
+    def test_bare_call(self):
+        """let x = func() creates an assignment_call binding."""
+        code = "fn f() {\n    let result = get_user();\n}\n"
+        bindings = extract_variable_bindings(code, "rust")
+        assert len(bindings) == 1
+        b = bindings[0]
+        assert b.variable == "result"
+        assert b.source == SOURCE_ASSIGNMENT_CALL
+        assert b.call_name == "get_user"
+
+    def test_method_call(self):
+        """let x = obj.method() creates an assignment_method_call binding."""
+        code = "fn f() {\n    let conn = db.connect();\n}\n"
+        bindings = extract_variable_bindings(code, "rust")
+        assert len(bindings) == 1
+        b = bindings[0]
+        assert b.variable == "conn"
+        assert b.source == SOURCE_ASSIGNMENT_METHOD_CALL
+        assert b.call_name == "connect"
+        assert b.call_receiver == "db"
+
+    def test_constructor_new(self):
+        """let x = Type::new() creates a constructor binding."""
+        code = "fn f() {\n    let repo = Repository::new();\n}\n"
+        bindings = extract_variable_bindings(code, "rust")
+        assert len(bindings) == 1
+        b = bindings[0]
+        assert b.variable == "repo"
+        assert b.source == SOURCE_CONSTRUCTOR
+        assert b.type_name == "Repository"
+
+    def test_constructor_from(self):
+        """let x = Type::from() creates a constructor binding."""
+        code = 'fn f() {\n    let s = String::from("hello");\n}\n'
+        bindings = extract_variable_bindings(code, "rust")
+        assert len(bindings) == 1
+        b = bindings[0]
+        assert b.variable == "s"
+        assert b.source == SOURCE_CONSTRUCTOR
+        assert b.type_name == "String"
+
+    def test_let_mut(self):
+        """let mut x = Type::new() creates a constructor binding."""
+        code = "fn f() {\n    let mut data = Vec::new();\n}\n"
+        bindings = extract_variable_bindings(code, "rust")
+        assert len(bindings) == 1
+        b = bindings[0]
+        assert b.variable == "data"
+        assert b.source == SOURCE_CONSTRUCTOR
+        assert b.type_name == "Vec"
+
+    def test_static_method_not_constructor(self):
+        """Type::method() where method is not new/from is a method call."""
+        code = "fn f() {\n    let result = Config::load();\n}\n"
+        bindings = extract_variable_bindings(code, "rust")
+        assert len(bindings) == 1
+        b = bindings[0]
+        assert b.variable == "result"
+        assert b.source == SOURCE_ASSIGNMENT_METHOD_CALL
+        assert b.call_name == "load"
+        assert b.call_receiver == "Config"
+
+    def test_non_call_skipped(self):
+        """let x = value (not a call) is skipped."""
+        code = "fn f() {\n    let x = some_var;\n    let y = 42;\n}\n"
+        bindings = extract_variable_bindings(code, "rust")
+        assert len(bindings) == 0
+
+
+class TestRustForBindings:
+    """Tests for Rust for-in bindings."""
+
+    def test_for_with_method_call(self):
+        """for item in items.iter() creates a for_in binding."""
+        code = "fn f() {\n    for item in items.iter() {}\n}\n"
+        bindings = extract_variable_bindings(code, "rust")
+        assert len(bindings) == 1
+        b = bindings[0]
+        assert b.variable == "item"
+        assert b.source == SOURCE_FOR_IN
+        assert b.call_name == "iter"
+        assert b.call_receiver == "items"
+
+    def test_for_with_bare_call(self):
+        """for item in get_items() creates a for_in binding."""
+        code = "fn f() {\n    for item in get_items() {}\n}\n"
+        bindings = extract_variable_bindings(code, "rust")
+        assert len(bindings) == 1
+        assert bindings[0].call_name == "get_items"
+
+    def test_for_with_identifier(self):
+        """for item in items creates a for_in binding."""
+        code = "fn f() {\n    for item in items {}\n}\n"
+        bindings = extract_variable_bindings(code, "rust")
+        assert len(bindings) == 1
+        assert bindings[0].variable == "item"
+        assert bindings[0].call_receiver == "items"
+
+
+class TestRustEdgeCases:
+    """Tests for Rust-specific edge cases."""
+
+    def test_nested_function_excluded(self):
+        """Bindings inside nested functions are NOT extracted."""
+        code = (
+            "fn outer() {\n"
+            "    let x = get_foo();\n"
+            "    fn inner() {\n"
+            "        let y = get_bar();\n"
+            "    }\n"
+            "    let z = get_baz();\n"
+            "}\n"
+        )
+        bindings = extract_variable_bindings(code, "rust")
+        assert len(bindings) == 2
+        assert {b.variable for b in bindings} == {"x", "z"}
+
+    def test_all_patterns_combined(self):
+        """All Rust binding patterns in one function."""
+        code = (
+            "fn process() {\n"
+            "    let conn = db.connect();\n"
+            "    let result = get_user();\n"
+            "    let repo = Repository::new();\n"
+            "    for item in items.iter() {}\n"
+            "}\n"
+        )
+        bindings = extract_variable_bindings(code, "rust")
+        variables = {b.variable for b in bindings}
+        assert variables == {"conn", "result", "repo", "item"}
