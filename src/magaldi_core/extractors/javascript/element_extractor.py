@@ -229,6 +229,24 @@ def _extract_js_arrow_function(node: Node, name: str, _lines: list[str]) -> Extr
     value_node = get_child_by_field(node, "value")
     arrow_func_node = value_node if value_node and value_node.type == "arrow_function" else node
 
+    # Extract parameters, return type, and build signature
+    params_node = get_child_by_field(arrow_func_node, "parameters") if arrow_func_node.type == "arrow_function" else None
+    params = get_node_text(params_node) if params_node else "()"
+    parameters = extract_js_parameters(params_node) if params_node else []
+    return_type = extract_js_return_type(arrow_func_node) if arrow_func_node.type == "arrow_function" else None
+
+    # Check for async: look for 'async' keyword before the arrow function in the parent
+    is_async = False
+    if node.parent:
+        for child in node.parent.children:
+            if child.type == "async" and child.start_byte < arrow_func_node.start_byte:
+                is_async = True
+                break
+
+    signature = f"{'async ' if is_async else ''}const {name} = {params} =>"
+    if return_type:
+        signature += f": {return_type}"
+
     # Check if this is a React hook
     decorators = ["hook"] if is_react_hook(name) else None
     decorator_details = [DecoratorInfo(name="hook", args=None, full="hook")] if decorators else None
@@ -240,7 +258,11 @@ def _extract_js_arrow_function(node: Node, name: str, _lines: list[str]) -> Extr
         line_end=line_end,
         raw_code=raw_code,
         byte_offset=node.start_byte,
+        signature=signature,
+        is_async=is_async,
         node=arrow_func_node,
+        return_type=return_type,
+        parameters=parameters or None,
         decorators=decorators,
         decorator_details=decorator_details,
     )
