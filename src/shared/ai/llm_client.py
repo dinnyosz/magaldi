@@ -427,6 +427,7 @@ class LLMClient:
         api_base: str | None = None,
         api_key: str | None = None,
         max_retries: int = 3,
+        model_name: str | None = None,
     ):
         """Initialize LLM client.
 
@@ -435,11 +436,16 @@ class LLMClient:
             api_base: API base URL (required for Ollama, optional for cloud)
             api_key: API key (required for cloud providers)
             max_retries: Maximum retry attempts for transient failures.
+            model_name: Original model name for thinking model detection.
+                When the LiteLLM model identifier differs from the actual model
+                (e.g., "openai/default" for vllm-mlx serving "qwen3-4b"), pass
+                the real name here so thinking model detection works correctly.
         """
         self.model = model
         self.api_base = api_base
         self.api_key = api_key
         self.max_retries = max_retries
+        self.model_name = model_name
 
         # Extract provider from model string
         self.provider = model.split("/")[0] if "/" in model else "openai"
@@ -525,9 +531,16 @@ class LLMClient:
             from shared.ai.ollama_models import resolve_ollama_model
             use_model, num_ctx = resolve_ollama_model(use_model, self.api_base, num_ctx)
 
-        # Check if this is a thinking model that needs think=false
-        model_name = use_model.split("/")[-1] if "/" in use_model else use_model
-        is_thinking_model = any(model_name.startswith(tm) for tm in self.THINKING_MODELS)
+        # Check if this is a thinking model that needs think=false.
+        # Use model_name hint (real name) if available, otherwise extract from
+        # the LiteLLM identifier.  This matters for vllm-mlx where the model
+        # identifier is "openai/default" but the actual model is e.g. "qwen3-4b".
+        # Split on "/" to handle org prefixes like "mlx-community/Qwen3-4B-..."
+        _raw_name = self.model_name or use_model
+        _name_for_detect = _raw_name.split("/")[-1] if "/" in _raw_name else _raw_name
+        is_thinking_model = any(
+            _name_for_detect.lower().startswith(tm) for tm in self.THINKING_MODELS
+        )
 
         def _do_generate() -> str:
             # Build kwargs for litellm
@@ -553,9 +566,15 @@ class LLMClient:
                 kwargs["api_key"] = "not-needed"
 
             # Disable thinking mode for models that support it
-            # LiteLLM added think parameter support in PR #15465 (Sept 2025)
-            if is_thinking_model and use_model.startswith("ollama/"):
-                kwargs["think"] = False
+            if is_thinking_model:
+                if use_model.startswith("ollama/"):
+                    # LiteLLM added think parameter support in PR #15465 (Sept 2025)
+                    kwargs["think"] = False
+                elif use_model.startswith("openai/") and self.api_base:
+                    # OpenAI-compatible local servers (vllm-mlx, llama.cpp):
+                    # pass chat_template_kwargs to disable <think> blocks
+                    kwargs["extra_body"] = kwargs.get("extra_body", {})
+                    kwargs["extra_body"]["chat_template_kwargs"] = {"enable_thinking": False}
 
             # Add num_ctx for local providers (KV cache optimization)
             if num_ctx:
@@ -622,9 +641,13 @@ class LLMClient:
             from shared.ai.ollama_models import resolve_ollama_model
             use_model, num_ctx = resolve_ollama_model(use_model, self.api_base, num_ctx)
 
-        # Check if this is a thinking model that needs think=false
-        model_name = use_model.split("/")[-1] if "/" in use_model else use_model
-        is_thinking_model = any(model_name.startswith(tm) for tm in self.THINKING_MODELS)
+        # Check if this is a thinking model that needs think=false.
+        # Check if this is a thinking model — see generate() comment.
+        _raw_name = self.model_name or use_model
+        _name_for_detect = _raw_name.split("/")[-1] if "/" in _raw_name else _raw_name
+        is_thinking_model = any(
+            _name_for_detect.lower().startswith(tm) for tm in self.THINKING_MODELS
+        )
 
         def _do_generate() -> str:
             kwargs: dict[str, Any] = {
@@ -644,8 +667,14 @@ class LLMClient:
             elif use_model.startswith("openai/") and self.api_base:
                 kwargs["api_key"] = "not-needed"
 
-            if is_thinking_model and use_model.startswith("ollama/"):
-                kwargs["think"] = False
+            # Disable thinking mode for models that support it
+            if is_thinking_model:
+                if use_model.startswith("ollama/"):
+                    kwargs["think"] = False
+                elif use_model.startswith("openai/") and self.api_base:
+                    # OpenAI-compatible local servers (vllm-mlx, llama.cpp)
+                    kwargs["extra_body"] = kwargs.get("extra_body", {})
+                    kwargs["extra_body"]["chat_template_kwargs"] = {"enable_thinking": False}
 
             # Add num_ctx for local providers (KV cache optimization)
             if num_ctx:

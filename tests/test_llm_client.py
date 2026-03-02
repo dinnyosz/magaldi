@@ -662,3 +662,102 @@ class TestNumCtxParameter:
 
         call_kwargs = mock_comp.call_args.kwargs
         assert "num_ctx" not in call_kwargs
+
+
+class TestThinkingModelDetection:
+    """Tests for thinking model detection and think=false parameter."""
+
+    def test_ollama_qwen3_sends_think_false(self):
+        """Ollama qwen3 should send think=False as top-level kwarg."""
+        client = LLMClient(model="ollama/qwen3:4b", api_base="http://localhost:11434")
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "response"
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response) as mock_comp:
+            client.generate_from_messages([{"role": "user", "content": "test"}])
+
+        call_kwargs = mock_comp.call_args.kwargs
+        assert call_kwargs.get("think") is False
+
+    def test_vllm_mlx_default_model_no_model_name_no_think(self):
+        """Without model_name, openai/default doesn't detect thinking model."""
+        client = LLMClient(
+            model="openai/default",
+            api_base="http://localhost:8000/v1",
+        )
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "response"
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response) as mock_comp:
+            client.generate_from_messages([{"role": "user", "content": "test"}])
+
+        call_kwargs = mock_comp.call_args.kwargs
+        assert "think" not in call_kwargs
+        # No chat_template_kwargs either
+        extra = call_kwargs.get("extra_body", {})
+        assert "chat_template_kwargs" not in extra
+
+    def test_vllm_mlx_with_model_name_sends_think_false(self):
+        """With model_name hint, vllm-mlx correctly disables thinking."""
+        client = LLMClient(
+            model="openai/default",
+            api_base="http://localhost:8000/v1",
+            model_name="mlx-community/Qwen3-4B-Instruct-2507-4bit",
+        )
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "response"
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response) as mock_comp:
+            client.generate_from_messages([{"role": "user", "content": "test"}])
+
+        call_kwargs = mock_comp.call_args.kwargs
+        # Should NOT use top-level think (that's Ollama-only)
+        assert "think" not in call_kwargs
+        # Should use extra_body.chat_template_kwargs
+        extra = call_kwargs.get("extra_body", {})
+        assert extra.get("chat_template_kwargs") == {"enable_thinking": False}
+
+    def test_vllm_mlx_generate_also_detects_thinking(self):
+        """The generate() method should also detect thinking models via model_name."""
+        client = LLMClient(
+            model="openai/default",
+            api_base="http://localhost:8000/v1",
+            model_name="Qwen3-1.7B-4bit",
+        )
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "response"
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response) as mock_comp:
+            client.generate("test prompt")
+
+        call_kwargs = mock_comp.call_args.kwargs
+        extra = call_kwargs.get("extra_body", {})
+        assert extra.get("chat_template_kwargs") == {"enable_thinking": False}
+
+    def test_non_thinking_model_no_extra_params(self):
+        """Non-thinking model should not get any think params."""
+        client = LLMClient(
+            model="openai/default",
+            api_base="http://localhost:8000/v1",
+            model_name="llama-3.1-8b",
+        )
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "response"
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response) as mock_comp:
+            client.generate_from_messages([{"role": "user", "content": "test"}])
+
+        call_kwargs = mock_comp.call_args.kwargs
+        assert "think" not in call_kwargs
+        extra = call_kwargs.get("extra_body", {})
+        assert "chat_template_kwargs" not in extra

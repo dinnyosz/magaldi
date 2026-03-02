@@ -183,6 +183,7 @@ class SummarizationLLMClient:
             model=full_model,
             api_base=api_base,
             api_key=api_key,
+            model_name=model,  # Real model name for thinking model detection
         )
 
     def verify_model(self) -> bool:

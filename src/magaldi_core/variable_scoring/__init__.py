@@ -164,7 +164,11 @@ def _score_batch(
             num_ctx=num_ctx,
         )
     except Exception:
-        logger.warning("LLM scoring failed for batch of %d variables, defaulting to keep", len(batch))
+        logger.warning(
+            "LLM scoring failed for batch of %d variables, defaulting to keep",
+            len(batch),
+            exc_info=True,
+        )
         # Default: score 5 on general_usefulness (pass threshold)
         return (
             {eid: VariableScore(general_usefulness=5) for _, eid, _, _, _ in batch},
