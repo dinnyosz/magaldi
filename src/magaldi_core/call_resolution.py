@@ -1720,22 +1720,36 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return sum(x * y for x, y in zip(a, b))
 
 
-def _receiver_class_affinity(receiver: str, candidate: dict) -> float:
+def _receiver_class_affinity(
+    receiver: str,
+    candidate: dict,
+    caller_parent_id: str | None = None,
+) -> float:
     """Score how well a receiver variable name relates to a candidate's class context.
 
     Heuristic scoring:
+    - Same class as caller (self.method()) → 1.0 (highest priority)
     - "repo" → parent class "Repository" (prefix match) → 1.0
     - "es_repo" → parent class "ElasticsearchRepository" (substring) → 0.8
     - "client" → file "http_client.py" (substring in path) → 0.6
     - No match → 0.0
 
     Args:
-        receiver: The receiver variable name (e.g., "repo", "client").
+        receiver: The receiver variable name (e.g., "repo", "client", "self").
         candidate: Candidate element dict with parent_id and relative_path.
+        caller_parent_id: Optional parent_id of the calling element.
 
     Returns:
         Affinity score between 0.0 and 1.0.
     """
+    # Same-class bonus: if caller and candidate share the same parent class,
+    # this is very likely the correct match (e.g., self.send() in Session
+    # should prefer Session.send over HTTPAdapter.send)
+    if caller_parent_id:
+        candidate_parent_id = candidate.get("parent_id", "") or ""
+        if candidate_parent_id and candidate_parent_id == caller_parent_id:
+            return 1.0
+
     receiver_lower = receiver.lower()
 
     # Extract class name from parent_id if available
@@ -1796,11 +1810,12 @@ def _score_candidates_rrf(
     candidates: list[dict],
     caller_embedding: list[float] | None,
     k: int = 60,
+    caller_parent_id: str | None = None,
 ) -> list[tuple[dict, float]]:
     """Score candidates using Reciprocal Rank Fusion across multiple signals.
 
     Fuses three ranking signals:
-    1. Receiver-to-class-name affinity (name heuristics)
+    1. Receiver-to-class-name affinity (name heuristics + same-class bonus)
     2. Embedding cosine similarity (semantic match)
     3. Path context match (file proximity hints)
 
@@ -1811,6 +1826,7 @@ def _score_candidates_rrf(
         candidates: List of candidate element dicts.
         caller_embedding: The calling element's caller_embedding, or None.
         k: RRF smoothing constant (default 60, standard value).
+        caller_parent_id: Optional parent_id of the calling element for same-class bonus.
 
     Returns:
         List of (candidate, rrf_score) tuples sorted descending by score.
@@ -1821,9 +1837,10 @@ def _score_candidates_rrf(
     if n == 0:
         return []
 
-    # Signal 1: Receiver-class affinity
+    # Signal 1: Receiver-class affinity (includes same-class bonus)
     affinity_scores = [
-        (i, _receiver_class_affinity(receiver, c)) for i, c in enumerate(candidates)
+        (i, _receiver_class_affinity(receiver, c, caller_parent_id))
+        for i, c in enumerate(candidates)
     ]
     affinity_ranked = sorted(affinity_scores, key=lambda x: -x[1])
 
@@ -2006,6 +2023,7 @@ def resolve_calls_by_embedding(
     for elem in elements:
         element_id = elem.get("element_id", "")
         caller_path = elem.get("relative_path", "")
+        caller_parent_id = elem.get("parent_id")
         calls = elem.get("calls", [])
         updated = False
 
@@ -2063,7 +2081,10 @@ def resolve_calls_by_embedding(
             caller_embedding = embedding_cache[element_id]
 
             # RRF works even without embeddings (falls back to name/path signals)
-            scored = _score_candidates_rrf(call, candidates, caller_embedding)
+            scored = _score_candidates_rrf(
+                call, candidates, caller_embedding,
+                caller_parent_id=caller_parent_id,
+            )
 
             if scored and scored[0][1] >= min_rrf_score:
                 best_candidate, best_score = scored[0]
