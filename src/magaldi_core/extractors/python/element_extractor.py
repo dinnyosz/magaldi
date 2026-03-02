@@ -94,6 +94,13 @@ def _extract_python_elements_scm(tree: Tree, lines: list[str]) -> list[Extracted
         class_node = match.get("decorated.class")
 
         if func_node:
+            # Skip if this decorated function is inside a class —
+            # class member extractor handles decorated methods
+            if is_inside_class(func_node):
+                seen_positions.add((func_node.start_byte, func_node.type))
+                seen_positions.add(deco_pos)
+                continue
+
             seen_positions.add((func_node.start_byte, func_node.type))
             seen_positions.add(deco_pos)
             deco_names, deco_details = get_decorators(decorated_node)
