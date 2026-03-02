@@ -12,7 +12,7 @@ from elasticsearch import Elasticsearch
 from elasticsearch import NotFoundError as ESNotFoundError
 from elasticsearch.helpers import bulk as es_bulk
 
-from shared.db.backends.base import NotFoundError
+from shared.db.backends.base import NotFoundError, _retry_on_overload
 
 
 class ElasticSearchClient:
@@ -44,11 +44,13 @@ class ElasticSearchClient:
 
     # --- Document CRUD ---
 
+    @_retry_on_overload()
     def index_document(
         self, index: str, doc_id: str, document: dict[str, Any]
     ) -> dict[str, Any]:
         return dict(self._client.index(index=index, id=doc_id, document=document))
 
+    @_retry_on_overload()
     def get_document(
         self, index: str, doc_id: str, source: list[str] | bool | None = None
     ) -> dict[str, Any]:
@@ -60,6 +62,7 @@ class ElasticSearchClient:
         except ESNotFoundError as exc:
             raise NotFoundError(str(exc)) from exc
 
+    @_retry_on_overload()
     def update_document(
         self, index: str, doc_id: str, body: dict[str, Any]
     ) -> dict[str, Any]:
@@ -68,17 +71,21 @@ class ElasticSearchClient:
         except ESNotFoundError as exc:
             raise NotFoundError(str(exc)) from exc
 
+    @_retry_on_overload()
     def exists_document(self, index: str, doc_id: str) -> bool:
         return bool(self._client.exists(index=index, id=doc_id))
 
     # --- Search / count ---
 
+    @_retry_on_overload()
     def search(self, index: str, body: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
         return dict(self._client.search(index=index, body=body, **kwargs))
 
+    @_retry_on_overload()
     def count(self, index: str, body: dict[str, Any]) -> dict[str, Any]:
         return dict(self._client.count(index=index, body=body))
 
+    @_retry_on_overload()
     def scroll(self, scroll_id: str, scroll: str) -> dict[str, Any]:
         return dict(self._client.scroll(scroll_id=scroll_id, scroll=scroll))
 
@@ -87,6 +94,7 @@ class ElasticSearchClient:
 
     # --- Batch operations ---
 
+    @_retry_on_overload()
     def mget(
         self, index: str, ids: list[str], source: list[str] | bool | None = None
     ) -> dict[str, Any]:
@@ -95,9 +103,11 @@ class ElasticSearchClient:
             kwargs["_source"] = source
         return dict(self._client.mget(**kwargs))
 
+    @_retry_on_overload()
     def bulk(self, operations: list[dict[str, Any]], refresh: bool = False) -> dict[str, Any]:
         return dict(self._client.bulk(operations=operations, refresh=refresh))
 
+    @_retry_on_overload()
     def bulk_helpers(
         self,
         actions: list[dict[str, Any]],
@@ -111,6 +121,7 @@ class ElasticSearchClient:
 
     # --- Bulk mutation ---
 
+    @_retry_on_overload()
     def delete_by_query(
         self,
         index: str,
@@ -126,6 +137,7 @@ class ElasticSearchClient:
             kwargs["request_timeout"] = request_timeout
         return dict(self._client.delete_by_query(**kwargs))
 
+    @_retry_on_overload()
     def update_by_query(
         self,
         index: str,
@@ -151,6 +163,9 @@ class ElasticSearchClient:
 
     def indices_stats(self, index: str) -> dict[str, Any]:
         return dict(self._client.indices.stats(index=index))
+
+    def indices_put_settings(self, index: str, body: dict[str, Any]) -> None:
+        self._client.indices.put_settings(index=index, body=body)
 
     # --- Lifecycle ---
 

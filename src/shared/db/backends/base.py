@@ -6,11 +6,67 @@ plus backend-agnostic exceptions and helper functions.
 
 from __future__ import annotations
 
+import functools
+import logging
+import random
+import time
 from typing import Any, Protocol, runtime_checkable
+
+logger = logging.getLogger(__name__)
 
 
 class NotFoundError(Exception):
     """Raised when a document is not found in the search backend."""
+
+
+def _retry_on_overload(
+    max_retries: int = 5,
+    base_delay: float = 2.0,
+    max_delay: float = 60.0,
+):
+    """Decorator that retries on HTTP 429 / circuit-breaker errors.
+
+    OpenSearch and Elasticsearch return TransportError(429) when the cluster
+    is under memory pressure (circuit breaker) or rate-limited.  The built-in
+    ``retry_on_timeout`` only handles socket timeouts, not 429 responses.
+
+    Uses exponential backoff with jitter, matching the pattern in
+    ``shared.ai.llm_client._retry_with_backoff``.
+    """
+
+    def decorator(fn):  # noqa: ANN001, ANN202
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+            last_error: Exception | None = None
+
+            for attempt in range(max_retries + 1):
+                try:
+                    return fn(*args, **kwargs)
+                except Exception as e:
+                    status = getattr(e, "status_code", None)
+                    if status != 429:
+                        raise
+
+                    last_error = e
+                    if attempt < max_retries:
+                        delay = min(
+                            base_delay * (2**attempt) + random.uniform(0, 1),
+                            max_delay,
+                        )
+                        logger.warning(
+                            "Search backend 429 (attempt %d/%d), retrying in %.1fs: %s",
+                            attempt + 1,
+                            max_retries + 1,
+                            delay,
+                            e,
+                        )
+                        time.sleep(delay)
+
+            raise last_error  # type: ignore[misc]
+
+        return wrapper
+
+    return decorator
 
 
 @runtime_checkable
@@ -95,6 +151,8 @@ class SearchClient(Protocol):
     def indices_refresh(self, index: str) -> None: ...
 
     def indices_stats(self, index: str) -> dict[str, Any]: ...
+
+    def indices_put_settings(self, index: str, body: dict[str, Any]) -> None: ...
 
     # --- Lifecycle ---
 
