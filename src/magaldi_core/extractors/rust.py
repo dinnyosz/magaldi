@@ -140,6 +140,10 @@ def extract_rust_elements(
             elem = _extract_rust_static(node, lines)
             if elem:
                 elements.append(elem)
+        elif node.type == "type_item":
+            elem = _extract_rust_type_alias(node, lines)
+            if elem:
+                elements.append(elem)
         elif node.type == "let_declaration":
             # Module-level let (rare, but handle it)
             elem = _extract_rust_variable(node, lines)
@@ -428,6 +432,37 @@ def _extract_rust_variable(node: Node, _lines: list[str]) -> ExtractedElement | 
         byte_offset=node.start_byte,
         node=node,
         decorators=decorators if decorators else None,
+    )
+
+
+def _extract_rust_type_alias(node: Node, _lines: list[str]) -> ExtractedElement | None:
+    """Extract a Rust type alias (type Foo = Bar;)."""
+    name = None
+    for child in node.children:
+        if child.type == "type_identifier":
+            name = get_node_text(child)
+            break
+
+    if not name:
+        return None
+
+    raw_code = node.text.decode('utf-8') if node.text else ""
+
+    # Build signature: type Name = <value>
+    # Truncate long type definitions
+    signature = raw_code.rstrip(";").strip()
+    if len(signature) > 100:
+        signature = signature[:97] + "..."
+
+    return ExtractedElement(
+        element_type="type_alias",
+        name=name,
+        line_start=node.start_point[0] + 1,
+        line_end=node.end_point[0] + 1,
+        raw_code=raw_code,
+        byte_offset=node.start_byte,
+        signature=signature,
+        node=node,
     )
 
 
