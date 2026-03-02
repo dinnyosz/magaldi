@@ -106,6 +106,18 @@ class RustParser(TreeSitterParser):
                 func_elem = self._convert_function(ext, file_info, scope, repository, username, lines)
                 elements.append(func_elem)
 
+            elif ext.element_type in ("enum", "trait", "type_alias"):
+                type_elem = self._convert_type_definition(ext, file_info, scope, repository, username)
+                elements.append(type_elem)
+
+            elif ext.element_type == "import":
+                import_elem = self._convert_import(ext, file_info, scope, repository, username)
+                elements.append(import_elem)
+
+            elif ext.element_type in ("constant", "variable"):
+                const_elem = self._convert_constant(ext, file_info, scope, repository, username, lines, parent=None)
+                elements.append(const_elem)
+
         # Set parent IDs
         self._set_hierarchy(elements, file_element)
 
@@ -288,5 +300,63 @@ class RustParser(TreeSitterParser):
         )
         elem.element_id = generate_element_id(
             scope, repository, username, file_info.relative_path, "constant", ext.name, ext.get_byte_offset()
+        )
+        return elem
+
+    def _convert_type_definition(
+        self,
+        ext: ExtractedElement,
+        file_info: FileInfo,
+        scope: str,
+        repository: str,
+        username: str,
+    ) -> CodeElement:
+        """Convert extracted enum, trait, or type_alias to CodeElement."""
+        elem = CodeElement(
+            scope=scope,
+            repository=repository,
+            username=username,
+            relative_path=file_info.relative_path,
+            element_type=ext.element_type,
+            name=ext.name,
+            language="rust",
+            line_start=ext.line_start,
+            line_end=ext.line_end,
+            raw_code=ext.raw_code,
+            signature=ext.signature,
+            level=1,
+        )
+        elem.element_id = generate_element_id(
+            scope, repository, username, file_info.relative_path,
+            ext.element_type, ext.name, ext.get_byte_offset()
+        )
+        return elem
+
+    def _convert_import(
+        self,
+        ext: ExtractedElement,
+        file_info: FileInfo,
+        scope: str,
+        repository: str,
+        username: str,
+    ) -> CodeElement:
+        """Convert extracted use declaration to CodeElement."""
+        elem = CodeElement(
+            scope=scope,
+            repository=repository,
+            username=username,
+            relative_path=file_info.relative_path,
+            element_type="import",
+            name=ext.name,
+            language="rust",
+            line_start=ext.line_start,
+            line_end=ext.line_end,
+            raw_code=ext.raw_code,
+            signature=ext.raw_code.strip(),
+            level=2,
+        )
+        elem.element_id = generate_element_id(
+            scope, repository, username, file_info.relative_path,
+            "import", ext.name, ext.get_byte_offset()
         )
         return elem
