@@ -235,13 +235,8 @@ def _extract_js_arrow_function(node: Node, name: str, _lines: list[str]) -> Extr
     parameters = extract_js_parameters(params_node) if params_node else []
     return_type = extract_js_return_type(arrow_func_node) if arrow_func_node.type == "arrow_function" else None
 
-    # Check for async: look for 'async' keyword before the arrow function in the parent
-    is_async = False
-    if node.parent:
-        for child in node.parent.children:
-            if child.type == "async" and child.start_byte < arrow_func_node.start_byte:
-                is_async = True
-                break
+    # Check for async: 'async' is a child of the arrow_function node itself
+    is_async = any(child.type == "async" for child in arrow_func_node.children)
 
     signature = f"{'async ' if is_async else ''}const {name} = {params} =>"
     if return_type:
