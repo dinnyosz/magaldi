@@ -65,6 +65,12 @@ async def check_llm_health(config: MagaldiConfig) -> dict:
             elif model.provider == "llamacpp":
                 response = requests.get(f"{validated_url}/v1/models", timeout=5)
                 results[name] = {"status": "healthy", "provider": "llamacpp"}
+            elif model.provider == "vllm-mlx":
+                response = requests.get(f"{validated_url}/health", timeout=5)
+                if response.ok:
+                    results[name] = {"status": "healthy", "provider": "vllm-mlx"}
+                else:
+                    results[name] = {"status": "unhealthy", "error": f"HTTP {response.status_code}"}
             else:
                 results[name] = {"status": "unknown", "provider": model.provider}
         except ValueError as e:

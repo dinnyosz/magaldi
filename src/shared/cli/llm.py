@@ -152,16 +152,53 @@ def _build_server_plans(llm_config: LLMConfig) -> list[ServerPlan]:
     return plans
 
 
+def _find_vllm_python() -> str:
+    """Find a Python interpreter that has vllm-mlx installed.
+
+    Checks sys.executable first, then looks for a .venv in the project root.
+    Falls back to sys.executable if nothing better is found.
+    """
+    # Check if current Python has vllm_mlx
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", "import vllm_mlx"],
+            capture_output=True, timeout=5,
+        )
+        if result.returncode == 0:
+            return sys.executable
+    except Exception:
+        pass
+
+    # Look for .venv in common locations
+    for candidate_dir in [Path.cwd(), Path(__file__).resolve().parent.parent.parent.parent]:
+        venv_python = candidate_dir / ".venv" / "bin" / "python"
+        if venv_python.exists():
+            try:
+                result = subprocess.run(
+                    [str(venv_python), "-c", "import vllm_mlx"],
+                    capture_output=True, timeout=5,
+                )
+                if result.returncode == 0:
+                    return str(venv_python)
+            except Exception:
+                pass
+
+    # Fallback
+    return sys.executable
+
+
 def _start_server(plan: ServerPlan) -> bool:
     """Start a vllm-mlx server as a background process."""
     if plan.is_running():
         console.print(f"  [green]Already running[/] on port {plan.port}")
         return True
 
+    python_bin = _find_vllm_python()
+
     # Build command
     cmd = [
-        sys.executable, "-m", "vllm_mlx.server",
-        plan.llm_model,
+        python_bin, "-m", "vllm_mlx.server",
+        "--model", plan.llm_model,
         "--port", str(plan.port),
         "--host", plan.host,
     ]
@@ -297,7 +334,7 @@ def llm_serve(port: int | None, no_batch: bool) -> None:
 
     if not plans:
         console.print("[yellow]No vllm-mlx models found in config.[/]")
-        console.print("Set provider: vllm-mlx and mlx_model in your magaldi.yaml")
+        console.print("Set provider: vllm-mlx and name to the HuggingFace MLX repo in your magaldi.yaml")
         return
 
     if port is not None:
@@ -367,7 +404,7 @@ def llm_status() -> None:
 
     if not plans:
         console.print("[dim]No vllm-mlx models configured[/]")
-        console.print("Set provider: vllm-mlx and mlx_model in your magaldi.yaml")
+        console.print("Set provider: vllm-mlx and name to the HuggingFace MLX repo in your magaldi.yaml")
         return
 
     from rich.table import Table

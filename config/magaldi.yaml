@@ -37,20 +37,20 @@ redis:
 
 llm:
   # Named model configurations
-  # Models run via Ollama by default (optimized for Apple Silicon)
+  # Models run via vllm-mlx (continuous batching, faster parallel processing on Apple Silicon)
   models:
     qwen3-4b:
-      name: "qwen3:4b-instruct"
-      provider: ollama
-      url: http://localhost:11434
+      name: mlx-community/Qwen3-4B-Instruct-2507-4bit
+      provider: vllm-mlx
+      url: http://localhost:8000
     qwen3-small:
-      name: "qwen3:1.7b"
-      provider: ollama
-      url: http://localhost:11434
+      name: mlx-community/Qwen3-1.7B-4bit
+      provider: vllm-mlx
+      url: http://localhost:8001
     qwen3-embed:
-      name: "qwen3-embedding:0.6b"
-      provider: ollama
-      url: http://localhost:11434
+      name: mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ
+      provider: vllm-mlx
+      url: http://localhost:8000
       dimensions: 1024
 
   # Which models to use for each purpose (reference by name above)

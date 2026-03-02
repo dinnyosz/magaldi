@@ -168,6 +168,10 @@ class SummarizationLLMClient:
             # llama.cpp server exposes OpenAI-compatible API
             full_model = f"openai/{model}"
             api_base = url  # Should include /v1 suffix
+        elif provider == "vllm-mlx":
+            # vllm-mlx serves one model per process via OpenAI-compatible API
+            full_model = "openai/default"
+            api_base = url if (url and url.endswith("/v1")) else f"{url}/v1" if url else None
         elif provider == "openai":
             full_model = model
             api_base = None
@@ -220,6 +224,9 @@ class SummarizationLLMClient:
             elif self.provider == "llamacpp":
                 # llama.cpp uses OpenAI-compatible API
                 use_model = f"openai/{model}"
+            elif self.provider == "vllm-mlx":
+                # vllm-mlx serves one model per process — ignore override
+                use_model = None
             elif self.provider == "openai":
                 use_model = model
             else:
@@ -275,6 +282,9 @@ class SummarizationLLMClient:
                 use_model = f"ollama/{model}"
             elif self.provider == "llamacpp":
                 use_model = f"openai/{model}"
+            elif self.provider == "vllm-mlx":
+                # vllm-mlx serves one model per process — ignore override
+                use_model = None
             elif self.provider == "openai":
                 use_model = model
             else:

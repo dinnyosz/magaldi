@@ -124,17 +124,18 @@ class LLMConfig:
         llm:
           models:
             qwen3-4b:
-              name: qwen3:4b-instruct
-              provider: llamacpp
-              url: http://localhost:8080
+              name: mlx-community/Qwen3-4B-Instruct-2507-4bit
+              provider: vllm-mlx
+              url: http://localhost:8000
             qwen3-small:
-              name: qwen3:1.7b
-              provider: llamacpp
-              url: http://localhost:8080
+              name: mlx-community/Qwen3-1.7B-4bit
+              provider: vllm-mlx
+              url: http://localhost:8001
             qwen3-embed:
-              name: "qwen3-embedding:0.6b"
-              provider: ollama
-              url: http://localhost:11434
+              name: mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ
+              provider: vllm-mlx
+              url: http://localhost:8000
+              dimensions: 1024
 
           summarize_model: qwen3-4b
           summarize_model_small: qwen3-small
@@ -142,22 +143,22 @@ class LLMConfig:
     """
 
     # Named model configurations
-    # All models run via Ollama for simplicity and optimized Apple Silicon performance
+    # Default to vllm-mlx for Apple Silicon (continuous batching, faster parallel processing)
     models: dict[str, ModelConfig] = field(default_factory=lambda: {
         "qwen3-4b": ModelConfig(
-            name="qwen3:4b-instruct",
-            provider="ollama",
-            url="http://localhost:11434",
+            name="mlx-community/Qwen3-4B-Instruct-2507-4bit",
+            provider="vllm-mlx",
+            url="http://localhost:8000",
         ),
         "qwen3-small": ModelConfig(
-            name="qwen3:1.7b",
-            provider="ollama",
-            url="http://localhost:11434",
+            name="mlx-community/Qwen3-1.7B-4bit",
+            provider="vllm-mlx",
+            url="http://localhost:8001",
         ),
         "qwen3-embed": ModelConfig(
-            name="qwen3-embedding:0.6b",
-            provider="ollama",
-            url="http://localhost:11434",
+            name="mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ",
+            provider="vllm-mlx",
+            url="http://localhost:8000",
             dimensions=1024,
         ),
     })
