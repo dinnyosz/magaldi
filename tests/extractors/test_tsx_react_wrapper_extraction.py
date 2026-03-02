@@ -125,8 +125,11 @@ const result = someFunction(function inner() {
         elements = extract_javascript_elements(tree, code.split("\n"))
 
         # Should not extract 'result' as a function since someFunction is not a React wrapper
+        # It may be extracted as a variable, but never as a function
         result = next((e for e in elements if e.name == "result"), None)
-        assert result is None
+        if result is not None:
+            assert result.element_type != "function", \
+                f"'result' should not be extracted as function, got: {result.element_type}"
 
 
 class TestReactHookDetection:

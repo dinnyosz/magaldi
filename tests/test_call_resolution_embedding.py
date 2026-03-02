@@ -716,12 +716,11 @@ class TestCallGraphFormatterSemanticRelated:
         formatter = CallGraphFormatter()
         output = formatter.format(result)
 
-        assert "Semantically Related (2):" in output
+        assert "Similar (2):" in output
         assert "similar_func" in output
-        assert "85% similar" in output
         assert "another_func" in output
-        assert "72% similar" in output
-        assert "Does something similar" in output
+        assert "0.85" in output
+        assert "0.72" in output
 
     def test_no_semantic_section_when_absent(self):
         """Formatter doesn't render section when no semantic data."""

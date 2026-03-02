@@ -204,6 +204,7 @@ class TestWatchCommand:
         assert "--skip-ai" in result.output
         assert "--user" in result.output
 
+    @patch("os._exit")
     @patch("watchdog.observers.Observer")
     @patch("shared.cli.watch.run_discovery")
     @patch("shared.cli.watch.run_change_detection")
@@ -214,6 +215,7 @@ class TestWatchCommand:
         mock_change_detection: MagicMock,
         mock_discovery: MagicMock,
         mock_observer_class: MagicMock,
+        mock_os_exit: MagicMock,
         cli_runner: CliRunner,
         tmp_path: Path,
     ):

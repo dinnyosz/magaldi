@@ -24,8 +24,10 @@ from typing import TYPE_CHECKING
 # Re-export classes from parsers package for backward compatibility
 from magaldi_core.parsers import (
     BashParser,
+    Call,
     CodeElement,
     DockerfileParser,
+    Import,
     JavaScriptParser,
     MarkdownParser,
     PhpParser,
@@ -35,6 +37,7 @@ from magaldi_core.parsers import (
     TomlParser,
     TreeSitterParser,
     YamlParser,
+    generate_element_id,
 )
 from magaldi_core.tree_sitter_manager import (
     ExtractedReference,
