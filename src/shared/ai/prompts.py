@@ -1106,6 +1106,9 @@ PREFIXES_TO_REMOVE = [
     "Summary:",
     "**Summary:**",
     "**Summary**:",
+    "Description:",
+    "**Description:**",
+    "**Description**:",
     # "This X" anti-patterns
     "This function ",
     "This method ",
@@ -1120,6 +1123,13 @@ PREFIXES_TO_REMOVE = [
     "This implementation ",
     "This decorator ",
     "This import ",
+    "This trait ",
+    "This enum ",
+    "This type ",
+    # CamelCase concatenation artifact from LLMs
+    "ThisFunction ",
+    "ThisMethod ",
+    "ThisClass ",
     # "The X" anti-patterns
     "The function ",
     "The method ",
@@ -1128,6 +1138,22 @@ PREFIXES_TO_REMOVE = [
     "The module ",
     "The code ",
 ]
+
+# Prompt leak patterns — LLM echoed the prompt instructions instead of answering
+PROMPT_LEAK_PREFIXES = [
+    "Describe this",
+    "Summarize this",
+    "Write ONLY",
+    "Answer these",
+    "Focus on",
+    "FOCUS on",
+    "For each ",
+]
+
+# Signature-echo pattern — LLM just echoed the function declaration
+_SIGNATURE_ECHO_RE = re.compile(
+    r"^(def|function|async def|async function|fn|pub fn|const|let|var|export)\s+\w+\s*[\(<]"
+)
 
 # Leading markdown formatting to strip before checking prefixes
 _LEADING_MARKDOWN_RE = re.compile(r"^(?:[#]+\s+|[-*]\s+|\*{1,2})")
@@ -1173,6 +1199,15 @@ def clean_summary(summary: str) -> str:
 
     if not summary:
         return summary
+
+    # Detect prompt leak: LLM echoed the prompt instructions
+    for leak_prefix in PROMPT_LEAK_PREFIXES:
+        if summary.startswith(leak_prefix):
+            return ""
+
+    # Detect signature echo: LLM just repeated the function declaration
+    if _SIGNATURE_ECHO_RE.match(summary):
+        return ""
 
     # Remove common prefixes (try raw first, then after markdown stripping)
     prefix_removed = False
