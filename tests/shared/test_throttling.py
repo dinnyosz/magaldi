@@ -3016,7 +3016,8 @@ class TestComputeEffectiveBaseWorkers:
                 assert result >= 1
 
     def test_budget_fraction_respected(self):
-        """Cumulative level cost should fit within EXPLORE_BUDGET_FRACTION of total."""
+        """Cumulative level cost should fit within budget OR be at the minimum floor."""
+        min_floor = 3  # Minimum exploration floor
         for elements in [20, 40, 80, 160, 320]:
             cap = compute_effective_base_workers(16, elements)
             budget = int(elements * EXPLORE_BUDGET_FRACTION)
@@ -3025,7 +3026,8 @@ class TestComputeEffectiveBaseWorkers:
                 ThroughputByLevel._min_samples_for_level(lvl)
                 for lvl in range(1, cap + 1)
             )
-            assert total_cost <= budget
+            # Either fits in budget, or is at the minimum floor
+            assert total_cost <= budget or cap == min_floor
 
     def test_medium_element_count_partial_cap(self):
         """100 elements with 16 workers should be partially capped."""
@@ -3040,6 +3042,19 @@ class TestComputeEffectiveBaseWorkers:
         # Budget = 120. Per-level cost: levels 1-5 cost 10 each, then scales up.
         # Should get a decent range but not necessarily full 16.
         assert cap > 5
+
+    def test_minimum_floor_of_3(self):
+        """Even with very few elements, at least 3 workers are allowed."""
+        # 10 elements → budget = 5, but floor guarantees 3
+        assert compute_effective_base_workers(16, 10) == 3
+        assert compute_effective_base_workers(8, 20) == 3
+        # Very small batch still gets 3
+        assert compute_effective_base_workers(4, 5) == 3
+
+    def test_minimum_floor_respects_base_workers(self):
+        """Floor of 3 doesn't exceed base_workers when base is 2."""
+        assert compute_effective_base_workers(2, 10) == 2
+        assert compute_effective_base_workers(2, 5) == 2
 
     def test_high_base_workers_needs_more_elements(self):
         """32 workers needs more elements than 16 workers."""
@@ -3078,17 +3093,22 @@ class TestExplorationOrchestratorCap:
         orch = ExplorationOrchestrator(16, total_elements=30)
         assert orch._original_base_workers == 16
 
-    def test_small_elements_skip_exploration(self):
-        """With very few elements and cap=1, orchestrate skips exploration entirely."""
-        orch = ExplorationOrchestrator(16, total_elements=10)
+    def test_base_workers_1_skips_exploration(self):
+        """With base_workers=1, orchestrate skips exploration entirely."""
+        orch = ExplorationOrchestrator(1, total_elements=10)
         tracker = ThroughputTracker(window_seconds=300.0)
-        assert orch.base_workers <= 1
+        assert orch.base_workers == 1
         state = orch.orchestrate({}, None, tracker)
         # Should skip: no warmup override, no GSS, just status
         assert state.warmup_override is None
         assert state.gss_probe is None
         assert state.exploration_status is not None
         assert "Skip" in state.exploration_status
+
+    def test_small_elements_get_minimum_floor(self):
+        """With very few elements, the minimum floor of 3 applies."""
+        orch = ExplorationOrchestrator(16, total_elements=10)
+        assert orch.base_workers == 3
 
     def test_reset_recalculates_cap_for_new_tier(self):
         """reset(total_elements) recalculates base_workers for the new tier."""

@@ -1140,12 +1140,17 @@ def compute_effective_base_workers(base_workers: int, total_elements: int) -> in
     accumulating the sample cost per level (_min_samples_for_level).
     Stop when the next level would overflow the budget.
 
+    A minimum of 3 workers (or base_workers if lower) is always allowed,
+    since fewer workers provide no meaningful exploration signal and modern
+    inference servers (vllm-mlx, vLLM) batch parallel requests efficiently.
+
     Args:
         base_workers: Original max workers (from config or tier).
         total_elements: Total elements to process in this tier/batch.
 
     Returns:
-        Effective base_workers, capped to fit the exploration budget.
+        Effective base_workers, capped to fit the exploration budget
+        (minimum 3, or base_workers if it's lower).
     """
     if base_workers <= 1:
         return base_workers
@@ -1161,7 +1166,10 @@ def compute_effective_base_workers(base_workers: int, total_elements: int) -> in
         cost += level_cost
         cap = level
 
-    return max(1, cap)
+    # Floor of 3: with fewer workers there's no meaningful exploration,
+    # and modern inference servers (vllm-mlx, vLLM) batch parallel requests
+    # efficiently even for small element counts.
+    return max(min(3, base_workers), cap)
 
 
 class ExplorationOrchestrator:
