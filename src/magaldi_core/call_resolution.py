@@ -2088,7 +2088,7 @@ def compute_semantic_relationships(
     repository: str,
     username: str = "main",
     top_k: int = 10,
-    min_score: float = 0.5,
+    min_score: float = 0.7,
 ) -> tuple[int, int]:
     """Pre-compute semantic relationships for all functions/methods.
 
@@ -2096,6 +2096,7 @@ def compute_semantic_relationships(
     elements by vector similarity and stores them on the element.
 
     Queries both user and main indices for a complete view.
+    Uses scroll pagination to handle repos with >10k functions.
 
     Args:
         repo: Repository instance.
@@ -2108,10 +2109,13 @@ def compute_semantic_relationships(
     Returns:
         Tuple of (elements_processed, total_relationships_stored).
     """
+    import contextlib
+
     elements_processed = 0
     total_relationships = 0
+    all_scores: list[float] = []
 
-    # Get all functions/methods with embeddings via direct ES query
+    # Get all functions/methods with embeddings via scroll pagination
     from shared.db.repositories.base import INDEX_NAME
 
     client = repo._get_client()
@@ -2138,24 +2142,45 @@ def compute_semantic_relationships(
     else:
         filter_clauses.append({"term": {"username": "main"}})
 
-    result = client.search(
-        index=INDEX_NAME,
-        body={
-            "query": {"bool": {"filter": filter_clauses}},
-            "size": 10000,
-            "_source": [
-                "element_id",
-                "hash_id",
-                "username",
-                "name",
-                "element_type",
-                "relative_path",
-                "summary_embedding",
-            ],
-        },
-    )
+    _source_fields = [
+        "element_id",
+        "hash_id",
+        "username",
+        "name",
+        "element_type",
+        "relative_path",
+        "summary_embedding",
+    ]
 
-    all_elements = [hit["_source"] for hit in result.get("hits", {}).get("hits", [])]
+    # Scroll through all matching elements (no 10k cap)
+    all_elements: list[dict] = []
+    scroll_id = None
+
+    try:
+        response = client.search(
+            index=INDEX_NAME,
+            body={
+                "query": {"bool": {"filter": filter_clauses}},
+                "size": 1000,
+                "_source": _source_fields,
+            },
+            scroll="2m",
+        )
+
+        scroll_id = response.get("_scroll_id")
+        hits = response.get("hits", {}).get("hits", [])
+
+        while hits:
+            for hit in hits:
+                all_elements.append(hit["_source"])
+
+            response = client.scroll(scroll_id=scroll_id, scroll="2m")
+            scroll_id = response.get("_scroll_id")
+            hits = response.get("hits", {}).get("hits", [])
+    finally:
+        if scroll_id:
+            with contextlib.suppress(Exception):
+                client.clear_scroll(scroll_id=scroll_id)
 
     # Deduplicate: user version wins over main
     if username and username != "main":
@@ -2197,6 +2222,7 @@ def compute_semantic_relationships(
             if s_id == element_id:
                 continue
             score = s.get("_score", 0.0)
+            all_scores.append(score)
             related.append({
                 "element_id": s_id,
                 "hash_id": s.get("hash_id", ""),
@@ -2210,6 +2236,17 @@ def compute_semantic_relationships(
             total_relationships += len(related)
 
         elements_processed += 1
+
+    # Log score distribution for threshold tuning
+    if all_scores:
+        avg_score = sum(all_scores) / len(all_scores)
+        logger.info(
+            "Semantic relationships: scores min=%.3f avg=%.3f max=%.3f (threshold=%.2f)",
+            min(all_scores),
+            avg_score,
+            max(all_scores),
+            min_score,
+        )
 
     logger.info(
         f"Semantic relationships: {total_relationships} relationships "

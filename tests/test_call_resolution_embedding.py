@@ -337,6 +337,17 @@ class TestResolveCallsByEmbedding:
 # =============================================================================
 
 
+def _mock_scroll_response(hits: list[dict]) -> dict:
+    """Build a mock search response with scroll support."""
+    return {
+        "_scroll_id": "test_scroll_id",
+        "hits": {"hits": hits},
+    }
+
+
+_EMPTY_SCROLL = {"_scroll_id": "test_scroll_id", "hits": {"hits": []}}
+
+
 class TestComputeSemanticRelationships:
     """Tests for compute_semantic_relationships."""
 
@@ -345,24 +356,21 @@ class TestComputeSemanticRelationships:
         client = MagicMock()
         mock_es._get_client.return_value = client
 
-        # Return one function with embedding
-        client.search.return_value = {
-            "hits": {
-                "hits": [
-                    {
-                        "_source": {
-                            "element_id": "elem1",
-                            "hash_id": "h1",
-                            "username": "main",
-                            "name": "process_data",
-                            "element_type": "function",
-                            "relative_path": "utils.py",
-                            "summary_embedding": [0.5, 0.5],
-                        }
-                    }
-                ]
+        # Return one function with embedding (scroll: first page, then empty)
+        client.search.return_value = _mock_scroll_response([
+            {
+                "_source": {
+                    "element_id": "elem1",
+                    "hash_id": "h1",
+                    "username": "main",
+                    "name": "process_data",
+                    "element_type": "function",
+                    "relative_path": "utils.py",
+                    "summary_embedding": [0.5, 0.5],
+                }
             }
-        }
+        ])
+        client.scroll.return_value = _EMPTY_SCROLL
 
         # search_by_vector returns similar elements
         mock_es.search_by_vector.return_value = [
@@ -385,23 +393,20 @@ class TestComputeSemanticRelationships:
         client = MagicMock()
         mock_es._get_client.return_value = client
 
-        client.search.return_value = {
-            "hits": {
-                "hits": [
-                    {
-                        "_source": {
-                            "element_id": "elem1",
-                            "hash_id": "h1",
-                            "username": "main",
-                            "name": "foo",
-                            "element_type": "function",
-                            "relative_path": "a.py",
-                            "summary_embedding": [1.0],
-                        }
-                    }
-                ]
+        client.search.return_value = _mock_scroll_response([
+            {
+                "_source": {
+                    "element_id": "elem1",
+                    "hash_id": "h1",
+                    "username": "main",
+                    "name": "foo",
+                    "element_type": "function",
+                    "relative_path": "a.py",
+                    "summary_embedding": [1.0],
+                }
             }
-        }
+        ])
+        client.scroll.return_value = _EMPTY_SCROLL
 
         # Only returns self
         mock_es.search_by_vector.return_value = [
@@ -419,23 +424,20 @@ class TestComputeSemanticRelationships:
         client = MagicMock()
         mock_es._get_client.return_value = client
 
-        client.search.return_value = {
-            "hits": {
-                "hits": [
-                    {
-                        "_source": {
-                            "element_id": "elem1",
-                            "hash_id": "h1",
-                            "username": "main",
-                            "name": "foo",
-                            "element_type": "function",
-                            "relative_path": "a.py",
-                            "summary_embedding": None,
-                        }
-                    }
-                ]
+        client.search.return_value = _mock_scroll_response([
+            {
+                "_source": {
+                    "element_id": "elem1",
+                    "hash_id": "h1",
+                    "username": "main",
+                    "name": "foo",
+                    "element_type": "function",
+                    "relative_path": "a.py",
+                    "summary_embedding": None,
+                }
             }
-        }
+        ])
+        client.scroll.return_value = _EMPTY_SCROLL
 
         processed, relationships = compute_semantic_relationships(mock_es, "s", "r", "main")
 
@@ -447,23 +449,20 @@ class TestComputeSemanticRelationships:
         client = MagicMock()
         mock_es._get_client.return_value = client
 
-        client.search.return_value = {
-            "hits": {
-                "hits": [
-                    {
-                        "_source": {
-                            "element_id": "elem1",
-                            "hash_id": "h1",
-                            "username": "main",
-                            "name": "foo",
-                            "element_type": "function",
-                            "relative_path": "a.py",
-                            "summary_embedding": [1.0],
-                        }
-                    }
-                ]
+        client.search.return_value = _mock_scroll_response([
+            {
+                "_source": {
+                    "element_id": "elem1",
+                    "hash_id": "h1",
+                    "username": "main",
+                    "name": "foo",
+                    "element_type": "function",
+                    "relative_path": "a.py",
+                    "summary_embedding": [1.0],
+                }
             }
-        }
+        ])
+        client.scroll.return_value = _EMPTY_SCROLL
 
         # Return more results than top_k=2
         mock_es.search_by_vector.return_value = [
@@ -487,34 +486,31 @@ class TestComputeSemanticRelationships:
         mock_es._get_client.return_value = client
 
         # Return same element from both user and main
-        client.search.return_value = {
-            "hits": {
-                "hits": [
-                    {
-                        "_source": {
-                            "element_id": "user_e1",
-                            "hash_id": "h1",
-                            "username": "dev",
-                            "name": "foo",
-                            "element_type": "function",
-                            "relative_path": "a.py",
-                            "summary_embedding": [1.0],
-                        }
-                    },
-                    {
-                        "_source": {
-                            "element_id": "main_e1",
-                            "hash_id": "h1m",
-                            "username": "main",
-                            "name": "foo",
-                            "element_type": "function",
-                            "relative_path": "a.py",
-                            "summary_embedding": [0.9],
-                        }
-                    },
-                ]
-            }
-        }
+        client.search.return_value = _mock_scroll_response([
+            {
+                "_source": {
+                    "element_id": "user_e1",
+                    "hash_id": "h1",
+                    "username": "dev",
+                    "name": "foo",
+                    "element_type": "function",
+                    "relative_path": "a.py",
+                    "summary_embedding": [1.0],
+                }
+            },
+            {
+                "_source": {
+                    "element_id": "main_e1",
+                    "hash_id": "h1m",
+                    "username": "main",
+                    "name": "foo",
+                    "element_type": "function",
+                    "relative_path": "a.py",
+                    "summary_embedding": [0.9],
+                }
+            },
+        ])
+        client.scroll.return_value = _EMPTY_SCROLL
 
         mock_es.search_by_vector.return_value = []
 
@@ -524,6 +520,64 @@ class TestComputeSemanticRelationships:
 
         # Only one element processed (deduplicated)
         assert processed == 1
+
+    def test_scroll_pagination_collects_all_elements(self, mock_es):
+        """Scroll pagination fetches elements across multiple pages."""
+        client = MagicMock()
+        mock_es._get_client.return_value = client
+
+        page1_hits = [
+            {"_source": {
+                "element_id": f"elem{i}", "hash_id": f"h{i}", "username": "main",
+                "name": f"fn{i}", "element_type": "function",
+                "relative_path": "a.py", "summary_embedding": [float(i)],
+            }}
+            for i in range(3)
+        ]
+        page2_hits = [
+            {"_source": {
+                "element_id": "elem3", "hash_id": "h3", "username": "main",
+                "name": "fn3", "element_type": "function",
+                "relative_path": "b.py", "summary_embedding": [3.0],
+            }}
+        ]
+
+        client.search.return_value = _mock_scroll_response(page1_hits)
+        client.scroll.side_effect = [
+            _mock_scroll_response(page2_hits),
+            _EMPTY_SCROLL,
+        ]
+        mock_es.search_by_vector.return_value = []
+
+        processed, _ = compute_semantic_relationships(mock_es, "s", "r", "main")
+
+        assert processed == 4
+        # Verify scroll was called and cleared
+        assert client.scroll.call_count == 2
+        client.clear_scroll.assert_called_once()
+
+    def test_clears_scroll_on_error(self, mock_es):
+        """Scroll context is cleaned up even if processing fails."""
+        client = MagicMock()
+        mock_es._get_client.return_value = client
+
+        client.search.return_value = _mock_scroll_response([
+            {"_source": {
+                "element_id": "elem1", "hash_id": "h1", "username": "main",
+                "name": "fn1", "element_type": "function",
+                "relative_path": "a.py", "summary_embedding": [1.0],
+            }}
+        ])
+        client.scroll.return_value = _EMPTY_SCROLL
+
+        # Make search_by_vector explode
+        mock_es.search_by_vector.side_effect = RuntimeError("boom")
+
+        with pytest.raises(RuntimeError, match="boom"):
+            compute_semantic_relationships(mock_es, "s", "r", "main")
+
+        # Scroll should still be cleared
+        client.clear_scroll.assert_called_once()
 
 
 # =============================================================================
