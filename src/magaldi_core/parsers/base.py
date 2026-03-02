@@ -323,11 +323,32 @@ def find_variable_usages(
 
 
 def extract_docstring(lines: list[str], block_start: int) -> str | None:
-    """Extract docstring from the start of a block."""
+    """Extract docstring from the start of a block.
+
+    Handles multi-line function signatures by searching past the signature
+    for the colon that ends the function header, then looking for the
+    docstring from there.
+    """
     if block_start >= len(lines):
         return None
 
-    for i in range(block_start, min(block_start + 3, len(lines))):
+    # Find where the function body starts (after the colon ending the signature).
+    # For multi-line signatures like:
+    #   def request(
+    #       self,
+    #       method,
+    #   ):
+    #       '''docstring'''
+    # We need to search past the closing ): to find the docstring.
+    body_start = block_start
+    for i in range(block_start, min(block_start + 30, len(lines))):
+        stripped = lines[i].rstrip()
+        if stripped.endswith(":") or stripped.endswith(":{"):
+            body_start = i + 1
+            break
+
+    # Search for docstring within 3 lines after the body start
+    for i in range(body_start, min(body_start + 3, len(lines))):
         line = lines[i].strip()
         if line.startswith('"""') or line.startswith("'''"):
             quote = line[:3]
