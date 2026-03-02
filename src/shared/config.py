@@ -112,6 +112,18 @@ class ModelConfig:
         else:
             return self.url
 
+    # Models that use thinking/reasoning tags (<think>...</think>) by default.
+    _THINKING_MODELS = ("qwen3", "deepseek-r1", "deepseek-coder-v2", "nemotron")
+
+    def is_thinking_model(self) -> bool:
+        """Check if this model uses thinking/reasoning by default.
+
+        Handles org prefixes (e.g., "mlx-community/Qwen3-4B-...") and
+        Ollama tags (e.g., "qwen3:4b-instruct").
+        """
+        base = self.name.split("/")[-1].lower()
+        return any(base.startswith(tm) for tm in self._THINKING_MODELS)
+
 
 @dataclass
 class LLMConfig:

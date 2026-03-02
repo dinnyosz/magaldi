@@ -11,6 +11,7 @@ from shared.config import (
     LoggingConfig,
     MagaldiConfig,
     MCPConfig,
+    ModelConfig,
     ParserConfig,
     SearchBackendConfig,
     SearchConfig,
@@ -421,3 +422,63 @@ class TestWorkersConfig:
         config = load_config(FIXTURES_DIR / "valid.yaml")
         assert config.workers.embedding.count == 2
         assert config.workers.embedding.batch_size == 10
+
+
+# =============================================================================
+# MODEL CONFIG
+# =============================================================================
+
+
+class TestModelConfig:
+    """Tests for ModelConfig methods."""
+
+    def test_is_thinking_model_ollama_qwen3(self):
+        cfg = ModelConfig(name="qwen3:4b-instruct", provider="ollama")
+        assert cfg.is_thinking_model() is True
+
+    def test_is_thinking_model_hf_qwen3(self):
+        cfg = ModelConfig(name="mlx-community/Qwen3-4B-Instruct-2507-4bit", provider="vllm-mlx")
+        assert cfg.is_thinking_model() is True
+
+    def test_is_thinking_model_deepseek_r1(self):
+        cfg = ModelConfig(name="deepseek-r1:7b", provider="ollama")
+        assert cfg.is_thinking_model() is True
+
+    def test_is_thinking_model_non_thinking(self):
+        cfg = ModelConfig(name="llama-3.1-8b", provider="ollama")
+        assert cfg.is_thinking_model() is False
+
+    def test_is_thinking_model_embedding(self):
+        cfg = ModelConfig(name="qwen3-embedding:0.6b", provider="ollama")
+        # "qwen3-embedding" starts with "qwen3" — it IS a thinking family name
+        # but embedding models don't generate text; this is a known edge case
+        # and harmless (think=false on embeddings is a no-op)
+        assert cfg.is_thinking_model() is True
+
+    def test_get_litellm_model_ollama(self):
+        cfg = ModelConfig(name="qwen3:4b", provider="ollama")
+        assert cfg.get_litellm_model() == "ollama/qwen3:4b"
+
+    def test_get_litellm_model_vllm_mlx(self):
+        cfg = ModelConfig(name="mlx-community/Qwen3-4B", provider="vllm-mlx")
+        assert cfg.get_litellm_model() == "openai/default"
+
+    def test_get_litellm_model_llamacpp(self):
+        cfg = ModelConfig(name="qwen3:4b", provider="llamacpp")
+        assert cfg.get_litellm_model() == "openai/qwen3:4b"
+
+    def test_get_litellm_model_openai(self):
+        cfg = ModelConfig(name="gpt-4o-mini", provider="openai")
+        assert cfg.get_litellm_model() == "gpt-4o-mini"
+
+    def test_get_api_base_ollama(self):
+        cfg = ModelConfig(name="qwen3:4b", provider="ollama", url="http://localhost:11434")
+        assert cfg.get_api_base() == "http://localhost:11434"
+
+    def test_get_api_base_vllm_mlx(self):
+        cfg = ModelConfig(name="model", provider="vllm-mlx", url="http://localhost:8000")
+        assert cfg.get_api_base() == "http://localhost:8000/v1"
+
+    def test_get_api_base_openai(self):
+        cfg = ModelConfig(name="gpt-4o", provider="openai")
+        assert cfg.get_api_base() is None

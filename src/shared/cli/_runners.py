@@ -348,12 +348,7 @@ def run_variable_scoring(
 
     # Create LLM client using the main model (small model scores everything 1,1,1,1)
     model_config = config.llm.get_summarize_model()
-    llm_client = SummarizationLLMClient(
-        url=model_config.url,
-        model=model_config.name,
-        provider=model_config.provider,
-        api_key=model_config.api_key,
-    )
+    llm_client = SummarizationLLMClient.from_model_config(model_config)
 
     scoring_config = VariableScoringConfig()
     effective_workers = workers if workers > 0 else 12

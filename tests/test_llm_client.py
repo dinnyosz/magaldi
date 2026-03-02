@@ -761,3 +761,100 @@ class TestThinkingModelDetection:
         assert "think" not in call_kwargs
         extra = call_kwargs.get("extra_body", {})
         assert "chat_template_kwargs" not in extra
+
+    def test_is_thinking_model_flag_set_on_init(self):
+        """_is_thinking_model should be set during __init__, not per-call."""
+        client_thinking = LLMClient(model="ollama/qwen3:4b")
+        assert client_thinking._is_thinking_model is True
+
+        client_not = LLMClient(model="ollama/llama-3.1:8b")
+        assert client_not._is_thinking_model is False
+
+        # Via model_name (vllm-mlx path)
+        client_vllm = LLMClient(
+            model="openai/default",
+            model_name="mlx-community/Qwen3-4B-Instruct-2507-4bit",
+        )
+        assert client_vllm._is_thinking_model is True
+
+
+class TestFromModelConfig:
+    """Tests for from_model_config() factory methods."""
+
+    def test_llm_client_from_model_config_ollama(self):
+        from shared.config import ModelConfig
+        cfg = ModelConfig(name="qwen3:4b", provider="ollama", url="http://localhost:11434")
+        client = LLMClient.from_model_config(cfg)
+        assert client.model == "ollama/qwen3:4b"
+        assert client.api_base == "http://localhost:11434"
+        assert client.model_name == "qwen3:4b"
+        assert client._is_thinking_model is True
+
+    def test_llm_client_from_model_config_vllm_mlx(self):
+        from shared.config import ModelConfig
+        cfg = ModelConfig(
+            name="mlx-community/Qwen3-4B-Instruct-2507-4bit",
+            provider="vllm-mlx",
+            url="http://localhost:8000",
+        )
+        client = LLMClient.from_model_config(cfg)
+        assert client.model == "openai/default"
+        assert client.api_base == "http://localhost:8000/v1"
+        assert client.model_name == "mlx-community/Qwen3-4B-Instruct-2507-4bit"
+        assert client._is_thinking_model is True
+
+    def test_llm_client_from_model_config_openai(self):
+        from shared.config import ModelConfig
+        cfg = ModelConfig(name="gpt-4o-mini", provider="openai", api_key="sk-test")
+        client = LLMClient.from_model_config(cfg)
+        assert client.model == "gpt-4o-mini"
+        assert client.api_base is None
+        assert client.api_key == "sk-test"
+        assert client._is_thinking_model is False
+
+    def test_llm_client_from_model_config_disables_thinking(self):
+        """from_model_config should produce a client that sends think=False."""
+        from shared.config import ModelConfig
+        cfg = ModelConfig(
+            name="mlx-community/Qwen3-4B-Instruct-2507-4bit",
+            provider="vllm-mlx",
+            url="http://localhost:8000",
+        )
+        client = LLMClient.from_model_config(cfg)
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "response"
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response) as mock_comp:
+            client.generate_from_messages([{"role": "user", "content": "test"}])
+
+        call_kwargs = mock_comp.call_args.kwargs
+        extra = call_kwargs.get("extra_body", {})
+        assert extra.get("chat_template_kwargs") == {"enable_thinking": False}
+
+    def test_embedding_client_from_model_config(self):
+        from shared.config import ModelConfig
+        cfg = ModelConfig(
+            name="qwen3-embedding:0.6b",
+            provider="ollama",
+            url="http://localhost:11434",
+            dimensions=1024,
+        )
+        client = EmbeddingClient.from_model_config(cfg)
+        assert client.model == "ollama/qwen3-embedding:0.6b"
+        assert client.api_base == "http://localhost:11434"
+        assert client.dimensions == 1024
+
+    def test_embedding_client_from_model_config_vllm_mlx(self):
+        from shared.config import ModelConfig
+        cfg = ModelConfig(
+            name="mlx-community/Qwen3-Embedding-0.6B-4bit",
+            provider="vllm-mlx",
+            url="http://localhost:8000",
+            dimensions=1024,
+        )
+        client = EmbeddingClient.from_model_config(cfg)
+        assert client.model == "openai/default"
+        assert client.api_base == "http://localhost:8000/v1"
+        assert client.dimensions == 1024

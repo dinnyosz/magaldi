@@ -17,12 +17,15 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from magaldi_core.code_parser import CodeElement
 
 # Import the new embedding client
 from shared.ai.llm_client import EmbeddingClient, LLMError
+
+if TYPE_CHECKING:
+    from shared.config import ModelConfig
 
 
 class EmbeddingError(Exception):
@@ -140,6 +143,21 @@ class CodeEmbeddingClient:
             api_base=api_base,
             api_key=api_key,
             dimensions=dimensions,
+        )
+
+    @classmethod
+    def from_model_config(cls, config: ModelConfig) -> CodeEmbeddingClient:
+        """Create client from a ModelConfig.
+
+        Preferred constructor — avoids duplicating provider-specific
+        translation logic that already lives in ModelConfig.
+        """
+        return cls(
+            url=config.url,
+            model=config.name,
+            provider=config.provider,
+            api_key=config.api_key,
+            dimensions=config.dimensions or 1024,
         )
 
     def verify_model(self) -> bool:

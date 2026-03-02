@@ -351,20 +351,8 @@ def process_elements(
     embed_client: CodeEmbeddingClient | None = None
 
     if not config.skip_ai:
-        summarize_cfg = config.summarize_model
-        llm_client = SummarizationLLMClient(
-            url=summarize_cfg.get_api_base() or "",
-            model=summarize_cfg.name,
-            provider=summarize_cfg.provider,
-            api_key=summarize_cfg.api_key,
-        )
-        embed_cfg = config.embed_model
-        embed_client = CodeEmbeddingClient(
-            url=embed_cfg.get_api_base() or "",
-            model=embed_cfg.name,
-            provider=embed_cfg.provider,
-            api_key=embed_cfg.api_key,
-        )
+        llm_client = SummarizationLLMClient.from_model_config(config.summarize_model)
+        embed_client = CodeEmbeddingClient.from_model_config(config.embed_model)
 
     # Pre-compute context sizes for all elements (for tier batching)
     # This enables DependencyTracker to group elements by context tier

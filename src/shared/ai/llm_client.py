@@ -31,7 +31,10 @@ import time
 import warnings
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
+
+if TYPE_CHECKING:
+    from shared.config import ModelConfig
 
 import aiohttp
 import httpx
@@ -432,14 +435,17 @@ class LLMClient:
         """Initialize LLM client.
 
         Args:
-            model: Model identifier (e.g., "ollama/qwen2.5-coder:3b", "gpt-4o-mini")
-            api_base: API base URL (required for Ollama, optional for cloud)
-            api_key: API key (required for cloud providers)
+            model: LiteLLM model identifier (e.g., "ollama/qwen3:4b", "openai/default").
+            api_base: API base URL (required for Ollama, optional for cloud).
+            api_key: API key (required for cloud providers).
             max_retries: Maximum retry attempts for transient failures.
             model_name: Original model name for thinking model detection.
-                When the LiteLLM model identifier differs from the actual model
+                When the LiteLLM identifier differs from the actual model
                 (e.g., "openai/default" for vllm-mlx serving "qwen3-4b"), pass
                 the real name here so thinking model detection works correctly.
+
+        Prefer ``from_model_config()`` when a ``ModelConfig`` is available —
+        it handles all provider-specific translation automatically.
         """
         self.model = model
         self.api_base = api_base
@@ -450,9 +456,33 @@ class LLMClient:
         # Extract provider from model string
         self.provider = model.split("/")[0] if "/" in model else "openai"
 
+        # Pre-compute thinking model flag once (instead of every generate call).
+        # Uses model_name (real name) if available, otherwise the LiteLLM identifier.
+        _raw = model_name or model
+        _base = _raw.split("/")[-1].lower()
+        self._is_thinking_model = any(_base.startswith(tm) for tm in self.THINKING_MODELS)
+
+    @classmethod
+    def from_model_config(cls, config: ModelConfig) -> LLMClient:
+        """Create client from a ModelConfig.
+
+        This is the preferred constructor — ModelConfig handles all
+        provider-specific translation (LiteLLM identifier, API base URL,
+        thinking model detection).
+
+        Args:
+            config: Model configuration from magaldi config.
+        """
+        return cls(
+            model=config.get_litellm_model(),
+            api_base=config.get_api_base(),
+            api_key=config.api_key,
+            model_name=config.name,
+        )
+
     @classmethod
     def from_config(cls, config: LLMConfig) -> LLMClient:
-        """Create client from config."""
+        """Create client from LLMConfig."""
         return cls(
             model=config.model,
             api_base=config.api_base,
@@ -477,6 +507,59 @@ class LLMClient:
             api_base=url,
             max_retries=max_retries,
         )
+
+    def _build_kwargs(
+        self,
+        use_model: str,
+        messages: list[dict[str, str]],
+        temperature: float,
+        top_p: float,
+        max_tokens: int,
+        timeout: int,
+        num_ctx: int | None,
+    ) -> dict[str, Any]:
+        """Build the kwargs dict for litellm.completion().
+
+        Centralises auth, thinking-model suppression, and num_ctx handling
+        so that generate() and generate_from_messages() stay thin.
+        """
+        kwargs: dict[str, Any] = {
+            "model": use_model,
+            "messages": messages,
+            "temperature": temperature,
+            "top_p": top_p,
+            "max_tokens": max_tokens,
+            "timeout": timeout,
+        }
+
+        # Auth
+        if self.api_base:
+            kwargs["api_base"] = self.api_base
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        elif use_model.startswith("openai/") and self.api_base:
+            # Local OpenAI-compatible servers don't need auth
+            # but LiteLLM requires an API key for openai/ prefix
+            kwargs["api_key"] = "not-needed"
+
+        # Disable thinking mode for models that use it by default
+        if self._is_thinking_model:
+            if use_model.startswith("ollama/"):
+                kwargs["think"] = False
+            elif use_model.startswith("openai/") and self.api_base:
+                # OpenAI-compatible local servers (vllm-mlx, llama.cpp)
+                kwargs["extra_body"] = kwargs.get("extra_body", {})
+                kwargs["extra_body"]["chat_template_kwargs"] = {"enable_thinking": False}
+
+        # Context window for local providers
+        if num_ctx:
+            if use_model.startswith("ollama/"):
+                kwargs["num_ctx"] = num_ctx
+            elif use_model.startswith("openai/") and self.api_base:
+                kwargs["extra_body"] = kwargs.get("extra_body", {})
+                kwargs["extra_body"]["n_ctx"] = num_ctx
+
+        return kwargs
 
     def verify_model(self) -> bool:
         """Check if model is available.
@@ -531,59 +614,9 @@ class LLMClient:
             from shared.ai.ollama_models import resolve_ollama_model
             use_model, num_ctx = resolve_ollama_model(use_model, self.api_base, num_ctx)
 
-        # Check if this is a thinking model that needs think=false.
-        # Use model_name hint (real name) if available, otherwise extract from
-        # the LiteLLM identifier.  This matters for vllm-mlx where the model
-        # identifier is "openai/default" but the actual model is e.g. "qwen3-4b".
-        # Split on "/" to handle org prefixes like "mlx-community/Qwen3-4B-..."
-        _raw_name = self.model_name or use_model
-        _name_for_detect = _raw_name.split("/")[-1] if "/" in _raw_name else _raw_name
-        is_thinking_model = any(
-            _name_for_detect.lower().startswith(tm) for tm in self.THINKING_MODELS
-        )
-
         def _do_generate() -> str:
-            # Build kwargs for litellm
-            kwargs: dict[str, Any] = {
-                "model": use_model,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": temperature,
-                "top_p": top_p,
-                "max_tokens": max_tokens,
-                "timeout": timeout,
-            }
-
-            # Add api_base for custom endpoints (Ollama, llama.cpp, etc.)
-            if self.api_base:
-                kwargs["api_base"] = self.api_base
-
-            # Add api_key if provided, or use dummy key for OpenAI-compatible local servers
-            if self.api_key:
-                kwargs["api_key"] = self.api_key
-            elif use_model.startswith("openai/") and self.api_base:
-                # Local OpenAI-compatible servers (llama.cpp) don't need auth
-                # but LiteLLM requires an API key for openai/ prefix
-                kwargs["api_key"] = "not-needed"
-
-            # Disable thinking mode for models that support it
-            if is_thinking_model:
-                if use_model.startswith("ollama/"):
-                    # LiteLLM added think parameter support in PR #15465 (Sept 2025)
-                    kwargs["think"] = False
-                elif use_model.startswith("openai/") and self.api_base:
-                    # OpenAI-compatible local servers (vllm-mlx, llama.cpp):
-                    # pass chat_template_kwargs to disable <think> blocks
-                    kwargs["extra_body"] = kwargs.get("extra_body", {})
-                    kwargs["extra_body"]["chat_template_kwargs"] = {"enable_thinking": False}
-
-            # Add num_ctx for local providers (KV cache optimization)
-            if num_ctx:
-                if use_model.startswith("ollama/"):
-                    kwargs["num_ctx"] = num_ctx
-                elif use_model.startswith("openai/") and self.api_base:
-                    # OpenAI-compatible local servers (llama.cpp, LM Studio, LocalAI)
-                    kwargs["extra_body"] = kwargs.get("extra_body", {})
-                    kwargs["extra_body"]["n_ctx"] = num_ctx
+            kwargs = self._build_kwargs(use_model, [{"role": "user", "content": prompt}],
+                                        temperature, top_p, max_tokens, timeout, num_ctx)
 
             response = completion(**kwargs)
 
@@ -641,49 +674,9 @@ class LLMClient:
             from shared.ai.ollama_models import resolve_ollama_model
             use_model, num_ctx = resolve_ollama_model(use_model, self.api_base, num_ctx)
 
-        # Check if this is a thinking model that needs think=false.
-        # Check if this is a thinking model — see generate() comment.
-        _raw_name = self.model_name or use_model
-        _name_for_detect = _raw_name.split("/")[-1] if "/" in _raw_name else _raw_name
-        is_thinking_model = any(
-            _name_for_detect.lower().startswith(tm) for tm in self.THINKING_MODELS
-        )
-
         def _do_generate() -> str:
-            kwargs: dict[str, Any] = {
-                "model": use_model,
-                "messages": messages,
-                "temperature": temperature,
-                "top_p": top_p,
-                "max_tokens": max_tokens,
-                "timeout": timeout,
-            }
-
-            if self.api_base:
-                kwargs["api_base"] = self.api_base
-
-            if self.api_key:
-                kwargs["api_key"] = self.api_key
-            elif use_model.startswith("openai/") and self.api_base:
-                kwargs["api_key"] = "not-needed"
-
-            # Disable thinking mode for models that support it
-            if is_thinking_model:
-                if use_model.startswith("ollama/"):
-                    kwargs["think"] = False
-                elif use_model.startswith("openai/") and self.api_base:
-                    # OpenAI-compatible local servers (vllm-mlx, llama.cpp)
-                    kwargs["extra_body"] = kwargs.get("extra_body", {})
-                    kwargs["extra_body"]["chat_template_kwargs"] = {"enable_thinking": False}
-
-            # Add num_ctx for local providers (KV cache optimization)
-            if num_ctx:
-                if use_model.startswith("ollama/"):
-                    kwargs["num_ctx"] = num_ctx
-                elif use_model.startswith("openai/") and self.api_base:
-                    # OpenAI-compatible local servers (llama.cpp, LM Studio, LocalAI)
-                    kwargs["extra_body"] = kwargs.get("extra_body", {})
-                    kwargs["extra_body"]["n_ctx"] = num_ctx
+            kwargs = self._build_kwargs(use_model, messages,
+                                        temperature, top_p, max_tokens, timeout, num_ctx)
 
             response = completion(**kwargs)
 
@@ -741,8 +734,24 @@ class EmbeddingClient:
         self.provider = model.split("/")[0] if "/" in model else "openai"
 
     @classmethod
+    def from_model_config(cls, config: ModelConfig) -> EmbeddingClient:
+        """Create client from a ModelConfig.
+
+        Preferred constructor — ModelConfig handles provider-specific translation.
+
+        Args:
+            config: Model configuration (must have ``dimensions`` set).
+        """
+        return cls(
+            model=config.get_litellm_model(),
+            api_base=config.get_api_base(),
+            api_key=config.api_key,
+            dimensions=config.dimensions or 1024,
+        )
+
+    @classmethod
     def from_config(cls, config: EmbeddingConfig) -> EmbeddingClient:
-        """Create client from config."""
+        """Create client from EmbeddingConfig."""
         return cls(
             model=config.model,
             api_base=config.api_base,

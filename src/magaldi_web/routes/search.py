@@ -101,15 +101,9 @@ Good example: "Summaries in this codebase are generated through a multi-step pip
 
 Answer:"""
 
-        # Use configured model alias with tiered context (e.g., qwen3-4b -> qwen3:4b-instruct-4k)
-        model_name = summarize_model.get_litellm_model()
         logger.info(f"Search summary: alias={config.llm.summarize_model} model={summarize_model.name} num_ctx={num_ctx}")
 
-        llm = LLMClient(
-            model=model_name,
-            api_base=summarize_model.get_api_base(),
-            api_key=summarize_model.api_key,
-        )
+        llm = LLMClient.from_model_config(summarize_model)
 
         summary = llm.generate(
             prompt=prompt,
@@ -181,12 +175,7 @@ async def search(
             from shared.ai.embedding import CodeEmbeddingClient
 
             embed_model = config.llm.get_embed_model()
-            embed_client = CodeEmbeddingClient(
-                url=embed_model.url,
-                model=embed_model.name,
-                provider=embed_model.provider,
-                api_key=embed_model.api_key,
-            )
+            embed_client = CodeEmbeddingClient.from_model_config(embed_model)
             query_embedding = await embed_client.embed_single_async(request.query)
             logger.info(f"Query embedding generated successfully (dim={len(query_embedding)})")
         except Exception as e:
