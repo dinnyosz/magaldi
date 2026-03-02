@@ -32,7 +32,6 @@ from magaldi_core.parsers.base import (
 from magaldi_core.tree_sitter_manager import (
     DecoratorInfo,
     ExtractedElement,
-    analyze_purity,
     associate_comments,
     detect_cli_commands,
     detect_http_routes,
@@ -204,16 +203,12 @@ class PythonParser(TreeSitterParser):
                     except Exception:
                         pass  # Skip type extraction if parsing fails
 
-                # Purity analysis
-                calls = build_extracted_calls(elem.calls)
+                # Side effects and mutated state (purity analysis disabled —
+                # 97% false-positive rate, see quality reports)
                 mutations = elem.attributes_modified or []
-                purity = analyze_purity(calls, mutations, "python")
-                elem.purity = {
-                    "level": purity.level,
-                    "confidence": purity.confidence,
-                    "reasons": purity.reasons,
-                }
-                effects = extract_side_effects(calls, mutations, "python")
+                effects = extract_side_effects(
+                    build_extracted_calls(elem.calls), mutations, "python"
+                )
                 elem.side_effects = [
                     {"kind": e.kind, "target": e.target, "line": e.line}
                     for e in effects
