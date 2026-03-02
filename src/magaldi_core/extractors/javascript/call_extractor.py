@@ -55,12 +55,16 @@ def extract_javascript_calls(function_node: Node) -> list[ExtractedCall]:
     for node in walk_tree(body_node):
         if node.type == "call_expression":
             extracted = _extract_js_call(node)
-            if extracted:
-                for call in extracted:
-                    key = (call.name, call.receiver, call.line)
-                    if key not in seen:
-                        seen.add(key)
-                        calls.append(call)
+        elif node.type == "new_expression":
+            extracted = _extract_js_new_call(node)
+        else:
+            continue
+        if extracted:
+            for call in extracted:
+                key = (call.name, call.receiver, call.line)
+                if key not in seen:
+                    seen.add(key)
+                    calls.append(call)
 
     return calls
 
@@ -134,14 +138,51 @@ def extract_top_level_javascript_calls(tree: Tree) -> list[ExtractedCall]:
     for node in walk_top_level(tree.root_node, _JS_SCOPE_TYPES):
         if node.type == "call_expression":
             extracted = _extract_js_call(node)
-            if extracted:
-                for call in extracted:
-                    key = (call.name, call.receiver, call.line)
-                    if key not in seen:
-                        seen.add(key)
-                        calls.append(call)
+        elif node.type == "new_expression":
+            extracted = _extract_js_new_call(node)
+        else:
+            continue
+        if extracted:
+            for call in extracted:
+                key = (call.name, call.receiver, call.line)
+                if key not in seen:
+                    seen.add(key)
+                    calls.append(call)
 
     return calls
+
+
+def _extract_js_new_call(node: Node) -> list[ExtractedCall]:
+    """Extract call information from a JavaScript new_expression node.
+
+    Handles: new Foo(), new pkg.Bar()
+
+    Args:
+        node: A 'new_expression' node from tree-sitter.
+
+    Returns:
+        List of ExtractedCall objects.
+    """
+    constructor_node = get_child_by_field(node, "constructor")
+    if not constructor_node:
+        return []
+
+    line = node.start_point[0] + 1
+
+    if constructor_node.type == "identifier":
+        name = get_node_text(constructor_node)
+        return [ExtractedCall(name=name, receiver=None, line=line)]
+    elif constructor_node.type == "member_expression":
+        prop_node = get_child_by_field(constructor_node, "property")
+        obj_node = get_child_by_field(constructor_node, "object")
+        if prop_node:
+            return [ExtractedCall(
+                name=get_node_text(prop_node),
+                receiver=get_node_text(obj_node) if obj_node else None,
+                line=line,
+            )]
+
+    return []
 
 
 def _get_js_chain_root(node: Node) -> str | None:
