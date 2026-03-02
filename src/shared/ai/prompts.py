@@ -1087,14 +1087,52 @@ UNCLOSED_THINKING_PATTERNS = [
     r"<reflection>.*$",
 ]
 
+# Orphaned closing/opening tags — model started "thinking" as the response itself,
+# then output </think> mid-summary without a matching opening tag.
+# Must run AFTER paired tag removal to avoid interfering.
+ORPHANED_TAG_PATTERNS = [
+    r"</think>\s*",
+    r"</thinking>\s*",
+    r"</reasoning>\s*",
+    r"</reflection>\s*",
+    r"<think>\s*",
+    r"<thinking>\s*",
+    r"<reasoning>\s*",
+    r"<reflection>\s*",
+]
+
 # Common prefixes to remove from summaries
 PREFIXES_TO_REMOVE = [
     "Summary:",
+    "**Summary:**",
+    "**Summary**:",
+    # "This X" anti-patterns
     "This function ",
     "This method ",
     "This class ",
     "This file ",
+    "This module ",
+    "This code ",
+    "This script ",
+    "This variable ",
+    "This constant ",
+    "This interface ",
+    "This implementation ",
+    "This decorator ",
+    "This import ",
+    # "The X" anti-patterns
+    "The function ",
+    "The method ",
+    "The class ",
+    "The file ",
+    "The module ",
+    "The code ",
 ]
+
+# Leading markdown formatting to strip before checking prefixes
+_LEADING_MARKDOWN_RE = re.compile(r"^(?:[#]+\s+|[-*]\s+|\*{1,2})")
+
+MIN_SUMMARY_LENGTH = 10
 
 
 def clean_summary(summary: str) -> str:
@@ -1104,7 +1142,7 @@ def clean_summary(summary: str) -> str:
         summary: Raw summary from LLM.
 
     Returns:
-        Cleaned summary.
+        Cleaned summary, or empty string if quality is too low.
     """
     summary = summary.strip()
 
@@ -1127,16 +1165,32 @@ def clean_summary(summary: str) -> str:
     for pattern in UNCLOSED_THINKING_PATTERNS:
         summary = re.sub(pattern, "", summary, flags=re.DOTALL | re.IGNORECASE)
 
+    # Remove orphaned closing/opening tags (no matching pair)
+    for pattern in ORPHANED_TAG_PATTERNS:
+        summary = re.sub(pattern, "", summary, flags=re.IGNORECASE)
+
     summary = summary.strip()
 
     if not summary:
         return summary
 
-    # Remove common prefixes
+    # Remove common prefixes (try raw first, then after markdown stripping)
+    prefix_removed = False
     for prefix in PREFIXES_TO_REMOVE:
         if summary.lower().startswith(prefix.lower()):
             summary = summary[len(prefix):].strip()
+            prefix_removed = True
             break
+
+    if not prefix_removed:
+        # Strip leading markdown formatting and retry prefix removal
+        stripped = _LEADING_MARKDOWN_RE.sub("", summary).strip()
+        if stripped:
+            summary = stripped
+            for prefix in PREFIXES_TO_REMOVE:
+                if summary.lower().startswith(prefix.lower()):
+                    summary = summary[len(prefix):].strip()
+                    break
 
     # Ensure ends with period
     if summary and not summary.endswith("."):
@@ -1145,5 +1199,11 @@ def clean_summary(summary: str) -> str:
     # Capitalize first letter
     if summary:
         summary = summary[0].upper() + summary[1:]
+
+    # Quality validation: reject summaries that are too short or contain no ASCII letters
+    if len(summary) < MIN_SUMMARY_LENGTH:
+        return ""
+    if not re.search(r"[a-zA-Z]", summary):
+        return ""
 
     return summary

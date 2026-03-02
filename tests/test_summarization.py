@@ -217,8 +217,8 @@ class TestCleanSummary:
     """Tests for summary cleaning."""
 
     def test_strips_whitespace(self):
-        result = clean_summary("  A summary  ")
-        assert result == "A summary."
+        result = clean_summary("  A summary text  ")
+        assert result == "A summary text."
 
     def test_removes_common_prefixes(self):
         result = clean_summary("Summary: Does something important")
@@ -234,6 +234,122 @@ class TestCleanSummary:
     def test_capitalizes_first_letter(self):
         result = clean_summary("calculates the sum")
         assert result[0].isupper()
+
+    # --- Orphaned think tag removal ---
+
+    def test_orphaned_closing_think_tag_with_content(self):
+        result = clean_summary("</think>\n\nConverts a string to uppercase.")
+        assert result == "Converts a string to uppercase."
+
+    def test_multiple_orphaned_closing_tags(self):
+        result = clean_summary(
+            "</think>\n\n</think>\n\nUsed to parse input data."
+        )
+        assert result == "Used to parse input data."
+
+    def test_orphaned_closing_tag_only(self):
+        """'</think>.' is too short after cleanup -> empty string."""
+        result = clean_summary("</think>.")
+        assert result == ""
+
+    def test_orphaned_closing_thinking_tag(self):
+        result = clean_summary("</thinking>\nHandles HTTP requests for the API.")
+        assert result == "Handles HTTP requests for the API."
+
+    def test_unclosed_opening_tag_consumes_to_end(self):
+        """Opening <think> at start with content is treated as unclosed thinking (eaten)."""
+        result = clean_summary("<think>\nReturns the cached result.")
+        assert result == ""
+
+    def test_orphaned_opening_tag_mid_text_consumed_by_unclosed(self):
+        """Opening <think> mid-text is treated as unclosed thinking — content after is eaten."""
+        result = clean_summary("Returns <think> the cached result.")
+        # UNCLOSED pattern eats from <think> to end; "Returns" alone is too short
+        assert result == ""
+
+    # --- Paired tag removal still works (regression) ---
+
+    def test_paired_think_tags_removed(self):
+        result = clean_summary(
+            "<think>I need to summarize this</think>Validates user input."
+        )
+        assert result == "Validates user input."
+
+    def test_paired_thinking_tags_removed(self):
+        result = clean_summary(
+            "<thinking>Let me think about this code</thinking> Parses JSON from the request body."
+        )
+        assert result == "Parses JSON from the request body."
+
+    # --- Leading markdown before anti-pattern prefix ---
+
+    def test_leading_bullet_before_prefix(self):
+        result = clean_summary("- This function parses config files")
+        assert "This function" not in result
+        assert result.startswith("Parses")
+
+    def test_leading_bold_before_prefix(self):
+        result = clean_summary("**This method validates input data")
+        assert "This method" not in result
+        assert result.startswith("Validates")
+
+    def test_leading_header_before_prefix(self):
+        result = clean_summary("# This class manages database connections")
+        assert "This class" not in result
+        assert result.startswith("Manages")
+
+    # --- Expanded prefix removal ---
+
+    def test_removes_this_module_prefix(self):
+        result = clean_summary("This module provides utility functions")
+        assert result.startswith("Provides")
+
+    def test_removes_the_function_prefix(self):
+        result = clean_summary("The function calculates the hash value")
+        assert result.startswith("Calculates")
+
+    def test_removes_the_class_prefix(self):
+        result = clean_summary("The class represents a user session")
+        assert result.startswith("Represents")
+
+    def test_removes_bold_summary_prefix(self):
+        result = clean_summary("**Summary:** Extracts tokens from source code")
+        assert result.startswith("Extracts")
+
+    # --- Quality validation ---
+
+    def test_too_short_summary_returns_empty(self):
+        result = clean_summary("Hi.")
+        assert result == ""
+
+    def test_no_ascii_letters_returns_empty(self):
+        """Arabic/non-ASCII only text -> empty string."""
+        result = clean_summary("مرحبا بالعالم")
+        assert result == ""
+
+    def test_pure_punctuation_returns_empty(self):
+        result = clean_summary("... --- !!!")
+        assert result == ""
+
+    # --- Real-world examples from OpenSearch ---
+
+    def test_real_example_think_dot(self):
+        result = clean_summary("</think>.")
+        assert result == ""
+
+    def test_real_example_multiple_orphans_with_antipattern(self):
+        result = clean_summary(
+            "</think>\n\n</think>\n\nThe function is used to validate input"
+        )
+        assert "The function" not in result
+        assert result.startswith("Is used") or result.startswith("Used") or result.startswith("Validate")
+
+    def test_real_example_hallucination_after_orphan(self):
+        """'Convert\\n\\n</think>\\n\\nIslamic emoticon.' -> too short or no sense."""
+        result = clean_summary("Convert\n\n</think>\n\nIslamic emoticon.")
+        # After orphan removal: "Convert  Islamic emoticon." — may or may not pass length
+        # but if it does pass, at least it's cleaned of tags
+        assert "</think>" not in result
 
 
 # =============================================================================
