@@ -145,10 +145,16 @@ def resolve_all_calls(
                     type_resolved += 1
                     call["category"] = "resolved"
 
-            # Update if changed
-            if resolved_id != old_resolved_id:
-                call["resolved_id"] = resolved_id
-                updated = True
+            # Update if a new resolution was found; preserve old resolution
+            # if no strategy matched (e.g., same-file bare calls from Strategy 1-2)
+            if resolved_id:
+                if resolved_id != old_resolved_id:
+                    call["resolved_id"] = resolved_id
+                    updated = True
+            elif not old_resolved_id:
+                # Both None — no change needed
+                pass
+            # else: no new match but had old resolution — keep the old one
 
         if updated:
             repo.store_calls(element_id, calls)
