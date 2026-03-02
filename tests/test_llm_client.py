@@ -777,6 +777,92 @@ class TestThinkingModelDetection:
         )
         assert client_vllm._is_thinking_model is True
 
+    def test_thinking_model_strips_think_tags_from_generate(self):
+        """Thinking models should have <think> blocks stripped from output."""
+        client = LLMClient(model="ollama/qwen3:4b", api_base="http://localhost:11434")
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = (
+            "<think>Let me reason about this...</think>The actual response"
+        )
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response):
+            result = client.generate("test prompt")
+
+        assert result == "The actual response"
+
+    def test_thinking_model_strips_think_tags_from_generate_from_messages(self):
+        """Thinking models should have <think> blocks stripped from messages output."""
+        client = LLMClient(
+            model="openai/default",
+            api_base="http://localhost:8000/v1",
+            model_name="mlx-community/Qwen3-4B-Instruct-2507-4bit",
+        )
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = (
+            "<think>I need to score these variables.\n"
+            "1. MAX_RETRIES looks important, score high\n"
+            "2. tmp is just a temp var</think>\n"
+            "1. 9,1,1,8\n2. 1,1,1,1"
+        )
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response):
+            result = client.generate_from_messages(
+                [{"role": "user", "content": "test"}]
+            )
+
+        assert "<think>" not in result
+        assert "1. 9,1,1,8" in result
+        assert "2. 1,1,1,1" in result
+
+    def test_thinking_model_strips_multiline_think_tags(self):
+        """<think> blocks spanning multiple lines should be fully stripped."""
+        client = LLMClient(model="ollama/qwen3:4b", api_base="http://localhost:11434")
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = (
+            "<think>\nLine 1\nLine 2\nLine 3\n</think>\nActual output"
+        )
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response):
+            result = client.generate("test")
+
+        assert result == "Actual output"
+
+    def test_thinking_model_handles_only_think_content(self):
+        """If output is only <think> tags with no real content, return empty."""
+        client = LLMClient(model="ollama/qwen3:4b", api_base="http://localhost:11434")
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = (
+            "<think>All thinking, no output</think>"
+        )
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response):
+            result = client.generate("test")
+
+        assert result == ""
+
+    def test_non_thinking_model_preserves_think_tags(self):
+        """Non-thinking models should NOT have <think> tags stripped."""
+        client = LLMClient(model="ollama/llama-3.1:8b", api_base="http://localhost:11434")
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = (
+            "<think>This is literal text, not a thinking tag</think>"
+        )
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response):
+            result = client.generate("test")
+
+        assert "<think>" in result
+
 
 class TestFromModelConfig:
     """Tests for from_model_config() factory methods."""

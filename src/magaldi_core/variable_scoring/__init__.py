@@ -87,6 +87,18 @@ def _build_batches(
     return batches
 
 
+def _strip_think_tags(output: str) -> str:
+    """Strip <think>...</think> blocks from LLM output.
+
+    Qwen3 and other thinking models may emit reasoning in <think> tags
+    even when thinking is disabled (e.g. server doesn't honor
+    chat_template_kwargs). The reasoning text can contain numbered patterns
+    that confuse the score parser, or consume the token budget so actual
+    scores never appear.
+    """
+    return re.sub(r"<think>.*?</think>", "", output, flags=re.DOTALL).strip()
+
+
 def _parse_scores(output: str, batch_size: int) -> list[VariableScore | None]:
     """Parse LLM output into variable scores.
 
@@ -103,6 +115,9 @@ def _parse_scores(output: str, batch_size: int) -> list[VariableScore | None]:
     Returns:
         List of VariableScore (or None for unparseable lines).
     """
+    # Strip thinking blocks before parsing (defense against thinking models)
+    output = _strip_think_tags(output)
+
     scores: list[VariableScore | None] = [None] * batch_size
     score_pattern = re.compile(r"(\d+)\.\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)")
 

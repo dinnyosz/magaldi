@@ -26,6 +26,7 @@ import atexit
 import contextlib
 import logging
 import random
+import re
 import signal
 import time
 import warnings
@@ -462,6 +463,23 @@ class LLMClient:
         _base = _raw.split("/")[-1].lower()
         self._is_thinking_model = any(_base.startswith(tm) for tm in self.THINKING_MODELS)
 
+        # Compiled regex for stripping <think> blocks (only used for thinking models)
+        self._think_re = re.compile(r"<think>.*?</think>", re.DOTALL)
+
+    def _strip_think_tags(self, text: str) -> str:
+        """Strip <think>...</think> blocks from model output.
+
+        Thinking models (Qwen3, DeepSeek-R1) may still emit <think> tags even
+        when thinking is disabled via API params — e.g. when the inference
+        server doesn't honor ``chat_template_kwargs``.  Stripping these blocks
+        prevents reasoning text from polluting downstream parsers (variable
+        scoring, summarization) and avoids wasting the tight token budget on
+        hidden reasoning.
+
+        Only called when ``_is_thinking_model`` is True.
+        """
+        return self._think_re.sub("", text).strip()
+
     @classmethod
     def from_model_config(cls, config: ModelConfig) -> LLMClient:
         """Create client from a ModelConfig.
@@ -625,7 +643,10 @@ class LLMClient:
             if content is None:
                 raise LLMError(f"Empty response from model '{use_model}'")
 
-            return content.strip()  # type: ignore[no-any-return]
+            text = content.strip()
+            if self._is_thinking_model:
+                text = self._strip_think_tags(text)
+            return text  # type: ignore[no-any-return]
 
         return _retry_with_backoff(
             _do_generate,
@@ -684,7 +705,10 @@ class LLMClient:
             if content is None:
                 raise LLMError(f"Empty response from model '{use_model}'")
 
-            return content.strip()  # type: ignore[no-any-return]
+            text = content.strip()
+            if self._is_thinking_model:
+                text = self._strip_think_tags(text)
+            return text  # type: ignore[no-any-return]
 
         return _retry_with_backoff(
             _do_generate,

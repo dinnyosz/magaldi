@@ -68,7 +68,9 @@ def build_user_prompt(variables: list[tuple[int, str, str, str]]) -> str:
     Returns:
         Formatted user prompt.
     """
-    lines = ["Score these variables:"]
+    # /no_think disables Qwen3's thinking mode via soft-switch.
+    # This is a fallback for servers that don't honor chat_template_kwargs.
+    lines = ["/no_think\nScore these variables:"]
     for idx, file_path, _name, raw_code in variables:
         # Truncate long code to keep prompt compact
         code = raw_code.replace("\n", " ").strip()
