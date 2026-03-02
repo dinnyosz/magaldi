@@ -11,7 +11,7 @@ services:
       - discovery.type=single-node
       - plugins.security.disabled=true
       - DISABLE_INSTALL_DEMO_CONFIG=true
-      - "OPENSEARCH_JAVA_OPTS=-Xms${SEARCH_HEAP_SIZE:-1g} -Xmx${SEARCH_HEAP_SIZE:-1g}"
+      - "OPENSEARCH_JAVA_OPTS=-Xms${SEARCH_HEAP_SIZE:-2g} -Xmx${SEARCH_HEAP_SIZE:-2g}"
     ports:
       - "${SEARCH_PORT:-9200}:9200"
     volumes:

@@ -7,7 +7,10 @@ connection management and index creation for all sub-repositories.
 from __future__ import annotations
 
 import hashlib
+import logging
 from typing import TYPE_CHECKING, Any
+
+logger = logging.getLogger(__name__)
 
 from shared.db.backends.base import SearchClient, get_index_mapping
 from shared.db.backends.factory import create_client
@@ -395,6 +398,7 @@ INDEX_MAPPING = {
     "settings": {
         "number_of_shards": 1,
         "number_of_replicas": 0,
+        "index.mapping.nested_objects.limit": 30000,
     },
 }
 
@@ -538,13 +542,22 @@ class RepositoryBase:
         return self._client
 
     def _ensure_index(self) -> None:
-        """Create indices if they don't exist."""
+        """Create indices if they don't exist, update settings on existing ones."""
         client = self._client
         if client:
             bt = self.backend_type
             # Main elements index
             if not client.index_exists(INDEX_NAME):
                 client.index_create(INDEX_NAME, _make_index_mapping(bt))
+            else:
+                # Update nested objects limit on existing index
+                try:
+                    client.indices_put_settings(
+                        INDEX_NAME,
+                        {"index.mapping.nested_objects.limit": 30000},
+                    )
+                except Exception:
+                    logger.debug("Could not update nested_objects.limit on %s", INDEX_NAME)
             # Relationships index (knowledge graph edges)
             if not client.index_exists(RELATIONSHIPS_INDEX_NAME):
                 client.index_create(RELATIONSHIPS_INDEX_NAME, _make_relationships_mapping(bt))
