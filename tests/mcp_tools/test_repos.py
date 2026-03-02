@@ -33,13 +33,17 @@ class TestListRepos:
         assert len(result) == 1
         assert result[0]["scope"] == "magaldi"
 
-    def test_list_repos_with_scope_filter(self, mock_repo):
-        """Test list_repos with scope filter."""
-        mock_repo.get_indexed_repositories.return_value = []
+    def test_list_repos_no_scope_filter(self, mock_repo):
+        """Test list_repos does not filter by scope (returns all repos)."""
+        mock_repo.get_indexed_repositories.return_value = [
+            {"scope": "org1", "repository": "repo1", "element_count": 50},
+            {"scope": "org2", "repository": "repo2", "element_count": 75},
+        ]
 
-        result = list_repos(repo=mock_repo, scope="test-scope")
+        result = list_repos(repo=mock_repo)
 
-        assert isinstance(result, list)
+        assert len(result) == 2
+        mock_repo.get_indexed_repositories.assert_called_once_with()
 
 
 # =============================================================================

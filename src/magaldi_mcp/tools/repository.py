@@ -11,19 +11,16 @@ from ._utils import _resolve_scope_repo
 
 def list_repos(
     repo: Repository,
-    scope: str | None = None,
 ) -> list[dict[str, Any]]:
     """List all indexed repositories.
 
     Args:
         repo: Search repository.
-        scope: Filter by scope (auto-detected from magaldi.yaml if not provided).
 
     Returns:
         List of repositories with statistics.
     """
-    scope, _ = _resolve_scope_repo(scope, None)
-    return repo.get_indexed_repositories(scope=scope)  # type: ignore[no-any-return]
+    return repo.get_indexed_repositories()  # type: ignore[no-any-return]
 
 
 def list_features(
