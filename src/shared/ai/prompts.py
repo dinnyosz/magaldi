@@ -1151,8 +1151,10 @@ PROMPT_LEAK_PREFIXES = [
 ]
 
 # Signature-echo pattern — LLM just echoed the function declaration
+# Matches: def foo(, function bar(, fn baz(, const x = (...) =>, etc.
 _SIGNATURE_ECHO_RE = re.compile(
-    r"^(def|function|async def|async function|fn|pub fn|const|let|var|export)\s+\w+\s*[\(<]"
+    r"^(def|function|async def|async function|fn|pub fn|export)\s+\w+\s*[\(<]"
+    r"|^(const|let|var)\s+\w+\s*=\s*(\(|async\s*\()"
 )
 
 # Leading markdown formatting to strip before checking prefixes
