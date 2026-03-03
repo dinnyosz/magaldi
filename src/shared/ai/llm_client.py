@@ -480,6 +480,47 @@ class LLMClient:
         """
         return self._think_re.sub("", text).strip()
 
+    def _extract_content(self, message: Any, use_model: str) -> str:
+        """Extract text content from an LLM response message.
+
+        Handles thinking models where the server may split output into
+        ``content`` (actual answer) and ``reasoning_content`` (thinking).
+        When ``content`` is None on a thinking model, falls back to
+        ``reasoning_content`` — some servers put the entire output there
+        when thinking suppression is ignored.
+
+        Args:
+            message: The response message object from LiteLLM.
+            use_model: Model identifier (for error messages).
+
+        Returns:
+            Extracted text with <think> tags stripped for thinking models.
+
+        Raises:
+            LLMError: If no usable content is found.
+        """
+        content = message.content
+
+        # Thinking models: server may put output in reasoning_content
+        # when it ignores enable_thinking=False
+        if content is None and self._is_thinking_model:
+            reasoning = getattr(message, "reasoning_content", None)
+            if reasoning:
+                logger.debug(
+                    "Model '%s' returned content=None but has reasoning_content "
+                    "(%d chars) — using it as fallback",
+                    use_model, len(reasoning),
+                )
+                content = reasoning
+
+        if content is None:
+            raise LLMError(f"Empty response from model '{use_model}'")
+
+        text = content.strip()
+        if self._is_thinking_model:
+            text = self._strip_think_tags(text)
+        return text
+
     @classmethod
     def from_model_config(cls, config: ModelConfig) -> LLMClient:
         """Create client from a ModelConfig.
@@ -637,16 +678,7 @@ class LLMClient:
                                         temperature, top_p, max_tokens, timeout, num_ctx)
 
             response = completion(**kwargs)
-
-            # Extract text from response
-            content = response.choices[0].message.content
-            if content is None:
-                raise LLMError(f"Empty response from model '{use_model}'")
-
-            text = content.strip()
-            if self._is_thinking_model:
-                text = self._strip_think_tags(text)
-            return text  # type: ignore[no-any-return]
+            return self._extract_content(response.choices[0].message, use_model)
 
         return _retry_with_backoff(
             _do_generate,
@@ -700,15 +732,7 @@ class LLMClient:
                                         temperature, top_p, max_tokens, timeout, num_ctx)
 
             response = completion(**kwargs)
-
-            content = response.choices[0].message.content
-            if content is None:
-                raise LLMError(f"Empty response from model '{use_model}'")
-
-            text = content.strip()
-            if self._is_thinking_model:
-                text = self._strip_think_tags(text)
-            return text  # type: ignore[no-any-return]
+            return self._extract_content(response.choices[0].message, use_model)
 
         return _retry_with_backoff(
             _do_generate,

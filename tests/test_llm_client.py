@@ -863,6 +863,61 @@ class TestThinkingModelDetection:
 
         assert "<think>" in result
 
+    def test_thinking_model_falls_back_to_reasoning_content(self):
+        """When content=None, thinking model should use reasoning_content."""
+        client = LLMClient(
+            model="openai/default",
+            api_base="http://localhost:8000/v1",
+            model_name="mlx-community/Qwen3-4B-Instruct-2507-4bit",
+        )
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = None
+        mock_response.choices[0].message.reasoning_content = (
+            "1. 9,1,1,8\n2. 1,1,1,1"
+        )
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response):
+            result = client.generate_from_messages(
+                [{"role": "user", "content": "test"}]
+            )
+
+        assert "1. 9,1,1,8" in result
+        assert "2. 1,1,1,1" in result
+
+    def test_thinking_model_strips_think_from_reasoning_content(self):
+        """reasoning_content fallback should also have think tags stripped."""
+        client = LLMClient(
+            model="openai/default",
+            api_base="http://localhost:8000/v1",
+            model_name="mlx-community/Qwen3-4B-Instruct-2507-4bit",
+        )
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = None
+        mock_response.choices[0].message.reasoning_content = (
+            "<think>reasoning</think>actual scores"
+        )
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response):
+            result = client.generate("test")
+
+        assert result == "actual scores"
+
+    def test_non_thinking_model_no_reasoning_fallback(self):
+        """Non-thinking model should NOT fall back to reasoning_content."""
+        client = LLMClient(model="ollama/llama-3.1:8b", api_base="http://localhost:11434")
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = None
+        mock_response.choices[0].message.reasoning_content = "some reasoning"
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response), pytest.raises(LLMError, match="Empty response"):
+            client.generate("test")
+
 
 class TestFromModelConfig:
     """Tests for from_model_config() factory methods."""
