@@ -307,6 +307,7 @@ class FeatureClusterer:
             self._llm_client = SummarizationLLMClient(
                 url=self.config.api_base,
                 model=self.config.labeling_model,
+                provider=self.config.provider,
             )
         return self._llm_client
 
