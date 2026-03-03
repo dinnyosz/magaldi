@@ -259,32 +259,13 @@ def _start_server(plan: ServerPlan, metal_memory_fraction: float = 0.35) -> bool
 
     # -- Metal memory cap --
     # vllm-mlx hardcodes mx.set_memory_limit(90% of device) which lets a 2.5GB
-    # 4-bit model balloon to 36GB+.  The caller passes the fraction based on
-    # model role: 35% for the LLM server, 15% for the embeddings-only server,
-    # reserving ~50% for the OS and magaldi parse process.
+    # 4-bit model balloon to 36GB+.  We patch batched.py to read from env vars
+    # instead.  The caller passes the fraction based on model role: 35% for the
+    # LLM server, 15% for the embeddings-only server, reserving ~50% for the
+    # OS and magaldi parse process.
     env = os.environ.copy()
     env["MAGALDI_METAL_MEMORY_FRACTION"] = str(metal_memory_fraction)
-
-    # Inject a Python preamble that patches mx.set_memory_limit before
-    # vllm_mlx imports it, then runs the CLI entrypoint.
-    preamble = (
-        "import mlx.core as mx, os; "
-        "frac = float(os.environ.get('MAGALDI_METAL_MEMORY_FRACTION', '0.50')); "
-        "info = mx.device_info(); "
-        "dev_mem = info.get('max_recommended_working_set_size', info.get('memory_size', 0)); "
-        "limit = int(dev_mem * frac); "
-        "mx.set_memory_limit(limit); "
-        "cache = int(4 * 1024**3); "
-        "mx.set_cache_limit(cache); "
-        # Prevent vllm_mlx from overriding our limits with its hardcoded 90%
-        "mx.set_memory_limit = lambda *a, **k: limit; "
-        "mx.set_cache_limit = lambda *a, **k: cache; "
-        "from vllm_mlx.cli import main; main()"
-    )
-    # Replace "python -m vllm_mlx.cli serve ..." with "python -c <preamble> serve ..."
-    # cmd[3:] keeps "serve" and all args after it.  With -c, sys.argv becomes
-    # ["-c", "serve", model, "--port", ...] which argparse parses correctly.
-    cmd = [cmd[0], "-c", preamble] + cmd[3:]
+    env["MAGALDI_METAL_CACHE_GB"] = "4"
 
     # Ensure pid directory exists
     PIDFILE_DIR.mkdir(parents=True, exist_ok=True)
