@@ -402,7 +402,7 @@ class BenchmarkConfig:
             - qwen3.5-small
             - qwen3.5-4b
           eval_models:
-            - qwen3.5-8b-eval  # Must NOT overlap with benchmark_models
+            - qwen3.5-9b-eval  # Must NOT overlap with benchmark_models
     """
 
     # Named model configurations for benchmarking
@@ -442,11 +442,11 @@ class BenchmarkConfig:
             num_ctx=16384,
         ),
         # Eval-only model: larger model not in the benchmark set
-        # Using qwen3.5:8b as judge — big enough gap from 2B/4B test models
+        # Using qwen3.5:9b as judge — big enough gap from 2B/4B test models
         # to provide meaningful evaluation without self-bias.
         # Alternative: use "openai:gpt-4o-mini" for cloud-based eval.
-        "qwen3.5-8b-eval": ModelConfig(
-            name="qwen3.5:8b",
+        "qwen3.5-9b-eval": ModelConfig(
+            name="qwen3.5:9b",
             provider="ollama",
             url="http://localhost:11434",
             num_ctx=16384,
@@ -466,7 +466,7 @@ class BenchmarkConfig:
     # IMPORTANT: eval model should NOT be in benchmark_models to avoid self-bias.
     # Use a larger model from a different size class for fair evaluation.
     eval_models: list[str] = field(default_factory=lambda: [
-        "qwen3.5-8b-eval",  # Quality evaluator (larger, not benchmarked)
+        "qwen3.5-9b-eval",  # Quality evaluator (larger, not benchmarked)
     ])
 
     # Generation settings (based on paper's methodology)
