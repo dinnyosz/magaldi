@@ -111,43 +111,79 @@ def prompt_improver(
     console.print()
 
     try:
+        # Track previous scores for delta display
+        prev_scores: dict[str, float] = {}
+        prev_avg: float | None = None
+
         # Run with live progress
         def on_iteration(iter_result: object) -> None:
-            """Print progress for each iteration."""
+            """Print progress for each iteration with detailed improvement steps."""
+            nonlocal prev_scores, prev_avg
             from shared.ai.prompt_improver import IterationResult
             assert isinstance(iter_result, IterationResult)
 
             i = iter_result.iteration
             score = iter_result.avg_score
 
-            if i == 0:
-                label = "Baseline (production prompt)"
-            else:
-                label = f"Improved prompt"
-                if iter_result.prompt.reasoning:
-                    label += f" — {iter_result.prompt.reasoning[:80]}"
-
-            # Score delta from previous
-            delta_str = ""
-            if i > 0:
-                # We don't have access to previous here, but the main result will show it
-                pass
-
+            # Header for this iteration
             score_color = "green" if score >= target_score else "yellow" if score >= 6.0 else "red"
             target_marker = " [green]✓ TARGET REACHED[/]" if score >= target_score else ""
 
+            # Score delta
+            delta_str = ""
+            if prev_avg is not None:
+                delta = score - prev_avg
+                if delta > 0:
+                    delta_str = f" [green](+{delta:.1f})[/]"
+                elif delta < 0:
+                    delta_str = f" [red]({delta:.1f})[/]"
+                else:
+                    delta_str = " [dim](±0)[/]"
+
+            if i == 0:
+                console.print(f"\n  [bold]Iteration {i}:[/] Baseline (production prompt)")
+            else:
+                console.print(f"\n  [bold]Iteration {i}:[/] Improved prompt")
+
             console.print(
-                f"  Iteration {i}: [{score_color}]{score:.1f}/10[/] "
-                f"({iter_result.summary_time:.1f}s gen + {iter_result.eval_time:.1f}s eval) "
-                f"[dim]{label}[/]{target_marker}"
+                f"    Score: [{score_color}]{score:.1f}/10[/]{delta_str}"
+                f" ({iter_result.summary_time:.1f}s gen + {iter_result.eval_time:.1f}s eval)"
+                f"{target_marker}"
             )
 
-            # Show the summary
+            # Show per-criterion scores with deltas
+            if iter_result.scores.scores:
+                score_parts = []
+                for criterion, s in iter_result.scores.scores.items():
+                    c_color = "green" if s >= 8 else "yellow" if s >= 6 else "red"
+                    c_delta = ""
+                    if criterion in prev_scores:
+                        d = s - prev_scores[criterion]
+                        if d > 0:
+                            c_delta = f"[green]↑{d}[/]"
+                        elif d < 0:
+                            c_delta = f"[red]↓{abs(d)}[/]"
+                    score_parts.append(f"{criterion}:[{c_color}]{s}[/]{c_delta}")
+                console.print(f"    Criteria: {', '.join(score_parts)}")
+
+            # Show evaluator notes
+            if iter_result.scores.notes:
+                console.print(f"    [dim]Notes: {iter_result.scores.notes}[/]")
+
+            # Show improvement reasoning (what the improver changed and why)
+            if i > 0 and iter_result.prompt.reasoning:
+                console.print(f"    [bold cyan]Improvement:[/] {iter_result.prompt.reasoning}")
+
+            # Show the generated summary
             if iter_result.summary:
                 summary_preview = iter_result.summary[:200]
                 if len(iter_result.summary) > 200:
                     summary_preview += "..."
                 console.print(f"    [dim]Summary: {summary_preview}[/]")
+
+            # Update previous scores for next iteration's deltas
+            prev_scores = dict(iter_result.scores.scores)
+            prev_avg = score
 
         result = improver.run(
             element_id=element_id,
@@ -176,9 +212,9 @@ def prompt_improver(
             console.print(f"\n[bold]Best Prompt (iteration {best.iteration}):[/]")
             if best.prompt.reasoning:
                 console.print(f"  [dim]Reasoning: {best.prompt.reasoning}[/]")
-            console.print(f"\n  [bold]System prompt:[/]")
+            console.print("\n  [bold]System prompt:[/]")
             console.print(f"  {best.prompt.system_prompt[:500]}{'...' if len(best.prompt.system_prompt) > 500 else ''}")
-            console.print(f"\n  [bold]Summary:[/]")
+            console.print("\n  [bold]Summary:[/]")
             console.print(f"  {best.summary}")
 
         # Save best prompt to YAML

@@ -79,6 +79,9 @@ from magaldi_mcp.tools.parser_lab import (
 # Pattern tools
 from magaldi_mcp.tools.patterns import pattern_search
 
+# Prompt Lab tools
+from magaldi_mcp.tools.prompt_lab import prompt_lab_improve
+
 # Quality tools
 from magaldi_mcp.tools.quality import (
     find_async_code,
@@ -169,6 +172,8 @@ __all__ = [
     "explain_element",
     # MCP review
     "mcp_self_review",
+    # Prompt Lab tools
+    "prompt_lab_improve",
     # Parser Lab tools
     "parser_lab_analyze",
     "parser_lab_create_test",

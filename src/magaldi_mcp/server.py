@@ -211,6 +211,7 @@ class MagaldiMCPServer:
             parser_lab_run_tests,
             parser_lab_suggest_fix,
             pattern_search,
+            prompt_lab_improve,
             search_code,
             search_features,
             search_glossary,
@@ -577,6 +578,14 @@ class MagaldiMCPServer:
                 context=args["context"],
                 include_analytics=args.get("include_analytics", True),
                 focus_tools=args.get("focus_tools"),
+            )
+        elif name == "prompt_lab_improve":
+            return await asyncio.to_thread(
+                prompt_lab_improve,
+                repo,
+                element_id=args["element_id"],
+                max_iterations=args.get("max_iterations", 5),
+                target_score=args.get("target_score", 8.0),
             )
         else:
             raise ValueError(f"Unknown tool: {name}")

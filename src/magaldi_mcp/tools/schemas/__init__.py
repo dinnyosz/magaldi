@@ -12,6 +12,7 @@ from magaldi_mcp.tools.schemas.meta import META_TOOLS
 from magaldi_mcp.tools.schemas.metrics import METRICS_TOOLS
 from magaldi_mcp.tools.schemas.parser_lab import PARSER_LAB_TOOLS
 from magaldi_mcp.tools.schemas.patterns import PATTERN_TOOLS
+from magaldi_mcp.tools.schemas.prompt_lab import PROMPT_LAB_TOOLS
 from magaldi_mcp.tools.schemas.search import SEARCH_TOOLS
 
 # Combine all tool schemas
@@ -28,6 +29,7 @@ ALL_TOOL_SCHEMAS = (
     HIERARCHY_TOOLS +
     META_TOOLS +
     PARSER_LAB_TOOLS +
+    PROMPT_LAB_TOOLS +
     LABS_TOOLS
 )
 
@@ -45,5 +47,6 @@ __all__ = [
     "HIERARCHY_TOOLS",
     "META_TOOLS",
     "PARSER_LAB_TOOLS",
+    "PROMPT_LAB_TOOLS",
     "LABS_TOOLS",
 ]

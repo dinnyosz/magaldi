@@ -21,7 +21,6 @@ from shared.ai.prompt_improver import (
     _reconstruct_element,
 )
 
-
 # =============================================================================
 # FIXTURES
 # =============================================================================
@@ -568,7 +567,7 @@ class TestPromptImproverRun:
     def test_single_iteration_converges(
         self,
         mock_repo_cls: MagicMock,
-        mock_llm_cls: MagicMock,
+        mock_llm_cls: MagicMock,  # noqa: ARG002 — required by @patch decorator order
         mock_bench_cls: MagicMock,
         mock_config: MagicMock,
         sample_doc: dict,
