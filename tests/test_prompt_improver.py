@@ -13,6 +13,9 @@ from shared.ai.ollama_benchmark import (
     EVALUATION_CRITERIA,
     EXPECTED_SENTENCES,
     CriteriaScores,
+    _fix_single_quotes,
+    _parse_json_lenient,
+    parse_evaluation_response,
 )
 from shared.ai.prompt_improver import (
     IMPROVEMENT_PROMPT,
@@ -829,3 +832,146 @@ class TestWeightedScoring:
     def test_accuracy_has_highest_weight(self) -> None:
         """Accuracy should have the highest weight."""
         assert CRITERIA_WEIGHTS["accuracy"] == max(CRITERIA_WEIGHTS.values())
+
+
+class TestLenientJsonParsing:
+    """Tests for _fix_single_quotes, _parse_json_lenient, and parse_evaluation_response."""
+
+    def test_fix_single_quotes_basic(self) -> None:
+        """Single-quoted strings are converted to double-quoted."""
+        assert _fix_single_quotes("{'key': 'value'}") == '{"key": "value"}'
+
+    def test_fix_single_quotes_preserves_double_quoted(self) -> None:
+        """Already double-quoted strings pass through unchanged."""
+        original = '{"key": "value"}'
+        assert _fix_single_quotes(original) == original
+
+    def test_fix_single_quotes_mixed(self) -> None:
+        """Mixed: double-quoted keys with single-quoted values."""
+        mixed = '{"notes": \'some text here\'}'
+        result = _fix_single_quotes(mixed)
+        assert '"notes"' in result
+        assert '"some text here"' in result
+
+    def test_fix_single_quotes_escapes_inner_double_quotes(self) -> None:
+        """Double quotes inside single-quoted strings are escaped."""
+        s = """{'notes': 'He said "hello" to me'}"""
+        result = _fix_single_quotes(s)
+        assert '\\"hello\\"' in result
+
+    def test_parse_json_lenient_valid_json(self) -> None:
+        """Valid JSON parses on first attempt."""
+        data = _parse_json_lenient('{"a": 1}')
+        assert data == {"a": 1}
+
+    def test_parse_json_lenient_trailing_comma(self) -> None:
+        """Trailing commas are cleaned up."""
+        data = _parse_json_lenient('{"a": 1, "b": 2,}')
+        assert data == {"a": 1, "b": 2}
+
+    def test_parse_json_lenient_single_quotes(self) -> None:
+        """Single-quoted JSON is handled."""
+        data = _parse_json_lenient("{'a': 1, 'b': 'text'}")
+        assert data == {"a": 1, "b": "text"}
+
+    def test_parse_json_lenient_returns_none_on_garbage(self) -> None:
+        """Completely invalid input returns None."""
+        assert _parse_json_lenient("not json at all") is None
+
+    def test_parse_evaluation_response_single_quoted_notes(self) -> None:
+        """Evaluation responses with single-quoted notes should parse correctly."""
+        response = (
+            '{"evaluations": {"A": {"accuracy": 8, "operation": 7, '
+            "'notes': 'The summary is mostly correct.'}}}"
+        )
+        evaluations, error = parse_evaluation_response(
+            response, "function", ["A"], {"A": "candidate"},
+        )
+        # Should parse without JSON error (may report missing criteria)
+        assert "JSON parse error" not in error
+        if evaluations.get("candidate"):
+            assert evaluations["candidate"].scores.get("accuracy") == 8
+
+    def test_parse_evaluation_response_all_single_quoted(self) -> None:
+        """Fully single-quoted evaluation response from a thinking model."""
+        response = (
+            "{'evaluations': {'A': {"
+            "'accuracy': 9, 'operation': 8, 'interface': 7, "
+            "'usage_scenarios': 6, 'side_effects': 5, 'preconditions': 4, "
+            "'agent_utility': 7, 'searchability': 8, 'conciseness': 9, "
+            "'no_context_repeat': 10, "
+            "'notes': 'Overall good summary.'}}}"
+        )
+        evaluations, error = parse_evaluation_response(
+            response, "function", ["A"], {"A": "candidate"},
+        )
+        assert error == ""
+        scores = evaluations["candidate"].scores
+        assert scores["accuracy"] == 9
+        assert scores["conciseness"] == 9
+        assert len(scores) == 10
+
+
+class TestEmptySummaryHandling:
+    """Tests for zero-score handling when summary generation fails."""
+
+    def test_empty_summary_gets_zero_scores(self) -> None:
+        """When summary is empty, all criteria should score 0."""
+        criteria = EVALUATION_CRITERIA["function"]
+        zero_scores = dict.fromkeys(criteria, 0)
+        scores = CriteriaScores(
+            scores=zero_scores,
+            notes="Summary generation failed.",
+        )
+        assert scores.average == 0.0
+        assert len(scores.scores) == len(criteria)
+        assert all(s == 0 for s in scores.scores.values())
+
+    def test_zero_scores_cover_all_function_criteria(self) -> None:
+        """Zero-score dict should have all expected function criteria."""
+        criteria = EVALUATION_CRITERIA["function"]
+        expected = {"accuracy", "operation", "interface", "usage_scenarios",
+                    "side_effects", "preconditions", "agent_utility",
+                    "searchability", "conciseness", "no_context_repeat"}
+        assert set(criteria.keys()) == expected
+
+
+class TestThinkingModelDetection:
+    """Tests for thinking model detection across qwen3 variants."""
+
+    def test_qwen3_is_thinking_model(self) -> None:
+        """qwen3 (base) should be detected as thinking model."""
+        from shared.ai.llm_client import LLMClient
+        assert LLMClient._check_is_thinking_model("qwen3:4b") is True
+
+    def test_qwen35_is_thinking_model(self) -> None:
+        """qwen3.5 should be detected as thinking model."""
+        from shared.ai.llm_client import LLMClient
+        assert LLMClient._check_is_thinking_model("qwen3.5:4b") is True
+
+    def test_qwen35_9b_is_thinking_model(self) -> None:
+        """qwen3.5:9b should be detected as thinking model."""
+        from shared.ai.llm_client import LLMClient
+        assert LLMClient._check_is_thinking_model("qwen3.5:9b") is True
+
+    def test_qwen25_is_not_thinking_model(self) -> None:
+        """qwen2.5 should NOT be detected as thinking model."""
+        from shared.ai.llm_client import LLMClient
+        assert LLMClient._check_is_thinking_model("qwen2.5-coder:3b") is False
+
+    def test_deepseek_r1_is_thinking_model(self) -> None:
+        """deepseek-r1 should be detected as thinking model."""
+        from shared.ai.llm_client import LLMClient
+        assert LLMClient._check_is_thinking_model("deepseek-r1:7b") is True
+
+    def test_model_config_is_thinking_model(self) -> None:
+        """ModelConfig.is_thinking_model should detect qwen3.5."""
+        from shared.config import ModelConfig
+        mc = ModelConfig(name="qwen3.5:4b", provider="ollama")
+        assert mc.is_thinking_model() is True
+
+    def test_model_config_qwen25_not_thinking(self) -> None:
+        """ModelConfig.is_thinking_model should NOT match qwen2.5."""
+        from shared.config import ModelConfig
+        mc = ModelConfig(name="qwen2.5-coder:3b", provider="ollama")
+        assert mc.is_thinking_model() is False

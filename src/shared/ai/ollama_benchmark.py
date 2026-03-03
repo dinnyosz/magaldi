@@ -356,6 +356,101 @@ JSON output:"""
     return prompt, label_to_model
 
 
+def _fix_single_quotes(s: str) -> str:
+    """Replace single-quoted JSON strings with double-quoted strings.
+
+    Thinking models sometimes output Python-style dicts with single quotes
+    instead of valid JSON double quotes. This does a character-by-character
+    replacement that handles escaped quotes and apostrophes in text.
+    """
+    result = []
+    i = 0
+    while i < len(s):
+        ch = s[i]
+        if ch == "'":
+            # Replace opening single quote with double quote
+            result.append('"')
+            i += 1
+            # Read until closing single quote (handle escapes)
+            while i < len(s):
+                if s[i] == "\\" and i + 1 < len(s):
+                    # Escaped character — keep as-is but convert \' to '
+                    if s[i + 1] == "'":
+                        result.append("'")
+                    else:
+                        result.append(s[i])
+                        result.append(s[i + 1])
+                    i += 2
+                elif s[i] == "'":
+                    result.append('"')
+                    i += 1
+                    break
+                elif s[i] == '"':
+                    # Escape double quotes inside single-quoted strings
+                    result.append('\\"')
+                    i += 1
+                else:
+                    result.append(s[i])
+                    i += 1
+        elif ch == '"':
+            # Already a double-quoted string — pass through verbatim
+            result.append(ch)
+            i += 1
+            while i < len(s):
+                if s[i] == "\\" and i + 1 < len(s):
+                    result.append(s[i])
+                    result.append(s[i + 1])
+                    i += 2
+                elif s[i] == '"':
+                    result.append(s[i])
+                    i += 1
+                    break
+                else:
+                    result.append(s[i])
+                    i += 1
+        else:
+            result.append(ch)
+            i += 1
+    return "".join(result)
+
+
+def _parse_json_lenient(json_str: str) -> dict | None:
+    """Parse JSON with lenient handling of common LLM output issues.
+
+    Handles:
+    - Trailing commas before } or ]
+    - Single-quoted strings (Python-style dicts from thinking models)
+
+    Returns parsed dict or None if all attempts fail.
+    """
+    # Attempt 1: strict JSON
+    try:
+        return json.loads(json_str)
+    except json.JSONDecodeError:
+        pass
+
+    # Attempt 2: fix trailing commas
+    fixed = re.sub(r',(\s*[}\]])', r'\1', json_str)
+    try:
+        return json.loads(fixed)
+    except json.JSONDecodeError:
+        pass
+
+    # Attempt 3: fix single-quoted strings
+    fixed2 = _fix_single_quotes(json_str)
+    try:
+        return json.loads(fixed2)
+    except json.JSONDecodeError:
+        pass
+
+    # Attempt 4: both fixes combined
+    fixed3 = re.sub(r',(\s*[}\]])', r'\1', fixed2)
+    try:
+        return json.loads(fixed3)
+    except json.JSONDecodeError:
+        return None
+
+
 def parse_evaluation_response(
     response: str,
     element_type: str,
@@ -422,16 +517,9 @@ def parse_evaluation_response(
 
     json_str = json_match.group(0)
 
-    try:
-        data = json.loads(json_str)
-    except json.JSONDecodeError as e:
-        # Try to fix common issues
-        # Remove trailing commas before } or ]
-        fixed = re.sub(r',(\s*[}\]])', r'\1', json_str)
-        try:
-            data = json.loads(fixed)
-        except json.JSONDecodeError:
-            return evaluations, f"JSON parse error: {e}"
+    data = _parse_json_lenient(json_str)
+    if data is None:
+        return evaluations, "JSON parse error in evaluation response"
 
     # Extract evaluations
     evals_data = data.get("evaluations", data)  # Handle both wrapped and unwrapped
@@ -506,7 +594,7 @@ class BenchmarkClient:
     """
 
     # Models that use thinking/reasoning tags by default.
-    # Note: qwen3.5 has reasoning disabled by default (opt-in), so NOT included here.
+    # All Qwen3 variants (qwen3, qwen3.5, etc.) think by default in Ollama.
     THINKING_MODELS = ("qwen3", "deepseek-r1", "deepseek-coder-v2", "nemotron", "lfm2.5-thinking", "sam860/lfm2.5")
 
     def __init__(

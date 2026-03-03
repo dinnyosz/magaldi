@@ -632,6 +632,27 @@ class PromptImprover:
         # Generate summary
         summary, summary_time = self._generate_summary(prompt, element, parent_summaries)
 
+        if not summary.strip():
+            # Generation failed — score 0 across all criteria instead of
+            # sending an empty string to the evaluator (which would score
+            # formatting criteria high for an empty response).
+            logger.warning("Summary generation failed at iteration %d", iteration)
+            element_type = element.element_type
+            criteria = EVALUATION_CRITERIA.get(element_type, {})
+            zero_scores = dict.fromkeys(criteria, 0)
+            scores = CriteriaScores(
+                scores=zero_scores,
+                notes="Summary generation failed — all scores set to 0.",
+            )
+            return IterationResult(
+                iteration=iteration,
+                prompt=prompt,
+                summary="(generation failed)",
+                scores=scores,
+                summary_time=summary_time,
+                eval_time=0.0,
+            )
+
         # Evaluate summary
         scores, eval_time = self._evaluate_summary(
             element_type=element.element_type,
@@ -680,10 +701,15 @@ class PromptImprover:
 
         start = time.perf_counter()
         try:
+            # Use a higher max_tokens than production summarization to
+            # accommodate thinking models (e.g., qwen3.5) where the thinking
+            # tokens consume part of the budget before the actual response.
+            max_tokens = max(self.config.llm.summarize_max_tokens, 2048)
             raw = client.generate_from_messages(
                 messages=messages,
                 temperature=self.config.llm.summarize_temperature,
-                max_tokens=self.config.llm.summarize_max_tokens,
+                max_tokens=max_tokens,
+                timeout=180,
             )
             elapsed = time.perf_counter() - start
             return clean_summary(raw), elapsed
