@@ -351,7 +351,20 @@ def run_variable_scoring(
     llm_client = SummarizationLLMClient.from_model_config(model_config)
 
     scoring_config = VariableScoringConfig()
-    effective_workers = workers if workers > 0 else 12
+
+    # Default worker count depends on inference backend.
+    # vllm-mlx crashes with a Metal GPU assertion when multiple concurrent
+    # chat completions trigger command buffer contention.  Its continuous
+    # batching handles throughput server-side, so 1 client-side worker suffices.
+    # llamacpp also handles batching server-side; safe with 1 worker.
+    # Ollama handles concurrency fine with 12.
+    # Cloud providers (openai, anthropic) handle concurrency server-side.
+    _SEQUENTIAL_BACKENDS = {"vllm-mlx", "llamacpp"}
+    if workers > 0:
+        effective_workers = workers
+    else:
+        backend = model_config.provider or "ollama"
+        effective_workers = 1 if backend in _SEQUENTIAL_BACKENDS else 12
 
     # Create shared state for live display
     worker_status = ScoringWorkerStatus()
