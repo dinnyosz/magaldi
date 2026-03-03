@@ -164,6 +164,8 @@ def good_scores() -> CriteriaScores:
             "usage_scenarios": 8,
             "side_effects": 9,
             "preconditions": 7,
+            "agent_utility": 8,
+            "searchability": 8,
             "conciseness": 9,
             "no_context_repeat": 9,
         },
@@ -181,6 +183,8 @@ def low_scores() -> CriteriaScores:
             "usage_scenarios": 4,
             "side_effects": 6,
             "preconditions": 3,
+            "agent_utility": 5,
+            "searchability": 4,
             "conciseness": 7,
             "no_context_repeat": 8,
         },
@@ -231,12 +235,9 @@ class TestIterationResult:
             summary="Processes data items.",
             scores=good_scores,
         )
-        # Weighted average: accuracy(9*3) + operation(9*2) + interface(8*1.5) +
-        # usage_scenarios(8*1.5) + side_effects(9*1.5) + preconditions(7*1) +
-        # conciseness(9*0.5) + no_context_repeat(9*0.5) = 27+18+12+12+13.5+7+4.5+4.5 = 98.5
-        # Total weight: 3+2+1.5+1.5+1.5+1+0.5+0.5 = 11.5
-        # 98.5 / 11.5 ≈ 8.57
-        assert 8.5 <= ir.avg_score <= 8.7
+        # Weighted average with 10 criteria including agent_utility(8*1.5)
+        # and searchability(8*1.5). Content-heavy scores dominate.
+        assert 8.3 <= ir.avg_score <= 8.7
 
     def test_avg_score_empty(self, baseline_prompt: PromptVersion) -> None:
         ir = IterationResult(
@@ -609,7 +610,7 @@ class TestPromptImproverRun:
             mock_bench_cls.return_value = bench_instance
             bench_instance.generate.return_value = MagicMock(
                 success=True,
-                response='{"evaluations": {"A": {"accuracy": 9, "operation": 9, "interface": 9, "usage_scenarios": 8, "side_effects": 9, "preconditions": 8, "conciseness": 9, "no_context_repeat": 9, "notes": "Good"}}}',
+                response='{"evaluations": {"A": {"accuracy": 9, "operation": 9, "interface": 9, "usage_scenarios": 8, "side_effects": 9, "preconditions": 8, "agent_utility": 9, "searchability": 8, "conciseness": 9, "no_context_repeat": 9, "notes": "Good"}}}',
             )
 
             improver = PromptImprover(config=mock_config)
@@ -741,6 +742,16 @@ class TestEvaluationCriteria:
         criteria = EVALUATION_CRITERIA["import"]
         assert "source" in criteria
         assert "purpose" in criteria
+
+    def test_all_types_have_agent_utility_criterion(self) -> None:
+        """Every element type should have an agent_utility criterion."""
+        for etype, criteria in EVALUATION_CRITERIA.items():
+            assert "agent_utility" in criteria, f"Missing agent_utility criterion for {etype}"
+
+    def test_all_types_have_searchability_criterion(self) -> None:
+        """Every element type should have a searchability criterion."""
+        for etype, criteria in EVALUATION_CRITERIA.items():
+            assert "searchability" in criteria, f"Missing searchability criterion for {etype}"
 
     def test_all_criteria_have_weights(self) -> None:
         """Every criterion used in EVALUATION_CRITERIA should have a weight."""
