@@ -259,9 +259,19 @@ def _start_server(plan: ServerPlan) -> bool:
 
     # Start as background process
     console.print(f"  Starting vllm-mlx on port {plan.port}...")
-    # Show the full command so the user can see (and override) all parameters
-    cmd_display = " ".join(cmd).replace(python_bin, "python -m")
-    console.print(f"    [dim]{cmd_display}[/]")
+    console.print(f"    LLM model:        {plan.llm_model}")
+    if plan.embedding_model:
+        console.print(f"    Embed model:      {plan.embedding_model}")
+    console.print(f"    Batching:         {'continuous' if plan.continuous_batching else 'single'}")
+    console.print("    KV cache:         4-bit quantized, paged (500 blocks)")
+    console.print("    Prefix cache:     4096 MB")
+    console.print("    Max sequences:    2")
+    console.print("    Chunked prefill:  512 tokens")
+    # Show reasoning parser if detected
+    for part_idx, part in enumerate(cmd):
+        if part == "--reasoning-parser" and part_idx + 1 < len(cmd):
+            console.print(f"    Reasoning parser: {cmd[part_idx + 1]}")
+            break
     console.print(f"    Log: {plan.logfile}")
 
     with open(plan.logfile, "w") as log_f:
