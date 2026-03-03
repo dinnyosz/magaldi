@@ -51,10 +51,10 @@ class TestLLMConfig:
         """Test default configuration values."""
         config = LLMConfig()
 
-        assert config.model == "ollama/qwen3:4b-instruct"
+        assert config.model == "ollama/qwen3.5:4b"
         assert config.api_base is None
         assert config.api_key is None
-        assert config.temperature == 0.2
+        assert config.temperature == 0.6
         assert config.max_tokens == 512
         assert config.timeout == 180  # 3 minutes to handle queue wait with many workers
         assert config.max_retries == 3
@@ -781,6 +781,30 @@ class TestThinkingModelDetection:
             model_name="mlx-community/Qwen3-4B-Instruct-2507-4bit",
         )
         assert client_vllm._is_thinking_model is True
+
+    def test_qwen3_5_not_thinking_model(self):
+        """qwen3.5 has reasoning disabled by default — NOT a thinking model."""
+        client = LLMClient(model="ollama/qwen3.5:4b", api_base="http://localhost:11434")
+        assert client._is_thinking_model is False
+
+    def test_qwen3_5_2b_not_thinking_model(self):
+        """qwen3.5:2b should also NOT be a thinking model."""
+        client = LLMClient(model="ollama/qwen3.5:2b", api_base="http://localhost:11434")
+        assert client._is_thinking_model is False
+
+    def test_qwen3_5_no_think_false_sent(self):
+        """qwen3.5 should NOT send think=False since it's not a thinking model."""
+        client = LLMClient(model="ollama/qwen3.5:4b", api_base="http://localhost:11434")
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "response"
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response) as mock_comp:
+            client.generate_from_messages([{"role": "user", "content": "test"}])
+
+        call_kwargs = mock_comp.call_args.kwargs
+        assert "think" not in call_kwargs
 
     def test_thinking_model_strips_think_tags_from_generate(self):
         """Thinking models should have <think> blocks stripped from output."""

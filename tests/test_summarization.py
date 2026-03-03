@@ -589,8 +589,8 @@ class TestSummarizationConfig:
     def test_default_values(self):
         config = SummarizationConfig()
 
-        assert config.model == "qwen3:4b-instruct"
-        assert config.temperature == 0.2
+        assert config.model == "qwen3.5:4b"
+        assert config.temperature == 0.6
         assert config.max_tokens == 512
         assert config.max_retries == 3
 
@@ -660,3 +660,97 @@ class TestSummarizationLLMClientNumCtx:
         mock_client.generate_from_messages.assert_called_once()
         call_kwargs = mock_client.generate_from_messages.call_args[1]
         assert call_kwargs.get("num_ctx") == 8192
+
+
+class TestSummarizationLLMClientSamplingParams:
+    """Tests for top_k, min_p, presence_penalty, repetition_penalty passthrough."""
+
+    def test_generate_passes_sampling_params(self):
+        """Should forward top_k, min_p, presence_penalty, repetition_penalty to underlying client."""
+        mock_client = MagicMock()
+        mock_client.generate.return_value = "test summary"
+
+        client = SummarizationLLMClient(
+            url="http://localhost:11434",
+            model="qwen3:4b",
+            provider="ollama",
+        )
+        client._client = mock_client
+        client.generate(
+            "test prompt",
+            top_k=20,
+            min_p=0.05,
+            presence_penalty=1.5,
+            repetition_penalty=1.1,
+        )
+
+        mock_client.generate.assert_called_once()
+        call_kwargs = mock_client.generate.call_args[1]
+        assert call_kwargs.get("top_k") == 20
+        assert call_kwargs.get("min_p") == 0.05
+        assert call_kwargs.get("presence_penalty") == 1.5
+        assert call_kwargs.get("repetition_penalty") == 1.1
+
+    def test_generate_from_messages_passes_sampling_params(self):
+        """Should forward top_k, min_p, presence_penalty, repetition_penalty in generate_from_messages."""
+        mock_client = MagicMock()
+        mock_client.generate_from_messages.return_value = "test summary"
+
+        client = SummarizationLLMClient(
+            url="http://localhost:11434",
+            model="qwen3:4b",
+            provider="ollama",
+        )
+        client._client = mock_client
+        client.generate_from_messages(
+            [{"role": "user", "content": "test"}],
+            top_k=20,
+            min_p=0.05,
+            presence_penalty=1.5,
+            repetition_penalty=1.1,
+        )
+
+        mock_client.generate_from_messages.assert_called_once()
+        call_kwargs = mock_client.generate_from_messages.call_args[1]
+        assert call_kwargs.get("top_k") == 20
+        assert call_kwargs.get("min_p") == 0.05
+        assert call_kwargs.get("presence_penalty") == 1.5
+        assert call_kwargs.get("repetition_penalty") == 1.1
+
+    def test_generate_defaults_sampling_params_to_none(self):
+        """Sampling params should default to None when not provided."""
+        mock_client = MagicMock()
+        mock_client.generate.return_value = "test summary"
+
+        client = SummarizationLLMClient(
+            url="http://localhost:11434",
+            model="qwen3:4b",
+            provider="ollama",
+        )
+        client._client = mock_client
+        client.generate("test prompt")
+
+        call_kwargs = mock_client.generate.call_args[1]
+        assert call_kwargs.get("top_k") is None
+        assert call_kwargs.get("min_p") is None
+        assert call_kwargs.get("presence_penalty") is None
+        assert call_kwargs.get("repetition_penalty") is None
+
+    def test_generate_from_messages_defaults_sampling_params_to_none(self):
+        """Sampling params should default to None in generate_from_messages."""
+        mock_client = MagicMock()
+        mock_client.generate_from_messages.return_value = "test summary"
+
+        client = SummarizationLLMClient(
+            url="http://localhost:11434",
+            model="qwen3:4b",
+            provider="ollama",
+        )
+        client._client = mock_client
+        client.generate_from_messages([{"role": "user", "content": "test"}])
+
+        call_kwargs = mock_client.generate_from_messages.call_args[1]
+        assert call_kwargs.get("top_k") is None
+        assert call_kwargs.get("min_p") is None
+        assert call_kwargs.get("presence_penalty") is None
+        assert call_kwargs.get("repetition_penalty") is None

@@ -85,13 +85,18 @@ class SummarizationConfig:
 
     # LLM settings (supports any LiteLLM provider)
     ollama_url: str = "http://localhost:11434"  # For Ollama provider
-    model: str = "qwen3:4b-instruct"
+    model: str = "qwen3.5:4b"
     provider: str = "ollama"  # ollama, openai, anthropic, etc.
     api_key: str | None = None  # For cloud providers
 
-    # Generation settings (based on arxiv.org/html/2507.03160v2)
-    temperature: float = 0.2
+    # Generation settings — Qwen3.5 "Precise Coding Tasks" preset
+    # huggingface.co/Qwen/Qwen3.5-4B
+    temperature: float = 0.6
     top_p: float = 0.95
+    top_k: int | None = 20
+    min_p: float | None = 0.0
+    presence_penalty: float | None = 0.0
+    repetition_penalty: float | None = 1.0
     max_tokens: int = 512
     timeout: int = 180  # 3 minutes to handle queue wait with many workers
 
@@ -219,7 +224,7 @@ class SummarizationLLMClient:
         See config.py get_litellm_model().
         """
         _PROVIDER_PREFIX = {
-            "ollama": "ollama/",
+            "ollama": "ollama_chat/",
             "lmstudio": "lm_studio/",
             "llamacpp": "openai/",
         }
@@ -243,6 +248,10 @@ class SummarizationLLMClient:
         timeout: int = 60,
         model: str | None = None,
         num_ctx: int | None = None,
+        top_k: int | None = None,
+        min_p: float | None = None,
+        presence_penalty: float | None = None,
+        repetition_penalty: float | None = None,
     ) -> str:
         """Generate completion from LLM.
 
@@ -254,6 +263,10 @@ class SummarizationLLMClient:
             timeout: Request timeout in seconds.
             model: Optional model override (uses default if not specified).
             num_ctx: Context window size for Ollama models.
+            top_k: Top-k sampling parameter.
+            min_p: Min-p sampling parameter.
+            presence_penalty: Presence penalty (0.0 to 2.0).
+            repetition_penalty: Repetition penalty.
 
         Returns:
             Generated text.
@@ -275,6 +288,10 @@ class SummarizationLLMClient:
                 timeout=timeout,
                 model=use_model,
                 num_ctx=num_ctx,
+                top_k=top_k,
+                min_p=min_p,
+                presence_penalty=presence_penalty,
+                repetition_penalty=repetition_penalty,
             )
         except LLMError as e:
             raise ValueError(str(e)) from e
@@ -288,6 +305,10 @@ class SummarizationLLMClient:
         timeout: int = 60,
         model: str | None = None,
         num_ctx: int | None = None,
+        top_k: int | None = None,
+        min_p: float | None = None,
+        presence_penalty: float | None = None,
+        repetition_penalty: float | None = None,
     ) -> str:
         """Generate completion from messages (optimized for prefix caching).
 
@@ -303,6 +324,10 @@ class SummarizationLLMClient:
             timeout: Request timeout in seconds.
             model: Optional model override.
             num_ctx: Context window size for Ollama models.
+            top_k: Top-k sampling parameter.
+            min_p: Min-p sampling parameter.
+            presence_penalty: Presence penalty (0.0 to 2.0).
+            repetition_penalty: Repetition penalty.
 
         Returns:
             Generated text.
@@ -323,6 +348,10 @@ class SummarizationLLMClient:
                 timeout=timeout,
                 model=use_model,
                 num_ctx=num_ctx,
+                top_k=top_k,
+                min_p=min_p,
+                presence_penalty=presence_penalty,
+                repetition_penalty=repetition_penalty,
             )
         except LLMError as e:
             raise ValueError(str(e)) from e
@@ -622,6 +651,10 @@ def generate_summary(
         top_p=config.top_p,
         max_tokens=config.max_tokens,
         timeout=config.timeout,
+        top_k=config.top_k,
+        min_p=config.min_p,
+        presence_penalty=config.presence_penalty,
+        repetition_penalty=config.repetition_penalty,
     )
 
     # Clean and return

@@ -278,10 +278,15 @@ def _summarize_element(
     raw_summary = llm_client.generate(
         prompt=prompt,
         temperature=config.summarize_temperature,
+        top_p=config.summarize_top_p,
         max_tokens=config.summarize_max_tokens,
         timeout=config.summarize_timeout,
         model=model_config.name,
         num_ctx=num_ctx,
+        top_k=config.summarize_top_k,
+        min_p=config.summarize_min_p,
+        presence_penalty=config.summarize_presence_penalty,
+        repetition_penalty=config.summarize_repetition_penalty,
     )
     response_tokens = len(raw_summary) // 4
 

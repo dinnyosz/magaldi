@@ -484,6 +484,12 @@ def run_processing(
         embed_model=config.llm.get_embed_model(),
         skip_ai=skip_ai,
         num_workers=effective_workers,
+        summarize_temperature=config.llm.summarize_temperature,
+        summarize_top_p=config.llm.summarize_top_p,
+        summarize_top_k=config.llm.summarize_top_k,
+        summarize_min_p=config.llm.summarize_min_p,
+        summarize_presence_penalty=config.llm.summarize_presence_penalty,
+        summarize_repetition_penalty=config.llm.summarize_repetition_penalty,
     )
 
     # Use effective workers for display

@@ -92,7 +92,7 @@ class TestLLMConfigDefaults:
     def test_default_summarize_model_reference(self):
         """Test that summarize_model is a reference key to named model."""
         config = LLMConfig()
-        assert config.summarize_model == "qwen3-4b"
+        assert config.summarize_model == "qwen3.5-4b"
 
     def test_default_summarize_model_name(self):
         """Test that the referenced summarize model has correct name."""
@@ -101,13 +101,23 @@ class TestLLMConfigDefaults:
         assert model.name == "mlx-community/Qwen3-4B-Instruct-2507-4bit"
 
     def test_default_summarize_temperature(self):
+        """Qwen3.5 precise coding preset: temp=0.6."""
         config = LLMConfig()
-        assert config.summarize_temperature == 0.2
+        assert config.summarize_temperature == 0.6
+
+    def test_default_summarize_sampling_params(self):
+        """Qwen3.5 precise coding preset: top_p=0.95, top_k=20, min_p=0.0."""
+        config = LLMConfig()
+        assert config.summarize_top_p == 0.95
+        assert config.summarize_top_k == 20
+        assert config.summarize_min_p == 0.0
+        assert config.summarize_presence_penalty == 0.0
+        assert config.summarize_repetition_penalty == 1.0
 
     def test_default_embed_model_reference(self):
         """Test that embed_model is a reference key to named model."""
         config = LLMConfig()
-        assert config.embed_model == "qwen3-embed"
+        assert config.embed_model == "qwen3-embed"  # Embedding stays on qwen3
 
     def test_default_embed_model_name(self):
         """Test that the referenced embed model has correct name."""
@@ -225,7 +235,7 @@ class TestEnvOverrides:
         config = load_config(FIXTURES_DIR / "minimal.yaml")
         # The env override changes the model reference key, not the model name
         # Note: This requires the referenced model to exist in config.llm.models
-        assert config.llm.summarize_model == "qwen3-4b"  # Default from dataclass
+        assert config.llm.summarize_model == "qwen3.5-4b"  # Default from dataclass
 
     def test_env_overrides_log_level(self):
         os.environ["MAGALDI_LOG_LEVEL"] = "WARNING"
@@ -446,6 +456,16 @@ class TestModelConfig:
 
     def test_is_thinking_model_non_thinking(self):
         cfg = ModelConfig(name="llama-3.1-8b", provider="ollama")
+        assert cfg.is_thinking_model() is False
+
+    def test_is_thinking_model_qwen3_5_not_thinking(self):
+        """qwen3.5 has reasoning disabled by default — NOT a thinking model."""
+        cfg = ModelConfig(name="qwen3.5:4b", provider="ollama")
+        assert cfg.is_thinking_model() is False
+
+    def test_is_thinking_model_qwen3_5_2b_not_thinking(self):
+        """qwen3.5:2b should also NOT be a thinking model."""
+        cfg = ModelConfig(name="qwen3.5:2b", provider="ollama")
         assert cfg.is_thinking_model() is False
 
     def test_is_thinking_model_embedding(self):

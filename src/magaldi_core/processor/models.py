@@ -39,7 +39,7 @@ def _default_summarize_model() -> ModelConfig:
     """Create default summarize model config."""
     from shared.config import ModelConfig
     return ModelConfig(
-        name="qwen3:4b-instruct", provider="llamacpp", url="http://localhost:8080"
+        name="qwen3.5:4b", provider="llamacpp", url="http://localhost:8080"
     )
 
 
@@ -47,7 +47,7 @@ def _default_summarize_model_small() -> ModelConfig:
     """Create default small summarize model config."""
     from shared.config import ModelConfig
     return ModelConfig(
-        name="qwen3:1.7b", provider="llamacpp", url="http://localhost:8081"
+        name="qwen3.5:2b", provider="llamacpp", url="http://localhost:8081"
     )
 
 
@@ -74,8 +74,15 @@ class ProcessingConfig:
 
     skip_ai: bool = False
 
-    # Summarization settings (based on arxiv.org/html/2507.03160v2)
-    summarize_temperature: float = 0.2
+    # Summarization settings
+    # Defaults based on Qwen3.5 "Precise Coding Tasks" preset:
+    # huggingface.co/Qwen/Qwen3.5-4B
+    summarize_temperature: float = 0.6
+    summarize_top_p: float = 0.95
+    summarize_top_k: int | None = 20
+    summarize_min_p: float | None = 0.0
+    summarize_presence_penalty: float | None = 0.0
+    summarize_repetition_penalty: float | None = 1.0
     summarize_max_tokens: int = 512
     summarize_timeout: int = 180  # 3 minutes to handle queue wait with many workers
     max_code_tokens: int = 4000

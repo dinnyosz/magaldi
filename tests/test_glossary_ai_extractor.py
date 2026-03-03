@@ -377,20 +377,21 @@ class TestCallLLMForGlossary:
         mock_client.generate_from_messages.return_value = "[]"
 
         with patch(
-            "shared.ai.glossary.ai_extractor.LLMClient",
+            "shared.ai.glossary.ai_extractor.LLMClient.from_model_config",
             return_value=mock_client,
-        ) as mock_llm_class:
+        ) as mock_from_model_config:
             await call_llm_for_glossary(
                 summary="Test summary",
                 label="test",
                 config=config,
             )
 
-        # Verify LLMClient was instantiated with config values
-        mock_llm_class.assert_called_once()
-        call_kwargs = mock_llm_class.call_args.kwargs
-        assert call_kwargs["model"] == "ollama/test-model-name"
-        assert call_kwargs["api_base"] == "http://test:11434"
+        # Verify LLMClient.from_model_config was called with the model config
+        mock_from_model_config.assert_called_once()
+        model_config = mock_from_model_config.call_args[0][0]
+        assert model_config.name == "test-model-name"
+        assert model_config.provider == "ollama"
+        assert model_config.url == "http://test:11434"
 
     @pytest.mark.asyncio
     async def test_returns_empty_list_on_llm_error(self):
