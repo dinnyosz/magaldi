@@ -84,6 +84,7 @@ class TestVariableScoringConfig:
         assert config.temperature == 0.1
         assert config.token_budget == 1200
         assert config.max_retries == 2
+        assert config.timeout == 180
 
 
 class TestScoringResult:
@@ -410,6 +411,24 @@ class TestScoreBatch:
 
         call_kwargs = mock_client.generate_from_messages.call_args
         assert call_kwargs.kwargs["temperature"] == 0.3
+
+    def test_passes_correct_timeout(self):
+        """Timeout from config is propagated to generate_from_messages."""
+        batch = [(1, "eid1", "f.py", "x", "x = 1")]
+        mock_client = MagicMock()
+        mock_client.generate_from_messages.return_value = "1. 5,5,5,5"
+
+        # Default timeout (180s)
+        config = VariableScoringConfig()
+        _score_batch(batch, mock_client, config, num_ctx=1024)
+        call_kwargs = mock_client.generate_from_messages.call_args
+        assert call_kwargs.kwargs["timeout"] == 180
+
+        # Custom timeout
+        config = VariableScoringConfig(timeout=300)
+        _score_batch(batch, mock_client, config, num_ctx=1024)
+        call_kwargs = mock_client.generate_from_messages.call_args
+        assert call_kwargs.kwargs["timeout"] == 300
 
     def test_token_counts_returned(self):
         """Token counts are estimated from prompt and response."""

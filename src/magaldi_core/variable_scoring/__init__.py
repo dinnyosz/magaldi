@@ -176,6 +176,7 @@ def _score_batch(
             messages=messages,
             temperature=config.temperature,
             max_tokens=output_budget,
+            timeout=config.timeout,
             num_ctx=num_ctx,
         )
     except Exception:
