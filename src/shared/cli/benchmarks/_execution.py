@@ -252,13 +252,14 @@ def evaluate_summaries(
             else:
                 summaries[model_key] = ""
 
-        # Build evaluation prompt
-        eval_prompt = build_evaluation_prompt(
+        # Build evaluation prompt with blind/anonymous labels
+        eval_prompt, label_to_model = build_evaluation_prompt(
             element_type=elem.element_type,
             element_name=elem.name,
             source_code=elem.raw_code or "",
             summaries=summaries,
         )
+        labels = list(label_to_model.keys())
 
         # Evaluate with each eval model
         for eval_mc in eval_model_configs:
@@ -289,7 +290,8 @@ def evaluate_summaries(
                     evaluations, error = parse_evaluation_response(
                         eval_result.response,
                         elem.element_type,
-                        tested_model_names,
+                        labels,
+                        label_to_model,
                     )
                     eval_result_obj.evaluations = evaluations
                     eval_result_obj.parse_error = error

@@ -76,7 +76,7 @@ class ModelConfig:
     Encapsulates everything needed to connect to and use a model.
     """
 
-    name: str  # Model name (e.g., "qwen3:4b-instruct", "mlx-community/Qwen3-4B-Instruct-2507-4bit")
+    name: str  # Model name (e.g., "qwen3.5:4b", "mlx-community/Qwen3-4B-Instruct-2507-4bit")
     provider: str = "ollama"  # ollama, lmstudio, llamacpp, vllm-mlx, openai, anthropic
     url: str = "http://localhost:11434"  # API endpoint
     api_key: str | None = None  # For cloud providers
@@ -125,6 +125,7 @@ class ModelConfig:
             return self.url
 
     # Models that use thinking/reasoning tags (<think>...</think>) by default.
+    # Note: qwen3.5 has reasoning disabled by default (opt-in), so NOT included here.
     _THINKING_MODELS = ("qwen3", "deepseek-r1", "deepseek-coder-v2", "nemotron")
 
     def is_thinking_model(self) -> bool:
@@ -132,9 +133,21 @@ class ModelConfig:
 
         Handles org prefixes (e.g., "mlx-community/Qwen3-4B-...") and
         Ollama tags (e.g., "qwen3:4b-instruct").
+
+        Note: qwen3.5 has reasoning disabled by default, so "qwen3.5:4b"
+        does NOT match. Only "qwen3" (without ".5") matches the thinking
+        family prefix. The startswith("qwen3") check is safe because
+        "qwen3.5" starts with "qwen3." not "qwen3:" or "qwen3-".
         """
         base = self.name.split("/")[-1].lower()
-        return any(base.startswith(tm) for tm in self._THINKING_MODELS)
+        for tm in self._THINKING_MODELS:
+            if base.startswith(tm):
+                # Ensure "qwen3" doesn't false-match "qwen3.5"
+                rest = base[len(tm):]
+                if tm == "qwen3" and rest.startswith("."):
+                    continue  # Skip qwen3.5, qwen3.6, etc.
+                return True
+        return False
 
 
 @dataclass
@@ -147,11 +160,11 @@ class LLMConfig:
     Example config.yaml:
         llm:
           models:
-            qwen3-4b:
+            qwen3.5-4b:
               name: mlx-community/Qwen3-4B-Instruct-2507-4bit
               provider: vllm-mlx
               url: http://localhost:8000
-            qwen3-small:
+            qwen3.5-small:
               name: mlx-community/Qwen3-1.7B-4bit
               provider: vllm-mlx
               url: http://localhost:8001
@@ -161,20 +174,20 @@ class LLMConfig:
               url: http://localhost:8000
               dimensions: 1024
 
-          summarize_model: qwen3-4b
-          summarize_model_small: qwen3-small
+          summarize_model: qwen3.5-4b
+          summarize_model_small: qwen3.5-small
           embed_model: qwen3-embed
     """
 
     # Named model configurations
     # Default to vllm-mlx for Apple Silicon (continuous batching, faster parallel processing)
     models: dict[str, ModelConfig] = field(default_factory=lambda: {
-        "qwen3-4b": ModelConfig(
+        "qwen3.5-4b": ModelConfig(
             name="mlx-community/Qwen3-4B-Instruct-2507-4bit",
             provider="vllm-mlx",
             url="http://localhost:8000",
         ),
-        "qwen3-small": ModelConfig(
+        "qwen3.5-small": ModelConfig(
             name="mlx-community/Qwen3-1.7B-4bit",
             provider="vllm-mlx",
             url="http://localhost:8001",
@@ -188,8 +201,8 @@ class LLMConfig:
     })
 
     # Which models to use for each purpose (reference by name)
-    summarize_model: str = "qwen3-4b"
-    summarize_model_small: str = "qwen3-small"
+    summarize_model: str = "qwen3.5-4b"
+    summarize_model_small: str = "qwen3.5-small"
     embed_model: str = "qwen3-embed"
 
     # Generation settings (defaults, can be overridden per-model)
@@ -377,60 +390,63 @@ class BenchmarkConfig:
     Example config.yaml:
         benchmark:
           models:
-            qwen3-small:
-              name: qwen3:1.7b
+            qwen3.5-small:
+              name: qwen3.5:2b
               provider: ollama
               url: http://localhost:11434
-            qwen3-4b:
-              name: qwen3:4b-instruct
+            qwen3.5-4b:
+              name: qwen3.5:4b
               provider: llamacpp
               url: http://localhost:8080
           benchmark_models:
-            - qwen3-small
-            - qwen3-4b
+            - qwen3.5-small
+            - qwen3.5-4b
           eval_models:
-            - qwen3-4b
+            - qwen3.5-8b-eval  # Must NOT overlap with benchmark_models
     """
 
     # Named model configurations for benchmarking
-    # NOTE: qwen3 models after July 2025 split into "thinking" and "instruct" variants
-    #       The default qwen3:Xb has thinking baked in, use instruct variants instead
-    # NOTE: Falcon H1 models require manual GGUF import - see plans/ollama_model_research.md
+    # NOTE: qwen3.5 has reasoning disabled by default (unlike qwen3 which had thinking baked in)
+    # NOTE: qwen3 models need think=False (handled by BenchmarkClient.THINKING_MODELS)
     models: dict[str, ModelConfig] = field(default_factory=lambda: {
-        "qwen3-small": ModelConfig(
+        # Qwen3 family (thinking model - reasoning disabled in benchmark)
+        "qwen3-1.7b": ModelConfig(
             name="qwen3:1.7b",
             provider="ollama",
             url="http://localhost:11434",
             num_ctx=16384,
         ),
         "qwen3-4b": ModelConfig(
-            name="qwen3:4b-instruct",
+            name="qwen3:4b",
             provider="ollama",
             url="http://localhost:11434",
             num_ctx=16384,
         ),
-        # Falcon H1 models (hybrid Transformer + Mamba-2 SSM architecture)
-        # Requires manual import from GGUF - see plans/ollama_model_research.md
-        "falcon-h1-tiny": ModelConfig(
-            name="falcon-h1-tiny-90m",
+        # Qwen3.5 family (reasoning disabled by default)
+        "qwen3.5-tiny": ModelConfig(
+            name="qwen3.5:0.8b",
             provider="ollama",
             url="http://localhost:11434",
             num_ctx=16384,
         ),
-        "falcon-h1-0.5b": ModelConfig(
-            name="falcon-h1-0.5b",
+        "qwen3.5-small": ModelConfig(
+            name="qwen3.5:2b",
             provider="ollama",
             url="http://localhost:11434",
             num_ctx=16384,
         ),
-        "falcon-h1-1.5b": ModelConfig(
-            name="falcon-h1-1.5b-deep",
+        "qwen3.5-4b": ModelConfig(
+            name="qwen3.5:4b",
             provider="ollama",
             url="http://localhost:11434",
             num_ctx=16384,
         ),
-        "falcon-h1-3b": ModelConfig(
-            name="falcon-h1-3b",
+        # Eval-only model: larger model not in the benchmark set
+        # Using qwen3.5:8b as judge — big enough gap from 2B/4B test models
+        # to provide meaningful evaluation without self-bias.
+        # Alternative: use "openai:gpt-4o-mini" for cloud-based eval.
+        "qwen3.5-8b-eval": ModelConfig(
+            name="qwen3.5:8b",
             provider="ollama",
             url="http://localhost:11434",
             num_ctx=16384,
@@ -439,18 +455,18 @@ class BenchmarkConfig:
 
     # Which models to benchmark (reference by name)
     benchmark_models: list[str] = field(default_factory=lambda: [
-        "qwen3-small",   # Best balance (8.2 rating, 114 t/s)
-        "qwen3-4b",      # Best quality (8.7 rating, 65 t/s)
-        # Falcon H1 models - hybrid Transformer + Mamba-2 SSM (requires GGUF import)
-        "falcon-h1-tiny",        # 90M params, general instruct
-        "falcon-h1-0.5b",        # 0.5B params, instruct
-        "falcon-h1-1.5b",        # 1.5B params, deep model
-        "falcon-h1-3b",          # 3B params, largest in set
+        "qwen3-1.7b",     # Qwen3 1.7B (thinking disabled)
+        "qwen3-4b",       # Qwen3 4B (thinking disabled)
+        "qwen3.5-tiny",   # Qwen3.5 0.8B
+        "qwen3.5-small",  # Qwen3.5 2B
+        "qwen3.5-4b",     # Qwen3.5 4B
     ])
 
     # Models used for evaluating/rating summaries (LLM-as-judge)
+    # IMPORTANT: eval model should NOT be in benchmark_models to avoid self-bias.
+    # Use a larger model from a different size class for fair evaluation.
     eval_models: list[str] = field(default_factory=lambda: [
-        "qwen3-4b",  # Quality evaluator
+        "qwen3.5-8b-eval",  # Quality evaluator (larger, not benchmarked)
     ])
 
     # Generation settings (based on paper's methodology)
@@ -483,6 +499,15 @@ class BenchmarkConfig:
         # huggingface.co/Qwen/Qwen3-1.7B#best-practices
         # temperature=0.7, top_p=0.8, top_k=20, min_p=0, presence_penalty=1.5
         "qwen3": ModelParams(
+            temperature=0.7,
+            top_p=0.8,
+            top_k=20,
+            min_p=0.0,
+            presence_penalty=1.5,
+        ),
+        # Qwen3.5 (reasoning disabled by default, no thinking tags)
+        # Same generation params as Qwen3 instruct for now
+        "qwen3.5": ModelParams(
             temperature=0.7,
             top_p=0.8,
             top_k=20,
@@ -542,8 +567,8 @@ class BenchmarkConfig:
             max_tokens=1024,  # Thinking models need more tokens
         ),
         # Falcon H1 Instruct models: Hybrid Transformer + Mamba-2 SSM architecture
+        # (removed from default benchmark set but params kept for CLI --models override)
         # huggingface.co/spaces/tiiuae/Falcon-H1-playground/discussions/1
-        # "For optimal performance, the recommended model temperature is 0.1"
         "falcon-h1": ModelParams(
             temperature=0.1,
         ),

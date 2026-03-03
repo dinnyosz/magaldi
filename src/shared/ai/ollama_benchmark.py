@@ -108,13 +108,27 @@ class EvaluationResult:
         return 0.0
 
 
+def _make_anonymous_labels(count: int) -> list[str]:
+    """Generate anonymous labels for blind evaluation: A, B, C, ..., Z, AA, AB, ..."""
+    labels = []
+    for i in range(count):
+        if i < 26:
+            labels.append(chr(65 + i))  # A-Z
+        else:
+            labels.append(chr(65 + i // 26 - 1) + chr(65 + i % 26))  # AA, AB, ...
+    return labels
+
+
 def build_evaluation_prompt(
     element_type: str,
     element_name: str,
     source_code: str,
     summaries: dict[str, str],  # model -> summary
-) -> str:
-    """Build evaluation prompt with element-specific criteria and JSON output.
+) -> tuple[str, dict[str, str]]:
+    """Build evaluation prompt with anonymous labels for blind evaluation.
+
+    Model names are replaced with anonymous labels (A, B, C, ...) to prevent
+    the eval model from biasing scores based on model identity.
 
     Args:
         element_type: Type of element (file, class, function, method, constant, variable).
@@ -123,7 +137,8 @@ def build_evaluation_prompt(
         summaries: Dict mapping model name to its summary.
 
     Returns:
-        Prompt string requesting JSON evaluation.
+        Tuple of (prompt string, label_to_model mapping).
+        The mapping maps anonymous labels back to real model names.
     """
     criteria = EVALUATION_CRITERIA.get(element_type, EVALUATION_CRITERIA["function"])
     min_sent, max_sent = EXPECTED_SENTENCES.get(element_type, (4, 6))
@@ -138,14 +153,17 @@ def build_evaluation_prompt(
         criteria_lines.append(f'  - "{key}": {desc}')
     criteria_text = "\n".join(criteria_lines)
 
-    # Build summaries section
-    summaries_section = []
-    for model, summary in summaries.items():
-        summaries_section.append(f'### {model}\n{summary if summary else "(generation failed)"}')
-    summaries_text = "\n\n".join(summaries_section)
-
-    # Build model list for JSON schema
+    # Assign anonymous labels to models (blind evaluation)
     model_list = list(summaries.keys())
+    labels = _make_anonymous_labels(len(model_list))
+    label_to_model: dict[str, str] = dict(zip(labels, model_list))
+
+    # Build summaries section with anonymous labels
+    summaries_section = []
+    for label, model in zip(labels, model_list):
+        summary = summaries[model]
+        summaries_section.append(f'### Summary {label}\n{summary if summary else "(generation failed)"}')
+    summaries_text = "\n\n".join(summaries_section)
 
     prompt = f"""You are evaluating code summaries for a {element_type} named "{element_name}".
 
@@ -175,41 +193,43 @@ Criteria:
 Output ONLY valid JSON (no markdown, no explanation) in this exact format:
 {{
   "evaluations": {{
-    "{model_list[0]}": {{
+    "{labels[0]}": {{
 {chr(10).join(f'      "{k}": <score 1-10>,' for k in list(criteria.keys())[:-1])}
       "{list(criteria.keys())[-1]}": <score 1-10>,
       "notes": "<brief note on strengths/weaknesses>"
-    }}{(',' + chr(10) + '    "' + '": {...},'.join(model_list[1:-1]) + '"' + ': {...},' if len(model_list) > 2 else '') if len(model_list) > 1 else ''}
-    {f'''"{model_list[-1]}": {{
+    }}{(',' + chr(10) + '    "' + '": {...},'.join(labels[1:-1]) + '"' + ': {...},' if len(labels) > 2 else '') if len(labels) > 1 else ''}
+    {f'''"{labels[-1]}": {{
 {chr(10).join(f'      "{k}": <score 1-10>,' for k in list(criteria.keys())[:-1])}
       "{list(criteria.keys())[-1]}": <score 1-10>,
       "notes": "<brief note>"
-    }}''' if len(model_list) > 1 else ''}
+    }}''' if len(labels) > 1 else ''}
   }}
 }}
 
-Evaluate all {len(model_list)} models: {", ".join(model_list)}
+Evaluate all {len(labels)} summaries: {", ".join(labels)}
 
 JSON output:"""
 
-    return prompt
+    return prompt, label_to_model
 
 
 def parse_evaluation_response(
     response: str,
     element_type: str,
-    models: list[str],
+    labels: list[str],
+    label_to_model: dict[str, str],
 ) -> tuple[dict[str, CriteriaScores], str]:
-    """Parse JSON evaluation response.
+    """Parse JSON evaluation response, mapping anonymous labels back to model names.
 
     Args:
         response: Raw LLM response.
         element_type: Element type for expected criteria.
-        models: List of model names to look for.
+        labels: List of anonymous labels (A, B, C, ...) used in the prompt.
+        label_to_model: Mapping from label to real model name.
 
     Returns:
         Tuple of (evaluations dict, error message).
-        evaluations maps model name to CriteriaScores.
+        evaluations maps real model name to CriteriaScores.
     """
     criteria = EVALUATION_CRITERIA.get(element_type, EVALUATION_CRITERIA["function"])
     evaluations: dict[str, CriteriaScores] = {}
@@ -273,26 +293,30 @@ def parse_evaluation_response(
     # Extract evaluations
     evals_data = data.get("evaluations", data)  # Handle both wrapped and unwrapped
 
-    for model in models:
-        if model in evals_data:
-            model_data = evals_data[model]
-            scores = {}
-            for criterion in criteria:
-                if criterion in model_data:
-                    try:
-                        score = int(model_data[criterion])
-                        if 1 <= score <= 10:
-                            scores[criterion] = score
-                    except (ValueError, TypeError):
-                        pass
-            notes = model_data.get("notes", "")
-            if isinstance(notes, str):
-                evaluations[model] = CriteriaScores(scores=scores, notes=notes)
-            else:
-                evaluations[model] = CriteriaScores(scores=scores, notes="")
+    # Parse by anonymous label and map back to real model names
+    for label in labels:
+        if label not in evals_data:
+            continue
+        model_data = evals_data[label]
+        scores = {}
+        for criterion in criteria:
+            if criterion in model_data:
+                try:
+                    score = int(model_data[criterion])
+                    if 1 <= score <= 10:
+                        scores[criterion] = score
+                except (ValueError, TypeError):
+                    pass
+        notes = model_data.get("notes", "")
+        real_model = label_to_model[label]
+        if isinstance(notes, str):
+            evaluations[real_model] = CriteriaScores(scores=scores, notes=notes)
+        else:
+            evaluations[real_model] = CriteriaScores(scores=scores, notes="")
 
-    # Check for missing models
-    missing = [m for m in models if m not in evaluations or not evaluations[m].scores]
+    # Check for missing models (report by real model name)
+    all_models = list(label_to_model.values())
+    missing = [m for m in all_models if m not in evaluations or not evaluations[m].scores]
     if missing:
         return evaluations, f"Missing evaluations for: {', '.join(missing)}"
 
@@ -338,7 +362,8 @@ class BenchmarkClient:
     Model format: "provider/model" (e.g., "ollama/qwen2.5-coder:3b", "openai/gpt-4o")
     """
 
-    # Models that use thinking/reasoning tags by default
+    # Models that use thinking/reasoning tags by default.
+    # Note: qwen3.5 has reasoning disabled by default (opt-in), so NOT included here.
     THINKING_MODELS = ("qwen3", "deepseek-r1", "deepseek-coder-v2", "nemotron", "lfm2.5-thinking", "sam860/lfm2.5")
 
     def __init__(
@@ -508,9 +533,16 @@ class BenchmarkClient:
         if effective_api_key:
             kwargs["api_key"] = effective_api_key
 
-        # Check if this is a thinking model
+        # Check if this is a thinking model (qwen3.5 is NOT a thinking model)
         model_name = model.split("/")[-1] if "/" in model else model
-        is_thinking_model = any(model_name.startswith(tm) for tm in self.THINKING_MODELS)
+        is_thinking_model = False
+        for tm in self.THINKING_MODELS:
+            if model_name.startswith(tm):
+                rest = model_name[len(tm):]
+                if tm == "qwen3" and rest.startswith("."):
+                    continue  # Skip qwen3.5, qwen3.6, etc.
+                is_thinking_model = True
+                break
 
         # Disable thinking mode for models that support it (Ollama)
         if is_thinking_model and model.startswith("ollama/"):
