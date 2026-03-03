@@ -195,10 +195,11 @@ def _start_server(plan: ServerPlan) -> bool:
 
     python_bin = _find_vllm_python()
 
-    # Build command
+    # Build command using the newer vllm_mlx.cli entrypoint which supports
+    # KV cache quantization, paged cache, chunked prefill, and other options.
     cmd = [
-        python_bin, "-m", "vllm_mlx.server",
-        "--model", plan.llm_model,
+        python_bin, "-m", "vllm_mlx.cli", "serve",
+        plan.llm_model,
         "--port", str(plan.port),
         "--host", plan.host,
     ]
@@ -209,15 +210,58 @@ def _start_server(plan: ServerPlan) -> bool:
     if plan.embedding_model:
         cmd.extend(["--embedding-model", plan.embedding_model])
 
+    # -- KV cache quantization --
+    # 4-bit quantization reduces KV cache memory ~4x vs fp16.
+    # Lower min-quantize-tokens from default 256→0 so even short sequences
+    # (variable scoring batches) get quantized.
+    cmd.extend([
+        "--kv-cache-quantization",
+        "--kv-cache-quantization-bits", "4",
+        "--kv-cache-min-quantize-tokens", "0",
+    ])
+
+    # -- Paged KV cache --
+    # Allocates KV cache in small blocks instead of monolithically per
+    # sequence.  Blocks are reused/freed dynamically, putting a hard ceiling
+    # on total memory.  max-cache-blocks × block-size = max cached tokens.
+    # 500 blocks × 64 tokens = 32K tokens max across all sequences.
+    cmd.extend([
+        "--use-paged-cache",
+        "--max-cache-blocks", "500",
+    ])
+
+    # -- Prefix cache --
+    # Cap stored prefix cache at 4GB.  The default (20% of RAM) is too
+    # aggressive when multiple servers share the same machine.
+    cmd.extend(["--cache-memory-mb", "4096"])
+
+    # -- Reasoning parser --
+    # Extract <think>...</think> into reasoning_content field server-side.
+    _REASONING_PARSERS = {"qwen3": "qwen3", "deepseek-r1": "deepseek_r1"}
+    primary_cfg = next((c for c in plan.model_configs if c.dimensions is None), None)
+    if primary_cfg and primary_cfg.is_thinking_model():
+        base = primary_cfg.name.split("/")[-1].lower()
+        for family, parser in _REASONING_PARSERS.items():
+            if base.startswith(family):
+                cmd.extend(["--reasoning-parser", parser])
+                break
+
+    # -- Concurrency & scheduling --
+    # Limit concurrent sequences to prevent Metal memory explosion.
+    cmd.extend(["--max-num-seqs", "2"])
+
+    # Chunked prefill: split long prompts into chunks so active requests
+    # aren't starved while a big prompt is being prefilled.
+    cmd.extend(["--chunked-prefill-tokens", "512"])
+
     # Ensure pid directory exists
     PIDFILE_DIR.mkdir(parents=True, exist_ok=True)
 
     # Start as background process
     console.print(f"  Starting vllm-mlx on port {plan.port}...")
-    console.print(f"    LLM: {plan.llm_model}")
-    if plan.embedding_model:
-        console.print(f"    Embed: {plan.embedding_model}")
-    console.print(f"    Batching: {'continuous' if plan.continuous_batching else 'simple'}")
+    # Show the full command so the user can see (and override) all parameters
+    cmd_display = " ".join(cmd).replace(python_bin, "python -m")
+    console.print(f"    [dim]{cmd_display}[/]")
     console.print(f"    Log: {plan.logfile}")
 
     with open(plan.logfile, "w") as log_f:
