@@ -187,7 +187,7 @@ def _find_vllm_python() -> str:
     return sys.executable
 
 
-def _start_server(plan: ServerPlan) -> bool:
+def _start_server(plan: ServerPlan, metal_memory_fraction: float = 0.35) -> bool:
     """Start a vllm-mlx server as a background process."""
     if plan.is_running():
         console.print(f"  [green]Already running[/] on port {plan.port}")
@@ -224,16 +224,16 @@ def _start_server(plan: ServerPlan) -> bool:
     # Allocates KV cache in small blocks instead of monolithically per
     # sequence.  Blocks are reused/freed dynamically, putting a hard ceiling
     # on total memory.  max-cache-blocks × block-size = max cached tokens.
-    # 500 blocks × 64 tokens = 32K tokens max across all sequences.
+    # 256 blocks × 64 tokens = 16K tokens max across all sequences.
     cmd.extend([
         "--use-paged-cache",
-        "--max-cache-blocks", "500",
+        "--max-cache-blocks", "256",
     ])
 
     # -- Prefix cache --
-    # Cap stored prefix cache at 4GB.  The default (20% of RAM) is too
-    # aggressive when multiple servers share the same machine.
-    cmd.extend(["--cache-memory-mb", "4096"])
+    # Cap stored prefix cache at 2GB.  The default (20% of RAM) is too
+    # aggressive and the 4GB cap was still being exceeded (~6.4GB actual).
+    cmd.extend(["--cache-memory-mb", "2048"])
 
     # -- Reasoning parser --
     # Extract <think>...</think> into reasoning_content field server-side.
@@ -247,12 +247,44 @@ def _start_server(plan: ServerPlan) -> bool:
                 break
 
     # -- Concurrency & scheduling --
-    # Limit concurrent sequences to prevent Metal memory explosion.
-    cmd.extend(["--max-num-seqs", "2"])
+    # Limit concurrent sequences.  vllm-mlx has a known Metal resource leak
+    # under high concurrency (GitHub issue #91 / PR #92) where lazy
+    # mx.concatenate() chains accumulate AGXAllocation handles.
+    # Keep this low until PR #92 is merged into a release.
+    cmd.extend(["--max-num-seqs", "4"])
 
     # Chunked prefill: split long prompts into chunks so active requests
     # aren't starved while a big prompt is being prefilled.
     cmd.extend(["--chunked-prefill-tokens", "512"])
+
+    # -- Metal memory cap --
+    # vllm-mlx hardcodes mx.set_memory_limit(90% of device) which lets a 2.5GB
+    # 4-bit model balloon to 36GB+.  The caller passes the fraction based on
+    # model role: 35% for the LLM server, 15% for the embeddings-only server,
+    # reserving ~50% for the OS and magaldi parse process.
+    env = os.environ.copy()
+    env["MAGALDI_METAL_MEMORY_FRACTION"] = str(metal_memory_fraction)
+
+    # Inject a Python preamble that patches mx.set_memory_limit before
+    # vllm_mlx imports it, then runs the CLI entrypoint.
+    preamble = (
+        "import mlx.core as mx, os; "
+        "frac = float(os.environ.get('MAGALDI_METAL_MEMORY_FRACTION', '0.50')); "
+        "info = mx.device_info(); "
+        "dev_mem = info.get('max_recommended_working_set_size', info.get('memory_size', 0)); "
+        "limit = int(dev_mem * frac); "
+        "mx.set_memory_limit(limit); "
+        "cache = int(4 * 1024**3); "
+        "mx.set_cache_limit(cache); "
+        # Prevent vllm_mlx from overriding our limits with its hardcoded 90%
+        "mx.set_memory_limit = lambda *a, **k: limit; "
+        "mx.set_cache_limit = lambda *a, **k: cache; "
+        "from vllm_mlx.cli import main; main()"
+    )
+    # Replace "python -m vllm_mlx.cli serve ..." with "python -c <preamble> serve ..."
+    # cmd[3:] keeps "serve" and all args after it.  With -c, sys.argv becomes
+    # ["-c", "serve", model, "--port", ...] which argparse parses correctly.
+    cmd = [cmd[0], "-c", preamble] + cmd[3:]
 
     # Ensure pid directory exists
     PIDFILE_DIR.mkdir(parents=True, exist_ok=True)
@@ -263,9 +295,11 @@ def _start_server(plan: ServerPlan) -> bool:
     if plan.embedding_model:
         console.print(f"    Embed model:      {plan.embedding_model}")
     console.print(f"    Batching:         {'continuous' if plan.continuous_batching else 'single'}")
-    console.print("    KV cache:         4-bit quantized, paged (500 blocks)")
-    console.print("    Prefix cache:     4096 MB")
-    console.print("    Max sequences:    2")
+    console.print("    KV cache:         4-bit quantized, paged (256 blocks)")
+    console.print("    Prefix cache:     2048 MB")
+    console.print(f"    Metal memory:     {metal_memory_fraction:.0%} of device")
+    console.print("    Metal cache:      4 GB")
+    console.print("    Max sequences:    4")
     console.print("    Chunked prefill:  512 tokens")
     # Show reasoning parser if detected
     for part_idx, part in enumerate(cmd):
@@ -277,6 +311,7 @@ def _start_server(plan: ServerPlan) -> bool:
     with open(plan.logfile, "w") as log_f:
         proc = subprocess.Popen(
             cmd,
+            env=env,
             stdout=log_f,
             stderr=subprocess.STDOUT,
             start_new_session=True,  # Detach from parent
@@ -406,7 +441,12 @@ def llm_serve(port: int | None, no_batch: bool) -> None:
 
     success_count = 0
     for plan in plans:
-        if _start_server(plan):
+        # Allocate more Metal memory to the LLM server (has chat model),
+        # less to the embeddings-only server.  35% + 15% = 50% total,
+        # leaving ~50% for the OS and magaldi parse process.
+        has_llm = any(c.dimensions is None for c in plan.model_configs)
+        fraction = 0.35 if has_llm else 0.15
+        if _start_server(plan, metal_memory_fraction=fraction):
             success_count += 1
         console.print()
 
