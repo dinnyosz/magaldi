@@ -488,11 +488,7 @@ async def call_llm_for_glossary(
 
     # Get model config from LLM config
     model_config = config.llm.get_summarize_model()
-    client = LLMClient(
-        model=model_config.get_litellm_model(),
-        api_base=model_config.get_api_base(),
-        api_key=model_config.api_key,
-    )
+    client = LLMClient.from_model_config(model_config)
 
     try:
         response = client.generate_from_messages(
@@ -702,11 +698,7 @@ def generate_glossary_summary_sync(
 
     # Get model config from LLM config
     model_config = config.llm.get_summarize_model()
-    client = LLMClient(
-        model=model_config.get_litellm_model(),
-        api_base=model_config.get_api_base(),
-        api_key=model_config.api_key,
-    )
+    client = LLMClient.from_model_config(model_config)
 
     start_time = time.time()
     try:
@@ -798,11 +790,7 @@ def call_llm_for_glossary_sync(
 
     # Get model config from LLM config
     model_config = config.llm.get_summarize_model()
-    client = LLMClient(
-        model=model_config.get_litellm_model(),
-        api_base=model_config.get_api_base(),
-        api_key=model_config.api_key,
-    )
+    client = LLMClient.from_model_config(model_config)
 
     try:
         response = client.generate_from_messages(
