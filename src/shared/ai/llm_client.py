@@ -336,17 +336,18 @@ class LLMConfig:
 
     # Model identifier (format: provider/model or just model for OpenAI)
     # Examples:
-    #   - "ollama/qwen3:4b-instruct"
+    #   - "ollama/qwen3.5:4b"
     #   - "gpt-4o-mini"
     #   - "claude-3-haiku-20240307"
-    model: str = "ollama/qwen3:4b-instruct"
+    model: str = "ollama/qwen3.5:4b"
 
     # API configuration
     api_base: str | None = None  # For Ollama: "http://localhost:11434"
     api_key: str | None = None  # For cloud providers
 
-    # Generation settings (based on arxiv.org/html/2507.03160v2)
-    temperature: float = 0.2
+    # Generation settings — Qwen3.5 "Precise Coding Tasks" preset
+    # huggingface.co/Qwen/Qwen3.5-4B
+    temperature: float = 0.6
     max_tokens: int = 512
     timeout: int = 180  # 3 minutes to handle queue wait with many workers
 
@@ -461,10 +462,19 @@ class LLMClient:
         # Uses model_name (real name) if available, otherwise the LiteLLM identifier.
         _raw = model_name or model
         _base = _raw.split("/")[-1].lower()
-        self._is_thinking_model = any(_base.startswith(tm) for tm in self.THINKING_MODELS)
+        self._is_thinking_model = self._check_is_thinking_model(_base)
 
         # Compiled regex for stripping <think> blocks (only used for thinking models)
         self._think_re = re.compile(r"<think>.*?</think>", re.DOTALL)
+
+    @staticmethod
+    def _check_is_thinking_model(base: str) -> bool:
+        """Check if a model base name is a thinking model.
+
+        Matches all Qwen3 variants (qwen3, qwen3.5, qwen3.6, etc.) since
+        they all default to thinking mode in Ollama/LiteLLM.
+        """
+        return any(base.startswith(tm) for tm in LLMClient.THINKING_MODELS)
 
     def _strip_think_tags(self, text: str) -> str:
         """Strip <think>...</think> blocks from model output.
@@ -576,6 +586,10 @@ class LLMClient:
         max_tokens: int,
         timeout: int,
         num_ctx: int | None,
+        top_k: int | None = None,
+        min_p: float | None = None,
+        presence_penalty: float | None = None,
+        repetition_penalty: float | None = None,
     ) -> dict[str, Any]:
         """Build the kwargs dict for litellm.completion().
 
@@ -590,6 +604,20 @@ class LLMClient:
             "max_tokens": max_tokens,
             "timeout": timeout,
         }
+
+        # Optional sampling parameters (from model-specific configs)
+        if presence_penalty is not None:
+            kwargs["presence_penalty"] = presence_penalty
+        if repetition_penalty is not None and repetition_penalty != 1.0:
+            # LiteLLM passes repetition_penalty via extra_body for Ollama
+            kwargs.setdefault("extra_body", {})
+            kwargs["extra_body"]["repetition_penalty"] = repetition_penalty
+        if top_k is not None or min_p is not None:
+            kwargs.setdefault("extra_body", {})
+            if top_k is not None:
+                kwargs["extra_body"]["top_k"] = top_k
+            if min_p is not None:
+                kwargs["extra_body"]["min_p"] = min_p
 
         # Auth
         if self.api_base:
@@ -606,7 +634,8 @@ class LLMClient:
 
         # Disable thinking mode for models that use it by default
         if self._is_thinking_model:
-            if use_model.startswith("ollama/"):
+            if use_model.startswith("ollama_chat/"):
+                # Native /api/chat supports "think" parameter directly
                 kwargs["think"] = False
             elif _is_local:
                 # Local servers (LM Studio, llama.cpp, vllm-mlx)
@@ -631,7 +660,7 @@ class LLMClient:
         # sending n_ctx in extra_body causes them to reject requests that
         # exceed the specified value, even if the model was loaded with a
         # larger context.
-        if num_ctx and use_model.startswith("ollama/"):
+        if num_ctx and use_model.startswith(("ollama/", "ollama_chat/")):
             kwargs["num_ctx"] = num_ctx
 
         return kwargs
@@ -650,7 +679,8 @@ class LLMClient:
             logger.debug("LLM health check failed for model %s", self.model, exc_info=True)
             return False
 
-    # Models that use thinking/reasoning tags by default
+    # Models that use thinking/reasoning tags by default.
+    # All Qwen3 variants (qwen3, qwen3.5, etc.) think by default in Ollama.
     THINKING_MODELS = ("qwen3", "deepseek-r1", "deepseek-coder-v2", "nemotron")
 
     def generate(
@@ -662,6 +692,10 @@ class LLMClient:
         timeout: int = 60,
         model: str | None = None,
         num_ctx: int | None = None,
+        top_k: int | None = None,
+        min_p: float | None = None,
+        presence_penalty: float | None = None,
+        repetition_penalty: float | None = None,
     ) -> str:
         """Generate text completion.
 
@@ -675,6 +709,10 @@ class LLMClient:
             num_ctx: Context window size for local providers (Ollama, llama.cpp).
                      For Ollama, this triggers use of tiered model aliases to avoid
                      reload overhead when context size changes.
+            top_k: Top-k sampling parameter.
+            min_p: Min-p sampling parameter.
+            presence_penalty: Presence penalty (0.0 to 2.0).
+            repetition_penalty: Repetition penalty.
 
         Returns:
             Generated text.
@@ -685,13 +723,14 @@ class LLMClient:
         use_model = model or self.model
 
         # For Ollama, resolve to tiered model alias based on num_ctx
-        if use_model.startswith("ollama/") and num_ctx:
+        if use_model.startswith(("ollama/", "ollama_chat/")) and num_ctx:
             from shared.ai.ollama_models import resolve_ollama_model
             use_model, num_ctx = resolve_ollama_model(use_model, self.api_base, num_ctx)
 
         def _do_generate() -> str:
             kwargs = self._build_kwargs(use_model, [{"role": "user", "content": prompt}],
-                                        temperature, top_p, max_tokens, timeout, num_ctx)
+                                        temperature, top_p, max_tokens, timeout, num_ctx,
+                                        top_k, min_p, presence_penalty, repetition_penalty)
 
             try:
                 response = completion(**kwargs)
@@ -720,6 +759,10 @@ class LLMClient:
         timeout: int = 60,
         model: str | None = None,
         num_ctx: int | None = None,
+        top_k: int | None = None,
+        min_p: float | None = None,
+        presence_penalty: float | None = None,
+        repetition_penalty: float | None = None,
     ) -> str:
         """Generate text completion from messages (system + user).
 
@@ -738,6 +781,10 @@ class LLMClient:
             num_ctx: Context window size for local providers (Ollama, llama.cpp).
                      For Ollama, this triggers use of tiered model aliases to avoid
                      reload overhead when context size changes.
+            top_k: Top-k sampling parameter.
+            min_p: Min-p sampling parameter.
+            presence_penalty: Presence penalty (0.0 to 2.0).
+            repetition_penalty: Repetition penalty.
 
         Returns:
             Generated text.
@@ -748,13 +795,14 @@ class LLMClient:
         use_model = model or self.model
 
         # For Ollama, resolve to tiered model alias based on num_ctx
-        if use_model.startswith("ollama/") and num_ctx:
+        if use_model.startswith(("ollama/", "ollama_chat/")) and num_ctx:
             from shared.ai.ollama_models import resolve_ollama_model
             use_model, num_ctx = resolve_ollama_model(use_model, self.api_base, num_ctx)
 
         def _do_generate() -> str:
             kwargs = self._build_kwargs(use_model, messages,
-                                        temperature, top_p, max_tokens, timeout, num_ctx)
+                                        temperature, top_p, max_tokens, timeout, num_ctx,
+                                        top_k, min_p, presence_penalty, repetition_penalty)
 
             try:
                 response = completion(**kwargs)

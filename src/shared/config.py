@@ -99,7 +99,10 @@ class ModelConfig:
         These should all delegate to ModelConfig instead of reimplementing the mapping.
         """
         if self.provider == "ollama":
-            return f"ollama/{self.name}"
+            # Use ollama_chat/ prefix to route via native /api/chat endpoint.
+            # The ollama/ prefix uses /v1/chat/completions (OpenAI-compat) which
+            # does NOT support the "think" parameter for disabling reasoning.
+            return f"ollama_chat/{self.name}"
         elif self.provider == "vllm-mlx":
             # vllm-mlx serves one model per process; API uses "default"
             return "openai/default"
@@ -125,29 +128,20 @@ class ModelConfig:
             return self.url
 
     # Models that use thinking/reasoning tags (<think>...</think>) by default.
-    # Note: qwen3.5 has reasoning disabled by default (opt-in), so NOT included here.
+    # All Qwen3 variants (qwen3, qwen3.5, etc.) think by default in Ollama.
     _THINKING_MODELS = ("qwen3", "deepseek-r1", "deepseek-coder-v2", "nemotron")
 
     def is_thinking_model(self) -> bool:
         """Check if this model uses thinking/reasoning by default.
 
         Handles org prefixes (e.g., "mlx-community/Qwen3-4B-...") and
-        Ollama tags (e.g., "qwen3:4b-instruct").
+        Ollama tags (e.g., "qwen3:4b-instruct", "qwen3.5:4b").
 
-        Note: qwen3.5 has reasoning disabled by default, so "qwen3.5:4b"
-        does NOT match. Only "qwen3" (without ".5") matches the thinking
-        family prefix. The startswith("qwen3") check is safe because
-        "qwen3.5" starts with "qwen3." not "qwen3:" or "qwen3-".
+        All Qwen3 variants (qwen3, qwen3.5, qwen3.6, etc.) use thinking
+        by default in Ollama and need think=False for clean output.
         """
         base = self.name.split("/")[-1].lower()
-        for tm in self._THINKING_MODELS:
-            if base.startswith(tm):
-                # Ensure "qwen3" doesn't false-match "qwen3.5"
-                rest = base[len(tm):]
-                if tm == "qwen3" and rest.startswith("."):
-                    continue  # Skip qwen3.5, qwen3.6, etc.
-                return True
-        return False
+        return any(base.startswith(tm) for tm in self._THINKING_MODELS)
 
 
 @dataclass
@@ -206,8 +200,14 @@ class LLMConfig:
     embed_model: str = "qwen3-embed"
 
     # Generation settings (defaults, can be overridden per-model)
-    summarize_temperature: float = 0.2
+    # Based on Qwen3.5 "Thinking Mode for Precise Coding Tasks" preset:
+    # huggingface.co/Qwen/Qwen3.5-4B — temp=0.6, top_p=0.95, top_k=20
+    summarize_temperature: float = 0.6
     summarize_top_p: float = 0.95
+    summarize_top_k: int | None = 20
+    summarize_min_p: float | None = 0.0
+    summarize_presence_penalty: float | None = 0.0
+    summarize_repetition_penalty: float | None = 1.0
     summarize_max_tokens: int = 512
     summarize_context_window: int = 8192
     embed_context_window: int = 32768
@@ -361,6 +361,11 @@ class ModelParams:
 
     Sources for recommended values:
     - Qwen3: huggingface.co/Qwen/Qwen3-4B (instruct: temp=0.7, top_p=0.8)
+    - Qwen3.5: huggingface.co/Qwen/Qwen3.5-4B
+        - Non-thinking general: temp=0.7, top_p=0.8, top_k=20, presence_penalty=1.5
+        - Precise coding: temp=0.6, top_p=0.95, top_k=20, presence_penalty=0.0
+        - Thinking general: temp=1.0, top_p=0.95, top_k=20, presence_penalty=1.5
+        - Non-thinking reasoning: temp=1.0, top_p=1.0, top_k=40, presence_penalty=2.0
     - Granite: huggingface.co/ibm-granite/granite-3.1-3b-a800m-instruct (temp=0.6)
     - LFM2.5: huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct (temp=0.1, top_p=0.1)
     """
@@ -417,7 +422,7 @@ class BenchmarkConfig:
             num_ctx=16384,
         ),
         "qwen3-4b": ModelConfig(
-            name="qwen3:4b",
+            name="qwen3:4b-instruct",
             provider="ollama",
             url="http://localhost:11434",
             num_ctx=16384,
@@ -455,8 +460,8 @@ class BenchmarkConfig:
 
     # Which models to benchmark (reference by name)
     benchmark_models: list[str] = field(default_factory=lambda: [
-        "qwen3-1.7b",     # Qwen3 1.7B (thinking disabled)
-        "qwen3-4b",       # Qwen3 4B (thinking disabled)
+        "qwen3-1.7b",     # Qwen3 1.7B (hybrid, think=false via API)
+        "qwen3-4b",       # Qwen3 4B instruct (no thinking)
         "qwen3.5-tiny",   # Qwen3.5 0.8B
         "qwen3.5-small",  # Qwen3.5 2B
         "qwen3.5-4b",     # Qwen3.5 4B
@@ -494,7 +499,7 @@ class BenchmarkConfig:
             top_k=20,
             repetition_penalty=1.05,
         ),
-        # Qwen3 (non-thinking mode, we set think=False in benchmark)
+        # Qwen3 (use instruct variant or think=false for non-thinking mode)
         # huggingface.co/Qwen/Qwen3-4B#best-practices
         # huggingface.co/Qwen/Qwen3-1.7B#best-practices
         # temperature=0.7, top_p=0.8, top_k=20, min_p=0, presence_penalty=1.5
@@ -506,13 +511,15 @@ class BenchmarkConfig:
             presence_penalty=1.5,
         ),
         # Qwen3.5 (reasoning disabled by default, no thinking tags)
-        # Same generation params as Qwen3 instruct for now
+        # huggingface.co/Qwen/Qwen3.5-4B — "Non-Thinking Mode for General Tasks"
+        # Also available: coding preset (temp=0.6, top_p=0.95, presence_penalty=0.0)
         "qwen3.5": ModelParams(
             temperature=0.7,
             top_p=0.8,
             top_k=20,
             min_p=0.0,
             presence_penalty=1.5,
+            repetition_penalty=1.0,
         ),
         # IBM Granite Code: Similar to Granite 3.x params
         # github.com/ibm-granite/granite-code-models
