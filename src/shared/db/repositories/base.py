@@ -63,7 +63,11 @@ INDEX_MAPPING = {
                 "fields": {
                     "keyword": {
                         "type": "keyword",
-                        "ignore_above": 32766,  # Max for keyword, allows regexp on full code
+                        # Keep well under Lucene's 32766-byte hard limit to avoid
+                        # indexing failures with multi-byte UTF-8 content.
+                        # Elements exceeding this are still stored/searchable via
+                        # the text field but won't support regexp/wildcard queries.
+                        "ignore_above": 8191,
                     }
                 }
             },
@@ -558,6 +562,27 @@ class RepositoryBase:
                     )
                 except Exception:
                     logger.debug("Could not update nested_objects.limit on %s", INDEX_NAME)
+                # Lower raw_code.keyword ignore_above to avoid Lucene term-size
+                # errors with multi-byte UTF-8 content (was 32766, now 8191).
+                try:
+                    client.indices_put_mapping(
+                        INDEX_NAME,
+                        {
+                            "properties": {
+                                "raw_code": {
+                                    "type": "text",
+                                    "fields": {
+                                        "keyword": {
+                                            "type": "keyword",
+                                            "ignore_above": 8191,
+                                        }
+                                    },
+                                }
+                            }
+                        },
+                    )
+                except Exception:
+                    logger.debug("Could not update raw_code.keyword mapping on %s", INDEX_NAME)
             # Relationships index (knowledge graph edges)
             if not client.index_exists(RELATIONSHIPS_INDEX_NAME):
                 client.index_create(RELATIONSHIPS_INDEX_NAME, _make_relationships_mapping(bt))

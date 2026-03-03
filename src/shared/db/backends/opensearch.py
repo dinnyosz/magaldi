@@ -172,6 +172,9 @@ class OpenSearchClient:
     def indices_put_settings(self, index: str, body: dict[str, Any]) -> None:
         self._client.indices.put_settings(index=index, body=body)
 
+    def indices_put_mapping(self, index: str, body: dict[str, Any]) -> None:
+        self._client.indices.put_mapping(index=index, body=body)
+
     # --- Lifecycle ---
 
     def close(self) -> None:

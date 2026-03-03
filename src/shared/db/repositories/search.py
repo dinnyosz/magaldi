@@ -214,6 +214,8 @@ class SearchRepository:
 
         Note: Patterns are automatically wrapped with .* for substring matching
         (Lucene regexp requires matching the entire field by default).
+        Elements with raw_code exceeding 8191 chars are excluded from
+        regexp/wildcard search (too large for keyword indexing).
 
         Args:
             pattern: Lucene regexp pattern (e.g., 'add_column.*Model').
