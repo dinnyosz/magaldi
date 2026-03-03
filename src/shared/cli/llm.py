@@ -231,9 +231,11 @@ def _start_server(plan: ServerPlan, metal_memory_fraction: float = 0.35) -> bool
     ])
 
     # -- Prefix cache --
-    # Cap stored prefix cache at 2GB.  The default (20% of RAM) is too
-    # aggressive and the 4GB cap was still being exceeded (~6.4GB actual).
-    cmd.extend(["--cache-memory-mb", "2048"])
+    # Disable prefix cache.  It was constantly hitting "Out of cache blocks"
+    # with paged cache enabled, and its memory budget (~20% of RAM) isn't
+    # reclaimed even when blocks can't be allocated.  The paged cache already
+    # shares common prefixes between sequences.
+    cmd.append("--disable-prefix-cache")
 
     # -- Reasoning parser --
     # Extract <think>...</think> into reasoning_content field server-side.
@@ -277,7 +279,7 @@ def _start_server(plan: ServerPlan, metal_memory_fraction: float = 0.35) -> bool
         console.print(f"    Embed model:      {plan.embedding_model}")
     console.print(f"    Batching:         {'continuous' if plan.continuous_batching else 'single'}")
     console.print("    KV cache:         4-bit quantized, paged (256 blocks)")
-    console.print("    Prefix cache:     2048 MB")
+    console.print("    Prefix cache:     disabled")
     console.print(f"    Metal memory:     {metal_memory_fraction:.0%} of device")
     console.print("    Metal cache:      4 GB")
     console.print("    Max sequences:    4")
