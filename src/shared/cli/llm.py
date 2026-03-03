@@ -231,11 +231,9 @@ def _start_server(plan: ServerPlan, metal_memory_fraction: float = 0.35) -> bool
     ])
 
     # -- Prefix cache --
-    # Disable prefix cache.  It was constantly hitting "Out of cache blocks"
-    # with paged cache enabled, and its memory budget (~20% of RAM) isn't
-    # reclaimed even when blocks can't be allocated.  The paged cache already
-    # shares common prefixes between sequences.
-    cmd.append("--disable-prefix-cache")
+    # Enabled: useful for shared system prompts (summarization, variable scoring).
+    # Previously disabled due to "Out of cache blocks" with paged cache, but
+    # re-enabled to test with higher max-num-seqs.
 
     # -- Reasoning parser --
     # Extract <think>...</think> into reasoning_content field server-side.
@@ -249,11 +247,12 @@ def _start_server(plan: ServerPlan, metal_memory_fraction: float = 0.35) -> bool
                 break
 
     # -- Concurrency & scheduling --
-    # Limit concurrent sequences.  vllm-mlx has a known Metal resource leak
-    # under high concurrency (GitHub issue #91 / PR #92) where lazy
-    # mx.concatenate() chains accumulate AGXAllocation handles.
-    # Keep this low until PR #92 is merged into a release.
-    cmd.extend(["--max-num-seqs", "4"])
+    # Limit concurrent sequences.  vllm-mlx hits a Metal command buffer race
+    # condition (_MTLCommandBuffer addCompletedHandler assertion) when running
+    # multiple sequences.  This is a known MLX thread-safety issue (mlx #3078).
+    # Higher values (4, 8) crash due to MLX Metal race condition (mlx #3078).
+    # 2 is the highest stable value on 48GB M4 Pro.
+    cmd.extend(["--max-num-seqs", "2"])
 
     # Chunked prefill: split long prompts into chunks so active requests
     # aren't starved while a big prompt is being prefilled.
@@ -268,6 +267,7 @@ def _start_server(plan: ServerPlan, metal_memory_fraction: float = 0.35) -> bool
     env = os.environ.copy()
     env["MAGALDI_METAL_MEMORY_FRACTION"] = str(metal_memory_fraction)
     env["MAGALDI_METAL_CACHE_GB"] = "4"
+    env["MAGALDI_METAL_PRESSURE_GB"] = "20"
 
     # Ensure pid directory exists
     PIDFILE_DIR.mkdir(parents=True, exist_ok=True)
@@ -279,10 +279,10 @@ def _start_server(plan: ServerPlan, metal_memory_fraction: float = 0.35) -> bool
         console.print(f"    Embed model:      {plan.embedding_model}")
     console.print(f"    Batching:         {'continuous' if plan.continuous_batching else 'single'}")
     console.print("    KV cache:         4-bit quantized, paged (256 blocks)")
-    console.print("    Prefix cache:     disabled")
+    console.print("    Prefix cache:     enabled")
     console.print(f"    Metal memory:     {metal_memory_fraction:.0%} of device")
     console.print("    Metal cache:      4 GB")
-    console.print("    Max sequences:    4")
+    console.print("    Max sequences:    2")
     console.print("    Chunked prefill:  512 tokens")
     # Show reasoning parser if detected
     for part_idx, part in enumerate(cmd):
