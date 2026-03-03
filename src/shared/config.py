@@ -77,7 +77,7 @@ class ModelConfig:
     """
 
     name: str  # Model name (e.g., "qwen3:4b-instruct", "mlx-community/Qwen3-4B-Instruct-2507-4bit")
-    provider: str = "ollama"  # ollama, llamacpp, vllm-mlx, openai, anthropic
+    provider: str = "ollama"  # ollama, lmstudio, llamacpp, vllm-mlx, openai, anthropic
     url: str = "http://localhost:11434"  # API endpoint
     api_key: str | None = None  # For cloud providers
 
@@ -88,12 +88,24 @@ class ModelConfig:
     num_ctx: int | None = None  # Context window size (Ollama num_ctx)
 
     def get_litellm_model(self) -> str:
-        """Get the full LiteLLM model identifier."""
+        """Get the full LiteLLM model identifier.
+
+        This is the SINGLE SOURCE OF TRUTH for provider → LiteLLM prefix mapping.
+        TODO: Eliminate duplicated provider mappings in:
+          - SummarizationLLMClient.__init__() in shared/ai/summarization.py
+          - SummarizationLLMClient._resolve_model_override() in shared/ai/summarization.py
+          - SummarizationEmbeddingClient.__init__() in shared/ai/embedding.py
+          - LLMClient._build_kwargs() in shared/ai/llm_client.py
+        These should all delegate to ModelConfig instead of reimplementing the mapping.
+        """
         if self.provider == "ollama":
             return f"ollama/{self.name}"
         elif self.provider == "vllm-mlx":
             # vllm-mlx serves one model per process; API uses "default"
             return "openai/default"
+        elif self.provider == "lmstudio":
+            # LM Studio has a dedicated LiteLLM provider
+            return f"lm_studio/{self.name}"
         elif self.provider == "llamacpp":
             return f"openai/{self.name}"
         elif self.provider == "openai":
@@ -105,7 +117,7 @@ class ModelConfig:
         """Get the API base URL."""
         if self.provider == "ollama":
             return self.url
-        elif self.provider in ("llamacpp", "vllm-mlx"):
+        elif self.provider in ("lmstudio", "llamacpp", "vllm-mlx"):
             return f"{self.url.rstrip('/')}/v1"
         elif self.provider == "openai":
             return None

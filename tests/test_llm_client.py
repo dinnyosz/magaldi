@@ -618,8 +618,13 @@ class TestNumCtxParameter:
         call_kwargs = mock_comp.call_args.kwargs
         assert call_kwargs.get("num_ctx") == 4096
 
-    def test_generate_passes_num_ctx_for_llamacpp(self):
-        """Should pass n_ctx via extra_body for llama.cpp provider."""
+    def test_generate_ignores_num_ctx_for_llamacpp(self):
+        """Should NOT pass n_ctx for OpenAI-compatible servers (LM Studio/llama.cpp).
+
+        LM Studio sets context size at model load time, not per-request.
+        Sending n_ctx in extra_body causes it to reject requests that exceed
+        the specified value, even if the model was loaded with a larger context.
+        """
         client = LLMClient(model="openai/qwen3:4b", api_base="http://localhost:8080/v1")
 
         mock_response = MagicMock()
@@ -630,7 +635,7 @@ class TestNumCtxParameter:
             client.generate("test prompt", num_ctx=4096)
 
         call_kwargs = mock_comp.call_args.kwargs
-        assert call_kwargs.get("extra_body", {}).get("n_ctx") == 4096
+        assert call_kwargs.get("extra_body", {}).get("n_ctx") is None
 
     def test_generate_from_messages_passes_num_ctx(self):
         """Should pass num_ctx in generate_from_messages."""

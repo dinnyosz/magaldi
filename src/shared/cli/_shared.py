@@ -189,15 +189,14 @@ def check_model_availability(config: MagaldiConfig, skip_ai: bool) -> list[str]:
                 # Model is available, add to warmup list (only LLM models, not embeddings)
                 if purpose != "embed":
                     ollama_models_to_warmup.append((model_cfg.name, model_cfg.url))
-        elif model_cfg.provider == "llamacpp":
-            # Check if llama-server is running
+        elif model_cfg.provider in ("lmstudio", "llamacpp"):
+            # Check if LM Studio / llama-server is running
             try:
                 requests.get(f"{model_cfg.url.rstrip('/')}/v1/models", timeout=5)
-                # llama-server returns 200 if running
             except requests.exceptions.ConnectionError:
                 errors.append(
-                    f"Cannot connect to llama-server at {model_cfg.url} for {purpose} model. "
-                    f"Start with: ./tools/benchmark-llama-server.sh"
+                    f"Cannot connect to OpenAI-compatible server at {model_cfg.url} for {purpose} model. "
+                    f"Start LM Studio / llama-server and load a model."
                 )
             except Exception:
                 pass  # Server is running but endpoint may not exist

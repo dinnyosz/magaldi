@@ -62,9 +62,9 @@ async def check_llm_health(config: MagaldiConfig) -> dict:
                     results[name] = {"status": "healthy", "provider": "ollama"}
                 else:
                     results[name] = {"status": "unhealthy", "error": f"HTTP {response.status_code}"}
-            elif model.provider == "llamacpp":
+            elif model.provider in ("lmstudio", "llamacpp"):
                 response = requests.get(f"{validated_url}/v1/models", timeout=5)
-                results[name] = {"status": "healthy", "provider": "llamacpp"}
+                results[name] = {"status": "healthy", "provider": model.provider}
             elif model.provider == "vllm-mlx":
                 response = requests.get(f"{validated_url}/health", timeout=5)
                 if response.ok:

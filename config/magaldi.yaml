@@ -37,20 +37,25 @@ redis:
 
 llm:
   # Named model configurations
-  # Models run via vllm-mlx (continuous batching, faster parallel processing on Apple Silicon)
+  # All models served by Ollama
   models:
     qwen3-4b:
-      name: mlx-community/Qwen3-4B-Instruct-2507-4bit
-      provider: vllm-mlx
-      url: http://localhost:8000
+      name: qwen3:4b-instruct
+      provider: ollama
+      url: http://localhost:11434
     qwen3-small:
-      name: mlx-community/Qwen3-1.7B-4bit
-      provider: vllm-mlx
-      url: http://localhost:8001
+      name: qwen3:1.7b
+      provider: ollama
+      url: http://localhost:11434
+
+    # To use LM Studio instead of Ollama, set provider: lmstudio
+    # and match the model name to LM Studio's /v1/models API identifier.
+
+    # --- Embedding ---
     qwen3-embed:
-      name: mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ
-      provider: vllm-mlx
-      url: http://localhost:8001
+      name: qwen3-embedding:0.6b
+      provider: ollama
+      url: http://localhost:11434
       dimensions: 1024
 
   # Which models to use for each purpose (reference by name above)

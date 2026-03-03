@@ -164,9 +164,15 @@ class SummarizationLLMClient:
         self.api_key = api_key
 
         # Build full model identifier for LiteLLM
+        # TODO: Eliminate this duplicated mapping — use ModelConfig.get_litellm_model()
+        # and ModelConfig.get_api_base() instead. See config.py get_litellm_model().
         if provider == "ollama":
             full_model = f"ollama/{model}"
             api_base = url
+        elif provider == "lmstudio":
+            # LM Studio has a dedicated LiteLLM provider
+            full_model = f"lm_studio/{model}"
+            api_base = url if (url and url.endswith("/v1")) else f"{url}/v1" if url else None
         elif provider == "llamacpp":
             # llama.cpp server exposes OpenAI-compatible API
             full_model = f"openai/{model}"
@@ -203,6 +209,27 @@ class SummarizationLLMClient:
             api_key=config.api_key,
         )
 
+    def _resolve_model_override(self, model: str) -> str | None:
+        """Resolve a model name override to a full LiteLLM model identifier.
+
+        Centralises provider → LiteLLM prefix mapping for model overrides
+        so it isn't duplicated in generate() and generate_from_messages().
+
+        TODO: Eliminate this — use ModelConfig.get_litellm_model() instead.
+        See config.py get_litellm_model().
+        """
+        _PROVIDER_PREFIX = {
+            "ollama": "ollama/",
+            "lmstudio": "lm_studio/",
+            "llamacpp": "openai/",
+        }
+        if self.provider == "vllm-mlx":
+            return None  # vllm-mlx serves one model per process — ignore override
+        if self.provider == "openai":
+            return model
+        prefix = _PROVIDER_PREFIX.get(self.provider, f"{self.provider}/")
+        return f"{prefix}{model}"
+
     def verify_model(self) -> bool:
         """Check if model is available."""
         return self._client.verify_model()  # type: ignore[no-any-return]
@@ -237,18 +264,7 @@ class SummarizationLLMClient:
         # Build model identifier for override if provided
         use_model = None
         if model:
-            if self.provider == "ollama":
-                use_model = f"ollama/{model}"
-            elif self.provider == "llamacpp":
-                # llama.cpp uses OpenAI-compatible API
-                use_model = f"openai/{model}"
-            elif self.provider == "vllm-mlx":
-                # vllm-mlx serves one model per process — ignore override
-                use_model = None
-            elif self.provider == "openai":
-                use_model = model
-            else:
-                use_model = f"{self.provider}/{model}"
+            use_model = self._resolve_model_override(model)
 
         try:
             return self._client.generate(  # type: ignore[no-any-return]
@@ -296,17 +312,7 @@ class SummarizationLLMClient:
         """
         use_model = None
         if model:
-            if self.provider == "ollama":
-                use_model = f"ollama/{model}"
-            elif self.provider == "llamacpp":
-                use_model = f"openai/{model}"
-            elif self.provider == "vllm-mlx":
-                # vllm-mlx serves one model per process — ignore override
-                use_model = None
-            elif self.provider == "openai":
-                use_model = model
-            else:
-                use_model = f"{self.provider}/{model}"
+            use_model = self._resolve_model_override(model)
 
         try:
             return self._client.generate_from_messages(  # type: ignore[no-any-return]

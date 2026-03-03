@@ -601,22 +601,38 @@ class LLMClient:
             # but LiteLLM requires an API key for openai/ prefix
             kwargs["api_key"] = "not-needed"
 
+        # Helper to check if model is a local server (not cloud)
+        _is_local = use_model.startswith(("openai/", "lm_studio/")) and self.api_base
+
         # Disable thinking mode for models that use it by default
         if self._is_thinking_model:
             if use_model.startswith("ollama/"):
                 kwargs["think"] = False
-            elif use_model.startswith("openai/") and self.api_base:
-                # OpenAI-compatible local servers (vllm-mlx, llama.cpp)
+            elif _is_local:
+                # Local servers (LM Studio, llama.cpp, vllm-mlx)
+                # Strategy 1: API param (works for vllm-mlx)
                 kwargs["extra_body"] = kwargs.get("extra_body", {})
                 kwargs["extra_body"]["chat_template_kwargs"] = {"enable_thinking": False}
+                # Strategy 2: /no_think in system message (works for LM Studio llama.cpp)
+                # Qwen3 models honor /no_think as a chat template directive
+                msgs = kwargs["messages"]
+                if msgs and msgs[0].get("role") == "system":
+                    content = msgs[0]["content"]
+                    if "/no_think" not in content:
+                        msgs = [{"role": "system", "content": f"/no_think\n{content}"}] + msgs[1:]
+                        kwargs["messages"] = msgs
+                else:
+                    msgs = [{"role": "system", "content": "/no_think"}] + msgs
+                    kwargs["messages"] = msgs
 
         # Context window for local providers
-        if num_ctx:
-            if use_model.startswith("ollama/"):
-                kwargs["num_ctx"] = num_ctx
-            elif use_model.startswith("openai/") and self.api_base:
-                kwargs["extra_body"] = kwargs.get("extra_body", {})
-                kwargs["extra_body"]["n_ctx"] = num_ctx
+        # Note: Only Ollama supports per-request context sizing via num_ctx.
+        # LM Studio / llama.cpp servers set context at model load time —
+        # sending n_ctx in extra_body causes them to reject requests that
+        # exceed the specified value, even if the model was loaded with a
+        # larger context.
+        if num_ctx and use_model.startswith("ollama/"):
+            kwargs["num_ctx"] = num_ctx
 
         return kwargs
 
@@ -677,7 +693,16 @@ class LLMClient:
             kwargs = self._build_kwargs(use_model, [{"role": "user", "content": prompt}],
                                         temperature, top_p, max_tokens, timeout, num_ctx)
 
-            response = completion(**kwargs)
+            try:
+                response = completion(**kwargs)
+            except Exception as e:
+                debug_kwargs = {k: v for k, v in kwargs.items() if k != "messages"}
+                msg_summary = [(m.get("role"), len(m.get("content", ""))) for m in kwargs.get("messages", [])]
+                logger.warning(
+                    "LiteLLM completion failed: %s | model=%s msgs=%s kwargs=%s",
+                    e, use_model, msg_summary, debug_kwargs,
+                )
+                raise
             return self._extract_content(response.choices[0].message, use_model)
 
         return _retry_with_backoff(
@@ -731,7 +756,17 @@ class LLMClient:
             kwargs = self._build_kwargs(use_model, messages,
                                         temperature, top_p, max_tokens, timeout, num_ctx)
 
-            response = completion(**kwargs)
+            try:
+                response = completion(**kwargs)
+            except Exception as e:
+                # Log the kwargs that caused the failure (omit message content for brevity)
+                debug_kwargs = {k: v for k, v in kwargs.items() if k != "messages"}
+                msg_summary = [(m.get("role"), len(m.get("content", ""))) for m in kwargs.get("messages", [])]
+                logger.warning(
+                    "LiteLLM completion failed: %s | model=%s msgs=%s kwargs=%s",
+                    e, use_model, msg_summary, debug_kwargs,
+                )
+                raise
             return self._extract_content(response.choices[0].message, use_model)
 
         return _retry_with_backoff(
