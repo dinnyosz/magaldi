@@ -19,49 +19,49 @@ import requests
 
 EVALUATION_CRITERIA: dict[str, dict[str, str]] = {
     "file": {
-        "purpose": "Clear about module's primary purpose and responsibility",
-        "domain": "Explains problem domain or capability it provides",
-        "architecture": "Mentions patterns, abstractions, or design decisions",
-        "discoverability": "Helps agent know when to look in this file",
-        "dependencies": "Describes dependencies and integrations",
+        "purpose": "Clear about module's primary job and what capability it provides",
+        "domain": "Explains what problem space this code addresses",
+        "architecture": "Mentions design patterns or abstractions it uses",
+        "discoverability": "Helps agent know when to look here and what questions lead to this file",
+        "dependencies": "Describes external modules or systems it integrates with",
         "no_enumeration": "Does NOT just list classes/functions (those are separate)",
     },
     "class": {
         "representation": "Clear what the class represents, models, or encapsulates",
         "responsibility": "Explains core responsibility and problem it solves",
-        "instantiation": "Describes how and when to instantiate or use",
-        "state": "Mentions state it manages and invariants",
+        "instantiation": "Describes how to create an instance and what parameters are required",
+        "state": "Mentions key attributes and what makes an instance valid vs invalid",
         "collaboration": "Explains how it works with other classes/modules",
         "no_enumeration": "Does NOT just list methods (those are separate)",
-        "no_context_repeat": "Does NOT repeat the file context summary",
+        "no_context_repeat": "Starts directly with what it does, not with filler or repeated context",
     },
     "function": {
         "operation": "Clear what operation, transformation, or task it performs",
-        "interface": "Describes inputs (with purposes) and return value",
-        "usage_scenarios": "Explains when to call this function",
-        "side_effects": "Mentions state changes, I/O, or exceptions",
-        "edge_cases": "Notes preconditions or edge cases caller should know",
-        "no_context_repeat": "Does NOT repeat file/class context",
+        "interface": "Describes parameters and return value with types",
+        "usage_scenarios": "Explains in what scenario an agent should call this",
+        "side_effects": "Mentions external state changes, I/O, or exceptions",
+        "edge_cases": "Notes what happens with empty/None inputs or preconditions",
+        "no_context_repeat": "Starts with an action verb, not with filler or repeated context",
     },
     "method": {
         "operation": "Clear what operation this method performs on/for the object",
-        "interface": "Describes inputs (with purposes) and return value",
-        "state_interaction": "Explains how it reads or modifies object state",
-        "lifecycle": "Describes when to call in object's lifecycle",
-        "side_effects": "Mentions side effects, exceptions, or preconditions",
-        "no_context_repeat": "Does NOT repeat file/class context",
+        "interface": "Describes parameters and return value",
+        "state_interaction": "Explains which instance attributes it reads or modifies",
+        "lifecycle": "Describes whether this is setup/init, cleanup, or called repeatedly",
+        "errors": "Mentions exceptions it can raise and preconditions that must hold",
+        "no_context_repeat": "Starts with an action verb, not with filler or repeated context",
     },
     "constant": {
-        "value_meaning": "Clear what configuration, value, or data it represents",
-        "usage": "Explains where and why it's used in the system",
-        "constraints": "Notes constraints or relationships with other values",
-        "no_context_repeat": "Does NOT repeat context",
+        "value_meaning": "Clear what this value represents or configures",
+        "usage": "Explains where in the system it is used",
+        "constraints": "Notes valid values, min/max bounds, or relationships with other values",
+        "no_context_repeat": "Starts directly with what it represents, not with filler or repeated context",
     },
     "variable": {
-        "data": "Clear what data, state, or configuration it holds",
-        "lifecycle": "Explains initialization and when it changes",
-        "role": "Describes role in containing scope's behavior",
-        "no_context_repeat": "Does NOT repeat context",
+        "data": "Clear what information this variable holds",
+        "lifecycle": "Explains how it is initialized and when it changes",
+        "role": "Describes how this variable influences its containing scope",
+        "no_context_repeat": "Starts directly with what it holds, not with filler or repeated context",
     },
 }
 
@@ -472,8 +472,8 @@ class BenchmarkClient:
         prompt: str,
         temperature: float = 0.2,
         top_p: float | None = 0.95,
-        _top_k: int | None = None,
-        _min_p: float | None = None,
+        top_k: int | None = None,
+        min_p: float | None = None,
         repetition_penalty: float | None = None,
         presence_penalty: float | None = None,
         max_tokens: int = 512,
@@ -523,6 +523,13 @@ class BenchmarkClient:
             # Map to frequency_penalty (OpenAI-style)
             kwargs["frequency_penalty"] = min(2.0, (repetition_penalty - 1.0) * 2)
 
+        # Pass provider-specific params via extra_body (Ollama native API)
+        extra_body: dict = {}
+        if top_k is not None:
+            extra_body["top_k"] = top_k
+        if min_p is not None:
+            extra_body["min_p"] = min_p
+
         # Add api_base (call param overrides instance)
         effective_api_base = api_base or self.api_base
         if effective_api_base:
@@ -533,20 +540,14 @@ class BenchmarkClient:
         if effective_api_key:
             kwargs["api_key"] = effective_api_key
 
-        # Check if this is a thinking model (qwen3.5 is NOT a thinking model)
-        model_name = model.split("/")[-1] if "/" in model else model
-        is_thinking_model = False
-        for tm in self.THINKING_MODELS:
-            if model_name.startswith(tm):
-                rest = model_name[len(tm):]
-                if tm == "qwen3" and rest.startswith("."):
-                    continue  # Skip qwen3.5, qwen3.6, etc.
-                is_thinking_model = True
-                break
-
-        # Disable thinking mode for models that support it (Ollama)
-        if is_thinking_model and model.startswith("ollama/"):
+        # Disable thinking/reasoning for Ollama models.
+        # Uses ollama_chat/ prefix which routes to native /api/chat supporting "think".
+        # Always pass think=False for benchmarks — we want pure summarization output.
+        if model.startswith("ollama_chat/"):
             kwargs["think"] = False
+
+        if extra_body:
+            kwargs["extra_body"] = extra_body
 
         try:
             response = self._litellm.completion(**kwargs)
