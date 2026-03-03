@@ -19,60 +19,166 @@ import requests
 
 EVALUATION_CRITERIA: dict[str, dict[str, str]] = {
     "file": {
+        "accuracy": "Summary correctly describes what the code actually does, no factual errors",
         "purpose": "Clear about module's primary job and what capability it provides",
         "domain": "Explains what problem space this code addresses",
         "architecture": "Mentions design patterns or abstractions it uses",
         "discoverability": "Helps agent know when to look here and what questions lead to this file",
         "dependencies": "Describes external modules or systems it integrates with",
+        "conciseness": "Every sentence adds value, no filler or redundancy",
         "no_enumeration": "Does NOT just list classes/functions (those are separate)",
     },
     "class": {
+        "accuracy": "Summary correctly describes what the class does, no factual errors",
         "representation": "Clear what the class represents, models, or encapsulates",
         "responsibility": "Explains core responsibility and problem it solves",
         "instantiation": "Describes how to create an instance and what parameters are required",
         "state": "Mentions key attributes and what makes an instance valid vs invalid",
         "collaboration": "Explains how it works with other classes/modules",
+        "conciseness": "Every sentence adds value, no filler or redundancy",
         "no_enumeration": "Does NOT just list methods (those are separate)",
         "no_context_repeat": "Starts directly with what it does, not with filler or repeated context",
     },
+    "interface": {
+        "accuracy": "Summary correctly describes what the interface defines, no factual errors",
+        "contract": "Clear what the interface requires implementors to provide",
+        "purpose": "Explains what capability or behavior the interface abstracts",
+        "methods": "Describes the key methods and their expected semantics",
+        "implementors": "Hints at what types of classes would implement this",
+        "conciseness": "Every sentence adds value, no filler or redundancy",
+        "no_context_repeat": "Starts directly with what it defines, not with filler or repeated context",
+    },
+    "trait": {
+        "accuracy": "Summary correctly describes what the trait provides, no factual errors",
+        "behavior": "Clear what reusable behavior or capability the trait provides",
+        "requirements": "Describes any abstract methods or constraints on implementing types",
+        "composition": "Explains how this trait composes with other traits or classes",
+        "state": "Mentions any default implementations or state expectations",
+        "conciseness": "Every sentence adds value, no filler or redundancy",
+        "no_context_repeat": "Starts directly with what it provides, not with filler or repeated context",
+    },
+    "enum": {
+        "accuracy": "Summary correctly describes what the enum represents, no factual errors",
+        "meaning": "Clear what concept or domain value set this enum models",
+        "variants": "Describes the key variants and what each represents",
+        "usage": "Explains when and where this enum is used in the system",
+        "conciseness": "Every sentence adds value, no filler or redundancy",
+        "no_context_repeat": "Starts directly with what it represents, not with filler or repeated context",
+    },
+    "type_alias": {
+        "accuracy": "Summary correctly describes the aliased type, no factual errors",
+        "definition": "Clear what the underlying type structure is",
+        "purpose": "Explains why this alias exists and what abstraction it provides",
+        "usage": "Describes where in the system this type is used",
+        "conciseness": "Every sentence adds value, no filler or redundancy",
+        "no_context_repeat": "Starts directly with what it defines, not with filler or repeated context",
+    },
     "function": {
+        "accuracy": "Summary correctly describes what the function does, no factual errors",
         "operation": "Clear what operation, transformation, or task it performs",
         "interface": "Describes parameters and return value with types",
         "usage_scenarios": "Explains in what scenario an agent should call this",
         "side_effects": "Mentions external state changes, I/O, or exceptions",
-        "edge_cases": "Notes what happens with empty/None inputs or preconditions",
+        "preconditions": "Notes required input constraints, assumptions, or error conditions",
+        "conciseness": "Every sentence adds value, no filler or redundancy",
         "no_context_repeat": "Starts with an action verb, not with filler or repeated context",
     },
     "method": {
+        "accuracy": "Summary correctly describes what the method does, no factual errors",
         "operation": "Clear what operation this method performs on/for the object",
         "interface": "Describes parameters and return value",
         "state_interaction": "Explains which instance attributes it reads or modifies",
         "lifecycle": "Describes whether this is setup/init, cleanup, or called repeatedly",
         "errors": "Mentions exceptions it can raise and preconditions that must hold",
+        "conciseness": "Every sentence adds value, no filler or redundancy",
         "no_context_repeat": "Starts with an action verb, not with filler or repeated context",
     },
     "constant": {
+        "accuracy": "Summary correctly describes the constant's value or purpose, no factual errors",
         "value_meaning": "Clear what this value represents or configures",
         "usage": "Explains where in the system it is used",
         "constraints": "Notes valid values, min/max bounds, or relationships with other values",
+        "conciseness": "Every sentence adds value, no filler or redundancy",
         "no_context_repeat": "Starts directly with what it represents, not with filler or repeated context",
     },
     "variable": {
+        "accuracy": "Summary correctly describes what the variable holds, no factual errors",
         "data": "Clear what information this variable holds",
         "lifecycle": "Explains how it is initialized and when it changes",
         "role": "Describes how this variable influences its containing scope",
+        "conciseness": "Every sentence adds value, no filler or redundancy",
         "no_context_repeat": "Starts directly with what it holds, not with filler or repeated context",
     },
+    "import": {
+        "accuracy": "Summary correctly describes what is imported, no factual errors",
+        "source": "Clear what module or package the import comes from",
+        "purpose": "Explains what capability the import provides to this file",
+        "conciseness": "Every sentence adds value, no filler or redundancy",
+    },
 }
+
+# Criterion weights for weighted average scoring.
+# Content criteria (accuracy, core purpose) are weighted higher than
+# formatting criteria (no_context_repeat, no_enumeration, conciseness).
+CRITERIA_WEIGHTS: dict[str, float] = {
+    # Core content — high weight (these define summary quality)
+    "accuracy": 3.0,
+    "purpose": 2.0,
+    "operation": 2.0,
+    "representation": 2.0,
+    "responsibility": 2.0,
+    "contract": 2.0,
+    "behavior": 2.0,
+    "meaning": 2.0,
+    "definition": 2.0,
+    "source": 2.0,
+    "data": 2.0,
+    "value_meaning": 2.0,
+    # Informational content — standard weight
+    "domain": 1.5,
+    "interface": 1.5,
+    "usage_scenarios": 1.5,
+    "side_effects": 1.5,
+    "state_interaction": 1.5,
+    "state": 1.5,
+    "instantiation": 1.5,
+    "collaboration": 1.5,
+    "methods": 1.5,
+    "implementors": 1.5,
+    "requirements": 1.5,
+    "composition": 1.5,
+    "variants": 1.5,
+    "usage": 1.5,
+    "errors": 1.5,
+    "preconditions": 1.0,
+    "lifecycle": 1.0,
+    "role": 1.0,
+    "architecture": 1.0,
+    "discoverability": 1.0,
+    "dependencies": 1.0,
+    "constraints": 1.0,
+    # Formatting — low weight (important but shouldn't dominate)
+    "conciseness": 0.5,
+    "no_context_repeat": 0.5,
+    "no_enumeration": 0.5,
+}
+
+# Default weight for any criterion not listed above
+DEFAULT_CRITERION_WEIGHT = 1.0
 
 # Expected sentence counts per element type
 EXPECTED_SENTENCES: dict[str, tuple[int, int]] = {
     "file": (4, 6),
     "class": (4, 6),
+    "interface": (3, 5),
+    "trait": (3, 5),
+    "enum": (2, 4),
+    "type_alias": (2, 3),
     "function": (4, 6),
     "method": (4, 6),
     "constant": (2, 3),
     "variable": (2, 3),
+    "import": (1, 2),
 }
 
 
@@ -85,10 +191,22 @@ class CriteriaScores:
 
     @property
     def average(self) -> float:
-        """Calculate average score across all criteria (1-10 scale)."""
+        """Calculate weighted average score across all criteria (1-10 scale).
+
+        Uses CRITERIA_WEIGHTS to weight content criteria higher than formatting
+        criteria. Falls back to DEFAULT_CRITERION_WEIGHT for unknown criteria.
+        """
         if not self.scores:
             return 0.0
-        return sum(self.scores.values()) / len(self.scores)
+        total_weight = 0.0
+        weighted_sum = 0.0
+        for criterion, score in self.scores.items():
+            weight = CRITERIA_WEIGHTS.get(criterion, DEFAULT_CRITERION_WEIGHT)
+            weighted_sum += score * weight
+            total_weight += weight
+        if total_weight == 0.0:
+            return 0.0
+        return weighted_sum / total_weight
 
 
 @dataclass

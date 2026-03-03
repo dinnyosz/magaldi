@@ -7,7 +7,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from magaldi_core.parsers.base import Call, CodeElement, Import
-from shared.ai.ollama_benchmark import CriteriaScores
+from shared.ai.ollama_benchmark import (
+    CRITERIA_WEIGHTS,
+    DEFAULT_CRITERION_WEIGHT,
+    EVALUATION_CRITERIA,
+    EXPECTED_SENTENCES,
+    CriteriaScores,
+)
 from shared.ai.prompt_improver import (
     IMPROVEMENT_PROMPT,
     IterationResult,
@@ -152,11 +158,13 @@ def sample_doc() -> dict:
 def good_scores() -> CriteriaScores:
     return CriteriaScores(
         scores={
+            "accuracy": 9,
             "operation": 9,
             "interface": 8,
             "usage_scenarios": 8,
             "side_effects": 9,
-            "edge_cases": 7,
+            "preconditions": 7,
+            "conciseness": 9,
             "no_context_repeat": 9,
         },
         notes="Good summary overall.",
@@ -167,14 +175,16 @@ def good_scores() -> CriteriaScores:
 def low_scores() -> CriteriaScores:
     return CriteriaScores(
         scores={
+            "accuracy": 6,
             "operation": 7,
             "interface": 5,
             "usage_scenarios": 4,
             "side_effects": 6,
-            "edge_cases": 3,
+            "preconditions": 3,
+            "conciseness": 7,
             "no_context_repeat": 8,
         },
-        notes="Weak on edge cases and usage scenarios.",
+        notes="Weak on preconditions and usage scenarios.",
     )
 
 
@@ -221,8 +231,12 @@ class TestIterationResult:
             summary="Processes data items.",
             scores=good_scores,
         )
-        # (9+8+8+9+7+9) / 6 = 50/6 ≈ 8.33
-        assert 8.3 <= ir.avg_score <= 8.4
+        # Weighted average: accuracy(9*3) + operation(9*2) + interface(8*1.5) +
+        # usage_scenarios(8*1.5) + side_effects(9*1.5) + preconditions(7*1) +
+        # conciseness(9*0.5) + no_context_repeat(9*0.5) = 27+18+12+12+13.5+7+4.5+4.5 = 98.5
+        # Total weight: 3+2+1.5+1.5+1.5+1+0.5+0.5 = 11.5
+        # 98.5 / 11.5 ≈ 8.57
+        assert 8.5 <= ir.avg_score <= 8.7
 
     def test_avg_score_empty(self, baseline_prompt: PromptVersion) -> None:
         ir = IterationResult(
@@ -595,7 +609,7 @@ class TestPromptImproverRun:
             mock_bench_cls.return_value = bench_instance
             bench_instance.generate.return_value = MagicMock(
                 success=True,
-                response='{"evaluations": {"A": {"operation": 9, "interface": 9, "usage_scenarios": 8, "side_effects": 9, "edge_cases": 8, "no_context_repeat": 9, "notes": "Good"}}}',
+                response='{"evaluations": {"A": {"accuracy": 9, "operation": 9, "interface": 9, "usage_scenarios": 8, "side_effects": 9, "preconditions": 8, "conciseness": 9, "no_context_repeat": 9, "notes": "Good"}}}',
             )
 
             improver = PromptImprover(config=mock_config)
@@ -660,3 +674,147 @@ class TestEdgeCases:
         for etype in ["file", "class", "function", "method", "constant", "variable", "interface", "trait", "enum", "type_alias", "import"]:
             key = _get_template_key(etype)
             assert key in ("file", "class", "function", "method", "constant", "variable", "interface", "trait", "enum", "type_alias", "import")
+
+
+# =============================================================================
+# EVALUATION CRITERIA & WEIGHTED SCORING TESTS
+# =============================================================================
+
+
+class TestEvaluationCriteria:
+    """Tests for EVALUATION_CRITERIA completeness and structure."""
+
+    def test_all_element_types_have_criteria(self) -> None:
+        """Every element type with a prompt template should have evaluation criteria."""
+        expected_types = {"file", "class", "interface", "trait", "enum", "type_alias",
+                          "function", "method", "constant", "variable", "import"}
+        assert set(EVALUATION_CRITERIA.keys()) == expected_types
+
+    def test_all_element_types_have_expected_sentences(self) -> None:
+        """Every element type with criteria should have expected sentence counts."""
+        for etype in EVALUATION_CRITERIA:
+            assert etype in EXPECTED_SENTENCES, f"Missing EXPECTED_SENTENCES for {etype}"
+
+    def test_all_types_have_accuracy_criterion(self) -> None:
+        """Every element type should have an accuracy criterion."""
+        for etype, criteria in EVALUATION_CRITERIA.items():
+            assert "accuracy" in criteria, f"Missing accuracy criterion for {etype}"
+
+    def test_all_types_have_conciseness_criterion(self) -> None:
+        """Every element type should have a conciseness criterion."""
+        for etype, criteria in EVALUATION_CRITERIA.items():
+            assert "conciseness" in criteria, f"Missing conciseness criterion for {etype}"
+
+    def test_function_has_preconditions_not_edge_cases(self) -> None:
+        """Function type should use 'preconditions' instead of 'edge_cases'."""
+        assert "preconditions" in EVALUATION_CRITERIA["function"]
+        assert "edge_cases" not in EVALUATION_CRITERIA["function"]
+
+    def test_interface_criteria(self) -> None:
+        """Interface should have contract-specific criteria."""
+        criteria = EVALUATION_CRITERIA["interface"]
+        assert "contract" in criteria
+        assert "implementors" in criteria
+        assert "methods" in criteria
+
+    def test_enum_criteria(self) -> None:
+        """Enum should have variant-specific criteria."""
+        criteria = EVALUATION_CRITERIA["enum"]
+        assert "variants" in criteria
+        assert "meaning" in criteria
+
+    def test_trait_criteria(self) -> None:
+        """Trait should have behavior/composition criteria."""
+        criteria = EVALUATION_CRITERIA["trait"]
+        assert "behavior" in criteria
+        assert "composition" in criteria
+        assert "requirements" in criteria
+
+    def test_type_alias_criteria(self) -> None:
+        """Type alias should have definition/purpose criteria."""
+        criteria = EVALUATION_CRITERIA["type_alias"]
+        assert "definition" in criteria
+        assert "purpose" in criteria
+
+    def test_import_criteria(self) -> None:
+        """Import should have source/purpose criteria."""
+        criteria = EVALUATION_CRITERIA["import"]
+        assert "source" in criteria
+        assert "purpose" in criteria
+
+    def test_all_criteria_have_weights(self) -> None:
+        """Every criterion used in EVALUATION_CRITERIA should have a weight."""
+        all_criteria = set()
+        for criteria in EVALUATION_CRITERIA.values():
+            all_criteria.update(criteria.keys())
+        for criterion in all_criteria:
+            assert criterion in CRITERIA_WEIGHTS, (
+                f"Criterion '{criterion}' has no weight in CRITERIA_WEIGHTS"
+            )
+
+
+class TestWeightedScoring:
+    """Tests for the weighted average scoring system."""
+
+    def test_equal_scores_same_as_unweighted(self) -> None:
+        """When all scores are equal, weighted average equals the score itself."""
+        scores = CriteriaScores(scores={
+            "accuracy": 7, "operation": 7, "interface": 7,
+            "conciseness": 7, "no_context_repeat": 7,
+        })
+        assert scores.average == 7.0
+
+    def test_high_weight_criteria_dominate(self) -> None:
+        """Content criteria (weight 3.0) should pull average more than formatting (0.5)."""
+        # accuracy=10 (weight 3.0), no_context_repeat=1 (weight 0.5)
+        scores = CriteriaScores(scores={
+            "accuracy": 10,
+            "no_context_repeat": 1,
+        })
+        # Weighted: (10*3.0 + 1*0.5) / (3.0 + 0.5) = 30.5 / 3.5 ≈ 8.71
+        assert scores.average > 8.5
+
+        # Unweighted would be: (10 + 1) / 2 = 5.5
+        # The weighted score should be significantly higher
+        unweighted = sum(scores.scores.values()) / len(scores.scores)
+        assert scores.average > unweighted
+
+    def test_low_formatting_score_doesnt_tank_average(self) -> None:
+        """A low formatting score shouldn't drag down an otherwise good summary."""
+        scores = CriteriaScores(scores={
+            "accuracy": 9,      # weight 3.0
+            "operation": 8,     # weight 2.0
+            "interface": 8,     # weight 1.5
+            "conciseness": 3,   # weight 0.5
+            "no_context_repeat": 2,  # weight 0.5
+        })
+        # Should still be above 7 because content is strong
+        assert scores.average > 7.0
+
+    def test_empty_scores_returns_zero(self) -> None:
+        """Empty scores should return 0.0."""
+        assert CriteriaScores().average == 0.0
+
+    def test_single_criterion(self) -> None:
+        """Single criterion should return its score regardless of weight."""
+        scores = CriteriaScores(scores={"accuracy": 8})
+        assert scores.average == 8.0
+
+    def test_unknown_criterion_uses_default_weight(self) -> None:
+        """Unknown criteria should use DEFAULT_CRITERION_WEIGHT."""
+        scores = CriteriaScores(scores={
+            "accuracy": 10,     # weight 3.0
+            "custom_thing": 2,  # weight DEFAULT_CRITERION_WEIGHT (1.0)
+        })
+        # Weighted: (10*3.0 + 2*1.0) / (3.0 + 1.0) = 32 / 4 = 8.0
+        expected = (10 * 3.0 + 2 * DEFAULT_CRITERION_WEIGHT) / (3.0 + DEFAULT_CRITERION_WEIGHT)
+        assert abs(scores.average - expected) < 0.01
+
+    def test_formatting_criteria_have_low_weight(self) -> None:
+        """Verify formatting criteria have weight 0.5."""
+        for criterion in ["conciseness", "no_context_repeat", "no_enumeration"]:
+            assert CRITERIA_WEIGHTS[criterion] == 0.5, f"{criterion} should have weight 0.5"
+
+    def test_accuracy_has_highest_weight(self) -> None:
+        """Accuracy should have the highest weight."""
+        assert CRITERIA_WEIGHTS["accuracy"] == max(CRITERIA_WEIGHTS.values())
