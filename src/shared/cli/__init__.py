@@ -13,6 +13,7 @@ Commands are organized in separate modules:
 - glossary_commands: Extract-glossary command
 - web: Web server commands
 - benchmarks: Benchmark-models command (package)
+- prompt_improver: RALPH prompt optimization command
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from shared.cli import (
     glossary_commands,  # noqa: F401
     llm,  # noqa: F401
     parse,  # noqa: F401
+    prompt_improver,  # noqa: F401
     watch,  # noqa: F401
     web,  # noqa: F401
 )
