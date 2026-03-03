@@ -1,7 +1,7 @@
 """Helper functions for benchmark commands.
 
-This module contains utility functions for model configuration, backend
-connection checking, and model warmup.
+This module contains utility functions for model configuration and backend
+connection checking.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from rich.console import Console
 
-    from shared.config import BenchmarkConfig, ModelConfig
+    from shared.config import ModelConfig
 
 
 def parse_model_spec_to_config(spec: str, ollama_url: str | None = None) -> ModelConfig:
@@ -146,42 +146,3 @@ def check_backend_connections(
                 missing_models.append(mc)
 
     return available_models_by_provider, models_to_test, missing_models
-
-
-def warmup_benchmark_models(
-    models_to_test: list[ModelConfig],
-    _benchmark_config: BenchmarkConfig,
-    console: Console,
-) -> list[ModelConfig]:
-    """Warm up models and return the list of models that succeeded.
-
-    Args:
-        models_to_test: List of model configurations to warm up.
-        benchmark_config: Benchmark configuration.
-        console: Rich console for output.
-
-    Returns:
-        List of models that successfully warmed up.
-    """
-    from shared.ai.ollama_benchmark import BenchmarkClient
-
-    models_failed_warmup: list[ModelConfig] = []
-    for mc in models_to_test:
-        display_name = f"{mc.provider}/{mc.name}"
-        api_config = get_model_api_config(mc)
-        api_model = mc.get_litellm_model()
-        with console.status(f"[bold blue]Warming up {display_name}...[/]"):
-            warmup_client = BenchmarkClient(api_base=mc.url)
-            success, warmup_time, error = warmup_client.warmup(
-                api_model,
-                timeout=120,
-                **api_config,
-            )
-        if success:
-            console.print(f"  [green]✓[/] {display_name} ({warmup_time:.1f}s)")
-        else:
-            console.print(f"  [red]✗[/] {display_name}: {error}")
-            models_failed_warmup.append(mc)
-
-    # Remove failed models
-    return [mc for mc in models_to_test if mc not in models_failed_warmup]

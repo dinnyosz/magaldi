@@ -4,7 +4,7 @@ This package contains the benchmark-models command for comparing LLM performance
 on code summarization tasks.
 
 Modules:
-- _helpers: Model configuration and warmup utilities
+- _helpers: Model configuration and backend connection utilities
 - _files: File selection and manifest creation
 - _execution: Benchmark execution and evaluation
 - _results: Results output and markdown generation
@@ -28,7 +28,6 @@ from ._files import create_full_manifest, select_benchmark_files
 from ._helpers import (
     check_backend_connections,
     parse_model_spec_to_config,
-    warmup_benchmark_models,
 )
 from ._results import display_benchmark_summary, save_benchmark_markdown
 
@@ -40,7 +39,6 @@ __all__ = [
     # Helpers (for potential reuse)
     "parse_model_spec_to_config",
     "check_backend_connections",
-    "warmup_benchmark_models",
     # Files
     "create_full_manifest",
     "select_benchmark_files",
@@ -61,7 +59,6 @@ __all__ = [
 @click.option("--models", "-m", default=None, help="Comma-separated list of Ollama models (default: from config)")
 @click.option("--ollama-url", default=None, help="Ollama API URL (default: from config or http://localhost:11434)")
 @click.option("--user", "-u", default="benchmark", help="Username for parsing (default: benchmark)")
-@click.option("--skip-warmup", is_flag=True, default=False, help="Skip model warmup phase")
 def benchmark_models(
     repo_path: str,
     file_path: str | None,
@@ -70,7 +67,6 @@ def benchmark_models(
     models: str | None,
     ollama_url: str | None,
     user: str,
-    skip_warmup: bool,
 ) -> None:
     """Benchmark Ollama models on code summarization.
 
@@ -166,23 +162,12 @@ def benchmark_models(
         test_model_names = [f"{mc.provider}/{mc.name}" for mc in models_to_test]
         console.print(f"  Testing models: {', '.join(test_model_names)}")
 
-        # Phase 6: Warmup models (optional)
-        if skip_warmup:
-            console.print("\n[bold blue]Phase 6:[/] Model Warmup [dim](skipped)[/]")
-        else:
-            console.print("\n[bold blue]Phase 6:[/] Model Warmup")
-            models_to_test = warmup_benchmark_models(models_to_test, benchmark_config, console)
-
-            if not models_to_test:
-                console.print("[red]No models available after warmup.[/]")
-                sys.exit(1)
-
-        # Phase 7: Run benchmarks with hierarchical context (file -> class -> method)
-        console.print("\n[bold blue]Phase 7:[/] Benchmarking (with hierarchical context)")
+        # Phase 6: Run benchmarks with hierarchical context (file -> class -> method)
+        console.print("\n[bold blue]Phase 6:[/] Benchmarking (with hierarchical context)")
         results = run_hierarchical_benchmarks(models_to_test, elements, repo_path, benchmark_config, console)
 
-        # Phase 8: LLM Evaluation of summaries (multi-criteria JSON-based)
-        console.print("\n[bold blue]Phase 8:[/] LLM Evaluation (multi-criteria)")
+        # Phase 7: LLM Evaluation of summaries (multi-criteria JSON-based)
+        console.print("\n[bold blue]Phase 7:[/] LLM Evaluation (multi-criteria)")
         evaluation_results = evaluate_summaries(
             models_to_test, elements, results, available_models_by_provider, benchmark_config, console
         )
