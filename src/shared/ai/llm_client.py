@@ -606,8 +606,15 @@ class LLMClient:
         }
 
         # Optional sampling parameters (from model-specific configs)
-        if presence_penalty is not None:
-            kwargs["presence_penalty"] = presence_penalty
+        # For Ollama, presence_penalty must go through extra_body — LiteLLM's
+        # ollama_chat provider does not support it as a top-level parameter.
+        _is_ollama = use_model.startswith(("ollama/", "ollama_chat/"))
+        if presence_penalty is not None and presence_penalty != 0.0:
+            if _is_ollama:
+                kwargs.setdefault("extra_body", {})
+                kwargs["extra_body"]["presence_penalty"] = presence_penalty
+            else:
+                kwargs["presence_penalty"] = presence_penalty
         if repetition_penalty is not None and repetition_penalty != 1.0:
             # LiteLLM passes repetition_penalty via extra_body for Ollama
             kwargs.setdefault("extra_body", {})

@@ -948,6 +948,73 @@ class TestThinkingModelDetection:
             client.generate("test")
 
 
+class TestPresencePenaltyRouting:
+    """Tests for presence_penalty routing to extra_body for Ollama."""
+
+    def test_ollama_presence_penalty_goes_to_extra_body(self):
+        """Ollama models should route presence_penalty via extra_body, not top-level."""
+        client = LLMClient(model="ollama_chat/qwen3:4b", api_base="http://localhost:11434")
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "response"
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response) as mock_comp:
+            client.generate("test", presence_penalty=1.5)
+
+        call_kwargs = mock_comp.call_args.kwargs
+        # Should NOT be top-level (LiteLLM rejects it for ollama_chat)
+        assert "presence_penalty" not in call_kwargs
+        # Should be in extra_body
+        assert call_kwargs["extra_body"]["presence_penalty"] == 1.5
+
+    def test_ollama_zero_presence_penalty_omitted(self):
+        """presence_penalty=0.0 is a no-op and should be omitted entirely."""
+        client = LLMClient(model="ollama_chat/qwen3:4b", api_base="http://localhost:11434")
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "response"
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response) as mock_comp:
+            client.generate("test", presence_penalty=0.0)
+
+        call_kwargs = mock_comp.call_args.kwargs
+        assert "presence_penalty" not in call_kwargs
+        # extra_body should not contain it either
+        extra = call_kwargs.get("extra_body", {})
+        assert "presence_penalty" not in extra
+
+    def test_openai_presence_penalty_stays_top_level(self):
+        """Non-Ollama providers should keep presence_penalty as top-level kwarg."""
+        client = LLMClient(model="gpt-4o-mini", api_key="sk-test")
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "response"
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response) as mock_comp:
+            client.generate("test", presence_penalty=1.5)
+
+        call_kwargs = mock_comp.call_args.kwargs
+        assert call_kwargs["presence_penalty"] == 1.5
+
+    def test_ollama_prefix_also_routes_to_extra_body(self):
+        """ollama/ prefix (not just ollama_chat/) should also route to extra_body."""
+        client = LLMClient(model="ollama/qwen3:4b", api_base="http://localhost:11434")
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "response"
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response) as mock_comp:
+            client.generate("test", presence_penalty=1.5)
+
+        call_kwargs = mock_comp.call_args.kwargs
+        assert "presence_penalty" not in call_kwargs
+        assert call_kwargs["extra_body"]["presence_penalty"] == 1.5
+
+
 class TestFromModelConfig:
     """Tests for from_model_config() factory methods."""
 
