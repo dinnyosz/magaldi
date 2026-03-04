@@ -248,10 +248,14 @@ def process_elements(
             has_caller_embedding = state.get("has_caller_embedding", False)
 
             # Check if element is fully processed
-            # For embeddable elements, require all three embeddings
+            # For embeddable elements, require summary + code embeddings.
+            # caller_embedding is only needed when element has calls.
             is_embeddable = should_embed(elem)
+            has_needed_embeddings = has_summary_embedding and has_code_embedding
+            if elem.calls:
+                has_needed_embeddings = has_needed_embeddings and has_caller_embedding
             is_fully_processed = has_summary and (
-                not is_embeddable or (has_summary_embedding and has_code_embedding and has_caller_embedding)
+                not is_embeddable or has_needed_embeddings
             )
 
             if content_unchanged and is_fully_processed:

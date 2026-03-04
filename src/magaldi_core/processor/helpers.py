@@ -459,8 +459,8 @@ def _embed_element(
             )
         caller_embedding = normalize_vector(caller_embedding)
     else:
-        # No calls — reuse summary embedding (identical text)
-        caller_embedding = summary_embedding
+        # No calls — skip caller embedding entirely (saves index storage + write I/O)
+        caller_embedding = None
 
     return summary_embedding, code_embedding, caller_embedding, summary_embed_time, code_embed_time, caller_embed_time
 
