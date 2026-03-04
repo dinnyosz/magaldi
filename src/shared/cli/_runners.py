@@ -331,12 +331,20 @@ def run_variable_scoring(
     )
     from shared.ai.summarization import SummarizationLLMClient
 
-    # Collect all variable/constant elements (skip test variables —
-    # they are self-documenting noise that wastes LLM scoring calls)
+    # Remove test variables/constants from parsed files entirely —
+    # they are self-documenting noise that wastes LLM scoring, embedding,
+    # and indexing resources. Purge them here so they never reach Phase 5.
+    for pf in parsing_result.parsed_files:
+        pf.elements = [
+            elem for elem in pf.elements
+            if not (elem.is_test and elem.element_type in ("variable", "constant"))
+        ]
+
+    # Collect remaining variable/constant elements for scoring
     variables: list[tuple[str, str, str, str]] = []
     for pf in parsing_result.parsed_files:
         for elem in pf.elements:
-            if elem.element_type in ("variable", "constant") and not elem.is_test:
+            if elem.element_type in ("variable", "constant"):
                 variables.append((
                     elem.element_id,
                     pf.file_info.relative_path,

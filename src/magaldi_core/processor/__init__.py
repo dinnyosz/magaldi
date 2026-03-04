@@ -295,18 +295,8 @@ def process_elements(
         # Element is new OR content changed OR missing summary/embeddings - needs processing
         elements_to_process.append(elem)
 
-    # Filter out test variables/constants — they are self-documenting noise
-    # that wastes embedding resources and pollutes search results.
-    # Test files, classes, and functions are still processed (with handcrafted summaries).
-    test_var_count = sum(
-        1 for e in elements_to_process
-        if e.is_test and e.element_type in ("variable", "constant")
-    )
-    if test_var_count:
-        elements_to_process = [
-            e for e in elements_to_process
-            if not (e.is_test and e.element_type in ("variable", "constant"))
-        ]
+    # Note: test variables/constants are already purged from parsed files
+    # during Phase 4 (variable scoring) — they never reach this point.
 
     # Total = elements that need processing (excludes unchanged)
     total = len(elements_to_process)
