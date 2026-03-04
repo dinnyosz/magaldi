@@ -325,12 +325,19 @@ class ElementRepository:
                 caller_emb = source.get("caller_embedding")
 
                 # Check for actual non-empty content, not just existence
+                has_summary_emb = isinstance(summary_emb, list) and len(summary_emb) > 0
+                has_code_emb = isinstance(code_emb, list) and len(code_emb) > 0
+                has_caller_emb = isinstance(caller_emb, list) and len(caller_emb) > 0
                 result[doc["_id"]] = {
                     "content_hash": source.get("content_hash"),
                     "has_summary": isinstance(summary, str) and len(summary) > 0,
-                    "has_summary_embedding": isinstance(summary_emb, list) and len(summary_emb) > 0,
-                    "has_code_embedding": isinstance(code_emb, list) and len(code_emb) > 0,
-                    "has_caller_embedding": isinstance(caller_emb, list) and len(caller_emb) > 0,
+                    "has_summary_embedding": has_summary_emb,
+                    "has_code_embedding": has_code_emb,
+                    "has_caller_embedding": has_caller_emb,
+                    # Preserve actual vectors for reuse when re-processing
+                    "summary_embedding": summary_emb if has_summary_emb else None,
+                    "code_embedding": code_emb if has_code_emb else None,
+                    "caller_embedding": caller_emb if has_caller_emb else None,
                 }
 
         return result

@@ -392,8 +392,9 @@ def _embed_element(
     embed_client: CodeEmbeddingClient,
     config: ProcessingConfig,
     on_stage_change: Callable[[str], None] | None = None,
-) -> tuple[list[float], list[float], list[float], float, float, float]:
-    """Generate all three embeddings for an element.
+    cached_embeddings: dict[str, list[float] | None] | None = None,
+) -> tuple[list[float], list[float], list[float] | None, float, float, float]:
+    """Generate embeddings for an element, reusing cached vectors when available.
 
     Args:
         element: Element to embed.
@@ -401,6 +402,9 @@ def _embed_element(
         embed_client: Embedding client.
         config: Processing configuration.
         on_stage_change: Optional callback to update status stage.
+        cached_embeddings: Optional dict with pre-existing embedding vectors
+            (keys: summary_embedding, code_embedding, caller_embedding).
+            Skips API calls for any embedding type already present.
 
     Returns:
         Tuple of (summary_embedding, code_embedding, caller_embedding,
@@ -409,58 +413,70 @@ def _embed_element(
     Raises:
         ValueError: If embedding validation fails.
     """
-    # Summary embedding
-    if on_stage_change:
-        on_stage_change("summ_embed")
-    summary_text = build_summary_embedding_text(element, summary_cache, config.embed_max_context)
-    summary_start = time.time()
-    summary_embedding = embed_client.embed_single(summary_text, timeout=config.embed_timeout)
-    summary_embed_time = time.time() - summary_start
+    cached = cached_embeddings or {}
 
-    # Validate dimensions
-    if not validate_vector(summary_embedding, config.embed_dimensions):
-        raise ValueError(
-            f"Invalid summary embedding: expected {config.embed_dimensions} dims, "
-            f"got {len(summary_embedding)}"
-        )
-    summary_embedding = normalize_vector(summary_embedding)
+    # Summary embedding
+    summary_embed_time = 0.0
+    cached_summary = cached.get("summary_embedding")
+    if cached_summary is not None:
+        summary_embedding = cached_summary
+    else:
+        if on_stage_change:
+            on_stage_change("summ_embed")
+        summary_text = build_summary_embedding_text(element, summary_cache, config.embed_max_context)
+        summary_start = time.time()
+        summary_embedding = embed_client.embed_single(summary_text, timeout=config.embed_timeout)
+        summary_embed_time = time.time() - summary_start
+
+        if not validate_vector(summary_embedding, config.embed_dimensions):
+            raise ValueError(
+                f"Invalid summary embedding: expected {config.embed_dimensions} dims, "
+                f"got {len(summary_embedding)}"
+            )
+        summary_embedding = normalize_vector(summary_embedding)
 
     # Code embedding
-    if on_stage_change:
-        on_stage_change("code_embed")
-    code_text = build_code_embedding_text(element, config.embed_max_context)
-    code_start = time.time()
-    code_embedding = embed_client.embed_single(code_text, timeout=config.embed_timeout)
-    code_embed_time = time.time() - code_start
+    code_embed_time = 0.0
+    cached_code = cached.get("code_embedding")
+    if cached_code is not None:
+        code_embedding = cached_code
+    else:
+        if on_stage_change:
+            on_stage_change("code_embed")
+        code_text = build_code_embedding_text(element, config.embed_max_context)
+        code_start = time.time()
+        code_embedding = embed_client.embed_single(code_text, timeout=config.embed_timeout)
+        code_embed_time = time.time() - code_start
 
-    # Validate dimensions
-    if not validate_vector(code_embedding, config.embed_dimensions):
-        raise ValueError(
-            f"Invalid code embedding: expected {config.embed_dimensions} dims, "
-            f"got {len(code_embedding)}"
-        )
-    code_embedding = normalize_vector(code_embedding)
+        if not validate_vector(code_embedding, config.embed_dimensions):
+            raise ValueError(
+                f"Invalid code embedding: expected {config.embed_dimensions} dims, "
+                f"got {len(code_embedding)}"
+            )
+        code_embedding = normalize_vector(code_embedding)
 
     # Caller embedding (passport + outbound calls for asymmetric resolution)
-    # Only elements with calls benefit — without calls, text is identical to summary
+    # Only elements with calls need caller_embedding
     caller_embed_time = 0.0
+    caller_embedding: list[float] | None = None
     if element.calls:
-        if on_stage_change:
-            on_stage_change("caller_embed")
-        caller_text = build_caller_embedding_text(element, summary_cache, config.embed_max_context)
-        caller_start = time.time()
-        caller_embedding = embed_client.embed_single(caller_text, timeout=config.embed_timeout)
-        caller_embed_time = time.time() - caller_start
+        cached_caller = cached.get("caller_embedding")
+        if cached_caller is not None:
+            caller_embedding = cached_caller
+        else:
+            if on_stage_change:
+                on_stage_change("caller_embed")
+            caller_text = build_caller_embedding_text(element, summary_cache, config.embed_max_context)
+            caller_start = time.time()
+            caller_embedding = embed_client.embed_single(caller_text, timeout=config.embed_timeout)
+            caller_embed_time = time.time() - caller_start
 
-        if not validate_vector(caller_embedding, config.embed_dimensions):
-            raise ValueError(
-                f"Invalid caller embedding: expected {config.embed_dimensions} dims, "
-                f"got {len(caller_embedding)}"
-            )
-        caller_embedding = normalize_vector(caller_embedding)
-    else:
-        # No calls — skip caller embedding entirely (saves index storage + write I/O)
-        caller_embedding = None
+            if not validate_vector(caller_embedding, config.embed_dimensions):
+                raise ValueError(
+                    f"Invalid caller embedding: expected {config.embed_dimensions} dims, "
+                    f"got {len(caller_embedding)}"
+                )
+            caller_embedding = normalize_vector(caller_embedding)
 
     return summary_embedding, code_embedding, caller_embedding, summary_embed_time, code_embed_time, caller_embed_time
 
@@ -541,6 +557,7 @@ def _process_single_element(
     worker_id: int,
     worker_status: WorkerStatus,
     on_status_change: Callable[[], None] | None = None,
+    cached_embeddings: dict[str, list[float] | None] | None = None,
 ) -> ProcessedElement:
     """Process a single element: summarize -> embed -> index.
 
@@ -556,6 +573,9 @@ def _process_single_element(
         worker_id: Worker thread ID.
         worker_status: Status tracker for workers.
         on_status_change: Optional callback when worker status changes.
+        cached_embeddings: Optional dict with pre-existing embedding vectors
+            (keys: summary_embedding, code_embedding, caller_embedding).
+            Skips API calls for any embedding type already present.
 
     Returns:
         ProcessedElement with timing info and success/error status.
@@ -654,7 +674,8 @@ def _process_single_element(
                 def on_embed_stage(stage: str) -> None:
                     update_status(stage, config.embed_model.name, "-")
                 summary_embedding, code_embedding, caller_embedding, summary_embed_time, code_embed_time, caller_embed_time = _embed_element(
-                    element, summary_cache, embed_client, config, on_embed_stage
+                    element, summary_cache, embed_client, config, on_embed_stage,
+                    cached_embeddings=cached_embeddings,
                 )
                 embed_time = summary_embed_time + code_embed_time + caller_embed_time
 

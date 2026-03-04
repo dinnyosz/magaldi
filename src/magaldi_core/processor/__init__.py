@@ -299,6 +299,18 @@ def process_elements(
         # Element is new OR content changed OR missing summary/embeddings - needs processing
         elements_to_process.append(elem)
 
+    # Collect cached embeddings for elements that need re-processing but have
+    # some embeddings already stored. Avoids re-computing embeddings that exist.
+    cached_embeddings: dict[str, dict[str, list[float] | None]] = {}
+    for elem in elements_to_process:
+        state = existing_states.get(elem.element_id)
+        if state is not None:
+            cached: dict[str, list[float] | None] = {}
+            for emb_key in ("summary_embedding", "code_embedding", "caller_embedding"):
+                cached[emb_key] = state.get(emb_key)
+            if any(v is not None for v in cached.values()):
+                cached_embeddings[elem.element_id] = cached
+
     # Note: test variables/constants are already purged from parsed files
     # during Phase 4 (variable scoring) — they never reach this point.
 
@@ -483,6 +495,7 @@ def process_elements(
                 worker_id=wid,
                 worker_status=worker_status,
                 on_status_change=on_status_change,
+                cached_embeddings=cached_embeddings.get(element.element_id),
             )
         finally:
             release_worker_id(wid)
