@@ -16,6 +16,7 @@ from shared.throttling import (
     ThroughputByLevel,
     ThroughputTracker,
     TimeoutEvent,
+    _get_explore_budget_fraction,
     build_throughput_levels_text,
     compute_effective_base_workers,
     compute_throttle_decision,
@@ -2988,14 +2989,15 @@ class TestComputeEffectiveBaseWorkers:
 
     def test_large_element_count_no_cap(self):
         """With many elements, full base_workers is returned."""
-        # Sum of _min_samples_for_level(1..16) = 10*5 + 12+14+16+18+20+22+24+26+28+30+32 = 292
-        # Budget for 1000 = 500, for 5000 = 2500 — both fit easily
+        # Sum of _min_samples_for_level(1..16) = 292
+        # 1000 elements → 50% → budget=500 → fits 16 levels (cost 292)
+        # 5000 elements → 50% → budget=2500 → fits 32 levels (cost 1076)
         assert compute_effective_base_workers(16, 1000) == 16
         assert compute_effective_base_workers(32, 5000) == 32
 
     def test_small_element_count_caps_workers(self):
         """With few elements, workers are capped."""
-        # 30 elements → budget = 15. Warmup A alone costs 10.
+        # ≤50 elements → skip exploration → floor of 3
         result = compute_effective_base_workers(16, 30)
         assert result < 16
         assert result >= 1
@@ -3016,11 +3018,12 @@ class TestComputeEffectiveBaseWorkers:
                 assert result >= 1
 
     def test_budget_fraction_respected(self):
-        """Cumulative level cost should fit within budget OR be at the minimum floor."""
+        """Cumulative level cost should fit within dynamic budget OR be at the minimum floor."""
         min_floor = 3  # Minimum exploration floor
-        for elements in [20, 40, 80, 160, 320]:
+        for elements in [80, 160, 320, 640, 1280]:
             cap = compute_effective_base_workers(16, elements)
-            budget = int(elements * EXPLORE_BUDGET_FRACTION)
+            fraction = _get_explore_budget_fraction(elements)
+            budget = int(elements * fraction)
             # Sum of _min_samples_for_level(1..cap) should fit in budget
             total_cost = sum(
                 ThroughputByLevel._min_samples_for_level(lvl)
@@ -3032,23 +3035,21 @@ class TestComputeEffectiveBaseWorkers:
     def test_medium_element_count_partial_cap(self):
         """100 elements with 16 workers should be partially capped."""
         cap = compute_effective_base_workers(16, 100)
-        # Budget = 50. Cost at cap=8 is ~40, at cap=12 is ~50.
+        # 100 elements → 50% → budget=50. Levels 1-5 cost 50 total.
         # Should allow a decent range but not full 16.
         assert 1 < cap < 16
 
     def test_240_elements_with_16_workers(self):
         """240 elements with 16 workers: cap scales with per-level cost."""
         cap = compute_effective_base_workers(16, 240)
-        # Budget = 120. Per-level cost: levels 1-5 cost 10 each, then scales up.
-        # Should get a decent range but not necessarily full 16.
+        # 240 elements → 50% → budget=120. Levels 1-9 cost 110. Good range.
         assert cap > 5
 
     def test_minimum_floor_of_3(self):
         """Even with very few elements, at least 3 workers are allowed."""
-        # 10 elements → budget = 5, but floor guarantees 3
+        # ≤50 elements → fraction=0.0 → skip exploration → min(3, base) = 3
         assert compute_effective_base_workers(16, 10) == 3
         assert compute_effective_base_workers(8, 20) == 3
-        # Very small batch still gets 3
         assert compute_effective_base_workers(4, 5) == 3
 
     def test_minimum_floor_respects_base_workers(self):
@@ -3062,6 +3063,28 @@ class TestComputeEffectiveBaseWorkers:
         cap_16 = compute_effective_base_workers(16, 200)
         # 32 workers has higher exploration cost than 16
         assert cap_32 <= cap_16 or cap_16 == 16
+
+    def test_dynamic_fraction_tiers(self):
+        """Budget fraction: skip for tiny workloads, 50% otherwise."""
+        assert _get_explore_budget_fraction(10) == 0.0   # ≤50: skip
+        assert _get_explore_budget_fraction(50) == 0.0   # ≤50: skip
+        assert _get_explore_budget_fraction(51) == 0.5   # >50: full budget
+        assert _get_explore_budget_fraction(200) == 0.5
+        assert _get_explore_budget_fraction(1000) == 0.5
+        assert _get_explore_budget_fraction(5000) == 0.5
+
+    def test_very_small_workload_skips_exploration(self):
+        """≤50 elements should skip exploration entirely (floor only)."""
+        for elements in [5, 10, 20, 30, 50]:
+            cap = compute_effective_base_workers(32, elements)
+            assert cap == 3, f"Expected 3 for {elements} elements, got {cap}"
+
+    def test_950_elements_32_workers_uses_full_budget(self):
+        """~950 elements with 32 workers: 50% budget allows decent range."""
+        cap = compute_effective_base_workers(32, 950)
+        # 950 elements → 50% → budget=475. GSS converges naturally.
+        assert cap >= 10, f"Expected >=10, got {cap}"
+        assert cap <= 32
 
 
 class TestExplorationOrchestratorCap:
@@ -3079,6 +3102,7 @@ class TestExplorationOrchestratorCap:
 
     def test_large_total_elements_no_cap(self):
         """Many elements should not cap workers."""
+        # 1000 elements → 30% fraction → budget=300, fits all 16 levels (cost 292)
         orch = ExplorationOrchestrator(16, total_elements=1000)
         assert orch.base_workers == 16
 

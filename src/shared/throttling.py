@@ -80,8 +80,32 @@ EXPLORE_BUDGET_MULTIPLIER = 3
 
 # Exploration budget: at most this fraction of total elements is spent on
 # warmup + GSS probing. The rest runs at the discovered peak.
-# 0.5 = spend at most half exploring, half at the optimum.
+# The budget is a ceiling, not a spending target — GSS converges on its own
+# and typically finishes well under budget. The fraction only matters for
+# small workloads where it actually caps the level range.
 EXPLORE_BUDGET_FRACTION = 0.5
+
+# Tiered budget fractions: (max_elements, fraction).
+# Applied in order — first matching threshold wins.
+# ≤50: skip exploration entirely (not enough data for meaningful signal)
+# >50: use the default 50% — GSS converges naturally regardless of budget size
+EXPLORE_BUDGET_TIERS: list[tuple[int, float]] = [
+    (50, 0.0),     # Skip exploration entirely
+]
+EXPLORE_BUDGET_DEFAULT_FRACTION = EXPLORE_BUDGET_FRACTION
+
+
+def _get_explore_budget_fraction(total_elements: int) -> float:
+    """Get exploration budget fraction based on workload size.
+
+    Smaller workloads get tighter budgets because exploration has diminishing
+    returns when there aren't enough elements for statistically meaningful
+    throughput measurements.
+    """
+    for threshold, fraction in EXPLORE_BUDGET_TIERS:
+        if total_elements <= threshold:
+            return fraction
+    return EXPLORE_BUDGET_DEFAULT_FRACTION
 
 # GSS partial signal: minimum samples to consider a level's partial data.
 # 3 is the minimum for a meaningful signal; 2 is too noisy, 1 is random.
@@ -1134,11 +1158,15 @@ class ExplorationState:
 
 
 def compute_effective_base_workers(base_workers: int, total_elements: int) -> int:
-    """Cap base_workers so exploration costs at most half the total elements.
+    """Cap base_workers so exploration fits within a dynamic budget.
 
-    Budget = total_elements / 2. Walk from level 1 to base_workers,
-    accumulating the sample cost per level (_min_samples_for_level).
-    Stop when the next level would overflow the budget.
+    Budget fraction scales with workload size (smaller workloads → tighter budget).
+    Walk from level 1 to base_workers, accumulating the sample cost per level
+    (_min_samples_for_level). Stop when the next level would overflow the budget.
+
+    Note: warmup phases A (level 1) and B (high probe) consume EXPLORE_MIN_SAMPLES
+    each, but this cost is already embedded in the per-level cost walk — level 1
+    and the high probe level are part of the walk. No separate deduction needed.
 
     A minimum of 3 workers (or base_workers if lower) is always allowed,
     since fewer workers provide no meaningful exploration signal and modern
@@ -1155,7 +1183,16 @@ def compute_effective_base_workers(base_workers: int, total_elements: int) -> in
     if base_workers <= 1:
         return base_workers
 
-    budget = int(total_elements * EXPLORE_BUDGET_FRACTION)
+    fraction = _get_explore_budget_fraction(total_elements)
+
+    # Very small workloads: skip exploration entirely
+    if fraction <= 0.0:
+        return min(3, base_workers)
+
+    budget = int(total_elements * fraction)
+    if budget <= 0:
+        return min(3, base_workers)
+
     cost = 0
     cap = 0
 
@@ -1181,7 +1218,7 @@ class ExplorationOrchestrator:
     to avoid duplicating the GSS orchestration logic.
 
     When total_elements is provided, base_workers is capped so that exploration
-    (warmup + GSS) costs at most EXPLORE_BUDGET_FRACTION of total elements.
+    (warmup + GSS) fits within a dynamic budget based on workload size.
     The remaining elements run at the discovered peak for actual throughput.
     """
 
@@ -1189,10 +1226,12 @@ class ExplorationOrchestrator:
         if total_elements is not None:
             effective = compute_effective_base_workers(base_workers, total_elements)
             if effective < base_workers:
+                fraction = _get_explore_budget_fraction(total_elements)
+                budget = int(total_elements * fraction)
                 _log_throttle(
                     f"EXPLORE CAP: {base_workers}→{effective} workers "
-                    f"(budget={int(total_elements * EXPLORE_BUDGET_FRACTION)} "
-                    f"from {total_elements} elements)"
+                    f"(budget={budget} from {total_elements} elements, "
+                    f"fraction={fraction:.0%})"
                 )
             self.base_workers = effective
         else:
@@ -1217,10 +1256,12 @@ class ExplorationOrchestrator:
                 self._original_base_workers, total_elements
             )
             if effective != self.base_workers:
+                fraction = _get_explore_budget_fraction(total_elements)
+                budget = int(total_elements * fraction)
                 _log_throttle(
                     f"EXPLORE CAP RESET: {self.base_workers}→{effective} workers "
-                    f"(budget={int(total_elements * EXPLORE_BUDGET_FRACTION)} "
-                    f"from {total_elements} elements)"
+                    f"(budget={budget} from {total_elements} elements, "
+                    f"fraction={fraction:.0%})"
                 )
             self.base_workers = effective
 
@@ -1250,9 +1291,10 @@ class ExplorationOrchestrator:
             state.explore_cap = self.base_workers
 
         # Skip exploration when budget is too small for meaningful data collection.
-        # base_workers=1 means compute_effective_base_workers couldn't fit even
-        # the minimum exploration cost — fall through to formula-based throttling.
-        if self.base_workers <= 1 and self._total_elements is not None:
+        # base_workers ≤ 2 means there aren't enough levels for GSS to search
+        # meaningfully — fall through to formula-based throttling instead.
+        # At base_workers=3, warmup can still collect useful baselines for throttling.
+        if self.base_workers <= 2 and self._total_elements is not None:
             state.exploration_status = f"Skipped ({self._total_elements} elements)"
             return state
 
