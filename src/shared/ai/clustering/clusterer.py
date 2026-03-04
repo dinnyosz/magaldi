@@ -53,7 +53,7 @@ class ClusterConfig:
 
     # LLM settings for labeling (based on arxiv.org/html/2507.03160v2)
     api_base: str = "http://localhost:11434"
-    labeling_model: str = "qwen3:4b-instruct"
+    labeling_model: str = "qwen3.5:4b"
     provider: str = "ollama"  # For tiered model name display
     label_temperature: float = 0.2
     label_top_p: float = 0.95
@@ -115,7 +115,7 @@ class ClusterConfig:
             affinity_percentile=cc.affinity_percentile,
             # LLM settings (passed in, typically from summarize model)
             api_base=api_base or "http://localhost:11434",
-            labeling_model=labeling_model or "qwen3:4b-instruct",
+            labeling_model=labeling_model or "qwen3.5:4b",
             provider=provider or "ollama",
         )
 
@@ -190,10 +190,59 @@ class LabelingTimingStats:
     total_label_time: float = 0.0
     label_count: int = 0
 
-    def record(self, label_time: float) -> None:
-        """Record timing for a completed label."""
+    # Token tracking
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    model_input_tokens: dict[str, int] = field(default_factory=dict)
+    model_output_tokens: dict[str, int] = field(default_factory=dict)
+    model_sample_counts: dict[str, int] = field(default_factory=dict)
+
+    def record(
+        self,
+        label_time: float,
+        prompt_tokens: int = 0,
+        response_tokens: int = 0,
+        model_name: str = "",
+    ) -> None:
+        """Record timing and token usage for a completed label."""
         self.total_label_time += label_time
         self.label_count += 1
+
+        self.total_input_tokens += prompt_tokens
+        self.total_output_tokens += response_tokens
+
+        if model_name and (prompt_tokens > 0 or response_tokens > 0):
+            self.model_input_tokens[model_name] = self.model_input_tokens.get(model_name, 0) + prompt_tokens
+            self.model_output_tokens[model_name] = self.model_output_tokens.get(model_name, 0) + response_tokens
+            self.model_sample_counts[model_name] = self.model_sample_counts.get(model_name, 0) + 1
+
+    def get_token_usage_summary(self) -> dict[str, Any]:
+        """Get token usage summary in standard format for log_token_usage()."""
+        by_type: dict[str, dict[str, int]] = {}
+        if self.total_input_tokens > 0 or self.total_output_tokens > 0:
+            by_type["labeling"] = {
+                "input": self.total_input_tokens,
+                "output": self.total_output_tokens,
+                "count": self.label_count,
+            }
+
+        by_model: dict[str, dict[str, int]] = {}
+        for model in sorted(self.model_sample_counts.keys()):
+            by_model[model] = {
+                "input": self.model_input_tokens.get(model, 0),
+                "output": self.model_output_tokens.get(model, 0),
+                "count": self.model_sample_counts.get(model, 0),
+            }
+
+        return {
+            "by_type": by_type,
+            "by_model": by_model,
+            "totals": {
+                "input": self.total_input_tokens,
+                "output": self.total_output_tokens,
+                "count": self.label_count,
+            },
+        }
 
     @property
     def avg_label_time(self) -> float:
@@ -676,6 +725,10 @@ class FeatureClusterer:
                     ctx_size=ctx_size_str,
                 ))
 
+            # Estimate prompt tokens
+            prompt_tokens = prompt_chars // 4
+            model_display = get_display_model(num_ctx)
+
             try:
                 api_start = time.time()
                 raw_label = llm_client.generate_from_messages(
@@ -687,7 +740,13 @@ class FeatureClusterer:
                     num_ctx=num_ctx,
                 )
                 label_time = time.time() - api_start
-                timing_stats.record(label_time)
+                response_tokens = len(raw_label) // 4
+                timing_stats.record(
+                    label_time,
+                    prompt_tokens=prompt_tokens,
+                    response_tokens=response_tokens,
+                    model_name=model_display,
+                )
 
                 # Clean label
                 label = self._clean_label(raw_label)
