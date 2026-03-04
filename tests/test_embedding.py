@@ -283,7 +283,7 @@ class TestBuildSummaryEmbeddingText:
         text = build_summary_embedding_text(class_element, embedding_store)
 
         assert "Flask application" in text  # File context
-        assert "UserService" in text
+        assert "Class: user service" in text  # Humanized name
         assert "User service class" in text
 
     def test_method_embedding_text_includes_class_context(
@@ -309,7 +309,7 @@ class TestBuildSummaryEmbeddingText:
 
         assert "Main module" in text  # File context
         assert "User management service" in text  # Class context
-        assert "get_user" in text
+        assert "Function: get user" in text  # Humanized name
         assert "Retrieves user by ID" in text
 
     def test_includes_signature(
@@ -366,6 +366,77 @@ class TestBuildSummaryEmbeddingText:
         text = build_summary_embedding_text(method_element, embedding_store)
 
         assert "Calls:" not in text
+
+    def test_function_name_humanized_in_passport(
+        self, embedding_store: InMemoryEmbeddingStore
+    ):
+        """Function names should be humanized (snake_case -> space-separated)."""
+        element = CodeElement(
+            element_id="scope:repo:main:src/app.py:function:get_user_by_email:10",
+            scope="scope",
+            repository="repo",
+            username="main",
+            relative_path="src/app.py",
+            element_type="function",
+            name="get_user_by_email",
+            language="python",
+            line_start=10,
+            line_end=20,
+            level=2,
+        )
+        embedding_store.store_element(element)
+
+        text = build_summary_embedding_text(element, embedding_store)
+
+        assert "Function: get user by email" in text
+        # Raw name should NOT appear in the Function: line
+        assert "Function: get_user_by_email" not in text
+
+    def test_class_name_humanized_in_passport(
+        self, embedding_store: InMemoryEmbeddingStore
+    ):
+        """Class names should be humanized (PascalCase -> space-separated)."""
+        element = CodeElement(
+            element_id="scope:repo:main:src/app.py:class:UserService:10",
+            scope="scope",
+            repository="repo",
+            username="main",
+            relative_path="src/app.py",
+            element_type="class",
+            name="UserService",
+            language="python",
+            line_start=10,
+            line_end=50,
+            level=1,
+        )
+        embedding_store.store_element(element)
+
+        text = build_summary_embedding_text(element, embedding_store)
+
+        assert "Class: user service" in text
+
+    def test_variable_name_humanized_in_passport(
+        self, embedding_store: InMemoryEmbeddingStore
+    ):
+        """Variable names should be humanized."""
+        element = CodeElement(
+            element_id="scope:repo:main:src/app.py:variable:max_retry_count:5",
+            scope="scope",
+            repository="repo",
+            username="main",
+            relative_path="src/app.py",
+            element_type="variable",
+            name="MAX_RETRY_COUNT",
+            language="python",
+            line_start=5,
+            line_end=5,
+            level=2,
+        )
+        embedding_store.store_element(element)
+
+        text = build_summary_embedding_text(element, embedding_store)
+
+        assert "Name: max retry count" in text
 
 
 class TestBuildCallerEmbeddingText:

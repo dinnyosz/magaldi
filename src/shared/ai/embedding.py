@@ -23,6 +23,7 @@ from magaldi_core.code_parser import CodeElement
 
 # Import the new embedding client
 from shared.ai.llm_client import EmbeddingClient, LLMError
+from shared.text_utils import humanize_name
 
 if TYPE_CHECKING:
     from shared.config import ModelConfig
@@ -586,7 +587,7 @@ def build_summary_embedding_text(
         if file_summary:
             parts.append(f"File context: {file_summary}")
 
-        parts.append(f"Class: {element.name}")
+        parts.append(f"Class: {humanize_name(element.name)}")
 
         summary = embedding_store.get_summary(element.element_id)
         parts.append(f"Summary: {summary or 'No summary available'}")
@@ -605,7 +606,7 @@ def build_summary_embedding_text(
         if class_summary:
             parts.append(f"Class context: {class_summary}")
 
-        parts.append(f"Function: {element.name}")
+        parts.append(f"Function: {humanize_name(element.name)}")
 
         summary = embedding_store.get_summary(element.element_id)
         parts.append(f"Summary: {summary or 'No summary available'}")
@@ -629,7 +630,7 @@ def build_summary_embedding_text(
         if class_summary:
             parts.append(f"Class context: {class_summary}")
 
-        parts.append(f"Name: {element.name}")
+        parts.append(f"Name: {humanize_name(element.name)}")
         parts.append(f"Type: {element.element_type}")
 
         summary = embedding_store.get_summary(element.element_id)
@@ -637,7 +638,7 @@ def build_summary_embedding_text(
 
     else:
         # Default for other types
-        parts.append(f"Name: {element.name}")
+        parts.append(f"Name: {humanize_name(element.name)}")
         summary = embedding_store.get_summary(element.element_id)
         if summary:
             parts.append(f"Summary: {summary}")
