@@ -131,8 +131,9 @@ class TestBuildUserPrompt:
         variables = [(1, "f.py", "x", long_code)]
         prompt = build_user_prompt(variables)
         # Should be truncated to 120 chars (117 + "...")
-        line = prompt.split("\n")[1]  # Second line (after "Score these variables:")
-        code_part = line.split("] ", 1)[1]
+        # Find the variable line (contains "[f.py]")
+        var_line = [line for line in prompt.split("\n") if "[f.py]" in line][0]
+        code_part = var_line.split("] ", 1)[1]
         assert code_part.endswith("...")
         assert len(code_part) <= 120
 

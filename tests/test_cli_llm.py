@@ -241,7 +241,7 @@ class TestModelConfigVllmMlx:
     def test_ollama_provider_unchanged(self) -> None:
         """Ollama provider still works as before."""
         cfg = ModelConfig(name="qwen3:4b-instruct", provider="ollama")
-        assert cfg.get_litellm_model() == "ollama/qwen3:4b-instruct"
+        assert cfg.get_litellm_model() == "ollama_chat/qwen3:4b-instruct"
         assert cfg.get_api_base() == "http://localhost:11434"
 
     def test_llamacpp_provider_unchanged(self) -> None:

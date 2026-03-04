@@ -128,8 +128,13 @@ class ModelConfig:
             return self.url
 
     # Models that use thinking/reasoning tags (<think>...</think>) by default.
-    # All Qwen3 variants (qwen3, qwen3.5, etc.) think by default in Ollama.
+    # qwen3 thinks by default but qwen3.5+ has reasoning disabled by default.
     _THINKING_MODELS = ("qwen3", "deepseek-r1", "deepseek-coder-v2", "nemotron")
+
+    # Models that are NOT thinking models despite matching a _THINKING_MODELS prefix.
+    # qwen3.5+ has reasoning disabled by default in Ollama — no think=False needed.
+    _NON_THINKING_MODELS = ("qwen3.5", "qwen3.6", "qwen3.7", "qwen3.8", "qwen3.9",
+                            "qwen3-embedding", "qwen3-coder")
 
     def is_thinking_model(self) -> bool:
         """Check if this model uses thinking/reasoning by default.
@@ -137,10 +142,13 @@ class ModelConfig:
         Handles org prefixes (e.g., "mlx-community/Qwen3-4B-...") and
         Ollama tags (e.g., "qwen3:4b-instruct", "qwen3.5:4b").
 
-        All Qwen3 variants (qwen3, qwen3.5, qwen3.6, etc.) use thinking
-        by default in Ollama and need think=False for clean output.
+        qwen3 uses thinking by default and needs think=False.
+        qwen3.5+ has reasoning disabled by default — NOT a thinking model.
         """
         base = self.name.split("/")[-1].lower()
+        # Check exclusions first (qwen3.5 matches "qwen3" prefix but is NOT a thinking model)
+        if any(base.startswith(ntm) for ntm in self._NON_THINKING_MODELS):
+            return False
         return any(base.startswith(tm) for tm in self._THINKING_MODELS)
 
 

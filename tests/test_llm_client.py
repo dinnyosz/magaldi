@@ -674,7 +674,7 @@ class TestThinkingModelDetection:
 
     def test_ollama_qwen3_sends_think_false(self):
         """Ollama qwen3 should send think=False as top-level kwarg."""
-        client = LLMClient(model="ollama/qwen3:4b", api_base="http://localhost:11434")
+        client = LLMClient(model="ollama_chat/qwen3:4b", api_base="http://localhost:11434")
 
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
@@ -1068,7 +1068,7 @@ class TestFromModelConfig:
         from shared.config import ModelConfig
         cfg = ModelConfig(name="qwen3:4b", provider="ollama", url="http://localhost:11434")
         client = LLMClient.from_model_config(cfg)
-        assert client.model == "ollama/qwen3:4b"
+        assert client.model == "ollama_chat/qwen3:4b"
         assert client.api_base == "http://localhost:11434"
         assert client.model_name == "qwen3:4b"
         assert client._is_thinking_model is True
@@ -1125,7 +1125,7 @@ class TestFromModelConfig:
             dimensions=1024,
         )
         client = EmbeddingClient.from_model_config(cfg)
-        assert client.model == "ollama/qwen3-embedding:0.6b"
+        assert client.model == "ollama_chat/qwen3-embedding:0.6b"
         assert client.api_base == "http://localhost:11434"
         assert client.dimensions == 1024
 

@@ -604,9 +604,9 @@ class TestPromptImproverRun:
         mock_llm_instance = MagicMock()
         mock_llm_instance.generate_from_messages.return_value = "Extracts name fields from a list of dicts, raising KeyError for missing keys."
 
-        # Patch LLMClient.from_model_config
-        with patch("shared.ai.prompt_improver.LLMClient") as llm_mod:
-            llm_mod.from_model_config.return_value = mock_llm_instance
+        # Patch LLMClient.from_model_config at the source (imported inside function)
+        with patch("shared.ai.llm_client.LLMClient.from_model_config") as mock_from_mc:
+            mock_from_mc.return_value = mock_llm_instance
 
             # Setup eval mock - returns high scores
             bench_instance = MagicMock()
@@ -944,15 +944,15 @@ class TestThinkingModelDetection:
         from shared.ai.llm_client import LLMClient
         assert LLMClient._check_is_thinking_model("qwen3:4b") is True
 
-    def test_qwen35_is_thinking_model(self) -> None:
-        """qwen3.5 should be detected as thinking model."""
+    def test_qwen35_is_not_thinking_model(self) -> None:
+        """qwen3.5 has reasoning disabled by default — NOT a thinking model."""
         from shared.ai.llm_client import LLMClient
-        assert LLMClient._check_is_thinking_model("qwen3.5:4b") is True
+        assert LLMClient._check_is_thinking_model("qwen3.5:4b") is False
 
-    def test_qwen35_9b_is_thinking_model(self) -> None:
-        """qwen3.5:9b should be detected as thinking model."""
+    def test_qwen35_9b_is_not_thinking_model(self) -> None:
+        """qwen3.5:9b has reasoning disabled by default — NOT a thinking model."""
         from shared.ai.llm_client import LLMClient
-        assert LLMClient._check_is_thinking_model("qwen3.5:9b") is True
+        assert LLMClient._check_is_thinking_model("qwen3.5:9b") is False
 
     def test_qwen25_is_not_thinking_model(self) -> None:
         """qwen2.5 should NOT be detected as thinking model."""
@@ -964,11 +964,11 @@ class TestThinkingModelDetection:
         from shared.ai.llm_client import LLMClient
         assert LLMClient._check_is_thinking_model("deepseek-r1:7b") is True
 
-    def test_model_config_is_thinking_model(self) -> None:
-        """ModelConfig.is_thinking_model should detect qwen3.5."""
+    def test_model_config_qwen35_not_thinking(self) -> None:
+        """ModelConfig.is_thinking_model should NOT detect qwen3.5 (reasoning disabled by default)."""
         from shared.config import ModelConfig
         mc = ModelConfig(name="qwen3.5:4b", provider="ollama")
-        assert mc.is_thinking_model() is True
+        assert mc.is_thinking_model() is False
 
     def test_model_config_qwen25_not_thinking(self) -> None:
         """ModelConfig.is_thinking_model should NOT match qwen2.5."""

@@ -339,7 +339,7 @@ class TestCallLLMForGlossary:
         mock_client.generate_from_messages.return_value = '["user", "login"]'
 
         with patch(
-            "shared.ai.glossary.ai_extractor.LLMClient",
+            "shared.ai.glossary.ai_extractor.LLMClient.from_model_config",
             return_value=mock_client,
         ):
             result = await call_llm_for_glossary(
@@ -402,7 +402,7 @@ class TestCallLLMForGlossary:
         mock_client.generate_from_messages.side_effect = LLMError("Connection failed")
 
         with patch(
-            "shared.ai.glossary.ai_extractor.LLMClient",
+            "shared.ai.glossary.ai_extractor.LLMClient.from_model_config",
             return_value=mock_client,
         ):
             result = await call_llm_for_glossary(
@@ -421,7 +421,7 @@ class TestCallLLMForGlossary:
 ```"""
 
         with patch(
-            "shared.ai.glossary.ai_extractor.LLMClient",
+            "shared.ai.glossary.ai_extractor.LLMClient.from_model_config",
             return_value=mock_client,
         ):
             result = await call_llm_for_glossary(

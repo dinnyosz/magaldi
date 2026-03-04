@@ -470,14 +470,13 @@ class TestModelConfig:
 
     def test_is_thinking_model_embedding(self):
         cfg = ModelConfig(name="qwen3-embedding:0.6b", provider="ollama")
-        # "qwen3-embedding" starts with "qwen3" — it IS a thinking family name
-        # but embedding models don't generate text; this is a known edge case
-        # and harmless (think=false on embeddings is a no-op)
-        assert cfg.is_thinking_model() is True
+        # "qwen3-embedding" is in NON_THINKING_MODELS — embedding models
+        # don't generate text and don't need think=False
+        assert cfg.is_thinking_model() is False
 
     def test_get_litellm_model_ollama(self):
         cfg = ModelConfig(name="qwen3:4b", provider="ollama")
-        assert cfg.get_litellm_model() == "ollama/qwen3:4b"
+        assert cfg.get_litellm_model() == "ollama_chat/qwen3:4b"
 
     def test_get_litellm_model_vllm_mlx(self):
         cfg = ModelConfig(name="mlx-community/Qwen3-4B", provider="vllm-mlx")
