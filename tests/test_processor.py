@@ -15,11 +15,13 @@ from magaldi_core.processor import (
     TimingStats,
     WorkerStatus,
     _extract_docstring_description,
+    _generate_docstring_summary,
     _generate_handcrafted_summary,
     _generate_small_function_summary,
     _generate_test_class_summary,
     _generate_test_file_summary,
     _generate_test_function_summary,
+    _get_craft_reason,
     _get_element_line_count,
     _is_small_function,
     _should_handcraft,
@@ -1281,7 +1283,9 @@ class TestIndexElementImportsAndCalls:
 
         assert result is True
         mock_es.index_element.assert_called_once()
-        mock_es.store_summary.assert_called_once_with(file_elem.element_id, "File summary")
+        mock_es.store_summary.assert_called_once_with(
+            file_elem.element_id, "File summary", craft_reason=None
+        )
 
         # Verify store_imports was called with correct data
         mock_es.store_imports.assert_called_once()
@@ -3122,3 +3126,390 @@ class TestCrossTierThroughputLeak:
             "Handcrafted element should record to its own level table"
         )
         assert levels[4][1] == 1
+
+
+# =============================================================================
+# CRAFT REASON CATEGORIZATION TESTS
+# =============================================================================
+
+
+class TestGetCraftReason:
+    """Tests for _get_craft_reason with reason categorization."""
+
+    def test_test_element_returns_test(self):
+        """Test elements should return 'test' reason."""
+        config = ProcessingConfig()
+        elem = CodeElement(
+            element_type="function", name="test_foo", is_test=True,
+            raw_code="def test_foo():\n    assert True\n",
+        )
+        assert _get_craft_reason(elem, config) == "test"
+
+    def test_import_returns_import(self):
+        """Import elements should return 'import' reason."""
+        config = ProcessingConfig()
+        elem = CodeElement(element_type="import", name="os", raw_code="import os")
+        assert _get_craft_reason(elem, config) == "import"
+
+    def test_small_function_returns_small(self):
+        """Small functions should return 'small' reason."""
+        config = ProcessingConfig(handcrafted_max_lines=5)
+        elem = CodeElement(
+            element_type="function", name="foo",
+            raw_code="def foo():\n    return 1\n",
+        )
+        assert _get_craft_reason(elem, config) == "small"
+
+    def test_small_method_returns_small(self):
+        """Small methods should return 'small' reason."""
+        config = ProcessingConfig(handcrafted_max_lines=5)
+        elem = CodeElement(
+            element_type="method", name="bar",
+            raw_code="def bar(self):\n    return self.x\n",
+        )
+        assert _get_craft_reason(elem, config) == "small"
+
+    def test_large_function_with_docstring_returns_docstring(self):
+        """Large function with docstring should return 'docstring' reason."""
+        config = ProcessingConfig(handcrafted_max_lines=3, use_docstrings=True)
+        elem = CodeElement(
+            element_type="function", name="process",
+            raw_code="def process():\n" + "    line\n" * 10,
+            docstring="Process the input data and return results.\n\nArgs:\n    data: input",
+        )
+        assert _get_craft_reason(elem, config) == "docstring"
+
+    def test_class_with_docstring_returns_docstring(self):
+        """Class with docstring should return 'docstring' reason."""
+        config = ProcessingConfig(use_docstrings=True)
+        elem = CodeElement(
+            element_type="class", name="UserService",
+            raw_code="class UserService:\n    pass",
+            docstring="Manages user authentication and authorization",
+        )
+        assert _get_craft_reason(elem, config) == "docstring"
+
+    def test_file_with_docstring_returns_docstring(self):
+        """File with docstring should return 'docstring' reason."""
+        config = ProcessingConfig(use_docstrings=True)
+        elem = CodeElement(
+            element_type="file", name="auth.py",
+            raw_code="# auth module\n",
+            docstring="Authentication utilities for the API server",
+        )
+        assert _get_craft_reason(elem, config) == "docstring"
+
+    def test_interface_with_docstring_returns_docstring(self):
+        """Interface with docstring should return 'docstring' reason."""
+        config = ProcessingConfig(use_docstrings=True)
+        elem = CodeElement(
+            element_type="interface", name="IUserService",
+            raw_code="interface IUserService {}",
+            docstring="Interface for user service operations",
+        )
+        assert _get_craft_reason(elem, config) == "docstring"
+
+    def test_use_docstrings_disabled_returns_none(self):
+        """Docstring check should be skipped when use_docstrings=False."""
+        config = ProcessingConfig(use_docstrings=False)
+        elem = CodeElement(
+            element_type="class", name="UserService",
+            raw_code="class UserService:\n    pass",
+            docstring="Manages user authentication and authorization",
+        )
+        assert _get_craft_reason(elem, config) is None
+
+    def test_short_docstring_below_threshold_returns_none(self):
+        """Docstring with <10 char description should not qualify."""
+        config = ProcessingConfig(use_docstrings=True)
+        elem = CodeElement(
+            element_type="class", name="Foo",
+            raw_code="class Foo:\n    pass",
+            docstring="Foo.",
+        )
+        assert _get_craft_reason(elem, config) is None
+
+    def test_large_function_without_docstring_returns_none(self):
+        """Large function without docstring should return None (LLM needed)."""
+        config = ProcessingConfig(handcrafted_max_lines=3, use_docstrings=True)
+        elem = CodeElement(
+            element_type="function", name="big",
+            raw_code="def big():\n" + "    line\n" * 10,
+        )
+        assert _get_craft_reason(elem, config) is None
+
+    def test_small_function_with_docstring_returns_small_not_docstring(self):
+        """Small function check takes priority over docstring check."""
+        config = ProcessingConfig(handcrafted_max_lines=5, use_docstrings=True)
+        elem = CodeElement(
+            element_type="function", name="foo",
+            raw_code="def foo():\n    return 1\n",
+            docstring="Return one from the function",
+        )
+        assert _get_craft_reason(elem, config) == "small"
+
+    def test_test_with_docstring_returns_test_not_docstring(self):
+        """Test check takes priority over docstring check."""
+        config = ProcessingConfig(use_docstrings=True)
+        elem = CodeElement(
+            element_type="function", name="test_foo", is_test=True,
+            raw_code="def test_foo():\n    assert True\n",
+            docstring="Test the foo functionality with edge cases",
+        )
+        assert _get_craft_reason(elem, config) == "test"
+
+    def test_import_with_docstring_returns_import_not_docstring(self):
+        """Import check takes priority over docstring check."""
+        config = ProcessingConfig(use_docstrings=True)
+        elem = CodeElement(
+            element_type="import", name="os",
+            raw_code="import os",
+            docstring="Operating system interface module",
+        )
+        assert _get_craft_reason(elem, config) == "import"
+
+    def test_variable_with_docstring_returns_docstring(self):
+        """Variable with docstring should return 'docstring' reason."""
+        config = ProcessingConfig(use_docstrings=True)
+        elem = CodeElement(
+            element_type="variable", name="MAX_RETRIES",
+            raw_code="MAX_RETRIES = 3",
+            docstring="Maximum number of retry attempts for API calls",
+        )
+        assert _get_craft_reason(elem, config) == "docstring"
+
+    def test_docstring_only_section_headers_returns_none(self):
+        """Docstring with only section headers (no description) should not qualify."""
+        config = ProcessingConfig(use_docstrings=True)
+        elem = CodeElement(
+            element_type="function", name="process",
+            raw_code="def process():\n" + "    line\n" * 10,
+            docstring="Args:\n    data: input\n\nReturns:\n    result",
+        )
+        assert _get_craft_reason(elem, config) is None
+
+
+class TestGenerateDocstringSummary:
+    """Tests for _generate_docstring_summary."""
+
+    def test_extracts_description_paragraph(self):
+        """Should extract description paragraph before section headers."""
+        elem = CodeElement(
+            element_type="class", name="UserService",
+            docstring="Manages user authentication and authorization.\n\nArgs:\n    db: database",
+        )
+        summary = _generate_docstring_summary(elem)
+        assert summary == "Manages user authentication and authorization"
+
+    def test_strips_trailing_period(self):
+        """Should strip trailing period for consistency."""
+        elem = CodeElement(
+            element_type="function", name="process",
+            docstring="Process the input data.",
+        )
+        summary = _generate_docstring_summary(elem)
+        assert summary == "Process the input data"
+
+    def test_multiline_description(self):
+        """Should join multiline descriptions with spaces."""
+        elem = CodeElement(
+            element_type="class", name="Parser",
+            docstring="Parse configuration files.\nSupports YAML and JSON formats.\n\nArgs:\n    path: file path",
+        )
+        summary = _generate_docstring_summary(elem)
+        assert summary == "Parse configuration files. Supports YAML and JSON formats"
+
+    def test_simple_one_liner(self):
+        """Should handle simple one-line docstrings."""
+        elem = CodeElement(
+            element_type="method", name="get_user",
+            docstring="Retrieve user by ID",
+        )
+        summary = _generate_docstring_summary(elem)
+        assert summary == "Retrieve user by ID"
+
+    def test_empty_docstring_fallback(self):
+        """Should fallback to element type + name for empty docstring."""
+        elem = CodeElement(
+            element_type="function", name="process",
+            docstring="",
+        )
+        summary = _generate_docstring_summary(elem)
+        assert summary == "Function: process"
+
+    def test_none_docstring_fallback(self):
+        """Should fallback to element type + name for None docstring."""
+        elem = CodeElement(
+            element_type="class", name="Foo",
+            docstring=None,
+        )
+        summary = _generate_docstring_summary(elem)
+        assert summary == "Class: Foo"
+
+
+class TestShouldHandcraftWithDocstrings:
+    """Tests for _should_handcraft with docstring-based handcrafting."""
+
+    def test_class_with_docstring_handcrafted_when_enabled(self):
+        """Class with good docstring should be handcrafted."""
+        config = ProcessingConfig(use_docstrings=True)
+        elem = CodeElement(
+            element_type="class", name="Foo",
+            raw_code="class Foo:\n    pass",
+            docstring="Manages authentication and user sessions for the API",
+        )
+        assert _should_handcraft(elem, config) is True
+
+    def test_class_with_docstring_not_handcrafted_when_disabled(self):
+        """Class with docstring should NOT be handcrafted when disabled."""
+        config = ProcessingConfig(use_docstrings=False)
+        elem = CodeElement(
+            element_type="class", name="Foo",
+            raw_code="class Foo:\n    pass",
+            docstring="Manages authentication and user sessions for the API",
+        )
+        assert _should_handcraft(elem, config) is False
+
+    def test_file_with_docstring_handcrafted(self):
+        """File with docstring should be handcrafted."""
+        config = ProcessingConfig(use_docstrings=True)
+        elem = CodeElement(
+            element_type="file", name="auth.py",
+            raw_code="# module\n",
+            docstring="Authentication and authorization utilities",
+        )
+        assert _should_handcraft(elem, config) is True
+
+    def test_large_function_with_docstring_handcrafted(self):
+        """Large function with docstring should be handcrafted."""
+        config = ProcessingConfig(handcrafted_max_lines=3, use_docstrings=True)
+        elem = CodeElement(
+            element_type="function", name="big",
+            raw_code="def big():\n" + "    line\n" * 10,
+            docstring="Process a large batch of data efficiently using streaming",
+        )
+        assert _should_handcraft(elem, config) is True
+
+    def test_backward_compat_no_docstring_no_change(self):
+        """Elements without docstrings should behave exactly as before."""
+        config = ProcessingConfig(use_docstrings=True, handcrafted_max_lines=5)
+        # Large function without docstring -> NOT handcrafted
+        elem = CodeElement(
+            element_type="function", name="big",
+            raw_code="def big():\n" + "    line\n" * 10,
+        )
+        assert _should_handcraft(elem, config) is False
+
+        # Non-test class without docstring -> NOT handcrafted
+        elem2 = CodeElement(
+            element_type="class", name="Foo",
+            raw_code="class Foo:\n    pass",
+        )
+        assert _should_handcraft(elem2, config) is False
+
+
+class TestGenerateHandcraftedSummaryWithCraftReason:
+    """Tests for _generate_handcrafted_summary with craft_reason parameter."""
+
+    def test_docstring_reason_uses_docstring(self):
+        """craft_reason='docstring' should use docstring description."""
+        elem = CodeElement(
+            element_type="class", name="UserService",
+            raw_code="class UserService:\n    pass",
+            docstring="Manages user sessions and authentication",
+        )
+        summary = _generate_handcrafted_summary(elem, craft_reason="docstring")
+        assert summary == "Manages user sessions and authentication"
+
+    def test_test_reason_uses_humanized_name(self):
+        """craft_reason='test' should use naming conventions."""
+        elem = CodeElement(
+            element_type="function", name="test_user_login",
+            raw_code="def test_user_login():\n    pass",
+            is_test=True,
+        )
+        summary = _generate_handcrafted_summary(elem, craft_reason="test")
+        assert "user login" in summary.lower()
+
+    def test_import_reason_uses_code(self):
+        """craft_reason='import' should use code as summary."""
+        elem = CodeElement(
+            element_type="import", name="os",
+            raw_code="import os",
+        )
+        summary = _generate_handcrafted_summary(elem, craft_reason="import")
+        assert "import os" in summary.lower()
+
+    def test_small_reason_uses_docstring_priority(self):
+        """craft_reason='small' should prefer docstring."""
+        elem = CodeElement(
+            element_type="function", name="foo",
+            raw_code="def foo():\n    return 1\n",
+            docstring="Return one from the function",
+        )
+        summary = _generate_handcrafted_summary(elem, craft_reason="small")
+        assert summary == "Return one from the function"
+
+    def test_none_reason_backward_compat(self):
+        """craft_reason=None should work like old behavior."""
+        elem = CodeElement(
+            element_type="import", name="os",
+            raw_code="import os",
+        )
+        summary = _generate_handcrafted_summary(elem, craft_reason=None)
+        assert "import os" in summary.lower()
+
+
+class TestContentHashIncludesDocstring:
+    """Tests for content hash including docstring."""
+
+    def test_hash_changes_with_docstring_change(self):
+        """Content hash should change when docstring changes."""
+        elem = CodeElement(
+            element_type="function", name="foo",
+            raw_code="function foo() { return 1; }",
+            docstring="Original description",
+        )
+        hash1 = elem.compute_content_hash()
+
+        elem.docstring = "Updated description"
+        hash2 = elem.compute_content_hash()
+
+        assert hash1 != hash2
+
+    def test_hash_same_with_same_content(self):
+        """Content hash should be deterministic."""
+        elem1 = CodeElement(
+            element_type="function", name="foo",
+            raw_code="function foo() { return 1; }",
+            docstring="Description here",
+        )
+        elem2 = CodeElement(
+            element_type="function", name="foo",
+            raw_code="function foo() { return 1; }",
+            docstring="Description here",
+        )
+        assert elem1.compute_content_hash() == elem2.compute_content_hash()
+
+    def test_hash_with_none_docstring(self):
+        """Content hash should work when docstring is None."""
+        elem = CodeElement(
+            element_type="function", name="foo",
+            raw_code="def foo(): pass",
+        )
+        hash_val = elem.compute_content_hash()
+        assert hash_val is not None
+        assert len(hash_val) == 64  # SHA256 hex digest
+
+    def test_hash_differs_with_vs_without_docstring(self):
+        """Elements with and without docstring should have different hashes."""
+        elem_no_doc = CodeElement(
+            element_type="function", name="foo",
+            raw_code="function foo() { return 1; }",
+        )
+        elem_with_doc = CodeElement(
+            element_type="function", name="foo",
+            raw_code="function foo() { return 1; }",
+            docstring="Return one",
+        )
+        assert elem_no_doc.compute_content_hash() != elem_with_doc.compute_content_hash()

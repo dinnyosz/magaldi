@@ -297,9 +297,8 @@ def _get_craft_reason(element: CodeElement, config: ProcessingConfig) -> str | N
         return "test"
     if element.element_type in _HANDCRAFTED_SUMMARY_TYPES:
         return "import"
-    if element.element_type in ("function", "method"):
-        if _is_small_function(element, config.handcrafted_max_lines):
-            return "small"
+    if element.element_type in ("function", "method") and _is_small_function(element, config.handcrafted_max_lines):
+        return "small"
     if config.use_docstrings and element.docstring:
         desc = _extract_docstring_description(element.docstring)
         if len(desc) >= _MIN_DOCSTRING_DESC_LENGTH:
