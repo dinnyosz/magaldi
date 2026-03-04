@@ -457,7 +457,7 @@ class TestPrecedingDocComment:
         assert result == "User configuration interface."
 
     def test_js_regular_comment_not_extracted(self):
-        """Only /** */ counts for JS, not // or /* */."""
+        """// line comments are not extracted for JS/TS."""
         lines = [
             "// This is a regular comment",
             "function foo() {",
@@ -465,13 +465,51 @@ class TestPrecedingDocComment:
         result = extract_preceding_doc_comment(lines, 2, "javascript")
         assert result is None
 
-    def test_js_non_doc_block_comment_not_extracted(self):
-        """/* */ without the extra * is not a doc comment."""
+    def test_js_non_doc_block_comment_extracted(self):
+        """/* */ directly before an element is still a useful comment."""
         lines = [
-            "/* This is not JSDoc */",
+            "/* Handles user authentication */",
             "function foo() {",
         ]
         result = extract_preceding_doc_comment(lines, 2, "javascript")
+        assert result == "Handles user authentication"
+
+    def test_js_multiline_non_doc_block_extracted(self):
+        """Multi-line /* ... */ directly before an element is extracted."""
+        lines = [
+            "/*",
+            " * Non-doc block comment",
+            " * with multiple lines",
+            " */",
+            "function foo() {",
+        ]
+        result = extract_preceding_doc_comment(lines, 5, "javascript")
+        assert result == "Non-doc block comment\nwith multiple lines"
+
+    def test_block_comment_doesnt_bleed_across_boundaries(self):
+        """A */ closing must not scan past another */ and pick up an older block."""
+        lines = [
+            "/** @deprecated Use newHelper instead */",
+            "function oldHelper() {}",
+            "",
+            "/* Regular block comment */",
+            "function regularComment() {}",
+        ]
+        # Line 4 (/* Regular... */) is directly above line 5
+        result = extract_preceding_doc_comment(lines, 5, "javascript")
+        assert result == "Regular block comment"
+
+    def test_stray_closing_doesnt_bleed_into_previous_block(self):
+        """A bare */ line must not scan past code into a previous block."""
+        lines = [
+            "/** Old JSDoc */",
+            "function old() {}",
+            "",
+            "some code here",
+            " */",  # stray closing without matching opening
+            "function broken() {}",
+        ]
+        result = extract_preceding_doc_comment(lines, 6, "javascript")
         assert result is None
 
     # --- Rust doc comments ---

@@ -387,9 +387,9 @@ _SECTION_MARKERS = frozenset({"===", "---", "***", "###"})
 
 
 def _extract_block_doc_comment(lines: list[str], end_idx: int) -> str | None:
-    """Extract a /** ... */ block doc comment ending at end_idx.
+    """Extract a /* ... */ or /** ... */ block doc comment ending at end_idx.
 
-    Scans backward from end_idx to find the opening /**, then extracts
+    Scans backward from end_idx to find the opening /* or /**, then extracts
     and cleans the content between them.
 
     Args:
@@ -397,29 +397,37 @@ def _extract_block_doc_comment(lines: list[str], end_idx: int) -> str | None:
         end_idx: 0-indexed line where */ appears.
 
     Returns:
-        Cleaned doc comment text, or None if not a valid /** block.
+        Cleaned doc comment text, or None if not a valid block.
     """
     end_line = lines[end_idx].strip()
     if not end_line.endswith("*/"):
         return None
 
-    # Single-line: /** Short description */
+    # Single-line: /** Short description */ or /* Short description */
     if end_line.startswith("/**"):
         content = end_line[3:-2].strip()
         return content if content else None
+    if end_line.startswith("/*"):
+        content = end_line[2:-2].strip()
+        return content if content else None
 
-    # Multi-line: scan backward for /**
+    # Multi-line: scan backward for /** or /*
     doc_lines: list[str] = []
     for i in range(end_idx, -1, -1):
         current = lines[i]
         stripped = current.strip()
 
-        if stripped.startswith("/**"):
-            # Opening line — extract content after /**
-            after_open = stripped[3:].strip()
+        if stripped.startswith("/**") or stripped.startswith("/*"):
+            # Opening line — extract content after /** or /*
+            offset = 3 if stripped.startswith("/**") else 2
+            after_open = stripped[offset:].strip()
             if after_open and after_open != "*":
                 doc_lines.insert(0, after_open)
             break
+
+        # Reject: another */ means we crossed a block boundary
+        if i != end_idx and "*/" in stripped:
+            return None
 
         if i == end_idx:
             # Closing line — extract content before */
@@ -430,13 +438,16 @@ def _extract_block_doc_comment(lines: list[str], end_idx: int) -> str | None:
             if before_close:
                 doc_lines.insert(0, before_close)
         else:
-            # Middle line — strip leading *
+            # Middle line — must start with * (standard block comment formatting)
+            # or be blank. Non-comment code means we've crossed a boundary.
+            if stripped and not stripped.startswith("*"):
+                return None
             content = stripped
             if content.startswith("*"):
                 content = content[1:].strip()
             doc_lines.insert(0, content)
     else:
-        # Never found opening /**, invalid block
+        # Never found opening, invalid block
         return None
 
     text = "\n".join(doc_lines).strip()
