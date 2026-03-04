@@ -1015,6 +1015,52 @@ class TestPresencePenaltyRouting:
         assert call_kwargs["extra_body"]["presence_penalty"] == 1.5
 
 
+class TestOllamaTimeoutOverride:
+    """Tests for Ollama client-side timeout override."""
+
+    def test_ollama_timeout_overridden_to_24h(self):
+        """Ollama models should ignore caller timeout and use 24h instead."""
+        client = LLMClient(model="ollama_chat/qwen3:4b", api_base="http://localhost:11434")
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "response"
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response) as mock_comp:
+            client.generate("test", timeout=60)
+
+        call_kwargs = mock_comp.call_args.kwargs
+        assert call_kwargs["timeout"] == 86400.0
+
+    def test_non_ollama_timeout_preserved(self):
+        """Non-Ollama providers should keep the caller-specified timeout."""
+        client = LLMClient(model="gpt-4o-mini", api_key="sk-test")
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "response"
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response) as mock_comp:
+            client.generate("test", timeout=120)
+
+        call_kwargs = mock_comp.call_args.kwargs
+        assert call_kwargs["timeout"] == 120.0
+
+    def test_ollama_prefix_also_overrides_timeout(self):
+        """ollama/ prefix (not just ollama_chat/) should also override timeout."""
+        client = LLMClient(model="ollama/llama3:8b", api_base="http://localhost:11434")
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "response"
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response) as mock_comp:
+            client.generate("test", timeout=30)
+
+        call_kwargs = mock_comp.call_args.kwargs
+        assert call_kwargs["timeout"] == 86400.0
+
+
 class TestFromModelConfig:
     """Tests for from_model_config() factory methods."""
 

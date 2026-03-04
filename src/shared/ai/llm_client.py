@@ -77,7 +77,10 @@ _httpx_client = httpx.Client(
         max_connections=100,
         max_keepalive_connections=20,
     ),
-    timeout=httpx.Timeout(300.0, connect=30.0),
+    # No client-side read timeout — Ollama queues requests internally and may
+    # take arbitrarily long when saturated.  Keep a connect timeout so we
+    # detect unreachable servers quickly.
+    timeout=httpx.Timeout(None, connect=30.0),
 )
 litellm.client_session = _httpx_client
 
@@ -118,7 +121,7 @@ async def _get_or_create_session_async() -> aiohttp.ClientSession:
                 enable_cleanup_closed=True,  # Clean up closed connections
             )
             timeout = aiohttp.ClientTimeout(
-                total=300,  # Total request timeout
+                total=None,  # No client-side read timeout (same as httpx)
                 connect=30,  # Connection timeout
             )
             _aiohttp_session = aiohttp.ClientSession(
@@ -596,19 +599,25 @@ class LLMClient:
         Centralises auth, thinking-model suppression, and num_ctx handling
         so that generate() and generate_from_messages() stay thin.
         """
+        # For local providers (Ollama), disable client-side timeout.
+        # Ollama queues requests internally and may take arbitrarily long
+        # when saturated — client-side timeouts cause spurious failures.
+        # LiteLLM clamps None/0 to 600s, so we use a large sentinel instead.
+        _is_ollama = use_model.startswith(("ollama/", "ollama_chat/"))
+        effective_timeout: float = 86400.0 if _is_ollama else float(timeout)
+
         kwargs: dict[str, Any] = {
             "model": use_model,
             "messages": messages,
             "temperature": temperature,
             "top_p": top_p,
             "max_tokens": max_tokens,
-            "timeout": timeout,
+            "timeout": effective_timeout,
         }
 
         # Optional sampling parameters (from model-specific configs)
         # For Ollama, presence_penalty must go through extra_body — LiteLLM's
         # ollama_chat provider does not support it as a top-level parameter.
-        _is_ollama = use_model.startswith(("ollama/", "ollama_chat/"))
         if presence_penalty is not None and presence_penalty != 0.0:
             if _is_ollama:
                 kwargs.setdefault("extra_body", {})
