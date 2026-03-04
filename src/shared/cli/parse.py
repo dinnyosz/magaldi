@@ -420,6 +420,10 @@ def parse(
                 )
                 if feature_result:
                     print_feature_result(feature_result)
+                    # Log token usage for feature extraction
+                    token_usage = feature_result.get("token_usage")
+                    if token_usage:
+                        run_logger.log_token_usage("Phase 7: Feature Extraction", token_usage)
                 run_logger.end_phase()
             except Exception as e:
                 console.print(f"  [yellow]Warning: Feature extraction failed: {rich_escape(str(e))}[/]")
@@ -431,13 +435,18 @@ def parse(
             console.print("\n[bold blue]Phase 8:[/] Glossary Extraction")
             run_logger.start_phase("Phase 8: Glossary Extraction")
             try:
-                run_glossary_extraction(
+                glossary_result = run_glossary_extraction(
                     scope=discovery_result.scope,
                     repository=discovery_result.repository,
                     username=user,
                     config=config,
                     workers=workers,
                 )
+                # Log token usage for glossary extraction
+                if glossary_result:
+                    token_usage = glossary_result.get("token_usage")
+                    if token_usage:
+                        run_logger.log_token_usage("Phase 8: Glossary Extraction", token_usage)
                 run_logger.end_phase()
             except Exception as e:
                 console.print(f"  [yellow]Warning: Glossary extraction failed: {rich_escape(str(e))}[/]")

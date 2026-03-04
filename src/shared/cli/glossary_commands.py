@@ -428,6 +428,7 @@ def run_glossary_extraction(
         return {
             "terms_count": len(glossary_items),
             "terms": [item.name for item in glossary_items],
+            "token_usage": timing_stats.get_token_usage_summary(),
         }
 
     finally:
