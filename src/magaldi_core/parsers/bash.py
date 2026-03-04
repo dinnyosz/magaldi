@@ -17,6 +17,7 @@ from magaldi_core.parsers.base import (
     CodeElement,
     Import,
     TreeSitterParser,
+    extract_preceding_doc_comment,
     generate_element_id,
 )
 
@@ -87,6 +88,7 @@ class BashParser(TreeSitterParser):
                     line_start=ext.line_start,
                     line_end=ext.line_end,
                     raw_code=ext.raw_code,
+                    docstring=extract_preceding_doc_comment(lines, ext.line_start, "bash"),
                     level=2,
                     parent_id=file_element.element_id,
                     calls=calls,
@@ -104,6 +106,7 @@ class BashParser(TreeSitterParser):
                     line_start=ext.line_start,
                     line_end=ext.line_end,
                     raw_code=ext.raw_code,
+                    docstring=extract_preceding_doc_comment(lines, ext.line_start, "bash"),
                     level=3,
                     parent_id=file_element.element_id,
                 )

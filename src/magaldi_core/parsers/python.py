@@ -26,6 +26,7 @@ from magaldi_core.parsers.base import (
     build_extracted_calls,
     determine_visibility,
     extract_docstring,
+    extract_preceding_doc_comment,
     find_variable_usages,
     generate_element_id,
 )
@@ -594,6 +595,7 @@ class PythonParser(TreeSitterParser):
             line_start=ext.line_start,
             line_end=ext.line_end,
             raw_code=ext.raw_code,
+            docstring=extract_preceding_doc_comment(lines, ext.line_start, "python"),
             level=3,
             visibility=determine_visibility(ext.name),
             context_usages=usages,

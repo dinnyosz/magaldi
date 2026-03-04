@@ -16,6 +16,7 @@ from magaldi_core.parsers.base import (
     CodeElement,
     Import,
     TreeSitterParser,
+    extract_preceding_doc_comment,
     generate_element_id,
 )
 from magaldi_core.tree_sitter_manager import (
@@ -110,7 +111,7 @@ class JavaScriptParser(TreeSitterParser):
 
             elif ext.element_type in ("interface", "type_alias"):
                 # TypeScript interfaces and type aliases are type-level constructs
-                type_elem = self._convert_type_definition(ext, file_info, scope, repository, username)
+                type_elem = self._convert_type_definition(ext, file_info, scope, repository, username, lines)
                 elements.append(type_elem)
 
             elif ext.element_type == "import":
@@ -133,6 +134,7 @@ class JavaScriptParser(TreeSitterParser):
         scope: str,
         repository: str,
         username: str,
+        lines: list[str],
     ) -> CodeElement:
         """Convert TypeScript interface or type alias to CodeElement."""
         elem = CodeElement(
@@ -147,6 +149,7 @@ class JavaScriptParser(TreeSitterParser):
             line_end=ext.line_end,
             raw_code=ext.raw_code,
             signature=ext.signature,
+            docstring=extract_preceding_doc_comment(lines, ext.line_start, file_info.language),
             level=1,  # Same level as classes
         )
         elem.element_id = generate_element_id(
@@ -191,7 +194,7 @@ class JavaScriptParser(TreeSitterParser):
         scope: str,
         repository: str,
         username: str,
-        _lines: list[str],
+        lines: list[str],
     ) -> CodeElement:
         """Convert extracted class to CodeElement."""
         # Extract class fields and base class from AST
@@ -213,6 +216,7 @@ class JavaScriptParser(TreeSitterParser):
             line_start=ext.line_start,
             line_end=ext.line_end,
             raw_code=ext.raw_code,
+            docstring=extract_preceding_doc_comment(lines, ext.line_start, file_info.language),
             level=1,
             class_attributes=class_attributes,
             base_classes=base_classes,
@@ -229,7 +233,7 @@ class JavaScriptParser(TreeSitterParser):
         scope: str,
         repository: str,
         username: str,
-        _lines: list[str],
+        lines: list[str],
     ) -> CodeElement:
         """Convert extracted function to CodeElement."""
         # Extract calls and exceptions from function body
@@ -263,6 +267,7 @@ class JavaScriptParser(TreeSitterParser):
             line_end=ext.line_end,
             raw_code=ext.raw_code,
             signature=ext.signature,
+            docstring=extract_preceding_doc_comment(lines, ext.line_start, file_info.language),
             is_async=ext.is_async,
             level=2,
             calls=calls,
@@ -283,7 +288,7 @@ class JavaScriptParser(TreeSitterParser):
         scope: str,
         repository: str,
         username: str,
-        _lines: list[str],
+        lines: list[str],
     ) -> CodeElement:
         """Convert extracted method to CodeElement."""
         # Extract calls, exceptions, and modified properties from method body
@@ -319,6 +324,7 @@ class JavaScriptParser(TreeSitterParser):
             line_end=ext.line_end,
             raw_code=ext.raw_code,
             signature=ext.signature,
+            docstring=extract_preceding_doc_comment(lines, ext.line_start, file_info.language),
             is_async=ext.is_async,
             level=2,
             parent_id=parent_class.element_id,
@@ -340,7 +346,7 @@ class JavaScriptParser(TreeSitterParser):
         scope: str,
         repository: str,
         username: str,
-        _lines: list[str],
+        lines: list[str],
         parent: CodeElement | None = None,
     ) -> CodeElement:
         """Convert extracted variable/field to CodeElement."""
@@ -355,6 +361,7 @@ class JavaScriptParser(TreeSitterParser):
             line_start=ext.line_start,
             line_end=ext.line_end,
             raw_code=ext.raw_code,
+            docstring=extract_preceding_doc_comment(lines, ext.line_start, file_info.language),
             level=3,
             parent_id=parent.element_id if parent else None,
         )

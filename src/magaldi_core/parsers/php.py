@@ -15,6 +15,7 @@ from magaldi_core.parsers.base import (
     CodeElement,
     Import,
     TreeSitterParser,
+    extract_preceding_doc_comment,
     generate_element_id,
 )
 from magaldi_core.tree_sitter_manager import (
@@ -200,7 +201,7 @@ class PhpParser(TreeSitterParser):
         scope: str,
         repository: str,
         username: str,
-        _lines: list[str],
+        lines: list[str],
     ) -> CodeElement:
         """Convert extracted class to CodeElement."""
         class_attributes = None
@@ -221,6 +222,7 @@ class PhpParser(TreeSitterParser):
             line_start=ext.line_start,
             line_end=ext.line_end,
             raw_code=ext.raw_code,
+            docstring=extract_preceding_doc_comment(lines, ext.line_start, "php"),
             level=1,
             class_attributes=class_attributes,
             base_classes=base_classes,
@@ -237,7 +239,7 @@ class PhpParser(TreeSitterParser):
         scope: str,
         repository: str,
         username: str,
-        _lines: list[str],
+        lines: list[str],
     ) -> CodeElement:
         """Convert extracted function to CodeElement."""
         calls: list[Call] = []
@@ -267,6 +269,7 @@ class PhpParser(TreeSitterParser):
             line_end=ext.line_end,
             raw_code=ext.raw_code,
             signature=ext.signature,
+            docstring=extract_preceding_doc_comment(lines, ext.line_start, "php"),
             level=2,
             calls=calls,
             exceptions_raised=exceptions_raised,
@@ -286,7 +289,7 @@ class PhpParser(TreeSitterParser):
         scope: str,
         repository: str,
         username: str,
-        _lines: list[str],
+        lines: list[str],
     ) -> CodeElement:
         """Convert extracted method to CodeElement."""
         calls: list[Call] = []
@@ -318,6 +321,7 @@ class PhpParser(TreeSitterParser):
             line_end=ext.line_end,
             raw_code=ext.raw_code,
             signature=ext.signature,
+            docstring=extract_preceding_doc_comment(lines, ext.line_start, "php"),
             decorators=ext.decorators or [],
             level=2,
             parent_id=parent_class.element_id,
@@ -339,7 +343,7 @@ class PhpParser(TreeSitterParser):
         scope: str,
         repository: str,
         username: str,
-        _lines: list[str],
+        lines: list[str],
         parent: CodeElement | None = None,
     ) -> CodeElement:
         """Convert extracted variable/property to CodeElement."""
@@ -354,6 +358,7 @@ class PhpParser(TreeSitterParser):
             line_start=ext.line_start,
             line_end=ext.line_end,
             raw_code=ext.raw_code,
+            docstring=extract_preceding_doc_comment(lines, ext.line_start, "php"),
             decorators=ext.decorators or [],
             level=3,
             parent_id=parent.element_id if parent else None,

@@ -18,6 +18,7 @@ from magaldi_core.parsers.base import (
     CodeElement,
     Import,
     TreeSitterParser,
+    extract_preceding_doc_comment,
     generate_element_id,
 )
 from magaldi_core.tree_sitter_manager import (
@@ -107,7 +108,7 @@ class RustParser(TreeSitterParser):
                 elements.append(func_elem)
 
             elif ext.element_type in ("enum", "trait", "type_alias"):
-                type_elem = self._convert_type_definition(ext, file_info, scope, repository, username)
+                type_elem = self._convert_type_definition(ext, file_info, scope, repository, username, lines)
                 elements.append(type_elem)
 
             elif ext.element_type == "import":
@@ -133,7 +134,7 @@ class RustParser(TreeSitterParser):
         scope: str,
         repository: str,
         username: str,
-        _lines: list[str],
+        lines: list[str],
     ) -> CodeElement:
         """Convert extracted struct/enum/impl to CodeElement."""
         class_attributes = None
@@ -158,6 +159,7 @@ class RustParser(TreeSitterParser):
             line_start=ext.line_start,
             line_end=ext.line_end,
             raw_code=ext.raw_code,
+            docstring=extract_preceding_doc_comment(lines, ext.line_start, "rust"),
             decorators=ext.decorators or [],
             level=1,
             class_attributes=class_attributes,
@@ -175,7 +177,7 @@ class RustParser(TreeSitterParser):
         scope: str,
         repository: str,
         username: str,
-        _lines: list[str],
+        lines: list[str],
     ) -> CodeElement:
         """Convert extracted function to CodeElement."""
         calls: list[Call] = []
@@ -205,6 +207,7 @@ class RustParser(TreeSitterParser):
             line_end=ext.line_end,
             raw_code=ext.raw_code,
             signature=ext.signature,
+            docstring=extract_preceding_doc_comment(lines, ext.line_start, "rust"),
             is_async=ext.is_async,
             decorators=ext.decorators or [],
             level=2,
@@ -226,7 +229,7 @@ class RustParser(TreeSitterParser):
         scope: str,
         repository: str,
         username: str,
-        _lines: list[str],
+        lines: list[str],
     ) -> CodeElement:
         """Convert extracted method to CodeElement."""
         calls: list[Call] = []
@@ -258,6 +261,7 @@ class RustParser(TreeSitterParser):
             line_end=ext.line_end,
             raw_code=ext.raw_code,
             signature=ext.signature,
+            docstring=extract_preceding_doc_comment(lines, ext.line_start, "rust"),
             is_async=ext.is_async,
             decorators=ext.decorators or [],
             level=2,
@@ -280,7 +284,7 @@ class RustParser(TreeSitterParser):
         scope: str,
         repository: str,
         username: str,
-        _lines: list[str],
+        lines: list[str],
         parent: CodeElement | None = None,
     ) -> CodeElement:
         """Convert extracted constant to CodeElement."""
@@ -295,6 +299,7 @@ class RustParser(TreeSitterParser):
             line_start=ext.line_start,
             line_end=ext.line_end,
             raw_code=ext.raw_code,
+            docstring=extract_preceding_doc_comment(lines, ext.line_start, "rust"),
             level=3,
             parent_id=parent.element_id if parent else None,
         )
@@ -310,6 +315,7 @@ class RustParser(TreeSitterParser):
         scope: str,
         repository: str,
         username: str,
+        lines: list[str],
     ) -> CodeElement:
         """Convert extracted enum, trait, or type_alias to CodeElement."""
         elem = CodeElement(
@@ -324,6 +330,7 @@ class RustParser(TreeSitterParser):
             line_end=ext.line_end,
             raw_code=ext.raw_code,
             signature=ext.signature,
+            docstring=extract_preceding_doc_comment(lines, ext.line_start, "rust"),
             level=1,
         )
         elem.element_id = generate_element_id(
