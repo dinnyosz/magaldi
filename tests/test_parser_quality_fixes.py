@@ -240,6 +240,44 @@ class TestMultiLineSignatureDocstring:
         result = extract_docstring(lines, 0)
         assert result is None
 
+    def test_signature_with_noqa_comment(self):
+        """Inline # noqa comment after colon should not break docstring extraction."""
+        lines = [
+            "def __init__(self, window_seconds: float = 300.0):  # noqa: ARG002",
+            '    """Initialize throughput-by-level tracker.',
+            "",
+            "    Data is kept for the entire tier lifetime.",
+            '    """',
+            "    self._levels = {}",
+        ]
+        result = extract_docstring(lines, 0)
+        assert result is not None
+        assert result.startswith("Initialize throughput-by-level tracker.")
+        assert "self._levels" not in result
+
+    def test_signature_with_type_ignore_comment(self):
+        """Inline # type: ignore comment after colon should not break extraction."""
+        lines = [
+            "def process(self, data: Any):  # type: ignore[override]",
+            '    """Process the incoming data."""',
+            "    return data",
+        ]
+        result = extract_docstring(lines, 0)
+        assert result == "Process the incoming data."
+
+    def test_multi_line_signature_with_noqa_comment(self):
+        """Multi-line signature where closing paren line has inline comment."""
+        lines = [
+            "def complex_func(",
+            "    arg1: str,",
+            "    arg2: int,",
+            "):  # noqa: PLR0913",
+            '    """Handle complex arguments."""',
+            "    pass",
+        ]
+        result = extract_docstring(lines, 0)
+        assert result == "Handle complex arguments."
+
 
 # =============================================================================
 # Rust: type_alias extraction

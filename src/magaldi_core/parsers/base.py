@@ -343,7 +343,10 @@ def extract_docstring(lines: list[str], block_start: int) -> str | None:
     body_start = block_start
     for i in range(block_start, min(block_start + 30, len(lines))):
         stripped = lines[i].rstrip()
-        if stripped.endswith(":") or stripped.endswith(":{"):
+        # Strip inline comments: "def foo():  # noqa" -> "def foo():"
+        # Uses "  #" (PEP 8 convention) to avoid false positives on strings with #.
+        code_part = stripped.split("  #")[0].rstrip() if "  #" in stripped else stripped
+        if code_part.endswith(":") or code_part.endswith(":{"):
             body_start = i + 1
             break
 
