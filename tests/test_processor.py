@@ -17,6 +17,9 @@ from magaldi_core.processor import (
     _extract_docstring_description,
     _generate_handcrafted_summary,
     _generate_small_function_summary,
+    _generate_test_class_summary,
+    _generate_test_file_summary,
+    _generate_test_function_summary,
     _get_element_line_count,
     _is_small_function,
     _should_handcraft,
@@ -309,9 +312,9 @@ class TestProcessingConfig:
         config = ProcessingConfig()
 
         # Model configs are now ModelConfig objects
-        assert config.summarize_model.name == "qwen3:4b-instruct"
+        assert config.summarize_model.name == "qwen3.5:4b"
         assert config.summarize_model.provider == "llamacpp"
-        assert config.summarize_model_small.name == "qwen3:1.7b"
+        assert config.summarize_model_small.name == "qwen3.5:2b"
         assert config.embed_model.name == "qwen3-embedding:0.6b"
         assert config.embed_model.provider == "ollama"
         assert config.skip_ai is False
@@ -1610,6 +1613,42 @@ class TestPerElementContextSize:
         # response_tokens should be len("Handles user authentication") // 4
         assert response_tokens == len("Handles user authentication") // 4
 
+    def test_summarize_element_uses_per_type_max_tokens(self):
+        """_summarize_element should pass per-type max_tokens to LLM."""
+        from shared.ai.prompts import OUTPUT_TOKEN_BUDGETS
+
+        mock_llm = MagicMock()
+        mock_llm.generate.return_value = "Handles user authentication"
+
+        # Test function (budget: 500) vs constant (budget: 200)
+        func_element = CodeElement(
+            element_id="test:repo:user:file.py:function:auth:1",
+            element_type="function",
+            name="auth",
+            raw_code="def auth(): pass",
+        )
+        const_element = CodeElement(
+            element_id="test:repo:user:file.py:constant:MAX:1",
+            element_type="constant",
+            name="MAX",
+            raw_code="MAX = 100",
+        )
+
+        config = ProcessingConfig()
+        cache = SummaryCache()
+        cache.add_element(func_element)
+        cache.add_element(const_element)
+
+        _summarize_element(func_element, cache, mock_llm, config)
+        func_max_tokens = mock_llm.generate.call_args[1].get("max_tokens")
+
+        _summarize_element(const_element, cache, mock_llm, config)
+        const_max_tokens = mock_llm.generate.call_args[1].get("max_tokens")
+
+        assert func_max_tokens == OUTPUT_TOKEN_BUDGETS["function"]  # 500
+        assert const_max_tokens == OUTPUT_TOKEN_BUDGETS["constant"]  # 200
+        assert const_max_tokens < func_max_tokens
+
     def test_element_type_affects_overhead(self):
         """Different element types have different prompt overheads."""
         mock_llm = MagicMock()
@@ -2427,8 +2466,8 @@ class TestShouldHandcraft:
         )
         assert _should_handcraft(elem, config) is False
 
-    def test_class_not_handcrafted(self):
-        """Classes should NOT be handcrafted (no handler yet)."""
+    def test_non_test_class_not_handcrafted(self):
+        """Non-test classes should NOT be handcrafted."""
         config = ProcessingConfig(handcrafted_max_lines=5)
         elem = CodeElement(
             element_type="class",
@@ -2437,8 +2476,8 @@ class TestShouldHandcraft:
         )
         assert _should_handcraft(elem, config) is False
 
-    def test_file_not_handcrafted(self):
-        """Files should NOT be handcrafted."""
+    def test_non_test_file_not_handcrafted(self):
+        """Non-test files should NOT be handcrafted."""
         config = ProcessingConfig(handcrafted_max_lines=5)
         elem = CodeElement(
             element_type="file",
@@ -2447,8 +2486,8 @@ class TestShouldHandcraft:
         )
         assert _should_handcraft(elem, config) is False
 
-    def test_variable_not_handcrafted(self):
-        """Variables should NOT be handcrafted."""
+    def test_non_test_variable_not_handcrafted(self):
+        """Non-test variables should NOT be handcrafted."""
         config = ProcessingConfig(handcrafted_max_lines=5)
         elem = CodeElement(
             element_type="variable",
@@ -2456,6 +2495,50 @@ class TestShouldHandcraft:
             raw_code="x = 1\n",
         )
         assert _should_handcraft(elem, config) is False
+
+    def test_test_function_always_handcrafted(self):
+        """Test functions should always be handcrafted regardless of size."""
+        config = ProcessingConfig(handcrafted_max_lines=0)  # Even when disabled
+        elem = CodeElement(
+            element_type="function",
+            name="test_user_login_with_expired_token",
+            raw_code="def test_user_login_with_expired_token():\n" + "    line\n" * 100,
+            is_test=True,
+        )
+        assert _should_handcraft(elem, config) is True
+
+    def test_test_class_always_handcrafted(self):
+        """Test classes should always be handcrafted."""
+        config = ProcessingConfig(handcrafted_max_lines=5)
+        elem = CodeElement(
+            element_type="class",
+            name="TestUserAuthentication",
+            raw_code="class TestUserAuthentication: ...",
+            is_test=True,
+        )
+        assert _should_handcraft(elem, config) is True
+
+    def test_test_file_always_handcrafted(self):
+        """Test files should always be handcrafted."""
+        config = ProcessingConfig(handcrafted_max_lines=5)
+        elem = CodeElement(
+            element_type="file",
+            name="test_user_auth.py",
+            raw_code="# tests",
+            is_test=True,
+        )
+        assert _should_handcraft(elem, config) is True
+
+    def test_test_variable_handcrafted(self):
+        """Test variables should be handcrafted (if they reach this point)."""
+        config = ProcessingConfig(handcrafted_max_lines=5)
+        elem = CodeElement(
+            element_type="variable",
+            name="mock_data",
+            raw_code='mock_data = {"key": "value"}',
+            is_test=True,
+        )
+        assert _should_handcraft(elem, config) is True
 
 
 class TestGenerateHandcraftedSummary:
@@ -2502,6 +2585,177 @@ class TestGenerateHandcraftedSummary:
         )
         summary = _generate_handcrafted_summary(elem)
         assert summary == "Enum: Color"
+
+    def test_dispatches_test_function(self):
+        """Should dispatch to test function generator for test functions."""
+        elem = CodeElement(
+            element_type="function",
+            name="test_user_login_with_expired_token",
+            raw_code="def test_user_login_with_expired_token(): ...",
+            is_test=True,
+        )
+        summary = _generate_handcrafted_summary(elem)
+        assert summary == "test user login with expired token"
+
+    def test_dispatches_test_class(self):
+        """Should dispatch to test class generator for test classes."""
+        elem = CodeElement(
+            element_type="class",
+            name="TestUserAuthentication",
+            raw_code="class TestUserAuthentication: ...",
+            is_test=True,
+        )
+        summary = _generate_handcrafted_summary(elem)
+        assert summary == "test user authentication"
+
+    def test_dispatches_test_file(self):
+        """Should dispatch to test file generator for test files."""
+        elem = CodeElement(
+            element_type="file",
+            name="test_user_auth.py",
+            raw_code="# tests",
+            is_test=True,
+        )
+        summary = _generate_handcrafted_summary(elem)
+        assert summary == "test user auth"
+
+    def test_dispatches_test_variable_fallback(self):
+        """Test variables should get humanized name as fallback."""
+        elem = CodeElement(
+            element_type="variable",
+            name="mock_database_client",
+            raw_code='mock_database_client = MagicMock()',
+            is_test=True,
+        )
+        summary = _generate_handcrafted_summary(elem)
+        assert summary == "mock database client"
+
+
+class TestGenerateTestFunctionSummary:
+    """Tests for _generate_test_function_summary."""
+
+    def test_uses_docstring_when_present(self):
+        """Should prefer docstring description over humanized name."""
+        elem = CodeElement(
+            element_type="function",
+            name="test_user_login",
+            raw_code="def test_user_login(): ...",
+            docstring="Verifies that expired JWT tokens are rejected with 401",
+            is_test=True,
+        )
+        summary = _generate_test_function_summary(elem)
+        assert summary == "Verifies that expired JWT tokens are rejected with 401"
+
+    def test_strips_trailing_period_from_docstring(self):
+        """Should strip trailing period from docstring."""
+        elem = CodeElement(
+            element_type="function",
+            name="test_foo",
+            raw_code="def test_foo(): ...",
+            docstring="Checks that foo works correctly.",
+            is_test=True,
+        )
+        summary = _generate_test_function_summary(elem)
+        assert summary == "Checks that foo works correctly"
+
+    def test_uses_humanized_name_without_docstring(self):
+        """Should fall back to humanized name when no docstring."""
+        elem = CodeElement(
+            element_type="function",
+            name="test_parseHTMLContent_with_invalid_input",
+            raw_code="def test_parseHTMLContent_with_invalid_input(): ...",
+            is_test=True,
+        )
+        summary = _generate_test_function_summary(elem)
+        assert summary == "test parse html content with invalid input"
+
+    def test_extracts_description_before_args_section(self):
+        """Should extract only description paragraph, not Args/Returns."""
+        elem = CodeElement(
+            element_type="function",
+            name="test_login",
+            raw_code="def test_login(): ...",
+            docstring="Verifies login flow\n\nArgs:\n    client: test client\n",
+            is_test=True,
+        )
+        summary = _generate_test_function_summary(elem)
+        assert summary == "Verifies login flow"
+
+
+class TestGenerateTestClassSummary:
+    """Tests for _generate_test_class_summary."""
+
+    def test_uses_docstring_when_present(self):
+        """Should prefer docstring description."""
+        elem = CodeElement(
+            element_type="class",
+            name="TestUserAuth",
+            raw_code="class TestUserAuth: ...",
+            docstring="Tests for user authentication flow",
+            is_test=True,
+        )
+        summary = _generate_test_class_summary(elem)
+        assert summary == "Tests for user authentication flow"
+
+    def test_uses_humanized_name_without_docstring(self):
+        """Should fall back to humanized class name."""
+        elem = CodeElement(
+            element_type="class",
+            name="TestUserAuthentication",
+            raw_code="class TestUserAuthentication: ...",
+            is_test=True,
+        )
+        summary = _generate_test_class_summary(elem)
+        assert summary == "test user authentication"
+
+
+class TestGenerateTestFileSummary:
+    """Tests for _generate_test_file_summary."""
+
+    def test_uses_docstring_when_present(self):
+        """Should prefer module docstring description."""
+        elem = CodeElement(
+            element_type="file",
+            name="test_auth.py",
+            raw_code='"""Tests for authentication."""\n...',
+            docstring="Tests for authentication",
+            is_test=True,
+        )
+        summary = _generate_test_file_summary(elem)
+        assert summary == "Tests for authentication"
+
+    def test_uses_humanized_filename_without_docstring(self):
+        """Should fall back to humanized file stem."""
+        elem = CodeElement(
+            element_type="file",
+            name="test_user_auth.py",
+            raw_code="# tests",
+            is_test=True,
+        )
+        summary = _generate_test_file_summary(elem)
+        assert summary == "test user auth"
+
+    def test_strips_py_extension(self):
+        """Should strip .py extension before humanizing."""
+        elem = CodeElement(
+            element_type="file",
+            name="test_parseHTMLContent.py",
+            raw_code="# tests",
+            is_test=True,
+        )
+        summary = _generate_test_file_summary(elem)
+        assert summary == "test parse html content"
+
+    def test_handles_file_without_extension(self):
+        """Should handle files without extension."""
+        elem = CodeElement(
+            element_type="file",
+            name="conftest",
+            raw_code="# conftest",
+            is_test=True,
+        )
+        summary = _generate_test_file_summary(elem)
+        assert summary == "conftest"
 
 
 class TestHandcraftedTierETA:

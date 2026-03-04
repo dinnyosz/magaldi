@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from shared.ai.context_size import compute_element_num_ctx
+from shared.text_utils import humanize_name
 from shared.ai.embedding import (
     build_caller_embedding_text,
     build_code_embedding_text,
@@ -20,6 +21,7 @@ from shared.ai.embedding import (
     normalize_vector,
     validate_vector,
 )
+from shared.ai.prompts import get_max_tokens_for_element_type
 from shared.ai.summarization import build_prompt, clean_summary
 
 from .models import ProcessedElement, ProcessingConfig, _get_model_display_name
@@ -193,6 +195,78 @@ def _generate_small_function_summary(element: CodeElement) -> str:
 
 
 # =============================================================================
+# TEST ELEMENT HANDCRAFTED SUMMARIES
+# =============================================================================
+
+
+def _generate_test_function_summary(element: CodeElement) -> str:
+    """Generate a handcrafted summary for a test function/method.
+
+    Test functions are self-documenting via naming conventions.
+    Priority:
+    1. Description paragraph from docstring (developer's own explanation)
+    2. Humanized function name (e.g., "test user login with expired token")
+
+    Args:
+        element: A test function or method element.
+
+    Returns:
+        A summary string suitable for embedding.
+    """
+    if element.docstring:
+        desc = _extract_docstring_description(element.docstring)
+        desc = desc.rstrip(".")
+        if desc:
+            return desc
+    return humanize_name(element.name)
+
+
+def _generate_test_class_summary(element: CodeElement) -> str:
+    """Generate a handcrafted summary for a test class.
+
+    Test class names describe what they test (e.g., TestUserAuthentication).
+    Priority:
+    1. Description paragraph from docstring
+    2. Humanized class name (e.g., "test user authentication")
+
+    Args:
+        element: A test class element.
+
+    Returns:
+        A summary string suitable for embedding.
+    """
+    if element.docstring:
+        desc = _extract_docstring_description(element.docstring)
+        desc = desc.rstrip(".")
+        if desc:
+            return desc
+    return humanize_name(element.name)
+
+
+def _generate_test_file_summary(element: CodeElement) -> str:
+    """Generate a handcrafted summary for a test file.
+
+    Priority:
+    1. Module docstring description
+    2. Humanized file name (e.g., test_user_auth.py -> "test user auth")
+
+    Args:
+        element: A test file element.
+
+    Returns:
+        A summary string suitable for embedding.
+    """
+    if element.docstring:
+        desc = _extract_docstring_description(element.docstring)
+        desc = desc.rstrip(".")
+        if desc:
+            return desc
+    # Use humanized file stem (strip extension)
+    file_stem = element.name.rsplit(".", 1)[0] if "." in element.name else element.name
+    return humanize_name(file_stem)
+
+
+# =============================================================================
 # HANDCRAFTED SUMMARY DISPATCH
 # =============================================================================
 
@@ -202,6 +276,7 @@ def _should_handcraft(element: CodeElement, config: ProcessingConfig) -> bool:
 
     Centralizes the handcrafted/LLM decision so it can be used both in
     processing and ETA tracking. Each element type has its own criteria:
+    - Test elements: always handcrafted (self-documenting via naming conventions)
     - Imports: always handcrafted (code IS the summary)
     - Functions/methods: handcrafted if below line threshold
 
@@ -212,6 +287,8 @@ def _should_handcraft(element: CodeElement, config: ProcessingConfig) -> bool:
     Returns:
         True if element should skip LLM and use a handcrafted summary.
     """
+    if element.is_test:
+        return True
     if element.element_type in _HANDCRAFTED_SUMMARY_TYPES:
         return True
     if element.element_type in ("function", "method"):
@@ -231,6 +308,18 @@ def _generate_handcrafted_summary(element: CodeElement) -> str:
     Returns:
         A summary string suitable for embedding.
     """
+    # Test elements get their own generators (self-documenting via naming)
+    if element.is_test:
+        if element.element_type in ("function", "method"):
+            return _generate_test_function_summary(element)
+        if element.element_type == "class":
+            return _generate_test_class_summary(element)
+        if element.element_type == "file":
+            return _generate_test_file_summary(element)
+        # Fallback for test variables/constants/etc.
+        return humanize_name(element.name)
+
+    # Non-test elements
     if element.element_type in _HANDCRAFTED_SUMMARY_TYPES:
         return _generate_import_summary(element)
     if element.element_type in ("function", "method"):
@@ -268,8 +357,11 @@ def _summarize_element(
     prompt = build_prompt(element, parent_summaries, config.max_code_tokens)
     prompt_tokens = len(prompt) // 4
 
-    # Generate summary (select model based on element type)
+    # Generate summary (select model and max_tokens based on element type)
     model_config = config.get_model_for_element_type(element.element_type)
+    max_tokens = get_max_tokens_for_element_type(
+        element.element_type, default=config.summarize_max_tokens
+    )
     # Compute per-element context size for optimal KV cache efficiency
     num_ctx = compute_element_num_ctx(
         element.element_type,
@@ -279,7 +371,7 @@ def _summarize_element(
         prompt=prompt,
         temperature=config.summarize_temperature,
         top_p=config.summarize_top_p,
-        max_tokens=config.summarize_max_tokens,
+        max_tokens=max_tokens,
         timeout=config.summarize_timeout,
         model=model_config.name,
         num_ctx=num_ctx,
