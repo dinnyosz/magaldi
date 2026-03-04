@@ -229,6 +229,7 @@ async def browse_elements(
             "visibility": source.get("visibility"),
             "is_async": source.get("is_async", False),
             "has_docstring": bool(source.get("docstring")),
+            "craft_reason": source.get("craft_reason"),
             "decorators": source.get("decorators", []),
             "level": source.get("level", 0),
         }

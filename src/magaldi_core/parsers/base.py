@@ -157,13 +157,15 @@ class CodeElement:
     def compute_content_hash(self) -> str:
         """Compute SHA256 hash of the element's content for change detection.
 
-        The hash is based on raw_code which contains the actual source code.
-        This allows detecting when an element's implementation changes,
-        even if the file around it changed but this element didn't.
+        The hash is based on raw_code + docstring. Including docstring ensures
+        that changes to preceding doc comments (JSDoc, rustdoc, PHPDoc) trigger
+        re-processing, even when the function body hasn't changed. For Python,
+        the docstring is already part of raw_code, so including it again is
+        redundant but harmless.
         """
         import hashlib
 
-        content = self.raw_code or ""
+        content = (self.raw_code or "") + (self.docstring or "")
         self.content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
         return self.content_hash
 

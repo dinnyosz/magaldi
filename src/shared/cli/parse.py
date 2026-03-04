@@ -160,9 +160,10 @@ def _run_extraction_only(
 @click.option("--llm-url", default=None, help="LLM API URL (default: from config)")
 @click.option("--workers", "-w", default=0, type=int, help="Max parallel workers (0=auto based on context tier)")
 @click.option("--force-clean", is_flag=True, help="Delete all indexed data for this repo/user before parsing")
+@click.option("--use-docstrings/--no-use-docstrings", default=True, help="Use docstrings as summaries instead of LLM (default: enabled)")
 def parse(
     repo_path: str, user: str, skip_ai: bool, features: bool, glossary: bool, skip_tests: bool, skip_resolve: bool,
-    dry_run: bool, llm_url: str | None, workers: int, force_clean: bool
+    dry_run: bool, llm_url: str | None, workers: int, force_clean: bool, use_docstrings: bool
 ) -> None:
     """Parse a repository and index its code elements.
 
@@ -325,7 +326,7 @@ def parse(
         console.print("\n[bold blue]Phase 5:[/] Processing")
         run_logger.start_phase("Phase 5: Processing")
         processed, skipped, indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, failed_elements, deleted = run_processing(
-            parsing_result, manifest, config, dry_run, skip_ai, workers
+            parsing_result, manifest, config, dry_run, skip_ai, workers, use_docstrings=use_docstrings
         )
         run_logger.end_phase({
             "processed": processed,

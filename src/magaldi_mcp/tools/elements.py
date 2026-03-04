@@ -143,6 +143,8 @@ def get_element(
         return result
 
     # Full mode: include all available fields
+    if doc.get("craft_reason"):
+        result["craft_reason"] = doc["craft_reason"]
     if doc.get("docstring"):
         result["docstring"] = doc["docstring"]
     if doc.get("decorators"):

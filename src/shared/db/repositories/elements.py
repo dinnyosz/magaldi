@@ -308,11 +308,11 @@ class ElementRepository:
 
         client = self._get_client()
 
-        # Fetch content_hash, summary, and embeddings in one call
+        # Fetch content_hash, summary, craft_reason, and embeddings in one call
         response = client.mget(
             INDEX_NAME,
             element_ids,
-            source=["content_hash", "summary", "summary_embedding", "code_embedding", "caller_embedding"],
+            source=["content_hash", "summary", "craft_reason", "summary_embedding", "code_embedding", "caller_embedding"],
         )
 
         result = {}
@@ -334,6 +334,7 @@ class ElementRepository:
                     "has_summary_embedding": has_summary_emb,
                     "has_code_embedding": has_code_emb,
                     "has_caller_embedding": has_caller_emb,
+                    "craft_reason": source.get("craft_reason"),
                     # Preserve actual vectors for reuse when re-processing
                     "summary_embedding": summary_emb if has_summary_emb else None,
                     "code_embedding": code_emb if has_code_emb else None,
@@ -393,7 +394,7 @@ class ElementRepository:
                         "filter": filters
                     }
                 },
-                "_source": ["content_hash", "summary", "summary_embedding", "code_embedding", "caller_embedding"],
+                "_source": ["content_hash", "summary", "craft_reason", "summary_embedding", "code_embedding", "caller_embedding"],
                 "size": len(content_hashes) * 2,  # Allow for some duplicates
             },
         )
@@ -417,6 +418,7 @@ class ElementRepository:
                 "has_summary_embedding": isinstance(summary_emb, list) and len(summary_emb) > 0,
                 "has_code_embedding": isinstance(code_emb, list) and len(code_emb) > 0,
                 "has_caller_embedding": isinstance(caller_emb, list) and len(caller_emb) > 0,
+                "craft_reason": source.get("craft_reason"),
                 "old_element_id": hit["_id"],  # Original ID for reference
                 # Include actual values for copying to new element
                 "summary": summary,

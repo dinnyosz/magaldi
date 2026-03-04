@@ -92,6 +92,11 @@ class ProcessingConfig:
     # Set to 0 to disable. Default 5 (~24% of functions in typical codebases).
     handcrafted_max_lines: int = 5
 
+    # Use docstring description as summary instead of LLM when available.
+    # Elements with a meaningful docstring (>=10 char description paragraph)
+    # skip LLM and use the developer-written docstring directly.
+    use_docstrings: bool = True
+
     # Embedding settings
     embed_dimensions: int = 1024
     embed_max_context: int = 8192
@@ -161,4 +166,5 @@ class ProcessedElement:
     response_tokens: int = 0  # Estimated tokens in LLM response
     assigned_tier: int = 0  # Context tier assigned to this element
     model_name: str = ""  # Model used for summarization (display name)
+    craft_reason: str | None = None  # Why handcrafted: "test", "import", "small", "docstring", or None (LLM)
     error: str | None = None

@@ -74,6 +74,7 @@ INDEX_MAPPING = {
             "signature": {"type": "text"},
             "docstring": {"type": "text"},
             "summary": {"type": "text"},
+            "craft_reason": {"type": "keyword"},  # Why handcrafted: test, import, small, docstring
             "level": {"type": "integer"},
             "parent_id": {"type": "keyword"},
             "decorators": {"type": "keyword"},

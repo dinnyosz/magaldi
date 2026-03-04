@@ -271,14 +271,48 @@ def _generate_test_file_summary(element: CodeElement) -> str:
 # =============================================================================
 
 
+# Minimum docstring description length to qualify for docstring-as-summary.
+# Shorter descriptions are too terse to be useful summaries.
+_MIN_DOCSTRING_DESC_LENGTH = 10
+
+
+def _get_craft_reason(element: CodeElement, config: ProcessingConfig) -> str | None:
+    """Determine why an element should use a handcrafted summary, if at all.
+
+    Returns a reason string for handcrafted elements, or None if the element
+    should be summarized by the LLM. Priority order:
+    1. Test elements → "test"
+    2. Imports → "import"
+    3. Small functions/methods → "small"
+    4. Elements with meaningful docstrings (when use_docstrings enabled) → "docstring"
+
+    Args:
+        element: Code element to check.
+        config: Processing configuration with thresholds.
+
+    Returns:
+        Craft reason string, or None if element needs LLM summarization.
+    """
+    if element.is_test:
+        return "test"
+    if element.element_type in _HANDCRAFTED_SUMMARY_TYPES:
+        return "import"
+    if element.element_type in ("function", "method"):
+        if _is_small_function(element, config.handcrafted_max_lines):
+            return "small"
+    if config.use_docstrings and element.docstring:
+        desc = _extract_docstring_description(element.docstring)
+        if len(desc) >= _MIN_DOCSTRING_DESC_LENGTH:
+            return "docstring"
+    return None
+
+
 def _should_handcraft(element: CodeElement, config: ProcessingConfig) -> bool:
     """Check if an element should use a handcrafted summary instead of LLM.
 
     Centralizes the handcrafted/LLM decision so it can be used both in
-    processing and ETA tracking. Each element type has its own criteria:
-    - Test elements: always handcrafted (self-documenting via naming conventions)
-    - Imports: always handcrafted (code IS the summary)
-    - Functions/methods: handcrafted if below line threshold
+    processing and ETA tracking. Delegates to _get_craft_reason() for
+    the actual decision logic.
 
     Args:
         element: Code element to check.
@@ -287,29 +321,48 @@ def _should_handcraft(element: CodeElement, config: ProcessingConfig) -> bool:
     Returns:
         True if element should skip LLM and use a handcrafted summary.
     """
-    if element.is_test:
-        return True
-    if element.element_type in _HANDCRAFTED_SUMMARY_TYPES:
-        return True
-    if element.element_type in ("function", "method"):
-        return _is_small_function(element, config.handcrafted_max_lines)
-    return False
+    return _get_craft_reason(element, config) is not None
 
 
-def _generate_handcrafted_summary(element: CodeElement) -> str:
-    """Generate a handcrafted summary based on element type.
+def _generate_docstring_summary(element: CodeElement) -> str:
+    """Generate a summary from an element's docstring description paragraph.
+
+    Uses the developer-written docstring as the summary, which is often
+    more accurate than an LLM-generated one. Strips trailing period for
+    consistency with clean_summary().
+
+    Args:
+        element: Code element with a docstring.
+
+    Returns:
+        A summary string from the docstring description.
+    """
+    desc = _extract_docstring_description(element.docstring or "")
+    desc = desc.rstrip(".")
+    if desc:
+        return desc
+    # Fallback: shouldn't happen if _get_craft_reason checked length
+    return f"{element.element_type.title()}: {element.name}"
+
+
+def _generate_handcrafted_summary(
+    element: CodeElement, craft_reason: str | None = None
+) -> str:
+    """Generate a handcrafted summary based on element type and craft reason.
 
     Dispatches to the appropriate per-type generator. Each element type
     that supports handcrafting has its own method with type-specific logic.
 
     Args:
         element: Code element to generate summary for.
+        craft_reason: Why this element is handcrafted ("test", "import",
+            "small", "docstring"). If None, derives reason from element.
 
     Returns:
         A summary string suitable for embedding.
     """
     # Test elements get their own generators (self-documenting via naming)
-    if element.is_test:
+    if craft_reason == "test" or (craft_reason is None and element.is_test):
         if element.element_type in ("function", "method"):
             return _generate_test_function_summary(element)
         if element.element_type == "class":
@@ -319,10 +372,18 @@ def _generate_handcrafted_summary(element: CodeElement) -> str:
         # Fallback for test variables/constants/etc.
         return humanize_name(element.name)
 
+    # Docstring-based summary (any element type with a meaningful docstring)
+    if craft_reason == "docstring":
+        return _generate_docstring_summary(element)
+
     # Non-test elements
-    if element.element_type in _HANDCRAFTED_SUMMARY_TYPES:
+    if craft_reason == "import" or (
+        craft_reason is None and element.element_type in _HANDCRAFTED_SUMMARY_TYPES
+    ):
         return _generate_import_summary(element)
-    if element.element_type in ("function", "method"):
+    if craft_reason == "small" or (
+        craft_reason is None and element.element_type in ("function", "method")
+    ):
         return _generate_small_function_summary(element)
     # Fallback for future types
     return f"{element.element_type.title()}: {element.name}"
@@ -490,6 +551,7 @@ def _index_element(
     repo: Repository,
     file_hash: str | None = None,
     element_count: int | None = None,
+    craft_reason: str | None = None,
 ) -> bool:
     """Index element to search backend with summary and all embeddings.
 
@@ -502,6 +564,7 @@ def _index_element(
         repo: Search repository.
         file_hash: File hash for all elements.
         element_count: Total element count in file (only for file-level elements).
+        craft_reason: Why this element was handcrafted (or None for LLM).
 
     Returns:
         True on success.
@@ -509,8 +572,8 @@ def _index_element(
     # Index the element
     repo.index_element(element, indexed_at=datetime.now(), file_hash=file_hash, element_count=element_count)
 
-    # Store summary
-    repo.store_summary(element.element_id, summary)
+    # Store summary (with craft reason if applicable)
+    repo.store_summary(element.element_id, summary, craft_reason=craft_reason)
 
     # Store embeddings if present (using type-specific methods)
     if summary_embedding is not None:
@@ -637,11 +700,12 @@ def _process_single_element(
         # Display tiered model name for Ollama (e.g., "qwen3:4b-instruct-4k")
         model_display = _get_model_display_name(element_model, num_ctx)
         update_status("summarizing", model_display, ctx_display)
+        craft_reason = _get_craft_reason(element, config)
         if config.skip_ai:
             summary = f"{element.element_type.title()}: {element.name}"
-        elif _should_handcraft(element, config):
+        elif craft_reason is not None:
             # Handcrafted summary: per-type generator, no LLM call needed
-            summary = _generate_handcrafted_summary(element)
+            summary = _generate_handcrafted_summary(element, craft_reason)
         else:
             api_start = time.time()
             summary, prompt_tokens, response_tokens = _summarize_element(element, summary_cache, llm_client, config)
@@ -689,7 +753,7 @@ def _process_single_element(
         if element.element_type == "file" and element_counts:
             element_count = element_counts.get(element.relative_path)
 
-        _index_element(element, summary, summary_embedding, code_embedding, caller_embedding, repo, file_hash, element_count)
+        _index_element(element, summary, summary_embedding, code_embedding, caller_embedding, repo, file_hash, element_count, craft_reason=craft_reason)
 
         worker_status.clear(worker_id)
         wall_time = time.time() - start_wall
@@ -706,6 +770,7 @@ def _process_single_element(
             response_tokens=response_tokens,
             assigned_tier=num_ctx,
             model_name=model_display,
+            craft_reason=craft_reason,
         )
 
     except Exception as e:
@@ -723,5 +788,6 @@ def _process_single_element(
             response_tokens=response_tokens,
             assigned_tier=num_ctx,
             model_name=model_display,
+            craft_reason=craft_reason,
             error=str(e),
         )

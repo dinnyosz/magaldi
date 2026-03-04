@@ -34,12 +34,14 @@ from .helpers import (
     _HANDCRAFTED_SUMMARY_TYPES,
     _embed_element,
     _extract_docstring_description,
+    _generate_docstring_summary,
     _generate_handcrafted_summary,
     _generate_import_summary,
     _generate_small_function_summary,
     _generate_test_class_summary,
     _generate_test_file_summary,
     _generate_test_function_summary,
+    _get_craft_reason,
     _get_element_line_count,
     _index_element,
     _is_small_function,
@@ -85,7 +87,9 @@ __all__ = [
     "_generate_test_function_summary",
     "_generate_test_class_summary",
     "_generate_test_file_summary",
+    "_get_craft_reason",
     "_should_handcraft",
+    "_generate_docstring_summary",
     "_generate_handcrafted_summary",
     "_summarize_element",
     "_embed_element",
@@ -275,6 +279,7 @@ def process_elements(
                         repo,
                         file_hash,
                         element_count,
+                        craft_reason=state.get("craft_reason"),
                     )
                     # Delete the old element now that we've indexed the new one
                     old_element_id = state.get("old_element_id")

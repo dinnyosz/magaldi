@@ -440,11 +440,14 @@ def run_processing(
     skip_ai: bool,
     workers: int,
     compact: bool = False,
+    use_docstrings: bool = True,
 ) -> tuple[int, int, int, float, float, float, float, TimingStats | None, list[tuple[str, str]], int]:
     """Run unified processing: summarize -> embed -> index.
 
     Args:
         compact: If True, hide worker table in display (for watch mode).
+        use_docstrings: If True, use docstring descriptions as summaries
+            instead of LLM for elements with meaningful docstrings.
 
     Returns:
         Tuple of (processed, skipped, indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, failed_elements, deleted).
@@ -493,6 +496,7 @@ def run_processing(
         summarize_model_small=config.llm.get_summarize_model_small(),
         embed_model=config.llm.get_embed_model(),
         skip_ai=skip_ai,
+        use_docstrings=use_docstrings,
         num_workers=effective_workers,
         summarize_temperature=config.llm.summarize_temperature,
         summarize_top_p=config.llm.summarize_top_p,

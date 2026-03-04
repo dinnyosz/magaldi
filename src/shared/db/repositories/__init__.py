@@ -224,9 +224,11 @@ class Repository:
         """Get embedding vector for an element."""
         return self._metadata.get_embedding(element_id, embedding_type)
 
-    def store_summary(self, element_id: str, summary: str) -> bool:
+    def store_summary(
+        self, element_id: str, summary: str, craft_reason: str | None = None
+    ) -> bool:
         """Store summary for an element."""
-        return self._metadata.store_summary(element_id, summary)
+        return self._metadata.store_summary(element_id, summary, craft_reason=craft_reason)
 
     def store_imports(self, element_id: str, imports: list[dict]) -> bool:
         """Store imports for a file element."""

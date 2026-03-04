@@ -300,22 +300,29 @@ class MetadataRepository:
             return doc.get(field_name)
         return None
 
-    def store_summary(self, element_id: str, summary: str) -> bool:
+    def store_summary(
+        self, element_id: str, summary: str, craft_reason: str | None = None
+    ) -> bool:
         """Store summary for an element in the index.
 
         Args:
             element_id: Element ID to update.
             summary: Summary text.
+            craft_reason: Why this element was handcrafted ("test", "import",
+                "small", "docstring"), or None for LLM-generated summaries.
 
         Returns:
             True on success.
         """
         try:
             client = self._get_client()
+            doc: dict = {"summary": summary}
+            if craft_reason is not None:
+                doc["craft_reason"] = craft_reason
             client.update_document(
                 INDEX_NAME,
                 element_id,
-                body={"doc": {"summary": summary}},
+                body={"doc": doc},
             )
             return True
         except NotFoundError:
