@@ -1291,10 +1291,10 @@ class ExplorationOrchestrator:
             state.explore_cap = self.base_workers
 
         # Skip exploration when budget is too small for meaningful data collection.
-        # base_workers ≤ 2 means there aren't enough levels for GSS to search
-        # meaningfully — fall through to formula-based throttling instead.
-        # At base_workers=3, warmup can still collect useful baselines for throttling.
-        if self.base_workers <= 2 and self._total_elements is not None:
+        # base_workers ≤ 3 means GSS has at most a [1, 3] bracket — too narrow
+        # to search meaningfully. Fall through to formula-based throttling which
+        # uses runtime feedback to pick the best worker count dynamically.
+        if self.base_workers <= 3 and self._total_elements is not None:
             state.exploration_status = f"Skipped ({self._total_elements} elements)"
             return state
 
