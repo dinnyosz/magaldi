@@ -64,13 +64,28 @@ class SubfeatureTimingStats:
     # Throughput tracker for throttling
     throughput_tracker: ThroughputTracker = field(default_factory=ThroughputTracker)
 
+    # Token tracking
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    model_input_tokens: dict[str, int] = field(default_factory=dict)
+    model_output_tokens: dict[str, int] = field(default_factory=dict)
+    model_sample_counts: dict[str, int] = field(default_factory=dict)
+
     def set_totals_by_tier(self, totals: dict[int, int]) -> None:
         """Set total counts by tier for ETA calculation."""
         with self._lock:
             self.totals_by_tier = dict(totals)
 
-    def record(self, summarize_time: float, embed_time: float, tier: int = 0) -> None:
-        """Record timing for a completed subfeature."""
+    def record(
+        self,
+        summarize_time: float,
+        embed_time: float,
+        tier: int = 0,
+        prompt_tokens: int = 0,
+        response_tokens: int = 0,
+        model_name: str = "",
+    ) -> None:
+        """Record timing and token usage for a completed subfeature."""
         with self._lock:
             self.total_summarize_time += summarize_time
             self.total_embed_time += embed_time
@@ -83,6 +98,44 @@ class SubfeatureTimingStats:
                 total_time = summarize_time + embed_time
                 self.total_time_by_tier[tier] = self.total_time_by_tier.get(tier, 0.0) + total_time
                 self.count_by_tier[tier] = self.count_by_tier.get(tier, 0) + 1
+
+            # Track token usage
+            self.total_input_tokens += prompt_tokens
+            self.total_output_tokens += response_tokens
+
+            if model_name and (prompt_tokens > 0 or response_tokens > 0):
+                self.model_input_tokens[model_name] = self.model_input_tokens.get(model_name, 0) + prompt_tokens
+                self.model_output_tokens[model_name] = self.model_output_tokens.get(model_name, 0) + response_tokens
+                self.model_sample_counts[model_name] = self.model_sample_counts.get(model_name, 0) + 1
+
+    def get_token_usage_summary(self) -> dict[str, Any]:
+        """Get token usage summary in standard format for log_token_usage()."""
+        with self._lock:
+            by_type: dict[str, dict[str, int]] = {}
+            if self.total_input_tokens > 0 or self.total_output_tokens > 0:
+                by_type["subfeature_summary"] = {
+                    "input": self.total_input_tokens,
+                    "output": self.total_output_tokens,
+                    "count": self.summarize_count,
+                }
+
+            by_model: dict[str, dict[str, int]] = {}
+            for model in sorted(self.model_sample_counts.keys()):
+                by_model[model] = {
+                    "input": self.model_input_tokens.get(model, 0),
+                    "output": self.model_output_tokens.get(model, 0),
+                    "count": self.model_sample_counts.get(model, 0),
+                }
+
+            return {
+                "by_type": by_type,
+                "by_model": by_model,
+                "totals": {
+                    "input": self.total_input_tokens,
+                    "output": self.total_output_tokens,
+                    "count": self.summarize_count,
+                },
+            }
 
     def record_task_runtime(self, runtime: float, concurrent_workers: int = 1) -> None:
         """Record task wall-clock runtime for throttling with concurrency context."""
@@ -267,6 +320,9 @@ class ProcessedSubfeature:
     summarize_time: float
     embed_time: float
     error: str | None = None
+    prompt_tokens: int = 0
+    response_tokens: int = 0
+    model_name: str = ""
 
 
 # =============================================================================
@@ -453,6 +509,9 @@ def _process_single_subfeature(
     sub_label = work_item.sub_cluster.label or f"subcluster_{work_item.sub_cluster.cluster_id}"
     summarize_time = 0.0
     embed_time = 0.0
+    prompt_tokens = 0
+    response_tokens = 0
+    model_display = ""
 
     def format_ctx(num_ctx: int) -> str:
         return f"{num_ctx // 1024}K" if num_ctx >= 1024 else str(num_ctx)
@@ -467,6 +526,8 @@ def _process_single_subfeature(
         # Update status: summarizing (with context size and start time)
         # Display tiered model name for Ollama (e.g., "qwen3:4b-instruct-4k")
         model_display = _get_model_display_name(config.summarize_model, config.provider, num_ctx)
+        # Estimate prompt tokens from messages
+        prompt_tokens = sum(len(m.get("content", "")) for m in messages) // 4
         stage_start = time.time()
         worker_status.set(worker_id, work_item.parent_label, "summarize", model_display, sub_label, format_ctx(num_ctx), stage_start)
         if on_status_change:
@@ -480,6 +541,7 @@ def _process_single_subfeature(
             llm_client, config, messages, num_ctx,
         )
         summarize_time = time.time() - summ_start
+        response_tokens = len(summary) // 4
 
         # Update status: embedding
         stage_start = time.time()
@@ -530,6 +592,9 @@ def _process_single_subfeature(
             success=True,
             summarize_time=summarize_time,
             embed_time=embed_time,
+            prompt_tokens=prompt_tokens,
+            response_tokens=response_tokens,
+            model_name=model_display,
         )
 
     except Exception as e:
@@ -930,7 +995,14 @@ def process_subfeatures(
         )
 
         # Throughput is recorded by run_throttled_tier in the throttle context
-        timing_stats.record(processed.summarize_time, processed.embed_time, tier=tier)
+        timing_stats.record(
+            processed.summarize_time,
+            processed.embed_time,
+            tier=tier,
+            prompt_tokens=processed.prompt_tokens,
+            response_tokens=processed.response_tokens,
+            model_name=processed.model_name,
+        )
 
         if processed.success:
             subfeature_state["completed"] += 1
