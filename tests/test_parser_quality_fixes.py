@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from magaldi_core.change_detection import FileInfo
-from magaldi_core.parsers.base import extract_docstring
+from magaldi_core.parsers.base import extract_docstring, extract_preceding_doc_comment
 from shared.ai.prompts import clean_summary
 
 
@@ -412,3 +412,334 @@ class TestCallCategorizerResolved:
 
         result = categorize_call(MockCall(), "python")
         assert result == CallCategory.UNKNOWN
+
+
+# =============================================================================
+# Preceding doc comment extraction (all languages)
+# =============================================================================
+
+
+class TestPrecedingDocComment:
+    """Tests for extract_preceding_doc_comment across all languages."""
+
+    # --- JSDoc (JavaScript/TypeScript) ---
+
+    def test_jsdoc_multiline_block(self):
+        lines = [
+            "/**",
+            " * Handle ticket purchase for a show.",
+            " * @param {string} showId - The show identifier",
+            " * @returns {Ticket} The purchased ticket",
+            " */",
+            "function purchaseTicket(showId) {",
+        ]
+        result = extract_preceding_doc_comment(lines, 6, "javascript")
+        assert result is not None
+        assert "Handle ticket purchase" in result
+        assert "@param" in result
+
+    def test_jsdoc_single_line(self):
+        lines = [
+            "/** Short description */",
+            "function foo() {",
+        ]
+        result = extract_preceding_doc_comment(lines, 2, "javascript")
+        assert result == "Short description"
+
+    def test_jsdoc_typescript(self):
+        lines = [
+            "/**",
+            " * User configuration interface.",
+            " */",
+            "interface UserConfig {",
+        ]
+        result = extract_preceding_doc_comment(lines, 4, "typescript")
+        assert result == "User configuration interface."
+
+    def test_js_regular_comment_not_extracted(self):
+        """Only /** */ counts for JS, not // or /* */."""
+        lines = [
+            "// This is a regular comment",
+            "function foo() {",
+        ]
+        result = extract_preceding_doc_comment(lines, 2, "javascript")
+        assert result is None
+
+    def test_js_non_doc_block_comment_not_extracted(self):
+        """/* */ without the extra * is not a doc comment."""
+        lines = [
+            "/* This is not JSDoc */",
+            "function foo() {",
+        ]
+        result = extract_preceding_doc_comment(lines, 2, "javascript")
+        assert result is None
+
+    # --- Rust doc comments ---
+
+    def test_rust_triple_slash(self):
+        lines = [
+            "/// Validate instrument serial number.",
+            "/// Returns true if valid.",
+            "fn validate_serial(s: &str) -> bool {",
+        ]
+        result = extract_preceding_doc_comment(lines, 3, "rust")
+        assert result is not None
+        assert "Validate instrument" in result
+        assert "Returns true" in result
+
+    def test_rust_with_derive_attribute(self):
+        """Doc comment above #[derive(...)] should still be extracted."""
+        lines = [
+            "/// A musical instrument in the orchestra.",
+            "#[derive(Debug, Clone)]",
+            "struct Instrument {",
+        ]
+        result = extract_preceding_doc_comment(lines, 3, "rust")
+        assert result == "A musical instrument in the orchestra."
+
+    def test_rust_inner_doc_not_extracted(self):
+        """//! inner doc comments should NOT be extracted as element docs."""
+        lines = [
+            "//! Module-level documentation",
+            "fn foo() {",
+        ]
+        result = extract_preceding_doc_comment(lines, 2, "rust")
+        assert result is None
+
+    def test_rust_block_doc_comment(self):
+        lines = [
+            "/**",
+            " * A Rust block doc comment.",
+            " * Second line.",
+            " */",
+            "fn documented() {",
+        ]
+        result = extract_preceding_doc_comment(lines, 5, "rust")
+        assert result is not None
+        assert "block doc comment" in result
+
+    def test_rust_multiple_attributes_between_doc_and_element(self):
+        lines = [
+            "/// The main configuration.",
+            "#[derive(Debug)]",
+            "#[serde(rename_all = \"camelCase\")]",
+            "struct Config {",
+        ]
+        result = extract_preceding_doc_comment(lines, 4, "rust")
+        assert result == "The main configuration."
+
+    # --- PHPDoc ---
+
+    def test_phpdoc_block(self):
+        lines = [
+            "/**",
+            " * Manage backstage operations.",
+            " * @param string $area The backstage area",
+            " */",
+            "class BackstageManager {",
+        ]
+        result = extract_preceding_doc_comment(lines, 5, "php")
+        assert result is not None
+        assert "Manage backstage" in result
+
+    def test_php_attribute_between_doc_and_class(self):
+        """PHP 8 #[Attribute] between PHPDoc and class should be skipped."""
+        lines = [
+            "/**",
+            " * A controller class.",
+            " */",
+            "#[Route('/api')]",
+            "class ApiController {",
+        ]
+        result = extract_preceding_doc_comment(lines, 5, "php")
+        assert result == "A controller class."
+
+    # --- Bash ---
+
+    def test_bash_comment_block(self):
+        lines = [
+            "# Check if all stage equipment is ready.",
+            "# Returns 0 on success, 1 on failure.",
+            "check_stage_equipment() {",
+        ]
+        result = extract_preceding_doc_comment(lines, 3, "bash")
+        assert result is not None
+        assert "stage equipment" in result
+
+    def test_bash_skips_shebang(self):
+        lines = [
+            "#!/bin/bash",
+            "do_thing() {",
+        ]
+        result = extract_preceding_doc_comment(lines, 2, "bash")
+        assert result is None
+
+    def test_bash_skips_section_markers(self):
+        lines = [
+            "# ========================",
+            "do_thing() {",
+        ]
+        result = extract_preceding_doc_comment(lines, 2, "bash")
+        assert result is None
+
+    def test_bash_stops_at_section_marker(self):
+        """Section marker should stop backward scanning, not include content above."""
+        lines = [
+            "# Some unrelated comment",
+            "# --- Section ---",
+            "# This function does X.",
+            "do_thing() {",
+        ]
+        result = extract_preceding_doc_comment(lines, 4, "bash")
+        assert result == "This function does X."
+        assert "unrelated" not in result
+
+    # --- Python (# comments for variables) ---
+
+    def test_python_hash_comment_for_variable(self):
+        lines = [
+            "# Maximum retry count before giving up.",
+            "MAX_RETRIES = 3",
+        ]
+        result = extract_preceding_doc_comment(lines, 2, "python")
+        assert result == "Maximum retry count before giving up."
+
+    def test_python_multiline_hash_comment(self):
+        lines = [
+            "# Thread-safe cache for storing summaries.",
+            "# Uses LRU eviction with a configurable max size.",
+            "_summary_cache: dict[str, str] = {}",
+        ]
+        result = extract_preceding_doc_comment(lines, 3, "python")
+        assert result is not None
+        assert "Thread-safe" in result
+        assert "LRU eviction" in result
+
+    # --- Edge cases ---
+
+    def test_no_comment_returns_none(self):
+        lines = [
+            "x = 1",
+            "y = 2",
+        ]
+        result = extract_preceding_doc_comment(lines, 2, "python")
+        assert result is None
+
+    def test_one_blank_line_gap_allowed(self):
+        lines = [
+            "/** Short desc */",
+            "",
+            "function foo() {",
+        ]
+        result = extract_preceding_doc_comment(lines, 3, "javascript")
+        assert result == "Short desc"
+
+    def test_two_blank_lines_gap_returns_none(self):
+        lines = [
+            "/** Short desc */",
+            "",
+            "",
+            "function foo() {",
+        ]
+        result = extract_preceding_doc_comment(lines, 4, "javascript")
+        assert result is None
+
+    def test_element_at_line_1_returns_none(self):
+        lines = [
+            "function foo() {",
+        ]
+        result = extract_preceding_doc_comment(lines, 1, "javascript")
+        assert result is None
+
+    def test_empty_lines_list(self):
+        result = extract_preceding_doc_comment([], 1, "javascript")
+        assert result is None
+
+    def test_truncates_long_doc_comment(self):
+        """Doc comments longer than 2000 chars should be truncated."""
+        long_line = "x" * 2100
+        lines = [
+            f"/// {long_line}",
+            "fn foo() {",
+        ]
+        result = extract_preceding_doc_comment(lines, 2, "rust")
+        assert result is not None
+        assert len(result) == 2000
+
+
+# =============================================================================
+# Integration tests: doc comment extraction via full parser pipeline
+# =============================================================================
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures" / "languages"
+
+
+class TestDocCommentIntegration:
+    """Integration tests parsing real fixture files and checking docstring field."""
+
+    def test_javascript_jsdoc_on_class(self):
+        """JSDoc on BoxOffice class in teatro_ticketing.js."""
+        from magaldi_core.parsers.javascript import JavaScriptParser
+
+        fixture = FIXTURES_DIR / "teatro_ticketing.js"
+        content = fixture.read_text()
+        file_info = FileInfo(
+            relative_path="teatro_ticketing.js",
+            absolute_path=fixture,
+            language="javascript",
+        )
+        parser = JavaScriptParser()
+        elements = parser.parse(content, file_info, "test", "teatro", "main")
+
+        box_office = next(
+            (e for e in elements if e.name == "BoxOffice" and e.element_type == "class"),
+            None,
+        )
+        assert box_office is not None
+        assert box_office.docstring is not None
+        assert "heart of the teatro" in box_office.docstring
+
+    def test_rust_triple_slash_on_function(self):
+        """/// doc comment on validate_instrument_serial in teatro_orchestra.rs."""
+        from magaldi_core.parsers.rust import RustParser
+
+        fixture = FIXTURES_DIR / "teatro_orchestra.rs"
+        content = fixture.read_text()
+        file_info = FileInfo(
+            relative_path="teatro_orchestra.rs",
+            absolute_path=fixture,
+            language="rust",
+        )
+        parser = RustParser()
+        elements = parser.parse(content, file_info, "test", "teatro", "main")
+
+        fn_elem = next(
+            (e for e in elements if e.name == "validate_instrument_serial"),
+            None,
+        )
+        assert fn_elem is not None
+        assert fn_elem.docstring is not None
+        assert "Phantom" in fn_elem.docstring
+
+    def test_rust_enum_without_doc_after_section_marker(self):
+        """Enum after '// --- Enums ---' section marker should have no docstring."""
+        from magaldi_core.parsers.rust import RustParser
+
+        fixture = FIXTURES_DIR / "teatro_orchestra.rs"
+        content = fixture.read_text()
+        file_info = FileInfo(
+            relative_path="teatro_orchestra.rs",
+            absolute_path=fixture,
+            language="rust",
+        )
+        parser = RustParser()
+        elements = parser.parse(content, file_info, "test", "teatro", "main")
+
+        # TuningStatus is right after #[derive] which is after "// --- Enums ---"
+        tuning = next(
+            (e for e in elements if e.name == "TuningStatus"),
+            None,
+        )
+        assert tuning is not None
+        # No doc comment — only #[derive(Debug, Clone, PartialEq)] above it
+        assert tuning.docstring is None
