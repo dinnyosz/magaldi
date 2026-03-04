@@ -13,7 +13,6 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from shared.ai.context_size import compute_element_num_ctx
-from shared.text_utils import humanize_name
 from shared.ai.embedding import (
     build_caller_embedding_text,
     build_code_embedding_text,
@@ -23,6 +22,7 @@ from shared.ai.embedding import (
 )
 from shared.ai.prompts import get_max_tokens_for_element_type
 from shared.ai.summarization import build_prompt, clean_summary
+from shared.text_utils import humanize_name
 
 from .models import ProcessedElement, ProcessingConfig, _get_model_display_name
 

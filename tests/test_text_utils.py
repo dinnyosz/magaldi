@@ -1,7 +1,5 @@
 """Tests for shared.text_utils module."""
 
-import pytest
-
 from shared.text_utils import humanize_name
 
 
