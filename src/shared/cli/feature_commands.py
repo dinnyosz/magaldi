@@ -37,6 +37,56 @@ if TYPE_CHECKING:
 # =============================================================================
 
 
+def _merge_token_summaries(*stats_objects: Any) -> dict[str, Any]:
+    """Merge token usage summaries from multiple timing stats objects.
+
+    Each object must have a get_token_usage_summary() method returning:
+        {"by_type": {...}, "by_model": {...}, "totals": {"input": N, "output": N, "count": N}}
+
+    Args:
+        stats_objects: Timing stats objects (LabelingTimingStats, FeatureTimingStats, etc.).
+            None values are skipped.
+
+    Returns:
+        Merged token usage dict in the standard format.
+    """
+    merged_by_type: dict[str, dict[str, int]] = {}
+    merged_by_model: dict[str, dict[str, int]] = {}
+    total_input = 0
+    total_output = 0
+    total_count = 0
+
+    for stats in stats_objects:
+        if stats is None:
+            continue
+        summary = stats.get_token_usage_summary()
+
+        for type_name, data in summary.get("by_type", {}).items():
+            merged_by_type[type_name] = data
+
+        for model, data in summary.get("by_model", {}).items():
+            if model not in merged_by_model:
+                merged_by_model[model] = {"input": 0, "output": 0, "count": 0}
+            merged_by_model[model]["input"] += data.get("input", 0)
+            merged_by_model[model]["output"] += data.get("output", 0)
+            merged_by_model[model]["count"] += data.get("count", 0)
+
+        totals = summary.get("totals", {})
+        total_input += totals.get("input", 0)
+        total_output += totals.get("output", 0)
+        total_count += totals.get("count", 0)
+
+    return {
+        "by_type": merged_by_type,
+        "by_model": merged_by_model,
+        "totals": {
+            "input": total_input,
+            "output": total_output,
+            "count": total_count,
+        },
+    }
+
+
 def run_feature_extraction(
     scope: str,
     repository: str,
@@ -167,8 +217,9 @@ def run_feature_extraction(
             }
 
         # Label features with Ollama (quick labels)
+        labeling_timing = None
         if not skip_labeling:
-            clustering_result = _run_labeling_phase(
+            clustering_result, labeling_timing = _run_labeling_phase(
                 clusterer, clustering_result, scope, repository, username, config
             )
 
@@ -694,6 +745,13 @@ def run_feature_extraction(
                     f"from {subfeature_result['parent_features_processed']} large features[/]"
                 )
 
+        # Merge token usage from labeling, feature, and subfeature phases
+        token_usage = _merge_token_summaries(
+            labeling_timing,
+            timing_stats,
+            sub_timing_stats if large_cluster_count > 0 else None,
+        )
+
         return {
             "cluster_count": clustering_result.cluster_count,
             "outlier_count": clustering_result.outlier_count,
@@ -705,6 +763,7 @@ def run_feature_extraction(
             "elapsed": proc_result.get("elapsed", 0),
             "subfeatures_created": subfeature_result.get("subfeatures_created", 0),
             "parent_features_with_subfeatures": subfeature_result.get("parent_features_processed", 0),
+            "token_usage": token_usage,
             "clusters": [
                 {
                     "cluster_id": c.cluster_id,

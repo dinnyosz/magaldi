@@ -352,7 +352,7 @@ def _run_labeling_phase(
     repository: str,
     username: str,
     config: MagaldiConfig,
-) -> Any:
+) -> tuple[Any, Any]:
     """Run feature labeling with Live progress display.
 
     Args:
@@ -364,7 +364,7 @@ def _run_labeling_phase(
         config: Magaldi configuration.
 
     Returns:
-        Updated ClusteringResult with labels.
+        Tuple of (updated ClusteringResult, LabelingTimingStats).
     """
     from shared.ai.clustering.clusterer import LabelingProgressState, LabelingTimingStats
 
@@ -424,7 +424,7 @@ def _run_labeling_phase(
             labeling_state = state
             live.refresh()
 
-        return clusterer.label_clusters(
+        result = clusterer.label_clusters(
             clustering_result,
             on_progress=on_labeling_progress,
             timing_stats=labeling_timing,
@@ -433,6 +433,7 @@ def _run_labeling_phase(
             username=username,
             magaldi_config=config,
         )
+        return result, labeling_timing
 
 
 # =============================================================================
