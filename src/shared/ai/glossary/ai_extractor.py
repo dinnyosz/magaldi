@@ -40,6 +40,14 @@ class GlossaryTimingStats:
     count_by_tier: dict[int, int] = field(default_factory=dict)
     totals_by_tier: dict[int, int] = field(default_factory=dict)
 
+    # Token tracking (per call_type: "glossary_extract" or "glossary_summary")
+    input_tokens_by_type: dict[str, int] = field(default_factory=dict)
+    output_tokens_by_type: dict[str, int] = field(default_factory=dict)
+    count_by_type: dict[str, int] = field(default_factory=dict)
+    model_input_tokens: dict[str, int] = field(default_factory=dict)
+    model_output_tokens: dict[str, int] = field(default_factory=dict)
+    model_sample_counts: dict[str, int] = field(default_factory=dict)
+
     def set_totals_by_tier(self, totals: dict[int, int]) -> None:
         """Set total counts by tier for ETA calculation."""
         with self._lock:
@@ -59,8 +67,16 @@ class GlossaryTimingStats:
             return 0.0
         return self.total_api_time / self.features_processed
 
-    def record_api_call(self, api_time: float, tier: int = 0) -> None:
-        """Record an API call timing."""
+    def record_api_call(
+        self,
+        api_time: float,
+        tier: int = 0,
+        prompt_tokens: int = 0,
+        response_tokens: int = 0,
+        model_name: str = "",
+        call_type: str = "",
+    ) -> None:
+        """Record an API call timing and token usage."""
         with self._lock:
             self.total_api_time += api_time
             self.features_processed += 1
@@ -69,6 +85,51 @@ class GlossaryTimingStats:
             if tier > 0:
                 self.total_time_by_tier[tier] = self.total_time_by_tier.get(tier, 0.0) + api_time
                 self.count_by_tier[tier] = self.count_by_tier.get(tier, 0) + 1
+
+            # Track token usage by call type
+            if call_type and (prompt_tokens > 0 or response_tokens > 0):
+                self.input_tokens_by_type[call_type] = self.input_tokens_by_type.get(call_type, 0) + prompt_tokens
+                self.output_tokens_by_type[call_type] = self.output_tokens_by_type.get(call_type, 0) + response_tokens
+                self.count_by_type[call_type] = self.count_by_type.get(call_type, 0) + 1
+
+            # Track per-model token usage
+            if model_name and (prompt_tokens > 0 or response_tokens > 0):
+                self.model_input_tokens[model_name] = self.model_input_tokens.get(model_name, 0) + prompt_tokens
+                self.model_output_tokens[model_name] = self.model_output_tokens.get(model_name, 0) + response_tokens
+                self.model_sample_counts[model_name] = self.model_sample_counts.get(model_name, 0) + 1
+
+    def get_token_usage_summary(self) -> dict[str, Any]:
+        """Get token usage summary in standard format for log_token_usage()."""
+        with self._lock:
+            by_type: dict[str, dict[str, int]] = {}
+            for call_type in sorted(self.count_by_type.keys()):
+                by_type[call_type] = {
+                    "input": self.input_tokens_by_type.get(call_type, 0),
+                    "output": self.output_tokens_by_type.get(call_type, 0),
+                    "count": self.count_by_type.get(call_type, 0),
+                }
+
+            by_model: dict[str, dict[str, int]] = {}
+            for model in sorted(self.model_sample_counts.keys()):
+                by_model[model] = {
+                    "input": self.model_input_tokens.get(model, 0),
+                    "output": self.model_output_tokens.get(model, 0),
+                    "count": self.model_sample_counts.get(model, 0),
+                }
+
+            total_input = sum(self.input_tokens_by_type.values())
+            total_output = sum(self.output_tokens_by_type.values())
+            total_count = sum(self.count_by_type.values())
+
+            return {
+                "by_type": by_type,
+                "by_model": by_model,
+                "totals": {
+                    "input": total_input,
+                    "output": total_output,
+                    "count": total_count,
+                },
+            }
 
     def record_task_runtime(self, runtime: float, concurrent_workers: float = 1.0) -> None:
         """Record task wall-clock runtime for throttling."""
@@ -659,7 +720,7 @@ def generate_glossary_summary_sync(
     feature_ids: list[str],
     features_by_id: dict[str, dict[str, Any]],
     config: MagaldiConfig | None = None,
-) -> tuple[str, float]:
+) -> tuple[str, float, int, int]:
     """Generate a holistic summary for a glossary term based on all its connected features.
 
     Uses message-based format (system + user) optimized for Ollama's KV cache
@@ -673,7 +734,7 @@ def generate_glossary_summary_sync(
         config: Optional MagaldiConfig.
 
     Returns:
-        Tuple of (summary string, api_time in seconds).
+        Tuple of (summary string, api_time, prompt_tokens, response_tokens).
     """
     if config is None:
         from shared.config import MagaldiConfig
@@ -695,6 +756,7 @@ def generate_glossary_summary_sync(
     from shared.ai.context_size import compute_aggregation_num_ctx
     prompt_chars = len(GLOSSARY_SUMMARY_SYSTEM_PROMPT) + len(user_content)
     num_ctx = compute_aggregation_num_ctx(prompt_chars, task_type="glossary_summary")
+    prompt_tokens = prompt_chars // 4
 
     # Get model config from LLM config
     model_config = config.llm.get_summarize_model()
@@ -710,16 +772,17 @@ def generate_glossary_summary_sync(
             num_ctx=num_ctx,
         )
         api_time = time.time() - start_time
-        return response.strip(), api_time
+        response_tokens = len(response) // 4
+        return response.strip(), api_time, prompt_tokens, response_tokens
     except LLMError:
         api_time = time.time() - start_time
-        return "", api_time
+        return "", api_time, prompt_tokens, 0
 
 
 def extract_glossary_from_feature_sync(
     feature: dict[str, Any],
     config: MagaldiConfig | None = None,
-) -> tuple[list[GlossaryItem], float]:
+) -> tuple[list[GlossaryItem], float, int, int]:
     """Synchronous version of extract_glossary_from_feature for thread pool.
 
     Args:
@@ -727,17 +790,17 @@ def extract_glossary_from_feature_sync(
         config: Optional MagaldiConfig. If None, uses default config.
 
     Returns:
-        Tuple of (list of GlossaryItem, api_time in seconds).
+        Tuple of (list of GlossaryItem, api_time, prompt_tokens, response_tokens).
     """
     feature_id = feature.get("feature_id") or feature.get("subfeature_id", "")
     label = feature.get("label", "")
     summary = feature.get("summary", "")
 
     if not summary:
-        return [], 0.0
+        return [], 0.0, 0, 0
 
     start_time = time.time()
-    term_names = call_llm_for_glossary_sync(summary, label, config)
+    term_names, prompt_tokens, response_tokens = call_llm_for_glossary_sync(summary, label, config)
     api_time = time.time() - start_time
 
     items = []
@@ -752,14 +815,14 @@ def extract_glossary_from_feature_sync(
                 )
             )
 
-    return items, api_time
+    return items, api_time, prompt_tokens, response_tokens
 
 
 def call_llm_for_glossary_sync(
     summary: str,
     label: str,
     config: MagaldiConfig | None = None,
-) -> list[str]:
+) -> tuple[list[str], int, int]:
     """Synchronous LLM call for glossary term extraction.
 
     Uses message-based format (system + user) optimized for Ollama's KV cache
@@ -772,7 +835,7 @@ def call_llm_for_glossary_sync(
         config: Optional MagaldiConfig. If None, uses default config.
 
     Returns:
-        List of term name strings.
+        Tuple of (term name strings, prompt_tokens, response_tokens).
     """
     if config is None:
         from shared.config import MagaldiConfig
@@ -787,6 +850,7 @@ def call_llm_for_glossary_sync(
     user_content = GLOSSARY_EXTRACTION_USER_PROMPT.format(label=label, summary=summary)
     prompt_chars = len(GLOSSARY_EXTRACTION_SYSTEM_PROMPT) + len(user_content)
     num_ctx = compute_aggregation_num_ctx(prompt_chars, task_type="glossary_extract")
+    prompt_tokens = prompt_chars // 4
 
     # Get model config from LLM config
     model_config = config.llm.get_summarize_model()
@@ -801,9 +865,10 @@ def call_llm_for_glossary_sync(
             num_ctx=num_ctx,
         )
     except LLMError:
-        return []
+        return [], prompt_tokens, 0
 
-    return parse_llm_response(response)
+    response_tokens = len(response) // 4
+    return parse_llm_response(response), prompt_tokens, response_tokens
 
 
 def extract_glossary_from_features_concurrent(
@@ -910,7 +975,7 @@ def extract_glossary_from_features_concurrent(
 
     def process_feature(
         feature: dict[str, Any],
-    ) -> tuple[list[GlossaryItem], float, bool]:
+    ) -> tuple[list[GlossaryItem], float, bool, int, int]:
         """Process a single feature in a worker thread."""
         worker_id = acquire_worker_id()
         try:
@@ -929,10 +994,10 @@ def extract_glossary_from_features_concurrent(
                 on_status_change()
 
             try:
-                items, api_time = extract_glossary_from_feature_sync(feature, config)
-                return items, api_time, True
+                items, api_time, p_tok, r_tok = extract_glossary_from_feature_sync(feature, config)
+                return items, api_time, True, p_tok, r_tok
             except Exception:
-                return [], 0.0, False
+                return [], 0.0, False, 0, 0
             finally:
                 worker_status.clear_status(worker_id)
                 if on_status_change:
@@ -980,7 +1045,7 @@ def extract_glossary_from_features_concurrent(
 
     def on_complete_phase1(feature: dict, result: tuple, _avg_workers: float, _runtime: float) -> None:
         """Handle completed feature extraction."""
-        items, api_time, success = result
+        items, api_time, success, p_tok, r_tok = result
 
         # Look up tier for this feature
         fid = feature.get("feature_id") or feature.get("subfeature_id", "")
@@ -994,7 +1059,14 @@ def extract_glossary_from_features_concurrent(
                 counters["failed"] += 1
             else:
                 counters["terms_extracted"] += len(items)
-                timing_stats.record_api_call(api_time, tier=tier)
+                timing_stats.record_api_call(
+                    api_time,
+                    tier=tier,
+                    prompt_tokens=p_tok,
+                    response_tokens=r_tok,
+                    model_name=get_tiered_model_display(tier) if tier > 0 else model_config.name,
+                    call_type="glossary_extract",
+                )
 
         with items_lock:
             all_items.extend(items)
@@ -1091,7 +1163,7 @@ def extract_glossary_from_features_concurrent(
 
     def generate_summary_for_term(
         item: GlossaryItem,
-    ) -> tuple[GlossaryItem, float, bool]:
+    ) -> tuple[GlossaryItem, float, bool, int, int]:
         """Generate summary for a merged glossary term."""
         worker_id = acquire_worker_id()
         try:
@@ -1110,7 +1182,7 @@ def extract_glossary_from_features_concurrent(
                 on_status_change()
 
             try:
-                summary, api_time = generate_glossary_summary_sync(
+                summary, api_time, p_tok, r_tok = generate_glossary_summary_sync(
                     term=item.name,
                     feature_ids=item.source_feature_ids,
                     features_by_id=features_by_id,
@@ -1118,9 +1190,9 @@ def extract_glossary_from_features_concurrent(
                 )
                 if summary:
                     item.description = summary
-                return item, api_time, True
+                return item, api_time, True, p_tok, r_tok
             except Exception:
-                return item, 0.0, False
+                return item, 0.0, False, 0, 0
             finally:
                 worker_status.clear_status(worker_id)
                 if on_status_change:
@@ -1165,7 +1237,7 @@ def extract_glossary_from_features_concurrent(
         item: GlossaryItem, result: tuple, _avg_workers: float, _runtime: float
     ) -> None:
         """Handle completed summary generation."""
-        completed_item, api_time, success = result
+        completed_item, api_time, success, p_tok, r_tok = result
 
         # Look up tier for this term
         tier = term_to_tier.get(item.name, 0)
@@ -1177,7 +1249,14 @@ def extract_glossary_from_features_concurrent(
             if not success:
                 counters["failed"] += 1
             else:
-                timing_stats.record_api_call(api_time, tier=tier)
+                timing_stats.record_api_call(
+                    api_time,
+                    tier=tier,
+                    prompt_tokens=p_tok,
+                    response_tokens=r_tok,
+                    model_name=get_tiered_model_display(tier) if tier > 0 else model_config.name,
+                    call_type="glossary_summary",
+                )
 
         with final_lock:
             final_items.append(completed_item)
