@@ -372,6 +372,198 @@ def extract_docstring(lines: list[str], block_start: int) -> str | None:
     return None
 
 
+# =============================================================================
+# Preceding doc comment extraction (JSDoc, rustdoc, PHPDoc, bash/python #)
+# =============================================================================
+
+# Languages that support /** ... */ block doc comments
+_BLOCK_DOC_LANGUAGES = frozenset({"javascript", "typescript", "php", "rust"})
+
+# Languages where #[...] attribute lines should be skipped when scanning backward
+_ATTRIBUTE_LANGUAGES = frozenset({"rust", "php"})
+
+# Section marker patterns that stop backward scanning for # comments
+_SECTION_MARKERS = frozenset({"===", "---", "***", "###"})
+
+
+def _extract_block_doc_comment(lines: list[str], end_idx: int) -> str | None:
+    """Extract a /** ... */ block doc comment ending at end_idx.
+
+    Scans backward from end_idx to find the opening /**, then extracts
+    and cleans the content between them.
+
+    Args:
+        lines: Source code lines (0-indexed).
+        end_idx: 0-indexed line where */ appears.
+
+    Returns:
+        Cleaned doc comment text, or None if not a valid /** block.
+    """
+    end_line = lines[end_idx].strip()
+    if not end_line.endswith("*/"):
+        return None
+
+    # Single-line: /** Short description */
+    if end_line.startswith("/**"):
+        content = end_line[3:-2].strip()
+        return content if content else None
+
+    # Multi-line: scan backward for /**
+    doc_lines: list[str] = []
+    for i in range(end_idx, -1, -1):
+        current = lines[i]
+        stripped = current.strip()
+
+        if stripped.startswith("/**"):
+            # Opening line — extract content after /**
+            after_open = stripped[3:].strip()
+            if after_open and after_open != "*":
+                doc_lines.insert(0, after_open)
+            break
+
+        if i == end_idx:
+            # Closing line — extract content before */
+            before_close = stripped[:-2].strip()
+            # Strip leading * from content lines
+            if before_close.startswith("*"):
+                before_close = before_close[1:].strip()
+            if before_close:
+                doc_lines.insert(0, before_close)
+        else:
+            # Middle line — strip leading *
+            content = stripped
+            if content.startswith("*"):
+                content = content[1:].strip()
+            doc_lines.insert(0, content)
+    else:
+        # Never found opening /**, invalid block
+        return None
+
+    text = "\n".join(doc_lines).strip()
+    return text[:2000] if text else None
+
+
+def _extract_line_doc_comments(
+    lines: list[str], start_idx: int, prefix: str
+) -> str | None:
+    """Extract consecutive line doc comments (/// or #) scanning backward.
+
+    Args:
+        lines: Source code lines (0-indexed).
+        start_idx: 0-indexed line to start scanning from (should already
+            be known to have the prefix).
+        prefix: Comment prefix to match ("///", "#").
+
+    Returns:
+        Cleaned doc comment text, or None.
+    """
+    doc_lines: list[str] = []
+    for i in range(start_idx, -1, -1):
+        stripped = lines[i].strip()
+        if not stripped.startswith(prefix):
+            break
+
+        # For #: skip shebang and section markers
+        if prefix == "#":
+            if stripped.startswith("#!"):
+                break
+            # Check for section markers like # ===, # ---, # ***
+            after_hash = stripped[1:].strip()
+            if after_hash and len(after_hash) >= 3:
+                first_3_chars = after_hash[:3]
+                if first_3_chars in _SECTION_MARKERS:
+                    break
+
+        # Strip prefix and clean
+        content = stripped[len(prefix) :]
+        # Strip single leading space if present (conventional formatting)
+        if content.startswith(" "):
+            content = content[1:]
+        doc_lines.insert(0, content)
+
+    if not doc_lines:
+        return None
+
+    text = "\n".join(doc_lines).strip()
+    return text[:2000] if text else None
+
+
+def extract_preceding_doc_comment(
+    lines: list[str],
+    element_line: int,
+    language: str,
+) -> str | None:
+    """Extract a doc comment immediately preceding a code element.
+
+    Scans backward from the element's start line looking for doc comment
+    patterns specific to the language:
+    - JS/TS/PHP/Rust: /** ... */ block comments (JSDoc, PHPDoc, rustdoc)
+    - Rust: /// line doc comments
+    - Python/Bash: # comment blocks
+
+    Allows at most 1 blank line between the doc comment and the element
+    (or attribute). Does NOT extract inner doc comments (Rust //!).
+
+    Args:
+        lines: Source code lines (0-indexed list).
+        element_line: 1-indexed line number of the element start.
+        language: Language identifier ("python", "javascript", "typescript",
+            "rust", "php", "bash").
+
+    Returns:
+        Cleaned doc comment text, or None if no doc comment found.
+    """
+    if element_line <= 1 or not lines:
+        return None
+
+    # Start scanning from the line above the element (0-indexed)
+    idx = element_line - 2
+
+    # Skip blank lines (allow at most 1)
+    blank_count = 0
+    while idx >= 0 and not lines[idx].strip():
+        blank_count += 1
+        if blank_count > 1:
+            return None
+        idx -= 1
+
+    if idx < 0:
+        return None
+
+    # Skip #[...] attribute lines (Rust, PHP)
+    if language in _ATTRIBUTE_LANGUAGES:
+        while idx >= 0:
+            stripped = lines[idx].strip()
+            if stripped.startswith("#[") and stripped.endswith("]"):
+                idx -= 1
+                # Allow one blank line between attribute and doc comment
+                if idx >= 0 and not lines[idx].strip():
+                    idx -= 1
+            else:
+                break
+        if idx < 0:
+            return None
+
+    stripped = lines[idx].strip()
+
+    # Try block doc comment (/** ... */) for applicable languages
+    if language in _BLOCK_DOC_LANGUAGES and stripped.endswith("*/"):
+        return _extract_block_doc_comment(lines, idx)
+
+    # Try Rust line doc comments (///)
+    if language == "rust" and stripped.startswith("///"):
+        return _extract_line_doc_comments(lines, idx, "///")
+
+    # Try # line comments for Python and Bash
+    if language in ("python", "bash") and stripped.startswith("#"):
+        # Skip shebang
+        if stripped.startswith("#!"):
+            return None
+        return _extract_line_doc_comments(lines, idx, "#")
+
+    return None
+
+
 def determine_visibility(name: str) -> str:
     """Determine visibility from name convention."""
     if name.startswith("__") and not name.endswith("__"):
