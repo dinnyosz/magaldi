@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from shared.ai.clustering.clusterer import LabelingTimingStats
 from shared.ai.clustering.feature_processor import (
     FeatureTimingStats,
@@ -14,7 +12,6 @@ from shared.ai.clustering.subfeature_processor import (
     SubfeatureTimingStats,
 )
 from shared.ai.glossary.ai_extractor import GlossaryTimingStats
-
 
 # =============================================================================
 # LABELING TIMING STATS TOKEN TRACKING
