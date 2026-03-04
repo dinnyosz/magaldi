@@ -331,11 +331,12 @@ def run_variable_scoring(
     )
     from shared.ai.summarization import SummarizationLLMClient
 
-    # Collect all variable/constant elements
+    # Collect all variable/constant elements (skip test variables —
+    # they are self-documenting noise that wastes LLM scoring calls)
     variables: list[tuple[str, str, str, str]] = []
     for pf in parsing_result.parsed_files:
         for elem in pf.elements:
-            if elem.element_type in ("variable", "constant"):
+            if elem.element_type in ("variable", "constant") and not elem.is_test:
                 variables.append((
                     elem.element_id,
                     pf.file_info.relative_path,
