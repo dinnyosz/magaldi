@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from rich.console import Group, RenderableType
 from rich.live import Live
+from rich.markup import escape as rich_escape
 from rich.progress import (
     BarColumn,
     Progress,
@@ -1068,7 +1069,7 @@ def run_call_resolution(
             console.print(f"    via constructors: {constructor_resolved}")
             console.print(f"    via scope: {scope_resolved}")
         except Exception as e:
-            console.print(f"  [yellow]Warning: Static call resolution failed: {e}[/]")
+            console.print(f"  [yellow]Warning: Static call resolution failed: {rich_escape(str(e))}[/]")
 
         # Embedding-based resolution for remaining untyped calls
         from magaldi_core.call_resolution import resolve_calls_by_embedding
@@ -1083,7 +1084,7 @@ def run_call_resolution(
             console.print(f"    single match: {single_resolved}")
             console.print(f"    via RRF similarity: {embedding_resolved}")
         except Exception as e:
-            console.print(f"  [yellow]Warning: Embedding call resolution failed: {e}[/]")
+            console.print(f"  [yellow]Warning: Embedding call resolution failed: {rich_escape(str(e))}[/]")
     else:
         console.print("\n  [dim]Call resolution skipped (--skip-resolve)[/]")
 
@@ -1097,4 +1098,4 @@ def run_call_resolution(
         )
         console.print(f"  Processed {elements_processed} elements, stored {total_relationships} relationships")
     except Exception as e:
-        console.print(f"  [yellow]Warning: Semantic relationships failed: {e}[/]")
+        console.print(f"  [yellow]Warning: Semantic relationships failed: {rich_escape(str(e))}[/]")

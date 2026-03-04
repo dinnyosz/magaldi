@@ -16,6 +16,7 @@ import aiohttp.client
 import aiohttp.connector
 import click
 from rich.console import Console
+from rich.markup import escape as rich_escape
 
 if TYPE_CHECKING:
     from shared.config import MagaldiConfig
@@ -262,7 +263,7 @@ def _warmup_ollama_tiers(models: list[tuple[str, str]]) -> None:
             else:
                 console.print("    [red]→ all tiers failed[/]")
         except Exception as e:
-            console.print(f"    [red]→ error:[/] {e}")
+            console.print(f"    [red]→ error:[/] {rich_escape(str(e))}")
 
 
 # =============================================================================

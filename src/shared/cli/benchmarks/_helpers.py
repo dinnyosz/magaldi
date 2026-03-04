@@ -9,6 +9,8 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
+from rich.markup import escape as rich_escape
+
 if TYPE_CHECKING:
     from rich.console import Console
 
@@ -114,7 +116,7 @@ def check_backend_connections(
                     console.print(f"  [yellow]![/] {provider} ({url}) | Cannot list models (status {resp.status_code})")
                     available_models_by_provider[provider] = []
             except Exception as e:
-                console.print(f"  [yellow]![/] {provider} ({url}) | Connection failed: {e}")
+                console.print(f"  [yellow]![/] {provider} ({url}) | Connection failed: {rich_escape(str(e))}")
                 available_models_by_provider[provider] = []
 
         else:

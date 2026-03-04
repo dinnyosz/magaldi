@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 import click
 from rich.console import Group, RenderableType
 from rich.live import Live
+from rich.markup import escape as rich_escape
 from rich.table import Table
 from rich.text import Text
 
@@ -490,5 +491,5 @@ def extract_glossary(
             console.print("[yellow]No features found to extract glossary from.[/]")
 
     except Exception as e:
-        console.print(f"\n[red]Error:[/] {e}")
+        console.print(f"\n[red]Error:[/] {rich_escape(str(e))}")
         sys.exit(1)

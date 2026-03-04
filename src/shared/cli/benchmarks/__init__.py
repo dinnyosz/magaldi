@@ -17,6 +17,7 @@ from collections import Counter
 from typing import TYPE_CHECKING
 
 import click
+from rich.markup import escape as rich_escape
 
 from shared.cli._printers import print_discovery_result, print_parsing_result
 from shared.cli._runners import run_discovery, run_parsing
@@ -223,7 +224,7 @@ def benchmark_models(
         console.print("\n[yellow]Interrupted[/]")
         sys.exit(130)
     except Exception as e:
-        console.print(f"\n[red]Error:[/] {e}")
+        console.print(f"\n[red]Error:[/] {rich_escape(str(e))}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

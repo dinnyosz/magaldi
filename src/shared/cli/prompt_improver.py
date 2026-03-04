@@ -11,6 +11,7 @@ from pathlib import Path
 
 import click
 import yaml
+from rich.markup import escape as rich_escape
 from rich.table import Table
 
 from shared.cli._shared import console, main
@@ -222,13 +223,13 @@ def prompt_improver(
             _save_best_prompt(save_best, result)
 
     except ValueError as e:
-        console.print(f"\n[red]Error:[/] {e}")
+        console.print(f"\n[red]Error:[/] {rich_escape(str(e))}")
         sys.exit(1)
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted[/]")
         sys.exit(130)
     except Exception as e:
-        console.print(f"\n[red]Error:[/] {e}")
+        console.print(f"\n[red]Error:[/] {rich_escape(str(e))}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

@@ -25,6 +25,7 @@ from urllib.parse import urlparse
 
 import click
 import requests
+from rich.markup import escape as rich_escape
 
 from shared.cli._shared import console, main
 from shared.config import LLMConfig, ModelConfig, load_config
@@ -559,4 +560,4 @@ def llm_logs(port: int, follow: bool, lines: int) -> None:
             )
             console.print(result.stdout, end="")
         except Exception as e:
-            console.print(f"[red]Error reading log: {e}[/]")
+            console.print(f"[red]Error reading log: {rich_escape(str(e))}[/]")

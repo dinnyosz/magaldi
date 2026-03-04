@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 import click
 import yaml
+from rich.markup import escape as rich_escape
 
 from shared.cli._printers import (
     print_change_manifest,
@@ -121,7 +122,7 @@ def _run_extraction_only(
         except Exception as e:
             if run_logger:
                 run_logger.log_error("feature_extraction", str(e))
-            console.print(f"  [yellow]Warning: Feature extraction failed: {e}[/]")
+            console.print(f"  [yellow]Warning: Feature extraction failed: {rich_escape(str(e))}[/]")
         finally:
             if run_logger:
                 run_logger.end_phase()
@@ -141,7 +142,7 @@ def _run_extraction_only(
         except Exception as e:
             if run_logger:
                 run_logger.log_error("glossary_extraction", str(e))
-            console.print(f"  [yellow]Warning: Glossary extraction failed: {e}[/]")
+            console.print(f"  [yellow]Warning: Glossary extraction failed: {rich_escape(str(e))}[/]")
         finally:
             if run_logger:
                 run_logger.end_phase()
@@ -381,7 +382,7 @@ def parse(
                     console.print("  [dim]No CLI/route hierarchies found[/]")
                 run_logger.end_phase({"relationships": rel_indexed, "external_refs": ref_indexed})
             except Exception as e:
-                console.print(f"  [yellow]Warning: Hierarchy extraction failed: {e}[/]")
+                console.print(f"  [yellow]Warning: Hierarchy extraction failed: {rich_escape(str(e))}[/]")
                 run_logger.log_error("hierarchy_extraction", str(e))
                 run_logger.end_phase({"error": str(e)})
 
@@ -400,7 +401,7 @@ def parse(
                 )
                 run_logger.end_phase()
             except Exception as e:
-                console.print(f"  [yellow]Warning: Call resolution failed: {e}[/]")
+                console.print(f"  [yellow]Warning: Call resolution failed: {rich_escape(str(e))}[/]")
                 run_logger.log_error("call_resolution", str(e))
                 run_logger.end_phase({"error": str(e)})
 
@@ -420,7 +421,7 @@ def parse(
                     print_feature_result(feature_result)
                 run_logger.end_phase()
             except Exception as e:
-                console.print(f"  [yellow]Warning: Feature extraction failed: {e}[/]")
+                console.print(f"  [yellow]Warning: Feature extraction failed: {rich_escape(str(e))}[/]")
                 run_logger.log_error("feature_extraction", str(e))
                 run_logger.end_phase({"error": str(e)})
 
@@ -438,7 +439,7 @@ def parse(
                 )
                 run_logger.end_phase()
             except Exception as e:
-                console.print(f"  [yellow]Warning: Glossary extraction failed: {e}[/]")
+                console.print(f"  [yellow]Warning: Glossary extraction failed: {rich_escape(str(e))}[/]")
                 run_logger.log_error("glossary_extraction", str(e))
                 run_logger.end_phase({"error": str(e)})
 
@@ -463,14 +464,14 @@ def parse(
         sys.stderr.flush()
         os._exit(130)
     except DiscoveryError as e:
-        console.print(f"\n[red]Discovery error:[/] {e}")
+        console.print(f"\n[red]Discovery error:[/] {rich_escape(str(e))}")
         if run_logger is not None:
             run_logger.log_error("discovery", str(e))
             log_path = run_logger.write()
             console.print(f"  [dim]Log:[/] {log_path}")
         sys.exit(1)
     except Exception as e:
-        console.print(f"\n[red]Error:[/] {e}")
+        console.print(f"\n[red]Error:[/] {rich_escape(str(e))}")
         if run_logger is not None:
             run_logger.log_error("parse", str(e))
             log_path = run_logger.write()

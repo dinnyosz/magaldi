@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import click
+from rich.markup import escape as rich_escape
 
 from shared.cli._printers import print_parsing_result
 from shared.cli._runners import run_change_detection, run_discovery, run_processing
@@ -434,7 +435,7 @@ def watch_loop(
                         run_logger,
                     )
                 except Exception as e:
-                    console.print(f"  [red]Error processing changes:[/] {e}")
+                    console.print(f"  [red]Error processing changes:[/] {rich_escape(str(e))}")
                     if run_logger:
                         run_logger.log_error("watch_batch", str(e), {
                             "batch": batch_count,
@@ -617,7 +618,7 @@ def watch(
                             if rel_indexed > 0 or ref_indexed > 0:
                                 console.print(f"  Indexed {rel_indexed} relationships, {ref_indexed} external refs")
                         except Exception as e:
-                            console.print(f"  [yellow]Warning: Hierarchy extraction failed: {e}[/]")
+                            console.print(f"  [yellow]Warning: Hierarchy extraction failed: {rich_escape(str(e))}[/]")
                             run_logger.log_error("watch_hierarchy", str(e))
                         run_logger.end_phase()
 
@@ -711,14 +712,14 @@ def watch(
         # Ctrl+C during initial scan or setup
         _shutdown_watch(run_logger=run_logger)
     except DiscoveryError as e:
-        console.print(f"\n[red]Discovery error:[/] {e}")
+        console.print(f"\n[red]Discovery error:[/] {rich_escape(str(e))}")
         if run_logger:
             run_logger.log_error("watch_discovery", str(e))
             log_path = run_logger.write()
             console.print(f"  [dim]Log:[/] {log_path}")
         sys.exit(1)
     except Exception as e:
-        console.print(f"\n[red]Error:[/] {e}")
+        console.print(f"\n[red]Error:[/] {rich_escape(str(e))}")
         if run_logger:
             run_logger.log_error("watch", str(e))
             log_path = run_logger.write()
