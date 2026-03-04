@@ -9,7 +9,7 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
-from shared.ai.context_size import CONTEXT_TIERS, get_tier_timeout
+from shared.ai.context_size import CONTEXT_TIERS, get_tier_timeout, is_handcrafted_tier
 from shared.throttling import (
     ExplorationOrchestrator,
     ThrottleDecision,
@@ -120,7 +120,7 @@ class DependencyTracker:
         """
         # Handcrafted elements don't use LLM — group them together
         # regardless of element type for maximum parallelism
-        if self._context_sizes.get(element.element_id) == 0:
+        if is_handcrafted_tier(self._context_sizes.get(element.element_id, 2048)):
             return "handcrafted"
         if element.element_type in ("function", "method", "variable", "constant"):
             return "small"
@@ -129,8 +129,8 @@ class DependencyTracker:
     def _get_tier(self, element_id: str) -> int:
         """Get the context tier for an element (snaps to standard tiers)."""
         ctx = self._context_sizes.get(element_id, 2048)
-        if ctx == 0:  # HANDCRAFTED_TIER — no LLM, own exploration cycle
-            return 0
+        if is_handcrafted_tier(ctx):  # Handcrafted — no LLM, own exploration cycle
+            return ctx
         # Find the tier this context size belongs to
         for tier in CONTEXT_TIERS:
             if ctx <= tier:

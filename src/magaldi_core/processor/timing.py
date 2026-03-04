@@ -10,7 +10,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from shared.ai.context_size import HANDCRAFTED_TIER, TIER_SCALING_EXPONENT
+from shared.ai.context_size import TIER_SCALING_EXPONENT, is_handcrafted_tier
+from shared.ai.prompts import OUTPUT_TOKEN_BUDGETS
 from shared.throttling import ThroughputTracker
 
 # Types that always use the small model (regardless of tier)
@@ -29,7 +30,7 @@ def _uses_small_model(element_type: str, tier: int) -> bool:
     Must mirror ProcessingConfig.get_model_for_element_type() logic.
     Handcrafted tier (no LLM) is treated as "small" for grouping purposes.
     """
-    if tier == HANDCRAFTED_TIER:
+    if is_handcrafted_tier(tier):
         return True  # No model needed, group with small for fallback
     if element_type in _ALWAYS_SMALL_TYPES:
         return True
@@ -324,19 +325,13 @@ class TimingStats:
                     has_issues = True
                     input_rows.append((elem_type, tier, count, overflows, avg_pct, worst_pct))
 
-            # Output token summary — output budgets per type (from PROMPT_OVERHEAD)
-            output_budgets = {
-                "file": 500, "class": 450, "function": 500,
-                "method": 400, "interface": 300, "trait": 300, "enum": 250,
-                "variable": 450, "constant": 200, "type_alias": 200,
-                "import": 100,
-            }
+            # Output token summary — budgets from OUTPUT_TOKEN_BUDGETS (shared.ai.prompts)
             output_rows: list[tuple[str, int, int, int]] = []
             for elem_type in sorted(self.output_sample_counts.keys()):
                 count = self.output_sample_counts[elem_type]
                 avg_tokens = self.output_tokens_sum[elem_type] // count
                 max_tokens = self.output_tokens_max[elem_type]
-                budget = output_budgets.get(elem_type, 200)
+                budget = OUTPUT_TOKEN_BUDGETS.get(elem_type, 200)
                 if max_tokens > budget:
                     has_issues = True
                     output_rows.append((elem_type, avg_tokens, max_tokens, budget))
@@ -503,7 +498,7 @@ class TimingStats:
         # 1b. Handcrafted tier: use seeded default when no data yet.
         # Handcrafted elements skip LLM and only do embed+index (~0.1s).
         # Don't fall through to LLM-based tier fallbacks which would overestimate.
-        if tier == HANDCRAFTED_TIER:
+        if is_handcrafted_tier(tier):
             return _HANDCRAFTED_DEFAULT_ETA, True
 
         # 2. Same type, closest tier — but only tiers using the same model.

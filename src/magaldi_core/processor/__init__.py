@@ -24,7 +24,13 @@ if TYPE_CHECKING:
 
 from magaldi_core.code_parser import CodeElement, ParsedFile
 from magaldi_core.job_tracker import RedisJobTracker, SummaryCache
-from shared.ai.context_size import CONTEXT_TIERS, HANDCRAFTED_TIER, compute_element_num_ctx
+from shared.ai.context_size import (
+    CONTEXT_TIERS,
+    CRAFT_REASON_TO_TIER,
+    HANDCRAFTED_TIER,
+    compute_element_num_ctx,
+    is_handcrafted_tier,
+)
 from shared.ai.embedding import CodeEmbeddingClient
 from shared.ai.summarization import SummarizationLLMClient
 from shared.db.store import Repository
@@ -386,12 +392,15 @@ def process_elements(
 
     # Pre-compute context sizes for all elements (for tier batching)
     # This enables DependencyTracker to group elements by context tier
-    # Handcrafted elements (imports, small functions) get HANDCRAFTED_TIER (0)
+    # Handcrafted elements get craft sub-tiers (test/import/small/docstring)
     # so they batch separately from LLM elements and get their own exploration cycle
     element_context_sizes: dict[str, int] = {}
     for elem in elements_to_process:
-        if _should_handcraft(elem, config):
-            element_context_sizes[elem.element_id] = HANDCRAFTED_TIER
+        craft_reason = _get_craft_reason(elem, config)
+        if craft_reason is not None:
+            element_context_sizes[elem.element_id] = CRAFT_REASON_TO_TIER.get(
+                craft_reason, HANDCRAFTED_TIER
+            )
         else:
             char_count = len(elem.raw_code or "")
             element_context_sizes[elem.element_id] = compute_element_num_ctx(
@@ -423,12 +432,12 @@ def process_elements(
     timing_stats.set_totals_by_type(totals_by_type)
 
     # Count elements by (type, tier) for tier-aware ETA
-    # element_context_sizes already has HANDCRAFTED_TIER (0) for handcrafted elements
+    # element_context_sizes already has craft sub-tiers for handcrafted elements
     totals_by_type_tier: dict[tuple[str, int], int] = {}
     for elem in elements_to_process:
         ctx_size = element_context_sizes.get(elem.element_id, 2048)
-        if ctx_size == HANDCRAFTED_TIER:
-            tier = HANDCRAFTED_TIER
+        if is_handcrafted_tier(ctx_size):
+            tier = ctx_size  # Keep craft sub-tier as-is
         else:
             # Snap to standard tier
             tier = 2048

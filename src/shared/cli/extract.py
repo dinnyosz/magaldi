@@ -140,10 +140,19 @@ def build_eta_table(
     if not eta_breakdown:
         return None
 
-    from shared.ai.context_size import CONTEXT_TIERS, HANDCRAFTED_TIER, TIER_ABBREV, TIER_COLORS
+    from shared.ai.context_size import (
+        CONTEXT_TIERS,
+        CRAFT_DOCSTRING,
+        CRAFT_IMPORT,
+        CRAFT_SMALL,
+        CRAFT_TEST,
+        TIER_ABBREV,
+        TIER_COLORS,
+    )
     tier_abbrev = TIER_ABBREV
-    # Standard tiers descending + handcrafted column at the end
-    all_tiers = sorted(CONTEXT_TIERS, reverse=True) + [HANDCRAFTED_TIER]
+    # Standard tiers descending + craft sub-tiers at the end
+    craft_tiers = [CRAFT_TEST, CRAFT_IMPORT, CRAFT_SMALL, CRAFT_DOCSTRING]
+    all_tiers = sorted(CONTEXT_TIERS, reverse=True) + craft_tiers
     type_colors = type_colors or {}
 
     # Build lookup from breakdown data

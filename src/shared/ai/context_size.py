@@ -25,11 +25,41 @@ CONTEXT_TIERS = [1024, 2048, 4096, 8192, 16384, 32768]
 
 # Sentinel tier for handcrafted summaries (no LLM context needed).
 # Elements assigned this tier skip LLM summarization and use code/docstring directly.
+# Use is_handcrafted_tier() to check — sub-tiers exist for display categorization.
 HANDCRAFTED_TIER = 0
+
+# Craft sub-tiers: split handcrafted elements by reason for display.
+# All share the same processing characteristics (no LLM, max parallelism).
+# Values must be < min(CONTEXT_TIERS) and >= 0 to pass tier tracking checks.
+CRAFT_TEST = 1
+CRAFT_IMPORT = 2
+CRAFT_SMALL = 3
+CRAFT_DOCSTRING = 4
+
+# All handcrafted tier values (for iteration and membership checks)
+HANDCRAFTED_TIERS = frozenset({HANDCRAFTED_TIER, CRAFT_TEST, CRAFT_IMPORT, CRAFT_SMALL, CRAFT_DOCSTRING})
+
+# Map craft_reason string to tier value
+CRAFT_REASON_TO_TIER = {
+    "test": CRAFT_TEST,
+    "import": CRAFT_IMPORT,
+    "small": CRAFT_SMALL,
+    "docstring": CRAFT_DOCSTRING,
+}
+
+
+def is_handcrafted_tier(tier: int) -> bool:
+    """Check if a tier value is any handcrafted sub-tier."""
+    return tier in HANDCRAFTED_TIERS
+
 
 # Human-readable abbreviations for each tier (single source of truth)
 TIER_ABBREV = {tier: f"{tier // 1024}k" for tier in CONTEXT_TIERS}
 TIER_ABBREV[HANDCRAFTED_TIER] = "craft"
+TIER_ABBREV[CRAFT_TEST] = "test"
+TIER_ABBREV[CRAFT_IMPORT] = "import"
+TIER_ABBREV[CRAFT_SMALL] = "small"
+TIER_ABBREV[CRAFT_DOCSTRING] = "doc"
 
 # Suffixes for Ollama tiered model aliases (e.g., "qwen3:4b-instruct-2k")
 TIER_SUFFIXES = {tier: f"-{tier // 1024}k" for tier in CONTEXT_TIERS}
@@ -43,6 +73,10 @@ TIER_COLORS = {
     2048: "bright_green",
     1024: "green",
     HANDCRAFTED_TIER: "dim green",
+    CRAFT_TEST: "dim green",
+    CRAFT_IMPORT: "dim green",
+    CRAFT_SMALL: "dim green",
+    CRAFT_DOCSTRING: "dim green",
 }
 
 # Tier scaling exponent for ETA estimation fallback.
@@ -55,7 +89,7 @@ TIER_SCALING_EXPONENT = 0.65
 # Smaller contexts = more parallelism, larger contexts = less to avoid GPU saturation
 # Tuned for M4 Pro 48GB - adjust for different hardware
 TIER_MAX_WORKERS = {
-    HANDCRAFTED_TIER: 16,  # No LLM - maximum parallelism
+    **dict.fromkeys(HANDCRAFTED_TIERS, 16),  # No LLM - maximum parallelism
     1024: 16,  # Tiny context - maximum parallelism
     2048: 12,  # Small context - high parallelism
     4096: 8,   # Medium-small
@@ -69,7 +103,7 @@ TIER_MAX_WORKERS = {
 # Derived from previous fixed values: old_timeout / sqrt(TIER_MAX_WORKERS[tier]).
 # NOTE: These are used for throttle calculations; Ollama may not enforce actual timeouts.
 TIER_BASE_TIMEOUTS = {
-    HANDCRAFTED_TIER: 15,   # No LLM - very fast even solo
+    **dict.fromkeys(HANDCRAFTED_TIERS, 15),  # No LLM - very fast even solo
     1024: 90,    # 1.5 minutes solo
     2048: 104,   # ~1.7 minutes solo
     4096: 127,   # ~2.1 minutes solo
