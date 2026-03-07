@@ -15,6 +15,7 @@ from typing import Any
 
 import tree_sitter_bash as ts_bash
 import tree_sitter_dockerfile as ts_dockerfile
+import tree_sitter_java as ts_java
 import tree_sitter_javascript as ts_javascript
 import tree_sitter_markdown as ts_markdown
 import tree_sitter_php as ts_php
@@ -47,6 +48,18 @@ from magaldi_core.extractors.base import (
     get_children_by_type,
     get_node_text,
     walk_tree,
+)
+from magaldi_core.extractors.java import (
+    JavaExtractor,
+    extract_java_base_classes,
+    extract_java_calls,
+    extract_java_class_fields,
+    extract_java_class_members,
+    extract_java_elements,
+    extract_java_imports,
+    extract_java_modified_attributes,
+    extract_java_thrown_exceptions,
+    extract_top_level_java_calls,
 )
 from magaldi_core.extractors.javascript import (
     JavaScriptExtractor,
@@ -93,11 +106,11 @@ from magaldi_core.extractors.rust import (
     extract_rust_elements,
     extract_rust_impl_members,
     extract_rust_impl_traits,
-    extract_rust_trait_members,
     extract_rust_imports,
     extract_rust_modified_fields,
     extract_rust_panics,
     extract_rust_struct_fields,
+    extract_rust_trait_members,
     extract_top_level_rust_calls,
 )
 from magaldi_core.extractors.types import (
@@ -146,6 +159,7 @@ class TreeSitterManager:
         "tsx": (ts_typescript, "language_tsx"),
         "php": (ts_php, "language_php"),
         "rust": (ts_rust, "language"),
+        "java": (ts_java, "language"),
         "markdown": (ts_markdown, "language"),
         "yaml": (ts_yaml, "language"),
         "toml": (ts_toml, "language"),
@@ -213,6 +227,8 @@ class TreeSitterManager:
             extractor = PHPExtractor()
         elif language == "rust":
             extractor = RustExtractor()
+        elif language == "java":
+            extractor = JavaExtractor()
         elif language == "markdown":
             from magaldi_core.extractors.markdown import MarkdownExtractor
             extractor = MarkdownExtractor()
@@ -416,6 +432,17 @@ __all__ = [
     "extract_rust_impl_traits",
     "extract_rust_panics",
     "extract_rust_modified_fields",
+    # Java extraction
+    "JavaExtractor",
+    "extract_java_elements",
+    "extract_java_class_members",
+    "extract_java_imports",
+    "extract_java_calls",
+    "extract_top_level_java_calls",
+    "extract_java_class_fields",
+    "extract_java_base_classes",
+    "extract_java_thrown_exceptions",
+    "extract_java_modified_attributes",
     # Analysis - semantic
     "extract_todos",
     "extract_section_markers",

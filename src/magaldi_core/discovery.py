@@ -38,6 +38,7 @@ SUPPORTED_EXTENSIONS: dict[str, str] = {
     ".tsx": "tsx",
     ".php": "php",
     ".rs": "rust",
+    ".java": "java",
     ".md": "markdown",
     ".yaml": "yaml",
     ".yml": "yaml",

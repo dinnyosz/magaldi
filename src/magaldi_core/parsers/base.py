@@ -383,7 +383,7 @@ def extract_docstring(lines: list[str], block_start: int) -> str | None:
 # =============================================================================
 
 # Languages that support /** ... */ block doc comments
-_BLOCK_DOC_LANGUAGES = frozenset({"javascript", "typescript", "php", "rust"})
+_BLOCK_DOC_LANGUAGES = frozenset({"javascript", "typescript", "php", "rust", "java"})
 
 # Languages where #[...] attribute lines should be skipped when scanning backward
 _ATTRIBUTE_LANGUAGES = frozenset({"rust", "php"})
@@ -556,6 +556,23 @@ def extract_preceding_doc_comment(
                 # Allow one blank line between attribute and doc comment
                 if idx >= 0 and not lines[idx].strip():
                     idx -= 1
+            else:
+                break
+        if idx < 0:
+            return None
+
+    # Skip @Annotation lines (Java)
+    if language == "java":
+        while idx >= 0:
+            stripped = lines[idx].strip()
+            if stripped.startswith("@"):
+                idx -= 1
+                # Allow one blank line between annotation and doc comment
+                if idx >= 0 and not lines[idx].strip():
+                    idx -= 1
+            elif stripped in ("public", "private", "protected", "static",
+                              "final", "abstract", "synchronized", "default"):
+                idx -= 1
             else:
                 break
         if idx < 0:

@@ -32,10 +32,10 @@ make typecheck              # Run mypy on src/magaldi
 make check                  # All: lint + typecheck + test
 
 # Pull Ollama models (for AI features)
-make ollama-pull            # qwen3:1.7b, qwen3:4b-instruct, qwen3-embedding:0.6b
+make ollama-pull            # qwen3.5:2b, qwen3.5:4b, qwen3-embedding:0.6b
 
 # Use llama.cpp server for summarization (better batching)
-./tools/benchmark-llama-server.sh --model qwen3:4b-instruct
+./tools/benchmark-llama-server.sh --model qwen3.5:4b
 ```
 
 ## Architecture
@@ -103,7 +103,7 @@ All design documents are in `plans/`:
 
 ## Supported Languages
 
-Python, JavaScript, TypeScript, PHP, Rust, Bash (via Tree-sitter grammars)
+Python, JavaScript, TypeScript, PHP, Rust, Java, Bash (via Tree-sitter grammars)
 
 ## Configuration
 

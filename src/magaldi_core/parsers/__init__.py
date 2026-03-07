@@ -5,6 +5,7 @@ This package contains tree-sitter based parsers for different programming langua
 - JavaScriptParser: JavaScript and TypeScript files
 - PhpParser: PHP files
 - RustParser: Rust files
+- JavaParser: Java files
 
 All parsers inherit from TreeSitterParser base class.
 """
@@ -22,6 +23,7 @@ from magaldi_core.parsers.base import (
 )
 from magaldi_core.parsers.bash import BashParser
 from magaldi_core.parsers.dockerfile import DockerfileParser
+from magaldi_core.parsers.java import JavaParser
 from magaldi_core.parsers.javascript import JavaScriptParser
 from magaldi_core.parsers.markdown import MarkdownParser
 from magaldi_core.parsers.php import PhpParser
@@ -45,6 +47,7 @@ __all__ = [
     # Language-specific parsers
     "BashParser",
     "DockerfileParser",
+    "JavaParser",
     "JavaScriptParser",
     "MarkdownParser",
     "PhpParser",

@@ -22,6 +22,18 @@ from magaldi_core.extractors.base import (
     get_node_text,
     walk_tree,
 )
+from magaldi_core.extractors.java import (
+    JavaExtractor,
+    extract_java_base_classes,
+    extract_java_calls,
+    extract_java_class_fields,
+    extract_java_class_members,
+    extract_java_elements,
+    extract_java_imports,
+    extract_java_modified_attributes,
+    extract_java_thrown_exceptions,
+    extract_top_level_java_calls,
+)
 from magaldi_core.extractors.javascript import (
     JavaScriptExtractor,
     extract_javascript_base_class,
@@ -97,6 +109,7 @@ _EXTRACTORS: dict[str, type[BaseExtractor]] = {
     "typescript": JavaScriptExtractor,
     "php": PHPExtractor,
     "rust": RustExtractor,
+    "java": JavaExtractor,
 }
 
 
@@ -151,6 +164,7 @@ __all__ = [
     "JavaScriptExtractor",
     "PHPExtractor",
     "RustExtractor",
+    "JavaExtractor",
     # Python extraction functions
     "extract_python_elements",
     "extract_python_class_members",
@@ -189,4 +203,14 @@ __all__ = [
     "extract_rust_impl_traits",
     "extract_rust_panics",
     "extract_rust_modified_fields",
+    # Java extraction functions
+    "extract_java_elements",
+    "extract_java_class_members",
+    "extract_java_imports",
+    "extract_java_calls",
+    "extract_top_level_java_calls",
+    "extract_java_class_fields",
+    "extract_java_base_classes",
+    "extract_java_thrown_exceptions",
+    "extract_java_modified_attributes",
 ]

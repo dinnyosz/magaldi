@@ -176,6 +176,37 @@ BUILTIN_METHODS: dict[str, set[str] | None] = {
         # Logging (log crate)
         "debug", "info", "warn", "error", "trace",
     },
+    "java": {
+        # Collections (List, Set, Map, Queue)
+        "add", "get", "put", "remove", "contains", "size", "isEmpty", "clear",
+        "iterator", "stream", "forEach", "toArray", "entrySet", "keySet",
+        "values", "containsKey", "containsValue", "addAll", "removeAll",
+        "retainAll", "sort", "subList", "indexOf", "lastIndexOf",
+        "offer", "poll", "peek",
+        # String
+        "length", "charAt", "substring", "startsWith", "endsWith", "trim", "strip",
+        "toLowerCase", "toUpperCase", "split", "replace", "replaceAll",
+        "matches", "format", "valueOf", "compareTo", "equals",
+        "equalsIgnoreCase", "intern", "isBlank", "toCharArray",
+        # Object
+        "toString", "hashCode", "getClass", "clone", "notify", "wait",
+        # Stream
+        "filter", "map", "flatMap", "reduce", "collect",
+        "count", "findFirst", "findAny", "anyMatch", "allMatch",
+        "noneMatch", "sorted", "distinct", "limit", "skip",
+        "of", "empty", "concat", "toList",
+        # Optional
+        "isPresent", "orElse", "orElseGet", "orElseThrow",
+        "ifPresent",
+        # I/O
+        "read", "write", "close", "flush",
+        # Logging
+        "debug", "info", "warn", "error", "trace", "log",
+        # Iterator
+        "hasNext", "next",
+        # Comparable / Comparator
+        "compare",
+    },
     "bash": set(),  # Bash doesn't have method calls
 }
 
@@ -288,6 +319,7 @@ SELF_REFERENCES: dict[str, set[str]] = {
     "typescript": {"this"},
     "php": {"this", "$this"},
     "rust": {"self", "Self"},
+    "java": {"this"},
 }
 
 

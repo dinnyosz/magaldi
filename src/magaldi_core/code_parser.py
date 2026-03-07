@@ -12,6 +12,7 @@ The actual parsing logic is in the parsers/ subpackage:
 - parsers/javascript.py - JavaScriptParser
 - parsers/php.py - PhpParser
 - parsers/rust.py - RustParser
+- parsers/java.py - JavaParser
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from magaldi_core.parsers import (
     CodeElement,
     DockerfileParser,
     Import,
+    JavaParser,
     JavaScriptParser,
     MarkdownParser,
     PhpParser,
@@ -294,6 +296,7 @@ PARSERS: dict[str, TreeSitterParser | PlainTextParser] = {
     "tsx": JavaScriptParser("tsx"),
     "php": PhpParser(),
     "rust": RustParser(),
+    "java": JavaParser(),
     "markdown": MarkdownParser(),
     "yaml": YamlParser(),
     "toml": TomlParser(),
