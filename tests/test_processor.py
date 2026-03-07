@@ -3257,23 +3257,41 @@ class TestGetCraftReason:
         )
         assert _get_craft_reason(elem, config) == "small"
 
-    def test_test_with_docstring_returns_test_not_docstring(self):
-        """Test check takes priority over docstring check."""
+    def test_test_with_docstring_returns_docstring(self):
+        """Docstring takes priority even over test check."""
         config = ProcessingConfig(use_docstrings=True)
         elem = CodeElement(
             element_type="function", name="test_foo", is_test=True,
             raw_code="def test_foo():\n    assert True\n",
             docstring="Test the foo functionality with edge cases",
         )
+        assert _get_craft_reason(elem, config) == "docstring"
+
+    def test_test_without_docstring_returns_test(self):
+        """Test without docstring falls back to 'test' reason."""
+        config = ProcessingConfig(use_docstrings=True)
+        elem = CodeElement(
+            element_type="function", name="test_foo", is_test=True,
+            raw_code="def test_foo():\n    assert True\n",
+        )
         assert _get_craft_reason(elem, config) == "test"
 
-    def test_import_with_docstring_returns_import_not_docstring(self):
-        """Import check takes priority over docstring check."""
+    def test_import_with_docstring_returns_docstring(self):
+        """Docstring takes priority even over import check."""
         config = ProcessingConfig(use_docstrings=True)
         elem = CodeElement(
             element_type="import", name="os",
             raw_code="import os",
             docstring="Operating system interface module",
+        )
+        assert _get_craft_reason(elem, config) == "docstring"
+
+    def test_import_without_docstring_returns_import(self):
+        """Import without docstring falls back to 'import' reason."""
+        config = ProcessingConfig(use_docstrings=True)
+        elem = CodeElement(
+            element_type="import", name="os",
+            raw_code="import os",
         )
         assert _get_craft_reason(elem, config) == "import"
 
