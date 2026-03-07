@@ -812,6 +812,9 @@ def _extract_php_method(node: Node, _lines: list[str]) -> ExtractedElement | Non
     if not name:
         return None
 
+    # Store visibility in decorators (consistent with properties and constants)
+    decorators.insert(0, visibility)
+
     # Extract structured parameters and return type
     parameters = _extract_php_parameters(params_node) if params_node else []
     return_type = _extract_php_return_type(node)

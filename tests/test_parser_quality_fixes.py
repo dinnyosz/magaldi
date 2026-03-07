@@ -1468,3 +1468,66 @@ class TestRawStringDocstring:
         ]
         result = extract_docstring(lines, 0)
         assert result == "Single quote raw docstring."
+
+
+# =============================================================================
+# PHP: Visibility field extraction
+# =============================================================================
+
+
+class TestPhpVisibility:
+    """Verify PHP visibility modifiers are correctly set on CodeElement."""
+
+    def _parse_php(self, code: str):
+        from magaldi_core.code_parser import PhpParser
+
+        parser = PhpParser()
+        file_info = FileInfo(
+            relative_path="test.php",
+            absolute_path=Path("/fake/test.php"),
+            language="php",
+        )
+        return parser.parse(code, file_info, "scope", "repo", "main")
+
+    def test_public_method_visibility(self):
+        """Public method should have visibility='public'."""
+        code = "<?php\nclass Foo {\n    public function bar() {}\n}\n"
+        elements = self._parse_php(code)
+        method = next(e for e in elements if e.name == "bar")
+        assert method.visibility == "public"
+
+    def test_private_method_visibility(self):
+        """Private method should have visibility='private'."""
+        code = "<?php\nclass Foo {\n    private function secret() {}\n}\n"
+        elements = self._parse_php(code)
+        method = next(e for e in elements if e.name == "secret")
+        assert method.visibility == "private"
+
+    def test_protected_method_visibility(self):
+        """Protected method should have visibility='protected'."""
+        code = "<?php\nclass Foo {\n    protected function internal() {}\n}\n"
+        elements = self._parse_php(code)
+        method = next(e for e in elements if e.name == "internal")
+        assert method.visibility == "protected"
+
+    def test_no_modifier_defaults_public(self):
+        """Method without visibility modifier should default to public."""
+        code = "<?php\nclass Foo {\n    function bar() {}\n}\n"
+        elements = self._parse_php(code)
+        method = next(e for e in elements if e.name == "bar")
+        assert method.visibility == "public"
+
+    def test_private_property_visibility(self):
+        """Private property should have visibility='private'."""
+        code = "<?php\nclass Foo {\n    private $secret = 'hidden';\n}\n"
+        elements = self._parse_php(code)
+        prop = next((e for e in elements if e.name == "secret"), None)
+        assert prop is not None
+        assert prop.visibility == "private"
+
+    def test_private_constant_visibility(self):
+        """Private constant should have visibility='private'."""
+        code = "<?php\nclass Foo {\n    private const KEY = 'value';\n}\n"
+        elements = self._parse_php(code)
+        const = next(e for e in elements if e.name == "KEY")
+        assert const.visibility == "private"

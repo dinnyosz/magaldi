@@ -35,6 +35,17 @@ from magaldi_core.tree_sitter_manager import (
 if TYPE_CHECKING:
     from magaldi_core.change_detection import FileInfo
 
+_VISIBILITY_KEYWORDS = frozenset({"public", "private", "protected"})
+
+
+def _extract_visibility(decorators: list[str] | None) -> str:
+    """Extract visibility modifier from decorator list."""
+    if decorators:
+        for d in decorators:
+            if d in _VISIBILITY_KEYWORDS:
+                return d
+    return "public"
+
 
 class PhpParser(TreeSitterParser):
     """Parse PHP files using tree-sitter."""
@@ -427,6 +438,7 @@ class PhpParser(TreeSitterParser):
             signature=ext.signature,
             docstring=extract_preceding_doc_comment(lines, ext.line_start, "php"),
             decorators=ext.decorators or [],
+            visibility=_extract_visibility(ext.decorators),
             level=2,
             parent_id=parent_class.element_id,
             calls=calls,
@@ -467,6 +479,7 @@ class PhpParser(TreeSitterParser):
             signature=ext.signature,
             docstring=extract_preceding_doc_comment(lines, ext.line_start, "php"),
             decorators=ext.decorators or [],
+            visibility=_extract_visibility(ext.decorators),
             level=3,
             parent_id=parent.element_id if parent else None,
         )
