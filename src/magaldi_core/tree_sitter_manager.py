@@ -93,6 +93,7 @@ from magaldi_core.extractors.rust import (
     extract_rust_elements,
     extract_rust_impl_members,
     extract_rust_impl_traits,
+    extract_rust_trait_members,
     extract_rust_imports,
     extract_rust_modified_fields,
     extract_rust_panics,
@@ -407,6 +408,7 @@ __all__ = [
     # Rust extraction
     "extract_rust_elements",
     "extract_rust_impl_members",
+    "extract_rust_trait_members",
     "extract_rust_imports",
     "extract_rust_calls",
     "extract_top_level_rust_calls",

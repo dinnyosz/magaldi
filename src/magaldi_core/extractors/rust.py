@@ -694,8 +694,41 @@ def extract_rust_impl_members(
     return methods, constants
 
 
+def extract_rust_trait_members(
+    trait_node: Node, lines: list[str]
+) -> list[ExtractedElement]:
+    """Extract method signatures and default methods from a Rust trait block.
+
+    Args:
+        trait_node: A trait_item node.
+        lines: Source code lines.
+
+    Returns:
+        List of method elements.
+    """
+    methods: list[ExtractedElement] = []
+
+    # Find declaration_list
+    decl_list = None
+    for child in trait_node.children:
+        if child.type == "declaration_list":
+            decl_list = child
+            break
+
+    if not decl_list:
+        return methods
+
+    for child in decl_list.children:
+        if child.type in ("function_item", "function_signature_item"):
+            elem = _extract_rust_method(child, lines)
+            if elem:
+                methods.append(elem)
+
+    return methods
+
+
 def _extract_rust_method(node: Node, _lines: list[str]) -> ExtractedElement | None:
-    """Extract a Rust method from an impl block."""
+    """Extract a Rust method from an impl or trait block."""
     name = None
     is_async = False
     decorators: list[str] = []
@@ -708,6 +741,12 @@ def _extract_rust_method(node: Node, _lines: list[str]) -> ExtractedElement | No
         elif child.type == "async":
             is_async = True
             decorators.append("async")
+        elif child.type == "function_modifiers":
+            # function_signature_item wraps modifiers (e.g. async) in this node
+            mod_text = get_node_text(child)
+            if "async" in mod_text:
+                is_async = True
+                decorators.append("async")
         elif child.type == "parameters":
             params_node = child
             # Check for self parameter

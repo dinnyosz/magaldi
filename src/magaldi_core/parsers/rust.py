@@ -27,6 +27,7 @@ from magaldi_core.tree_sitter_manager import (
     extract_rust_elements,
     extract_rust_impl_members,
     extract_rust_impl_traits,
+    extract_rust_trait_members,
     extract_rust_imports,
     extract_rust_modified_fields,
     extract_rust_panics,
@@ -107,7 +108,20 @@ class RustParser(TreeSitterParser):
                 func_elem = self._convert_function(ext, file_info, scope, repository, username, lines)
                 elements.append(func_elem)
 
-            elif ext.element_type in ("enum", "trait", "type_alias"):
+            elif ext.element_type == "trait":
+                trait_elem = self._convert_type_definition(ext, file_info, scope, repository, username, lines)
+                elements.append(trait_elem)
+
+                # Extract trait methods (abstract signatures + default impls)
+                if ext.node:
+                    trait_methods = extract_rust_trait_members(ext.node, lines)
+                    for method_ext in trait_methods:
+                        method_elem = self._convert_method(
+                            method_ext, trait_elem, file_info, scope, repository, username, lines
+                        )
+                        elements.append(method_elem)
+
+            elif ext.element_type in ("enum", "type_alias"):
                 type_elem = self._convert_type_definition(ext, file_info, scope, repository, username, lines)
                 elements.append(type_elem)
 

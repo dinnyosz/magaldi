@@ -1733,3 +1733,89 @@ class TestLockFileExclusion:
         from magaldi_core.discovery import DEFAULT_EXCLUDE_FILES, _is_excluded_file
 
         assert _is_excluded_file("Gemfile.lock", DEFAULT_EXCLUDE_FILES)
+
+
+# =============================================================================
+# Rust: Trait method extraction
+# =============================================================================
+
+
+class TestRustTraitMethods:
+    """Verify trait method signatures are extracted as child elements."""
+
+    def _parse_rust(self, code: str):
+        from magaldi_core.code_parser import RustParser
+
+        parser = RustParser()
+        file_info = FileInfo(
+            relative_path="lib.rs",
+            absolute_path=Path("/fake/lib.rs"),
+            language="rust",
+        )
+        return parser.parse(code, file_info, "scope", "repo", "main")
+
+    def test_abstract_method_extracted(self):
+        """Test trait abstract method (no body) is extracted."""
+        code = "trait Foo {\n    fn bar(&self) -> i32;\n}\n"
+        elements = self._parse_rust(code)
+        methods = [e for e in elements if e.element_type == "method"]
+        assert len(methods) == 1
+        assert methods[0].name == "bar"
+        assert "fn bar(&self) -> i32" in methods[0].signature
+
+    def test_default_method_extracted(self):
+        """Test trait default method (with body) is extracted."""
+        code = "trait Foo {\n    fn bar(&self) -> i32 {\n        42\n    }\n}\n"
+        elements = self._parse_rust(code)
+        methods = [e for e in elements if e.element_type == "method"]
+        assert len(methods) == 1
+        assert methods[0].name == "bar"
+
+    def test_multiple_methods(self):
+        """Test trait with multiple methods."""
+        code = (
+            "trait Reader {\n"
+            "    fn read(&mut self, buf: &mut [u8]) -> Result<usize>;\n"
+            "    fn read_exact(&mut self, buf: &mut [u8]) -> Result<()> {\n"
+            "        Ok(())\n"
+            "    }\n"
+            "}\n"
+        )
+        elements = self._parse_rust(code)
+        methods = [e for e in elements if e.element_type == "method"]
+        names = {m.name for m in methods}
+        assert names == {"read", "read_exact"}
+
+    def test_methods_have_correct_parent_id(self):
+        """Test trait methods have parent_id pointing to trait."""
+        code = "trait Foo {\n    fn bar(&self);\n}\n"
+        elements = self._parse_rust(code)
+        trait_elem = next(e for e in elements if e.element_type == "trait")
+        method_elem = next(e for e in elements if e.element_type == "method")
+        assert method_elem.parent_id == trait_elem.element_id
+
+    def test_method_signatures_captured(self):
+        """Test trait method signatures include return type."""
+        code = "trait Iterator {\n    fn next(&mut self) -> Option<Self::Item>;\n}\n"
+        elements = self._parse_rust(code)
+        method = next(e for e in elements if e.element_type == "method")
+        assert "fn next" in method.signature
+        assert "Option<Self::Item>" in method.signature
+
+    def test_async_trait_method(self):
+        """Test async trait methods are detected."""
+        code = "trait AsyncReader {\n    async fn read(&mut self) -> Vec<u8>;\n}\n"
+        elements = self._parse_rust(code)
+        methods = [e for e in elements if e.element_type == "method"]
+        assert len(methods) == 1
+        assert methods[0].is_async is True
+
+    def test_empty_trait_no_methods(self):
+        """Test empty trait produces no methods."""
+        code = "trait Marker {}\n"
+        elements = self._parse_rust(code)
+        methods = [e for e in elements if e.element_type == "method"]
+        assert len(methods) == 0
+        # Trait itself should still exist
+        traits = [e for e in elements if e.element_type == "trait"]
+        assert len(traits) == 1
