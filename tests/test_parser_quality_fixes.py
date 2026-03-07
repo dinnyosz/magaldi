@@ -1693,3 +1693,43 @@ class TestBatsExtension:
         # Should parse without error and find at least the file element
         assert len(elements) >= 1
         assert elements[0].element_type == "file"
+
+
+# =============================================================================
+# Lock file exclusion
+# =============================================================================
+
+
+class TestLockFileExclusion:
+    """Test that lock files with non-.lock extensions are excluded."""
+
+    def test_pnpm_lock_yaml_excluded(self):
+        """Test pnpm-lock.yaml matches exclusion pattern."""
+        from magaldi_core.discovery import DEFAULT_EXCLUDE_FILES, _is_excluded_file
+
+        assert _is_excluded_file("pnpm-lock.yaml", DEFAULT_EXCLUDE_FILES)
+
+    def test_generic_lock_yaml_excluded(self):
+        """Test any *-lock.yaml file is excluded."""
+        from magaldi_core.discovery import DEFAULT_EXCLUDE_FILES, _is_excluded_file
+
+        assert _is_excluded_file("some-lock.yaml", DEFAULT_EXCLUDE_FILES)
+
+    def test_generic_lock_json_excluded(self):
+        """Test any *-lock.json file is excluded."""
+        from magaldi_core.discovery import DEFAULT_EXCLUDE_FILES, _is_excluded_file
+
+        assert _is_excluded_file("package-lock.json", DEFAULT_EXCLUDE_FILES)
+
+    def test_regular_yaml_not_excluded(self):
+        """Test normal YAML files are not excluded."""
+        from magaldi_core.discovery import DEFAULT_EXCLUDE_FILES, _is_excluded_file
+
+        assert not _is_excluded_file("config.yaml", DEFAULT_EXCLUDE_FILES)
+        assert not _is_excluded_file("docker-compose.yaml", DEFAULT_EXCLUDE_FILES)
+
+    def test_dot_lock_still_excluded(self):
+        """Test *.lock pattern still works."""
+        from magaldi_core.discovery import DEFAULT_EXCLUDE_FILES, _is_excluded_file
+
+        assert _is_excluded_file("Gemfile.lock", DEFAULT_EXCLUDE_FILES)

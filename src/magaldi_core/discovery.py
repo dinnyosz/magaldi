@@ -90,6 +90,8 @@ DEFAULT_EXCLUDE_FILES: list[str] = [
     "*.min.css",
     "*.map",
     "*.lock",
+    "*-lock.yaml",
+    "*-lock.json",
     "package-lock.json",
     "yarn.lock",
     "composer.lock",
