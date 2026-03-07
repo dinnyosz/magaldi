@@ -135,12 +135,12 @@ class TestResolveCallsByEmbedding:
             {
                 "element_id": "caller1",
                 "calls": [
-                    {"name": "save", "receiver": "repo", "category": "untyped", "resolved_id": None},
+                    {"name": "persist_record", "receiver": "repo", "category": "untyped", "resolved_id": None},
                 ],
             }
         ]
         mock_es.find_candidates_by_name.return_value = [
-            {"element_id": "target1", "name": "save", "element_type": "method"},
+            {"element_id": "target1", "name": "persist_record", "element_type": "method"},
         ]
 
         total, single, embedding = resolve_calls_by_embedding(mock_es, "s", "r", "main")
@@ -295,12 +295,12 @@ class TestResolveCallsByEmbedding:
             {
                 "element_id": "caller1",
                 "calls": [
-                    {"name": "save", "receiver": "repo", "category": "untyped", "resolved_id": None},
+                    {"name": "persist_record", "receiver": "repo", "category": "untyped", "resolved_id": None},
                 ],
             }
         ]
         mock_es.find_candidates_by_name.return_value = [
-            {"element_id": "t1", "name": "save", "element_type": "method"},
+            {"element_id": "t1", "name": "persist_record", "element_type": "method"},
         ]
 
         resolve_calls_by_embedding(mock_es, "s", "r", "main")
@@ -1565,22 +1565,22 @@ class TestEmbeddingResolutionFixtureFiltering:
     """E2E tests: fixture candidates are excluded for production callers."""
 
     def test_fixture_candidate_excluded_for_production_caller(self, mock_es):
-        """Production code calling .add() should not resolve to test fixture."""
+        """Production code calling .track_event() should not resolve to test fixture."""
         mock_es.find_all_elements_with_calls.return_value = [
             {
                 "element_id": "caller1",
                 "relative_path": "src/processor.py",
                 "calls": [
-                    {"name": "add", "receiver": "tracker", "category": "untyped", "resolved_id": None},
+                    {"name": "track_event", "receiver": "tracker", "category": "untyped", "resolved_id": None},
                 ],
             }
         ]
         # One real candidate, one fixture
         mock_es.find_candidates_by_name.return_value = [
-            {"element_id": "fixture_add", "name": "add", "element_type": "function",
+            {"element_id": "fixture_track", "name": "track_event", "element_type": "function",
              "summary_embedding": [0.9, 0.1], "parent_id": "",
              "relative_path": "tests/fixtures/repos/valid_repo/src/utils.py"},
-            {"element_id": "real_add", "name": "add", "element_type": "method",
+            {"element_id": "real_track", "name": "track_event", "element_type": "method",
              "summary_embedding": [0.5, 0.5], "parent_id": "x:r:main:tracker.py:class:Tracker:1",
              "relative_path": "src/tracker.py"},
         ]
@@ -1588,24 +1588,24 @@ class TestEmbeddingResolutionFixtureFiltering:
 
         total, single, embedding = resolve_calls_by_embedding(mock_es, "s", "r", "main")
 
-        # Fixture filtered out, only real_add remains as single candidate
+        # Fixture filtered out, only real_track remains as single candidate
         assert single == 1 or embedding == 1
         stored_calls = mock_es.store_calls.call_args[0][1]
-        assert stored_calls[0]["resolved_id"] == "real_add"
+        assert stored_calls[0]["resolved_id"] == "real_track"
 
     def test_test_caller_can_resolve_to_fixture(self, mock_es):
-        """Test code calling .add() CAN resolve to test fixture."""
+        """Test code calling .track_event() CAN resolve to test fixture."""
         mock_es.find_all_elements_with_calls.return_value = [
             {
                 "element_id": "test_caller",
                 "relative_path": "tests/test_processor.py",
                 "calls": [
-                    {"name": "add", "receiver": "tracker", "category": "untyped", "resolved_id": None},
+                    {"name": "track_event", "receiver": "tracker", "category": "untyped", "resolved_id": None},
                 ],
             }
         ]
         mock_es.find_candidates_by_name.return_value = [
-            {"element_id": "fixture_add", "name": "add", "element_type": "function",
+            {"element_id": "fixture_track", "name": "track_event", "element_type": "function",
              "summary_embedding": [0.9, 0.1], "parent_id": "",
              "relative_path": "tests/fixtures/repos/valid_repo/src/utils.py"},
         ]
@@ -1615,4 +1615,4 @@ class TestEmbeddingResolutionFixtureFiltering:
         # Test caller: fixture NOT filtered out, single candidate resolves
         assert single == 1
         stored_calls = mock_es.store_calls.call_args[0][1]
-        assert stored_calls[0]["resolved_id"] == "fixture_add"
+        assert stored_calls[0]["resolved_id"] == "fixture_track"

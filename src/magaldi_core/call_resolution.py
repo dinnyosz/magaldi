@@ -1912,6 +1912,29 @@ def _merge_candidates(
     return list(seen.values())
 
 
+# Generic method names that should NOT be resolved via embedding similarity.
+# These are so common across languages (Object.create, Promise.resolve, etc.)
+# that embedding-based matching almost always produces false positives.
+# Static resolution (Strategies 1-5) still works for these names.
+_EMBEDDING_BLOCKLIST = frozenset({
+    # Construction / lifecycle
+    "new", "create", "init", "initialize", "setup", "destroy", "dispose",
+    "close", "open", "start", "stop", "run", "execute",
+    # CRUD-like
+    "get", "set", "add", "remove", "delete", "update", "put", "patch",
+    "read", "write", "save", "load", "find", "search",
+    # Invocation
+    "call", "apply", "invoke", "send", "emit", "dispatch",
+    "push", "pop", "shift", "unshift",
+    # Promise / async
+    "then", "catch", "finally", "resolve", "reject",
+    # Conversion
+    "toString", "valueOf", "toJSON", "toArray", "toList", "toMap",
+    # Common overrides
+    "equals", "compare", "hash", "clone", "copy", "merge",
+    "format", "parse", "validate", "reset", "clear", "flush",
+})
+
 # Path segments that indicate test fixtures — candidates from these paths
 # are excluded when the caller is production code, to avoid mis-resolution
 # (e.g. dict.get() → tests/fixtures/teatro_production.ts:method:get).
@@ -2065,7 +2088,13 @@ def resolve_calls_by_embedding(
             if not candidates:
                 continue
 
+            is_generic = name in _EMBEDDING_BLOCKLIST
+
             if len(candidates) == 1:
+                if is_generic:
+                    # Generic names with a single candidate are still likely
+                    # false positives (e.g., Object.create → ZodString.create)
+                    continue
                 # Single candidate — resolve directly
                 call["resolved_id"] = candidates[0].get("element_id")
                 call["category"] = "embedding_resolved"
@@ -2086,7 +2115,9 @@ def resolve_calls_by_embedding(
                 caller_parent_id=caller_parent_id,
             )
 
-            if scored and scored[0][1] >= min_rrf_score:
+            # Generic names need a much higher threshold to avoid false positives
+            threshold = min_rrf_score * 2 if is_generic else min_rrf_score
+            if scored and scored[0][1] >= threshold:
                 best_candidate, best_score = scored[0]
                 call["resolved_id"] = best_candidate.get("element_id")
                 call["category"] = "embedding_resolved"

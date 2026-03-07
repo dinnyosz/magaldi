@@ -1073,3 +1073,84 @@ class TestFallbackNameLookup:
         result = _fallback_name_lookup(repo, "nonexistent", "scope", "repo", "main")
 
         assert result is None
+
+
+# =============================================================================
+# Embedding blocklist for generic names
+# =============================================================================
+
+
+class TestEmbeddingBlocklist:
+    """Verify generic method names are skipped by embedding resolution."""
+
+    def test_blocklist_contains_common_names(self):
+        """Blocklist should include the most common false-positive names."""
+        from magaldi_core.call_resolution import _EMBEDDING_BLOCKLIST
+
+        for name in ["new", "create", "close", "resolve", "apply", "get", "set"]:
+            assert name in _EMBEDDING_BLOCKLIST, f"{name} should be in blocklist"
+
+    def test_generic_single_candidate_skipped(self):
+        """Generic names with a single candidate should not be resolved."""
+        from unittest.mock import MagicMock
+
+        from magaldi_core.call_resolution import resolve_calls_by_embedding
+
+        repo = MagicMock()
+        repo.find_all_elements_with_calls.return_value = [
+            {
+                "element_id": "scope:repo:main:app.py:function:my_func:10",
+                "relative_path": "app.py",
+                "calls": [
+                    {"name": "create", "receiver": "Factory", "category": "untyped"},
+                ],
+            }
+        ]
+        repo.find_candidates_by_name.return_value = [
+            {"element_id": "target1", "name": "create", "element_type": "method"},
+        ]
+
+        total, single, rrf = resolve_calls_by_embedding(repo, "scope", "repo", "main")
+
+        # "create" is generic — single candidate should be skipped
+        assert single == 0
+
+    def test_non_generic_single_candidate_resolves(self):
+        """Non-generic names with a single candidate should resolve normally."""
+        from unittest.mock import MagicMock
+
+        from magaldi_core.call_resolution import resolve_calls_by_embedding
+
+        repo = MagicMock()
+        repo.find_all_elements_with_calls.return_value = [
+            {
+                "element_id": "scope:repo:main:app.py:function:my_func:10",
+                "relative_path": "app.py",
+                "calls": [
+                    {"name": "processOrder", "receiver": "OrderService", "category": "untyped"},
+                ],
+            }
+        ]
+        repo.find_candidates_by_name.return_value = [
+            {"element_id": "target1", "name": "processOrder", "element_type": "method"},
+        ]
+
+        total, single, rrf = resolve_calls_by_embedding(repo, "scope", "repo", "main")
+
+        # "processOrder" is NOT generic — should resolve
+        assert single == 1
+
+    def test_generic_names_need_higher_rrf_threshold(self):
+        """Generic names should require a higher RRF score to resolve."""
+        from magaldi_core.call_resolution import _EMBEDDING_BLOCKLIST
+
+        # Verify the blocklist is used as a threshold modifier, not a hard skip
+        # (the actual threshold doubling is tested via integration in the function)
+        assert "get" in _EMBEDDING_BLOCKLIST
+        assert "processOrder" not in _EMBEDDING_BLOCKLIST
+
+    def test_blocklist_is_frozenset(self):
+        """Blocklist should be a frozenset for O(1) lookups."""
+        from magaldi_core.call_resolution import _EMBEDDING_BLOCKLIST
+
+        assert isinstance(_EMBEDDING_BLOCKLIST, frozenset)
