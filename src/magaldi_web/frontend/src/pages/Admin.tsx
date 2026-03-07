@@ -554,6 +554,22 @@ function Admin() {
             </p>
           ) : (
             <>
+              {/* Summary Metrics */}
+              <Row className="mb-3">
+                <Col xs={4} className="text-center">
+                  <h4 className="mb-0">{mcpAnalytics.total_calls.toLocaleString()}</h4>
+                  <small className="text-muted">Total Calls</small>
+                </Col>
+                <Col xs={4} className="text-center">
+                  <h4 className="mb-0">{mcpAnalytics.unique_tools}</h4>
+                  <small className="text-muted">Unique Tools</small>
+                </Col>
+                <Col xs={4} className="text-center">
+                  <h4 className="mb-0">{mcpAnalytics.today_calls.toLocaleString()}</h4>
+                  <small className="text-muted">Today</small>
+                </Col>
+              </Row>
+              <hr />
               {/* Row 1: Charts */}
               <Row className="mb-4">
                 {/* Tool Distribution Pie Chart */}

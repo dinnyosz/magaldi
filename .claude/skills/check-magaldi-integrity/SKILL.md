@@ -42,7 +42,7 @@ Every piece of data extracted during parsing MUST be surfaced to users through A
 | Dashboard aggregations | `get_dashboard()` @ `src/magaldi_web/routes/dashboard.py` |
 | ES serialization | `index_element()` @ `src/shared/db/repositories/elements.py` |
 | Conditional element types | `CONDITIONAL_ELEMENT_TYPES` @ `src/magaldi_web/frontend/src/pages/Explorer.tsx`, `Search.tsx` |
-| Language fixture files | `tests/fixtures/languages/example_*.{py,js,ts,tsx,php,rs,sh}` |
+| Language fixture files | `tests/fixtures/languages/teatro_*.{py,js,ts,tsx,php,rs,sh}` |
 
 ---
 
@@ -743,7 +743,7 @@ After verification, produce:
 
 ### Missing Language Fixture Coverage
 - [ ] `new_type` not exercised in any fixture file in `tests/fixtures/languages/`
-- [ ] New language added but no `example_{lang}.{ext}` fixture file
+- [ ] New language added but no `teatro_{name}.{ext}` fixture file
 
 ### Recommendations
 1. Add `new_type` to all prompt dicts in summarization.py
@@ -765,23 +765,23 @@ Example source files in `tests/fixtures/languages/` ensure all element types app
 
 | File | Language | Element Types Covered |
 |------|----------|----------------------|
-| `example_python.py` | Python | class, enum, function, method, constant, variable, import |
-| `example_javascript.js` | JavaScript | class, function, method, constant, variable, import |
-| `example_typescript.ts` | TypeScript | class, interface, type_alias, enum, function, method, constant, variable, import |
-| `example_react.tsx` | React/TSX | interface, type_alias, enum, function, constant, import |
-| `example_php.php` | PHP | class, interface, trait, enum, function, method, constant, variable, import |
-| `example_rust.rs` | Rust | class (struct), trait, enum, function, method, constant, variable, import |
-| `example_bash.sh` | Bash | function, constant |
+| `teatro_performers.py` | Python | class, enum, function, method, constant, variable, import |
+| `teatro_ticketing.js` | JavaScript | class, function, method, constant, variable, import |
+| `teatro_production.ts` | TypeScript | class, interface, type_alias, enum, function, method, constant, variable, import |
+| `teatro_marquee.tsx` | React/TSX | interface, type_alias, enum, function, constant, import |
+| `teatro_backstage.php` | PHP | class, interface, trait, enum, function, method, constant, variable, import |
+| `teatro_orchestra.rs` | Rust | class (struct), trait, enum, function, method, constant, variable, import |
+| `teatro_stagehand.sh` | Bash | function, constant |
 
 ### Checklist for New Element Types
 
 - [ ] Add at least 2-3 examples of the new type to the relevant language fixture file(s)
 - [ ] Verify extraction works: run the verification script below
-- [ ] If adding a new language, create `tests/fixtures/languages/example_{lang}.{ext}`
+- [ ] If adding a new language, create `tests/fixtures/languages/teatro_{name}.{ext}`
 
 ### Checklist for New Languages
 
-- [ ] Create `tests/fixtures/languages/example_{lang}.{ext}` with examples of ALL element types the extractor supports
+- [ ] Create `tests/fixtures/languages/teatro_{name}.{ext}` with examples of ALL element types the extractor supports
 - [ ] Include: classes, functions, methods, constants, variables, imports
 - [ ] Include language-specific types: interfaces, traits, enums, type aliases (if applicable)
 - [ ] Verify with the extraction script below
@@ -799,13 +799,13 @@ from pathlib import Path
 
 fixtures = Path('tests/fixtures/languages')
 langs = [
-    ('example_python.py', 'python'),
-    ('example_javascript.js', 'javascript'),
-    ('example_typescript.ts', 'typescript'),
-    ('example_react.tsx', 'typescript'),
-    ('example_php.php', 'php'),
-    ('example_rust.rs', 'rust'),
-    ('example_bash.sh', 'bash'),
+    ('teatro_performers.py', 'python'),
+    ('teatro_ticketing.js', 'javascript'),
+    ('teatro_production.ts', 'typescript'),
+    ('teatro_marquee.tsx', 'typescript'),
+    ('teatro_backstage.php', 'php'),
+    ('teatro_orchestra.rs', 'rust'),
+    ('teatro_stagehand.sh', 'bash'),
 ]
 
 all_types = set()
@@ -846,7 +846,7 @@ else:
 - [ ] `{type}` not exercised in any fixture file
 
 **Missing fixture files:**
-- [ ] No fixture for `{language}` — create `tests/fixtures/languages/example_{lang}.{ext}`
+- [ ] No fixture for `{language}` — create `tests/fixtures/languages/teatro_{name}.{ext}`
 
 **Fixture parse errors:**
 - [ ] `{filename}` fails to parse: {error}
