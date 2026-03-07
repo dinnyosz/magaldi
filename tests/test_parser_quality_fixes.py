@@ -1819,3 +1819,110 @@ class TestRustTraitMethods:
         # Trait itself should still exist
         traits = [e for e in elements if e.element_type == "trait"]
         assert len(traits) == 1
+
+
+# =============================================================================
+# Nested function parent_id assignment
+# =============================================================================
+
+
+class TestNestedFunctionHierarchy:
+    """Test that nested functions get correct parent_id via line containment."""
+
+    def test_python_nested_function(self):
+        """Test Python nested function has outer function as parent."""
+        from magaldi_core.code_parser import PythonParser
+
+        code = "def outer():\n    def inner():\n        return 42\n    return inner()\n"
+        parser = PythonParser()
+        file_info = FileInfo(
+            relative_path="test.py",
+            absolute_path=Path("/fake/test.py"),
+            language="python",
+        )
+        elements = parser.parse(code, file_info, "s", "r", "main")
+
+        outer = next(e for e in elements if e.name == "outer")
+        inner = next(e for e in elements if e.name == "inner")
+        assert inner.parent_id == outer.element_id
+
+    def test_js_nested_function(self):
+        """Test JS nested function has outer function as parent."""
+        from magaldi_core.code_parser import JavaScriptParser
+
+        code = "function outer() {\n    function inner() {\n        return 42;\n    }\n}\n"
+        parser = JavaScriptParser()
+        file_info = FileInfo(
+            relative_path="test.js",
+            absolute_path=Path("/fake/test.js"),
+            language="javascript",
+        )
+        elements = parser.parse(code, file_info, "s", "r", "main")
+
+        outer = next(e for e in elements if e.name == "outer")
+        inner = next(e for e in elements if e.name == "inner")
+        assert inner.parent_id == outer.element_id
+
+    def test_nested_in_method(self):
+        """Test function nested inside a class method."""
+        from magaldi_core.code_parser import PythonParser
+
+        code = (
+            "class MyClass:\n"
+            "    def process(self):\n"
+            "        def helper():\n"
+            "            pass\n"
+            "        helper()\n"
+        )
+        parser = PythonParser()
+        file_info = FileInfo(
+            relative_path="test.py",
+            absolute_path=Path("/fake/test.py"),
+            language="python",
+        )
+        elements = parser.parse(code, file_info, "s", "r", "main")
+
+        method = next(e for e in elements if e.name == "process")
+        helper = next(e for e in elements if e.name == "helper")
+        assert helper.parent_id == method.element_id
+
+    def test_top_level_function_still_parented_to_file(self):
+        """Test that top-level functions still get file as parent."""
+        from magaldi_core.code_parser import PythonParser
+
+        code = "def top_level():\n    pass\n"
+        parser = PythonParser()
+        file_info = FileInfo(
+            relative_path="test.py",
+            absolute_path=Path("/fake/test.py"),
+            language="python",
+        )
+        elements = parser.parse(code, file_info, "s", "r", "main")
+
+        file_elem = next(e for e in elements if e.element_type == "file")
+        func = next(e for e in elements if e.name == "top_level")
+        assert func.parent_id == file_elem.element_id
+
+    def test_deeply_nested(self):
+        """Test three levels of nesting."""
+        from magaldi_core.code_parser import PythonParser
+
+        code = (
+            "def a():\n"
+            "    def b():\n"
+            "        def c():\n"
+            "            pass\n"
+        )
+        parser = PythonParser()
+        file_info = FileInfo(
+            relative_path="test.py",
+            absolute_path=Path("/fake/test.py"),
+            language="python",
+        )
+        elements = parser.parse(code, file_info, "s", "r", "main")
+
+        a = next(e for e in elements if e.name == "a")
+        b = next(e for e in elements if e.name == "b")
+        c = next(e for e in elements if e.name == "c")
+        assert b.parent_id == a.element_id
+        assert c.parent_id == b.element_id

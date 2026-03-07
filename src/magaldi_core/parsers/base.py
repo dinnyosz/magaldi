@@ -661,12 +661,53 @@ class TreeSitterParser:
         return file_element
 
     def _set_hierarchy(self, elements: list[CodeElement], file_element: CodeElement) -> None:
-        """Set parent IDs for elements without explicit parents."""
+        """Set parent IDs for elements without explicit parents.
+
+        Uses line-range containment to detect nesting: if element B's lines
+        are fully inside element A's lines, B is a child of A. When multiple
+        elements contain B, the tightest (smallest span) wins.
+        """
+        # Types that can contain other elements
+        _CONTAINER_TYPES = {"class", "function", "method", "trait", "enum", "interface"}
+
+        # Build list of potential parents (containers with known element_ids)
+        containers = [
+            e for e in elements
+            if e.element_type in _CONTAINER_TYPES
+            and e.element_id
+            and e.line_start is not None
+            and e.line_end is not None
+        ]
+
         for elem in elements:
             if elem.element_type == "file":
                 continue
-            if not elem.parent_id:
-                elem.parent_id = file_element.element_id
+            if elem.parent_id:
+                continue
+
+            # Find tightest enclosing container
+            best_parent = None
+            best_span = float("inf")
+
+            if elem.line_start is not None and elem.line_end is not None:
+                for container in containers:
+                    if container is elem:
+                        continue
+                    # Container must strictly enclose this element
+                    if (
+                        container.line_start <= elem.line_start
+                        and container.line_end >= elem.line_end
+                        and (container.line_start, container.line_end)
+                        != (elem.line_start, elem.line_end)
+                    ):
+                        span = container.line_end - container.line_start
+                        if span < best_span:
+                            best_span = span
+                            best_parent = container
+
+            elem.parent_id = (
+                best_parent.element_id if best_parent else file_element.element_id
+            )
 
     def _resolve_calls_in_file(
         self,
