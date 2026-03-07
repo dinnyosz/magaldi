@@ -239,8 +239,8 @@ class TestGetFileStructure:
 
         assert result["file"] == "test.py"
         assert result["language"] == "python"
-        assert result["counts"]["classes"] == 1
-        assert result["counts"]["functions"] == 1
+        assert result["counts"]["class"] == 1
+        assert result["counts"]["function"] == 1
 
     def test_get_file_structure_file_not_found(self, mock_repo):
         """Test get_file_structure raises when file not found."""

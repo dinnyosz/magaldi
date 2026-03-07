@@ -12,6 +12,7 @@ from magaldi_mcp.tools import (
     get_children,
     get_context,
     get_element,
+    get_file_structure,
 )
 
 # =============================================================================
@@ -462,6 +463,232 @@ class TestGetContextExtended:
 # =============================================================================
 # GET FILE STRUCTURE TESTS
 # =============================================================================
+
+
+class TestGetFileStructure:
+    """Tests for get_file_structure expanded element types."""
+
+    def _setup_file_structure(self, mock_repo, elements):
+        """Helper to set up mock for get_file_structure."""
+        mock_client = MagicMock()
+        mock_repo._get_client.return_value = mock_client
+
+        # First search: _find_file_element
+        mock_client.search.side_effect = [
+            {
+                "hits": {
+                    "hits": [
+                        {
+                            "_source": {
+                                "element_id": "s:r:main:file.ts:file:file.ts:0",
+                                "name": "file.ts",
+                                "element_type": "file",
+                                "language": "typescript",
+                            }
+                        }
+                    ]
+                }
+            },
+            # Second search: _find_elements_in_file
+            {
+                "hits": {
+                    "hits": [
+                        {"_source": e} for e in elements
+                    ]
+                }
+            },
+        ]
+
+    def test_includes_interface_elements(self, mock_repo):
+        """Test get_file_structure includes interface elements."""
+        self._setup_file_structure(mock_repo, [
+            {
+                "element_id": "s:r:main:file.ts:interface:IUser:5",
+                "hash_id": "abc1",
+                "name": "IUser",
+                "element_type": "interface",
+                "line_start": 5,
+                "parent_id": "s:r:main:file.ts:file:file.ts:0",
+            },
+        ])
+
+        result = get_file_structure(
+            repo=mock_repo,
+            scope="s",
+            repository="r",
+            file_path="file.ts",
+        )
+
+        assert len(result["structure"]) == 1
+        assert result["structure"][0]["name"] == "IUser"
+        assert result["structure"][0]["type"] == "interface"
+        assert result["counts"]["interface"] == 1
+
+    def test_includes_enum_elements(self, mock_repo):
+        """Test get_file_structure includes enum elements."""
+        self._setup_file_structure(mock_repo, [
+            {
+                "element_id": "s:r:main:file.ts:enum:Color:1",
+                "hash_id": "abc2",
+                "name": "Color",
+                "element_type": "enum",
+                "line_start": 1,
+                "parent_id": "s:r:main:file.ts:file:file.ts:0",
+            },
+        ])
+
+        result = get_file_structure(
+            repo=mock_repo,
+            scope="s",
+            repository="r",
+            file_path="file.ts",
+        )
+
+        assert len(result["structure"]) == 1
+        assert result["structure"][0]["name"] == "Color"
+        assert result["structure"][0]["type"] == "enum"
+        assert result["counts"]["enum"] == 1
+
+    def test_includes_type_alias_elements(self, mock_repo):
+        """Test get_file_structure includes type_alias elements."""
+        self._setup_file_structure(mock_repo, [
+            {
+                "element_id": "s:r:main:file.ts:type_alias:UserId:1",
+                "hash_id": "abc3",
+                "name": "UserId",
+                "element_type": "type_alias",
+                "line_start": 1,
+                "parent_id": "s:r:main:file.ts:file:file.ts:0",
+            },
+        ])
+
+        result = get_file_structure(
+            repo=mock_repo,
+            scope="s",
+            repository="r",
+            file_path="file.ts",
+        )
+
+        assert len(result["structure"]) == 1
+        assert result["structure"][0]["name"] == "UserId"
+        assert result["structure"][0]["type"] == "type_alias"
+        assert result["counts"]["type_alias"] == 1
+
+    def test_includes_constant_elements(self, mock_repo):
+        """Test get_file_structure includes constant elements."""
+        self._setup_file_structure(mock_repo, [
+            {
+                "element_id": "s:r:main:file.ts:constant:MAX_SIZE:1",
+                "hash_id": "abc4",
+                "name": "MAX_SIZE",
+                "element_type": "constant",
+                "line_start": 1,
+                "parent_id": "s:r:main:file.ts:file:file.ts:0",
+            },
+        ])
+
+        result = get_file_structure(
+            repo=mock_repo,
+            scope="s",
+            repository="r",
+            file_path="file.ts",
+        )
+
+        assert len(result["structure"]) == 1
+        assert result["structure"][0]["name"] == "MAX_SIZE"
+        assert result["structure"][0]["type"] == "constant"
+        assert result["counts"]["constant"] == 1
+
+    def test_includes_trait_elements(self, mock_repo):
+        """Test get_file_structure includes trait elements."""
+        self._setup_file_structure(mock_repo, [
+            {
+                "element_id": "s:r:main:file.ts:trait:Display:1",
+                "hash_id": "abc5",
+                "name": "Display",
+                "element_type": "trait",
+                "line_start": 1,
+                "parent_id": "s:r:main:file.ts:file:file.ts:0",
+            },
+        ])
+
+        result = get_file_structure(
+            repo=mock_repo,
+            scope="s",
+            repository="r",
+            file_path="file.ts",
+        )
+
+        assert len(result["structure"]) == 1
+        assert result["structure"][0]["name"] == "Display"
+        assert result["structure"][0]["type"] == "trait"
+        assert result["counts"]["trait"] == 1
+
+    def test_counts_only_includes_present_types(self, mock_repo):
+        """Test counts dict only includes types that have elements."""
+        self._setup_file_structure(mock_repo, [
+            {
+                "element_id": "s:r:main:file.ts:function:foo:1",
+                "hash_id": "abc6",
+                "name": "foo",
+                "element_type": "function",
+                "line_start": 1,
+                "parent_id": "s:r:main:file.ts:file:file.ts:0",
+            },
+            {
+                "element_id": "s:r:main:file.ts:interface:IFoo:10",
+                "hash_id": "abc7",
+                "name": "IFoo",
+                "element_type": "interface",
+                "line_start": 10,
+                "parent_id": "s:r:main:file.ts:file:file.ts:0",
+            },
+        ])
+
+        result = get_file_structure(
+            repo=mock_repo,
+            scope="s",
+            repository="r",
+            file_path="file.ts",
+        )
+
+        # Only function and interface should appear in counts
+        assert result["counts"] == {"function": 1, "interface": 1}
+        assert "class" not in result["counts"]
+        assert "method" not in result["counts"]
+
+    def test_excludes_variable_elements(self, mock_repo):
+        """Test get_file_structure still excludes variable elements."""
+        self._setup_file_structure(mock_repo, [
+            {
+                "element_id": "s:r:main:file.ts:function:foo:1",
+                "hash_id": "abc8",
+                "name": "foo",
+                "element_type": "function",
+                "line_start": 1,
+                "parent_id": "s:r:main:file.ts:file:file.ts:0",
+            },
+            {
+                "element_id": "s:r:main:file.ts:variable:x:5",
+                "hash_id": "abc9",
+                "name": "x",
+                "element_type": "variable",
+                "line_start": 5,
+                "parent_id": "s:r:main:file.ts:file:file.ts:0",
+            },
+        ])
+
+        result = get_file_structure(
+            repo=mock_repo,
+            scope="s",
+            repository="r",
+            file_path="file.ts",
+        )
+
+        # Should only have function, not variable
+        assert len(result["structure"]) == 1
+        assert result["structure"][0]["name"] == "foo"
+
 
 # =============================================================================
 # GET CHILDREN TESTS

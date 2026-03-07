@@ -20,7 +20,7 @@ FILE_TOOLS = [
     ),
     Tool(
         name="get_file_structure",
-        description="Outline a file's classes, functions, methods, and imports.",
+        description="Outline a file's structure: classes, functions, methods, imports, interfaces, traits, enums, type aliases, and constants.",
         inputSchema={
             "type": "object",
             "properties": {

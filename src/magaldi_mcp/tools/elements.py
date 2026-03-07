@@ -467,8 +467,11 @@ def get_file_structure(
     # Get all elements in file
     all_elements = _find_elements_in_file(repo, scope, repository, username, file_path)
 
-    # Filter to classes, functions, methods, imports (reduces output significantly)
-    structure_types = {"class", "function", "method", "import"}
+    # Filter to structural element types (reduces output significantly)
+    structure_types = {
+        "class", "function", "method", "import",
+        "interface", "trait", "enum", "type_alias", "constant",
+    }
     elements = [e for e in all_elements if e.get("element_type") in structure_types]
 
     # Build tree structure (minimal - use get_element for details)
@@ -493,9 +496,8 @@ def get_file_structure(
         "language": file_doc.get("language"),
         "structure": build_tree(file_id),
         "counts": {
-            "classes": sum(1 for e in elements if e.get("element_type") == "class"),
-            "functions": sum(1 for e in elements if e.get("element_type") == "function"),
-            "methods": sum(1 for e in elements if e.get("element_type") == "method"),
-            "imports": sum(1 for e in elements if e.get("element_type") == "import"),
+            t: sum(1 for e in elements if e.get("element_type") == t)
+            for t in sorted(structure_types)
+            if any(e.get("element_type") == t for e in elements)
         },
     }
