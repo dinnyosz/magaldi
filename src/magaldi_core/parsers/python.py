@@ -107,7 +107,7 @@ class PythonParser(TreeSitterParser):
 
         # Convert ExtractedElements to CodeElements
         for ext in extracted:
-            if ext.element_type == "class":
+            if ext.element_type in ("class", "enum"):
                 class_elem = self._convert_class(ext, file_info, scope, repository, username, lines)
                 elements.append(class_elem)
 
@@ -412,7 +412,7 @@ class PythonParser(TreeSitterParser):
             repository=repository,
             username=username,
             relative_path=file_info.relative_path,
-            element_type="class",
+            element_type=ext.element_type,  # preserves "class" or "enum"
             name=ext.name,
             language="python",
             line_start=ext.line_start,
@@ -427,7 +427,7 @@ class PythonParser(TreeSitterParser):
             base_classes=base_classes,
         )
         elem.element_id = generate_element_id(
-            scope, repository, username, file_info.relative_path, "class", ext.name, ext.get_byte_offset()
+            scope, repository, username, file_info.relative_path, ext.element_type, ext.name, ext.get_byte_offset()
         )
         return elem
 

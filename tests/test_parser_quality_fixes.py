@@ -1531,3 +1531,69 @@ class TestPhpVisibility:
         elements = self._parse_php(code)
         const = next(e for e in elements if e.name == "KEY")
         assert const.visibility == "private"
+
+
+# =============================================================================
+# Python: Enum support
+# =============================================================================
+
+
+class TestPythonEnumSupport:
+    """Verify Python enum.Enum subclasses are extracted with element_type='enum'."""
+
+    def _parse_python(self, code: str):
+        from magaldi_core.code_parser import PythonParser
+
+        parser = PythonParser()
+        file_info = FileInfo(
+            relative_path="test.py",
+            absolute_path=Path("/fake/test.py"),
+            language="python",
+        )
+        return parser.parse(code, file_info, "scope", "repo", "main")
+
+    def test_enum_class_detected(self):
+        """class Color(Enum) should have element_type='enum'."""
+        code = "from enum import Enum\n\nclass Color(Enum):\n    RED = 1\n    GREEN = 2\n    BLUE = 3\n"
+        elements = self._parse_python(code)
+        color = next((e for e in elements if e.name == "Color"), None)
+        assert color is not None, "Color enum should be extracted"
+        assert color.element_type == "enum"
+
+    def test_int_enum_detected(self):
+        """class Priority(IntEnum) should have element_type='enum'."""
+        code = "from enum import IntEnum\n\nclass Priority(IntEnum):\n    LOW = 1\n    HIGH = 2\n"
+        elements = self._parse_python(code)
+        prio = next((e for e in elements if e.name == "Priority"), None)
+        assert prio is not None
+        assert prio.element_type == "enum"
+
+    def test_str_enum_detected(self):
+        """class Status(StrEnum) should have element_type='enum'."""
+        code = "from enum import StrEnum\n\nclass Status(StrEnum):\n    ACTIVE = 'active'\n    INACTIVE = 'inactive'\n"
+        elements = self._parse_python(code)
+        status = next((e for e in elements if e.name == "Status"), None)
+        assert status is not None
+        assert status.element_type == "enum"
+
+    def test_enum_element_id_uses_enum_type(self):
+        """Element ID should use 'enum' not 'class'."""
+        code = "from enum import Enum\n\nclass Color(Enum):\n    RED = 1\n"
+        elements = self._parse_python(code)
+        color = next(e for e in elements if e.name == "Color")
+        assert ":enum:" in color.element_id
+
+    def test_enum_has_level_1(self):
+        """Enums should be level 1 (like classes)."""
+        code = "from enum import Enum\n\nclass Color(Enum):\n    RED = 1\n"
+        elements = self._parse_python(code)
+        color = next(e for e in elements if e.name == "Color")
+        assert color.level == 1
+
+    def test_regular_class_still_works(self):
+        """Non-enum classes should still have element_type='class' (regression check)."""
+        code = "class Foo:\n    pass\n"
+        elements = self._parse_python(code)
+        foo = next((e for e in elements if e.name == "Foo"), None)
+        assert foo is not None
+        assert foo.element_type == "class"
