@@ -283,8 +283,12 @@ def _get_craft_reason(element: CodeElement, config: ProcessingConfig) -> str | N
     should be summarized by the LLM. Priority order:
     1. Test elements → "test"
     2. Imports → "import"
-    3. Small functions/methods → "small"
-    4. Elements with meaningful docstrings (when use_docstrings enabled) → "docstring"
+    3. Elements with meaningful docstrings (when use_docstrings enabled) → "docstring"
+    4. Small functions/methods → "small"
+
+    Docstring is checked before small-function so that a short function with
+    a good docstring uses the human-written description rather than a generic
+    "small function" template.
 
     Args:
         element: Code element to check.
@@ -297,12 +301,12 @@ def _get_craft_reason(element: CodeElement, config: ProcessingConfig) -> str | N
         return "test"
     if element.element_type in _HANDCRAFTED_SUMMARY_TYPES:
         return "import"
-    if element.element_type in ("function", "method") and _is_small_function(element, config.handcrafted_max_lines):
-        return "small"
     if config.use_docstrings and element.docstring:
         desc = _extract_docstring_description(element.docstring)
         if len(desc) >= _MIN_DOCSTRING_DESC_LENGTH:
             return "docstring"
+    if element.element_type in ("function", "method") and _is_small_function(element, config.handcrafted_max_lines):
+        return "small"
     return None
 
 

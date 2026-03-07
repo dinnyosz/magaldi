@@ -3238,13 +3238,22 @@ class TestGetCraftReason:
         )
         assert _get_craft_reason(elem, config) is None
 
-    def test_small_function_with_docstring_returns_small_not_docstring(self):
-        """Small function check takes priority over docstring check."""
+    def test_small_function_with_docstring_returns_docstring_not_small(self):
+        """Docstring check takes priority over small function check."""
         config = ProcessingConfig(handcrafted_max_lines=5, use_docstrings=True)
         elem = CodeElement(
             element_type="function", name="foo",
             raw_code="def foo():\n    return 1\n",
             docstring="Return one from the function",
+        )
+        assert _get_craft_reason(elem, config) == "docstring"
+
+    def test_small_function_without_docstring_returns_small(self):
+        """Small function without docstring falls back to 'small' reason."""
+        config = ProcessingConfig(handcrafted_max_lines=5, use_docstrings=True)
+        elem = CodeElement(
+            element_type="function", name="foo",
+            raw_code="def foo():\n    return 1\n",
         )
         assert _get_craft_reason(elem, config) == "small"
 
