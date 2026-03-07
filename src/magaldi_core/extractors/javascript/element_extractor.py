@@ -145,6 +145,11 @@ def extract_javascript_elements(
         # Import statements
         elif node.type == "import_statement":
             elements.append(_extract_js_import(node, lines))
+        # Assignment-based function definitions: obj.method = function() {}
+        elif node.type == "expression_statement":
+            elem = _extract_js_assignment_function(node, lines)
+            if elem:
+                elements.append(elem)
 
     return elements
 
@@ -279,6 +284,94 @@ def _extract_js_arrow_function(node: Node, name: str, _lines: list[str]) -> Extr
         parameters=parameters or None,
         decorators=decorators,
         decorator_details=decorator_details,
+    )
+
+
+def _extract_js_assignment_function(
+    expr_stmt: Node, _lines: list[str]
+) -> ExtractedElement | None:
+    """Extract function from assignment patterns like obj.method = function() {}.
+
+    Handles:
+    - app.use = function use(fn) { ... }
+    - View.prototype.lookup = function lookup(name) { ... }
+    - exports.Router = function Router() { ... }
+    - module.exports = function createApp() { ... }
+
+    Skips:
+    - module.exports = { ... } (object exports, not function)
+    - module.exports = function() {} (anonymous, no useful name)
+    """
+    if not expr_stmt.children:
+        return None
+
+    assign = expr_stmt.children[0]
+    if assign.type != "assignment_expression":
+        return None
+
+    left = get_child_by_field(assign, "left")
+    right = get_child_by_field(assign, "right")
+    if not left or not right:
+        return None
+
+    # Right side must be a function expression or arrow function
+    if right.type not in ("function_expression", "function", "arrow_function"):
+        return None
+
+    # Left side must be a member expression (obj.method)
+    if left.type != "member_expression":
+        return None
+
+    # Extract name: prefer the function's own name, fall back to property name
+    func_name_node = get_child_by_field(right, "name")
+    func_name = get_node_text(func_name_node) if func_name_node else None
+
+    # Get the property name from the member expression (last identifier)
+    prop_node = get_child_by_field(left, "property")
+    prop_name = get_node_text(prop_node) if prop_node else None
+
+    # Use function name if available, otherwise property name
+    name = func_name or prop_name
+    if not name:
+        return None
+
+    # Skip module.exports = function() {} with no name (anonymous default export)
+    if not func_name and prop_name == "exports":
+        obj_node = get_child_by_field(left, "object")
+        obj_text = get_node_text(obj_node) if obj_node else ""
+        if obj_text == "module":
+            return None
+
+    # Extract parameters and return type from the function
+    params_node = get_child_by_field(right, "parameters")
+    params = get_node_text(params_node) if params_node else "()"
+    parameters = extract_js_parameters(params_node) if params_node else []
+    return_type = extract_js_return_type(right)
+
+    is_async = any(child.type == "async" for child in right.children)
+
+    # Build signature from the full assignment
+    left_text = get_node_text(left)
+    signature = f"{'async ' if is_async else ''}{left_text} = function{params}"
+    if return_type:
+        signature += f": {return_type}"
+
+    line_start = expr_stmt.start_point[0] + 1
+    line_end = expr_stmt.end_point[0] + 1
+    raw_code = expr_stmt.text.decode("utf-8") if expr_stmt.text else ""
+
+    return ExtractedElement(
+        element_type="function",
+        name=name,
+        line_start=line_start,
+        line_end=line_end,
+        raw_code=raw_code,
+        byte_offset=expr_stmt.start_byte,
+        signature=signature,
+        is_async=is_async,
+        node=right,
+        return_type=return_type,
+        parameters=parameters or None,
     )
 
 

@@ -1219,3 +1219,95 @@ class TestJsVariableConstantParsing:
         # The extractor marks `const` as constant via _extract_js_variable
         var = next((e for e in elements if e.name == "MAX"), None)
         assert var is not None
+
+
+# =============================================================================
+# JS: Object-method and prototype assignment extraction
+# =============================================================================
+
+
+class TestJsObjectMethodAssignment:
+    """Verify assignment-based function patterns are extracted."""
+
+    def _parse_js(self, code: str, language: str = "javascript"):
+        from magaldi_core.code_parser import JavaScriptParser
+
+        parser = JavaScriptParser(language)
+        file_info = FileInfo(
+            relative_path="test.js",
+            absolute_path=Path("/fake/test.js"),
+            language=language,
+        )
+        return parser.parse(code, file_info, "scope", "repo", "main")
+
+    def test_obj_method_assignment(self):
+        """app.use = function use(fn) {} should be extracted."""
+        code = "app.use = function use(fn) { return fn; };\n"
+        elements = self._parse_js(code)
+        func = next((e for e in elements if e.name == "use"), None)
+        assert func is not None, "app.use = function use() should be extracted"
+        assert func.element_type == "function"
+
+    def test_prototype_method_assignment(self):
+        """View.prototype.lookup = function lookup(name) {} should be extracted."""
+        code = "View.prototype.lookup = function lookup(name) { return name; };\n"
+        elements = self._parse_js(code)
+        func = next((e for e in elements if e.name == "lookup"), None)
+        assert func is not None, "View.prototype.lookup should be extracted"
+        assert func.element_type == "function"
+
+    def test_exports_named_function(self):
+        """exports.Router = function Router() {} should be extracted."""
+        code = "exports.Router = function Router() {};\n"
+        elements = self._parse_js(code)
+        func = next((e for e in elements if e.name == "Router"), None)
+        assert func is not None, "exports.Router should be extracted"
+
+    def test_module_exports_named_function(self):
+        """module.exports = function createApp() {} should use function name."""
+        code = "module.exports = function createApp() { return {}; };\n"
+        elements = self._parse_js(code)
+        func = next((e for e in elements if e.name == "createApp"), None)
+        assert func is not None, "module.exports with named function should be extracted"
+
+    def test_module_exports_anonymous_skipped(self):
+        """module.exports = function() {} (anonymous) should be skipped."""
+        code = "module.exports = function() { return {}; };\n"
+        elements = self._parse_js(code)
+        funcs = [e for e in elements if e.element_type == "function"]
+        assert len(funcs) == 0, "Anonymous module.exports should be skipped"
+
+    def test_module_exports_object_skipped(self):
+        """module.exports = { foo: 1 } should not produce a function."""
+        code = "module.exports = { foo: 1 };\n"
+        elements = self._parse_js(code)
+        funcs = [e for e in elements if e.element_type == "function"]
+        assert len(funcs) == 0, "Object export should not produce a function"
+
+    def test_assignment_function_has_params(self):
+        """Extracted assignment function should have parameters."""
+        code = "app.set = function set(key, value) { this[key] = value; };\n"
+        elements = self._parse_js(code)
+        func = next((e for e in elements if e.name == "set"), None)
+        assert func is not None
+        assert func.parameters is not None
+        param_names = [p["name"] for p in func.parameters]
+        assert "key" in param_names
+        assert "value" in param_names
+
+    def test_assignment_function_has_signature(self):
+        """Extracted assignment function should have a meaningful signature."""
+        code = "app.use = function use(fn) { return fn; };\n"
+        elements = self._parse_js(code)
+        func = next((e for e in elements if e.name == "use"), None)
+        assert func is not None
+        assert func.signature is not None
+        assert "app.use" in func.signature
+
+    def test_async_assignment_function(self):
+        """Async assignment functions should have is_async flag."""
+        code = "app.handler = async function handler(req) { await req; };\n"
+        elements = self._parse_js(code)
+        func = next((e for e in elements if e.name == "handler"), None)
+        assert func is not None
+        assert func.is_async is True
