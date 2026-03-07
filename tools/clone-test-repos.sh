@@ -45,6 +45,11 @@ REPOS=(
   "BurntSushi/ripgrep|2|rust"
   "sharkdp/bat|2|rust"
 
+  # Java
+  "google/gson|1|java"
+  "spring-projects/spring-petclinic|2|java"
+  "square/okhttp|2|java"
+
   # Bash
   "dylanaraps/neofetch|1|bash"
   "rbenv/rbenv|2|bash"
@@ -80,7 +85,7 @@ while [[ $# -gt 0 ]]; do
       echo "Options:"
       echo "  --tier 1       Smoke test repos only (smallest, ~20 MB total)"
       echo "  --tier 2       All repos (tier 1 + 2, ~150 MB total)"
-      echo "  --lang LANG    Single language: python, javascript, typescript, php, rust, bash, polyglot"
+      echo "  --lang LANG    Single language: python, javascript, typescript, php, rust, java, bash, polyglot"
       echo "  --list         Print repos without cloning"
       echo ""
       echo "Repos are cloned into: $DEST"

@@ -493,6 +493,9 @@ Use the repo list from `tools/clone-test-repos.sh --list` to map language/tier f
 | fd | rust | 1 |
 | ripgrep | rust | 2 |
 | bat | rust | 2 |
+| gson | java | 1 |
+| spring-petclinic | java | 2 |
+| okhttp | java | 2 |
 | neofetch | bash | 1 |
 | rbenv | bash | 2 |
 | nvm | bash | 2 |
