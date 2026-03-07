@@ -86,6 +86,13 @@ TEST_PATH_PATTERNS: dict[str, list[str]] = {
     "rust": [
         r"(^|/)tests/",                # tests/ directory (integration tests)
     ],
+    "java": [
+        r"(^|/)src/test/",             # Maven/Gradle test source root
+        r"Test\.java$",                # *Test.java
+        r"Tests\.java$",               # *Tests.java
+        r"IT\.java$",                  # *IT.java (integration tests)
+        r"(^|/)test/",                 # test/ directory
+    ],
 }
 
 
@@ -129,6 +136,13 @@ def is_test_element(name: str, decorators: list[str], language: str) -> bool:
     if language == "rust":
         test_attrs = {"test", "cfg(test)"}
         return any(dec in test_attrs for dec in decorators)
+
+    # Java: JUnit @Test or @ParameterizedTest annotations
+    if language == "java":
+        test_annotations = {"@Test", "@ParameterizedTest", "@RepeatedTest"}
+        if any(dec in test_annotations for dec in decorators):
+            return True
+        return name.startswith("test") or name.startswith("should")
 
     # JavaScript/TypeScript: detected via call patterns (describe/it/test)
     # These are handled separately during parsing

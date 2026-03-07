@@ -44,6 +44,11 @@ ENV_VAR_PATTERNS: dict[str, list[tuple[str, str]]] = {
         (r"env::var_os\(['\"](\w+)['\"]", "var_os"),
         (r"std::env::var\(['\"](\w+)['\"]", "var"),
     ],
+    "java": [
+        (r"System\.getenv\(['\"](\w+)['\"]", "getenv"),
+        (r"System\.getProperty\(['\"](\w+)['\"]", "property"),
+        (r"env\.get\(['\"](\w+)['\"]", "get"),
+    ],
 }
 
 
@@ -156,6 +161,45 @@ CONCURRENCY_PATTERNS: dict[str, dict[str, list[str]]] = {
         ],
         "channels": ["mpsc::", "channel()", "Sender", "Receiver"],
     },
+    "java": {
+        "threading": [
+            "Thread(",
+            "Runnable",
+            "ExecutorService",
+            "Executors.",
+            "ThreadPoolExecutor",
+            "ForkJoinPool",
+            "ScheduledExecutorService",
+        ],
+        "concurrent": [
+            "CompletableFuture",
+            "Future<",
+            "Callable<",
+            "CountDownLatch",
+            "CyclicBarrier",
+            "Semaphore",
+            "ConcurrentHashMap",
+            "ConcurrentLinkedQueue",
+            "BlockingQueue",
+            "AtomicInteger",
+            "AtomicLong",
+            "AtomicReference",
+            "AtomicBoolean",
+        ],
+        "locking": [
+            "synchronized",
+            "ReentrantLock",
+            "ReadWriteLock",
+            "StampedLock",
+            ".lock()",
+            ".unlock()",
+        ],
+        "reactive": [
+            "Mono<", "Flux<", "Publisher<",
+            "Observable<", "Flowable<",
+            "WebFlux",
+        ],
+    },
 }
 
 # Lock patterns for detecting synchronization
@@ -165,6 +209,7 @@ LOCK_PATTERNS: dict[str, list[str]] = {
     "typescript": ["Mutex", "Atomics.", "SharedArrayBuffer"],
     "php": ["flock(", "sem_acquire", "sem_release"],
     "rust": [".lock()", ".read()", ".write()", "Mutex::new", "RwLock::new"],
+    "java": ["synchronized", "ReentrantLock", ".lock()", ".unlock()", "Semaphore"],
 }
 
 

@@ -82,6 +82,18 @@ DECISION_NODES: dict[str, set[str]] = {
         "match_expression",
         "match_arm",
     },
+    "java": {
+        "if_statement",
+        "for_statement",
+        "enhanced_for_statement",
+        "while_statement",
+        "do_statement",
+        "switch_expression",
+        "switch_block_statement_group",  # switch case
+        "try_statement",
+        "catch_clause",
+        "ternary_expression",
+    },
 }
 
 # Boolean operator patterns (add to complexity for short-circuit evaluation)
@@ -91,6 +103,7 @@ BOOLEAN_OPERATORS: dict[str, set[str]] = {
     "typescript": {"&&", "||"},
     "php": {"&&", "||", "and", "or"},
     "rust": {"&&", "||"},
+    "java": {"&&", "||"},
 }
 
 

@@ -11,6 +11,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from magaldi_core.extractors.patterns.java import (
+    detect_java_http_routes,
+)
 from magaldi_core.extractors.patterns.javascript import (
     detect_javascript_http_routes,
 )
@@ -49,6 +52,8 @@ def detect_http_routes(
         return detect_python_http_routes(decorators)  # type: ignore[no-any-return]
     elif language in ("javascript", "typescript", "tsx"):
         return detect_javascript_http_routes(decorators)  # type: ignore[no-any-return]
+    elif language == "java":
+        return detect_java_http_routes(decorators)  # type: ignore[no-any-return]
     else:
         # For unknown languages, try both
         routes = detect_python_http_routes(decorators)
@@ -143,6 +148,15 @@ _PUBLIC_API_DECORATORS = {
     "options", "trace", "actix_web::main", "actix_rt::main", "launch", "rocket::launch",
     # Rust Tokio/test
     "tokio::main", "test", "tokio::test", "actix_rt::test",
+    # Java Spring MVC
+    "@GetMapping", "@PostMapping", "@PutMapping", "@DeleteMapping", "@PatchMapping",
+    "@RequestMapping",
+    "@RestController", "@Controller",
+    # Java JAX-RS / Jakarta REST
+    "@GET", "@POST", "@PUT", "@DELETE", "@PATCH", "@HEAD", "@OPTIONS",
+    "@Path",
+    # Java Micronaut
+    "@Get", "@Post", "@Put", "@Delete", "@Patch",
 }
 
 

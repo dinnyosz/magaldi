@@ -488,6 +488,66 @@ class RustModuleResolver(ModuleResolver):
 
 
 # =============================================================================
+# JAVA
+# =============================================================================
+
+
+class JavaModuleResolver(ModuleResolver):
+    """Java: dotted package paths, Maven/Gradle conventions."""
+
+    # Java standard library top-level packages
+    _STDLIB_PACKAGES: frozenset[str] = frozenset({
+        "java", "javax", "jdk", "sun", "com.sun", "org.xml", "org.w3c",
+    })
+
+    # Common third-party top-level packages
+    _THIRD_PARTY_PACKAGES: frozenset[str] = frozenset({
+        "org.springframework", "org.hibernate", "org.apache", "org.junit",
+        "org.mockito", "org.assertj", "org.hamcrest", "org.slf4j",
+        "org.json", "org.yaml", "org.jetbrains",
+        "com.google", "com.fasterxml", "com.amazonaws", "com.github",
+        "com.squareup", "com.zaxxer", "com.mysql",
+        "io.netty", "io.undertow", "io.micronaut", "io.quarkus",
+        "io.swagger", "io.grpc", "io.projectreactor",
+        "jakarta", "lombok", "reactor",
+        "net.bytebuddy", "net.sf",
+    })
+
+    def is_external_module(self, module: str) -> bool:
+        """External if matching stdlib or known third-party package."""
+        # Check against stdlib prefixes
+        for prefix in self._STDLIB_PACKAGES:
+            if module.startswith(prefix):
+                return True
+
+        # Check against known third-party prefixes
+        return any(module.startswith(prefix) for prefix in self._THIRD_PARTY_PACKAGES)
+
+    def module_to_file_paths(
+        self, module: str, caller_path: str | None = None  # noqa: ARG002
+    ) -> list[str]:
+        """Convert Java import path to possible file paths.
+
+        Java uses dotted package paths: com.example.models.User
+        The last component is the class name, preceding parts are the package.
+
+        Common source roots: src/main/java/, src/, or bare package path.
+        """
+        paths: list[str] = []
+
+        # Convert dots to path separators
+        # com.example.models.User -> com/example/models/User.java
+        file_path = module.replace(".", "/") + ".java"
+
+        # Try common Maven/Gradle source roots
+        paths.append(f"src/main/java/{file_path}")
+        paths.append(f"src/{file_path}")
+        paths.append(file_path)
+
+        return paths
+
+
+# =============================================================================
 # REGISTRY
 # =============================================================================
 
@@ -496,6 +556,7 @@ _PYTHON_RESOLVER = PythonModuleResolver()
 _JAVASCRIPT_RESOLVER = JavaScriptModuleResolver()
 _PHP_RESOLVER = PHPModuleResolver()
 _RUST_RESOLVER = RustModuleResolver()
+_JAVA_RESOLVER = JavaModuleResolver()
 
 _RESOLVERS: dict[str, ModuleResolver] = {
     "python": _PYTHON_RESOLVER,
@@ -504,6 +565,7 @@ _RESOLVERS: dict[str, ModuleResolver] = {
     "tsx": _JAVASCRIPT_RESOLVER,
     "php": _PHP_RESOLVER,
     "rust": _RUST_RESOLVER,
+    "java": _JAVA_RESOLVER,
 }
 
 

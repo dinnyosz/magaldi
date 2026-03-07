@@ -33,6 +33,13 @@ Rust:
 - let x = obj.method()      (method call binding)
 - let x = Type::new()       (constructor binding)
 - for x in expr             (for-in loop)
+
+Java:
+- Type x = func()           (local variable with call)
+- var x = obj.method()      (method call assignment)
+- Type x = new Class()      (constructor via new)
+- for (Type x : collection) (enhanced for loop)
+- catch (Type e) {}          (catch clause — HAS type info)
 """
 
 from __future__ import annotations
@@ -116,6 +123,10 @@ _SCOPE_TYPES_BY_LANG: dict[str, frozenset[str]] = {
     "rust": frozenset({
         "function_item", "impl_item", "closure_expression",
     }),
+    "java": frozenset({
+        "method_declaration", "constructor_declaration", "class_declaration",
+        "lambda_expression",
+    }),
 }
 
 # Tree-sitter grammar names for parsing (tsx uses typescript grammar)
@@ -144,6 +155,9 @@ _FUNC_DEF_TYPES: dict[str, frozenset[str]] = {
     "rust": frozenset({
         "function_item",
     }),
+    "java": frozenset({
+        "method_declaration", "constructor_declaration",
+    }),
 }
 
 # Decorated/exported wrapper types per language
@@ -154,6 +168,7 @@ _WRAPPER_TYPES: dict[str, frozenset[str]] = {
     "tsx": frozenset({"export_statement"}),
     "php": frozenset(),
     "rust": frozenset(),
+    "java": frozenset(),
 }
 
 
@@ -289,6 +304,8 @@ def _extract_binding(
         return _extract_binding_php(node)
     if language == "rust":
         return _extract_binding_rust(node)
+    if language == "java":
+        return _extract_binding_java(node)
     return None
 
 
@@ -1065,5 +1082,179 @@ def _extract_for_binding_rust(node: Node) -> BindingInfo | None:
             variable=var_name, source=SOURCE_FOR_IN,
             call_receiver=collection_name, line=line,
         )
+
+    return None
+
+
+# =============================================================================
+# JAVA BINDINGS
+# =============================================================================
+
+
+def _extract_call_info_java(
+    call_node: Node,
+) -> tuple[str | None, str | None, str | None]:
+    """Extract call info from Java call nodes.
+
+    Handles:
+    - method_invocation: obj.method() or method()
+    - object_creation_expression: new ClassName()
+    """
+    if call_node.type == "object_creation_expression":
+        # new ClassName(...)
+        type_node = get_child_by_field(call_node, "type")
+        if type_node:
+            name = get_node_text(type_node)
+            # Strip generics: ArrayList<String> -> ArrayList
+            if "<" in name:
+                name = name.split("<")[0]
+            return name, None, name
+        return None, None, None
+
+    if call_node.type == "method_invocation":
+        name_node = get_child_by_field(call_node, "name")
+        obj_node = get_child_by_field(call_node, "object")
+        if name_node:
+            method_name = get_node_text(name_node)
+            if obj_node:
+                if obj_node.type == "identifier":
+                    receiver = get_node_text(obj_node)
+                    return method_name, receiver, None
+                if obj_node.type == "this":
+                    return method_name, "this", None
+                if obj_node.type in ("field_access", "method_invocation"):
+                    receiver = get_node_text(obj_node)
+                    return method_name, receiver, None
+            return method_name, None, None
+
+    return None, None, None
+
+
+def _extract_binding_java(
+    node: Node,
+) -> BindingInfo | list[BindingInfo] | None:
+    """Extract Java-specific bindings."""
+    if node.type == "local_variable_declaration":
+        return _extract_local_var_binding_java(node)
+    if node.type == "enhanced_for_statement":
+        return _extract_for_binding_java(node)
+    if node.type == "catch_clause":
+        return _extract_catch_binding_java(node)
+    return None
+
+
+def _extract_local_var_binding_java(node: Node) -> list[BindingInfo]:
+    """Extract bindings from Java local variable declarations.
+
+    Handles: Type x = func(), var x = new Class(), Type x = obj.method()
+    """
+    bindings: list[BindingInfo] = []
+
+    for child in node.children:
+        if child.type != "variable_declarator":
+            continue
+
+        name_node = get_child_by_field(child, "name")
+        value_node = get_child_by_field(child, "value")
+
+        if not name_node or name_node.type != "identifier":
+            continue
+        if not value_node:
+            continue
+
+        var_name = get_node_text(name_node)
+        line = child.start_point[0] + 1
+
+        # new ClassName()
+        if value_node.type == "object_creation_expression":
+            call_name, _, type_name = _extract_call_info_java(value_node)
+            if type_name:
+                bindings.append(BindingInfo(
+                    variable=var_name, source=SOURCE_CONSTRUCTOR,
+                    call_name=call_name, type_name=type_name, line=line,
+                ))
+            continue
+
+        # method_invocation: func() or obj.method()
+        if value_node.type == "method_invocation":
+            call_name, call_receiver, _ = _extract_call_info_java(value_node)
+            if not call_name:
+                continue
+
+            if call_receiver:
+                bindings.append(BindingInfo(
+                    variable=var_name, source=SOURCE_ASSIGNMENT_METHOD_CALL,
+                    call_name=call_name, call_receiver=call_receiver, line=line,
+                ))
+            else:
+                bindings.append(BindingInfo(
+                    variable=var_name, source=SOURCE_ASSIGNMENT_CALL,
+                    call_name=call_name, line=line,
+                ))
+
+    return bindings
+
+
+def _extract_for_binding_java(node: Node) -> BindingInfo | None:
+    """Extract binding from Java enhanced for statement.
+
+    for (Type item : collection) { }
+    """
+    name_node = get_child_by_field(node, "name")
+    value_node = get_child_by_field(node, "value")
+
+    if not name_node or not value_node:
+        return None
+
+    if name_node.type != "identifier":
+        return None
+
+    var_name = get_node_text(name_node)
+    line = node.start_point[0] + 1
+
+    if value_node.type == "method_invocation":
+        call_name, call_receiver, type_name = _extract_call_info_java(value_node)
+        return BindingInfo(
+            variable=var_name, source=SOURCE_FOR_IN,
+            call_name=call_name, call_receiver=call_receiver,
+            type_name=type_name, line=line,
+        )
+
+    if value_node.type == "identifier":
+        collection_name = get_node_text(value_node)
+        return BindingInfo(
+            variable=var_name, source=SOURCE_FOR_IN,
+            call_receiver=collection_name, line=line,
+        )
+
+    return None
+
+
+def _extract_catch_binding_java(node: Node) -> BindingInfo | None:
+    """Extract binding from Java catch clause. Has type info.
+
+    catch (ExceptionType e) { }
+    """
+    # Find the catch_formal_parameter child
+    for child in node.children:
+        if child.type == "catch_formal_parameter":
+            type_name = None
+            var_name = None
+
+            for sub in child.children:
+                if sub.type == "catch_type":
+                    # Get the type name (first type in multi-catch)
+                    for type_child in sub.children:
+                        if type_child.type in ("type_identifier", "scoped_type_identifier"):
+                            type_name = get_node_text(type_child)
+                            break
+                elif sub.type == "identifier":
+                    var_name = get_node_text(sub)
+
+            if var_name:
+                return BindingInfo(
+                    variable=var_name, source=SOURCE_EXCEPT_AS,
+                    type_name=type_name, line=node.start_point[0] + 1,
+                )
 
     return None

@@ -3,20 +3,27 @@
 This package contains framework/library pattern extractors:
 
 patterns/
+  java/         - Java frameworks (Spring, JAX-RS, Micronaut)
+  javascript/   - JS/TS frameworks (Express, NestJS, Hono)
   php/          - PHP frameworks (Slim, Laravel, Symfony)
   python/       - Python frameworks (FastAPI, Flask, Django, Click, Typer)
-  javascript/   - JS/TS frameworks (Express, NestJS, Hono)
   rust/         - Rust frameworks (Actix-web, Rocket)
 
 These extractors build on top of language extractors to detect
 framework/library-specific code structures like routes and CLI commands.
 """
 
-# PHP patterns (AST-level extraction)
+# Java patterns (annotation-based detection)
+from magaldi_core.extractors.patterns.java import (
+    detect_java_http_routes,
+)
+
 # JavaScript/TypeScript patterns (decorator-based detection)
 from magaldi_core.extractors.patterns.javascript import (
     detect_javascript_http_routes,
 )
+
+# PHP patterns (AST-level extraction)
 from magaldi_core.extractors.patterns.php import (
     extract_slim_route_groups,
     extract_slim_routes,
@@ -34,14 +41,16 @@ from magaldi_core.extractors.patterns.rust import (
 )
 
 __all__ = [
+    # Java
+    "detect_java_http_routes",
+    # JavaScript/TypeScript
+    "detect_javascript_http_routes",
     # PHP
     "extract_slim_routes",
     "extract_slim_route_groups",
     # Python
     "detect_python_http_routes",
     "detect_python_cli_commands",
-    # JavaScript/TypeScript
-    "detect_javascript_http_routes",
     # Rust
     "detect_rust_http_routes",
 ]
