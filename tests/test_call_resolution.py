@@ -1154,3 +1154,220 @@ class TestEmbeddingBlocklist:
         from magaldi_core.call_resolution import _EMBEDDING_BLOCKLIST
 
         assert isinstance(_EMBEDDING_BLOCKLIST, frozenset)
+
+
+class TestSuperResolution:
+    """Test Strategy 5.8: super()/parent:: call resolution."""
+
+    def _make_repo(self):
+        from unittest.mock import MagicMock
+
+        repo = MagicMock()
+        repo.store_calls = MagicMock()
+        return repo
+
+    def test_resolves_python_super_call(self):
+        """Test super().method() resolves to parent class method."""
+        from magaldi_core.call_resolution import _resolve_via_super
+
+        repo = self._make_repo()
+
+        elements = [
+            {
+                "element_id": "s:r:main:app.py:method:validate:20",
+                "parent_id": "s:r:main:app.py:class:Child:10",
+                "calls": [
+                    {"name": "validate", "receiver": "super", "category": "untyped"},
+                ],
+            },
+        ]
+
+        # Parent class has base_classes
+        repo.get_document.return_value = {
+            "element_id": "s:r:main:app.py:class:Child:10",
+            "base_classes": ["Parent"],
+        }
+
+        # Resolve Parent class
+        repo.get_document_by_name_only.return_value = {
+            "element_id": "s:r:main:base.py:class:Parent:1",
+        }
+
+        # Resolve method on Parent
+        repo.get_method_by_class.return_value = {
+            "element_id": "s:r:main:base.py:method:validate:5",
+        }
+
+        count = _resolve_via_super(repo, elements, "s", "r", "main")
+
+        assert count == 1
+        assert elements[0]["calls"][0]["resolved_id"] == "s:r:main:base.py:method:validate:5"
+        assert elements[0]["calls"][0]["category"] == "super_resolved"
+        repo.store_calls.assert_called_once()
+
+    def test_resolves_php_parent_call(self):
+        """Test parent::method() resolves (PHP uses receiver='parent')."""
+        from magaldi_core.call_resolution import _resolve_via_super
+
+        repo = self._make_repo()
+
+        elements = [
+            {
+                "element_id": "s:r:main:app.php:method:save:20",
+                "parent_id": "s:r:main:app.php:class:Child:10",
+                "calls": [
+                    {"name": "save", "receiver": "parent", "category": "untyped"},
+                ],
+            },
+        ]
+
+        repo.get_document.return_value = {
+            "element_id": "s:r:main:app.php:class:Child:10",
+            "base_classes": ["BaseModel"],
+        }
+        repo.get_document_by_name_only.return_value = {
+            "element_id": "s:r:main:base.php:class:BaseModel:1",
+        }
+        repo.get_method_by_class.return_value = {
+            "element_id": "s:r:main:base.php:method:save:5",
+        }
+
+        count = _resolve_via_super(repo, elements, "s", "r", "main")
+        assert count == 1
+        assert elements[0]["calls"][0]["resolved_id"] == "s:r:main:base.php:method:save:5"
+
+    def test_skips_already_resolved(self):
+        """Test already-resolved super calls are skipped."""
+        from magaldi_core.call_resolution import _resolve_via_super
+
+        repo = self._make_repo()
+
+        elements = [
+            {
+                "element_id": "s:r:main:app.py:method:validate:20",
+                "parent_id": "s:r:main:app.py:class:Child:10",
+                "calls": [
+                    {
+                        "name": "validate",
+                        "receiver": "super",
+                        "resolved_id": "already_resolved",
+                        "category": "resolved",
+                    },
+                ],
+            },
+        ]
+
+        count = _resolve_via_super(repo, elements, "s", "r", "main")
+        assert count == 0
+
+    def test_no_base_classes_skips(self):
+        """Test elements without base_classes are skipped."""
+        from magaldi_core.call_resolution import _resolve_via_super
+
+        repo = self._make_repo()
+
+        elements = [
+            {
+                "element_id": "s:r:main:app.py:method:validate:20",
+                "parent_id": "s:r:main:app.py:class:Child:10",
+                "calls": [
+                    {"name": "validate", "receiver": "super", "category": "untyped"},
+                ],
+            },
+        ]
+
+        repo.get_document.return_value = {
+            "element_id": "s:r:main:app.py:class:Child:10",
+            "base_classes": [],
+        }
+
+        count = _resolve_via_super(repo, elements, "s", "r", "main")
+        assert count == 0
+
+    def test_no_parent_id_skips(self):
+        """Test top-level functions with super calls are skipped."""
+        from magaldi_core.call_resolution import _resolve_via_super
+
+        repo = self._make_repo()
+
+        elements = [
+            {
+                "element_id": "s:r:main:app.py:function:broken:1",
+                "calls": [
+                    {"name": "validate", "receiver": "super", "category": "untyped"},
+                ],
+            },
+        ]
+
+        count = _resolve_via_super(repo, elements, "s", "r", "main")
+        assert count == 0
+
+    def test_method_not_found_in_parent(self):
+        """Test graceful handling when method doesn't exist in parent class."""
+        from magaldi_core.call_resolution import _resolve_via_super
+
+        repo = self._make_repo()
+
+        elements = [
+            {
+                "element_id": "s:r:main:app.py:method:validate:20",
+                "parent_id": "s:r:main:app.py:class:Child:10",
+                "calls": [
+                    {"name": "nonexistent", "receiver": "super", "category": "untyped"},
+                ],
+            },
+        ]
+
+        repo.get_document.return_value = {
+            "element_id": "s:r:main:app.py:class:Child:10",
+            "base_classes": ["Parent"],
+        }
+        repo.get_document_by_name_only.return_value = {
+            "element_id": "s:r:main:base.py:class:Parent:1",
+        }
+        repo.get_method_by_class.return_value = None
+
+        count = _resolve_via_super(repo, elements, "s", "r", "main")
+        assert count == 0
+
+    def test_multiple_inheritance_tries_all(self):
+        """Test resolution tries each base class in order."""
+        from magaldi_core.call_resolution import _resolve_via_super
+
+        repo = self._make_repo()
+
+        elements = [
+            {
+                "element_id": "s:r:main:app.py:method:save:20",
+                "parent_id": "s:r:main:app.py:class:Child:10",
+                "calls": [
+                    {"name": "save", "receiver": "super", "category": "untyped"},
+                ],
+            },
+        ]
+
+        repo.get_document.return_value = {
+            "element_id": "s:r:main:app.py:class:Child:10",
+            "base_classes": ["Mixin", "Base"],
+        }
+
+        # Mixin doesn't have the method, Base does
+        def mock_name_lookup(name, element_type, scope, repository, username):
+            if name == "Mixin":
+                return {"element_id": "s:r:main:mixin.py:class:Mixin:1"}
+            if name == "Base":
+                return {"element_id": "s:r:main:base.py:class:Base:1"}
+            return None
+
+        repo.get_document_by_name_only.side_effect = mock_name_lookup
+
+        def mock_method_lookup(class_id, method_name, scope, repository, username):
+            if class_id == "s:r:main:base.py:class:Base:1" and method_name == "save":
+                return {"element_id": "s:r:main:base.py:method:save:5"}
+            return None
+
+        repo.get_method_by_class.side_effect = mock_method_lookup
+
+        count = _resolve_via_super(repo, elements, "s", "r", "main")
+        assert count == 1
+        assert elements[0]["calls"][0]["resolved_id"] == "s:r:main:base.py:method:save:5"

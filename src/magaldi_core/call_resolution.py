@@ -39,7 +39,7 @@ def resolve_all_calls(
     scope: str,
     repository: str,
     username: str = "main",
-) -> tuple[int, int, int, int, int]:
+) -> tuple[int, int, int, int, int, int]:
     """Full call resolution pass - re-resolves ALL calls in the repository.
 
     Used during partial parsing to ensure call graphs are complete even when
@@ -54,7 +54,7 @@ def resolve_all_calls(
 
     Returns:
         Tuple of (total_calls_processed, import_resolved, type_resolved,
-        constructor_resolved, scope_resolved).
+        constructor_resolved, scope_resolved, super_resolved).
     """
     total_processed = 0
     import_resolved = 0
@@ -101,7 +101,7 @@ def resolve_all_calls(
             # strategies 5.5/5.6/5.7 can re-process them on subsequent runs
             if category in (
                 "resolved", "return_type_resolved", "constructor_resolved",
-                "scope_resolved", "embedding_resolved",
+                "scope_resolved", "super_resolved", "embedding_resolved",
             ):
                 if receiver is None:
                     category = "unknown"
@@ -180,17 +180,23 @@ def resolve_all_calls(
         repo, elements, scope, repository, username
     )
 
+    # Strategy 5.8: super()/parent:: call resolution
+    elements = repo.find_all_elements_with_calls(scope, repository, username)
+    super_count = _resolve_via_super(
+        repo, elements, scope, repository, username
+    )
+
     total_resolved = (
         import_resolved + type_resolved + return_type_count
-        + constructor_count + scope_count
+        + constructor_count + scope_count + super_count
     )
     logger.info(
         f"Full resolution: resolved {total_resolved}/{total_processed} calls "
         f"({import_resolved} via imports, {type_resolved} via type annotations, "
         f"{return_type_count} via return-type, {constructor_count} via constructors, "
-        f"{scope_count} via scope analysis)"
+        f"{scope_count} via scope analysis, {super_count} via super)"
     )
-    return total_processed, import_resolved, type_resolved, constructor_count, scope_count
+    return total_processed, import_resolved, type_resolved, constructor_count, scope_count, super_count
 
 
 def resolve_cross_file_calls(
@@ -1139,6 +1145,109 @@ def _resolve_via_constructors(
         )
 
     return constructor_resolved
+
+
+_SUPER_RECEIVERS = frozenset({"super", "parent"})
+
+
+def _resolve_via_super(
+    repo: Repository,
+    elements: list[dict],
+    scope: str,
+    repository: str,
+    username: str,
+) -> int:
+    """Strategy 5.8: Resolve super()/parent:: calls to parent class methods.
+
+    For calls with receiver="super" (Python/JS) or "parent" (PHP),
+    finds the containing class via parent_id, looks up base_classes,
+    and resolves the method in the parent class.
+
+    Args:
+        repo: Repository instance.
+        elements: Elements with calls.
+        scope: Repository scope.
+        repository: Repository name.
+        username: Username branch.
+
+    Returns:
+        Number of calls resolved.
+    """
+    resolved_count = 0
+
+    # Find elements with unresolved super/parent calls
+    candidates = [
+        elem for elem in elements
+        if any(
+            c.get("receiver") in _SUPER_RECEIVERS and not c.get("resolved_id")
+            for c in elem.get("calls", [])
+        )
+    ]
+
+    if not candidates:
+        return 0
+
+    for elem in candidates:
+        element_id = elem.get("element_id", "")
+        parent_id = elem.get("parent_id")
+        if not parent_id:
+            continue
+
+        # Get the containing class (parent of this method)
+        class_doc = repo.get_document(parent_id)
+        if not class_doc:
+            continue
+
+        base_classes = class_doc.get("base_classes") or []
+        if not base_classes:
+            continue
+
+        calls = elem.get("calls", [])
+        updated = False
+
+        for call in calls:
+            if call.get("resolved_id"):
+                continue
+            if call.get("receiver") not in _SUPER_RECEIVERS:
+                continue
+
+            method_name = call.get("name")
+            if not method_name:
+                continue
+
+            # Try each base class in order (MRO-like)
+            for base_name in base_classes:
+                base_doc = repo.get_document_by_name_only(
+                    name=base_name,
+                    element_type="class",
+                    scope=scope,
+                    repository=repository,
+                    username=username,
+                )
+                if not base_doc or not base_doc.get("element_id"):
+                    continue
+
+                method_doc = repo.get_method_by_class(
+                    class_id=base_doc["element_id"],
+                    method_name=method_name,
+                    scope=scope,
+                    repository=repository,
+                    username=username,
+                )
+                if method_doc and method_doc.get("element_id"):
+                    call["resolved_id"] = method_doc["element_id"]
+                    call["category"] = "super_resolved"
+                    resolved_count += 1
+                    updated = True
+                    break
+
+        if updated:
+            repo.store_calls(element_id, calls)
+
+    if resolved_count:
+        logger.info(f"Strategy 5.8 (super): resolved {resolved_count} calls")
+
+    return resolved_count
 
 
 def _resolve_via_scope_bindings(

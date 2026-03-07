@@ -1063,15 +1063,19 @@ def run_call_resolution(
                 type_resolved,
                 constructor_resolved,
                 scope_resolved,
+                super_resolved,
             ) = resolve_all_calls(repo, scope, repository, username)
             total_resolved = (
-                import_resolved + type_resolved + constructor_resolved + scope_resolved
+                import_resolved + type_resolved + constructor_resolved
+                + scope_resolved + super_resolved
             )
             console.print(f"  Full pass: {total_resolved}/{total_calls} resolved")
             console.print(f"    via imports: {import_resolved}")
             console.print(f"    via types: {type_resolved}")
             console.print(f"    via constructors: {constructor_resolved}")
             console.print(f"    via scope: {scope_resolved}")
+            if super_resolved:
+                console.print(f"    via super: {super_resolved}")
         except Exception as e:
             console.print(f"  [yellow]Warning: Static call resolution failed: {rich_escape(str(e))}[/]")
 
