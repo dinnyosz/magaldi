@@ -22,6 +22,28 @@ class SearchRepository:
         """Get search client from base."""
         return self._base._get_client()
 
+    @staticmethod
+    def _build_username_filter(username: str | None) -> dict[str, Any] | None:
+        """Build ES filter for username, merging user + main branches.
+
+        When username is not "main", queries both user and main so that
+        user-specific data overlays the full "main" index.  When username
+        is None, returns None (no filter applied).
+        """
+        if not username:
+            return None
+        if username == "main":
+            return {"term": {"username": "main"}}
+        return {
+            "bool": {
+                "should": [
+                    {"term": {"username": username}},
+                    {"term": {"username": "main"}},
+                ],
+                "minimum_should_match": 1,
+            }
+        }
+
     def search_by_text(
         self,
         query: str,
@@ -53,19 +75,26 @@ class SearchRepository:
             }
         ]
 
+        filter_clauses: list[dict[str, Any]] = []
+
         if scope:
-            must_clauses.append({"term": {"scope": scope}})
+            filter_clauses.append({"term": {"scope": scope}})
         if repository:
-            must_clauses.append({"term": {"repository": repository}})
-        if username:
-            must_clauses.append({"term": {"username": username}})
+            filter_clauses.append({"term": {"repository": repository}})
+        username_filter = self._build_username_filter(username)
+        if username_filter:
+            filter_clauses.append(username_filter)
         if element_types:
-            must_clauses.append({"terms": {"element_type": element_types}})
+            filter_clauses.append({"terms": {"element_type": element_types}})
+
+        query: dict[str, Any] = {"bool": {"must": must_clauses}}
+        if filter_clauses:
+            query["bool"]["filter"] = filter_clauses
 
         client = self._get_client()
         result = client.search(
             index=INDEX_NAME,
-            body={"query": {"bool": {"must": must_clauses}}, "size": size},
+            body={"query": query, "size": size},
         )
 
         return [hit["_source"] for hit in result["hits"]["hits"]]
@@ -106,8 +135,9 @@ class SearchRepository:
             filter_clauses.append({"term": {"scope": scope}})
         if repository:
             filter_clauses.append({"term": {"repository": repository}})
-        if username:
-            filter_clauses.append({"term": {"username": username}})
+        username_filter = self._build_username_filter(username)
+        if username_filter:
+            filter_clauses.append(username_filter)
         if element_types:
             filter_clauses.append({"terms": {"element_type": element_types}})
 
@@ -159,8 +189,9 @@ class SearchRepository:
             filter_clauses.append({"term": {"scope": scope}})
         if repository:
             filter_clauses.append({"term": {"repository": repository}})
-        if username:
-            filter_clauses.append({"term": {"username": username}})
+        username_filter = self._build_username_filter(username)
+        if username_filter:
+            filter_clauses.append(username_filter)
         if element_types:
             filter_clauses.append({"terms": {"element_type": element_types}})
 
@@ -243,8 +274,9 @@ class SearchRepository:
 
         filter_clauses: list[dict[str, Any]] = []
 
-        if username:
-            filter_clauses.append({"term": {"username": username}})
+        username_filter = self._build_username_filter(username)
+        if username_filter:
+            filter_clauses.append(username_filter)
         if scope:
             filter_clauses.append({"term": {"scope": scope}})
         if repository:
@@ -303,8 +335,9 @@ class SearchRepository:
 
         filter_clauses: list[dict[str, Any]] = []
 
-        if username:
-            filter_clauses.append({"term": {"username": username}})
+        username_filter = self._build_username_filter(username)
+        if username_filter:
+            filter_clauses.append(username_filter)
         if scope:
             filter_clauses.append({"term": {"scope": scope}})
         if repository:
@@ -360,8 +393,9 @@ class SearchRepository:
 
         filter_clauses: list[dict[str, Any]] = []
 
-        if username:
-            filter_clauses.append({"term": {"username": username}})
+        username_filter = self._build_username_filter(username)
+        if username_filter:
+            filter_clauses.append(username_filter)
         if scope:
             filter_clauses.append({"term": {"scope": scope}})
         if repository:
@@ -414,8 +448,9 @@ class SearchRepository:
             filter_clauses.append({"term": {"scope": scope}})
         if repository:
             filter_clauses.append({"term": {"repository": repository}})
-        if username:
-            filter_clauses.append({"term": {"username": username}})
+        username_filter = self._build_username_filter(username)
+        if username_filter:
+            filter_clauses.append(username_filter)
 
         # Nested query to find elements with calls.resolved_id matching target
         nested_query: dict[str, Any] = {
@@ -477,8 +512,9 @@ class SearchRepository:
             filter_clauses.append({"term": {"scope": scope}})
         if repository:
             filter_clauses.append({"term": {"repository": repository}})
-        if username:
-            filter_clauses.append({"term": {"username": username}})
+        username_filter = self._build_username_filter(username)
+        if username_filter:
+            filter_clauses.append(username_filter)
 
         # Nested query to find elements with imports.module matching
         nested_query: dict[str, Any] = {
@@ -634,15 +670,24 @@ class SearchRepository:
         if element_types is None:
             element_types = ["function", "method"]
 
+        filter_clauses: list[dict[str, Any]] = [
+            {"term": {"scope": scope}},
+            {"term": {"repository": repository}},
+        ]
+        username_filter = self._build_username_filter(username)
+        if username_filter:
+            filter_clauses.append(username_filter)
+        else:
+            # Default to "main" when no username provided
+            filter_clauses.append({"term": {"username": "main"}})
+
         query: dict[str, Any] = {
             "bool": {
                 "must": [
                     {"term": {"name": name}},
-                    {"term": {"scope": scope}},
-                    {"term": {"repository": repository}},
-                    {"term": {"username": username}},
                     {"terms": {"element_type": element_types}},
                 ],
+                "filter": filter_clauses,
             }
         }
 
