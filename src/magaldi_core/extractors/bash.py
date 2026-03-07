@@ -21,6 +21,24 @@ _BASH_BUILTINS = frozenset({
     "umask", "ulimit", "shopt", "enable", "builtin", "command", "type",
 })
 
+# Node types that wrap script content without adding semantic meaning.
+# Scripts using download guards (e.g., `{ ... }`) produce these at root level.
+_TRANSPARENT_CONTAINERS = frozenset({"compound_statement", "subshell"})
+
+
+def _iter_top_level_nodes(root: Node):
+    """Iterate top-level nodes, descending into transparent containers.
+
+    Bash scripts sometimes wrap all content in { ... } (download guard) or
+    ( ... ) (subshell). This yields the actual function/variable nodes inside
+    those wrappers instead of stopping at the container boundary.
+    """
+    for child in root.children:
+        if child.type in _TRANSPARENT_CONTAINERS:
+            yield from _iter_top_level_nodes(child)
+        else:
+            yield child
+
 
 class BashExtractor:
     """Extractor for Bash shell scripts."""
@@ -33,11 +51,13 @@ class BashExtractor:
         """Extract functions, variables, and constants from a Bash AST.
 
         Extracts at all depths — including inside function bodies.
+        Recurses into compound_statement and subshell nodes to handle
+        scripts wrapped in { ... } or ( ... ) guards.
         """
         elements: list[ExtractedElement] = []
         root = tree.root_node
 
-        for child in root.children:
+        for child in _iter_top_level_nodes(root):
             if child.type == "function_definition":
                 elem = _extract_function(child, lines)
                 if elem:

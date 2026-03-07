@@ -1311,3 +1311,79 @@ class TestJsObjectMethodAssignment:
         func = next((e for e in elements if e.name == "handler"), None)
         assert func is not None
         assert func.is_async is True
+
+
+# =============================================================================
+# Bash: Brace-group extraction fix
+# =============================================================================
+
+
+class TestBashBraceGroupExtraction:
+    """Verify functions inside { ... } brace-groups are extracted."""
+
+    def _parse_bash(self, code: str):
+        from magaldi_core.code_parser import BashParser
+
+        parser = BashParser()
+        file_info = FileInfo(
+            relative_path="test.sh",
+            absolute_path=Path("/fake/test.sh"),
+            language="bash",
+        )
+        return parser.parse(code, file_info, "scope", "repo", "main")
+
+    def test_function_inside_brace_group(self):
+        """Functions inside { ... } should be extracted."""
+        code = "#!/bin/bash\n{\n  my_func() {\n    echo hello\n  }\n}\n"
+        elements = self._parse_bash(code)
+        func = next((e for e in elements if e.name == "my_func"), None)
+        assert func is not None, "Function inside brace-group should be extracted"
+        assert func.element_type == "function"
+
+    def test_multiple_functions_inside_brace_group(self):
+        """Multiple functions inside { ... } should all be extracted."""
+        code = (
+            "#!/bin/bash\n{\n"
+            "  func_a() {\n    echo a\n  }\n"
+            "  func_b() {\n    echo b\n  }\n"
+            "  func_c() {\n    echo c\n  }\n"
+            "}\n"
+        )
+        elements = self._parse_bash(code)
+        func_names = [e.name for e in elements if e.element_type == "function"]
+        assert "func_a" in func_names
+        assert "func_b" in func_names
+        assert "func_c" in func_names
+
+    def test_variable_inside_brace_group(self):
+        """Top-level variables inside { ... } should be extracted."""
+        code = "#!/bin/bash\n{\n  MY_VAR=hello\n}\n"
+        elements = self._parse_bash(code)
+        var = next((e for e in elements if e.name == "MY_VAR"), None)
+        assert var is not None, "Variable inside brace-group should be extracted"
+
+    def test_top_level_functions_still_work(self):
+        """Functions NOT inside brace-groups should still work (regression check)."""
+        code = "#!/bin/bash\nmy_func() {\n  echo hello\n}\n"
+        elements = self._parse_bash(code)
+        func = next((e for e in elements if e.name == "my_func"), None)
+        assert func is not None
+
+    def test_nested_brace_groups(self):
+        """Functions in nested { { ... } } should be extracted."""
+        code = "#!/bin/bash\n{\n  {\n    inner_func() {\n      echo inner\n    }\n  }\n}\n"
+        elements = self._parse_bash(code)
+        func = next((e for e in elements if e.name == "inner_func"), None)
+        assert func is not None, "Function in nested brace-group should be extracted"
+
+    def test_mixed_top_level_and_brace_group(self):
+        """Script with both top-level and brace-group functions."""
+        code = (
+            "#!/bin/bash\n"
+            "top_func() {\n  echo top\n}\n"
+            "{\n  inner_func() {\n    echo inner\n  }\n}\n"
+        )
+        elements = self._parse_bash(code)
+        func_names = [e.name for e in elements if e.element_type == "function"]
+        assert "top_func" in func_names
+        assert "inner_func" in func_names
