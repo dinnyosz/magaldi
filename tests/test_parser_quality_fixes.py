@@ -11,12 +11,9 @@ Covers:
 
 from pathlib import Path
 
-import pytest
-
 from magaldi_core.change_detection import FileInfo
 from magaldi_core.parsers.base import extract_docstring, extract_preceding_doc_comment
 from shared.ai.prompts import clean_summary
-
 
 # =============================================================================
 # Python: Decorated class member dual-extraction bug
@@ -1058,3 +1055,84 @@ class TestPhpTraitParsing:
         trait = next(e for e in elements if e.name == "Timestampable")
         assert trait.docstring is not None
         assert "timestamp" in trait.docstring.lower()
+
+
+# =============================================================================
+# PHP: class constant extraction
+# =============================================================================
+
+
+class TestPhpClassConstants:
+    """Verify PHP class constants are extracted."""
+
+    def _parse_php(self, code: str):
+        from magaldi_core.parsers.php import PhpParser
+
+        parser = PhpParser()
+        file_info = FileInfo(
+            relative_path="test.php",
+            absolute_path=Path("/fake/test.php"),
+            language="php",
+        )
+        return parser.parse(code, file_info, "scope", "repo", "main")
+
+    def test_class_constant_extracted(self):
+        """Class constant should be extracted."""
+        code = "<?php\nclass Config {\n    const VERSION = '1.0';\n}\n"
+        elements = self._parse_php(code)
+        const = next((e for e in elements if e.name == "VERSION"), None)
+        assert const is not None, f"Expected constant 'VERSION', got: {[(e.name, e.element_type) for e in elements]}"
+
+    def test_class_constant_type(self):
+        """Class constant element_type should be 'constant'."""
+        code = "<?php\nclass Config {\n    const VERSION = '1.0';\n}\n"
+        elements = self._parse_php(code)
+        const = next(e for e in elements if e.name == "VERSION")
+        assert const.element_type == "constant"
+
+    def test_class_constant_visibility(self):
+        """Visibility modifiers should be in decorators."""
+        code = "<?php\nclass Config {\n    public const PUBLIC_VAL = 1;\n    private const PRIVATE_VAL = 2;\n    protected const PROTECTED_VAL = 3;\n}\n"
+        elements = self._parse_php(code)
+
+        pub = next(e for e in elements if e.name == "PUBLIC_VAL")
+        assert "public" in (pub.decorators or [])
+
+        priv = next(e for e in elements if e.name == "PRIVATE_VAL")
+        assert "private" in (priv.decorators or [])
+
+        prot = next(e for e in elements if e.name == "PROTECTED_VAL")
+        assert "protected" in (prot.decorators or [])
+
+    def test_class_constant_signature(self):
+        """Signature should contain visibility and const declaration."""
+        code = "<?php\nclass Config {\n    public const VERSION = '1.0';\n}\n"
+        elements = self._parse_php(code)
+        const = next(e for e in elements if e.name == "VERSION")
+        assert const.signature is not None
+        assert "public const VERSION" in const.signature
+
+    def test_multiple_class_constants(self):
+        """Multiple constants should all be extracted."""
+        code = "<?php\nclass Status {\n    const ACTIVE = 1;\n    const INACTIVE = 0;\n    const PENDING = 2;\n}\n"
+        elements = self._parse_php(code)
+        const_names = [e.name for e in elements if e.element_type == "constant"]
+        assert "ACTIVE" in const_names
+        assert "INACTIVE" in const_names
+        assert "PENDING" in const_names
+
+    def test_class_constant_parent_id(self):
+        """Class constant should have parent_id pointing to the class."""
+        code = "<?php\nclass Config {\n    const VERSION = '1.0';\n}\n"
+        elements = self._parse_php(code)
+        cls = next(e for e in elements if e.name == "Config" and e.element_type == "class")
+        const = next(e for e in elements if e.name == "VERSION")
+        assert const.parent_id == cls.element_id
+
+    def test_interface_constants(self):
+        """Constants inside interfaces should also be extracted."""
+        code = "<?php\ninterface HasVersion {\n    const API_VERSION = '2.0';\n}\n"
+        elements = self._parse_php(code)
+        const = next((e for e in elements if e.name == "API_VERSION"), None)
+        assert const is not None
+        assert const.element_type == "constant"

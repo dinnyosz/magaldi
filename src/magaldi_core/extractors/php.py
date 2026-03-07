@@ -642,6 +642,52 @@ def _extract_php_function(node: Node, _lines: list[str]) -> ExtractedElement | N
     )
 
 
+def _extract_php_class_constant(node: Node, _lines: list[str]) -> list[ExtractedElement]:
+    """Extract class constants from a const_declaration inside a class.
+
+    Handles patterns like:
+        public const VERSION = '1.0';
+        const MAX_SIZE = 100;
+        private const SECRET = 'xyz';
+
+    Args:
+        node: A const_declaration node inside a declaration_list.
+        lines: Source code lines.
+
+    Returns:
+        List of ExtractedElement with element_type="constant".
+    """
+    constants: list[ExtractedElement] = []
+    visibility = "public"  # Default for class constants
+
+    for child in node.children:
+        if child.type == "visibility_modifier":
+            visibility = get_node_text(child)
+        elif child.type == "const_element":
+            name = None
+            value = None
+            for elem_child in child.children:
+                if elem_child.type == "name":
+                    name = get_node_text(elem_child)
+                elif elem_child.type not in ("=",):
+                    value = get_node_text(elem_child)
+
+            if name:
+                constants.append(ExtractedElement(
+                    element_type="constant",
+                    name=name,
+                    line_start=child.start_point[0] + 1,
+                    line_end=child.end_point[0] + 1,
+                    raw_code=node.text.decode('utf-8') if node.text else "",
+                    byte_offset=child.start_byte,
+                    node=child,
+                    signature=f"{visibility} const {name}" + (f" = {value}" if value else ""),
+                    decorators=[visibility],
+                ))
+
+    return constants
+
+
 def extract_php_class_members(
     class_node: Node, lines: list[str]
 ) -> tuple[list[ExtractedElement], list[ExtractedElement]]:
@@ -675,6 +721,9 @@ def extract_php_class_members(
         elif child.type == "property_declaration":
             elems = _extract_php_property(child, lines)
             properties.extend(elems)
+        elif child.type == "const_declaration":
+            consts = _extract_php_class_constant(child, lines)
+            properties.extend(consts)
 
     return methods, properties
 

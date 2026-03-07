@@ -106,14 +106,19 @@ class PhpParser(TreeSitterParser):
                 )
                 elements.append(interface_elem)
 
-                # Extract interface method signatures
+                # Extract interface method signatures and constants
                 if ext.node:
-                    methods, _properties = extract_php_class_members(ext.node, lines)
+                    methods, properties = extract_php_class_members(ext.node, lines)
                     for method_ext in methods:
                         method_elem = self._convert_method(
                             method_ext, interface_elem, file_info, scope, repository, username, lines
                         )
                         elements.append(method_elem)
+                    for prop_ext in properties:
+                        prop_elem = self._convert_variable(
+                            prop_ext, file_info, scope, repository, username, lines, parent=interface_elem
+                        )
+                        elements.append(prop_elem)
 
             elif ext.element_type == "trait":
                 trait_elem = self._convert_trait(
@@ -445,24 +450,27 @@ class PhpParser(TreeSitterParser):
         lines: list[str],
         parent: CodeElement | None = None,
     ) -> CodeElement:
-        """Convert extracted variable/property to CodeElement."""
+        """Convert extracted variable/property/constant to CodeElement."""
+        # Preserve "constant" type when extracted as such
+        element_type = ext.element_type if ext.element_type == "constant" else "variable"
         elem = CodeElement(
             scope=scope,
             repository=repository,
             username=username,
             relative_path=file_info.relative_path,
-            element_type="variable",
+            element_type=element_type,
             name=ext.name,
             language="php",
             line_start=ext.line_start,
             line_end=ext.line_end,
             raw_code=ext.raw_code,
+            signature=ext.signature,
             docstring=extract_preceding_doc_comment(lines, ext.line_start, "php"),
             decorators=ext.decorators or [],
             level=3,
             parent_id=parent.element_id if parent else None,
         )
         elem.element_id = generate_element_id(
-            scope, repository, username, file_info.relative_path, "variable", ext.name, ext.get_byte_offset()
+            scope, repository, username, file_info.relative_path, element_type, ext.name, ext.get_byte_offset()
         )
         return elem
