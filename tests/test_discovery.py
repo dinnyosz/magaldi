@@ -13,6 +13,8 @@ from magaldi_core.discovery import (
     DiscoveryResult,
     LanguageStats,
     RepoConfig,
+    _detect_file_language,
+    _detect_shebang_language,
     discover,
     enumerate_languages,
     load_repo_config,
@@ -474,3 +476,114 @@ class TestDiscoveryResult:
         assert result.username == "test-user"
         assert result.total_files == 5
         assert result.total_lines == 100
+
+
+# =============================================================================
+# SHEBANG LANGUAGE DETECTION
+# =============================================================================
+
+
+class TestShebangDetection:
+    """Tests for shebang-based language detection in extensionless files."""
+
+    def test_bash_shebang_detected(self, tmp_path: Path):
+        """#!/bin/bash should detect as bash."""
+        script = tmp_path / "myscript"
+        script.write_text("#!/bin/bash\necho hello\n")
+        assert _detect_shebang_language(script) == "bash"
+
+    def test_env_bash_shebang(self, tmp_path: Path):
+        """#!/usr/bin/env bash should detect as bash."""
+        script = tmp_path / "myscript"
+        script.write_text("#!/usr/bin/env bash\necho hello\n")
+        assert _detect_shebang_language(script) == "bash"
+
+    def test_sh_shebang(self, tmp_path: Path):
+        """#!/bin/sh should detect as bash."""
+        script = tmp_path / "myscript"
+        script.write_text("#!/bin/sh\nset -e\n")
+        assert _detect_shebang_language(script) == "bash"
+
+    def test_zsh_shebang(self, tmp_path: Path):
+        """#!/usr/bin/env zsh should detect as bash."""
+        script = tmp_path / "myscript"
+        script.write_text("#!/usr/bin/env zsh\necho hello\n")
+        assert _detect_shebang_language(script) == "bash"
+
+    def test_python_shebang(self, tmp_path: Path):
+        """#!/usr/bin/env python3 should detect as python."""
+        script = tmp_path / "myscript"
+        script.write_text("#!/usr/bin/env python3\nimport sys\n")
+        assert _detect_shebang_language(script) == "python"
+
+    def test_python2_shebang(self, tmp_path: Path):
+        """#!/usr/bin/python should detect as python."""
+        script = tmp_path / "myscript"
+        script.write_text("#!/usr/bin/python\nprint 'hi'\n")
+        assert _detect_shebang_language(script) == "python"
+
+    def test_node_shebang(self, tmp_path: Path):
+        """#!/usr/bin/env node should detect as javascript."""
+        script = tmp_path / "myscript"
+        script.write_text("#!/usr/bin/env node\nconsole.log('hi')\n")
+        assert _detect_shebang_language(script) == "javascript"
+
+    def test_php_shebang(self, tmp_path: Path):
+        """#!/usr/bin/env php should detect as php."""
+        script = tmp_path / "myscript"
+        script.write_text("#!/usr/bin/env php\n<?php echo 'hi'; ?>\n")
+        assert _detect_shebang_language(script) == "php"
+
+    def test_no_shebang_returns_none(self, tmp_path: Path):
+        """File without shebang should return None."""
+        script = tmp_path / "myscript"
+        script.write_text("just some text\n")
+        assert _detect_shebang_language(script) is None
+
+    def test_binary_file_no_crash(self, tmp_path: Path):
+        """Binary file should not crash, returns None."""
+        binfile = tmp_path / "myscript"
+        binfile.write_bytes(b"\x00\x01\x02\x03\xff\xfe")
+        assert _detect_shebang_language(binfile) is None
+
+    def test_nonexistent_file_returns_none(self, tmp_path: Path):
+        """Nonexistent file should return None (OSError handled)."""
+        assert _detect_shebang_language(tmp_path / "nope") is None
+
+    def test_empty_file_returns_none(self, tmp_path: Path):
+        """Empty file should return None."""
+        script = tmp_path / "myscript"
+        script.write_text("")
+        assert _detect_shebang_language(script) is None
+
+    def test_detect_file_language_uses_shebang_for_extensionless(self, tmp_path: Path):
+        """_detect_file_language should use shebang for extensionless files."""
+        script = tmp_path / "run-server"
+        script.write_text("#!/usr/bin/env bash\necho start\n")
+        assert _detect_file_language(script) == "bash"
+
+    def test_detect_file_language_extension_takes_precedence(self, tmp_path: Path):
+        """Extension should take precedence over shebang."""
+        script = tmp_path / "script.py"
+        script.write_text("#!/bin/bash\necho hello\n")
+        assert _detect_file_language(script) == "python"
+
+    def test_detect_file_language_skips_shebang_for_unknown_extension(self, tmp_path: Path):
+        """Files with unknown extension should NOT get shebang check (has extension)."""
+        script = tmp_path / "data.json"
+        script.write_text("#!/bin/bash\necho hello\n")
+        assert _detect_file_language(script) is None
+
+    def test_enumerate_languages_includes_shebang_files(self, tmp_path: Path):
+        """Extensionless bash scripts should appear in language enumeration."""
+        script = tmp_path / "run-app"
+        script.write_text("#!/usr/bin/env bash\necho running\necho done\n")
+        # Also add a regular .py file
+        (tmp_path / "app.py").write_text("print('hello')\n")
+
+        config = RepoConfig(scope="test", name="repo")
+        result = enumerate_languages(tmp_path, config)
+
+        assert "bash" in result
+        assert result["bash"].files >= 1
+        assert "python" in result

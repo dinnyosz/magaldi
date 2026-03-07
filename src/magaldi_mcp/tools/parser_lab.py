@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from magaldi_core.discovery import SUPPORTED_EXTENSIONS, SUPPORTED_FILENAMES
+from magaldi_core.discovery import SHEBANG_PATTERNS, SUPPORTED_EXTENSIONS, SUPPORTED_FILENAMES
 from magaldi_core.extractors.types import ExtractedElement
 from magaldi_core.tree_sitter_manager import get_manager
 
@@ -37,16 +37,12 @@ def _check_magaldi_scope() -> None:
 # LANGUAGE DETECTION
 # =============================================================================
 
-# Shebang patterns for detecting language from code snippets
+# Shebang patterns: use shared constant from discovery.py
+# Extended with ruby/perl for code snippet detection (not file discovery)
 _SHEBANG_PATTERNS: dict[str, str] = {
-    "bash": "bash",
-    "sh": "bash",
-    "zsh": "bash",
-    "python": "python",
-    "node": "javascript",
+    **SHEBANG_PATTERNS,
     "ruby": "ruby",
     "perl": "perl",
-    "php": "php",
 }
 
 

@@ -53,6 +53,17 @@ SUPPORTED_FILENAMES: dict[str, str] = {
     "Dockerfile": "dockerfile",
 }
 
+# Shebang tokens for detecting language from extensionless files
+SHEBANG_PATTERNS: dict[str, str] = {
+    "bash": "bash",
+    "sh": "bash",
+    "zsh": "bash",
+    "python3": "python",
+    "python": "python",
+    "node": "javascript",
+    "php": "php",
+}
+
 DEFAULT_EXCLUDE_DIRECTORIES: list[str] = [
     "node_modules",
     "vendor",
@@ -294,11 +305,31 @@ def resolve_username(cli_user: str | None, config: RepoConfig) -> str:
 # =============================================================================
 
 
+def _detect_shebang_language(file_path: Path) -> str | None:
+    """Detect language from shebang line for extensionless files.
+
+    Reads only the first 128 bytes in binary mode to minimize I/O
+    and handle binary files gracefully.
+    """
+    try:
+        with open(file_path, "rb") as f:
+            first_bytes = f.read(128)
+        if not first_bytes.startswith(b"#!"):
+            return None
+        first_line = first_bytes.split(b"\n", 1)[0].decode("ascii", errors="replace")
+        for token, lang in SHEBANG_PATTERNS.items():
+            if token in first_line:
+                return lang
+    except OSError:
+        pass
+    return None
+
+
 def _detect_file_language(file_path: Path) -> str | None:
-    """Detect language from file extension or filename.
+    """Detect language from file extension, filename, or shebang.
 
     Checks SUPPORTED_EXTENSIONS first, then SUPPORTED_FILENAMES for
-    extensionless files like Dockerfile.
+    files like Dockerfile, then shebang for extensionless files.
     """
     ext = file_path.suffix.lower()
     if ext in SUPPORTED_EXTENSIONS:
@@ -309,6 +340,10 @@ def _detect_file_language(file_path: Path) -> str | None:
     for pattern, lang in SUPPORTED_FILENAMES.items():
         if name == pattern or name.startswith(f"{pattern}."):
             return lang
+
+    # Check shebang for extensionless files (only when no extension)
+    if not ext:
+        return _detect_shebang_language(file_path)
 
     return None
 
