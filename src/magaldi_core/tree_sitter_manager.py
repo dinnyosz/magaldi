@@ -66,6 +66,7 @@ from magaldi_core.extractors.php import (
     extract_php_base_class,
     extract_php_calls,
     extract_php_class_members,
+    extract_php_interface_bases,
     extract_php_class_properties,
     extract_php_elements,
     extract_php_imports,
@@ -400,6 +401,7 @@ __all__ = [
     "extract_top_level_php_calls",
     "extract_php_class_properties",
     "extract_php_base_class",
+    "extract_php_interface_bases",
     "extract_php_thrown_exceptions",
     "extract_php_modified_properties",
     # Rust extraction

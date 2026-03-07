@@ -915,3 +915,146 @@ export abstract class BaseService {
         cls = next((e for e in elements if e.name == "BaseService" and e.element_type == "class"), None)
         assert cls is not None
         assert "abstract" in (cls.decorators or [])
+
+
+# =============================================================================
+# PHP: interface parsing
+# =============================================================================
+
+
+class TestPhpInterfaceParsing:
+    """Verify PHP interfaces are extracted as CodeElements."""
+
+    def _parse_php(self, code: str):
+        from magaldi_core.parsers.php import PhpParser
+
+        parser = PhpParser()
+        file_info = FileInfo(
+            relative_path="test.php",
+            absolute_path=Path("/fake/test.php"),
+            language="php",
+        )
+        return parser.parse(code, file_info, "scope", "repo", "main")
+
+    def test_simple_interface_extracted(self):
+        """Interface should be extracted as an element."""
+        code = "<?php\ninterface Cacheable {\n    public function cache(): void;\n}\n"
+        elements = self._parse_php(code)
+        iface = next((e for e in elements if e.name == "Cacheable"), None)
+        assert iface is not None, f"Expected interface 'Cacheable', got: {[(e.name, e.element_type) for e in elements]}"
+
+    def test_interface_type_correct(self):
+        """Interface element_type should be 'interface'."""
+        code = "<?php\ninterface Cacheable {\n    public function cache(): void;\n}\n"
+        elements = self._parse_php(code)
+        iface = next(e for e in elements if e.name == "Cacheable")
+        assert iface.element_type == "interface"
+
+    def test_interface_methods_extracted(self):
+        """Method signatures inside interface should be extracted as methods."""
+        code = "<?php\ninterface Serializable {\n    public function serialize(): string;\n    public function unserialize(string $data): void;\n}\n"
+        elements = self._parse_php(code)
+        methods = [e for e in elements if e.element_type == "method"]
+        method_names = [m.name for m in methods]
+        assert "serialize" in method_names
+        assert "unserialize" in method_names
+
+    def test_interface_method_parent_id(self):
+        """Interface methods should have parent_id pointing to the interface."""
+        code = "<?php\ninterface Cacheable {\n    public function cache(): void;\n}\n"
+        elements = self._parse_php(code)
+        iface = next(e for e in elements if e.name == "Cacheable")
+        method = next(e for e in elements if e.name == "cache" and e.element_type == "method")
+        assert method.parent_id == iface.element_id
+
+    def test_interface_extends(self):
+        """Interface extending other interfaces should have base_classes populated."""
+        code = "<?php\ninterface ReadWritable extends Readable, Writable {\n    public function seek(int $pos): void;\n}\n"
+        elements = self._parse_php(code)
+        iface = next(e for e in elements if e.name == "ReadWritable")
+        assert iface.base_classes is not None
+        assert "Readable" in iface.base_classes
+        assert "Writable" in iface.base_classes
+
+    def test_interface_docstring(self):
+        """PHPDoc before interface should be extracted."""
+        code = "<?php\n/**\n * Defines cacheable behavior.\n */\ninterface Cacheable {\n}\n"
+        elements = self._parse_php(code)
+        iface = next(e for e in elements if e.name == "Cacheable")
+        assert iface.docstring is not None
+        assert "cacheable" in iface.docstring.lower()
+
+    def test_interface_and_class_coexist(self):
+        """Both interface and class in same file should be extracted."""
+        code = "<?php\ninterface Loggable {\n    public function log(): void;\n}\n\nclass FileLogger implements Loggable {\n    public function log(): void {}\n}\n"
+        elements = self._parse_php(code)
+        iface = next((e for e in elements if e.name == "Loggable" and e.element_type == "interface"), None)
+        cls = next((e for e in elements if e.name == "FileLogger" and e.element_type == "class"), None)
+        assert iface is not None
+        assert cls is not None
+
+
+# =============================================================================
+# PHP: trait parsing
+# =============================================================================
+
+
+class TestPhpTraitParsing:
+    """Verify PHP traits are extracted as CodeElements."""
+
+    def _parse_php(self, code: str):
+        from magaldi_core.parsers.php import PhpParser
+
+        parser = PhpParser()
+        file_info = FileInfo(
+            relative_path="test.php",
+            absolute_path=Path("/fake/test.php"),
+            language="php",
+        )
+        return parser.parse(code, file_info, "scope", "repo", "main")
+
+    def test_simple_trait_extracted(self):
+        """Trait should be extracted as an element."""
+        code = "<?php\ntrait Timestampable {\n    public function getCreatedAt(): string { return $this->createdAt; }\n}\n"
+        elements = self._parse_php(code)
+        trait = next((e for e in elements if e.name == "Timestampable"), None)
+        assert trait is not None, f"Expected trait 'Timestampable', got: {[(e.name, e.element_type) for e in elements]}"
+
+    def test_trait_type_correct(self):
+        """Trait element_type should be 'trait'."""
+        code = "<?php\ntrait Timestampable {\n    public function touch(): void {}\n}\n"
+        elements = self._parse_php(code)
+        trait = next(e for e in elements if e.name == "Timestampable")
+        assert trait.element_type == "trait"
+
+    def test_trait_methods_extracted(self):
+        """Methods inside trait should be extracted."""
+        code = "<?php\ntrait Cacheable {\n    public function cache(): void {}\n    public function invalidate(): void {}\n}\n"
+        elements = self._parse_php(code)
+        methods = [e for e in elements if e.element_type == "method"]
+        method_names = [m.name for m in methods]
+        assert "cache" in method_names
+        assert "invalidate" in method_names
+
+    def test_trait_method_parent_id(self):
+        """Trait methods should have parent_id pointing to the trait."""
+        code = "<?php\ntrait Cacheable {\n    public function cache(): void {}\n}\n"
+        elements = self._parse_php(code)
+        trait = next(e for e in elements if e.name == "Cacheable")
+        method = next(e for e in elements if e.name == "cache" and e.element_type == "method")
+        assert method.parent_id == trait.element_id
+
+    def test_trait_properties_extracted(self):
+        """Properties inside trait should be extracted as variables."""
+        code = "<?php\ntrait HasName {\n    protected $name;\n    public function getName(): string { return $this->name; }\n}\n"
+        elements = self._parse_php(code)
+        props = [e for e in elements if e.element_type == "variable" and e.name == "name"]
+        assert len(props) >= 1
+
+    def test_trait_docstring(self):
+        """PHPDoc before trait should be extracted."""
+        code = "<?php\n/**\n * Adds timestamp fields.\n */\ntrait Timestampable {\n}\n"
+        elements = self._parse_php(code)
+        trait = next(e for e in elements if e.name == "Timestampable")
+        assert trait.docstring is not None
+        assert "timestamp" in trait.docstring.lower()

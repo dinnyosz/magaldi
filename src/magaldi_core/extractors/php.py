@@ -1185,6 +1185,32 @@ def extract_php_base_class(class_node: Node) -> list[str]:
     return bases
 
 
+def extract_php_interface_bases(interface_node: Node) -> list[str]:
+    """Extract base interfaces from a PHP interface (extends clause).
+
+    For: interface Foo extends Bar, Baz { ... }
+    Returns: ["Bar", "Baz"]
+
+    Args:
+        interface_node: An interface_declaration node from tree-sitter.
+
+    Returns:
+        List of base interface names.
+    """
+    bases: list[str] = []
+
+    if interface_node.type != "interface_declaration":
+        return bases
+
+    for child in interface_node.children:
+        if child.type == "base_clause":
+            for bc_child in child.children:
+                if bc_child.type == "name":
+                    bases.append(get_node_text(bc_child))
+
+    return bases
+
+
 def extract_php_thrown_exceptions(method_node: Node) -> list[str]:
     """Extract exception types from throw statements in a PHP method.
 

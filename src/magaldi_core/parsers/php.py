@@ -26,6 +26,7 @@ from magaldi_core.tree_sitter_manager import (
     extract_php_class_properties,
     extract_php_elements,
     extract_php_imports,
+    extract_php_interface_bases,
     extract_php_modified_properties,
     extract_php_thrown_exceptions,
     extract_top_level_php_calls,
@@ -96,6 +97,41 @@ class PhpParser(TreeSitterParser):
                     for prop_ext in properties:
                         prop_elem = self._convert_variable(
                             prop_ext, file_info, scope, repository, username, lines, parent=class_elem
+                        )
+                        elements.append(prop_elem)
+
+            elif ext.element_type == "interface":
+                interface_elem = self._convert_interface(
+                    ext, file_info, scope, repository, username, lines
+                )
+                elements.append(interface_elem)
+
+                # Extract interface method signatures
+                if ext.node:
+                    methods, _properties = extract_php_class_members(ext.node, lines)
+                    for method_ext in methods:
+                        method_elem = self._convert_method(
+                            method_ext, interface_elem, file_info, scope, repository, username, lines
+                        )
+                        elements.append(method_elem)
+
+            elif ext.element_type == "trait":
+                trait_elem = self._convert_trait(
+                    ext, file_info, scope, repository, username, lines
+                )
+                elements.append(trait_elem)
+
+                # Extract trait methods and properties
+                if ext.node:
+                    methods, properties = extract_php_class_members(ext.node, lines)
+                    for method_ext in methods:
+                        method_elem = self._convert_method(
+                            method_ext, trait_elem, file_info, scope, repository, username, lines
+                        )
+                        elements.append(method_elem)
+                    for prop_ext in properties:
+                        prop_elem = self._convert_variable(
+                            prop_ext, file_info, scope, repository, username, lines, parent=trait_elem
                         )
                         elements.append(prop_elem)
 
@@ -229,6 +265,69 @@ class PhpParser(TreeSitterParser):
         )
         elem.element_id = generate_element_id(
             scope, repository, username, file_info.relative_path, "class", ext.name, ext.get_byte_offset()
+        )
+        return elem
+
+    def _convert_interface(
+        self,
+        ext: ExtractedElement,
+        file_info: FileInfo,
+        scope: str,
+        repository: str,
+        username: str,
+        lines: list[str],
+    ) -> CodeElement:
+        """Convert extracted interface to CodeElement."""
+        base_classes = None
+        if ext.node:
+            base_classes = extract_php_interface_bases(ext.node) or None
+
+        elem = CodeElement(
+            scope=scope,
+            repository=repository,
+            username=username,
+            relative_path=file_info.relative_path,
+            element_type="interface",
+            name=ext.name,
+            language="php",
+            line_start=ext.line_start,
+            line_end=ext.line_end,
+            raw_code=ext.raw_code,
+            docstring=extract_preceding_doc_comment(lines, ext.line_start, "php"),
+            level=1,
+            base_classes=base_classes,
+        )
+        elem.element_id = generate_element_id(
+            scope, repository, username, file_info.relative_path, "interface", ext.name, ext.get_byte_offset()
+        )
+        return elem
+
+    def _convert_trait(
+        self,
+        ext: ExtractedElement,
+        file_info: FileInfo,
+        scope: str,
+        repository: str,
+        username: str,
+        lines: list[str],
+    ) -> CodeElement:
+        """Convert extracted trait to CodeElement."""
+        elem = CodeElement(
+            scope=scope,
+            repository=repository,
+            username=username,
+            relative_path=file_info.relative_path,
+            element_type="trait",
+            name=ext.name,
+            language="php",
+            line_start=ext.line_start,
+            line_end=ext.line_end,
+            raw_code=ext.raw_code,
+            docstring=extract_preceding_doc_comment(lines, ext.line_start, "php"),
+            level=1,
+        )
+        elem.element_id = generate_element_id(
+            scope, repository, username, file_info.relative_path, "trait", ext.name, ext.get_byte_offset()
         )
         return elem
 
