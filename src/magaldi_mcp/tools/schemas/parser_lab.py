@@ -23,7 +23,7 @@ PARSER_LAB_TOOLS = [
                 },
                 "language": {
                     "type": "string",
-                    "enum": ["python", "javascript", "typescript", "tsx", "php", "rust", "bash"],
+                    "enum": ["python", "javascript", "typescript", "tsx", "php", "rust", "java", "bash"],
                 },
                 "debug": {"type": "boolean", "default": False, "description": "Include full AST"},
             },
@@ -40,7 +40,7 @@ PARSER_LAB_TOOLS = [
                 "name": {"type": "string", "description": "Test name (e.g., 'drf_api_view_decorator')"},
                 "language": {
                     "type": "string",
-                    "enum": ["python", "javascript", "typescript", "tsx", "php", "rust", "bash"],
+                    "enum": ["python", "javascript", "typescript", "tsx", "php", "rust", "java", "bash"],
                 },
                 "code": {"type": "string", "description": "Code to test parsing on"},
                 "expected": {
@@ -114,7 +114,7 @@ PARSER_LAB_TOOLS = [
                 "gap_description": {"type": "string", "description": "What\'s not extracted correctly"},
                 "language": {
                     "type": "string",
-                    "enum": ["python", "javascript", "typescript", "tsx", "php", "rust", "bash"],
+                    "enum": ["python", "javascript", "typescript", "tsx", "php", "rust", "java", "bash"],
                 },
                 "failing_test": {"type": "string", "description": "Path to failing test"},
             },
