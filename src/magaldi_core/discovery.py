@@ -46,6 +46,7 @@ SUPPORTED_EXTENSIONS: dict[str, str] = {
     ".nfo": "text",
     ".sh": "bash",
     ".bash": "bash",
+    ".bats": "bash",
 }
 
 # Filenames (without extension) that map to a language

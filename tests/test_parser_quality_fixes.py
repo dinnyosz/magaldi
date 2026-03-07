@@ -1654,3 +1654,42 @@ class TestRustLifetimeImpl:
         method_names = [m.name for m in methods]
         assert "parse" in method_names
         assert "next" in method_names
+
+
+# =============================================================================
+# .bats extension support
+# =============================================================================
+
+
+class TestBatsExtension:
+    """Test that .bats files are recognized as bash."""
+
+    def test_bats_in_supported_extensions(self):
+        """Test .bats maps to bash in SUPPORTED_EXTENSIONS."""
+        from magaldi_core.discovery import SUPPORTED_EXTENSIONS
+
+        assert ".bats" in SUPPORTED_EXTENSIONS
+        assert SUPPORTED_EXTENSIONS[".bats"] == "bash"
+
+    def test_bats_file_parses_as_bash(self):
+        """Test that a .bats file is parsed correctly as bash."""
+        from magaldi_core.parsers.bash import BashParser
+
+        code = (
+            "#!/usr/bin/env bats\n"
+            "\n"
+            "@test \"addition\" {\n"
+            "  result=$(( 2 + 2 ))\n"
+            "  [ \"$result\" -eq 4 ]\n"
+            "}\n"
+        )
+        file_info = FileInfo(
+            absolute_path=Path("/tmp/test.bats"),
+            relative_path="test.bats",
+            language="bash",
+        )
+        parser = BashParser()
+        elements = parser.parse(code, file_info, "s", "r", "main")
+        # Should parse without error and find at least the file element
+        assert len(elements) >= 1
+        assert elements[0].element_type == "file"
