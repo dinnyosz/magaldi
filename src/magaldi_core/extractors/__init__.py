@@ -45,6 +45,7 @@ from magaldi_core.extractors.javascript import (
     extract_javascript_modified_properties,
     extract_javascript_references,
     extract_javascript_thrown_exceptions,
+    extract_top_level_javascript_calls,
 )
 from magaldi_core.extractors.php import (
     PHPExtractor,
@@ -56,6 +57,7 @@ from magaldi_core.extractors.php import (
     extract_php_imports,
     extract_php_modified_properties,
     extract_php_thrown_exceptions,
+    extract_top_level_php_calls,
 )
 from magaldi_core.extractors.python import (
     PythonExtractor,
@@ -68,6 +70,7 @@ from magaldi_core.extractors.python import (
     extract_python_modified_attributes,
     extract_python_raised_exceptions,
     extract_python_references,
+    extract_top_level_python_calls,
 )
 from magaldi_core.extractors.rust import (
     RustExtractor,
@@ -79,6 +82,7 @@ from magaldi_core.extractors.rust import (
     extract_rust_modified_fields,
     extract_rust_panics,
     extract_rust_struct_fields,
+    extract_top_level_rust_calls,
 )
 from magaldi_core.extractors.types import (
     CliCommand,
@@ -175,6 +179,7 @@ __all__ = [
     "extract_python_base_classes",
     "extract_python_raised_exceptions",
     "extract_python_modified_attributes",
+    "extract_top_level_python_calls",
     # JavaScript extraction functions
     "extract_javascript_elements",
     "extract_javascript_class_members",
@@ -185,6 +190,7 @@ __all__ = [
     "extract_javascript_base_class",
     "extract_javascript_thrown_exceptions",
     "extract_javascript_modified_properties",
+    "extract_top_level_javascript_calls",
     # PHP extraction functions
     "extract_php_elements",
     "extract_php_class_members",
@@ -194,6 +200,7 @@ __all__ = [
     "extract_php_base_class",
     "extract_php_thrown_exceptions",
     "extract_php_modified_properties",
+    "extract_top_level_php_calls",
     # Rust extraction functions
     "extract_rust_elements",
     "extract_rust_impl_members",
@@ -203,6 +210,7 @@ __all__ = [
     "extract_rust_impl_traits",
     "extract_rust_panics",
     "extract_rust_modified_fields",
+    "extract_top_level_rust_calls",
     # Java extraction functions
     "extract_java_elements",
     "extract_java_class_members",
