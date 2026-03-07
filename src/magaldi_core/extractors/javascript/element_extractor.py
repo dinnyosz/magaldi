@@ -78,6 +78,25 @@ def extract_javascript_elements(
             elements.append(_extract_js_class(
                 node, lines, decorators, decorator_details, decorated_node
             ))
+        elif node.type == "abstract_class_declaration":
+            # TypeScript abstract classes — reuse _extract_js_class with "abstract" decorator
+            decorators: list[str] | None = ["abstract"]
+            decorator_details: list[DecoratorInfo] | None = None
+            decorated_node: Node | None = None
+
+            parent = node.parent
+            if parent and parent.type == "export_statement":
+                has_decorators = any(c.type == "decorator" for c in parent.children)
+                if has_decorators:
+                    extra_decos, extra_details = get_js_decorators(parent)
+                    if extra_decos:
+                        decorators = ["abstract"] + extra_decos
+                        decorator_details = extra_details
+                    decorated_node = parent
+
+            elements.append(_extract_js_class(
+                node, lines, decorators, decorator_details, decorated_node
+            ))
         elif node.type == "function_declaration":
             elements.append(_extract_js_function(node, lines))
         elif node.type == "lexical_declaration":
@@ -569,6 +588,36 @@ def extract_javascript_class_members(
                     node=child,
                     return_type=return_type,
                     parameters=parameters or None,
+                )
+            )
+        elif child.type == "abstract_method_signature":
+            # TypeScript abstract method declarations (no body)
+            name_node = get_child_by_field(child, "name")
+            name = get_node_text(name_node) if name_node else "unknown"
+
+            params_node = get_child_by_field(child, "parameters")
+            params = get_node_text(params_node) if params_node else "()"
+
+            parameters = extract_js_parameters(params_node) if params_node else []
+            return_type = extract_js_return_type(child)
+
+            signature = f"abstract {name}{params}"
+            if return_type:
+                signature += f": {return_type}"
+
+            methods.append(
+                ExtractedElement(
+                    element_type="method",
+                    name=name,
+                    line_start=child.start_point[0] + 1,
+                    line_end=child.end_point[0] + 1,
+                    raw_code=child.text.decode('utf-8') if child.text else "",
+                    byte_offset=child.start_byte,
+                    signature=signature,
+                    node=child,
+                    return_type=return_type,
+                    parameters=parameters or None,
+                    decorators=["abstract"],
                 )
             )
         elif child.type == "field_definition":

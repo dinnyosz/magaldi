@@ -653,6 +653,20 @@ class TestPrecedingDocComment:
         assert "Thread-safe" in result
         assert "LRU eviction" in result
 
+    # --- TypeScript abstract class ---
+
+    def test_ts_jsdoc_on_abstract_class(self):
+        """JSDoc on abstract class should be extracted."""
+        lines = [
+            "/**",
+            " * Base controller for all routes.",
+            " */",
+            "abstract class BaseController {",
+        ]
+        result = extract_preceding_doc_comment(lines, 4, "typescript")
+        assert result is not None
+        assert "Base controller" in result
+
     # --- Edge cases ---
 
     def test_no_comment_returns_none(self):
@@ -781,3 +795,123 @@ class TestDocCommentIntegration:
         assert tuning is not None
         # No doc comment — only #[derive(Debug, Clone, PartialEq)] above it
         assert tuning.docstring is None
+
+
+# =============================================================================
+# TypeScript: abstract class extraction
+# =============================================================================
+
+
+class TestTypeScriptAbstractClass:
+    """Verify abstract classes and their methods are extracted."""
+
+    def _parse_typescript(self, code: str):
+        from magaldi_core.parsers.javascript import JavaScriptParser
+
+        parser = JavaScriptParser("typescript")
+        file_info = FileInfo(
+            relative_path="test.ts",
+            absolute_path=Path("/fake/test.ts"),
+            language="typescript",
+        )
+        return parser.parse(code, file_info, "scope", "repo", "main")
+
+    def test_abstract_class_extracted(self):
+        """abstract class should be extracted as a class element."""
+        code = """\
+abstract class Animal {
+    abstract speak(): string;
+}
+"""
+        elements = self._parse_typescript(code)
+        cls = next((e for e in elements if e.name == "Animal" and e.element_type == "class"), None)
+        assert cls is not None, f"Expected class 'Animal', got: {[(e.name, e.element_type) for e in elements]}"
+        assert "abstract" in (cls.decorators or [])
+
+    def test_abstract_method_extracted(self):
+        """Abstract method signatures should be extracted as methods."""
+        code = """\
+abstract class Animal {
+    abstract speak(): string;
+    abstract move(distance: number): void;
+}
+"""
+        elements = self._parse_typescript(code)
+        methods = [e for e in elements if e.element_type == "method"]
+        method_names = [m.name for m in methods]
+        assert "speak" in method_names, f"Expected 'speak' method, got: {method_names}"
+        assert "move" in method_names, f"Expected 'move' method, got: {method_names}"
+
+        speak = next(m for m in methods if m.name == "speak")
+        assert "abstract" in (speak.decorators or [])
+        assert speak.signature is not None
+        assert "abstract" in speak.signature
+
+    def test_abstract_class_concrete_methods(self):
+        """Concrete methods in abstract class should also be extracted."""
+        code = """\
+abstract class Animal {
+    abstract speak(): string;
+    getName(): string {
+        return this.name;
+    }
+}
+"""
+        elements = self._parse_typescript(code)
+        methods = [e for e in elements if e.element_type == "method"]
+        method_names = [m.name for m in methods]
+        assert "speak" in method_names
+        assert "getName" in method_names
+
+        get_name = next(m for m in methods if m.name == "getName")
+        assert "abstract" not in (get_name.decorators or [])
+
+    def test_abstract_class_with_extends(self):
+        """Abstract class with extends should have base_classes populated."""
+        code = """\
+abstract class Vehicle extends Transport {
+    abstract start(): void;
+}
+"""
+        elements = self._parse_typescript(code)
+        cls = next((e for e in elements if e.name == "Vehicle" and e.element_type == "class"), None)
+        assert cls is not None
+        assert cls.base_classes is not None
+        assert "Transport" in cls.base_classes
+
+    def test_abstract_and_regular_class_coexist(self):
+        """Both abstract and regular classes in same file should be extracted."""
+        code = """\
+abstract class Shape {
+    abstract area(): number;
+}
+
+class Circle extends Shape {
+    area(): number {
+        return Math.PI * this.radius ** 2;
+    }
+}
+"""
+        elements = self._parse_typescript(code)
+        classes = [e for e in elements if e.element_type == "class"]
+        class_names = [c.name for c in classes]
+        assert "Shape" in class_names
+        assert "Circle" in class_names
+
+        shape = next(c for c in classes if c.name == "Shape")
+        assert "abstract" in (shape.decorators or [])
+
+        circle = next(c for c in classes if c.name == "Circle")
+        assert "abstract" not in (circle.decorators or [])
+
+    def test_exported_abstract_class(self):
+        """export abstract class should be extracted."""
+        code = """\
+export abstract class BaseService {
+    abstract init(): Promise<void>;
+}
+"""
+        elements = self._parse_typescript(code)
+        cls = next((e for e in elements if e.name == "BaseService" and e.element_type == "class"), None)
+        assert cls is not None
+        assert "abstract" in (cls.decorators or [])

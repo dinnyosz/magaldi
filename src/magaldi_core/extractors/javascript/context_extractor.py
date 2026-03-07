@@ -89,7 +89,7 @@ def extract_javascript_base_class(class_node: Node) -> list[str]:
     """
     bases: list[str] = []
 
-    if class_node.type != "class_declaration":
+    if class_node.type not in ("class_declaration", "abstract_class_declaration"):
         return bases
 
     for child in class_node.children:
