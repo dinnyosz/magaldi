@@ -119,6 +119,14 @@ class JavaScriptParser(TreeSitterParser):
                 import_elem = self._convert_import(ext, file_info, scope, repository, username)
                 elements.append(import_elem)
 
+            elif ext.element_type in ("variable", "constant"):
+                var_elem = self._convert_variable(ext, file_info, scope, repository, username, lines)
+                elements.append(var_elem)
+
+            elif ext.element_type == "enum":
+                enum_elem = self._convert_type_definition(ext, file_info, scope, repository, username, lines)
+                elements.append(enum_elem)
+
         # Set parent IDs
         self._set_hierarchy(elements, file_element)
 
@@ -352,22 +360,26 @@ class JavaScriptParser(TreeSitterParser):
         parent: CodeElement | None = None,
     ) -> CodeElement:
         """Convert extracted variable/field to CodeElement."""
+        element_type = ext.element_type if ext.element_type == "constant" else "variable"
+        level = 3 if parent else 1  # Top-level variables are level 1 (like classes)
         elem = CodeElement(
             scope=scope,
             repository=repository,
             username=username,
             relative_path=file_info.relative_path,
-            element_type="variable",
+            element_type=element_type,
             name=ext.name,
             language=file_info.language,
             line_start=ext.line_start,
             line_end=ext.line_end,
             raw_code=ext.raw_code,
+            signature=ext.signature,
             docstring=extract_preceding_doc_comment(lines, ext.line_start, file_info.language),
-            level=3,
+            decorators=ext.decorators or [],
+            level=level,
             parent_id=parent.element_id if parent else None,
         )
         elem.element_id = generate_element_id(
-            scope, repository, username, file_info.relative_path, "variable", ext.name, ext.get_byte_offset()
+            scope, repository, username, file_info.relative_path, element_type, ext.name, ext.get_byte_offset()
         )
         return elem

@@ -1136,3 +1136,86 @@ class TestPhpClassConstants:
         const = next((e for e in elements if e.name == "API_VERSION"), None)
         assert const is not None
         assert const.element_type == "constant"
+
+
+# =============================================================================
+# JS/TS: Variable, constant, and enum conversion in parser
+# =============================================================================
+
+
+class TestJsVariableConstantParsing:
+    """Verify JS/TS variables, constants, and enums are not silently dropped by the parser."""
+
+    def _parse_js(self, code: str, language: str = "javascript"):
+        from magaldi_core.code_parser import JavaScriptParser
+
+        parser = JavaScriptParser(language)
+        file_info = FileInfo(
+            relative_path="test.js",
+            absolute_path=Path("/fake/test.js"),
+            language=language,
+        )
+        return parser.parse(code, file_info, "scope", "repo", "main")
+
+    def test_export_const_extracted(self):
+        """export const should produce a constant element."""
+        code = "export const API_URL = 'https://example.com';\n"
+        elements = self._parse_js(code, language="typescript")
+        const = next((e for e in elements if e.name == "API_URL"), None)
+        assert const is not None, "export const API_URL should be extracted"
+        assert const.element_type in ("variable", "constant")
+
+    def test_const_variable_extracted(self):
+        """const with object value should be extracted."""
+        code = "const config = { debug: true, port: 3000 };\n"
+        elements = self._parse_js(code)
+        var = next((e for e in elements if e.name == "config"), None)
+        assert var is not None, "const config should be extracted"
+
+    def test_var_declaration_extracted(self):
+        """var declaration should be extracted."""
+        code = "var MAX_RETRIES = 5;\n"
+        elements = self._parse_js(code)
+        var = next((e for e in elements if e.name == "MAX_RETRIES"), None)
+        assert var is not None, "var MAX_RETRIES should be extracted"
+
+    def test_top_level_variable_level_1(self):
+        """Top-level variables should have level=1 (not level=3)."""
+        code = "const VERSION = '1.0.0';\n"
+        elements = self._parse_js(code, language="typescript")
+        var = next((e for e in elements if e.name == "VERSION"), None)
+        assert var is not None
+        assert var.level == 1, f"Top-level variable should be level 1, got {var.level}"
+
+    def test_ts_enum_extracted(self):
+        """TypeScript enums should be extracted (not silently dropped)."""
+        code = "enum Color {\n  Red,\n  Green,\n  Blue,\n}\n"
+        elements = self._parse_js(code, language="typescript")
+        enum = next((e for e in elements if e.name == "Color"), None)
+        assert enum is not None, "enum Color should be extracted"
+        assert enum.element_type == "enum"
+
+    def test_ts_enum_level_1(self):
+        """TypeScript enums should be level 1 (like classes)."""
+        code = "export enum Direction {\n  Up,\n  Down,\n}\n"
+        elements = self._parse_js(code, language="typescript")
+        enum = next((e for e in elements if e.name == "Direction"), None)
+        assert enum is not None
+        assert enum.level == 1
+
+    def test_variable_has_element_id(self):
+        """Extracted variables should have element_id set."""
+        code = "const PI = 3.14;\n"
+        elements = self._parse_js(code, language="typescript")
+        var = next((e for e in elements if e.name == "PI"), None)
+        assert var is not None
+        assert var.element_id is not None
+        assert ":variable:" in var.element_id or ":constant:" in var.element_id
+
+    def test_constant_preserves_type(self):
+        """Element type 'constant' should be preserved (not coerced to 'variable')."""
+        code = "export const MAX = 100;\n"
+        elements = self._parse_js(code, language="typescript")
+        # The extractor marks `const` as constant via _extract_js_variable
+        var = next((e for e in elements if e.name == "MAX"), None)
+        assert var is not None
