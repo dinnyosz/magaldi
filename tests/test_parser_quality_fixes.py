@@ -1387,3 +1387,84 @@ class TestBashBraceGroupExtraction:
         func_names = [e.name for e in elements if e.element_type == "function"]
         assert "top_func" in func_names
         assert "inner_func" in func_names
+
+
+# =============================================================================
+# Python: Raw string docstring extraction (r"""...""")
+# =============================================================================
+
+
+class TestRawStringDocstring:
+    """Verify r-string and other prefixed docstrings are extracted."""
+
+    def test_raw_single_line_docstring(self):
+        """r\"\"\"text\"\"\" should be extracted."""
+        from magaldi_core.parsers.base import extract_docstring
+
+        lines = [
+            'def foo():',
+            '    r"""This is a raw docstring."""',
+        ]
+        result = extract_docstring(lines, 0)
+        assert result == "This is a raw docstring."
+
+    def test_raw_multiline_docstring(self):
+        """r\"\"\"...\"\"\" spanning multiple lines."""
+        from magaldi_core.parsers.base import extract_docstring
+
+        lines = [
+            'def foo():',
+            '    r"""',
+            '    Multi-line raw docstring.',
+            '    """',
+        ]
+        result = extract_docstring(lines, 0)
+        assert result is not None
+        assert "Multi-line raw docstring." in result
+
+    def test_unicode_prefix_docstring(self):
+        """u\"\"\"text\"\"\" should be extracted."""
+        from magaldi_core.parsers.base import extract_docstring
+
+        lines = [
+            'def foo():',
+            '    u"""Unicode docstring."""',
+        ]
+        result = extract_docstring(lines, 0)
+        assert result == "Unicode docstring."
+
+    def test_plain_docstring_still_works(self):
+        """Regular \"\"\"text\"\"\" must still work (regression check)."""
+        from magaldi_core.parsers.base import extract_docstring
+
+        lines = [
+            'def foo():',
+            '    """Regular docstring."""',
+        ]
+        result = extract_docstring(lines, 0)
+        assert result == "Regular docstring."
+
+    def test_plain_multiline_still_works(self):
+        """Regular multi-line docstrings must still work."""
+        from magaldi_core.parsers.base import extract_docstring
+
+        lines = [
+            'def foo():',
+            '    """',
+            '    Multi-line docstring.',
+            '    """',
+        ]
+        result = extract_docstring(lines, 0)
+        assert result is not None
+        assert "Multi-line docstring." in result
+
+    def test_single_quote_raw_docstring(self):
+        """r'''text''' should be extracted."""
+        from magaldi_core.parsers.base import extract_docstring
+
+        lines = [
+            'def foo():',
+            "    r'''Single quote raw docstring.'''",
+        ]
+        result = extract_docstring(lines, 0)
+        assert result == "Single quote raw docstring."

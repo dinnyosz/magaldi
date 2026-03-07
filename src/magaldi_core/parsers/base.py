@@ -355,14 +355,18 @@ def extract_docstring(lines: list[str], block_start: int) -> str | None:
     # Search for docstring within 3 lines after the body start
     for i in range(body_start, min(body_start + 3, len(lines))):
         line = lines[i].strip()
-        if line.startswith('"""') or line.startswith("'''"):
-            quote = line[:3]
-            if line.count(quote) >= 2:
-                # Single line docstring
-                return line[3:-3].strip()
+        # Strip string prefixes (r, u, b, f) to detect r"""...""", u'''...''', etc.
+        stripped_prefix = line.lstrip("rRuUbBfF")
+        if stripped_prefix.startswith('"""') or stripped_prefix.startswith("'''"):
+            quote = stripped_prefix[:3]
+            prefix_len = len(line) - len(stripped_prefix)
+            content_start = prefix_len + 3  # skip prefix + quote
+            if line[content_start:].count(quote) >= 1:
+                # Single line docstring: r"""text""" or """text"""
+                return line[content_start:line.rindex(quote)].strip()
             else:
                 # Multi-line docstring
-                docstring_lines = [line[3:]]
+                docstring_lines = [line[content_start:]]
                 for j in range(i + 1, len(lines)):
                     end_line = lines[j]
                     if quote in end_line:
