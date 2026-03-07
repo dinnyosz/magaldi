@@ -473,6 +473,10 @@ class TestGetChildren:
 
     def test_get_children_returns_children(self, mock_repo):
         """Test get_children returns child elements."""
+        mock_repo.get_document_by_id_or_hash.side_effect = None
+        mock_repo.get_document_by_id_or_hash.return_value = {
+            "element_id": "parent_id",
+        }
         mock_client = MagicMock()
         mock_repo._get_client.return_value = mock_client
         mock_client.search.return_value = {
@@ -505,6 +509,36 @@ class TestGetChildren:
 
         assert isinstance(result, list)
         assert len(result) == 2
+
+    def test_get_children_resolves_hash_id(self, mock_repo):
+        """Test get_children resolves hash_id to element_id before querying."""
+        mock_repo.get_document_by_id_or_hash.side_effect = None
+        mock_repo.get_document_by_id_or_hash.return_value = {
+            "element_id": "scope:repo:main:file.py:class:Foo:10",
+        }
+        mock_client = MagicMock()
+        mock_repo._get_client.return_value = mock_client
+        mock_client.search.return_value = {"hits": {"hits": []}}
+
+        get_children(
+            repo=mock_repo,
+            element_id="abc12345",  # hash_id
+        )
+
+        # Should resolve hash first
+        mock_repo.get_document_by_id_or_hash.assert_called_once_with("abc12345")
+        # Should query _find_children with canonical element_id, not hash
+        search_body = mock_client.search.call_args[1]["body"]
+        assert search_body["query"]["term"]["parent_id"] == "scope:repo:main:file.py:class:Foo:10"
+
+    def test_get_children_not_found_raises(self, mock_repo):
+        """Test get_children raises ValueError when element not found."""
+        import pytest
+
+        mock_repo.get_document_by_id_or_hash.return_value = None
+
+        with pytest.raises(ValueError, match="Element not found"):
+            get_children(repo=mock_repo, element_id="nonexistent")
 
 
 # =============================================================================

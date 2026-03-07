@@ -453,6 +453,10 @@ class TestGetChildrenTool:
     @pytest.mark.asyncio
     async def test_get_children_returns_children(self, server, mock_repo):
         """Test get_children tool returns child elements."""
+        mock_repo.get_document_by_id_or_hash.side_effect = None
+        mock_repo.get_document_by_id_or_hash.return_value = {
+            "element_id": "scope:repo:user:file.py:class:Parent:1",
+        }
         mock_repo.get_elements_by_parent.return_value = [
             {"element_id": "scope:repo:user:file.py:method:child:5", "name": "child"}
         ]

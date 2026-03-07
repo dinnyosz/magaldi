@@ -368,12 +368,17 @@ def get_children(
 
     Args:
         repo: Search repository.
-        element_id: Parent element ID.
+        element_id: Parent element ID or hash_id.
 
     Returns:
         List of child elements.
     """
-    children = _find_children(repo, element_id)
+    # Resolve hash_id to canonical element_id (parent_id is stored as element_id format)
+    doc = repo.get_document_by_id_or_hash(element_id)
+    if not doc:
+        raise ValueError(f"Element not found: {element_id}")
+    canonical_id = doc.get("element_id", element_id)
+    children = _find_children(repo, canonical_id)
     return [
         {
             "element_id": c.get("element_id"),
