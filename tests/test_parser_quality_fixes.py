@@ -1597,3 +1597,60 @@ class TestPythonEnumSupport:
         foo = next((e for e in elements if e.name == "Foo"), None)
         assert foo is not None
         assert foo.element_type == "class"
+
+
+# =============================================================================
+# Rust: Impl blocks with lifetime parameters
+# =============================================================================
+
+
+class TestRustLifetimeImpl:
+    """Verify impl blocks with lifetime parameters are extracted."""
+
+    def _parse_rust(self, code: str):
+        from magaldi_core.code_parser import RustParser
+
+        parser = RustParser()
+        file_info = FileInfo(
+            relative_path="test.rs",
+            absolute_path=Path("/fake/test.rs"),
+            language="rust",
+        )
+        return parser.parse(code, file_info, "scope", "repo", "main")
+
+    def test_impl_with_lifetime_param(self):
+        """impl<'a> Foo<'a> should be extracted."""
+        code = "impl<'a> PrettyPrinter<'a> {\n    fn print(&self) {}\n}\n"
+        elements = self._parse_rust(code)
+        impl_elem = next((e for e in elements if e.name == "PrettyPrinter"), None)
+        assert impl_elem is not None, "impl<'a> PrettyPrinter<'a> should be extracted"
+
+    def test_impl_with_elided_lifetime(self):
+        """impl Controller<'_> should be extracted."""
+        code = "impl Controller<'_> {\n    fn handle(&self) {}\n}\n"
+        elements = self._parse_rust(code)
+        impl_elem = next((e for e in elements if e.name == "Controller"), None)
+        assert impl_elem is not None, "impl Controller<'_> should be extracted"
+
+    def test_trait_impl_with_lifetime(self):
+        """impl Display for MyType<'a> should be extracted."""
+        code = "impl Display for MyType<'a> {\n    fn fmt(&self) {}\n}\n"
+        elements = self._parse_rust(code)
+        impl_elem = next((e for e in elements if "MyType" in e.name), None)
+        assert impl_elem is not None, "impl Display for MyType<'a> should be extracted"
+
+    def test_plain_impl_still_works(self):
+        """impl MyStruct should still work (regression check)."""
+        code = "impl MyStruct {\n    fn new() -> Self { MyStruct {} }\n}\n"
+        elements = self._parse_rust(code)
+        impl_elem = next((e for e in elements if e.name == "MyStruct"), None)
+        assert impl_elem is not None
+
+    def test_impl_lifetime_has_methods(self):
+        """Methods inside lifetime impl blocks should be extracted."""
+        code = "impl<'a> Parser<'a> {\n    fn parse(&self) -> &str { \"\" }\n    fn next(&mut self) {}\n}\n"
+        elements = self._parse_rust(code)
+        methods = [e for e in elements if e.element_type == "method"]
+        method_names = [m.name for m in methods]
+        assert "parse" in method_names
+        assert "next" in method_names
