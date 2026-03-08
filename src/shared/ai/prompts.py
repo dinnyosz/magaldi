@@ -112,6 +112,28 @@ SENTENCE_RANGES: dict[str, dict[str, tuple[int, int]]] = {
     },
 }
 
+# Maximum output tokens per element type — passed as max_tokens to the LLM.
+# These are the source of truth; timing.py references them for budget reporting.
+OUTPUT_TOKEN_BUDGETS: dict[str, int] = {
+    "file": 500, "class": 450, "function": 500,
+    "method": 400, "interface": 300, "trait": 300, "enum": 250,
+    "variable": 450, "constant": 200, "type_alias": 200,
+    "import": 100,
+}
+
+
+def get_max_tokens_for_element_type(element_type: str, default: int = 512) -> int:
+    """Get the max output tokens for a given element type.
+
+    Args:
+        element_type: Type of element (file, class, function, etc.)
+        default: Fallback if element_type is not in OUTPUT_TOKEN_BUDGETS.
+
+    Returns:
+        Max tokens to pass to the LLM for this element type.
+    """
+    return OUTPUT_TOKEN_BUDGETS.get(element_type, default)
+
 
 def get_size_tier(element_type: str, line_count: int) -> str:
     """Determine size tier based on element type and line count.

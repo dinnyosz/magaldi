@@ -39,6 +39,7 @@ from shared.ai.prompts import (
     build_prompt,
     clean_summary,
     format_sentence_range,
+    get_max_tokens_for_element_type,
     get_sentence_range,
     get_size_tier,
     truncate_code,
@@ -644,12 +645,15 @@ def generate_summary(
     # - User message: shared context first (file/class), then element-specific
     messages = build_messages(element, parent_summaries, config.max_code_tokens)
 
-    # Generate summary using message-based API
+    # Generate summary using message-based API (per-type max_tokens)
+    max_tokens = get_max_tokens_for_element_type(
+        element.element_type, default=config.max_tokens
+    )
     raw_summary = llm_client.generate_from_messages(
         messages=messages,
         temperature=config.temperature,
         top_p=config.top_p,
-        max_tokens=config.max_tokens,
+        max_tokens=max_tokens,
         timeout=config.timeout,
         top_k=config.top_k,
         min_p=config.min_p,

@@ -754,3 +754,85 @@ class TestSummarizationLLMClientSamplingParams:
         assert call_kwargs.get("min_p") is None
         assert call_kwargs.get("presence_penalty") is None
         assert call_kwargs.get("repetition_penalty") is None
+
+
+# =============================================================================
+# PER-TYPE OUTPUT TOKEN BUDGETS
+# =============================================================================
+
+
+class TestOutputTokenBudgets:
+    """Tests for per-element-type max_tokens enforcement."""
+
+    def test_get_max_tokens_known_types(self):
+        """All known element types should return their specific budget."""
+        from shared.ai.prompts import OUTPUT_TOKEN_BUDGETS, get_max_tokens_for_element_type
+
+        for elem_type, expected in OUTPUT_TOKEN_BUDGETS.items():
+            assert get_max_tokens_for_element_type(elem_type) == expected
+
+    def test_get_max_tokens_unknown_type_returns_default(self):
+        """Unknown element types should return the default."""
+        from shared.ai.prompts import get_max_tokens_for_element_type
+
+        assert get_max_tokens_for_element_type("unknown_type") == 512
+        assert get_max_tokens_for_element_type("unknown_type", default=256) == 256
+
+    def test_generate_summary_uses_per_type_max_tokens(
+        self, config: SummarizationConfig, method_element: CodeElement,
+    ):
+        """generate_summary should pass per-type max_tokens to LLM, not config default."""
+        from shared.ai.prompts import OUTPUT_TOKEN_BUDGETS
+
+        client = SummarizationLLMClient("http://localhost:11434", "qwen2.5-coder:7b")
+        client._client = MagicMock()
+        client._client.generate_from_messages.return_value = "Retrieves a user by ID."
+
+        store = InMemorySummaryStore()
+        store.store_element(method_element)
+        # Store parent summaries so build_messages has context
+        store.store_summary(
+            "scope:repo:main:src/app.py:file:app.py:1",
+            "Flask application.",
+        )
+
+        generate_summary(method_element, store, client, config)
+
+        call_kwargs = client._client.generate_from_messages.call_args[1]
+        expected_max_tokens = OUTPUT_TOKEN_BUDGETS["method"]
+        assert call_kwargs["max_tokens"] == expected_max_tokens
+
+    def test_generate_summary_constant_gets_small_budget(
+        self, config: SummarizationConfig,
+    ):
+        """Constants should get a much smaller max_tokens than the default 512."""
+        from shared.ai.prompts import OUTPUT_TOKEN_BUDGETS
+
+        constant_element = CodeElement(
+            element_id="scope:repo:main:src/config.py:constant:MAX_RETRIES:5",
+            scope="scope",
+            repository="repo",
+            username="main",
+            relative_path="src/config.py",
+            element_type="constant",
+            name="MAX_RETRIES",
+            language="python",
+            line_start=5,
+            line_end=5,
+            raw_code="MAX_RETRIES = 3",
+            level=0,
+        )
+
+        client = SummarizationLLMClient("http://localhost:11434", "qwen2.5-coder:7b")
+        client._client = MagicMock()
+        client._client.generate_from_messages.return_value = "Maximum retry attempts."
+
+        store = InMemorySummaryStore()
+        store.store_element(constant_element)
+
+        generate_summary(constant_element, store, client, config)
+
+        call_kwargs = client._client.generate_from_messages.call_args[1]
+        expected_max_tokens = OUTPUT_TOKEN_BUDGETS["constant"]
+        assert call_kwargs["max_tokens"] == expected_max_tokens
+        assert expected_max_tokens < config.max_tokens  # 200 < 512
