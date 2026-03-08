@@ -243,8 +243,9 @@ def run_single_request(
             "timeout": timeout,
         }
 
-        # Disable thinking for qwen3
-        if "qwen3" in model.lower():
+        # Disable thinking for qwen3 (not qwen3.5 which has reasoning disabled by default)
+        model_lower = model.lower()
+        if "qwen3" in model_lower and "qwen3.5" not in model_lower:
             kwargs["think"] = False
 
         if api_base:

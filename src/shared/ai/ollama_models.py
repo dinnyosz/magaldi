@@ -5,9 +5,9 @@ overhead when context size changes between requests.
 
 Instead of passing num_ctx per request (which causes Ollama to unload/reload
 the model), we create aliases with fixed context sizes:
-  - qwen3:4b-instruct-2k  (num_ctx=2048)
-  - qwen3:4b-instruct-4k  (num_ctx=4096)
-  - qwen3:4b-instruct-8k  (num_ctx=8192)
+  - qwen3.5:4b-2k  (num_ctx=2048)
+  - qwen3.5:4b-4k  (num_ctx=4096)
+  - qwen3.5:4b-8k  (num_ctx=8192)
   - etc.
 
 The model weights are shared via mmap, so only the KV cache memory differs.
@@ -356,15 +356,16 @@ def resolve_ollama_model(
         For others: (original_model, original_num_ctx)
     """
     # Only handle Ollama models
-    if not litellm_model.startswith("ollama/"):
+    if not litellm_model.startswith(("ollama/", "ollama_chat/")):
         return litellm_model, num_ctx
 
     # If no num_ctx specified, use base model
     if num_ctx is None:
         return litellm_model, None
 
-    # Extract base model name (remove "ollama/" prefix)
-    base_model = litellm_model[7:]  # Remove "ollama/"
+    # Extract base model name (remove "ollama/" or "ollama_chat/" prefix)
+    prefix = "ollama_chat/" if litellm_model.startswith("ollama_chat/") else "ollama/"
+    base_model = litellm_model[len(prefix):]
 
     # Skip if already a tiered model
     if is_tiered_model(base_model):
@@ -375,7 +376,7 @@ def resolve_ollama_model(
     tiered_model = ensure_tiered_model(base_model, num_ctx, base_url)
 
     # Still pass num_ctx as harmless fallback
-    return f"ollama/{tiered_model}", num_ctx
+    return f"{prefix}{tiered_model}", num_ctx
 
 
 def warmup_ollama_tiers(
@@ -421,10 +422,12 @@ def warmup_ollama_tiers_verbose(
     Returns:
         TierCreationResult with detailed info, or None for non-Ollama models.
     """
-    if not litellm_model.startswith("ollama/"):
+    if not litellm_model.startswith(("ollama/", "ollama_chat/")):
         return None
 
-    base_model = litellm_model[7:]  # Remove "ollama/"
+    # Extract base model name (remove "ollama/" or "ollama_chat/" prefix)
+    prefix = "ollama_chat/" if litellm_model.startswith("ollama_chat/") else "ollama/"
+    base_model = litellm_model[len(prefix):]
 
     if is_tiered_model(base_model):
         logger.debug(f"Model {base_model} is already tiered, skipping warmup")
@@ -438,7 +441,7 @@ def warmup_ollama_tiers_verbose(
         tiers=tiers or CONTEXT_TIERS,
     )
 
-    # Convert tier_map to include "ollama/" prefix
-    result.tier_map = {tier: f"ollama/{name}" for tier, name in result.tier_map.items()}
+    # Convert tier_map to include LiteLLM prefix
+    result.tier_map = {tier: f"{prefix}{name}" for tier, name in result.tier_map.items()}
 
     return result

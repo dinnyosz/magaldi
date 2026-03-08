@@ -113,10 +113,6 @@ def run_hierarchical_benchmarks(
             # Build prompt with parent context
             prompt = build_summarization_prompt(elem, parent_summaries)
 
-            # For thinking models, add directive to skip thinking
-            if any(mc.name.startswith(tm) for tm in BenchmarkClient.THINKING_MODELS):
-                prompt = prompt + "\n\n/no_think"
-
             with console.status(f"    [{len(model_results)+1}/{len(elements)}] {elem_name}..."):
                 model_params = benchmark_config.get_model_params(mc.name)
                 max_tokens = model_params.max_tokens or benchmark_config.max_tokens
