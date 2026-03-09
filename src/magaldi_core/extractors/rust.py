@@ -82,6 +82,103 @@ class RustExtractor(BaseExtractor):
 
 
 # =============================================================================
+# ATTRIBUTE HELPERS
+# =============================================================================
+
+
+def _get_preceding_attributes(node: Node) -> list[str]:
+    """Extract attribute names from attribute_item siblings immediately preceding a node.
+
+    In Rust's AST, attributes like #[test] or #[cfg(test)] are sibling nodes
+    that appear immediately before the annotated item in the parent's children list.
+
+    Args:
+        node: The AST node to find preceding attributes for.
+
+    Returns:
+        List of attribute name strings (e.g., ["test", "cfg"]).
+    """
+    attrs: list[str] = []
+    parent = node.parent
+    if not parent:
+        return attrs
+
+    # Walk backwards through siblings to collect consecutive attribute_items
+    found_self = False
+    preceding: list[Node] = []
+    for child in reversed(parent.children):
+        if child.id == node.id:
+            found_self = True
+            continue
+        if found_self:
+            if child.type == "attribute_item":
+                preceding.append(child)
+            else:
+                break  # Stop at first non-attribute sibling
+
+    for attr_node in preceding:
+        attr_name = _extract_attribute_name(attr_node)
+        if attr_name:
+            attrs.append(attr_name)
+
+    return attrs
+
+
+def _extract_attribute_name(attr_item_node: Node) -> str | None:
+    """Extract the attribute name from an attribute_item node.
+
+    For #[test] returns "test".
+    For #[cfg(test)] returns "cfg".
+    For #[tokio::test] returns "tokio::test".
+
+    Args:
+        attr_item_node: An attribute_item AST node.
+
+    Returns:
+        The attribute name string, or None.
+    """
+    for child in attr_item_node.children:
+        if child.type == "attribute":
+            for attr_child in child.children:
+                if attr_child.type == "identifier":
+                    return get_node_text(attr_child)  # type: ignore[no-any-return]
+                elif attr_child.type == "scoped_identifier":
+                    return get_node_text(attr_child)  # type: ignore[no-any-return]
+    return None
+
+
+# =============================================================================
+# RUST VISIBILITY HELPERS
+# =============================================================================
+
+
+def _extract_rust_visibility(node: Node) -> str:
+    """Extract visibility from a Rust AST node.
+
+    Rust visibility rules:
+    - No visibility_modifier -> "private" (module-private)
+    - `pub` -> "public"
+    - `pub(crate)` -> "pub(crate)"
+    - `pub(super)` -> "pub(super)"
+    - `pub(in path)` -> "pub(in path)"
+
+    Args:
+        node: A function_item, struct_item, enum_item, trait_item, etc.
+
+    Returns:
+        Visibility string.
+    """
+    for child in node.children:
+        if child.type == "visibility_modifier":
+            text = get_node_text(child).strip()
+            if text == "pub":
+                return "public"
+            # pub(crate), pub(super), pub(in path::to::mod)
+            return text
+    return "private"
+
+
+# =============================================================================
 # RUST ELEMENT EXTRACTION
 # =============================================================================
 
@@ -171,6 +268,7 @@ def _extract_rust_struct(node: Node, _lines: list[str]) -> ExtractedElement | No
         line_end=node.end_point[0] + 1,
         raw_code=node.text.decode('utf-8') if node.text else "",
         byte_offset=node.start_byte,
+        visibility=_extract_rust_visibility(node),
         node=node,
     )
 
@@ -193,6 +291,7 @@ def _extract_rust_enum(node: Node, _lines: list[str]) -> ExtractedElement | None
         line_end=node.end_point[0] + 1,
         raw_code=node.text.decode('utf-8') if node.text else "",
         byte_offset=node.start_byte,
+        visibility=_extract_rust_visibility(node),
         node=node,
     )
 
@@ -215,6 +314,7 @@ def _extract_rust_trait(node: Node, _lines: list[str]) -> ExtractedElement | Non
         line_end=node.end_point[0] + 1,
         raw_code=node.text.decode('utf-8') if node.text else "",
         byte_offset=node.start_byte,
+        visibility=_extract_rust_visibility(node),
         node=node,
     )
 
@@ -326,6 +426,7 @@ def _extract_rust_module_const(node: Node, _lines: list[str]) -> ExtractedElemen
         line_end=line_end,
         raw_code=raw_code,
         byte_offset=node.start_byte,
+        visibility=_extract_rust_visibility(node),
         node=node,
         return_type=const_type,  # Store type in return_type field
     )
@@ -375,6 +476,7 @@ def _extract_rust_static(node: Node, _lines: list[str]) -> ExtractedElement | No
         line_end=line_end,
         raw_code=raw_code,
         byte_offset=node.start_byte,
+        visibility=_extract_rust_visibility(node),
         node=node,
         return_type=static_type,
         decorators=decorators,
@@ -567,12 +669,23 @@ def _extract_rust_function(node: Node, _lines: list[str]) -> ExtractedElement | 
     decorators: list[str] = []
     params_node = None
 
+    # Collect preceding attributes (e.g., #[test], #[tokio::test])
+    preceding_attrs = _get_preceding_attributes(node)
+    decorators.extend(preceding_attrs)
+
     for child in node.children:
         if child.type == "identifier":
             name = get_node_text(child)
         elif child.type == "async":
             is_async = True
-            decorators.append("async")
+            if "async" not in decorators:
+                decorators.append("async")
+        elif child.type == "function_modifiers":
+            mod_text = get_node_text(child)
+            if "async" in mod_text:
+                is_async = True
+                if "async" not in decorators:
+                    decorators.append("async")
         elif child.type == "parameters":
             params_node = child
 
@@ -599,7 +712,7 @@ def _extract_rust_function(node: Node, _lines: list[str]) -> ExtractedElement | 
         byte_offset=node.start_byte,
         signature=signature,
         is_async=is_async,
-        decorators=decorators,
+        decorators=decorators if decorators else None,
         node=node,
         return_type=return_type,
         parameters=parameters or None,
@@ -735,18 +848,24 @@ def _extract_rust_method(node: Node, _lines: list[str]) -> ExtractedElement | No
     has_self = False
     params_node = None
 
+    # Collect preceding attributes (e.g., #[test], #[tokio::test])
+    preceding_attrs = _get_preceding_attributes(node)
+    decorators.extend(preceding_attrs)
+
     for child in node.children:
         if child.type == "identifier":
             name = get_node_text(child)
         elif child.type == "async":
             is_async = True
-            decorators.append("async")
+            if "async" not in decorators:
+                decorators.append("async")
         elif child.type == "function_modifiers":
             # function_signature_item wraps modifiers (e.g. async) in this node
             mod_text = get_node_text(child)
             if "async" in mod_text:
                 is_async = True
-                decorators.append("async")
+                if "async" not in decorators:
+                    decorators.append("async")
         elif child.type == "parameters":
             params_node = child
             # Check for self parameter

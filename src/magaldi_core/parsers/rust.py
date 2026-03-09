@@ -38,6 +38,16 @@ from magaldi_core.tree_sitter_manager import (
 if TYPE_CHECKING:
     from magaldi_core.change_detection import FileInfo
 
+# Rust test attribute names that mark test functions
+_TEST_ATTRIBUTES = frozenset({"test", "tokio::test", "async_std::test"})
+
+
+def _is_test_function(decorators: list[str] | None) -> bool:
+    """Check if a Rust function/method has a test attribute."""
+    if not decorators:
+        return False
+    return any(d in _TEST_ATTRIBUTES for d in decorators)
+
 
 class RustParser(TreeSitterParser):
     """Parse Rust files using tree-sitter."""
@@ -223,6 +233,7 @@ class RustParser(TreeSitterParser):
             signature=ext.signature,
             docstring=extract_preceding_doc_comment(lines, ext.line_start, "rust"),
             is_async=ext.is_async,
+            is_test=_is_test_function(ext.decorators),
             decorators=ext.decorators or [],
             level=2,
             calls=calls,
@@ -277,6 +288,7 @@ class RustParser(TreeSitterParser):
             signature=ext.signature,
             docstring=extract_preceding_doc_comment(lines, ext.line_start, "rust"),
             is_async=ext.is_async,
+            is_test=_is_test_function(ext.decorators),
             decorators=ext.decorators or [],
             level=2,
             parent_id=parent_class.element_id,
