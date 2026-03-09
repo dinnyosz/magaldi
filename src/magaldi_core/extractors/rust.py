@@ -140,9 +140,7 @@ def _extract_attribute_name(attr_item_node: Node) -> str | None:
     for child in attr_item_node.children:
         if child.type == "attribute":
             for attr_child in child.children:
-                if attr_child.type == "identifier":
-                    return get_node_text(attr_child)  # type: ignore[no-any-return]
-                elif attr_child.type == "scoped_identifier":
+                if attr_child.type == "identifier" or attr_child.type == "scoped_identifier":
                     return get_node_text(attr_child)  # type: ignore[no-any-return]
     return None
 
@@ -196,10 +194,27 @@ def extract_rust_elements(
     Returns:
         List of extracted elements.
     """
-    elements: list[ExtractedElement] = []
-    root = tree.root_node
+    return _extract_elements_from_children(tree.root_node.children, lines)
 
-    for node in root.children:
+
+def _extract_elements_from_children(
+    children: list[Node] | tuple[Node, ...], lines: list[str]
+) -> list[ExtractedElement]:
+    """Extract elements from a list of AST child nodes.
+
+    Shared logic for extracting from both the file root and from inside
+    mod_item declaration_list blocks.
+
+    Args:
+        children: List of AST child nodes to process.
+        lines: Source code lines.
+
+    Returns:
+        List of extracted elements.
+    """
+    elements: list[ExtractedElement] = []
+
+    for node in children:
         if node.type == "struct_item":
             elem = _extract_rust_struct(node, lines)
             if elem:
@@ -246,8 +261,82 @@ def extract_rust_elements(
             elem = _extract_rust_variable(node, lines)
             if elem:
                 elements.append(elem)
+        elif node.type == "mod_item":
+            # Inline module: mod tests { ... }
+            mod_elem = _extract_rust_mod(node, lines)
+            if mod_elem:
+                elements.append(mod_elem)
+                # Recursively extract child elements from the mod's body
+                mod_children = _extract_mod_body_elements(node, lines)
+                elements.extend(mod_children)
 
     return elements
+
+
+def _extract_rust_mod(node: Node, _lines: list[str]) -> ExtractedElement | None:
+    """Extract a Rust inline mod block as a class-like element.
+
+    Handles: mod tests { ... }
+    Also handles: #[cfg(test)] mod tests { ... } (attribute is on preceding sibling)
+
+    Args:
+        node: A mod_item AST node.
+        lines: Source code lines.
+
+    Returns:
+        ExtractedElement for the module, or None if it has no body (extern mod).
+    """
+    name = None
+    has_body = False
+
+    for child in node.children:
+        if child.type == "identifier":
+            name = get_node_text(child)
+        elif child.type == "declaration_list":
+            has_body = True
+
+    if not name or not has_body:
+        return None  # Skip `mod foo;` (extern module declarations without body)
+
+    # Collect preceding attributes (e.g., #[cfg(test)])
+    preceding_attrs = _get_preceding_attributes(node)
+    decorators = ["mod"] + preceding_attrs
+
+    return ExtractedElement(
+        element_type="class",  # Treat mod as class for consistency (like impl)
+        name=name,
+        line_start=node.start_point[0] + 1,
+        line_end=node.end_point[0] + 1,
+        raw_code=node.text.decode('utf-8') if node.text else "",
+        byte_offset=node.start_byte,
+        decorators=decorators,
+        node=node,
+    )
+
+
+def _extract_mod_body_elements(
+    mod_node: Node, lines: list[str]
+) -> list[ExtractedElement]:
+    """Extract elements from inside a mod block's declaration_list.
+
+    Args:
+        mod_node: A mod_item AST node.
+        lines: Source code lines.
+
+    Returns:
+        List of elements found inside the module body.
+    """
+    # Find declaration_list
+    decl_list = None
+    for child in mod_node.children:
+        if child.type == "declaration_list":
+            decl_list = child
+            break
+
+    if not decl_list:
+        return []
+
+    return _extract_elements_from_children(decl_list.children, lines)
 
 
 def _extract_rust_struct(node: Node, _lines: list[str]) -> ExtractedElement | None:
@@ -563,6 +652,7 @@ def _extract_rust_type_alias(node: Node, _lines: list[str]) -> ExtractedElement 
         line_end=node.end_point[0] + 1,
         raw_code=raw_code,
         byte_offset=node.start_byte,
+        visibility=_extract_rust_visibility(node),
         signature=signature,
         node=node,
     )
@@ -710,6 +800,7 @@ def _extract_rust_function(node: Node, _lines: list[str]) -> ExtractedElement | 
         line_end=node.end_point[0] + 1,
         raw_code=node.text.decode('utf-8') if node.text else "",
         byte_offset=node.start_byte,
+        visibility=_extract_rust_visibility(node),
         signature=signature,
         is_async=is_async,
         decorators=decorators if decorators else None,
@@ -903,6 +994,7 @@ def _extract_rust_method(node: Node, _lines: list[str]) -> ExtractedElement | No
         line_end=node.end_point[0] + 1,
         raw_code=node.text.decode('utf-8') if node.text else "",
         byte_offset=node.start_byte,
+        visibility=_extract_rust_visibility(node),
         signature=signature,
         is_async=is_async,
         decorators=decorators,

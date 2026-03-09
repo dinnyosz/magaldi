@@ -27,11 +27,11 @@ from magaldi_core.tree_sitter_manager import (
     extract_rust_elements,
     extract_rust_impl_members,
     extract_rust_impl_traits,
-    extract_rust_trait_members,
     extract_rust_imports,
     extract_rust_modified_fields,
     extract_rust_panics,
     extract_rust_struct_fields,
+    extract_rust_trait_members,
     extract_top_level_rust_calls,
 )
 
@@ -185,6 +185,7 @@ class RustParser(TreeSitterParser):
             raw_code=ext.raw_code,
             docstring=extract_preceding_doc_comment(lines, ext.line_start, "rust"),
             decorators=ext.decorators or [],
+            visibility=ext.visibility or "public",
             level=1,
             class_attributes=class_attributes,
             base_classes=base_classes,
@@ -235,6 +236,7 @@ class RustParser(TreeSitterParser):
             is_async=ext.is_async,
             is_test=_is_test_function(ext.decorators),
             decorators=ext.decorators or [],
+            visibility=ext.visibility or "public",
             level=2,
             calls=calls,
             exceptions_raised=exceptions_raised,
@@ -290,6 +292,7 @@ class RustParser(TreeSitterParser):
             is_async=ext.is_async,
             is_test=_is_test_function(ext.decorators),
             decorators=ext.decorators or [],
+            visibility=ext.visibility or "public",
             level=2,
             parent_id=parent_class.element_id,
             calls=calls,
@@ -326,6 +329,7 @@ class RustParser(TreeSitterParser):
             line_end=ext.line_end,
             raw_code=ext.raw_code,
             docstring=extract_preceding_doc_comment(lines, ext.line_start, "rust"),
+            visibility=ext.visibility or "public",
             level=3,
             parent_id=parent.element_id if parent else None,
         )
@@ -357,6 +361,7 @@ class RustParser(TreeSitterParser):
             raw_code=ext.raw_code,
             signature=ext.signature,
             docstring=extract_preceding_doc_comment(lines, ext.line_start, "rust"),
+            visibility=ext.visibility or "public",
             level=1,
         )
         elem.element_id = generate_element_id(
