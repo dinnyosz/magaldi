@@ -43,7 +43,8 @@ class JavaExtractor(BaseExtractor):
         self, class_node: Node, lines: list[str]
     ) -> tuple[list[ExtractedElement], list[ExtractedElement]]:
         """Extract methods and fields from a Java class body."""
-        return extract_java_class_members(class_node, lines)
+        methods, fields, _nested = extract_java_class_members(class_node, lines)
+        return methods, fields
 
     def extract_imports(self, tree: Tree, lines: list[str]) -> list[ExtractedImport]:
         """Extract import statements from Java AST."""
@@ -269,23 +270,40 @@ def _extract_java_import_element(node: Node, _lines: list[str]) -> ExtractedElem
 
 def extract_java_class_members(
     class_node: Node, lines: list[str]
-) -> tuple[list[ExtractedElement], list[ExtractedElement]]:
-    """Extract methods and fields from a Java class/interface/enum body.
+) -> tuple[list[ExtractedElement], list[ExtractedElement], list[ExtractedElement]]:
+    """Extract methods, fields, and nested types from a Java class/interface/enum body.
 
     Args:
         class_node: A class/interface/enum declaration node.
         lines: Source code lines.
 
     Returns:
-        Tuple of (methods, fields/constants).
+        Tuple of (methods, fields/constants, nested_types).
     """
     methods: list[ExtractedElement] = []
     fields: list[ExtractedElement] = []
+    nested_types: list[ExtractedElement] = []
 
     body = _get_body_node(class_node)
     if not body:
-        return methods, fields
+        return methods, fields, nested_types
 
+    _extract_body_members(body, lines, methods, fields, nested_types)
+
+    return methods, fields, nested_types
+
+
+def _extract_body_members(
+    body: Node,
+    lines: list[str],
+    methods: list[ExtractedElement],
+    fields: list[ExtractedElement],
+    nested_types: list[ExtractedElement],
+) -> None:
+    """Extract members from a class/interface/enum body node.
+
+    Populates the provided lists in place.
+    """
     for child in body.children:
         if child.type == "method_declaration":
             elem = _extract_java_method(child, lines)
@@ -298,22 +316,37 @@ def extract_java_class_members(
         elif child.type == "field_declaration":
             field_elems = _extract_java_field(child, lines)
             fields.extend(field_elems)
+        elif child.type == "class_declaration":
+            elem = _extract_java_class(child, lines)
+            if elem:
+                nested_types.append(elem)
+        elif child.type == "interface_declaration":
+            elem = _extract_java_interface(child, lines)
+            if elem:
+                nested_types.append(elem)
+        elif child.type == "enum_declaration":
+            elem = _extract_java_enum(child, lines)
+            if elem:
+                nested_types.append(elem)
+        elif child.type == "record_declaration":
+            elem = _extract_java_record(child, lines)
+            if elem:
+                nested_types.append(elem)
+        elif child.type == "annotation_type_declaration":
+            elem = _extract_java_annotation_type(child, lines)
+            if elem:
+                nested_types.append(elem)
         elif child.type == "enum_body_declarations":
-            # Methods inside enum body
-            for enum_child in child.children:
-                if enum_child.type == "method_declaration":
-                    elem = _extract_java_method(enum_child, lines)
-                    if elem:
-                        methods.append(elem)
-                elif enum_child.type == "constructor_declaration":
-                    elem = _extract_java_constructor(enum_child, lines)
-                    if elem:
-                        methods.append(elem)
-                elif enum_child.type == "field_declaration":
-                    field_elems = _extract_java_field(enum_child, lines)
-                    fields.extend(field_elems)
-
-    return methods, fields
+            # Methods/fields inside enum body (after the semicolon)
+            _extract_body_members(child, lines, methods, fields, nested_types)
+        elif child.type == "enum_constant":
+            elem = _extract_java_enum_constant(child, lines)
+            if elem:
+                fields.append(elem)
+        elif child.type == "annotation_type_element_declaration":
+            elem = _extract_java_annotation_member(child, lines)
+            if elem:
+                methods.append(elem)
 
 
 def _extract_java_method(node: Node, _lines: list[str]) -> ExtractedElement | None:
@@ -413,6 +446,54 @@ def _extract_java_field(
                 )
 
     return fields
+
+
+def _extract_java_enum_constant(node: Node, _lines: list[str]) -> ExtractedElement | None:
+    """Extract an enum constant (e.g., DRAMA("Drama") or RED).
+
+    Enum constants are extracted as constants with the enum as parent.
+    """
+    name = _get_identifier(node)
+    if not name:
+        return None
+
+    return ExtractedElement(
+        element_type="constant",
+        name=name,
+        line_start=node.start_point[0] + 1,
+        line_end=node.end_point[0] + 1,
+        raw_code=node.text.decode("utf-8") if node.text else "",
+        byte_offset=node.start_byte,
+        node=node,
+    )
+
+
+def _extract_java_annotation_member(
+    node: Node, _lines: list[str]
+) -> ExtractedElement | None:
+    """Extract an annotation type element declaration.
+
+    E.g., String value(); or boolean nullSafe() default true;
+    These are extracted as methods of the annotation type.
+    """
+    name = _get_identifier(node)
+    if not name:
+        return None
+
+    return_type = _extract_return_type(node)
+    signature = f"{return_type or 'Object'} {name}()"
+
+    return ExtractedElement(
+        element_type="method",
+        name=name,
+        line_start=node.start_point[0] + 1,
+        line_end=node.end_point[0] + 1,
+        raw_code=node.text.decode("utf-8") if node.text else "",
+        byte_offset=node.start_byte,
+        node=node,
+        signature=signature,
+        return_type=return_type,
+    )
 
 
 # =============================================================================

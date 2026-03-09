@@ -96,17 +96,23 @@
     parameters: (formal_parameters)? @accessor.params
     body: (statement_block) @accessor.body)) @accessor.def
 
-; Public field
+; Public field (JavaScript)
 (class_body
   (field_definition
     property: (property_identifier) @field.name
     value: (_)? @field.value)) @field.def
 
-; Private field
+; Private field (JavaScript)
 (class_body
   (field_definition
     property: (private_property_identifier) @private_field.name
     value: (_)? @private_field.value)) @private_field.def
+
+; Public field (TypeScript) — includes static arrow function properties
+(class_body
+  (public_field_definition
+    name: (property_identifier) @ts_field.name
+    value: (_)? @ts_field.value)) @ts_field.def
 
 ; =============================================================================
 ; EXPORTS

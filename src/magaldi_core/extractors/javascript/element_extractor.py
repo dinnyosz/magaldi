@@ -713,24 +713,64 @@ def extract_javascript_class_members(
                     decorators=["abstract"],
                 )
             )
-        elif child.type == "field_definition":
-            name_node = get_child_by_field(child, "property")
+        elif child.type in ("field_definition", "public_field_definition"):
+            # field_definition (JS) uses "property" field, public_field_definition (TS) uses "name"
+            name_node = (
+                get_child_by_field(child, "property")
+                or get_child_by_field(child, "name")
+            )
             name = get_node_text(name_node) if name_node else "unknown"
+            value_node = get_child_by_field(child, "value")
+
+            is_static = any(c.type == "static" for c in child.children)
 
             line_start = child.start_point[0] + 1
             line_end = child.end_point[0] + 1
             raw_code = child.text.decode('utf-8') if child.text else ""
 
-            fields.append(
-                ExtractedElement(
-                    element_type="variable",
-                    name=name,
-                    line_start=line_start,
-                    line_end=line_end,
-                    raw_code=raw_code,
-                    byte_offset=child.start_byte,
-                    node=child,
+            # Arrow functions or function expressions as field values are methods
+            if value_node and value_node.type in ("arrow_function", "function_expression", "function"):
+                params_node = get_child_by_field(value_node, "parameters")
+                params = get_node_text(params_node) if params_node else "()"
+                parameters = extract_js_parameters(params_node) if params_node else []
+                return_type = extract_js_return_type(value_node)
+
+                is_async = any(c.type == "async" for c in value_node.children)
+
+                prefix = "static " if is_static else ""
+                signature = f"{prefix}{name} = {params} =>"
+                if return_type:
+                    signature += f": {return_type}"
+
+                decorators = ["static"] if is_static else None
+
+                methods.append(
+                    ExtractedElement(
+                        element_type="method",
+                        name=name,
+                        line_start=line_start,
+                        line_end=line_end,
+                        raw_code=raw_code,
+                        byte_offset=child.start_byte,
+                        signature=signature,
+                        is_async=is_async,
+                        node=value_node,
+                        return_type=return_type,
+                        parameters=parameters or None,
+                        decorators=decorators,
+                    )
                 )
-            )
+            else:
+                fields.append(
+                    ExtractedElement(
+                        element_type="variable",
+                        name=name,
+                        line_start=line_start,
+                        line_end=line_end,
+                        raw_code=raw_code,
+                        byte_offset=child.start_byte,
+                        node=child,
+                    )
+                )
 
     return methods, fields

@@ -106,22 +106,11 @@ class JavaParser(TreeSitterParser):
                 )
                 elements.append(class_elem)
 
-                # Extract class members
+                # Extract class members (recursively handles nested types)
                 if ext.node:
-                    methods, fields = extract_java_class_members(ext.node, lines)
-
-                    for method_ext in methods:
-                        method_elem = self._convert_method(
-                            method_ext, class_elem, file_info, scope, repository, username, lines
-                        )
-                        elements.append(method_elem)
-
-                    for field_ext in fields:
-                        field_elem = self._convert_constant(
-                            field_ext, file_info, scope, repository, username, lines,
-                            parent=class_elem,
-                        )
-                        elements.append(field_elem)
+                    self._extract_members_recursive(
+                        ext.node, class_elem, file_info, scope, repository, username, lines, elements
+                    )
 
             elif ext.element_type == "import":
                 import_elem = self._convert_import(
@@ -136,6 +125,48 @@ class JavaParser(TreeSitterParser):
         self._resolve_calls_in_file(elements, self_keyword="this")
 
         return elements
+
+    def _extract_members_recursive(
+        self,
+        class_node,
+        parent_elem: CodeElement,
+        file_info: FileInfo,
+        scope: str,
+        repository: str,
+        username: str,
+        lines: list[str],
+        elements: list[CodeElement],
+    ) -> None:
+        """Extract members from a class node, recursively processing nested types."""
+        methods, fields, nested_types = extract_java_class_members(class_node, lines)
+
+        for method_ext in methods:
+            method_elem = self._convert_method(
+                method_ext, parent_elem, file_info, scope, repository, username, lines
+            )
+            elements.append(method_elem)
+
+        for field_ext in fields:
+            field_elem = self._convert_constant(
+                field_ext, file_info, scope, repository, username, lines,
+                parent=parent_elem,
+            )
+            elements.append(field_elem)
+
+        # Recursively process nested type declarations
+        for nested_ext in nested_types:
+            nested_elem = self._convert_class(
+                nested_ext, file_info, scope, repository, username, lines
+            )
+            nested_elem.parent_id = parent_elem.element_id
+            elements.append(nested_elem)
+
+            # Recursively extract members of nested types
+            if nested_ext.node:
+                self._extract_members_recursive(
+                    nested_ext.node, nested_elem, file_info, scope, repository, username,
+                    lines, elements,
+                )
 
     def _convert_class(
         self,
