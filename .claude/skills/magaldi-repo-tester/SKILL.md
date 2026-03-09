@@ -476,30 +476,58 @@ Use the repo list from `tools/clone-test-repos.sh --list` to map language/tier f
 
 ## Repo-to-Language Mapping
 
-| Repo | Language | Tier |
-|------|----------|------|
-| click | python | 1 |
-| requests | python | 2 |
-| httpx | python | 2 |
-| got | javascript | 1 |
-| express | javascript | 2 |
-| lodash | javascript | 2 |
-| zod | typescript | 1 |
-| trpc | typescript | 2 |
-| drizzle-orm | typescript | 2 |
-| guzzle | php | 1 |
-| composer | php | 2 |
-| PHPMailer | php | 2 |
-| fd | rust | 1 |
-| ripgrep | rust | 2 |
-| bat | rust | 2 |
-| gson | java | 1 |
-| spring-petclinic | java | 2 |
-| okhttp | java | 2 |
-| neofetch | bash | 1 |
-| rbenv | bash | 2 |
-| nvm | bash | 2 |
-| nickel | polyglot | 2 |
+| Repo | Language | Tier | Type |
+|------|----------|------|------|
+| click | python | 1 | library |
+| requests | python | 2 | library |
+| httpx | python | 2 | library |
+| fastapi | python | 3 | library |
+| pydantic | python | 3 | library |
+| full-stack-fastapi-template | python | 3 | app |
+| core (home-assistant) | python | 3 | app |
+| got | javascript | 1 | library |
+| express | javascript | 2 | library |
+| lodash | javascript | 2 | library |
+| axios | javascript | 3 | library |
+| date-fns | javascript | 3 | library |
+| Ghost | javascript | 3 | app |
+| nodebestpractices | javascript | 3 | app |
+| zod | typescript | 1 | library |
+| trpc | typescript | 2 | library |
+| drizzle-orm | typescript | 2 | library |
+| prisma | typescript | 3 | library |
+| typeorm | typescript | 3 | library |
+| cal.com | typescript | 3 | app |
+| immich | typescript | 3 | app |
+| guzzle | php | 1 | library |
+| composer | php | 2 | app |
+| PHPMailer | php | 2 | library |
+| framework (laravel) | php | 3 | library |
+| console (symfony) | php | 3 | library |
+| firefly-iii | php | 3 | app |
+| matomo | php | 3 | app |
+| fd | rust | 1 | app |
+| ripgrep | rust | 2 | app |
+| bat | rust | 2 | app |
+| tokio | rust | 3 | library |
+| serde | rust | 3 | library |
+| ruff | rust | 3 | app |
+| zellij | rust | 3 | app |
+| gson | java | 1 | library |
+| spring-petclinic | java | 2 | app |
+| okhttp | java | 2 | library |
+| commons-lang | java | 3 | library |
+| junit5 | java | 3 | library |
+| java-design-patterns | java | 3 | app |
+| kafka | java | 3 | app |
+| neofetch | bash | 1 | app |
+| rbenv | bash | 2 | app |
+| nvm | bash | 2 | app |
+| ohmyzsh | bash | 3 | library |
+| asdf | bash | 3 | library |
+| pi-hole | bash | 3 | app |
+| dokku | bash | 3 | app |
+| nickel | polyglot | 2 | app |
 
 ## Key Things to Catch
 

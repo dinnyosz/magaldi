@@ -17,43 +17,71 @@ DEST="$PROJECT_ROOT/test_repos"
 
 # ── Repo definitions ────────────────────────────────────────────────
 # Format: "github_path|tier|language"
-# Tier 1 = smoke test (~1 min), Tier 2 = pattern coverage (~5 min)
+# Tier 1 = smoke test (~1 min), Tier 2 = pattern coverage (~5 min), Tier 3 = stress test (~15 min)
 
 REPOS=(
   # Python
   "pallets/click|1|python"
   "psf/requests|2|python"
   "encode/httpx|2|python"
+  "fastapi/fastapi|3|python"                         # Library: decorators, type hints, async
+  "pydantic/pydantic|3|python"                       # Library: dataclasses, generics, validators
+  "tiangolo/full-stack-fastapi-template|3|python"    # App using FastAPI/Pydantic/SQLModel
+  "home-assistant/core|3|python"                     # App: massive real-world, async, decorators
 
   # JavaScript
   "sindresorhus/got|1|javascript"
   "expressjs/express|2|javascript"
   "lodash/lodash|2|javascript"
+  "axios/axios|3|javascript"                         # Library: CommonJS + ESM patterns
+  "date-fns/date-fns|3|javascript"                   # Library: many small modules
+  "TryGhost/Ghost|3|javascript"                      # App using Express, knex, etc.
+  "goldbergyoni/nodebestpractices|3|javascript"       # App: example code + patterns
 
   # TypeScript
   "colinhacks/zod|1|typescript"
   "trpc/trpc|2|typescript"
   "drizzle-team/drizzle-orm|2|typescript"
+  "prisma/prisma|3|typescript"                       # Library: complex monorepo
+  "typeorm/typeorm|3|typescript"                     # Library: decorators, ORM patterns
+  "calcom/cal.com|3|typescript"                      # App: Next.js + tRPC + Prisma + zod
+  "immich-app/immich|3|typescript"                   # App: NestJS backend + React frontend
 
   # PHP
   "guzzle/guzzle|1|php"
   "composer/composer|2|php"
   "PHPMailer/PHPMailer|2|php"
+  "laravel/framework|3|php"                          # Library: all PHP patterns
+  "symfony/console|3|php"                            # Library: CLI component
+  "firefly-iii/firefly-iii|3|php"                    # App: Laravel finance tracker
+  "matomo-org/matomo|3|php"                          # App: analytics platform
 
   # Rust
   "sharkdp/fd|1|rust"
   "BurntSushi/ripgrep|2|rust"
   "sharkdp/bat|2|rust"
+  "tokio-rs/tokio|3|rust"                            # Library: async runtime, macros
+  "serde-rs/serde|3|rust"                            # Library: proc macros, derives
+  "astral-sh/ruff|3|rust"                            # App using tokio, serde, clap
+  "zellij-org/zellij|3|rust"                         # App: terminal, async, traits, enums
 
   # Java
   "google/gson|1|java"
   "spring-projects/spring-petclinic|2|java"
   "square/okhttp|2|java"
+  "apache/commons-lang|3|java"                       # Library: utilities, generics
+  "junit-team/junit5|3|java"                         # Library: annotations, nested classes
+  "iluwatar/java-design-patterns|3|java"             # App: all OOP patterns, inner classes
+  "apache/kafka|3|java"                              # App: concurrency, annotations
 
   # Bash
   "dylanaraps/neofetch|1|bash"
   "rbenv/rbenv|2|bash"
   "nvm-sh/nvm|2|bash"
+  "ohmyzsh/ohmyzsh|3|bash"                           # Library: many scripts, plugin system
+  "asdf-vm/asdf|3|bash"                              # Library: plugin-based version manager
+  "pi-hole/pi-hole|3|bash"                           # App: infra scripts, function chains
+  "dokku/dokku|3|bash"                               # App: plugin-based PaaS
 
   # Polyglot
   "nickel-lang/nickel|2|polyglot"
@@ -84,7 +112,8 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "Options:"
       echo "  --tier 1       Smoke test repos only (smallest, ~20 MB total)"
-      echo "  --tier 2       All repos (tier 1 + 2, ~150 MB total)"
+      echo "  --tier 2       Tier 1 + pattern coverage (~150 MB total)"
+      echo "  --tier 3       All repos incl. stress tests (~500 MB total)"
       echo "  --lang LANG    Single language: python, javascript, typescript, php, rust, java, bash, polyglot"
       echo "  --list         Print repos without cloning"
       echo ""
