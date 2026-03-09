@@ -91,13 +91,17 @@ def extract_java_elements(
 ) -> list[ExtractedElement]:
     """Extract classes, interfaces, enums, and top-level elements from Java code.
 
+    Extracts top-level type declarations and recursively extracts their
+    members (methods, fields, constants) and nested type declarations
+    (inner classes, interfaces, enums, records, annotation types).
+
     Args:
         tree: Parsed tree-sitter tree.
         lines: Source code lines.
         _file_path: Optional file path for logging purposes.
 
     Returns:
-        List of extracted elements.
+        List of extracted elements (types, methods, fields, imports).
     """
     elements: list[ExtractedElement] = []
     root = tree.root_node
@@ -107,28 +111,59 @@ def extract_java_elements(
             elem = _extract_java_class(node, lines)
             if elem:
                 elements.append(elem)
+                _collect_members_recursive(node, lines, elements)
         elif node.type == "interface_declaration":
             elem = _extract_java_interface(node, lines)
             if elem:
                 elements.append(elem)
+                _collect_members_recursive(node, lines, elements)
         elif node.type == "enum_declaration":
             elem = _extract_java_enum(node, lines)
             if elem:
                 elements.append(elem)
+                _collect_members_recursive(node, lines, elements)
         elif node.type == "record_declaration":
             elem = _extract_java_record(node, lines)
             if elem:
                 elements.append(elem)
+                _collect_members_recursive(node, lines, elements)
         elif node.type == "annotation_type_declaration":
             elem = _extract_java_annotation_type(node, lines)
             if elem:
                 elements.append(elem)
+                _collect_members_recursive(node, lines, elements)
         elif node.type == "import_declaration":
             elem = _extract_java_import_element(node, lines)
             if elem:
                 elements.append(elem)
 
     return elements
+
+
+def _collect_members_recursive(
+    class_node: Node,
+    lines: list[str],
+    elements: list[ExtractedElement],
+) -> None:
+    """Recursively collect all members from a class/interface/enum body.
+
+    Extracts methods, fields, enum constants, annotation members, and
+    nested type declarations. For nested types, recurses to extract
+    their members too.
+
+    Args:
+        class_node: A class/interface/enum/record/annotation_type declaration node.
+        lines: Source code lines.
+        elements: List to append extracted elements to (modified in place).
+    """
+    methods, fields, nested_types = extract_java_class_members(class_node, lines)
+    elements.extend(methods)
+    elements.extend(fields)
+
+    for nested in nested_types:
+        elements.append(nested)
+        if nested.node:
+            _collect_members_recursive(nested.node, lines, elements)
 
 
 def _extract_java_class(node: Node, _lines: list[str]) -> ExtractedElement | None:
@@ -919,9 +954,14 @@ def _get_identifier(node: Node) -> str | None:
 
 
 def _get_body_node(node: Node) -> Node | None:
-    """Get the body node (class_body, interface_body, enum_body) from a declaration."""
+    """Get the body node from a type declaration.
+
+    Handles class_body, interface_body, enum_body, and annotation_type_body.
+    """
     for child in node.children:
-        if child.type in ("class_body", "interface_body", "enum_body"):
+        if child.type in (
+            "class_body", "interface_body", "enum_body", "annotation_type_body",
+        ):
             return child
     return None
 
