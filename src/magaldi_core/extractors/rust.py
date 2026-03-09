@@ -918,7 +918,9 @@ def extract_rust_calls(function_node: Node) -> list[ExtractedCall]:
                     receiver = None
                     method = None
                     for fe_child in func_node.children:
-                        if fe_child.type == "identifier":
+                        if fe_child.type == "self":
+                            receiver = "self"
+                        elif fe_child.type == "identifier":
                             receiver = get_node_text(fe_child)
                         elif fe_child.type == "field_identifier":
                             method = get_node_text(fe_child)
@@ -986,7 +988,9 @@ def extract_top_level_rust_calls(tree: Tree) -> list[ExtractedCall]:
                     receiver = None
                     method = None
                     for fe_child in func_node.children:
-                        if fe_child.type == "identifier":
+                        if fe_child.type == "self":
+                            receiver = "self"
+                        elif fe_child.type == "identifier":
                             receiver = get_node_text(fe_child)
                         elif fe_child.type == "field_identifier":
                             method = get_node_text(fe_child)
