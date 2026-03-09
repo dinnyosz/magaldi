@@ -438,7 +438,7 @@ class PhpParser(TreeSitterParser):
             signature=ext.signature,
             docstring=extract_preceding_doc_comment(lines, ext.line_start, "php"),
             decorators=ext.decorators or [],
-            visibility=_extract_visibility(ext.decorators),
+            visibility=ext.visibility or _extract_visibility(ext.decorators),
             level=2,
             parent_id=parent_class.element_id,
             calls=calls,
@@ -479,7 +479,7 @@ class PhpParser(TreeSitterParser):
             signature=ext.signature,
             docstring=extract_preceding_doc_comment(lines, ext.line_start, "php"),
             decorators=ext.decorators or [],
-            visibility=_extract_visibility(ext.decorators),
+            visibility=ext.visibility or _extract_visibility(ext.decorators),
             level=3,
             parent_id=parent.element_id if parent else None,
         )

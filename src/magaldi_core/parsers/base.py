@@ -599,10 +599,19 @@ def extract_preceding_doc_comment(
 
 
 def determine_visibility(name: str) -> str:
-    """Determine visibility from name convention."""
-    if name.startswith("__") and not name.endswith("__"):
+    """Determine visibility from name convention.
+
+    Python conventions:
+    - __name (no trailing __) -> private (name mangling)
+    - __name__ (dunder) -> public (special methods)
+    - _name -> protected (convention)
+    - name -> public
+    """
+    if name.startswith("__") and name.endswith("__"):
+        return "public"  # Dunder methods are public
+    if name.startswith("__"):
         return "private"
-    elif name.startswith("_"):
+    if name.startswith("_"):
         return "protected"
     return "public"
 

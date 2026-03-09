@@ -635,6 +635,28 @@ def _extract_js_import(node: Node, _lines: list[str]) -> ExtractedElement:
     )
 
 
+def _extract_js_visibility(node: Node) -> str:
+    """Extract visibility modifier from a JS/TS class member AST node.
+
+    TypeScript uses `accessibility_modifier` child nodes with values
+    "public", "private", or "protected". ES private fields use
+    `private_property_identifier` (e.g., #field).
+
+    Args:
+        node: A method_definition, public_field_definition, or field_definition node.
+
+    Returns:
+        Visibility string: "public", "private", or "protected".
+    """
+    for child in node.children:
+        if child.type == "accessibility_modifier":
+            return get_node_text(child).strip()
+        # ES private fields: #fieldName
+        if child.type == "private_property_identifier":
+            return "private"
+    return "public"
+
+
 def extract_javascript_class_members(
     class_node: Node, _lines: list[str]
 ) -> tuple[list[ExtractedElement], list[ExtractedElement]]:
@@ -676,6 +698,7 @@ def extract_javascript_class_members(
                     line_end=line_end,
                     raw_code=raw_code,
                     byte_offset=child.start_byte,
+                    visibility=_extract_js_visibility(child),
                     signature=signature,
                     is_async=is_async,
                     node=child,
@@ -706,6 +729,7 @@ def extract_javascript_class_members(
                     line_end=child.end_point[0] + 1,
                     raw_code=child.text.decode('utf-8') if child.text else "",
                     byte_offset=child.start_byte,
+                    visibility=_extract_js_visibility(child),
                     signature=signature,
                     node=child,
                     return_type=return_type,
@@ -723,6 +747,7 @@ def extract_javascript_class_members(
             value_node = get_child_by_field(child, "value")
 
             is_static = any(c.type == "static" for c in child.children)
+            field_visibility = _extract_js_visibility(child)
 
             line_start = child.start_point[0] + 1
             line_end = child.end_point[0] + 1
@@ -752,6 +777,7 @@ def extract_javascript_class_members(
                         line_end=line_end,
                         raw_code=raw_code,
                         byte_offset=child.start_byte,
+                        visibility=field_visibility,
                         signature=signature,
                         is_async=is_async,
                         node=value_node,
@@ -769,6 +795,7 @@ def extract_javascript_class_members(
                         line_end=line_end,
                         raw_code=raw_code,
                         byte_offset=child.start_byte,
+                        visibility=field_visibility,
                         node=child,
                     )
                 )

@@ -171,7 +171,8 @@ def detect_public_api(
     Args:
         name: Name of the element (function, method, class).
         decorators: List of decorator information.
-        visibility: Visibility level ("public", "private", "protected").
+        visibility: Visibility level ("public", "private", "protected", "package",
+            "pub(crate)", "pub(super)", etc.).
         language: The programming language.
 
     Returns:

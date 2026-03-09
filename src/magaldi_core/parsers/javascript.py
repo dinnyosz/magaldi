@@ -335,6 +335,7 @@ class JavaScriptParser(TreeSitterParser):
             signature=ext.signature,
             docstring=extract_preceding_doc_comment(lines, ext.line_start, file_info.language),
             decorators=ext.decorators or [],
+            visibility=ext.visibility or "public",
             is_async=ext.is_async,
             level=2,
             parent_id=parent_class.element_id,
@@ -376,6 +377,7 @@ class JavaScriptParser(TreeSitterParser):
             signature=ext.signature,
             docstring=extract_preceding_doc_comment(lines, ext.line_start, file_info.language),
             decorators=ext.decorators or [],
+            visibility=ext.visibility or "public",
             level=level,
             parent_id=parent.element_id if parent else None,
         )

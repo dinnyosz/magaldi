@@ -575,7 +575,7 @@ def _extract_php_parameters(params_node: Node) -> list[ParameterInfo]:
                     if nc.type == "name":
                         param_name = get_node_text(nc)
                         break
-            elif c.type in ("named_type", "primitive_type", "nullable_type", "union_type"):
+            elif c.type in ("named_type", "primitive_type", "optional_type", "union_type", "intersection_type"):
                 param_type = get_node_text(c)
             elif c.type == "variadic_placeholder":
                 param_name = "..." + (param_name or "")
@@ -680,6 +680,7 @@ def _extract_php_class_constant(node: Node, _lines: list[str]) -> list[Extracted
                     line_end=child.end_point[0] + 1,
                     raw_code=node.text.decode('utf-8') if node.text else "",
                     byte_offset=child.start_byte,
+                    visibility=visibility,
                     node=child,
                     signature=f"{visibility} const {name}" + (f" = {value}" if value else ""),
                     decorators=[visibility],
@@ -833,6 +834,7 @@ def _extract_php_method(node: Node, _lines: list[str]) -> ExtractedElement | Non
         line_end=node.end_point[0] + 1,
         raw_code=node.text.decode('utf-8') if node.text else "",
         byte_offset=node.start_byte,
+        visibility=visibility,
         signature=signature,
         decorators=decorators,
         node=node,
@@ -862,6 +864,7 @@ def _extract_php_property(node: Node, _lines: list[str]) -> list[ExtractedElemen
                                 line_end=node.end_point[0] + 1,
                                 raw_code=node.text.decode('utf-8') if node.text else "",
                                 byte_offset=node.start_byte,
+                                visibility=visibility,
                                 decorators=[visibility],
                             ))
 

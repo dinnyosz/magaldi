@@ -173,7 +173,7 @@ public class Foo {
         assert methods["pub"].visibility == "public"
         assert methods["priv"].visibility == "private"
         assert methods["prot"].visibility == "protected"
-        assert methods["pkg"].visibility == "public"  # default maps to public
+        assert methods["pkg"].visibility == "package"  # no modifier = package-private
 
     def test_static_method(self):
         code = """\

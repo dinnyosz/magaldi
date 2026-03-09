@@ -60,6 +60,7 @@ class ExtractedElement:
     decorators: list[str] | None = None
     decorator_details: list[DecoratorInfo] | None = None  # Rich decorator info
     is_async: bool = False
+    visibility: str | None = None  # 'public', 'private', 'protected', 'package', 'pub(crate)', 'pub(super)', etc.
     parent_node: Node | None = None  # For tracking hierarchy
     node: Node | None = None  # The AST node itself
     return_type: str | None = None  # For functions/methods

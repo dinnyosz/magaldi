@@ -53,7 +53,7 @@ def _extract_visibility(decorators: list[str] | None) -> str:
         for d in decorators:
             if d in _VISIBILITY_KEYWORDS:
                 return d
-    return "public"  # Java default is package-private, but we map to public for consistency
+    return "package"  # Java default: no modifier = package-private
 
 
 class JavaParser(TreeSitterParser):
