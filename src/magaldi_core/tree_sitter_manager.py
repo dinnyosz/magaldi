@@ -104,6 +104,7 @@ from magaldi_core.extractors.rust import (
     RustExtractor,
     extract_rust_calls,
     extract_rust_elements,
+    extract_rust_function_body_variables,
     extract_rust_impl_members,
     extract_rust_impl_traits,
     extract_rust_imports,
@@ -423,6 +424,7 @@ __all__ = [
     "extract_php_modified_properties",
     # Rust extraction
     "extract_rust_elements",
+    "extract_rust_function_body_variables",
     "extract_rust_impl_members",
     "extract_rust_trait_members",
     "extract_rust_imports",

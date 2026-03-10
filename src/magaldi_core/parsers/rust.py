@@ -25,6 +25,7 @@ from magaldi_core.tree_sitter_manager import (
     ExtractedElement,
     extract_rust_calls,
     extract_rust_elements,
+    extract_rust_function_body_variables,
     extract_rust_impl_members,
     extract_rust_impl_traits,
     extract_rust_imports,
@@ -107,6 +108,18 @@ class RustParser(TreeSitterParser):
                             method_ext, class_elem, file_info, scope, repository, username, lines
                         )
                         elements.append(method_elem)
+
+                        # Extract variables from method body
+                        if method_ext.node:
+                            body_vars = extract_rust_function_body_variables(
+                                method_ext.node, lines
+                            )
+                            for var_ext in body_vars:
+                                var_elem = self._convert_constant(
+                                    var_ext, file_info, scope, repository, username, lines,
+                                    parent=method_elem
+                                )
+                                elements.append(var_elem)
 
                     for const_ext in constants:
                         const_elem = self._convert_constant(
@@ -329,6 +342,7 @@ class RustParser(TreeSitterParser):
             line_end=ext.line_end,
             raw_code=ext.raw_code,
             docstring=extract_preceding_doc_comment(lines, ext.line_start, "rust"),
+            decorators=ext.decorators or [],
             visibility=ext.visibility or "public",
             level=3,
             parent_id=parent.element_id if parent else None,

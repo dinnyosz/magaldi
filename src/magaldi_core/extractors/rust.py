@@ -228,7 +228,7 @@ def _extract_elements_from_children(
             if elem:
                 elements.append(elem)
                 # Extract variables from function body
-                elements.extend(_extract_rust_function_body_variables(node, lines))
+                elements.extend(extract_rust_function_body_variables(node, lines))
         elif node.type == "impl_item":
             # impl blocks become "class" elements for consistency
             elem = _extract_rust_impl(node, lines)
@@ -603,6 +603,14 @@ def _extract_rust_variable(node: Node, _lines: list[str]) -> ExtractedElement | 
                     name = get_node_text(child)
                     break
 
+    # Also check for mutable_specifier as direct child of let_declaration
+    # (some tree-sitter versions use this instead of mut_pattern)
+    if not is_mutable:
+        for child in node.children:
+            if child.type == "mutable_specifier":
+                is_mutable = True
+                break
+
     if not name or not value_node:
         return None
 
@@ -621,6 +629,7 @@ def _extract_rust_variable(node: Node, _lines: list[str]) -> ExtractedElement | 
         line_end=line_end,
         raw_code=raw_code,
         byte_offset=node.start_byte,
+        visibility="private",  # let bindings are always local/private
         node=node,
         decorators=decorators if decorators else None,
     )
@@ -658,7 +667,7 @@ def _extract_rust_type_alias(node: Node, _lines: list[str]) -> ExtractedElement 
     )
 
 
-def _extract_rust_function_body_variables(
+def extract_rust_function_body_variables(
     func_node: Node, lines: list[str]
 ) -> list[ExtractedElement]:
     """Extract let/const declarations from inside a Rust function body.

@@ -67,6 +67,19 @@
   name: (identifier) @static.name) @static.def
 
 ; =============================================================================
+; VARIABLES (let bindings)
+; =============================================================================
+
+; Let declaration
+(let_declaration
+  pattern: (identifier) @variable.name) @variable.def
+
+; Let mut declaration
+(let_declaration
+  pattern: (mut_pattern
+    (identifier) @variable.name)) @variable.mut_def
+
+; =============================================================================
 ; TYPE ALIASES
 ; =============================================================================
 
