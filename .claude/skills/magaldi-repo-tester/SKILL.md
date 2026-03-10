@@ -2,13 +2,16 @@
 name: magaldi-repo-tester
 description: >
   Validate Magaldi's parser quality against external test repos, then fix issues.
-  Two-phase workflow: detect gaps (per-repo), then fix them (per-language) using
-  Parser Lab TDD and Prompt Lab. Use after running parse-test-repos.sh.
+  Session-based workflow: each run gets a date-based session, repos run in parallel
+  subagents, findings tracked in structured session files, fixes coordinated from
+  a main session log. Use after running parse-test-repos.sh.
 ---
 
 # Magaldi Repo Tester
 
 Validates parsing quality by comparing what Magaldi indexed against what the source code actually contains. When issues are found, launches per-language fixer subagents that use Parser Lab's TDD workflow to fix them.
+
+Every run is a **session** — a coordinated set of per-repo analyses tracked by a main session log. Sessions are date-based and resumable.
 
 ## Prerequisites
 
@@ -18,35 +21,114 @@ Validates parsing quality by comparing what Magaldi indexed against what the sou
 
 All test repos use `scope: test-repo` and `repository: <dirname>`.
 
+## Session Architecture
+
+### File Structure
+
+```
+test_repos/
+├── _sessions/
+│   ├── 2026-03-10_001.md          # Main session log (coordinates full run)
+│   ├── 2026-03-10_002.md          # Second run same day
+│   └── ...
+├── click/
+│   ├── _sessions/
+│   │   ├── 2026-03-10_001.md      # Per-repo findings for this session
+│   │   └── ...
+│   └── ... source code ...
+├── got/
+│   ├── _sessions/
+│   │   └── 2026-03-10_001.md
+│   └── ...
+└── _results/                       # Existing parse results (untouched)
+```
+
+### Session Name Format
+
+`YYYY-MM-DD_NNN` — date plus zero-padded sequence number. First run of the day = `_001`.
+
+---
+
 ## How It Works
+
+### Orchestrator vs Subagent Responsibilities
+
+The orchestrator (you) does ONLY lightweight coordination:
+- Generate session name, create initial session log (Step 0)
+- Launch subagents and collect their responses
+- Parse subagent return values to decide what to launch next
+- Post progress updates to the user
+
+ALL heavy work runs in subagents via the Task tool:
+- **Detect subagents** (Step 1) — one per repo, does all MCP calls + source reading + Parser Lab
+- **Triage subagent** (Step 2) — reads findings files, aggregates, updates session log
+- **Fixer subagents** (Step 3) — one per language/category, does TDD fix cycle
+- **Finalize subagent** (Step 4) — runs final tests, updates session log
+
+This keeps the orchestrator's context window small and focused on coordination.
 
 ### Two-Phase Architecture
 
-**Phase A — Detect (per-repo):** Launch subagents per test repo. Each samples elements, compares indexed data vs actual source, and produces a structured issue list categorized by fix type.
+**Phase A — Detect (per-repo):** Launch one subagent per test repo. Each subagent samples indexed elements, compares against source, runs Parser Lab spot-checks, and writes findings to `{repo}/_sessions/{session}.md`.
 
-**Phase B — Fix (per-language + per-category):** Aggregate issues by language. Launch one fixer subagent per language that had issues. Also launch dedicated fixers for cross-cutting concerns (summarization prompts, call resolution). Each fixer uses Parser Lab's TDD cycle: reproduce → write test → fix → verify.
+**Phase B — Fix (per-language + per-category):** Triage subagent aggregates issues from all repo findings. Fixer subagents launched per language/category. Each fixer works from the session log and updates it as tasks complete.
 
-Why per-language for fixes? A missing pattern in `queries/python/elements.scm` affects ALL Python repos. One subagent per language prevents conflicting edits to the same files.
-
-## Modes
+### Modes
 
 The user can request:
-- **detect only** ("just detect", "report only", "audit") → Run Phase A only, produce reports
-- **full** (default) → Run Phase A, then Phase B, then validate
+- **detect only** ("just detect", "report only", "audit") → Phase A + triage only
+- **full** (default) → Phase A → triage → Phase B → finalize
+
+---
+
+## Step 0: Generate Session (orchestrator — lightweight)
+
+1. Determine today's date in `YYYY-MM-DD` format
+2. List existing files in `test_repos/_sessions/` matching today's date
+3. Increment the sequence: if `2026-03-10_001.md` exists, next is `2026-03-10_002`
+4. Create directories if needed:
+   ```bash
+   mkdir -p test_repos/_sessions
+   ```
+5. Create the main session log file with initial content:
+
+```markdown
+# Session: {session_name}
+
+**Started:** {ISO timestamp}
+**Status:** detecting
+**Mode:** {detect_only|full}
+**Repos:** {comma-separated repo list, or "tier N" / "all"}
+
+## Repos
+
+| Repo | Language | Status | Issues | Findings File |
+|------|----------|--------|--------|---------------|
+| {repo1} | {lang1} | pending | - | {repo1}/_sessions/{session_name}.md |
+| {repo2} | {lang2} | pending | - | {repo2}/_sessions/{session_name}.md |
+
+## Triage Summary
+
+(Populated after all repos complete)
+
+## Fix Log
+
+(Populated during fix phase)
+```
 
 ---
 
 ## Step 1: Detect
 
-### 1a. List Parsed Test Repos
+### 1a. List Parsed Test Repos (orchestrator — one MCP call)
 
 ```
 mcp__magaldi__list_repos()
 ```
 
-Filter for repos with `scope: test-repo`. If none found, tell the user to run `./tools/parse-test-repos.sh` first.
+Filter for repos with `scope: test-repo`. If none found, tell the user to run `./tools/parse-test-repos.sh` first. Use the result to build the repo list for the session log and subagent launches.
 
-### 1b. Launch Detect Subagents
+### 1b. Launch Detect Subagents (one per repo)
 
 Use the Task tool with `subagent_type: "general-purpose"` for each repo. Launch 2-3 in parallel.
 
@@ -56,6 +138,8 @@ Each detect subagent gets this prompt:
 You are validating Magaldi's parser quality for the "{repo_name}" repository ({language}).
 The repo is indexed with scope="test-repo", repository="{repo_name}".
 The source code is at: /Users/dinnyosz/code/magaldi/test_repos/{repo_name}/
+
+Session: {session_name}
 
 Use magaldi MCP tools (search_code, find_usages, pattern_search, find_files,
 get_element, get_call_graph, get_repo_stats, etc.) instead of built-in Grep/Glob.
@@ -83,17 +167,84 @@ For each sample:
    - **Return type**: Is it captured?
    - **Element type**: Is function vs method classification correct?
 
-### Phase 3: Structural Checks
+### Phase 3: Parser Lab Spot-Checks
+1. Use the Glob tool to list source files matching the language extension
+   (e.g., `**/*.py`, `**/*.js`, `**/*.rs`) in the repo directory
+2. Exclude test files (paths containing `test`, `spec`, `__test__`, `fixtures`),
+   vendored code (`vendor/`, `node_modules/`, `third_party/`), and generated files
+3. Pick 3-5 files at random, spread across different directories
+4. For each file:
+   a. Read the file with the Read tool
+   b. Run `parser_lab_analyze` with the file contents and `language="{language}"`
+   c. Compare Parser Lab results against source — any missing elements are `parser_lab_gap`
+
+### Phase 4: Structural Checks
 1. Pick 2-3 source files at random (Read them), look for:
    - Functions/classes that exist in source but are NOT indexed
    - Imports that aren't captured
    - Constants/variables that should have been extracted
 2. Check class hierarchy: pick a class, verify its methods are indexed as children
 
-### Phase 4: Produce Issue List
+### Phase 5: Write Findings File
 
-Return your findings as a structured issue list. Use this EXACT format — one YAML block per issue.
-ONLY include real issues you confirmed. Do not fabricate issues.
+Create the per-repo findings file at:
+`/Users/dinnyosz/code/magaldi/test_repos/{repo_name}/_sessions/{session_name}.md`
+
+Create the `_sessions` directory first if it doesn't exist:
+```bash
+mkdir -p /Users/dinnyosz/code/magaldi/test_repos/{repo_name}/_sessions
+```
+
+Use this format:
+
+```markdown
+# Findings: {repo_name} — Session {session_name}
+
+**Repo:** {repo_name}
+**Language:** {language}
+**Scope:** test-repo
+**Analyzed:** {ISO timestamp}
+**Elements indexed:** {total}
+**Issues found:** {count}
+
+## Stats
+
+| Type | Count |
+|------|-------|
+| function | N |
+| class | N |
+| method | N |
+| ... | ... |
+
+## Issues
+
+ISSUES:
+- category: {category}
+  language: {language}
+  ...
+(use the same YAML issue format documented below)
+
+## Samples Checked
+
+- `{element_id_or_name}` — {brief result}
+- ...
+
+## Parser Lab Spot-Checks
+
+- `{file_path}` — {N elements found, M gaps}
+- ...
+```
+
+### Phase 6: Return Summary
+
+Return a brief summary at the end of your response:
+- Total issues found
+- Issue breakdown by category
+- The path to the findings file you wrote
+
+Also include the YAML issue list as the LAST thing in your response (parsed by orchestrator).
+
+## Issue Categories (YAML format)
 
 ```yaml
 ISSUES:
@@ -150,52 +301,122 @@ ISSUES:
   language: {language}
   expected_types: ["{type1}", "{type2}"]
   details: "{language should have these types but 0 were indexed}"
+
+- category: parser_lab_gap
+  language: {language}
+  file: "{relative_path_within_repo}"
+  element: "{element_name}"
+  type: "{expected_type}"
+  line: {line_number}
+  code_snippet: |
+    {the code that parser_lab_analyze failed to extract}
+  details: "{element visible in source but parser_lab_analyze did not extract it — parser gap}"
 ```
 
-Also write a human-readable report to: /Users/dinnyosz/code/magaldi/test_repos/{repo_name}/_quality_report.md
-
-The report should include:
-- Stats summary (elements indexed, type breakdown)
-- Tables for each issue category (same as the issues above, but in markdown table format)
-- Recommendations section
-
-IMPORTANT: The structured YAML issue list must be the LAST thing in your response,
-after all analysis is complete. This is parsed by the orchestrator.
+IMPORTANT: The structured YAML issue list must be the LAST thing in the subagent response.
 ```
+
+### 1c. Update Main Session Log (orchestrator — lightweight)
+
+As each detect subagent returns:
+1. Extract the issue count from the subagent's response (it returns this in its summary)
+2. Update the repo's row in the main session log file:
+   - Status: `completed`
+   - Issues: count
+3. If a subagent fails, mark status as `failed` with error note
+
+This is a quick file edit — the subagent already wrote the detailed findings file.
 
 ---
 
-## Step 2: Triage
+## Step 2: Triage (subagent)
 
-After all detect subagents complete, aggregate their issues:
+After ALL detect subagents complete, launch a **triage subagent** to aggregate and prioritize findings. This keeps the orchestrator's context clean.
 
-1. Parse the YAML issue lists from each subagent's response
-2. Group issues by language and category
-3. Determine which fixers to launch:
+Use the Task tool with `subagent_type: "general-purpose"`:
+
+```
+You are triaging parser quality findings from a Magaldi repo tester session.
+Session: {session_name}
+Main session log: /Users/dinnyosz/code/magaldi/test_repos/_sessions/{session_name}.md
+
+## Your Task
+
+1. Read the main session log to get the list of repos and their findings files
+2. Read each per-repo findings file from `{repo}/_sessions/{session_name}.md`
+3. Parse the YAML issue blocks from each file
+4. Aggregate issues by language and category
+5. Deduplicate: same missing element found by multiple checks → keep one with most detail
+6. Assign priorities:
+   - HIGH: issues affecting many elements or blocking core functionality
+   - MEDIUM: systematic gaps in a language
+   - LOW: cosmetic, single-instance, or edge-case issues
+7. Determine which fixers are needed:
 
 | Condition | Fixer to launch |
 |-----------|-----------------|
-| Any `missing_element`, `wrong_element_type`, `missing_params` for language X | Language X fixer |
+| Any `missing_element`, `wrong_element_type`, `missing_params`, `parser_lab_gap` for language X | Language X fixer |
 | Any `bad_summary` issues | Prompts fixer |
 | Any `missing_calls`, `phantom_calls` issues | Call resolution fixer |
 | `missing_element_type_for_language` | Language X fixer |
 
-4. If no issues found → report clean bill of health and stop
+8. Update the main session log:
+   - Set **Status** to `triage`
+   - Populate the **Triage Summary** table:
 
-Skip fixers for categories with fewer than 1 issue (not worth spawning a subagent for).
+| # | Category | Language | Count | Priority | Fix Status |
+|---|----------|----------|-------|----------|------------|
+| 1 | {category description} | {lang} | {count} | {HIGH|MEDIUM|LOW} | pending |
+
+   - Initialize the **Fix Log** section with empty table headers
+
+9. Return a structured summary listing which fixers to launch and their issue payloads (YAML).
+   Format:
+
+```yaml
+TRIAGE:
+  fixers_needed:
+    - type: language_fixer
+      language: {language}
+      issue_count: N
+      issues: |
+        {YAML issues block for this language}
+    - type: prompts_fixer
+      issue_count: N
+      issues: |
+        {YAML issues block}
+    - type: call_resolution_fixer
+      issue_count: N
+      issues: |
+        {YAML issues block}
+  total_issues: N
+  clean_repos: [{repo names with 0 issues}]
+```
+
+If no issues found, return `total_issues: 0` and set session status to `completed`.
+```
+
+After the triage subagent completes:
+- If `total_issues: 0` → report clean bill of health, stop
+- If mode is `detect_only` → mark session `completed`, stop here
+- Otherwise → proceed to Step 3 using the fixer payloads from the triage response
 
 ---
 
 ## Step 3: Fix
 
+Update main session log status to `fixing`.
+
 Launch fixer subagents in parallel (up to 3 at a time). Each fixer type has its own prompt template.
 
 ### 3a. Language Fixer Subagent
 
-One per language that had parser-level issues (`missing_element`, `wrong_element_type`, `missing_params`, `missing_element_type_for_language`).
+One per language that had parser-level issues.
 
 ```
 You are fixing Magaldi's {language} parser based on issues found in test repos.
+Session: {session_name}
+Main session log: /Users/dinnyosz/code/magaldi/test_repos/_sessions/{session_name}.md
 
 Use magaldi MCP tools (search_code, find_usages, pattern_search, find_files,
 get_element, get_call_graph, get_repo_stats, etc.) instead of built-in Grep/Glob.
@@ -231,8 +452,7 @@ Use `parser_lab_create_test` to create a test that captures expected behavior:
 
 ### 3. Verify the Test Fails
 Run `parser_lab_run_tests` with `filter` set to the test name.
-Confirm it fails for the right reason (missing element, wrong type, etc.).
-If it passes → the issue may already be fixed or was a false positive. Skip it.
+Confirm it fails for the right reason. If it passes → skip (false positive or already fixed).
 
 ### 4. Get a Fix Suggestion
 Use `parser_lab_suggest_fix`:
@@ -240,27 +460,29 @@ Use `parser_lab_suggest_fix`:
 - `language`: "{language}"
 - `failing_test`: path to the failing test file (from step 2 output)
 
-Review the suggestion. It will point to specific .scm queries or extractor code.
-
 ### 5. Apply the Fix
 Read the suggested file(s), then use Edit to make the changes.
-Common fix patterns:
-- **Missing element**: Add a new S-expression pattern to `elements.scm`
-- **Wrong type**: Fix classification logic in `element_extractor.py`
-- **Missing params**: Fix parameter extraction in `element_extractor.py` or `utils.py`
-- **Missing return type**: Fix return type extraction in the extractor
 
 ### 6. Verify the Test Passes
 Run `parser_lab_run_tests` with `filter` set to the test name.
-If it still fails, iterate on the fix.
 
 ### 7. Regression Check
 Run `parser_lab_run_tests` WITHOUT a filter to ensure no existing tests broke.
-If regressions found, fix them before moving on.
+
+## Updating the Session Log
+
+After each issue is fixed (or skipped), update the main session log's Fix Log table:
+
+Read the current session log, find the relevant triage row, and update its Fix Status.
+Add a row to the Fix Log section:
+
+| # | Task | Fixer | Status | Files Modified | Details |
+|---|------|-------|--------|----------------|---------|
+| N | {brief description} | {language}-parser | {fixed|skipped|partial} | {files} | {what changed} |
 
 ## Output
 
-After fixing all issues, return a summary:
+Return a summary:
 
 ```yaml
 FIXES:
@@ -269,10 +491,6 @@ FIXES:
   test_name: "{test name created}"
   files_modified: ["{file1}", "{file2}"]
   details: "{what was changed}"
-
-- issue: "..."
-  status: skipped
-  reason: "{why — false positive, already fixed, too complex, etc.}"
 ```
 ```
 
@@ -282,6 +500,8 @@ Launched when `bad_summary` issues are found.
 
 ```
 You are fixing Magaldi's summarization prompt quality based on issues found in test repos.
+Session: {session_name}
+Main session log: /Users/dinnyosz/code/magaldi/test_repos/_sessions/{session_name}.md
 
 Use magaldi MCP tools (search_code, find_usages, pattern_search, find_files,
 get_element, etc.) instead of built-in Grep/Glob.
@@ -302,19 +522,17 @@ Do NOT modify parser or extractor files.
 ### For Anti-Verbose Violations ("This function...", "This class...")
 1. Read `src/shared/ai/prompts.py`
 2. Find the SYSTEM_PROMPTS and PROMPTS entries for the affected element type
-3. Check if the anti-verbose instruction is present and clear
-4. If missing or weak, strengthen it. Pattern:
-   "Start with an action verb — never start with 'This [type]...', 'The [type]...', or similar."
-5. Run `make test-fast` to verify no test breaks
+3. Strengthen the anti-verbose instruction if needed
+4. Run `make test-fast` to verify no test breaks
 
 ### For Inaccurate/Vague Summaries
-1. Use `prompt_lab_improve` with the element_id of the element that has a bad summary
-   - Set `max_iterations` to 5
-   - Set `target_score` to 8
-2. Review the optimized prompt — it shows what changes improved the score
-3. If the improvement suggests a systemic prompt change (not element-specific),
-   apply the learning to the relevant prompt template in `prompts.py`
-4. If the issue is element-specific (just needs re-processing), note it as "needs re-index"
+1. Use `prompt_lab_improve` with the element_id
+2. Review the optimized prompt
+3. Apply systemic changes to `prompts.py` if applicable
+
+## Updating the Session Log
+
+After each fix, update the main session log Fix Log table (same pattern as language fixer).
 
 ## Output
 
@@ -323,12 +541,7 @@ FIXES:
 - issue: "{element_name}: {problem}"
   status: fixed|skipped|needs_reindex
   files_modified: ["{file1}"]
-  details: "{what was changed in the prompt}"
-  prompt_lab_score: {before} -> {after}
-
-- issue: "..."
-  status: needs_reindex
-  reason: "Prompt is fine, element just needs re-processing"
+  details: "{what was changed}"
 ```
 ```
 
@@ -338,6 +551,8 @@ Launched when `missing_calls` or `phantom_calls` issues are found.
 
 ```
 You are fixing Magaldi's call resolution logic based on issues found in test repos.
+Session: {session_name}
+Main session log: /Users/dinnyosz/code/magaldi/test_repos/_sessions/{session_name}.md
 
 Use magaldi MCP tools (search_code, find_usages, pattern_search, find_files,
 get_element, get_call_graph, etc.) instead of built-in Grep/Glob.
@@ -357,41 +572,16 @@ Do NOT modify summarization or unrelated parser files.
 ## Analysis Workflow
 
 For each issue:
+1. Read the source code at the element's location
+2. Identify the call pattern (bare, method, module-qualified, chained, etc.)
+3. Check which resolution strategy should handle it (Strategies 1-6)
+4. Use `parser_lab_analyze` to check if the call is even extracted
+5. Diagnose and fix the gap
+6. Test with `parser_lab_run_tests`
 
-1. **Understand the call pattern** — Read the source code at the element's location.
-   Identify what kind of call is being missed:
-   - Bare function call: `foo()`
-   - Method call on self: `self.foo()`
-   - Method call on typed var: `repo.get()`
-   - Module-qualified call: `utils.foo()`
-   - Import-aliased call: `from x import y as z; z()`
-   - Chained call: `obj.method().another()`
-   - Call within comprehension/lambda
+## Updating the Session Log
 
-2. **Check which strategy should resolve it** — The 6 strategies:
-   - Strategy 1-2: Same-file bare calls + self-method calls (at parse time)
-   - Strategy 3: Import-based (`from utils import foo; foo()`)
-   - Strategy 4: Module method (`import utils; utils.foo()`)
-   - Strategy 5: Type-annotated (`repo: Repository; repo.get_document()`)
-   - Strategy 6: Embedding-based RRF (semantic similarity fallback)
-
-3. **Check call extraction** — Use `parser_lab_analyze` on the source code.
-   Does the call even appear in the extracted calls list? If not, the issue is
-   in the call extractor (`extractors/{language}/call_extractor.py`), not resolution.
-
-4. **Diagnose the resolution failure** — If the call IS extracted but not resolved:
-   - Check import map: is the import captured?
-   - Check type annotations: is the variable typed?
-   - Check if the target element exists in the index
-
-5. **Apply fix** — Common patterns:
-   - **Missing call extraction**: Fix the call extractor's AST traversal
-   - **Import not mapped**: Fix `_build_import_map()` in call_resolution.py
-   - **Type annotation not followed**: Fix Strategy 5 logic
-   - **Phantom caller**: Fix over-eager matching in resolution strategies
-
-6. **Test** — Use `parser_lab_run_tests` for call-related tests.
-   Also use `parser_lab_analyze` on the code snippet to verify calls are now extracted.
+After each fix, update the main session log Fix Log table.
 
 ## Output
 
@@ -400,67 +590,44 @@ FIXES:
 - issue: "{element_name}: missing calls [{calls}]"
   status: fixed|skipped|partial
   root_cause: "call_extraction|import_mapping|type_resolution|strategy_gap"
-  strategy_affected: "{1-6}"
   files_modified: ["{file1}"]
   details: "{what was changed}"
-
-- issue: "..."
-  status: skipped
-  reason: "{why — e.g., requires embedding re-index, semantic resolution, etc.}"
 ```
 ```
 
 ---
 
-## Step 4: Validate
+## Step 4: Finalize (subagent)
 
-After all fixers complete, re-validate to confirm improvements:
+After all fixer subagents complete, launch a **finalize subagent** to wrap up.
 
-1. Run `parser_lab_run_tests` to ensure all tests pass (including new ones from fixers)
-2. If the user wants full validation: re-parse affected test repos and re-run detect subagents
-3. Compare before/after issue counts
+Use the Task tool with `subagent_type: "general-purpose"`:
 
----
+```
+You are finalizing a Magaldi repo tester session.
+Session: {session_name}
+Main session log: /Users/dinnyosz/code/magaldi/test_repos/_sessions/{session_name}.md
 
-## Step 5: Report
+## Your Task
 
-Produce a final summary combining detect and fix results:
-
-```markdown
-## Repo Tester Results
-
-### Detection Summary
-
-| Repo | Lang | Elements | Issues Found |
-|------|------|----------|--------------|
-| click | python | 150 | 5 |
-| express | javascript | 200 | 8 |
-
-### Issues by Category
-
-| Category | Count | Fixed | Skipped |
-|----------|-------|-------|---------|
-| missing_element | 4 | 3 | 1 |
-| bad_summary | 6 | 4 | 2 |
-| missing_calls | 3 | 2 | 1 |
-| missing_params | 2 | 2 | 0 |
-
-### Fixes Applied
-
-| Fix | Files Modified | Test Created |
-|-----|---------------|--------------|
-| Python: added async generator pattern to elements.scm | queries/python/elements.scm | test_python_async_generator |
-| Prompts: strengthened anti-verbose for class type | src/shared/ai/prompts.py | - |
-
-### Remaining Issues (Skipped)
-1. {issue}: {reason skipped}
-
-### Integrity Check Reminder
-If any structural changes were made (new element types, new fields), run:
-`/check-magaldi-integrity`
+1. Read the main session log
+2. Run `parser_lab_run_tests` to ensure all tests pass (including new ones from fixers)
+3. Tally final counts: issues found, fixed, skipped, partial
+4. Update the main session log:
+   - Set **Status** to `completed`
+   - Add **Completed:** timestamp at the bottom
+   - Ensure all Fix Log rows have final statuses
+5. Return a brief summary for the user:
+   - Total repos analyzed
+   - Total issues found
+   - Issues fixed / skipped / partial
+   - Any failing tests
+   - Whether structural changes were made (triggers integrity check reminder)
 ```
 
-Write report to: `/Users/dinnyosz/code/magaldi/test_repos/_repo_tester_report.md`
+After the finalize subagent completes, report the summary to the user.
+
+If structural changes were made (new element types, new fields), remind the user to run `/check-magaldi-integrity`.
 
 ---
 
@@ -468,11 +635,11 @@ Write report to: `/Users/dinnyosz/code/magaldi/test_repos/_repo_tester_report.md
 
 The user can specify which repos to test:
 - "test click and express" → only those two
-- "test all rust repos" → fd, ripgrep, bat
+- "test all rust repos" → fd, ripgrep, bat, tokio, serde, ruff, zellij
 - "test tier 1" → smoke test repos only
 - "just detect python repos" → detect-only mode for Python repos
 
-Use the repo list from `tools/clone-test-repos.sh --list` to map language/tier filters.
+Use the repo list below to map language/tier filters.
 
 ## Repo-to-Language Mapping
 
@@ -531,17 +698,17 @@ Use the repo list from `tools/clone-test-repos.sh --list` to map language/tier f
 
 ## Key Things to Catch
 
-1. **Call resolution gaps**: Function calls `foo()` in source but `foo` not in indexed callees
-2. **Phantom callers**: Indexed caller relationships that don't exist in source
-3. **Missing elements**: Functions/classes in source code that weren't indexed at all
-4. **Wrong element type**: Function classified as method or vice versa
-5. **Bad summaries**: Starting with "This function/class/module..." instead of action verb
-6. **Missing parameters**: Parameters present in source but not in indexed element
-7. **Missing return types**: Return type annotation present but not captured
-8. **Import gaps**: Import statements not captured
-9. **Constant/variable gaps**: Module-level constants not extracted
+1. **Missing elements**: Functions/classes in source that weren't indexed
+2. **Wrong element type**: Function classified as method or vice versa
+3. **Bad summaries**: Starting with "This function/class/module..."
+4. **Missing parameters**: Parameters present in source but not indexed
+5. **Missing return types**: Return type annotation present but not captured
+6. **Call resolution gaps**: Function calls in source but not in indexed callees
+7. **Phantom callers**: Indexed caller relationships that don't exist in source
+8. **Parser Lab gaps**: Elements visible in source that `parser_lab_analyze` fails to extract
+9. **Import gaps**: Import statements not captured
 10. **Class hierarchy**: Methods not properly linked to parent class
 
 ## Integrity Check
 
-**IMPORTANT**: If fixer subagents make structural changes (new element types, new fields in extractors), you MUST run `/check-magaldi-integrity` after all fixes are applied. This ensures changes propagate to Web UI, MCP tools, and summarization.
+**IMPORTANT**: If fixer subagents make structural changes (new element types, new fields in extractors), you MUST run `/check-magaldi-integrity` after all fixes are applied.
