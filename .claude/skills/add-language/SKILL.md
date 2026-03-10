@@ -31,13 +31,24 @@ TodoWrite([
 
 For each phase:
 1. Mark phase `in_progress` in TodoWrite
-2. Launch subagent using the Task tool with `subagent_type: "general-purpose"` and the corresponding prompt template below
+2. Launch subagent using the Task tool with `subagent_type: "general-purpose"`, the corresponding prompt template below, and the **model + max_turns** specified in the table
 3. Wait for subagent completion
 4. Review output, verify files were created/modified correctly
 5. Mark phase `completed` in TodoWrite
 6. Commit using `/commit-message`
 
 **Phases 2 & 3 can run in parallel** (both depend on Phase 1 but not on each other).
+
+### Subagent Model & Budget
+
+| Phase | Model | max_turns | Rationale |
+|-------|-------|-----------|-----------|
+| Phase 0: Research | `sonnet` | 30 | Web search + structured doc writing, no code generation |
+| Phase 1: Core Implementation | (default/opus) | — | Creates extractor + parser from scratch, needs deep reasoning |
+| Phase 2: Analysis Integration | `sonnet` | 25 | Pattern-following: read existing dict entries, add new language values |
+| Phase 3: Framework Support | `sonnet` | 25 | Same as Phase 2 — copy existing pattern, fill new language |
+| Phase 4: Testing | `sonnet` | 30 | Writing tests following existing patterns, running them |
+| Phase 5: Test Repos | `haiku` | 15 | Web search for repos, add entries to shell scripts, run commands |
 
 ### 3. Language Profile artifact
 

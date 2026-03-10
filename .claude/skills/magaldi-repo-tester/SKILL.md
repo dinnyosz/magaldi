@@ -67,6 +67,17 @@ ALL heavy work runs in subagents via the Task tool:
 
 This keeps the orchestrator's context window small and focused on coordination.
 
+### Subagent Model & Budget
+
+| Subagent | Model | max_turns | Rationale |
+|----------|-------|-----------|-----------|
+| Detect (per-repo) | `sonnet` | 30 | MCP calls + file reads + comparisons. Structured output, no invention. |
+| Triage | `haiku` | 15 | Read files, aggregate counts, update markdown tables. Pure data wrangling. |
+| Language Fixer | (default/opus) | — | TDD cycle: diagnose → write test → fix parser. Needs deep reasoning. |
+| Prompts Fixer | `sonnet` | 20 | Editing prompt strings. Straightforward text changes. |
+| Call Resolution Fixer | (default/opus) | — | Complex call resolution logic, strategy analysis. |
+| Finalize | `haiku` | 10 | Run tests, tally counts, update markdown. Pure bookkeeping. |
+
 ### Two-Phase Architecture
 
 **Phase A — Detect (per-repo):** Launch one subagent per test repo. Each subagent samples indexed elements, compares against source, runs Parser Lab spot-checks, and writes findings to `{repo}/_sessions/{session}.md`.
@@ -130,7 +141,7 @@ Filter for repos with `scope: test-repo`. If none found, tell the user to run `.
 
 ### 1b. Launch Detect Subagents (one per repo)
 
-Use the Task tool with `subagent_type: "general-purpose"` for each repo. Launch 2-3 in parallel.
+Use the Task tool with `subagent_type: "general-purpose"`, `model: "sonnet"`, `max_turns: 30` for each repo. Launch 2-3 in parallel.
 
 Each detect subagent gets this prompt:
 
@@ -333,7 +344,7 @@ This is a quick file edit — the subagent already wrote the detailed findings f
 
 After ALL detect subagents complete, launch a **triage subagent** to aggregate and prioritize findings. This keeps the orchestrator's context clean.
 
-Use the Task tool with `subagent_type: "general-purpose"`:
+Use the Task tool with `subagent_type: "general-purpose"`, `model: "haiku"`, `max_turns: 15`:
 
 ```
 You are triaging parser quality findings from a Magaldi repo tester session.
@@ -496,7 +507,7 @@ FIXES:
 
 ### 3b. Prompts Fixer Subagent
 
-Launched when `bad_summary` issues are found.
+Launched when `bad_summary` issues are found. Use `model: "sonnet"`, `max_turns: 20`.
 
 ```
 You are fixing Magaldi's summarization prompt quality based on issues found in test repos.
@@ -601,7 +612,7 @@ FIXES:
 
 After all fixer subagents complete, launch a **finalize subagent** to wrap up.
 
-Use the Task tool with `subagent_type: "general-purpose"`:
+Use the Task tool with `subagent_type: "general-purpose"`, `model: "haiku"`, `max_turns: 10`:
 
 ```
 You are finalizing a Magaldi repo tester session.
