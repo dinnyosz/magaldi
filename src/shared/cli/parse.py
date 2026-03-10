@@ -159,12 +159,11 @@ def _run_extraction_only(
 @click.option("--dry-run", is_flag=True, help="Use in-memory storage (no database required)")
 @click.option("--llm-url", default=None, help="LLM API URL (default: from config)")
 @click.option("--workers", "-w", default=0, type=int, help="Max parallel workers (0=auto based on context tier)")
-@click.option("--call-workers", default=1, type=int, help="Parallel threads for call resolution (default: 1)")
 @click.option("--force-clean", is_flag=True, help="Delete all indexed data for this repo/user before parsing")
 @click.option("--use-docstrings/--no-use-docstrings", default=True, help="Use docstrings as summaries instead of LLM (default: enabled)")
 def parse(
     repo_path: str, user: str, skip_ai: bool, features: bool, glossary: bool, skip_tests: bool, skip_resolve: bool,
-    dry_run: bool, llm_url: str | None, workers: int, call_workers: int, force_clean: bool, use_docstrings: bool
+    dry_run: bool, llm_url: str | None, workers: int, force_clean: bool, use_docstrings: bool
 ) -> None:
     """Parse a repository and index its code elements.
 
@@ -400,7 +399,7 @@ def parse(
                     user,
                     skip_resolve=skip_resolve,
                     console=console,
-                    max_workers=call_workers,
+                    max_workers=workers,
                 )
                 run_logger.end_phase()
             except Exception as e:

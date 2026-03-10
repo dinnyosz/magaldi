@@ -1054,14 +1054,19 @@ def run_call_resolution(
     if console is None:
         console = Console()
 
+    # Resolve effective worker count for call resolution.
+    # 0 = auto: default to 1 (sequential) since call resolution is
+    # I/O-bound on OpenSearch and parallelism needs explicit opt-in.
+    effective_workers = max_workers if max_workers > 0 else 1
+
     with repo.bulk_buffer():
 
         if not skip_resolve:
             from magaldi_core.call_resolution import resolve_all_calls
 
             console.print("\n  [bold]Static Call Resolution[/]")
-            if max_workers > 1:
-                console.print(f"  [dim]Using {max_workers} worker threads[/]")
+            if effective_workers > 1:
+                console.print(f"  [dim]Using {effective_workers} worker threads[/]")
             try:
                 (
                     total_calls,
@@ -1072,7 +1077,7 @@ def run_call_resolution(
                     super_resolved,
                 ) = resolve_all_calls(
                     repo, scope, repository, username,
-                    max_workers=max_workers,
+                    max_workers=effective_workers,
                     on_step=lambda msg: console.print(f"    [dim]{msg}[/]"),
                 )
                 total_resolved = (
