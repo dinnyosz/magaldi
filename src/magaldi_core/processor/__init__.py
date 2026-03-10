@@ -188,8 +188,12 @@ def process_elements(
 
     # Get content hashes and summary state for change detection
     # Only skip if content unchanged AND summary exists (handles interrupted runs)
+    # skip_ai: use lightweight mget that skips embedding vectors (~400-600MB savings)
     all_element_ids = list(new_element_ids)
-    existing_states = repo.get_element_processing_state(all_element_ids)
+    if config.skip_ai:
+        existing_states = repo.get_element_processing_state_light(all_element_ids)
+    else:
+        existing_states = repo.get_element_processing_state(all_element_ids)
 
     # RELOCATED ELEMENT MATCHING (must happen BEFORE deleting stale elements!)
     # When an element's line number changes, its ID changes but content_hash stays same.
@@ -253,20 +257,27 @@ def process_elements(
             state_found_count += 1
             content_unchanged = state.get("content_hash") == elem.content_hash
             has_summary = state.get("has_summary", False)
-            has_summary_embedding = state.get("has_summary_embedding", False)
-            has_code_embedding = state.get("has_code_embedding", False)
-            has_caller_embedding = state.get("has_caller_embedding", False)
 
             # Check if element is fully processed
-            # For embeddable elements, require summary + code embeddings.
-            # caller_embedding is only needed when element has calls.
-            is_embeddable = should_embed(elem)
-            has_needed_embeddings = has_summary_embedding and has_code_embedding
-            if elem.calls:
-                has_needed_embeddings = has_needed_embeddings and has_caller_embedding
-            is_fully_processed = has_summary and (
-                not is_embeddable or has_needed_embeddings
-            )
+            if config.skip_ai:
+                # skip-ai never generates embeddings, so only require summary.
+                # Without this, skip-ai elements would be re-processed every run
+                # because they'd never satisfy the embedding requirement.
+                is_fully_processed = has_summary
+            else:
+                has_summary_embedding = state.get("has_summary_embedding", False)
+                has_code_embedding = state.get("has_code_embedding", False)
+                has_caller_embedding = state.get("has_caller_embedding", False)
+
+                # For embeddable elements, require summary + code embeddings.
+                # caller_embedding is only needed when element has calls.
+                is_embeddable = should_embed(elem)
+                has_needed_embeddings = has_summary_embedding and has_code_embedding
+                if elem.calls:
+                    has_needed_embeddings = has_needed_embeddings and has_caller_embedding
+                is_fully_processed = has_summary and (
+                    not is_embeddable or has_needed_embeddings
+                )
 
             if content_unchanged and is_fully_processed:
                 if is_relocated:
@@ -312,15 +323,17 @@ def process_elements(
 
     # Collect cached embeddings for elements that need re-processing but have
     # some embeddings already stored. Avoids re-computing embeddings that exist.
+    # skip_ai: no embeddings to cache, skip entirely
     cached_embeddings: dict[str, dict[str, list[float] | None]] = {}
-    for elem in elements_to_process:
-        state = existing_states.get(elem.element_id)
-        if state is not None:
-            cached: dict[str, list[float] | None] = {}
-            for emb_key in ("summary_embedding", "code_embedding", "caller_embedding"):
-                cached[emb_key] = state.get(emb_key)
-            if any(v is not None for v in cached.values()):
-                cached_embeddings[elem.element_id] = cached
+    if not config.skip_ai:
+        for elem in elements_to_process:
+            state = existing_states.get(elem.element_id)
+            if state is not None:
+                cached: dict[str, list[float] | None] = {}
+                for emb_key in ("summary_embedding", "code_embedding", "caller_embedding"):
+                    cached[emb_key] = state.get(emb_key)
+                if any(v is not None for v in cached.values()):
+                    cached_embeddings[elem.element_id] = cached
 
     # Note: test variables/constants are already purged from parsed files
     # during Phase 4 (variable scoring) — they never reach this point.
