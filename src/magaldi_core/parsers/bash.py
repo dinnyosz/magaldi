@@ -88,6 +88,7 @@ class BashParser(TreeSitterParser):
                     line_start=ext.line_start,
                     line_end=ext.line_end,
                     raw_code=ext.raw_code,
+                    signature=ext.signature,
                     docstring=extract_preceding_doc_comment(lines, ext.line_start, "bash"),
                     level=2,
                     parent_id=file_element.element_id,

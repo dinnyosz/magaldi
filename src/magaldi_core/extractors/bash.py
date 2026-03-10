@@ -127,6 +127,41 @@ class BashExtractor:
         return extract_bash_calls(function_node)
 
 
+def _build_function_signature(node: Node) -> str:
+    """Build a function signature string from a function_definition AST node.
+
+    Concatenates tokens before the compound_statement (function body) to
+    produce signatures like ``"get_os()"``, ``"function setup()"``, or
+    ``"function teardown"``.
+    """
+    parts: list[str] = []
+    for child in node.children:
+        if child.type == "compound_statement":
+            break
+        parts.append(get_node_text(child))
+    # Join with spaces, then collapse any double spaces around ()
+    sig = " ".join(parts)
+    sig = sig.replace(" (", "(").replace("( ", "(")
+    sig = sig.replace(" )", ")").replace(") ", ")")
+    return sig
+
+
+def _build_signature_from_first_line(raw_code: str) -> str:
+    """Build a function signature from the first line of raw code.
+
+    Used for recovered functions that lack an AST node.  Extracts the
+    portion before the opening ``{``.
+
+    Examples:
+        ``"get_os() {"`` -> ``"get_os()"``
+        ``"function setup() {"`` -> ``"function setup()"``
+    """
+    first_line = raw_code.split("\n", 1)[0]
+    # Strip the opening brace and trailing whitespace
+    sig = first_line.split("{", 1)[0].rstrip()
+    return sig
+
+
 def _extract_function(node: Node, lines: list[str]) -> ExtractedElement | None:
     """Extract a function definition."""
     # Find the function name - first 'word' child
@@ -143,12 +178,17 @@ def _extract_function(node: Node, lines: list[str]) -> ExtractedElement | None:
     line_end = node.end_point[0] + 1
     raw_code = "\n".join(lines[line_start - 1:line_end])
 
+    # Build signature from AST children before the body (compound_statement).
+    # Covers: "name()", "function name()", "function name"
+    signature = _build_function_signature(node)
+
     return ExtractedElement(
         element_type="function",
         name=name,
         line_start=line_start,
         line_end=line_end,
         raw_code=raw_code,
+        signature=signature,
         node=node,
     )
 
@@ -207,6 +247,8 @@ def _recover_broken_functions(
         raw_code = "\n".join(lines[line_start - 1 : line_end])
         byte_offset = match.start()
 
+        signature = _build_signature_from_first_line(raw_code)
+
         recovered.append(
             ExtractedElement(
                 element_type="function",
@@ -214,6 +256,7 @@ def _recover_broken_functions(
                 line_start=line_start,
                 line_end=line_end,
                 raw_code=raw_code,
+                signature=signature,
                 byte_offset=byte_offset,
                 node=None,
             )
