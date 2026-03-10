@@ -7,7 +7,6 @@ from tree_sitter import Node, Tree
 from magaldi_core.extractors.base import (
     get_children_by_type,
     get_node_text,
-    walk_top_level,
     walk_tree,
 )
 from magaldi_core.extractors.types import ExtractedCall, ExtractedElement, ExtractedImport
@@ -38,6 +37,37 @@ def _iter_top_level_nodes(root: Node):
             yield from _iter_top_level_nodes(child)
         else:
             yield child
+
+
+def _walk_top_level_bash(root: Node, skip_types: frozenset[str]):
+    """Walk file-scope nodes, unwrapping transparent containers first.
+
+    Combines transparent container unwrapping (``_iter_top_level_nodes``) with
+    scope-skipping (skip ``function_definition`` subtrees).  This ensures that
+    brace-group wrappers ``{ ... }`` and subshell wrappers ``( ... )`` are
+    treated as transparent, while function bodies are properly skipped.
+
+    Args:
+        root: The root node (``tree.root_node``).
+        skip_types: Node types whose subtrees should be skipped entirely.
+
+    Yields:
+        All descendant nodes at file scope (inside transparent containers but
+        outside function bodies).
+    """
+    for child in _iter_top_level_nodes(root):
+        if child.type in skip_types:
+            continue
+        yield from _walk_skip_bash(child, skip_types)
+
+
+def _walk_skip_bash(node: Node, skip_types: frozenset[str]):
+    """Walk a subtree, skipping nodes whose type is in *skip_types*."""
+    yield node
+    for child in node.children:
+        if child.type in skip_types:
+            continue
+        yield from _walk_skip_bash(child, skip_types)
 
 
 class BashExtractor:
@@ -379,7 +409,7 @@ def extract_top_level_bash_calls(tree: Tree) -> list[ExtractedCall]:
     calls: list[ExtractedCall] = []
     seen: set[tuple[str, int]] = set()
 
-    for node in walk_top_level(tree.root_node, _BASH_SCOPE_TYPES):
+    for node in _walk_top_level_bash(tree.root_node, _BASH_SCOPE_TYPES):
         if node.type != "command":
             continue
 
