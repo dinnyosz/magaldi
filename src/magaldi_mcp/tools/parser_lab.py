@@ -363,6 +363,16 @@ def parser_lab_analyze(
     document_sections: list[dict] = []
     if extractor:
         elements = extractor.extract_elements(tree, lines)
+        # Extract class members (methods, fields, nested types) for languages
+        # where the extractor returns only top-level types and the parser
+        # handles member extraction (e.g., JS/TS, Java).
+        if hasattr(extractor, "extract_class_members"):
+            class_elements = [e for e in elements if e.element_type in ("class", "interface", "enum")]
+            for class_elem in class_elements:
+                if class_elem.node:
+                    methods, fields = extractor.extract_class_members(class_elem.node, lines)
+                    elements.extend(methods)
+                    elements.extend(fields)
         # Markdown stores sections as metadata, not elements
         if hasattr(extractor, "extract_sections"):
             document_sections = extractor.extract_sections(tree, lines)
