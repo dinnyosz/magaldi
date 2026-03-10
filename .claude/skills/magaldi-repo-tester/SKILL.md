@@ -151,7 +151,7 @@ get_element, get_call_graph, get_repo_stats, etc.) instead of built-in Grep/Glob
 2. Note element counts per type (function, class, method, etc.)
 3. Flag any element types with 0 count that should exist for {language}
 
-### Phase 2: Sample and Validate (5-10 elements)
+### Phase 2: Sample and Validate (10-20 elements)
 For each sample:
 
 1. Use `search_code` with a generic query (e.g., "handle", "process", "create", "validate")
@@ -172,14 +172,14 @@ For each sample:
    (e.g., `**/*.py`, `**/*.js`, `**/*.rs`) in the repo directory
 2. Exclude test files (paths containing `test`, `spec`, `__test__`, `fixtures`),
    vendored code (`vendor/`, `node_modules/`, `third_party/`), and generated files
-3. Pick 3-5 files at random, spread across different directories
+3. Pick 6-10 files at random, spread across different directories
 4. For each file:
    a. Read the file with the Read tool
    b. Run `parser_lab_analyze` with the file contents and `language="{language}"`
    c. Compare Parser Lab results against source — any missing elements are `parser_lab_gap`
 
 ### Phase 4: Structural Checks
-1. Pick 2-3 source files at random (Read them), look for:
+1. Pick 4-6 source files at random (Read them), look for:
    - Functions/classes that exist in source but are NOT indexed
    - Imports that aren't captured
    - Constants/variables that should have been extracted
