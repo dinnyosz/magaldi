@@ -228,7 +228,7 @@ def process_file_changes(
 
     # Phase 3: Parsing
     parsing_result = parse_files(manifest)
-    print_parsing_result(parsing_result)
+    print_parsing_result(parsing_result, skip_ai=skip_ai)
     if run_logger:
         run_logger.end_phase({"files": len(new_or_modified), "elements": parsing_result.total_elements})
 
@@ -574,7 +574,7 @@ def watch(
                 console.print("\n[bold blue]Parsing[/]")
                 run_logger.start_phase("Initial Parsing")
                 parsing_result = run_parsing(manifest)
-                print_parsing_result(parsing_result)
+                print_parsing_result(parsing_result, skip_ai=skip_ai)
                 run_logger.end_phase({"files": len(parsing_result.parsed_files), "elements": parsing_result.total_elements})
 
                 if parsing_result.total_elements > 0:

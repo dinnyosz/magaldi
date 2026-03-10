@@ -645,6 +645,24 @@ class TestPrintFunctions:
         captured = capsys.readouterr()
         assert "failed" in captured.out
 
+    def test_print_parsing_result_skip_ai_hides_tiers(self, mock_parsing_result, capsys):
+        """With skip_ai=True, context tier display should be suppressed."""
+        print_parsing_result(mock_parsing_result, skip_ai=True)
+
+        captured = capsys.readouterr()
+        # Element summary should still show
+        assert "20" in captured.out
+        assert "function" in captured.out
+        # But context tiers should NOT show
+        assert "Context tiers" not in captured.out
+
+    def test_print_parsing_result_skip_ai_false_shows_tiers(self, mock_parsing_result, capsys):
+        """With skip_ai=False (default), context tiers should show."""
+        print_parsing_result(mock_parsing_result, skip_ai=False)
+
+        captured = capsys.readouterr()
+        assert "Context tiers" in captured.out
+
     def test_print_feature_result_none(self, capsys):
         """Test print_feature_result with None."""
         print_feature_result(None)

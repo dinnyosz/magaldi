@@ -394,18 +394,20 @@ def process_elements(
     # This enables DependencyTracker to group elements by context tier
     # Handcrafted elements get craft sub-tiers (test/import/small/docstring)
     # so they batch separately from LLM elements and get their own exploration cycle
+    # skip_ai: no LLM/embedding work, tier separation is unnecessary — pass empty
     element_context_sizes: dict[str, int] = {}
-    for elem in elements_to_process:
-        craft_reason = _get_craft_reason(elem, config)
-        if craft_reason is not None:
-            element_context_sizes[elem.element_id] = CRAFT_REASON_TO_TIER.get(
-                craft_reason, HANDCRAFTED_TIER
-            )
-        else:
-            char_count = len(elem.raw_code or "")
-            element_context_sizes[elem.element_id] = compute_element_num_ctx(
-                elem.element_type, char_count
-            )
+    if not config.skip_ai:
+        for elem in elements_to_process:
+            craft_reason = _get_craft_reason(elem, config)
+            if craft_reason is not None:
+                element_context_sizes[elem.element_id] = CRAFT_REASON_TO_TIER.get(
+                    craft_reason, HANDCRAFTED_TIER
+                )
+            else:
+                char_count = len(elem.raw_code or "")
+                element_context_sizes[elem.element_id] = compute_element_num_ctx(
+                    elem.element_type, char_count
+                )
 
     # Initialize tracking structures (use provided or create new)
     # Pass per-element context sizes for tier batching (minimizes model reloads)
@@ -432,24 +434,26 @@ def process_elements(
     timing_stats.set_totals_by_type(totals_by_type)
 
     # Count elements by (type, tier) for tier-aware ETA
-    # element_context_sizes already has craft sub-tiers for handcrafted elements
-    totals_by_type_tier: dict[tuple[str, int], int] = {}
-    for elem in elements_to_process:
-        ctx_size = element_context_sizes.get(elem.element_id, 2048)
-        if is_handcrafted_tier(ctx_size):
-            tier = ctx_size  # Keep craft sub-tier as-is
-        else:
-            # Snap to standard tier
-            tier = 2048
-            for t in CONTEXT_TIERS:
-                if ctx_size <= t:
-                    tier = t
-                    break
+    # skip_ai: no tiers, skip this computation entirely
+    if not config.skip_ai:
+        # element_context_sizes already has craft sub-tiers for handcrafted elements
+        totals_by_type_tier: dict[tuple[str, int], int] = {}
+        for elem in elements_to_process:
+            ctx_size = element_context_sizes.get(elem.element_id, 2048)
+            if is_handcrafted_tier(ctx_size):
+                tier = ctx_size  # Keep craft sub-tier as-is
             else:
-                tier = CONTEXT_TIERS[-1]
-        key = (elem.element_type, tier)
-        totals_by_type_tier[key] = totals_by_type_tier.get(key, 0) + 1
-    timing_stats.set_totals_by_type_tier(totals_by_type_tier)
+                # Snap to standard tier
+                tier = 2048
+                for t in CONTEXT_TIERS:
+                    if ctx_size <= t:
+                        tier = t
+                        break
+                else:
+                    tier = CONTEXT_TIERS[-1]
+            key = (elem.element_type, tier)
+            totals_by_type_tier[key] = totals_by_type_tier.get(key, 0) + 1
+        timing_stats.set_totals_by_type_tier(totals_by_type_tier)
 
     # Track completed/failed counts for progress
     completed_count = 0  # Only count actually processed elements

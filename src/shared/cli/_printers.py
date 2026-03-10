@@ -43,7 +43,7 @@ def print_change_manifest(manifest: ChangeManifest) -> None:
     console.print(f"  {' | '.join(parts)}")
 
 
-def print_parsing_result(result: ParsingResult) -> None:
+def print_parsing_result(result: ParsingResult, *, skip_ai: bool = False) -> None:
     """Print parsing results including context size analysis."""
     # Existing summary line
     types = ", ".join(f"{t}: [green]{c}[/]" for t, c in sorted(result.elements_by_type.items()))
@@ -51,15 +51,17 @@ def print_parsing_result(result: ParsingResult) -> None:
     console.print(f"  [green]{len(result.parsed_files)}[/] files → [green]{result.total_elements}[/] elements ({types}){failed}")
 
     # Per-tier context size summary (compact one-liner)
-    tiers = result.elements_by_tier
-    non_empty_tiers = {tier: stats for tier, stats in tiers.items() if stats["count"] > 0}
+    # Skip when --skip-ai: tiers are for LLM KV cache optimization, irrelevant without AI
+    if not skip_ai:
+        tiers = result.elements_by_tier
+        non_empty_tiers = {tier: stats for tier, stats in tiers.items() if stats["count"] > 0}
 
-    if non_empty_tiers:
-        tier_parts = []
-        for tier in sorted(non_empty_tiers.keys()):
-            count = non_empty_tiers[tier]["count"]
-            tier_parts.append(f"[cyan]{tier // 1024}k[/]:{count}")
-        console.print(f"  [dim]Context tiers:[/] {' [dim]|[/] '.join(tier_parts)}")
+        if non_empty_tiers:
+            tier_parts = []
+            for tier in sorted(non_empty_tiers.keys()):
+                count = non_empty_tiers[tier]["count"]
+                tier_parts.append(f"[cyan]{tier // 1024}k[/]:{count}")
+            console.print(f"  [dim]Context tiers:[/] {' [dim]|[/] '.join(tier_parts)}")
 
 
 def print_feature_result(result: dict) -> None:
