@@ -1363,10 +1363,10 @@ class TestProcessedElement:
 
 
 class TestIndexElementImportsAndCalls:
-    """Tests for _index_element storing imports and calls."""
+    """Tests for _index_element storing imports and calls via index_element_complete."""
 
     def test_file_element_with_imports_stores_imports(self):
-        """File elements with imports should have imports stored in ES."""
+        """File elements with imports should pass imports to index_element_complete."""
         from magaldi_core.code_parser import Import
         from magaldi_core.processor import _index_element
 
@@ -1386,8 +1386,9 @@ class TestIndexElementImportsAndCalls:
             ],
         )
 
-        # Mock ES repository
+        # Mock ES repository — make index_element_complete return True
         mock_es = MagicMock()
+        mock_es.index_element_complete.return_value = True
 
         # Call _index_element
         result = _index_element(
@@ -1400,22 +1401,17 @@ class TestIndexElementImportsAndCalls:
         )
 
         assert result is True
-        mock_es.index_element.assert_called_once()
-        mock_es.store_summary.assert_called_once_with(
-            file_elem.element_id, "File summary", craft_reason=None
-        )
+        mock_es.index_element_complete.assert_called_once()
 
-        # Verify store_imports was called with correct data
-        mock_es.store_imports.assert_called_once()
-        call_args = mock_es.store_imports.call_args
-        assert call_args[0][0] == file_elem.element_id
-        imports_data = call_args[0][1]
+        # Verify imports were passed correctly
+        call_kwargs = mock_es.index_element_complete.call_args
+        imports_data = call_kwargs.kwargs["imports"]
         assert len(imports_data) == 2
         assert imports_data[0] == {"name": "os", "module": "os", "alias": None, "line": 1}
         assert imports_data[1] == {"name": "pd", "module": "pandas", "alias": "pd", "line": 2}
 
     def test_function_element_with_calls_stores_calls(self):
-        """Function elements with calls should have calls stored in ES."""
+        """Function elements with calls should pass calls to index_element_complete."""
         from magaldi_core.code_parser import Call
         from magaldi_core.processor import _index_element
 
@@ -1437,6 +1433,7 @@ class TestIndexElementImportsAndCalls:
 
         # Mock ES repository
         mock_es = MagicMock()
+        mock_es.index_element_complete.return_value = True
 
         # Call _index_element
         result = _index_element(
@@ -1450,11 +1447,9 @@ class TestIndexElementImportsAndCalls:
 
         assert result is True
 
-        # Verify store_calls was called with correct data
-        mock_es.store_calls.assert_called_once()
-        call_args = mock_es.store_calls.call_args
-        assert call_args[0][0] == func_elem.element_id
-        calls_data = call_args[0][1]
+        # Verify calls were passed correctly
+        call_kwargs = mock_es.index_element_complete.call_args
+        calls_data = call_kwargs.kwargs["calls"]
         assert len(calls_data) == 2
         assert calls_data[0] == {"name": "helper", "receiver": None, "line": 11, "resolved_id": None, "category": "unknown"}
         assert calls_data[1] == {
@@ -1466,7 +1461,7 @@ class TestIndexElementImportsAndCalls:
         }
 
     def test_method_element_with_calls_stores_calls(self):
-        """Method elements with calls should have calls stored in ES."""
+        """Method elements with calls should pass calls to index_element_complete."""
         from magaldi_core.code_parser import Call
         from magaldi_core.processor import _index_element
 
@@ -1487,6 +1482,7 @@ class TestIndexElementImportsAndCalls:
 
         # Mock ES repository
         mock_es = MagicMock()
+        mock_es.index_element_complete.return_value = True
 
         # Call _index_element
         result = _index_element(
@@ -1500,15 +1496,15 @@ class TestIndexElementImportsAndCalls:
 
         assert result is True
 
-        # Verify store_calls was called
-        mock_es.store_calls.assert_called_once()
-        calls_data = mock_es.store_calls.call_args[0][1]
+        # Verify calls were passed correctly
+        call_kwargs = mock_es.index_element_complete.call_args
+        calls_data = call_kwargs.kwargs["calls"]
         assert len(calls_data) == 1
         assert calls_data[0]["name"] == "_internal"
         assert calls_data[0]["receiver"] == "self"
 
-    def test_element_without_imports_does_not_call_store_imports(self):
-        """Elements without imports should not call store_imports."""
+    def test_element_without_imports_does_not_pass_imports(self):
+        """Elements without imports should pass imports=None to index_element_complete."""
         from magaldi_core.processor import _index_element
 
         # Create file element without imports
@@ -1525,6 +1521,7 @@ class TestIndexElementImportsAndCalls:
         )
 
         mock_es = MagicMock()
+        mock_es.index_element_complete.return_value = True
 
         _index_element(
             element=file_elem,
@@ -1535,11 +1532,12 @@ class TestIndexElementImportsAndCalls:
             repo=mock_es,
         )
 
-        # store_imports should NOT be called when imports is empty
-        mock_es.store_imports.assert_not_called()
+        # imports should be None when empty
+        call_kwargs = mock_es.index_element_complete.call_args
+        assert call_kwargs.kwargs["imports"] is None
 
-    def test_element_without_calls_does_not_call_store_calls(self):
-        """Elements without calls should not call store_calls."""
+    def test_element_without_calls_does_not_pass_calls(self):
+        """Elements without calls should pass calls=None to index_element_complete."""
         from magaldi_core.processor import _index_element
 
         # Create function element without calls
@@ -1556,6 +1554,7 @@ class TestIndexElementImportsAndCalls:
         )
 
         mock_es = MagicMock()
+        mock_es.index_element_complete.return_value = True
 
         _index_element(
             element=func_elem,
@@ -1566,11 +1565,12 @@ class TestIndexElementImportsAndCalls:
             repo=mock_es,
         )
 
-        # store_calls should NOT be called when calls is empty
-        mock_es.store_calls.assert_not_called()
+        # calls should be None when empty
+        call_kwargs = mock_es.index_element_complete.call_args
+        assert call_kwargs.kwargs["calls"] is None
 
     def test_class_element_does_not_store_calls(self):
-        """Class elements should not store calls (only function/method do)."""
+        """Class elements should not pass calls (only function/method do)."""
         from magaldi_core.code_parser import Call
         from magaldi_core.processor import _index_element
 
@@ -1588,6 +1588,7 @@ class TestIndexElementImportsAndCalls:
         )
 
         mock_es = MagicMock()
+        mock_es.index_element_complete.return_value = True
 
         _index_element(
             element=class_elem,
@@ -1598,11 +1599,12 @@ class TestIndexElementImportsAndCalls:
             repo=mock_es,
         )
 
-        # store_calls should NOT be called for class elements
-        mock_es.store_calls.assert_not_called()
+        # calls should be None for class elements
+        call_kwargs = mock_es.index_element_complete.call_args
+        assert call_kwargs.kwargs["calls"] is None
 
     def test_non_file_element_does_not_store_imports(self):
-        """Non-file elements should not store imports (only file does)."""
+        """Non-file elements should not pass imports (only file does)."""
         from magaldi_core.code_parser import Import
         from magaldi_core.processor import _index_element
 
@@ -1620,6 +1622,7 @@ class TestIndexElementImportsAndCalls:
         )
 
         mock_es = MagicMock()
+        mock_es.index_element_complete.return_value = True
 
         _index_element(
             element=func_elem,
@@ -1630,8 +1633,9 @@ class TestIndexElementImportsAndCalls:
             repo=mock_es,
         )
 
-        # store_imports should NOT be called for non-file elements
-        mock_es.store_imports.assert_not_called()
+        # imports should be None for non-file elements
+        call_kwargs = mock_es.index_element_complete.call_args
+        assert call_kwargs.kwargs["imports"] is None
 
 
 # =============================================================================

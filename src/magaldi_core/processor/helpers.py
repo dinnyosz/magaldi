@@ -557,6 +557,9 @@ def _index_element(
 ) -> bool:
     """Index element to search backend with summary and all embeddings.
 
+    Delegates to ``repo.index_element_complete()`` which merges all data
+    into a single bulk index operation instead of 2-6 separate ops.
+
     Args:
         element: Element to index.
         summary: Generated summary.
@@ -571,29 +574,16 @@ def _index_element(
     Returns:
         True on success.
     """
-    # Index the element
-    repo.index_element(element, indexed_at=datetime.now(), file_hash=file_hash, element_count=element_count)
-
-    # Store summary (with craft reason if applicable)
-    repo.store_summary(element.element_id, summary, craft_reason=craft_reason)
-
-    # Store embeddings if present (using type-specific methods)
-    if summary_embedding is not None:
-        repo.store_summary_embedding(element.element_id, summary_embedding)
-    if code_embedding is not None:
-        repo.store_code_embedding(element.element_id, code_embedding)
-    if caller_embedding is not None:
-        repo.store_caller_embedding(element.element_id, caller_embedding)
-
-    # Store imports for file elements
+    # Build imports data if applicable
+    imports_data: list[dict] | None = None
     if element.element_type == "file" and element.imports:
         imports_data = [
             {"name": imp.name, "module": imp.module, "alias": imp.alias, "line": imp.line}
             for imp in element.imports
         ]
-        repo.store_imports(element.element_id, imports_data)
 
-    # Store calls for function/method/file elements
+    # Build calls data if applicable
+    calls_data: list[dict] | None = None
     if element.element_type in ("function", "method", "file") and element.calls:
         calls_data = [
             {
@@ -605,9 +595,20 @@ def _index_element(
             }
             for call in element.calls
         ]
-        repo.store_calls(element.element_id, calls_data)
 
-    return True
+    return repo.index_element_complete(
+        element,
+        summary,
+        indexed_at=datetime.now(),
+        file_hash=file_hash,
+        element_count=element_count,
+        craft_reason=craft_reason,
+        imports=imports_data,
+        calls=calls_data,
+        summary_embedding=summary_embedding,
+        code_embedding=code_embedding,
+        caller_embedding=caller_embedding,
+    )
 
 
 def _process_single_element(

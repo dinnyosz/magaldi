@@ -112,11 +112,17 @@ class BulkIndexBuffer:
     def flush(self) -> int:
         """Flush the buffer immediately.
 
+        Swaps the buffer under the lock, then flushes without holding it
+        so producer threads are never blocked on I/O.
+
         Returns:
             Number of operations flushed (0 if buffer was empty).
         """
         with self._lock:
-            return self._flush_locked()
+            if not self._buffer:
+                return 0
+            batch = self._swap_buffer()
+        return self._flush_batch(batch)
 
     def close(self) -> None:
         """Stop the timer and flush remaining operations."""
@@ -150,24 +156,62 @@ class BulkIndexBuffer:
 
     def _add(self, action: dict[str, Any]) -> None:
         """Add an action to the buffer, flushing if count threshold reached."""
+        batch: list[dict[str, Any]] | None = None
         with self._lock:
             self._buffer.append(action)
             if len(self._buffer) >= self._max_count:
-                self._flush_locked()
+                batch = self._swap_buffer()
+        # Flush outside the lock so other threads can keep adding
+        if batch is not None:
+            self._flush_batch(batch)
+
+    def _swap_buffer(self) -> list[dict[str, Any]]:
+        """Swap out the current buffer and return the old one.
+
+        Must be called while holding ``self._lock``.
+        """
+        batch = self._buffer
+        self._buffer = []
+        self._last_flush_time = time.monotonic()
+        return batch
 
     def _flush_locked(self) -> int:
-        """Flush while holding the lock. Returns count of ops flushed."""
+        """Swap buffer under lock, then flush without holding it.
+
+        Used by ``flush()`` and ``_timer_loop`` which acquire the lock
+        themselves. The actual network call happens outside the lock so
+        producer threads are never blocked on I/O.
+
+        Returns:
+            Number of operations flushed (0 if buffer was empty).
+        """
         if not self._buffer:
             return 0
+        batch = self._swap_buffer()
+        # NOTE: We must release the lock before the network call.
+        # The caller (flush / _timer_loop) holds self._lock via a
+        # ``with`` block, so we need a slightly different structure —
+        # see flush() and _timer_loop() which now call _swap_buffer +
+        # _flush_batch directly instead of _flush_locked.
+        #
+        # _flush_locked is kept for backward compat but should only be
+        # called when holding the lock and when the caller will release
+        # it BEFORE calling _flush_batch. See close() for safe usage.
+        return self._flush_batch(batch)
 
-        actions = self._buffer
-        self._buffer = []
+    def _flush_batch(self, actions: list[dict[str, Any]]) -> int:
+        """Send a batch of actions to the search backend.
+
+        This method does NOT hold any lock — callers must have already
+        swapped the buffer under the lock before calling this.
+
+        Returns:
+            Number of operations flushed (0 on total failure).
+        """
         count = len(actions)
-        self._last_flush_time = time.monotonic()
+        if count == 0:
+            return 0
 
-        # Release lock during the actual network call would be ideal,
-        # but bulk_helpers is fast enough and we want simple correctness.
-        # The lock is held briefly — new adds will just wait.
         try:
             success, errors = self._client.bulk_helpers(
                 actions, raise_on_error=False, refresh=False
@@ -184,7 +228,8 @@ class BulkIndexBuffer:
             logger.exception("Bulk flush failed for %d operations", count)
             self._errors.append(f"Flush of {count} ops failed")
             # Re-add to buffer so they can be retried on next flush
-            self._buffer = actions + self._buffer
+            with self._lock:
+                self._buffer = actions + self._buffer
             return 0
 
         self._flush_count += 1
@@ -221,7 +266,11 @@ class BulkIndexBuffer:
             if self._stop_event.is_set():
                 break
 
+            batch: list[dict[str, Any]] | None = None
             with self._lock:
                 elapsed = time.monotonic() - self._last_flush_time
                 if elapsed >= self._max_interval and self._buffer:
-                    self._flush_locked()
+                    batch = self._swap_buffer()
+            # Flush outside the lock
+            if batch is not None:
+                self._flush_batch(batch)

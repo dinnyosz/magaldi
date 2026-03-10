@@ -398,12 +398,15 @@ class ElementRepository:
         craft_reason: str | None = None,
         imports: list[dict] | None = None,
         calls: list[dict] | None = None,
+        summary_embedding: list[float] | None = None,
+        code_embedding: list[float] | None = None,
+        caller_embedding: list[float] | None = None,
     ) -> bool:
-        """Index element with summary, imports, and calls in a single operation.
+        """Index element with all data in a single bulk operation.
 
-        Merges all data into one bulk index op instead of 2-4 separate ops
-        (index + update summary + update imports + update calls). Used by
-        skip-ai fast path to reduce OpenSearch operations from ~34k-68k to ~17k.
+        Merges element, summary, embeddings, imports, and calls into one
+        bulk index op instead of 2-6 separate ops. Used by both skip-ai
+        fast path and normal processing to reduce OpenSearch operations.
 
         Args:
             element: Code element to index.
@@ -414,6 +417,9 @@ class ElementRepository:
             craft_reason: Why handcrafted, or None for LLM.
             imports: Import data for file elements.
             calls: Call data for function/method elements.
+            summary_embedding: Summary embedding vector (or None).
+            code_embedding: Code embedding vector (or None).
+            caller_embedding: Caller embedding vector (or None).
 
         Returns:
             True on success.
@@ -458,6 +464,12 @@ class ElementRepository:
             doc["imports"] = imports
         if calls is not None:
             doc["calls"] = calls
+        if summary_embedding is not None:
+            doc["summary_embedding"] = summary_embedding
+        if code_embedding is not None:
+            doc["code_embedding"] = code_embedding
+        if caller_embedding is not None:
+            doc["caller_embedding"] = caller_embedding
 
         # Enhanced context fields
         if element.class_attributes:
