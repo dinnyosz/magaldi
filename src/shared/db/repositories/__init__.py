@@ -123,6 +123,17 @@ class Repository:
             self._features._bulk_buffer = None
             self._glossary._bulk_buffer = None
 
+    def flush(self) -> None:
+        """Flush the bulk buffer if active, making buffered writes visible.
+
+        No-op when no bulk buffer is active.  Call this between dependent
+        phases (e.g. between call-resolution strategies) to ensure earlier
+        writes are searchable before the next phase reads.
+        """
+        buf = self._metadata._bulk_buffer
+        if buf is not None:
+            buf.flush()
+
     # =========================================================================
     # Element operations (delegated to ElementRepository)
     # =========================================================================
@@ -183,8 +194,11 @@ class Repository:
         craft_reason: str | None = None,
         imports: list[dict] | None = None,
         calls: list[dict] | None = None,
+        summary_embedding: list[float] | None = None,
+        code_embedding: list[float] | None = None,
+        caller_embedding: list[float] | None = None,
     ) -> bool:
-        """Index element with summary, imports, and calls in a single operation."""
+        """Index element with all data in a single bulk operation."""
         return self._elements.index_element_complete(
             element, summary,
             indexed_at=indexed_at,
@@ -193,6 +207,9 @@ class Repository:
             craft_reason=craft_reason,
             imports=imports,
             calls=calls,
+            summary_embedding=summary_embedding,
+            code_embedding=code_embedding,
+            caller_embedding=caller_embedding,
         )
 
     def find_elements_by_content_hash(

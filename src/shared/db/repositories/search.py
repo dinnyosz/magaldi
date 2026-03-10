@@ -585,6 +585,7 @@ class SearchRepository:
                     "language",
                     "parameters",
                     "calls",
+                    "parent_id",
                 ],
             },
         )
