@@ -1,5 +1,6 @@
 """Tests for processor module."""
 
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -388,6 +389,33 @@ class TestSkipThrottling:
         # Both methods should be available immediately (no drain)
         ready = tracker.get_ready_elements(max_count=20, skip_throttling=True)
         assert len(ready) == 2
+
+    def test_skip_throttling_works_without_context_sizes(self):
+        """DependencyTracker works with empty context_sizes (skip_ai mode).
+
+        When skip_ai is set, process_elements passes empty context_sizes
+        since tier batching is irrelevant. The tracker should work fine
+        with the default fallback (2048) in _get_tier.
+        """
+        file_elem = make_element("scope:repo:user:f.py:file:f.py:1", "file", None, 0)
+        func1 = make_element("scope:repo:user:f.py:function:f1:5", "function", file_elem.element_id, 2)
+        func2 = make_element("scope:repo:user:f.py:function:f2:10", "function", file_elem.element_id, 2)
+
+        # Empty context_sizes — mirrors skip_ai behavior
+        tracker = DependencyTracker([file_elem, func1, func2], context_sizes={}, max_num_workers=8)
+
+        # File should be ready
+        ready = tracker.get_ready_elements(max_count=20, skip_throttling=True)
+        assert len(ready) == 1
+        assert ready[0].element_id == file_elem.element_id
+        tracker.mark_complete(file_elem.element_id)
+
+        # Both functions ready immediately
+        ready = tracker.get_ready_elements(max_count=20, skip_throttling=True)
+        assert len(ready) == 2
+
+        # _get_tier falls back to 2048 for unknown elements
+        assert tracker._get_tier(func1.element_id) == 2048
 
 
 # =============================================================================
@@ -2943,6 +2971,158 @@ class TestHandcraftedTierETA:
         # Should be 0.1s default, NOT extrapolated from 2.5s LLM time
         assert avg_time == pytest.approx(0.1)
         assert is_fallback is True
+
+
+class TestElapsedRateETAFallback:
+    """Tests for elapsed-rate fallback when tier-based ETA is near-zero.
+
+    With --skip-ai (or any scenario where all elements complete near-instantly),
+    the per-tier base_time is ~0.0, making tier-based ETA useless.  The fallback
+    uses wall-clock elapsed / completed * remaining instead.
+    """
+
+    def test_eta_seconds_fallback_when_base_times_zero(self):
+        """eta_seconds should use elapsed-rate when tier avg is ~0."""
+        stats = TimingStats()
+        stats.phase_start = time.time() - 10.0  # 10s ago
+        stats.set_totals_by_type_tier({
+            ("function", 2048): 100,
+        })
+        # Record 50 completions with near-zero base time (skip_ai pattern)
+        for _ in range(50):
+            stats.record(
+                wall_time=0.0001,
+                summarize_time=0.0,
+                embed_time=0.0,
+                element_type="function",
+                tier=2048,
+                avg_workers=4.0,
+            )
+        eta = stats.eta_seconds(50, 100)
+        assert eta is not None
+        # 50 done in ~10s → rate = 0.2s/item → 50 remaining → ~10s ETA
+        assert 5.0 < eta < 20.0
+
+    def test_eta_seconds_no_fallback_when_base_times_significant(self):
+        """When tier-based ETA exceeds elapsed-rate, tier-based wins."""
+        stats = TimingStats()
+        # Realistic: 10 items at 3s wall / 4 workers ≈ 8s elapsed
+        stats.phase_start = time.time() - 8.0
+        stats.set_totals_by_type_tier({
+            ("function", 2048): 20,
+        })
+        # Record 10 completions with significant base time (LLM pattern)
+        for _ in range(10):
+            stats.record(
+                wall_time=3.0,
+                summarize_time=2.5,
+                embed_time=0.3,
+                element_type="function",
+                tier=2048,
+                avg_workers=4.0,
+            )
+        eta = stats.eta_seconds(10, 20)
+        assert eta is not None
+        # Tier-based: 10 remaining * (3.0 / 4.0) avg = 7.5s
+        # Elapsed-rate: 8.0 / 10 * 10 = 8.0s
+        # max(7.5, 8.0) = 8.0 — both are comparable, ETA is reasonable
+        assert 5.0 < eta < 15.0
+
+    def test_eta_seconds_fallback_zero_completed(self):
+        """eta_seconds should return None when nothing completed."""
+        stats = TimingStats()
+        stats.phase_start = time.time() - 5.0
+        stats.set_totals_by_type_tier({("function", 2048): 10})
+        assert stats.eta_seconds(0, 10) is None
+
+    def test_eta_seconds_fallback_zero_elapsed(self):
+        """eta_seconds should return None when elapsed is ~0."""
+        stats = TimingStats()
+        stats.phase_start = time.time()  # just started
+        stats.set_totals_by_type_tier({("function", 2048): 10})
+        # No completions recorded, elapsed ≈ 0
+        assert stats.eta_seconds(0, 10) is None
+
+    def test_get_eta_breakdown_fallback(self):
+        """get_eta_breakdown should use elapsed-rate for near-zero tiers."""
+        stats = TimingStats()
+        stats.phase_start = time.time() - 10.0
+        stats.set_totals_by_type_tier({
+            ("function", 2048): 50,
+            ("method", 2048): 50,
+        })
+        # Record 25 functions with near-zero time
+        for _ in range(25):
+            stats.record(
+                wall_time=0.0001,
+                summarize_time=0.0,
+                embed_time=0.0,
+                element_type="function",
+                tier=2048,
+                avg_workers=4.0,
+            )
+        breakdown = stats.get_eta_breakdown()
+        # Both (function, 2048) and (method, 2048) should have positive ETAs
+        assert len(breakdown) > 0
+        for _, _, remaining, total, eta in breakdown:
+            if remaining > 0:
+                assert eta > 0, f"ETA should be positive, got {eta}"
+
+    def test_get_eta_breakdown_with_avg_fallback(self):
+        """get_eta_breakdown_with_avg should mark elapsed-rate as fallback."""
+        stats = TimingStats()
+        stats.phase_start = time.time() - 10.0
+        stats.set_totals_by_type_tier({
+            ("function", 2048): 50,
+        })
+        # Record 25 completions with near-zero time
+        for _ in range(25):
+            stats.record(
+                wall_time=0.0001,
+                summarize_time=0.0,
+                embed_time=0.0,
+                element_type="function",
+                tier=2048,
+                avg_workers=4.0,
+            )
+        breakdown = stats.get_eta_breakdown_with_avg()
+        assert len(breakdown) == 1
+        _, _, avg, is_fallback, done, total = breakdown[0]
+        # avg should be the elapsed-rate, not the near-zero base time
+        assert avg > 0.1, f"avg should use elapsed rate, got {avg}"
+
+    def test_eta_fallback_mixed_tiers(self):
+        """Skip-ai with multiple tiers: all should get elapsed-rate."""
+        stats = TimingStats()
+        stats.phase_start = time.time() - 20.0
+        stats.set_totals_by_type_tier({
+            ("file", 4096): 10,
+            ("function", 1): 50,  # CRAFT_TEST
+            ("function", 2048): 40,
+        })
+        # Complete all files and some functions with near-zero times
+        for _ in range(10):
+            stats.record(
+                wall_time=0.0001,
+                summarize_time=0.0,
+                embed_time=0.0,
+                element_type="file",
+                tier=4096,
+                avg_workers=4.0,
+            )
+        for _ in range(20):
+            stats.record(
+                wall_time=0.0001,
+                summarize_time=0.0,
+                embed_time=0.0,
+                element_type="function",
+                tier=1,
+                avg_workers=4.0,
+            )
+        eta = stats.eta_seconds(30, 100)
+        assert eta is not None
+        # 70 remaining, 30 done in ~20s → rate ≈ 0.67s/item → ETA ≈ 46s
+        assert 20.0 < eta < 80.0
 
 
 class TestCrossTierThroughputLeak:

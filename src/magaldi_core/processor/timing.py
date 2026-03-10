@@ -659,12 +659,27 @@ class TimingStats:
                     if remaining > 0 and avg > 0:
                         total_work_time += remaining * avg
 
-            if total_work_time <= 0:
+            # Elapsed-rate fallback: when items are near-instant (skip_ai),
+            # base_time ≈ 0 but wall-clock throughput reflects real overhead
+            # (indexing I/O, thread scheduling, futures management).
+            # Use max(tier_eta, elapsed_eta) so the ETA never underestimates.
+            elapsed_eta = 0.0
+            if self.phase_start > 0:
+                total_done = sum(self.summarize_counts_by_type_tier.values())
+                total_remaining = (
+                    sum(self.totals_by_type_tier.values()) - total_done
+                )
+                elapsed = self.elapsed
+                if total_done > 0 and total_remaining > 0 and elapsed > 0:
+                    elapsed_eta = (elapsed / total_done) * total_remaining
+
+            if total_work_time <= 0 and elapsed_eta <= 0:
                 return None
 
-            # base_time is already throughput-normalized (wall_time / workers at record time)
-            # so total_work_time is already the ETA - no further division needed
-            return total_work_time
+            # Use whichever is larger: tier-based or elapsed-rate.
+            # For LLM workloads, tier-based dominates (correct).
+            # For skip_ai, elapsed-rate dominates (correct).
+            return max(total_work_time, elapsed_eta)
 
     def get_eta_breakdown(self, _num_workers: int = 1) -> list[tuple[str, int, int, int, float]]:
         """Get ETA breakdown per (type, tier) for display.
@@ -682,13 +697,21 @@ class TimingStats:
             total_count = sum(self.summarize_counts_by_type_tier.values())
             global_avg = total_wall_time / total_count if total_count > 0 else 0.0
 
+            # Elapsed-rate fallback: global wall-clock rate when tier avg ≈ 0
+            # (skip_ai: base_time ≈ 0 but real throughput reflects I/O overhead)
+            elapsed_rate = 0.0
+            if self.phase_start > 0:
+                elapsed = self.elapsed
+                elapsed_rate = elapsed / total_count if total_count > 0 and elapsed > 0 else 0.0
+
             breakdown = []
             for (element_type, tier), tot in self.totals_by_type_tier.items():
                 done = self.summarize_counts_by_type_tier.get((element_type, tier), 0)
                 remaining = tot - done
                 if remaining > 0:
                     avg = self._get_avg_for_type_tier(element_type, tier, global_avg)
-                    # avg is already throughput-normalized, so work_time IS the ETA
+                    # Use max(tier_avg, elapsed_rate) so ETA never underestimates
+                    avg = max(avg, elapsed_rate)
                     eta = remaining * avg if avg > 0 else 0.0
                     breakdown.append((element_type, tier, remaining, tot, eta))
 
@@ -713,9 +736,19 @@ class TimingStats:
             total_count = sum(self.summarize_counts_by_type_tier.values())
             global_avg = total_wall_time / total_count if total_count > 0 else 0.0
 
+            # Elapsed-rate fallback: global wall-clock rate when tier avg ≈ 0
+            elapsed_rate = 0.0
+            if self.phase_start > 0:
+                elapsed = self.elapsed
+                elapsed_rate = elapsed / total_count if total_count > 0 and elapsed > 0 else 0.0
+
             breakdown = []
             for (element_type, tier), tot in self.totals_by_type_tier.items():
                 avg, is_fallback = self._get_avg_for_type_tier_with_fallback(element_type, tier, global_avg)
+                # Use max(tier_avg, elapsed_rate) so ETA never underestimates
+                if elapsed_rate > avg:
+                    avg = elapsed_rate
+                    is_fallback = True
                 done = self.summarize_counts_by_type_tier.get((element_type, tier), 0)
                 # Include all items, even those with no timing data yet (avg=0)
                 breakdown.append((element_type, tier, avg, is_fallback, done, tot))
