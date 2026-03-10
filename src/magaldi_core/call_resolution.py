@@ -26,48 +26,100 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import TYPE_CHECKING
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import TYPE_CHECKING, TypeVar
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from shared.db.repositories import Repository
 
 logger = logging.getLogger(__name__)
 
+_T = TypeVar("_T")
 
-def resolve_all_calls(
+
+# ---------------------------------------------------------------------------
+# Parallel map helper
+# ---------------------------------------------------------------------------
+
+def _parallel_map(
+    fn: Callable[..., _T],
+    items: list,
+    max_workers: int = 1,
+    desc: str = "",
+) -> list[_T]:
+    """Execute *fn* over *items*, optionally in parallel.
+
+    When *max_workers* <= 1 (default) the items are processed sequentially
+    in the calling thread — zero overhead.  Otherwise a
+    :class:`ThreadPoolExecutor` is used.
+
+    Per-item exceptions are logged and skipped so one bad element never
+    kills the entire batch.
+
+    Returns:
+        List of results (one per successfully processed item).
+    """
+    results: list[_T] = []
+
+    if max_workers <= 1 or len(items) <= 1:
+        for item in items:
+            try:
+                results.append(fn(item))
+            except Exception:
+                logger.exception("%s: error processing item", desc)
+        return results
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_idx = {
+            executor.submit(fn, item): i for i, item in enumerate(items)
+        }
+        for future in as_completed(future_to_idx):
+            try:
+                results.append(future.result())
+            except Exception:
+                logger.exception("%s: error processing item", desc)
+
+    return results
+
+
+def _process_file_group_strategies_3_5(
+    elements: list[dict],
     repo: Repository,
     scope: str,
     repository: str,
-    username: str = "main",
-) -> tuple[int, int, int, int, int, int]:
-    """Full call resolution pass - re-resolves ALL calls in the repository.
+    username: str,
+) -> tuple[int, int, int]:
+    """Process a group of elements from the same file for strategies 3-5.
 
-    Used during partial parsing to ensure call graphs are complete even when
-    only some files were re-parsed. Clears existing resolved_ids and re-resolves
-    to handle renamed/moved functions.
-
-    Args:
-        repo: Repository instance.
-        scope: Repository scope.
-        repository: Repository name.
-        username: Username branch.
+    All elements share the same ``relative_path`` so the import map is
+    built once and reused.  Each element's calls are written back via
+    ``repo.store_calls`` (thread-safe when a bulk buffer is active).
 
     Returns:
-        Tuple of (total_calls_processed, import_resolved, type_resolved,
-        constructor_resolved, scope_resolved, super_resolved).
+        ``(total_processed, import_resolved, type_resolved)``
     """
     total_processed = 0
     import_resolved = 0
     type_resolved = 0
 
-    # Get ALL elements with calls (not just unresolved)
-    elements = repo.find_all_elements_with_calls(scope, repository, username)
-    logger.info(f"Full resolution: found {len(elements)} elements with calls")
+    if not elements:
+        return total_processed, import_resolved, type_resolved
+
+    # All elements in this group share the same file — build import map once
+    relative_path = elements[0].get("relative_path", "")
+    language = elements[0].get("language", "python")
+    file_imports = repo.get_file_imports(relative_path, scope, repository, username)
+    import_map = _build_import_map(
+        file_imports, repo, scope, repository, username,
+        language=language, caller_path=relative_path,
+    ) if file_imports else {}
 
     for elem in elements:
         element_id = elem.get("element_id", "")
-        relative_path = elem.get("relative_path", "")
-        language = elem.get("language", "python")
+        elem_language = elem.get("language", language)
         parameters = elem.get("parameters", [])
 
         # Build param type map for type-based resolution
@@ -76,13 +128,6 @@ def resolve_all_calls(
             for p in parameters:
                 if p.get("type"):
                     param_types[p["name"]] = p["type"]
-
-        # Get file's imports
-        file_imports = repo.get_file_imports(relative_path, scope, repository, username)
-        import_map = _build_import_map(
-            file_imports, repo, scope, repository, username,
-            language=language, caller_path=relative_path,
-        ) if file_imports else {}
 
         calls = elem.get("calls", [])
         updated = False
@@ -117,7 +162,7 @@ def resolve_all_calls(
                 resolved_id = _lookup_element_by_import(
                     repo, import_info, name, scope, repository, username,
                     caller_path=relative_path,
-                    language=language,
+                    language=elem_language,
                 )
                 if resolved_id:
                     import_resolved += 1
@@ -129,7 +174,7 @@ def resolve_all_calls(
                 resolved_id = _lookup_element_by_import(
                     repo, import_info, name, scope, repository, username,
                     caller_path=relative_path,
-                    language=language,
+                    language=elem_language,
                 )
                 if resolved_id:
                     import_resolved += 1
@@ -159,31 +204,103 @@ def resolve_all_calls(
         if updated:
             repo.store_calls(element_id, calls)
 
+    return total_processed, import_resolved, type_resolved
+
+
+def resolve_all_calls(
+    repo: Repository,
+    scope: str,
+    repository: str,
+    username: str = "main",
+    max_workers: int = 1,
+) -> tuple[int, int, int, int, int, int]:
+    """Full call resolution pass - re-resolves ALL calls in the repository.
+
+    Used during partial parsing to ensure call graphs are complete even when
+    only some files were re-parsed. Clears existing resolved_ids and re-resolves
+    to handle renamed/moved functions.
+
+    When *max_workers* > 1, per-file groups (strategies 3-5) and per-candidate
+    processing (strategies 5.5-5.8) are executed in parallel threads.
+
+    Args:
+        repo: Repository instance.
+        scope: Repository scope.
+        repository: Repository name.
+        username: Username branch.
+        max_workers: Number of threads for parallel processing (1 = sequential).
+
+    Returns:
+        Tuple of (total_calls_processed, import_resolved, type_resolved,
+        constructor_resolved, scope_resolved, super_resolved).
+    """
+    total_processed = 0
+    import_resolved = 0
+    type_resolved = 0
+
+    # Get ALL elements with calls (not just unresolved)
+    elements = repo.find_all_elements_with_calls(scope, repository, username)
+    logger.info(f"Full resolution: found {len(elements)} elements with calls")
+
+    # Group elements by file path — elements in the same file share imports
+    file_groups: dict[str, list[dict]] = defaultdict(list)
+    for elem in elements:
+        file_groups[elem.get("relative_path", "")].append(elem)
+
+    groups = list(file_groups.values())
+
+    results = _parallel_map(
+        lambda group: _process_file_group_strategies_3_5(
+            group, repo, scope, repository, username,
+        ),
+        groups,
+        max_workers=max_workers,
+        desc="strategies 3-5",
+    )
+
+    for total_p, imp_r, type_r in results:
+        total_processed += total_p
+        import_resolved += imp_r
+        type_resolved += type_r
+
+    # Flush bulk buffer so writes from strategies 3-5 are visible
+    repo.flush()
+
     # Strategy 5.5: Return-type propagation
     # Re-fetch elements to get updated calls after strategies 3-5
     elements = repo.find_all_elements_with_calls(scope, repository, username)
     return_type_count = _resolve_via_return_types(
-        repo, elements, scope, repository, username
+        repo, elements, scope, repository, username,
+        max_workers=max_workers,
     )
+
+    repo.flush()
 
     # Strategy 5.6: Constructor-based type inference
     # Re-fetch elements to get updated calls after 5.5
     elements = repo.find_all_elements_with_calls(scope, repository, username)
     constructor_count = _resolve_via_constructors(
-        repo, elements, scope, repository, username
+        repo, elements, scope, repository, username,
+        max_workers=max_workers,
     )
+
+    repo.flush()
 
     # Strategy 5.7: Scope-aware type binding (AST-based)
     # Re-fetch elements to get updated calls after 5.6
     elements = repo.find_all_elements_with_calls(scope, repository, username)
     scope_count = _resolve_via_scope_bindings(
-        repo, elements, scope, repository, username
+        repo, elements, scope, repository, username,
+        max_workers=max_workers,
     )
+
+    repo.flush()
 
     # Strategy 5.8: super()/parent:: call resolution
     elements = repo.find_all_elements_with_calls(scope, repository, username)
     super_count = _resolve_via_super(
-        repo, elements, scope, repository, username
+        repo, elements, scope, repository, username,
+        max_workers=max_workers,
     )
 
     total_resolved = (
@@ -844,12 +961,69 @@ def _build_receiver_type_map(
     return type_map
 
 
+def _process_candidate_return_types(
+    elem_id: str,
+    doc: dict,
+    repo: Repository,
+    scope: str,
+    repository: str,
+    username: str,
+) -> int:
+    """Process a single candidate for Strategy 5.5 (return-type propagation).
+
+    Returns the number of calls resolved.
+    """
+    raw_code = doc.get("raw_code", "")
+    calls = doc.get("calls", [])
+
+    if not raw_code:
+        return 0
+
+    # Build resolved bare call map: func_name -> resolved_id
+    resolved_bare: dict[str, str] = {}
+    for c in calls:
+        if not c.get("receiver") and c.get("resolved_id"):
+            resolved_bare[c["name"]] = c["resolved_id"]
+
+    # Infer types from return types
+    inferred_types = _build_receiver_type_map(
+        raw_code, resolved_bare, repo, language=doc.get("language", "python"),
+    )
+
+    if not inferred_types:
+        return 0
+
+    # Try to resolve unresolved receiver calls using inferred types
+    resolved_count = 0
+    updated = False
+    for call in calls:
+        if call.get("resolved_id") or not call.get("receiver"):
+            continue
+        receiver = call["receiver"]
+        if receiver in inferred_types:
+            resolved_id = _lookup_method_by_type(
+                repo, inferred_types[receiver], call["name"],
+                scope, repository, username,
+            )
+            if resolved_id:
+                call["resolved_id"] = resolved_id
+                call["category"] = "return_type_resolved"
+                resolved_count += 1
+                updated = True
+
+    if updated:
+        repo.store_calls(elem_id, calls)
+
+    return resolved_count
+
+
 def _resolve_via_return_types(
     repo: Repository,
     elements: list[dict],
     scope: str,
     repository: str,
     username: str,
+    max_workers: int = 1,
 ) -> int:
     """Strategy 5.5: Resolve calls using return-type propagation.
 
@@ -863,12 +1037,11 @@ def _resolve_via_return_types(
         scope: Repository scope.
         repository: Repository name.
         username: Username branch.
+        max_workers: Number of threads for parallel processing.
 
     Returns:
         Number of calls resolved via return-type propagation.
     """
-    return_type_resolved = 0
-
     # Find elements that could benefit from return-type propagation:
     # must have both unresolved receiver calls AND resolved bare calls
     candidates: list[str] = []
@@ -894,58 +1067,23 @@ def _resolve_via_return_types(
     # Batch fetch full documents for all candidates
     docs = repo.get_documents_batch(candidates)
 
-    for elem_id in candidates:
-        if not elem_id:
-            continue
+    # Build work items: (elem_id, doc) pairs with valid docs
+    work_items = [
+        (eid, docs[eid])
+        for eid in candidates
+        if eid and eid in docs
+    ]
 
-        doc = docs.get(elem_id)
-        if not doc:
-            continue
+    results = _parallel_map(
+        lambda item: _process_candidate_return_types(
+            item[0], item[1], repo, scope, repository, username,
+        ),
+        work_items,
+        max_workers=max_workers,
+        desc="strategy 5.5",
+    )
 
-        raw_code = doc.get("raw_code", "")
-        language = doc.get("language", "python")
-        calls = doc.get("calls", [])
-
-        if not raw_code:
-            continue
-
-        # Build resolved bare call map: func_name -> resolved_id
-        resolved_bare: dict[str, str] = {}
-        for c in calls:
-            if not c.get("receiver") and c.get("resolved_id"):
-                resolved_bare[c["name"]] = c["resolved_id"]
-
-        # Infer types from return types
-        inferred_types = _build_receiver_type_map(
-            raw_code, resolved_bare, repo, language=language,
-        )
-
-        if not inferred_types:
-            continue
-
-        # Try to resolve unresolved receiver calls using inferred types
-        updated = False
-        for call in calls:
-            if call.get("resolved_id") or not call.get("receiver"):
-                continue
-            receiver = call["receiver"]
-            if receiver in inferred_types:
-                resolved_id = _lookup_method_by_type(
-                    repo,
-                    inferred_types[receiver],
-                    call["name"],
-                    scope,
-                    repository,
-                    username,
-                )
-                if resolved_id:
-                    call["resolved_id"] = resolved_id
-                    call["category"] = "return_type_resolved"
-                    return_type_resolved += 1
-                    updated = True
-
-        if updated:
-            repo.store_calls(elem_id, calls)
+    return_type_resolved = sum(results)
 
     if return_type_resolved:
         logger.info(
@@ -1045,12 +1183,60 @@ def _build_constructor_type_map(
     return type_map
 
 
+def _process_candidate_constructors(
+    elem_id: str,
+    doc: dict,
+    repo: Repository,
+    scope: str,
+    repository: str,
+    username: str,
+) -> int:
+    """Process a single candidate for Strategy 5.6 (constructor inference).
+
+    Returns the number of calls resolved.
+    """
+    raw_code = doc.get("raw_code", "")
+    language = doc.get("language", "python")
+    calls = doc.get("calls", [])
+
+    if not raw_code:
+        return 0
+
+    # Build constructor type map: var_name -> ClassName
+    constructor_types = _build_constructor_type_map(raw_code, language=language)
+    if not constructor_types:
+        return 0
+
+    resolved_count = 0
+    updated = False
+    for call in calls:
+        if call.get("resolved_id") or not call.get("receiver"):
+            continue
+        receiver = call["receiver"]
+        if receiver in constructor_types:
+            resolved_id = _lookup_method_by_type(
+                repo, constructor_types[receiver], call["name"],
+                scope, repository, username,
+            )
+            if resolved_id:
+                call["resolved_id"] = resolved_id
+                call["category"] = "constructor_resolved"
+                resolved_count += 1
+                updated = True
+
+    if updated:
+        repo.store_calls(elem_id, calls)
+
+    return resolved_count
+
+
 def _resolve_via_constructors(
     repo: Repository,
     elements: list[dict],
     scope: str,
     repository: str,
     username: str,
+    max_workers: int = 1,
 ) -> int:
     """Strategy 5.6: Resolve calls using constructor-based type inference.
 
@@ -1067,12 +1253,11 @@ def _resolve_via_constructors(
         scope: Repository scope.
         repository: Repository name.
         username: Username branch.
+        max_workers: Number of threads for parallel processing.
 
     Returns:
         Number of calls resolved via constructor type inference.
     """
-    constructor_resolved = 0
-
     # Find elements with unresolved receiver calls
     candidates: list[str] = []
     for elem in elements:
@@ -1094,50 +1279,22 @@ def _resolve_via_constructors(
     # Batch fetch full documents for all candidates
     docs = repo.get_documents_batch(candidates)
 
-    for elem_id in candidates:
-        if not elem_id:
-            continue
+    work_items = [
+        (eid, docs[eid])
+        for eid in candidates
+        if eid and eid in docs
+    ]
 
-        doc = docs.get(elem_id)
-        if not doc:
-            continue
+    results = _parallel_map(
+        lambda item: _process_candidate_constructors(
+            item[0], item[1], repo, scope, repository, username,
+        ),
+        work_items,
+        max_workers=max_workers,
+        desc="strategy 5.6",
+    )
 
-        raw_code = doc.get("raw_code", "")
-        language = doc.get("language", "python")
-        calls = doc.get("calls", [])
-
-        if not raw_code:
-            continue
-
-        # Build constructor type map: var_name -> ClassName
-        constructor_types = _build_constructor_type_map(raw_code, language=language)
-
-        if not constructor_types:
-            continue
-
-        # Try to resolve unresolved receiver calls using constructor types
-        updated = False
-        for call in calls:
-            if call.get("resolved_id") or not call.get("receiver"):
-                continue
-            receiver = call["receiver"]
-            if receiver in constructor_types:
-                resolved_id = _lookup_method_by_type(
-                    repo,
-                    constructor_types[receiver],
-                    call["name"],
-                    scope,
-                    repository,
-                    username,
-                )
-                if resolved_id:
-                    call["resolved_id"] = resolved_id
-                    call["category"] = "constructor_resolved"
-                    constructor_resolved += 1
-                    updated = True
-
-        if updated:
-            repo.store_calls(elem_id, calls)
+    constructor_resolved = sum(results)
 
     if constructor_resolved:
         logger.info(
@@ -1150,12 +1307,84 @@ def _resolve_via_constructors(
 _SUPER_RECEIVERS = frozenset({"super", "parent"})
 
 
+def _process_candidate_super(
+    elem: dict,
+    repo: Repository,
+    scope: str,
+    repository: str,
+    username: str,
+) -> int:
+    """Process a single candidate for Strategy 5.8 (super/parent resolution).
+
+    Returns the number of calls resolved.
+    """
+    element_id = elem.get("element_id", "")
+    parent_id = elem.get("parent_id")
+    if not parent_id:
+        return 0
+
+    # Get the containing class (parent of this method)
+    class_doc = repo.get_document(parent_id)
+    if not class_doc:
+        return 0
+
+    base_classes = class_doc.get("base_classes") or []
+    if not base_classes:
+        return 0
+
+    calls = elem.get("calls", [])
+    resolved_count = 0
+    updated = False
+
+    for call in calls:
+        if call.get("resolved_id"):
+            continue
+        if call.get("receiver") not in _SUPER_RECEIVERS:
+            continue
+
+        method_name = call.get("name")
+        if not method_name:
+            continue
+
+        # Try each base class in order (MRO-like)
+        for base_name in base_classes:
+            base_doc = repo.get_document_by_name_only(
+                name=base_name,
+                element_type="class",
+                scope=scope,
+                repository=repository,
+                username=username,
+            )
+            if not base_doc or not base_doc.get("element_id"):
+                continue
+
+            method_doc = repo.get_method_by_class(
+                class_id=base_doc["element_id"],
+                method_name=method_name,
+                scope=scope,
+                repository=repository,
+                username=username,
+            )
+            if method_doc and method_doc.get("element_id"):
+                call["resolved_id"] = method_doc["element_id"]
+                call["category"] = "super_resolved"
+                resolved_count += 1
+                updated = True
+                break
+
+    if updated:
+        repo.store_calls(element_id, calls)
+
+    return resolved_count
+
+
 def _resolve_via_super(
     repo: Repository,
     elements: list[dict],
     scope: str,
     repository: str,
     username: str,
+    max_workers: int = 1,
 ) -> int:
     """Strategy 5.8: Resolve super()/parent:: calls to parent class methods.
 
@@ -1169,12 +1398,11 @@ def _resolve_via_super(
         scope: Repository scope.
         repository: Repository name.
         username: Username branch.
+        max_workers: Number of threads for parallel processing.
 
     Returns:
         Number of calls resolved.
     """
-    resolved_count = 0
-
     # Find elements with unresolved super/parent calls
     candidates = [
         elem for elem in elements
@@ -1187,65 +1415,104 @@ def _resolve_via_super(
     if not candidates:
         return 0
 
-    for elem in candidates:
-        element_id = elem.get("element_id", "")
-        parent_id = elem.get("parent_id")
-        if not parent_id:
-            continue
+    results = _parallel_map(
+        lambda elem: _process_candidate_super(
+            elem, repo, scope, repository, username,
+        ),
+        candidates,
+        max_workers=max_workers,
+        desc="strategy 5.8",
+    )
 
-        # Get the containing class (parent of this method)
-        class_doc = repo.get_document(parent_id)
-        if not class_doc:
-            continue
-
-        base_classes = class_doc.get("base_classes") or []
-        if not base_classes:
-            continue
-
-        calls = elem.get("calls", [])
-        updated = False
-
-        for call in calls:
-            if call.get("resolved_id"):
-                continue
-            if call.get("receiver") not in _SUPER_RECEIVERS:
-                continue
-
-            method_name = call.get("name")
-            if not method_name:
-                continue
-
-            # Try each base class in order (MRO-like)
-            for base_name in base_classes:
-                base_doc = repo.get_document_by_name_only(
-                    name=base_name,
-                    element_type="class",
-                    scope=scope,
-                    repository=repository,
-                    username=username,
-                )
-                if not base_doc or not base_doc.get("element_id"):
-                    continue
-
-                method_doc = repo.get_method_by_class(
-                    class_id=base_doc["element_id"],
-                    method_name=method_name,
-                    scope=scope,
-                    repository=repository,
-                    username=username,
-                )
-                if method_doc and method_doc.get("element_id"):
-                    call["resolved_id"] = method_doc["element_id"]
-                    call["category"] = "super_resolved"
-                    resolved_count += 1
-                    updated = True
-                    break
-
-        if updated:
-            repo.store_calls(element_id, calls)
+    resolved_count = sum(results)
 
     if resolved_count:
         logger.info(f"Strategy 5.8 (super): resolved {resolved_count} calls")
+
+    return resolved_count
+
+
+def _process_candidate_scope_bindings(
+    elem_id: str,
+    doc: dict,
+    repo: Repository,
+    scope: str,
+    repository: str,
+    username: str,
+    max_passes: int = 3,
+) -> int:
+    """Process a single candidate for Strategy 5.7 (scope bindings).
+
+    Returns the number of calls resolved.
+    """
+    from magaldi_core.scope_bindings import extract_variable_bindings
+
+    raw_code = doc.get("raw_code", "")
+    language = doc.get("language", "")
+    calls = doc.get("calls", [])
+    parameters = doc.get("parameters", [])
+
+    if not raw_code or language not in (
+        "python", "javascript", "typescript", "tsx", "php", "rust",
+    ):
+        return 0
+
+    # Extract variable bindings from AST
+    bindings = extract_variable_bindings(raw_code, language)
+    if not bindings:
+        return 0
+
+    # Build param type map from function parameters
+    param_types: dict[str, str] = {}
+    if parameters:
+        for p in parameters:
+            if p.get("type"):
+                param_types[p["name"]] = p["type"]
+
+    # Multi-pass resolution: each pass may discover new types
+    # that enable further resolution in the next pass
+    resolved_count = 0
+    updated = False
+    for _pass_num in range(max_passes):
+        pass_resolved = 0
+
+        # Build resolved call maps from current state
+        resolved_calls = _build_resolved_maps(calls)
+
+        # Resolve binding types
+        binding_types: dict[str, str] = {}
+        for binding in bindings:
+            var = binding.variable
+            inferred_type = _resolve_binding_type(
+                binding, resolved_calls, param_types, binding_types, repo,
+                scope, repository, username,
+            )
+            if inferred_type:
+                binding_types[var] = inferred_type
+
+        # Try to resolve unresolved receiver calls using binding types
+        for call in calls:
+            if call.get("resolved_id") or not call.get("receiver"):
+                continue
+            receiver = call["receiver"]
+            if receiver in binding_types:
+                resolved_id = _lookup_method_by_type(
+                    repo, binding_types[receiver], call["name"],
+                    scope, repository, username,
+                )
+                if resolved_id:
+                    call["resolved_id"] = resolved_id
+                    call["category"] = "scope_resolved"
+                    resolved_count += 1
+                    pass_resolved += 1
+                    updated = True
+
+        # Stop if no progress in this pass
+        if pass_resolved == 0:
+            break
+
+    if updated:
+        repo.store_calls(elem_id, calls)
 
     return resolved_count
 
@@ -1257,6 +1524,7 @@ def _resolve_via_scope_bindings(
     repository: str,
     username: str,
     max_passes: int = 3,
+    max_workers: int = 1,
 ) -> int:
     """Strategy 5.7: Resolve calls using AST-based scope analysis.
 
@@ -1279,14 +1547,11 @@ def _resolve_via_scope_bindings(
         repository: Repository name.
         username: Username branch.
         max_passes: Maximum resolution passes per element for chaining.
+        max_workers: Number of threads for parallel processing.
 
     Returns:
         Number of calls resolved via scope analysis.
     """
-    from magaldi_core.scope_bindings import extract_variable_bindings
-
-    scope_resolved = 0
-
     # Find elements with unresolved receiver calls
     candidates: list[str] = []
     for elem in elements:
@@ -1308,83 +1573,23 @@ def _resolve_via_scope_bindings(
     # Batch fetch full documents for all candidates
     docs = repo.get_documents_batch(candidates)
 
-    for elem_id in candidates:
-        if not elem_id:
-            continue
+    work_items = [
+        (eid, docs[eid])
+        for eid in candidates
+        if eid and eid in docs
+    ]
 
-        doc = docs.get(elem_id)
-        if not doc:
-            continue
+    results = _parallel_map(
+        lambda item: _process_candidate_scope_bindings(
+            item[0], item[1], repo, scope, repository, username,
+            max_passes=max_passes,
+        ),
+        work_items,
+        max_workers=max_workers,
+        desc="strategy 5.7",
+    )
 
-        raw_code = doc.get("raw_code", "")
-        language = doc.get("language", "")
-        calls = doc.get("calls", [])
-        parameters = doc.get("parameters", [])
-
-        if not raw_code or language not in (
-            "python", "javascript", "typescript", "tsx", "php", "rust",
-        ):
-            continue
-
-        # Extract variable bindings from AST
-        bindings = extract_variable_bindings(raw_code, language)
-        if not bindings:
-            continue
-
-        # Build param type map from function parameters
-        param_types: dict[str, str] = {}
-        if parameters:
-            for p in parameters:
-                if p.get("type"):
-                    param_types[p["name"]] = p["type"]
-
-        # Multi-pass resolution: each pass may discover new types
-        # that enable further resolution in the next pass
-        updated = False
-        for _pass_num in range(max_passes):
-            pass_resolved = 0
-
-            # Build resolved call maps from current state
-            resolved_calls = _build_resolved_maps(calls)
-
-            # Resolve binding types
-            binding_types: dict[str, str] = {}
-            for binding in bindings:
-                var = binding.variable
-                inferred_type = _resolve_binding_type(
-                    binding, resolved_calls, param_types, binding_types, repo,
-                    scope, repository, username,
-                )
-                if inferred_type:
-                    binding_types[var] = inferred_type
-
-            # Try to resolve unresolved receiver calls using binding types
-            for call in calls:
-                if call.get("resolved_id") or not call.get("receiver"):
-                    continue
-                receiver = call["receiver"]
-                if receiver in binding_types:
-                    resolved_id = _lookup_method_by_type(
-                        repo,
-                        binding_types[receiver],
-                        call["name"],
-                        scope,
-                        repository,
-                        username,
-                    )
-                    if resolved_id:
-                        call["resolved_id"] = resolved_id
-                        call["category"] = "scope_resolved"
-                        scope_resolved += 1
-                        pass_resolved += 1
-                        updated = True
-
-            # Stop if no progress in this pass
-            if pass_resolved == 0:
-                break
-
-        if updated:
-            repo.store_calls(elem_id, calls)
+    scope_resolved = sum(results)
 
     if scope_resolved:
         logger.info(f"Scope binding resolution: resolved {scope_resolved} calls")
