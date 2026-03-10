@@ -535,6 +535,11 @@ def process_elements(
     # Interval for wait() timeout - allows periodic display updates
     HISTORY_RECORD_INTERVAL = 2.0  # Refresh display every 2 seconds
 
+    # Start bulk buffer for batched OpenSearch writes.
+    # Flushes automatically after 50 ops or 5 seconds, plus final flush on close.
+    _bulk_buf_ctx = repo.bulk_buffer()
+    _bulk_buf = _bulk_buf_ctx.__enter__()
+
     try:
         while not dependency_tracker.is_complete():
             # Get current max from active workers (for emergency throttling)
@@ -760,6 +765,8 @@ def process_elements(
         for future in future_to_element:
             future.cancel()
         executor.shutdown(wait=False, cancel_futures=True)
+        # Flush remaining buffered writes before exiting
+        _bulk_buf_ctx.__exit__(None, None, None)
         # Clear worker status display first (so Live display is clean)
         for wid in range(max_workers):
             worker_status.clear(wid)
@@ -774,6 +781,8 @@ def process_elements(
     else:
         # Normal completion - shutdown and wait
         executor.shutdown(wait=True)
+        # Flush remaining buffered writes
+        _bulk_buf_ctx.__exit__(None, None, None)
 
     # Clean up Redis tracker
     if redis_tracker:

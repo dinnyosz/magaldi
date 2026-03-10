@@ -8,12 +8,16 @@ This module handles:
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from magaldi_core.change_detection import ChangeManifest
 from magaldi_core.code_parser import CodeElement, ParsedFile, ParsingResult
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 
 class StorageError(Exception):
@@ -138,6 +142,14 @@ class SearchRepository(Protocol):
         self, scope: str, repository: str, username: str, relative_path: str
     ) -> int:
         """Delete all documents for a file. Returns count deleted."""
+        ...
+
+    def bulk_buffer(
+        self,
+        max_count: int = 50,
+        max_interval: float = 5.0,
+    ) -> Any:
+        """Context manager for batched writes. Returns a BulkIndexBuffer."""
         ...
 
 
@@ -317,6 +329,15 @@ class InMemorySearchRepository:
             del self._documents[eid]
         return len(to_delete)
 
+    @contextmanager
+    def bulk_buffer(
+        self,
+        max_count: int = 50,  # noqa: ARG002
+        max_interval: float = 5.0,  # noqa: ARG002
+    ) -> Generator[None, None, None]:
+        """No-op bulk buffer for in-memory implementation."""
+        yield None
+
 
 # =============================================================================
 # 4.1 HANDLE DELETIONS
@@ -462,6 +483,9 @@ def index_elements(
 ) -> int:
     """Index elements to search repository.
 
+    Uses bulk buffering to batch OpenSearch writes for performance.
+    The buffer flushes automatically after 50 operations or 5 seconds.
+
     Args:
         parsed_files: List of parsed files (includes file_hash).
         search_repo: Search repository.
@@ -477,21 +501,22 @@ def index_elements(
     total = sum(len(pf.elements) for pf in parsed_files)
     completed = 0
 
-    for pf in parsed_files:
-        file_hash = pf.file_info.hash
+    with search_repo.bulk_buffer():
+        for pf in parsed_files:
+            file_hash = pf.file_info.hash
 
-        for element in pf.elements:
-            # Pass file_hash only for file-level elements
-            if element.element_type == "file":
-                if search_repo.index_element(element, indexed_at, file_hash=file_hash):
-                    indexed += 1
-            else:
-                if search_repo.index_element(element, indexed_at):
-                    indexed += 1
+            for element in pf.elements:
+                # Pass file_hash only for file-level elements
+                if element.element_type == "file":
+                    if search_repo.index_element(element, indexed_at, file_hash=file_hash):
+                        indexed += 1
+                else:
+                    if search_repo.index_element(element, indexed_at):
+                        indexed += 1
 
-            completed += 1
-            if on_progress:
-                on_progress(completed, total)
+                completed += 1
+                if on_progress:
+                    on_progress(completed, total)
 
     return indexed
 

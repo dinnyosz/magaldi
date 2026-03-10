@@ -6,12 +6,15 @@ Handles CRUD operations for code elements in the search backend.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from magaldi_core.code_parser import CodeElement
 from shared.db.backends.base import NotFoundError
 
 from .base import INDEX_NAME, RepositoryBase, generate_hash_id
+
+if TYPE_CHECKING:
+    from shared.db.bulk_buffer import BulkIndexBuffer
 
 
 class ElementRepository:
@@ -19,6 +22,7 @@ class ElementRepository:
 
     def __init__(self, base: RepositoryBase):
         self._base = base
+        self._bulk_buffer: BulkIndexBuffer | None = None
 
     def _get_client(self) -> Any:
         """Get search client from base."""
@@ -142,8 +146,11 @@ class ElementRepository:
         if element.document_sections:
             doc["document_sections"] = element.document_sections
 
-        client = self._get_client()
-        client.index_document(INDEX_NAME, element.element_id, doc)
+        if self._bulk_buffer is not None:
+            self._bulk_buffer.add_index(element.element_id, doc)
+        else:
+            client = self._get_client()
+            client.index_document(INDEX_NAME, element.element_id, doc)
         return True
 
     def get_document(self, element_id: str) -> dict[str, Any] | None:

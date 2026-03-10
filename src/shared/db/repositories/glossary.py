@@ -6,9 +6,12 @@ Handles indexing, retrieval, and searching of glossary entries.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .base import INDEX_NAME, RepositoryBase, generate_hash_id
+
+if TYPE_CHECKING:
+    from shared.db.bulk_buffer import BulkIndexBuffer
 
 
 class GlossaryRepository:
@@ -16,6 +19,7 @@ class GlossaryRepository:
 
     def __init__(self, base: RepositoryBase):
         self._base = base
+        self._bulk_buffer: BulkIndexBuffer | None = None
 
     def _get_client(self) -> Any:
         """Get search client from base."""
@@ -74,8 +78,11 @@ class GlossaryRepository:
             "level": -3,  # Glossary terms are at the highest conceptual level
         }
 
-        client = self._get_client()
-        client.index_document(INDEX_NAME, glossary_id, doc)
+        if self._bulk_buffer is not None:
+            self._bulk_buffer.add_index(glossary_id, doc)
+        else:
+            client = self._get_client()
+            client.index_document(INDEX_NAME, glossary_id, doc)
         return True
 
     def get_glossary_terms(
@@ -274,16 +281,19 @@ class GlossaryRepository:
         Returns:
             True on success.
         """
-        client = self._get_client()
-
-        client.update_document(
-            INDEX_NAME,
-            glossary_id,
-            body={"doc": {
-                "feature_associations": feature_associations,
-                "updated_at": datetime.now().isoformat(),
-            }},
-        )
+        partial = {
+            "feature_associations": feature_associations,
+            "updated_at": datetime.now().isoformat(),
+        }
+        if self._bulk_buffer is not None:
+            self._bulk_buffer.add_update(glossary_id, partial)
+        else:
+            client = self._get_client()
+            client.update_document(
+                INDEX_NAME,
+                glossary_id,
+                body={"doc": partial},
+            )
 
         return True
 

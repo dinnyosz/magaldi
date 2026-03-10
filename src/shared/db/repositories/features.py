@@ -7,9 +7,12 @@ from __future__ import annotations
 
 import contextlib
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .base import INDEX_NAME, RepositoryBase, generate_hash_id
+
+if TYPE_CHECKING:
+    from shared.db.bulk_buffer import BulkIndexBuffer
 
 
 class FeatureRepository:
@@ -17,6 +20,7 @@ class FeatureRepository:
 
     def __init__(self, base: RepositoryBase):
         self._base = base
+        self._bulk_buffer: BulkIndexBuffer | None = None
 
     def _get_client(self) -> Any:
         """Get search client from base."""
@@ -81,8 +85,11 @@ class FeatureRepository:
         if connected_features:
             doc["connected_features"] = connected_features
 
-        client = self._get_client()
-        client.index_document(INDEX_NAME, feature_id, doc)
+        if self._bulk_buffer is not None:
+            self._bulk_buffer.add_index(feature_id, doc)
+        else:
+            client = self._get_client()
+            client.index_document(INDEX_NAME, feature_id, doc)
         return True
 
     def index_subfeature(
@@ -139,8 +146,11 @@ class FeatureRepository:
         if embedding is not None:
             doc["summary_embedding"] = embedding
 
-        client = self._get_client()
-        client.index_document(INDEX_NAME, subfeature_id, doc)
+        if self._bulk_buffer is not None:
+            self._bulk_buffer.add_index(subfeature_id, doc)
+        else:
+            client = self._get_client()
+            client.index_document(INDEX_NAME, subfeature_id, doc)
         return True
 
     def get_features(

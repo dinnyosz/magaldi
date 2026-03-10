@@ -6,11 +6,14 @@ embeddings, imports, and function calls.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from shared.db.backends.base import NotFoundError
 
 from .base import INDEX_NAME, RepositoryBase
+
+if TYPE_CHECKING:
+    from shared.db.bulk_buffer import BulkIndexBuffer
 
 
 class MetadataRepository:
@@ -18,6 +21,7 @@ class MetadataRepository:
 
     def __init__(self, base: RepositoryBase):
         self._base = base
+        self._bulk_buffer: BulkIndexBuffer | None = None
 
     def _get_client(self) -> Any:
         """Get search client from base."""
@@ -232,6 +236,9 @@ class MetadataRepository:
             True on success.
         """
         field_name = f"{embedding_type}_embedding"
+        if self._bulk_buffer is not None:
+            self._bulk_buffer.add_update(element_id, {field_name: embedding})
+            return True
         try:
             client = self._get_client()
             client.update_document(
@@ -314,11 +321,14 @@ class MetadataRepository:
         Returns:
             True on success.
         """
+        doc: dict = {"summary": summary}
+        if craft_reason is not None:
+            doc["craft_reason"] = craft_reason
+        if self._bulk_buffer is not None:
+            self._bulk_buffer.add_update(element_id, doc)
+            return True
         try:
             client = self._get_client()
-            doc: dict = {"summary": summary}
-            if craft_reason is not None:
-                doc["craft_reason"] = craft_reason
             client.update_document(
                 INDEX_NAME,
                 element_id,
@@ -338,6 +348,9 @@ class MetadataRepository:
         Returns:
             True on success, False if element not found.
         """
+        if self._bulk_buffer is not None:
+            self._bulk_buffer.add_update(element_id, {"imports": imports})
+            return True
         try:
             client = self._get_client()
             client.update_document(
@@ -359,6 +372,9 @@ class MetadataRepository:
         Returns:
             True on success, False if element not found.
         """
+        if self._bulk_buffer is not None:
+            self._bulk_buffer.add_update(element_id, {"calls": calls})
+            return True
         try:
             client = self._get_client()
             client.update_document(
@@ -380,6 +396,9 @@ class MetadataRepository:
         Returns:
             True on success, False if element not found.
         """
+        if self._bulk_buffer is not None:
+            self._bulk_buffer.add_update(element_id, {"semantic_related": related})
+            return True
         try:
             client = self._get_client()
             client.update_document(

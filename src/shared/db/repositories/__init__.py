@@ -6,6 +6,7 @@ backward compatibility while delegating to focused sub-repositories.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -18,8 +19,11 @@ from .search import SearchRepository
 from .stats import StatsRepository
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+
     from magaldi_core.code_parser import CodeElement
     from shared.config import MagaldiConfig
+    from shared.db.bulk_buffer import BulkIndexBuffer
 
 
 class Repository:
@@ -74,6 +78,50 @@ class Repository:
     def close(self) -> None:
         """Close search backend client."""
         return self._base.close()
+
+    @contextmanager
+    def bulk_buffer(
+        self,
+        max_count: int = 50,
+        max_interval: float = 5.0,
+    ) -> Generator[BulkIndexBuffer, None, None]:
+        """Context manager that batches OpenSearch writes for performance.
+
+        While active, index_element / store_summary / store_embedding /
+        store_imports / store_calls will be buffered and flushed in bulk
+        when either *max_count* operations accumulate or *max_interval*
+        seconds elapse since the last flush.  A final flush happens on exit.
+
+        Usage::
+
+            with repo.bulk_buffer(max_count=100, max_interval=3.0) as buf:
+                for elem in elements:
+                    repo.index_element(elem, indexed_at=now)
+            # buf.total_flushed  — number of ops committed
+
+        Args:
+            max_count: Flush after this many buffered operations.
+            max_interval: Flush after this many seconds since last flush.
+
+        Yields:
+            The active BulkIndexBuffer (useful for inspecting stats).
+        """
+        from shared.db.bulk_buffer import BulkIndexBuffer
+
+        client = self._base._get_client()
+        buf = BulkIndexBuffer(client, INDEX_NAME, max_count=max_count, max_interval=max_interval)
+        self._elements._bulk_buffer = buf
+        self._metadata._bulk_buffer = buf
+        self._features._bulk_buffer = buf
+        self._glossary._bulk_buffer = buf
+        try:
+            with buf:
+                yield buf
+        finally:
+            self._elements._bulk_buffer = None
+            self._metadata._bulk_buffer = None
+            self._features._bulk_buffer = None
+            self._glossary._bulk_buffer = None
 
     # =========================================================================
     # Element operations (delegated to ElementRepository)
