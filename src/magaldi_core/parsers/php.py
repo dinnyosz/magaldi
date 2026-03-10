@@ -275,6 +275,7 @@ class PhpParser(TreeSitterParser):
             line_end=ext.line_end,
             raw_code=ext.raw_code,
             docstring=extract_preceding_doc_comment(lines, ext.line_start, "php"),
+            decorators=ext.decorators or [],
             level=1,
             class_attributes=class_attributes,
             base_classes=base_classes,

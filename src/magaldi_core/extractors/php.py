@@ -807,6 +807,10 @@ def _extract_php_method(node: Node, _lines: list[str]) -> ExtractedElement | Non
             visibility = get_node_text(child)
         elif child.type == "static_modifier":
             decorators.append("static")
+        elif child.type == "abstract_modifier":
+            decorators.append("abstract")
+        elif child.type == "final_modifier":
+            decorators.append("final")
         elif child.type == "formal_parameters":
             params_node = child
 
@@ -820,8 +824,12 @@ def _extract_php_method(node: Node, _lines: list[str]) -> ExtractedElement | Non
     parameters = _extract_php_parameters(params_node) if params_node else []
     return_type = _extract_php_return_type(node)
 
-    # Build signature
-    signature = f"{visibility} function {name}"
+    # Build signature with modifiers (abstract/final/static between visibility and function)
+    modifiers = [visibility]
+    for mod in ("abstract", "final", "static"):
+        if mod in decorators:
+            modifiers.append(mod)
+    signature = " ".join(modifiers) + f" function {name}"
     if params_node:
         signature += get_node_text(params_node)
     if return_type:
@@ -999,23 +1007,24 @@ def extract_php_calls(function_node: Node) -> list[ExtractedCall]:
 
         elif node.type == "scoped_call_expression":
             # Static call: Class::method()
+            # Children: [name/qualified_name/relative_scope, "::", name, arguments]
+            # Use :: position to distinguish receiver (before) from method (after)
             line = node.start_point[0] + 1
             receiver = None
             method_name = None
+            seen_scope_operator = False
 
             for child in node.children:
-                if child.type in ("name", "qualified_name", "relative_scope"):
-                    receiver = get_node_text(child)
-                elif child.type == "name" and receiver:
-                    method_name = get_node_text(child)
-
-            # Try getting method name differently
-            if not method_name:
-                for i, child in enumerate(node.children):
-                    if child.type == "::" and i + 1 < len(node.children):
-                        next_child = node.children[i + 1]
-                        if next_child.type == "name":
-                            method_name = get_node_text(next_child)
+                if child.type == "::":
+                    seen_scope_operator = True
+                elif not seen_scope_operator:
+                    # Before :: -> receiver
+                    if child.type in ("name", "qualified_name", "relative_scope"):
+                        receiver = get_node_text(child)
+                else:
+                    # After :: -> method name
+                    if child.type == "name":
+                        method_name = get_node_text(child)
 
             if method_name:
                 key = (method_name, receiver, line)
@@ -1083,22 +1092,22 @@ def extract_top_level_php_calls(tree: Tree) -> list[ExtractedCall]:
                     calls.append(ExtractedCall(name=method_name, receiver=receiver, line=line))
 
         elif node.type == "scoped_call_expression":
+            # Static call: Class::method()
+            # Use :: position to distinguish receiver (before) from method (after)
             line = node.start_point[0] + 1
             receiver = None
             method_name = None
+            seen_scope_operator = False
 
             for child in node.children:
-                if child.type in ("name", "qualified_name", "relative_scope"):
-                    receiver = get_node_text(child)
-                elif child.type == "name" and receiver:
-                    method_name = get_node_text(child)
-
-            if not method_name:
-                for i, child in enumerate(node.children):
-                    if child.type == "::" and i + 1 < len(node.children):
-                        next_child = node.children[i + 1]
-                        if next_child.type == "name":
-                            method_name = get_node_text(next_child)
+                if child.type == "::":
+                    seen_scope_operator = True
+                elif not seen_scope_operator:
+                    if child.type in ("name", "qualified_name", "relative_scope"):
+                        receiver = get_node_text(child)
+                else:
+                    if child.type == "name":
+                        method_name = get_node_text(child)
 
             if method_name:
                 key = (method_name, receiver, line)
