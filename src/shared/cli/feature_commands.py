@@ -126,6 +126,8 @@ def run_feature_extraction(
     from shared.db.store import Repository
 
     repo = Repository(config)
+    _bulk_buf_ctx = repo.bulk_buffer()
+    _bulk_buf_ctx.__enter__()
 
     try:
         # Fetch embeddings for functions/methods only
@@ -776,6 +778,7 @@ def run_feature_extraction(
         }
 
     finally:
+        _bulk_buf_ctx.__exit__(None, None, None)
         repo.close()
 
 

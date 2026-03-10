@@ -1052,58 +1052,60 @@ def run_call_resolution(
     if console is None:
         console = Console()
 
-    if not skip_resolve:
-        from magaldi_core.call_resolution import resolve_all_calls
+    with repo.bulk_buffer():
 
-        console.print("\n  [bold]Static Call Resolution[/]")
+        if not skip_resolve:
+            from magaldi_core.call_resolution import resolve_all_calls
+
+            console.print("\n  [bold]Static Call Resolution[/]")
+            try:
+                (
+                    total_calls,
+                    import_resolved,
+                    type_resolved,
+                    constructor_resolved,
+                    scope_resolved,
+                    super_resolved,
+                ) = resolve_all_calls(repo, scope, repository, username)
+                total_resolved = (
+                    import_resolved + type_resolved + constructor_resolved
+                    + scope_resolved + super_resolved
+                )
+                console.print(f"  Full pass: {total_resolved}/{total_calls} resolved")
+                console.print(f"    via imports: {import_resolved}")
+                console.print(f"    via types: {type_resolved}")
+                console.print(f"    via constructors: {constructor_resolved}")
+                console.print(f"    via scope: {scope_resolved}")
+                if super_resolved:
+                    console.print(f"    via super: {super_resolved}")
+            except Exception as e:
+                console.print(f"  [yellow]Warning: Static call resolution failed: {rich_escape(str(e))}[/]")
+
+            # Embedding-based resolution for remaining untyped calls
+            from magaldi_core.call_resolution import resolve_calls_by_embedding
+
+            console.print("\n  [bold]Embedding Call Resolution[/]")
+            try:
+                total_processed, single_resolved, embedding_resolved = resolve_calls_by_embedding(
+                    repo, scope, repository, username,
+                )
+                total_resolved = single_resolved + embedding_resolved
+                console.print(f"  Resolved: {total_resolved}/{total_processed} untyped calls")
+                console.print(f"    single match: {single_resolved}")
+                console.print(f"    via RRF similarity: {embedding_resolved}")
+            except Exception as e:
+                console.print(f"  [yellow]Warning: Embedding call resolution failed: {rich_escape(str(e))}[/]")
+        else:
+            console.print("\n  [dim]Call resolution skipped (--skip-resolve)[/]")
+
+        # Semantic relationships always run (independent of call resolution)
+        from magaldi_core.call_resolution import compute_semantic_relationships
+
+        console.print("\n  [bold]Semantic Relationships[/]")
         try:
-            (
-                total_calls,
-                import_resolved,
-                type_resolved,
-                constructor_resolved,
-                scope_resolved,
-                super_resolved,
-            ) = resolve_all_calls(repo, scope, repository, username)
-            total_resolved = (
-                import_resolved + type_resolved + constructor_resolved
-                + scope_resolved + super_resolved
-            )
-            console.print(f"  Full pass: {total_resolved}/{total_calls} resolved")
-            console.print(f"    via imports: {import_resolved}")
-            console.print(f"    via types: {type_resolved}")
-            console.print(f"    via constructors: {constructor_resolved}")
-            console.print(f"    via scope: {scope_resolved}")
-            if super_resolved:
-                console.print(f"    via super: {super_resolved}")
-        except Exception as e:
-            console.print(f"  [yellow]Warning: Static call resolution failed: {rich_escape(str(e))}[/]")
-
-        # Embedding-based resolution for remaining untyped calls
-        from magaldi_core.call_resolution import resolve_calls_by_embedding
-
-        console.print("\n  [bold]Embedding Call Resolution[/]")
-        try:
-            total_processed, single_resolved, embedding_resolved = resolve_calls_by_embedding(
+            elements_processed, total_relationships = compute_semantic_relationships(
                 repo, scope, repository, username,
             )
-            total_resolved = single_resolved + embedding_resolved
-            console.print(f"  Resolved: {total_resolved}/{total_processed} untyped calls")
-            console.print(f"    single match: {single_resolved}")
-            console.print(f"    via RRF similarity: {embedding_resolved}")
+            console.print(f"  Processed {elements_processed} elements, stored {total_relationships} relationships")
         except Exception as e:
-            console.print(f"  [yellow]Warning: Embedding call resolution failed: {rich_escape(str(e))}[/]")
-    else:
-        console.print("\n  [dim]Call resolution skipped (--skip-resolve)[/]")
-
-    # Semantic relationships always run (independent of call resolution)
-    from magaldi_core.call_resolution import compute_semantic_relationships
-
-    console.print("\n  [bold]Semantic Relationships[/]")
-    try:
-        elements_processed, total_relationships = compute_semantic_relationships(
-            repo, scope, repository, username,
-        )
-        console.print(f"  Processed {elements_processed} elements, stored {total_relationships} relationships")
-    except Exception as e:
-        console.print(f"  [yellow]Warning: Semantic relationships failed: {rich_escape(str(e))}[/]")
+            console.print(f"  [yellow]Warning: Semantic relationships failed: {rich_escape(str(e))}[/]")

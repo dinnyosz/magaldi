@@ -71,6 +71,8 @@ def run_glossary_extraction(
     own_repo = repo is None
     if repo is None:
         repo = Repository(config)
+    _bulk_buf_ctx = repo.bulk_buffer()
+    _bulk_buf_ctx.__enter__()
 
     try:
         # Fetch features and subfeatures
@@ -432,6 +434,7 @@ def run_glossary_extraction(
         }
 
     finally:
+        _bulk_buf_ctx.__exit__(None, None, None)
         if own_repo:
             repo.close()
 
