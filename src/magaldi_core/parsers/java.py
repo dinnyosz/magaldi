@@ -156,7 +156,7 @@ class JavaParser(TreeSitterParser):
         # Recursively process nested type declarations
         for nested_ext in nested_types:
             nested_elem = self._convert_class(
-                nested_ext, file_info, scope, repository, username, lines
+                nested_ext, file_info, scope, repository, username, lines, level=2,
             )
             nested_elem.parent_id = parent_elem.element_id
             elements.append(nested_elem)
@@ -176,8 +176,19 @@ class JavaParser(TreeSitterParser):
         repository: str,
         username: str,
         lines: list[str],
+        level: int = 1,
     ) -> CodeElement:
-        """Convert extracted class/interface/enum to CodeElement."""
+        """Convert extracted class/interface/enum to CodeElement.
+
+        Args:
+            ext: Extracted element data.
+            file_info: File metadata.
+            scope: Repository scope.
+            repository: Repository name.
+            username: Username.
+            lines: Source code lines.
+            level: Hierarchy level (1 for top-level, 2 for nested).
+        """
         class_attributes = None
         base_classes = None
 
@@ -204,7 +215,7 @@ class JavaParser(TreeSitterParser):
             docstring=extract_preceding_doc_comment(lines, ext.line_start, "java"),
             decorators=ext.decorators or [],
             visibility=visibility,
-            level=1,
+            level=level,
             class_attributes=class_attributes,
             base_classes=base_classes,
         )
