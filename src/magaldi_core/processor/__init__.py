@@ -101,6 +101,7 @@ __all__ = [
     "_embed_element",
     "_index_element",
     "_process_single_element",
+    "_process_skip_ai_fast",
     "_get_model_display_name",
 ]
 
