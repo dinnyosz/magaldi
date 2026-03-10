@@ -117,7 +117,12 @@ def _extract_js_import_clause(node: Node, module: str, line: int) -> list[Extrac
 
 
 def _extract_js_require_statement(node: Node) -> list[ExtractedImport]:
-    """Extract imports from CommonJS require() calls."""
+    """Extract imports from CommonJS require() calls.
+
+    Handles both direct and chained require patterns:
+    - const foo = require('bar')
+    - var debug = require('debug')('express:view')
+    """
     imports: list[ExtractedImport] = []
     line = node.start_point[0] + 1
 
@@ -129,23 +134,55 @@ def _extract_js_require_statement(node: Node) -> list[ExtractedImport]:
             if not name_node or not value_node:
                 continue
 
-            # Check if value is a require() call
+            # Check if value is a require() call (direct or chained)
             if value_node.type == "call_expression":
-                func_node = get_child_by_field(value_node, "function")
-                if func_node and get_node_text(func_node) == "require":
-                    # Get the module argument
-                    args_node = get_child_by_field(value_node, "arguments")
-                    if args_node and len(args_node.children) > 0:
-                        for arg in args_node.children:
-                            if arg.type == "string":
-                                module = get_node_text(arg).strip("'\"")
-                                name = get_node_text(name_node)
-                                imports.append(ExtractedImport(
-                                    name=name,
-                                    module=module,
-                                    alias=None,
-                                    line=line,
-                                ))
-                                break
+                module = _find_require_module(value_node)
+                if module:
+                    name = get_node_text(name_node)
+                    imports.append(ExtractedImport(
+                        name=name,
+                        module=module,
+                        alias=None,
+                        line=line,
+                    ))
 
     return imports
+
+
+def _find_require_module(call_node: Node) -> str | None:
+    """Extract the module path from a require() call expression.
+
+    Handles both direct require() and chained patterns:
+    - require('http') -> 'http'
+    - require('debug')('express:view') -> 'debug'
+
+    Args:
+        call_node: A call_expression node.
+
+    Returns:
+        The module path string, or None if not a require() call.
+    """
+    if call_node.type != "call_expression":
+        return None
+
+    func_node = get_child_by_field(call_node, "function")
+    if not func_node:
+        return None
+
+    # Direct require(): require('http')
+    if func_node.type == "identifier" and get_node_text(func_node) == "require":
+        args_node = get_child_by_field(call_node, "arguments")
+        if args_node:
+            for arg in args_node.children:
+                if arg.type == "string":
+                    module: str = get_node_text(arg).strip("'\"")
+                    return module
+        return None
+
+    # Chained require(): require('debug')('express:view')
+    # The func_node is itself a call_expression: require('debug')
+    if func_node.type == "call_expression":
+        result: str | None = _find_require_module(func_node)
+        return result
+
+    return None

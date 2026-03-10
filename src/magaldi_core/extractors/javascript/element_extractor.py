@@ -743,19 +743,21 @@ def _find_require_module(value_node: Node) -> str | None:
         if args_node:
             for arg in args_node.children:
                 if arg.type == "string":
-                    return get_node_text(arg).strip("'\"")
+                    module: str = get_node_text(arg).strip("'\"")
+                    return module
         return None
 
     # Chained require(): require('debug')('express:view')
     # The func_node is itself a call_expression: require('debug')
     if func_node.type == "call_expression":
-        return _find_require_module(func_node)
+        result: str | None = _find_require_module(func_node)
+        return result
 
     return None
 
 
 def _extract_js_require_import(
-    decl_stmt: Node, decl_node: Node, name: str, value_node: Node, _lines: list[str]
+    decl_stmt: Node, decl_node: Node, _name: str, value_node: Node, _lines: list[str]
 ) -> ExtractedElement | None:
     """Extract a CommonJS require() call as an import element.
 
@@ -767,7 +769,7 @@ def _extract_js_require_import(
     Args:
         decl_stmt: The lexical_declaration or variable_declaration node.
         decl_node: The variable_declarator node.
-        name: The variable name.
+        _name: The variable name (unused; module path is used as element name).
         value_node: The call_expression node.
         lines: Source code lines.
 

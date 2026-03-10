@@ -596,3 +596,253 @@ class TestMinifiedPythonCodeExtraction:
         # All element IDs should be unique
         element_ids = [e.element_id for e in functions]
         assert len(set(element_ids)) == 3, "Element IDs should be unique"
+
+
+# =============================================================================
+# ASSIGNMENT FUNCTION EXTRACTION (obj.prop = function() {})
+# =============================================================================
+
+
+class TestAssignmentFunctionExtraction:
+    """Tests for assignment-based function patterns common in pre-ES6 JS."""
+
+    def _parse(self, code: str) -> list:
+        parser = JavaScriptParser()
+        file_info = FileInfo(
+            relative_path="module.js",
+            absolute_path=Path("/fake/module.js"),
+            language="javascript",
+        )
+        return parser.parse(code, file_info, "scope", "repo", "main")
+
+    def test_obj_prop_named_function(self):
+        """obj.prop = function name() {} extracts as function with correct name."""
+        code = """app.init = function init() {
+  this.cache = {};
+};
+
+app.use = function use(fn) {
+  var offset = 0;
+};
+
+req.get = function get(name) {
+  return this.header(name);
+};
+
+res.send = function send(body) {
+  var chunk = body;
+};
+"""
+        elements = self._parse(code)
+        functions = [e for e in elements if e.element_type == "function"]
+        func_names = {f.name for f in functions}
+
+        assert "init" in func_names, f"Expected 'init', got {func_names}"
+        assert "use" in func_names, f"Expected 'use', got {func_names}"
+        assert "get" in func_names, f"Expected 'get', got {func_names}"
+        assert "send" in func_names, f"Expected 'send', got {func_names}"
+
+    def test_obj_prop_function_signature_includes_name(self):
+        """Signature for named function expression should include the function name."""
+        code = """app.init = function init() {
+  this.cache = {};
+};
+"""
+        elements = self._parse(code)
+        init_func = next(e for e in elements if e.name == "init" and e.element_type == "function")
+
+        # Signature should include the function name: "app.init = function init()"
+        # not just "app.init = function()"
+        assert "function init(" in init_func.signature, (
+            f"Signature should contain 'function init(', got: {init_func.signature}"
+        )
+
+    def test_obj_prop_anonymous_function(self):
+        """obj.prop = function() {} uses property name as function name."""
+        code = """app.render = function(name, options, callback) {
+  var done = callback;
+};
+"""
+        elements = self._parse(code)
+        render_func = next(
+            (e for e in elements if e.name == "render" and e.element_type == "function"),
+            None
+        )
+        assert render_func is not None, "Expected anonymous function to use property name 'render'"
+
+    def test_prototype_method_extraction(self):
+        """Constructor.prototype.method = function() {} is extracted."""
+        code = """View.prototype.lookup = function lookup() {
+  var path = this.name;
+  return path;
+};
+
+View.prototype.render = function render(options, callback) {
+  this.engine(this.path, options, callback);
+};
+"""
+        elements = self._parse(code)
+        functions = [e for e in elements if e.element_type == "function"]
+        func_names = {f.name for f in functions}
+
+        assert "lookup" in func_names, f"Expected 'lookup', got {func_names}"
+        assert "render" in func_names, f"Expected 'render', got {func_names}"
+
+    def test_prototype_method_signature(self):
+        """Prototype method signature includes prototype chain."""
+        code = """View.prototype.lookup = function lookup(name) {
+  return name;
+};
+"""
+        elements = self._parse(code)
+        lookup = next(e for e in elements if e.name == "lookup" and e.element_type == "function")
+
+        assert "View.prototype.lookup" in lookup.signature, (
+            f"Signature should contain 'View.prototype.lookup', got: {lookup.signature}"
+        )
+
+    def test_exports_named_function(self):
+        """exports.xxx = function name() {} is extracted."""
+        code = """exports.setCharset = function setCharset(type, charset) {
+  return type;
+};
+"""
+        elements = self._parse(code)
+        func = next(
+            (e for e in elements if e.name == "setCharset" and e.element_type == "function"),
+            None
+        )
+        assert func is not None, "Expected exports function 'setCharset'"
+
+    def test_exports_anonymous_function(self):
+        """exports.xxx = function() {} uses property name."""
+        code = """exports.normalizeType = function(type) {
+  return type;
+};
+"""
+        elements = self._parse(code)
+        func = next(
+            (e for e in elements if e.name == "normalizeType" and e.element_type == "function"),
+            None
+        )
+        assert func is not None, "Expected exports function 'normalizeType'"
+
+    def test_assignment_function_parameters(self):
+        """Assignment functions extract parameters correctly."""
+        code = """app.use = function use(fn, opts) {
+  return fn;
+};
+"""
+        elements = self._parse(code)
+        use_func = next(e for e in elements if e.name == "use" and e.element_type == "function")
+
+        assert use_func.parameters is not None, "Expected parameters to be extracted"
+        # Parameters may be dicts or objects depending on serialization
+        param_names = [
+            p["name"] if isinstance(p, dict) else p.name
+            for p in use_func.parameters
+        ]
+        assert "fn" in param_names, f"Expected 'fn' in params, got {param_names}"
+        assert "opts" in param_names, f"Expected 'opts' in params, got {param_names}"
+
+
+# =============================================================================
+# COMMONJS REQUIRE() AS IMPORT ELEMENTS
+# =============================================================================
+
+
+class TestCommonJSRequireElements:
+    """Tests for CommonJS require() being captured as import elements."""
+
+    def _parse(self, code: str) -> list:
+        parser = JavaScriptParser()
+        file_info = FileInfo(
+            relative_path="module.js",
+            absolute_path=Path("/fake/module.js"),
+            language="javascript",
+        )
+        return parser.parse(code, file_info, "scope", "repo", "main")
+
+    def test_var_require_creates_import_element(self):
+        """var x = require('mod') should create an import element."""
+        code = """var http = require('http');
+var path = require('path');
+"""
+        elements = self._parse(code)
+        import_elems = [e for e in elements if e.element_type == "import"]
+
+        import_names = {e.name for e in import_elems}
+        assert "http" in import_names, (
+            f"Expected import element for 'http', got: {import_names}"
+        )
+        assert "path" in import_names, (
+            f"Expected import element for 'path', got: {import_names}"
+        )
+
+    def test_const_require_creates_import_element(self):
+        """const x = require('mod') should create an import element."""
+        code = """const express = require('express');
+"""
+        elements = self._parse(code)
+        import_elems = [e for e in elements if e.element_type == "import"]
+
+        assert any(e.name == "express" for e in import_elems), (
+            f"Expected import element for 'express', got: {[e.name for e in import_elems]}"
+        )
+
+    def test_chained_require_creates_import(self):
+        """var debug = require('debug')('app') should create an import."""
+        code = """var debug = require('debug')('express:view');
+"""
+        elements = self._parse(code)
+        file_elem = next(e for e in elements if e.element_type == "file")
+
+        # Should be captured as import on the file element
+        import_names = {i.name for i in file_elem.imports}
+        assert "debug" in import_names, (
+            f"Expected import for 'debug' from chained require, got: {import_names}"
+        )
+
+    def test_require_not_duplicated_as_variable(self):
+        """require() should create import elements, not variable elements."""
+        code = """var http = require('http');
+const express = require('express');
+"""
+        elements = self._parse(code)
+
+        # Should not have variable elements for require imports
+        var_elems = [e for e in elements if e.element_type == "variable"]
+        var_names = {e.name for e in var_elems}
+        assert "http" not in var_names, (
+            f"'http' should be import, not variable: {var_names}"
+        )
+        assert "express" not in var_names, (
+            f"'express' should be import, not variable: {var_names}"
+        )
+
+    def test_require_import_element_signature(self):
+        """Import elements from require() should have readable signatures."""
+        code = """const express = require('express');
+"""
+        elements = self._parse(code)
+        import_elems = [e for e in elements if e.element_type == "import"]
+
+        assert len(import_elems) > 0, "Expected at least one import element"
+        express_import = next(e for e in import_elems if e.name == "express")
+        assert express_import.signature is not None, "Import element should have a signature"
+
+    def test_mixed_imports_and_requires(self):
+        """Both ES6 imports and require() should create import elements."""
+        code = """import { useState } from 'react';
+const path = require('path');
+"""
+        elements = self._parse(code)
+        import_elems = [e for e in elements if e.element_type == "import"]
+
+        import_names = {e.name for e in import_elems}
+        assert "react" in import_names or "useState" in import_names, (
+            f"Expected ES6 import element, got: {import_names}"
+        )
+        assert "path" in import_names, (
+            f"Expected require import element for 'path', got: {import_names}"
+        )
