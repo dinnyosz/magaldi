@@ -350,6 +350,182 @@ class ElementRepository:
 
         return result
 
+    def get_element_processing_state_light(
+        self, element_ids: list[str]
+    ) -> dict[str, dict[str, Any]]:
+        """Get minimal processing state for skip-ai mode (no embeddings).
+
+        Only fetches content_hash and summary existence, avoiding the ~400-600MB
+        embedding vector transfer that get_element_processing_state() incurs.
+
+        Args:
+            element_ids: List of element IDs to check.
+
+        Returns:
+            Dict mapping element_id to {content_hash, has_summary, craft_reason}.
+        """
+        if not element_ids:
+            return {}
+
+        client = self._get_client()
+
+        response = client.mget(
+            INDEX_NAME,
+            element_ids,
+            source=["content_hash", "summary", "craft_reason"],
+        )
+
+        result = {}
+        for doc in response["docs"]:
+            if doc.get("found", False):
+                source = doc.get("_source", {})
+                summary = source.get("summary")
+                result[doc["_id"]] = {
+                    "content_hash": source.get("content_hash"),
+                    "has_summary": isinstance(summary, str) and len(summary) > 0,
+                    "craft_reason": source.get("craft_reason"),
+                }
+
+        return result
+
+    def index_element_complete(
+        self,
+        element: CodeElement,
+        summary: str,
+        indexed_at: datetime | None = None,
+        file_hash: str | None = None,
+        element_count: int | None = None,
+        craft_reason: str | None = None,
+        imports: list[dict] | None = None,
+        calls: list[dict] | None = None,
+    ) -> bool:
+        """Index element with summary, imports, and calls in a single operation.
+
+        Merges all data into one bulk index op instead of 2-4 separate ops
+        (index + update summary + update imports + update calls). Used by
+        skip-ai fast path to reduce OpenSearch operations from ~34k-68k to ~17k.
+
+        Args:
+            element: Code element to index.
+            summary: Summary text.
+            indexed_at: Timestamp for indexing.
+            file_hash: File hash for change detection.
+            element_count: Total element count in file (file-level only).
+            craft_reason: Why handcrafted, or None for LLM.
+            imports: Import data for file elements.
+            calls: Call data for function/method elements.
+
+        Returns:
+            True on success.
+        """
+        if indexed_at is None:
+            indexed_at = datetime.now()
+
+        doc = {
+            "element_id": element.element_id,
+            "hash_id": generate_hash_id(element.element_id),
+            "scope": element.scope,
+            "repository": element.repository,
+            "username": element.username,
+            "relative_path": element.relative_path,
+            "element_type": element.element_type,
+            "name": element.name,
+            "language": element.language,
+            "line_start": element.line_start,
+            "line_end": element.line_end,
+            "raw_code": element.raw_code,
+            "signature": element.signature,
+            "docstring": element.docstring,
+            "level": element.level,
+            "parent_id": element.parent_id,
+            "decorators": element.decorators,
+            "visibility": element.visibility,
+            "is_async": element.is_async,
+            "is_test": element.is_test,
+            "content_hash": element.content_hash,
+            "indexed_at": indexed_at.isoformat(),
+            # Merge summary directly into the document
+            "summary": summary,
+        }
+
+        if file_hash is not None:
+            doc["file_hash"] = file_hash
+        if element_count is not None:
+            doc["element_count"] = element_count
+        if craft_reason is not None:
+            doc["craft_reason"] = craft_reason
+        if imports is not None:
+            doc["imports"] = imports
+        if calls is not None:
+            doc["calls"] = calls
+
+        # Enhanced context fields
+        if element.class_attributes:
+            doc["class_attributes"] = element.class_attributes
+        if element.base_classes:
+            doc["base_classes"] = element.base_classes
+        if element.exceptions_raised:
+            doc["exceptions_raised"] = element.exceptions_raised
+        if element.attributes_modified:
+            doc["attributes_modified"] = element.attributes_modified
+        if element.decorator_details:
+            doc["decorator_details"] = element.decorator_details
+        if element.return_type:
+            doc["return_type"] = element.return_type
+        if element.parameters:
+            doc["parameters"] = element.parameters
+
+        # Extended code intelligence fields
+        if element.type_annotations:
+            doc["type_annotations"] = element.type_annotations
+        if element.detected_patterns:
+            doc["detected_patterns"] = element.detected_patterns
+        if element.pattern_confidence:
+            doc["pattern_confidence"] = element.pattern_confidence
+        if element.todos:
+            doc["todos"] = element.todos
+        if element.section_markers:
+            doc["section_markers"] = element.section_markers
+        if element.associated_comments:
+            doc["associated_comments"] = element.associated_comments
+        if element.is_public_api:
+            doc["is_public_api"] = element.is_public_api
+        if element.http_routes:
+            doc["http_routes"] = element.http_routes
+        if element.cli_commands:
+            doc["cli_commands"] = element.cli_commands
+        if element.purity:
+            doc["purity"] = element.purity
+        if element.side_effects:
+            doc["side_effects"] = element.side_effects
+        if element.mutated_state:
+            doc["mutated_state"] = element.mutated_state
+
+        # Code metrics fields
+        if element.complexity:
+            doc["complexity"] = element.complexity
+        if element.code_metrics:
+            doc["code_metrics"] = element.code_metrics
+        if element.docstring_quality:
+            doc["docstring_quality"] = element.docstring_quality
+        if element.security_issues:
+            doc["security_issues"] = element.security_issues
+        if element.env_vars:
+            doc["env_vars"] = element.env_vars
+        if element.concurrency:
+            doc["concurrency"] = element.concurrency
+        if element.metrics_summary:
+            doc["metrics_summary"] = element.metrics_summary
+        if element.document_sections:
+            doc["document_sections"] = element.document_sections
+
+        if self._bulk_buffer is not None:
+            self._bulk_buffer.add_index(element.element_id, doc)
+        else:
+            client = self._get_client()
+            client.index_document(INDEX_NAME, element.element_id, doc)
+        return True
+
     def find_elements_by_content_hash(
         self,
         scope: str,

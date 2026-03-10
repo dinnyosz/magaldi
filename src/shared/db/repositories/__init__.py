@@ -167,6 +167,34 @@ class Repository:
         """Get content hash and summary state for smart skip logic."""
         return self._elements.get_element_processing_state(element_ids)
 
+    def get_element_processing_state_light(
+        self, element_ids: list[str]
+    ) -> dict[str, dict[str, Any]]:
+        """Get minimal processing state for skip-ai mode (no embeddings)."""
+        return self._elements.get_element_processing_state_light(element_ids)
+
+    def index_element_complete(
+        self,
+        element: CodeElement,
+        summary: str,
+        indexed_at: datetime | None = None,
+        file_hash: str | None = None,
+        element_count: int | None = None,
+        craft_reason: str | None = None,
+        imports: list[dict] | None = None,
+        calls: list[dict] | None = None,
+    ) -> bool:
+        """Index element with summary, imports, and calls in a single operation."""
+        return self._elements.index_element_complete(
+            element, summary,
+            indexed_at=indexed_at,
+            file_hash=file_hash,
+            element_count=element_count,
+            craft_reason=craft_reason,
+            imports=imports,
+            calls=calls,
+        )
+
     def find_elements_by_content_hash(
         self,
         scope: str,
