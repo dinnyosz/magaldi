@@ -108,6 +108,153 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
+# SKIP-AI FAST PATH
+# =============================================================================
+
+
+def _process_skip_ai_fast(
+    elements_to_process: list[CodeElement],
+    repo: Repository,
+    file_hashes: dict[str, str] | None,
+    element_counts: dict[str, int] | None,
+    result: ProcessingResult,
+    total_found: int,
+    on_progress: Callable[[ProgressState], None] | None = None,
+) -> ProcessingResult:
+    """Fast path for skip-ai mode: synchronous level-by-level indexing.
+
+    Bypasses ThreadPoolExecutor, DependencyTracker, LLM clients, and embedding.
+    Processes elements in hierarchy order using a tight loop with merged writes.
+
+    Key optimizations vs normal path:
+    - Single-threaded (no lock contention on bulk buffer)
+    - 1 bulk op per element (vs 2-4 separate index+update ops)
+    - Larger bulk buffer (2000 ops, fewer flush round-trips)
+    - No per-element overhead (model selection, status tracking, etc.)
+
+    Args:
+        elements_to_process: Elements that need processing (after skip filtering).
+        repo: Search repository for indexing.
+        file_hashes: Optional dict mapping relative_path to file hash.
+        element_counts: Optional dict mapping relative_path to element count.
+        result: ProcessingResult to update with counts.
+        total_found: Total elements found (for progress display).
+        on_progress: Optional progress callback.
+
+    Returns:
+        Updated ProcessingResult.
+    """
+    from datetime import datetime
+
+    total = len(elements_to_process)
+    timing_stats = TimingStats()
+    worker_status = WorkerStatus()
+    timing_stats.phase_start = time.time()
+
+    # Group by level for hierarchy ordering (files → classes → methods → variables)
+    by_level: dict[int, list[CodeElement]] = {}
+    for elem in elements_to_process:
+        by_level.setdefault(elem.level, []).append(elem)
+
+    completed_count = 0
+    now = datetime.now()
+
+    # Use a large bulk buffer to minimize flush frequency.
+    # Single-threaded, so no lock contention — can batch aggressively.
+    with repo.bulk_buffer(max_count=2000, max_interval=10.0):
+        for level in sorted(by_level.keys()):
+            level_elements = by_level[level]
+
+            for elem in level_elements:
+                # Generate simple summary (same as helpers.py L707)
+                summary = f"{elem.element_type.title()}: {elem.name}"
+
+                # Prepare imports for file elements
+                imports_data = None
+                if elem.element_type == "file" and elem.imports:
+                    imports_data = [
+                        {
+                            "name": imp.name,
+                            "module": imp.module,
+                            "alias": imp.alias,
+                            "line": imp.line,
+                        }
+                        for imp in elem.imports
+                    ]
+
+                # Prepare calls for function/method/file elements
+                calls_data = None
+                if elem.element_type in ("function", "method", "file") and elem.calls:
+                    calls_data = [
+                        {
+                            "name": call.name,
+                            "receiver": call.receiver,
+                            "line": call.line,
+                            "resolved_id": call.resolved_id,
+                            "category": call.category,
+                        }
+                        for call in elem.calls
+                    ]
+
+                # File hash and element count
+                file_hash = file_hashes.get(elem.relative_path) if file_hashes else None
+                element_count = None
+                if elem.element_type == "file" and element_counts:
+                    element_count = element_counts.get(elem.relative_path)
+
+                # Single merged write operation (1 bulk op instead of 2-4)
+                repo.index_element_complete(
+                    elem,
+                    summary,
+                    indexed_at=now,
+                    file_hash=file_hash,
+                    element_count=element_count,
+                    imports=imports_data,
+                    calls=calls_data,
+                )
+
+                result.elements_processed += 1
+                result.indexed += 1
+                completed_count += 1
+
+                # Progress callback every 500 elements (avoid callback overhead)
+                if on_progress and completed_count % 500 == 0:
+                    progress_state = ProgressState(
+                        total=total,
+                        completed=completed_count,
+                        skipped=result.elements_skipped,
+                        failed=0,
+                        timing=timing_stats,
+                        workers=worker_status,
+                        num_workers=1,
+                        recent_errors=[],
+                        parallelism=None,
+                        total_found=total_found,
+                        non_ai_skipped=0,
+                    )
+                    on_progress(progress_state)
+
+    # Final progress callback
+    if on_progress:
+        progress_state = ProgressState(
+            total=total,
+            completed=completed_count,
+            skipped=result.elements_skipped,
+            failed=0,
+            timing=timing_stats,
+            workers=worker_status,
+            num_workers=1,
+            recent_errors=[],
+            parallelism=None,
+            total_found=total_found,
+            non_ai_skipped=0,
+        )
+        on_progress(progress_state)
+
+    return result
+
+
+# =============================================================================
 # MAIN PROCESSING FUNCTION
 # =============================================================================
 
@@ -387,6 +534,22 @@ def process_elements(
             )
             on_progress(progress_state)
         return result
+
+    # =====================================================================
+    # SKIP-AI FAST PATH: synchronous level-by-level indexing
+    # Bypasses ThreadPoolExecutor, DependencyTracker, LLM clients.
+    # Single-threaded tight loop with merged writes (1 op/element).
+    # =====================================================================
+    if config.skip_ai:
+        return _process_skip_ai_fast(
+            elements_to_process=elements_to_process,
+            repo=repo,
+            file_hashes=file_hashes,
+            element_counts=element_counts,
+            result=result,
+            total_found=total_found,
+            on_progress=on_progress,
+        )
 
     # Summary cache for hierarchical context
     summary_cache = SummaryCache()
