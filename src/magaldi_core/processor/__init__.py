@@ -542,48 +542,58 @@ def process_elements(
 
     try:
         while not dependency_tracker.is_complete():
-            # Get current max from active workers (for emergency throttling)
-            current_max_runtime = worker_status.get_max_active_runtime()
+            # skip_ai: no LLM/embedding work, just indexing — use all workers, no throttling
+            if config.skip_ai:
+                throttle_limit = max_workers
+                ready_elements = dependency_tracker.get_ready_elements(
+                    max_count=max_workers * 2,
+                    skip_throttling=True,
+                )
+                # Consume tier-change flag to avoid stale state
+                dependency_tracker.did_tier_just_change()
+            else:
+                # Get current max from active workers (for emergency throttling)
+                current_max_runtime = worker_status.get_max_active_runtime()
 
-            # Get current time and active worker count for throttle decisions
-            time.time()
-            active_workers = worker_status.active_count()
+                # Get current time and active worker count for throttle decisions
+                time.time()
+                active_workers = worker_status.active_count()
 
-            # Get throughput-based stats for adaptive throttling (with concurrency context)
-            throughput, avg_runtime, completion_count, avg_concurrency, high_load_avg = (
-                timing_stats.get_throughput_stats_with_concurrency()
-            )
-            remaining = dependency_tracker.pending_count()
-            all_levels = timing_stats.get_all_throughput_levels()
-            current_throttle = dependency_tracker.compute_throttle_decision(
-                current_max_runtime, active_workers, throughput, avg_runtime, completion_count,
-                avg_concurrency, high_load_avg,
-                all_levels=all_levels,
-                remaining=remaining,
-            )
+                # Get throughput-based stats for adaptive throttling (with concurrency context)
+                throughput, avg_runtime, completion_count, avg_concurrency, high_load_avg = (
+                    timing_stats.get_throughput_stats_with_concurrency()
+                )
+                remaining = dependency_tracker.pending_count()
+                all_levels = timing_stats.get_all_throughput_levels()
+                current_throttle = dependency_tracker.compute_throttle_decision(
+                    current_max_runtime, active_workers, throughput, avg_runtime, completion_count,
+                    avg_concurrency, high_load_avg,
+                    all_levels=all_levels,
+                    remaining=remaining,
+                )
 
-            # Always use recommended_workers as the limit (includes ramp-up logic)
-            # Even when not throttling, we ramp up gradually to avoid overwhelming
-            throttle_limit = current_throttle.recommended_workers
+                # Always use recommended_workers as the limit (includes ramp-up logic)
+                # Even when not throttling, we ramp up gradually to avoid overwhelming
+                throttle_limit = current_throttle.recommended_workers
 
-            # Clear post_warmup flag AFTER getting throttle_limit (not in display calls)
-            # This ensures the flag is only consumed once per warmup, for the main calculation
-            dependency_tracker.clear_post_warmup()
+                # Clear post_warmup flag AFTER getting throttle_limit (not in display calls)
+                # This ensures the flag is only consumed once per warmup, for the main calculation
+                dependency_tracker.clear_post_warmup()
 
-            # Get elements that are ready (parents completed)
-            # DependencyTracker applies tier-specific limits internally
-            # Pass throttle_limit to further reduce concurrency if needed
-            ready_elements = dependency_tracker.get_ready_elements(
-                max_count=max_workers * 2,
-                throttle_limit=throttle_limit,
-            )
+                # Get elements that are ready (parents completed)
+                # DependencyTracker applies tier-specific limits internally
+                # Pass throttle_limit to further reduce concurrency if needed
+                ready_elements = dependency_tracker.get_ready_elements(
+                    max_count=max_workers * 2,
+                    throttle_limit=throttle_limit,
+                )
 
-            # Reset throughput history on tier/model change so stale data
-            # from a different tier doesn't pollute throttling decisions
-            if dependency_tracker.did_tier_just_change():
-                timing_stats.reset_throughput()
-                current_submit_model = dependency_tracker.get_current_model()
-                current_submit_tier = dependency_tracker.get_current_tier()
+                # Reset throughput history on tier/model change so stale data
+                # from a different tier doesn't pollute throttling decisions
+                if dependency_tracker.did_tier_just_change():
+                    timing_stats.reset_throughput()
+                    current_submit_model = dependency_tracker.get_current_model()
+                    current_submit_tier = dependency_tracker.get_current_tier()
 
             # Submit new tasks for ready elements
             # Track allowed workers at start for throughput calculation

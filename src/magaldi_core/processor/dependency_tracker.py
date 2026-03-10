@@ -162,6 +162,7 @@ class DependencyTracker:
         self,
         max_count: int = 10,
         throttle_limit: int | None = None,
+        skip_throttling: bool = False,
     ) -> list[CodeElement]:
         """Get elements ready for processing (parent done, not started).
 
@@ -173,18 +174,41 @@ class DependencyTracker:
         Throttling:
         - Runtime-based throttle_limit reduces workers when approaching timeout
         - Tier warmup limits to 1 task during model/tier transitions
+        - skip_throttling=True bypasses all throttling/warmup (for skip_ai mode)
 
         Args:
             max_count: Maximum elements to return.
             throttle_limit: If set, reduces worker limit for runtime throttling.
+            skip_throttling: If True, use max workers with no warmup/drain/throttle.
         """
         with self._lock:
             ready = self._get_all_ready()
             if not ready:
                 return []
 
+            # Fast path: skip_throttling mode (no LLM → no model warmup needed)
+            # Only respect parent-child hierarchy, use all available workers
+            if skip_throttling:
+                # Group by level to respect parent deps
+                by_level: dict[int, list[CodeElement]] = {}
+                for elem in ready:
+                    level = self._get_level(elem)
+                    by_level.setdefault(level, []).append(elem)
+
+                target_level = min(by_level.keys())
+                level_ready = by_level[target_level]
+
+                total_in_progress = len(self._in_progress)
+                slots_available = max(0, self._max_num_workers - total_in_progress)
+                effective_limit = min(max_count, slots_available)
+                batch = level_ready[:effective_limit]
+
+                for e in batch:
+                    self._in_progress.add(e.element_id)
+                return batch
+
             # First, group by hierarchy level to ensure parents processed before children
-            by_level: dict[int, list[CodeElement]] = {}
+            by_level = {}
             for elem in ready:
                 level = self._get_level(elem)
                 by_level.setdefault(level, []).append(elem)

@@ -301,6 +301,96 @@ class TestDependencyTracker:
 
 
 # =============================================================================
+# SKIP THROTTLING TESTS (skip_ai mode)
+# =============================================================================
+
+
+class TestSkipThrottling:
+    """Tests for skip_throttling mode in DependencyTracker.
+
+    When skip_ai is set, there's no LLM work — only indexing.
+    The throttling/warmup/drain logic should be bypassed.
+    """
+
+    def test_skip_throttling_returns_all_ready_at_once(self):
+        """With skip_throttling, all ready elements at a level are returned immediately."""
+        elems = [
+            make_element(f"scope:repo:user:f{i}.py:file:f{i}.py:1", "file", None, 0)
+            for i in range(5)
+        ]
+        tracker = DependencyTracker(elems, max_num_workers=8)
+
+        ready = tracker.get_ready_elements(max_count=20, skip_throttling=True)
+        assert len(ready) == 5
+
+    def test_skip_throttling_no_warmup_limit(self):
+        """Without skip_throttling, first call returns only 1 (warmup). With it, returns all."""
+        elems = [
+            make_element(f"scope:repo:user:f{i}.py:file:f{i}.py:1", "file", None, 0)
+            for i in range(5)
+        ]
+
+        # Without skip_throttling: warmup limits to 1
+        tracker_normal = DependencyTracker(elems, max_num_workers=8)
+        ready_normal = tracker_normal.get_ready_elements(max_count=20)
+        assert len(ready_normal) == 1  # warmup limit
+
+        # With skip_throttling: all ready
+        tracker_skip = DependencyTracker(elems, max_num_workers=8)
+        ready_skip = tracker_skip.get_ready_elements(max_count=20, skip_throttling=True)
+        assert len(ready_skip) == 5
+
+    def test_skip_throttling_respects_max_workers(self):
+        """skip_throttling should still cap at max_num_workers."""
+        elems = [
+            make_element(f"scope:repo:user:f{i}.py:file:f{i}.py:1", "file", None, 0)
+            for i in range(10)
+        ]
+        tracker = DependencyTracker(elems, max_num_workers=3)
+
+        ready = tracker.get_ready_elements(max_count=20, skip_throttling=True)
+        assert len(ready) == 3  # capped at max_num_workers
+
+    def test_skip_throttling_respects_parent_deps(self):
+        """skip_throttling still enforces parent-child hierarchy."""
+        parent = make_element("scope:repo:user:file.py:file:file.py:1", "file", None, 0)
+        child = make_element(
+            "scope:repo:user:file.py:method:my_method:5", "method", parent.element_id, 2
+        )
+        tracker = DependencyTracker([parent, child], max_num_workers=8)
+
+        # Only parent should be ready (child needs parent first)
+        ready = tracker.get_ready_elements(max_count=20, skip_throttling=True)
+        assert len(ready) == 1
+        assert ready[0].element_id == parent.element_id
+
+        tracker.mark_complete(parent.element_id)
+
+        # Now child should be ready
+        ready = tracker.get_ready_elements(max_count=20, skip_throttling=True)
+        assert len(ready) == 1
+        assert ready[0].element_id == child.element_id
+
+    def test_skip_throttling_no_tier_drain(self):
+        """skip_throttling should not drain on tier/model changes."""
+        # Mix of file (large model) and method (small model) — different tiers
+        file_elem = make_element("scope:repo:user:f.py:file:f.py:1", "file", None, 0)
+        method1 = make_element("scope:repo:user:f.py:method:m1:5", "method", file_elem.element_id, 2)
+        method2 = make_element("scope:repo:user:f.py:method:m2:10", "method", file_elem.element_id, 2)
+
+        tracker = DependencyTracker([file_elem, method1, method2], max_num_workers=8)
+
+        # Get file
+        ready = tracker.get_ready_elements(max_count=20, skip_throttling=True)
+        assert len(ready) == 1
+        tracker.mark_complete(file_elem.element_id)
+
+        # Both methods should be available immediately (no drain)
+        ready = tracker.get_ready_elements(max_count=20, skip_throttling=True)
+        assert len(ready) == 2
+
+
+# =============================================================================
 # PROCESSING CONFIG TESTS
 # =============================================================================
 
