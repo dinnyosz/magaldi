@@ -108,6 +108,8 @@ def extract_javascript_elements(
                 name = get_node_text(name_node) if name_node else "unknown"
                 if value_node and value_node.type == "arrow_function":
                     elements.append(_extract_js_arrow_function(decl, name, lines))
+                elif value_node and value_node.type in _FUNCTION_EXPRESSION_TYPES:
+                    elements.append(_extract_js_function_expression(decl, name, lines))
                 elif value_node and value_node.type == "call_expression":
                     # Check for require() calls: const x = require('mod')
                     req_elem = _extract_js_require_import(node, decl, name, value_node, lines)
@@ -136,6 +138,8 @@ def extract_javascript_elements(
                 name = get_node_text(name_node) if name_node else "unknown"
                 if value_node and value_node.type == "arrow_function":
                     elements.append(_extract_js_arrow_function(decl, name, lines))
+                elif value_node and value_node.type in _FUNCTION_EXPRESSION_TYPES:
+                    elements.append(_extract_js_function_expression(decl, name, lines))
                 elif value_node and value_node.type == "call_expression":
                     # Check for require() calls: var x = require('mod')
                     req_elem = _extract_js_require_import(node, decl, name, value_node, lines)
@@ -306,6 +310,72 @@ def _extract_js_arrow_function(node: Node, name: str, _lines: list[str]) -> Extr
     )
 
 
+_FUNCTION_EXPRESSION_TYPES = frozenset({
+    "function_expression",
+    "function",
+    "generator_function",
+})
+
+
+def _extract_js_function_expression(node: Node, name: str, _lines: list[str]) -> ExtractedElement:
+    """Extract a function expression assigned to a variable.
+
+    Handles patterns like:
+        const myFunc = function(x) { return x; };
+        const myFunc = async function(x) { return x; };
+        const myGen = function*(x) { yield x; };
+        const myAsyncGen = async function*(x) { yield x; };
+
+    Args:
+        node: The variable_declarator node containing the function expression.
+        name: The name of the function (from the variable name).
+        lines: Source code lines.
+    """
+    line_start = node.start_point[0] + 1
+    line_end = node.end_point[0] + 1
+    raw_code = node.text.decode('utf-8') if node.text else ""
+
+    # Get the actual function expression node
+    value_node = get_child_by_field(node, "value")
+    func_node = value_node if value_node and value_node.type in _FUNCTION_EXPRESSION_TYPES else node
+
+    # Extract parameters, return type
+    params_node = get_child_by_field(func_node, "parameters") if func_node.type in _FUNCTION_EXPRESSION_TYPES else None
+    params = get_node_text(params_node) if params_node else "()"
+    parameters = extract_js_parameters(params_node) if params_node else []
+    return_type = extract_js_return_type(func_node) if func_node.type in _FUNCTION_EXPRESSION_TYPES else None
+
+    # Check for async keyword
+    is_async = any(child.type == "async" for child in func_node.children)
+
+    # Check for generator (function* or async function*)
+    is_generator = func_node.type == "generator_function"
+
+    signature = f"{'async ' if is_async else ''}function{'*' if is_generator else ''} {name}{params}"
+    if return_type:
+        signature += f": {return_type}"
+
+    # Check if this is a React hook
+    decorators = ["hook"] if is_react_hook(name) else None
+    decorator_details = [DecoratorInfo(name="hook", args=None, full="hook")] if decorators else None
+
+    return ExtractedElement(
+        element_type="function",
+        name=name,
+        line_start=line_start,
+        line_end=line_end,
+        raw_code=raw_code,
+        byte_offset=node.start_byte,
+        signature=signature,
+        is_async=is_async,
+        node=func_node,
+        return_type=return_type,
+        parameters=parameters or None,
+        decorators=decorators,
+        decorator_details=decorator_details,
+    )
+
+
 def _extract_js_assignment_function(
     expr_stmt: Node, _lines: list[str]
 ) -> ExtractedElement | None:
@@ -333,8 +403,8 @@ def _extract_js_assignment_function(
     if not left or not right:
         return None
 
-    # Right side must be a function expression or arrow function
-    if right.type not in ("function_expression", "function", "arrow_function"):
+    # Right side must be a function expression, generator function, or arrow function
+    if right.type not in ("function_expression", "function", "generator_function", "arrow_function"):
         return None
 
     # Left side must be a member expression (obj.method)
