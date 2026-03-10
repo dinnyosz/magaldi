@@ -27,7 +27,6 @@ REPOS=(
   "fastapi/fastapi|3|python"                         # Library: decorators, type hints, async
   "pydantic/pydantic|3|python"                       # Library: dataclasses, generics, validators
   "tiangolo/full-stack-fastapi-template|3|python"    # App using FastAPI/Pydantic/SQLModel
-  "home-assistant/core|3|python"                     # App: massive real-world, async, decorators
 
   # JavaScript
   "sindresorhus/got|1|javascript"
@@ -44,7 +43,6 @@ REPOS=(
   "drizzle-team/drizzle-orm|2|typescript"
   "prisma/prisma|3|typescript"                       # Library: complex monorepo
   "typeorm/typeorm|3|typescript"                     # Library: decorators, ORM patterns
-  "calcom/cal.com|3|typescript"                      # App: Next.js + tRPC + Prisma + zod
   "immich-app/immich|3|typescript"                   # App: NestJS backend + React frontend
 
   # PHP
@@ -54,7 +52,6 @@ REPOS=(
   "laravel/framework|3|php"                          # Library: all PHP patterns
   "symfony/console|3|php"                            # Library: CLI component
   "firefly-iii/firefly-iii|3|php"                    # App: Laravel finance tracker
-  "matomo-org/matomo|3|php"                          # App: analytics platform
 
   # Rust
   "sharkdp/fd|1|rust"
@@ -62,7 +59,6 @@ REPOS=(
   "sharkdp/bat|2|rust"
   "tokio-rs/tokio|3|rust"                            # Library: async runtime, macros
   "serde-rs/serde|3|rust"                            # Library: proc macros, derives
-  "astral-sh/ruff|3|rust"                            # App using tokio, serde, clap
   "zellij-org/zellij|3|rust"                         # App: terminal, async, traits, enums
 
   # Java
