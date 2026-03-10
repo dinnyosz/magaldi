@@ -77,7 +77,7 @@ def get_call_graph(
 
     # Find callees (what this function calls) using indexed call data
     if direction in ("callees", "both"):
-        calls = repo.get_calls(element_id)
+        calls = repo.get_calls(target_element_id)
         for call in calls:
             callee_entry: dict[str, Any] = {
                 "name": call.get("name"),
