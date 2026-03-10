@@ -365,6 +365,14 @@ def parse(
         if not dry_run and indexed > 0:
             from shared.db.store import Repository
             repo = Repository(config)
+
+            # Refresh index so Phase 5's bulk writes are searchable.
+            # The bulk buffer flushes with refresh=False for performance,
+            # so data isn't visible to queries until the next auto-refresh
+            # (default 1s).  For fast repos (especially with --skip-ai),
+            # Phase 6 can start before auto-refresh fires, causing 0 results.
+            repo.refresh()
+
             run_logger.start_phase("Hierarchy Extraction")
             console.print("\n  [bold]Hierarchy Extraction[/]")
             try:
@@ -406,6 +414,9 @@ def parse(
                 console.print(f"  [yellow]Warning: Call resolution failed: {rich_escape(str(e))}[/]")
                 run_logger.log_error("call_resolution", str(e))
                 run_logger.end_phase({"error": str(e)})
+
+            # Refresh after call resolution writes (bulk buffer uses refresh=False)
+            repo.refresh()
 
         # Phase 7: Feature Extraction (opt-in with --features)
         if features and not skip_ai and not dry_run and processed > 0:

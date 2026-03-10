@@ -124,15 +124,30 @@ class Repository:
             self._glossary._bulk_buffer = None
 
     def flush(self) -> None:
-        """Flush the bulk buffer if active, making buffered writes visible.
+        """Flush the bulk buffer if active, sending buffered writes to the backend.
 
-        No-op when no bulk buffer is active.  Call this between dependent
-        phases (e.g. between call-resolution strategies) to ensure earlier
-        writes are searchable before the next phase reads.
+        No-op when no bulk buffer is active.  Note: flushed writes use
+        ``refresh=False`` so they may not be immediately searchable.
+        Call :meth:`refresh` after flushing to make writes visible to queries.
         """
         buf = self._metadata._bulk_buffer
         if buf is not None:
             buf.flush()
+
+    def refresh(self) -> None:
+        """Refresh the search index so recent writes become searchable.
+
+        The bulk buffer flushes with ``refresh=False`` for performance, so
+        documents are written but not visible to queries until the backend's
+        auto-refresh interval (default 1s).  Call this between phases where
+        one phase writes data and the next phase queries it.
+
+        Safe to call at any time — no-op cost is negligible.
+        """
+        from .base import INDEX_NAME
+
+        client = self._base._get_client()
+        client.indices_refresh(INDEX_NAME)
 
     # =========================================================================
     # Element operations (delegated to ElementRepository)

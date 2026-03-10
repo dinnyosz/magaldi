@@ -269,8 +269,10 @@ def resolve_all_calls(
         import_resolved += imp_r
         type_resolved += type_r
 
-    # Flush bulk buffer so writes from strategies 3-5 are visible
+    # Flush bulk buffer and refresh index so writes from strategies 3-5
+    # are visible to subsequent strategy queries
     repo.flush()
+    repo.refresh()
 
     # Strategy 5.5: Return-type propagation
     _step("Strategy 5.5: return-type propagation")
@@ -281,6 +283,7 @@ def resolve_all_calls(
     )
 
     repo.flush()
+    repo.refresh()
 
     # Strategy 5.6: Constructor-based type inference
     _step("Strategy 5.6: constructor inference")
@@ -291,6 +294,7 @@ def resolve_all_calls(
     )
 
     repo.flush()
+    repo.refresh()
 
     # Strategy 5.7: Scope-aware type binding (AST-based)
     _step("Strategy 5.7: scope-aware bindings")
@@ -301,6 +305,7 @@ def resolve_all_calls(
     )
 
     repo.flush()
+    repo.refresh()
 
     # Strategy 5.8: super()/parent:: call resolution
     _step("Strategy 5.8: super/parent calls")

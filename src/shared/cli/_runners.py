@@ -1094,6 +1094,10 @@ def run_call_resolution(
             except Exception as e:
                 console.print(f"  [yellow]Warning: Static call resolution failed: {rich_escape(str(e))}[/]")
 
+            # Flush + refresh so static resolution writes are visible to embedding resolution
+            repo.flush()
+            repo.refresh()
+
             # Embedding-based resolution for remaining untyped calls
             from magaldi_core.call_resolution import resolve_calls_by_embedding
 
@@ -1110,6 +1114,10 @@ def run_call_resolution(
                 console.print(f"  [yellow]Warning: Embedding call resolution failed: {rich_escape(str(e))}[/]")
         else:
             console.print("\n  [dim]Call resolution skipped (--skip-resolve)[/]")
+
+        # Flush + refresh so embedding resolution writes are visible to semantic relationships
+        repo.flush()
+        repo.refresh()
 
         # Semantic relationships always run (independent of call resolution)
         from magaldi_core.call_resolution import compute_semantic_relationships

@@ -114,6 +114,28 @@ class TestRepositoryInit:
 
 
 # =============================================================================
+# REFRESH TESTS
+# =============================================================================
+
+
+class TestRepositoryRefresh:
+    """Tests for Repository.refresh() method."""
+
+    def test_refresh_calls_indices_refresh(self, mock_repo, mock_client):
+        """refresh() calls indices_refresh on the search client."""
+        mock_repo.refresh()
+
+        mock_client.indices_refresh.assert_called_once_with("magaldi-code-elements")
+
+    def test_refresh_idempotent(self, mock_repo, mock_client):
+        """Multiple refresh() calls work without error."""
+        mock_repo.refresh()
+        mock_repo.refresh()
+
+        assert mock_client.indices_refresh.call_count == 2
+
+
+# =============================================================================
 # INDEX ELEMENT TESTS
 # =============================================================================
 

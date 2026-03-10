@@ -205,6 +205,15 @@ class TestResolveAllCallsParallel:
         # flush() should be called at least 4 times (after 3-5, 5.5, 5.6, 5.7)
         assert repo.flush.call_count >= 4
 
+    def test_refresh_called_between_strategies(self):
+        """repo.refresh() is called after each flush to make writes searchable."""
+        repo = self._make_repo([])
+
+        resolve_all_calls(repo, "scope", "repo", "main", max_workers=1)
+
+        # refresh() should be called at least 4 times (after 3-5, 5.5, 5.6, 5.7)
+        assert repo.refresh.call_count >= 4
+
     def test_on_step_callback_called(self):
         """on_step callback is invoked for each strategy phase."""
         repo = self._make_repo([])
