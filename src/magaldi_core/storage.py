@@ -146,7 +146,7 @@ class SearchRepository(Protocol):
 
     def bulk_buffer(
         self,
-        max_count: int = 50,
+        max_count: int = 300,
         max_interval: float = 5.0,
     ) -> Any:
         """Context manager for batched writes. Returns a BulkIndexBuffer."""
@@ -332,7 +332,7 @@ class InMemorySearchRepository:
     @contextmanager
     def bulk_buffer(
         self,
-        max_count: int = 50,  # noqa: ARG002
+        max_count: int = 300,  # noqa: ARG002
         max_interval: float = 5.0,  # noqa: ARG002
     ) -> Generator[None, None, None]:
         """No-op bulk buffer for in-memory implementation."""

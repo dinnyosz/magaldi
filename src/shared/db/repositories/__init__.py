@@ -82,7 +82,7 @@ class Repository:
     @contextmanager
     def bulk_buffer(
         self,
-        max_count: int = 50,
+        max_count: int = 300,
         max_interval: float = 5.0,
     ) -> Generator[BulkIndexBuffer, None, None]:
         """Context manager that batches OpenSearch writes for performance.

@@ -36,7 +36,7 @@ class BulkIndexBuffer:
         max_interval: Flush after this many seconds since last flush.
     """
 
-    DEFAULT_MAX_COUNT = 50
+    DEFAULT_MAX_COUNT = 300
     DEFAULT_MAX_INTERVAL = 5.0  # seconds
 
     def __init__(
