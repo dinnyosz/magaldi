@@ -1036,6 +1036,7 @@ def run_call_resolution(
     username: str,
     skip_resolve: bool = False,
     console: Console | None = None,
+    max_workers: int = 1,
 ) -> None:
     """Run Phase 6: Call Resolution (static + embedding + semantic relationships).
 
@@ -1046,6 +1047,7 @@ def run_call_resolution(
         username: Username/branch.
         skip_resolve: If True, skip call resolution (but still compute semantic relationships).
         console: Rich console for output.
+        max_workers: Number of threads for parallel call resolution (1 = sequential).
     """
     from rich.console import Console
 
@@ -1058,6 +1060,8 @@ def run_call_resolution(
             from magaldi_core.call_resolution import resolve_all_calls
 
             console.print("\n  [bold]Static Call Resolution[/]")
+            if max_workers > 1:
+                console.print(f"  [dim]Using {max_workers} worker threads[/]")
             try:
                 (
                     total_calls,
@@ -1066,7 +1070,11 @@ def run_call_resolution(
                     constructor_resolved,
                     scope_resolved,
                     super_resolved,
-                ) = resolve_all_calls(repo, scope, repository, username)
+                ) = resolve_all_calls(
+                    repo, scope, repository, username,
+                    max_workers=max_workers,
+                    on_step=lambda msg: console.print(f"    [dim]{msg}[/]"),
+                )
                 total_resolved = (
                     import_resolved + type_resolved + constructor_resolved
                     + scope_resolved + super_resolved

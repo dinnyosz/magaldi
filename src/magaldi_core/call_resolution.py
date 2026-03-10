@@ -213,6 +213,7 @@ def resolve_all_calls(
     repository: str,
     username: str = "main",
     max_workers: int = 1,
+    on_step: Callable[[str], None] | None = None,
 ) -> tuple[int, int, int, int, int, int]:
     """Full call resolution pass - re-resolves ALL calls in the repository.
 
@@ -229,6 +230,8 @@ def resolve_all_calls(
         repository: Repository name.
         username: Username branch.
         max_workers: Number of threads for parallel processing (1 = sequential).
+        on_step: Optional callback invoked with a description string before
+            each resolution strategy starts.  Useful for CLI progress display.
 
     Returns:
         Tuple of (total_calls_processed, import_resolved, type_resolved,
@@ -238,7 +241,10 @@ def resolve_all_calls(
     import_resolved = 0
     type_resolved = 0
 
+    _step = on_step or (lambda _msg: None)
+
     # Get ALL elements with calls (not just unresolved)
+    _step("Strategies 3-5: imports + type annotations")
     elements = repo.find_all_elements_with_calls(scope, repository, username)
     logger.info(f"Full resolution: found {len(elements)} elements with calls")
 
@@ -267,7 +273,7 @@ def resolve_all_calls(
     repo.flush()
 
     # Strategy 5.5: Return-type propagation
-    # Re-fetch elements to get updated calls after strategies 3-5
+    _step("Strategy 5.5: return-type propagation")
     elements = repo.find_all_elements_with_calls(scope, repository, username)
     return_type_count = _resolve_via_return_types(
         repo, elements, scope, repository, username,
@@ -277,7 +283,7 @@ def resolve_all_calls(
     repo.flush()
 
     # Strategy 5.6: Constructor-based type inference
-    # Re-fetch elements to get updated calls after 5.5
+    _step("Strategy 5.6: constructor inference")
     elements = repo.find_all_elements_with_calls(scope, repository, username)
     constructor_count = _resolve_via_constructors(
         repo, elements, scope, repository, username,
@@ -287,7 +293,7 @@ def resolve_all_calls(
     repo.flush()
 
     # Strategy 5.7: Scope-aware type binding (AST-based)
-    # Re-fetch elements to get updated calls after 5.6
+    _step("Strategy 5.7: scope-aware bindings")
     elements = repo.find_all_elements_with_calls(scope, repository, username)
     scope_count = _resolve_via_scope_bindings(
         repo, elements, scope, repository, username,
@@ -297,6 +303,7 @@ def resolve_all_calls(
     repo.flush()
 
     # Strategy 5.8: super()/parent:: call resolution
+    _step("Strategy 5.8: super/parent calls")
     elements = repo.find_all_elements_with_calls(scope, repository, username)
     super_count = _resolve_via_super(
         repo, elements, scope, repository, username,
