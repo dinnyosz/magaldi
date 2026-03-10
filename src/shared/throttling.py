@@ -1863,6 +1863,29 @@ _LEVEL_COL_WIDTH = 10  # Fixed width per level column (chars)
 _LEVELS_PER_ROW = 8  # Max levels before wrapping to a new line
 
 
+def _format_base_time(seconds: float) -> str:
+    """Format base time with adaptive precision — always ~3 significant digits.
+
+    >= 100s:  "123s"     (0 decimals)
+    >= 10s:   "42.1s"    (1 decimal)
+    >= 1s:    "3.24s"    (2 decimals)
+    >= 0.1s:  "0.134s"   (3 decimals)
+    >= 0.01s: "0.0134s"  (4 decimals)
+    < 0.01s:  "0.00s"    (2 decimals, floor)
+    """
+    if seconds >= 100:
+        return f"{seconds:.0f}s"
+    if seconds >= 10:
+        return f"{seconds:.1f}s"
+    if seconds >= 1:
+        return f"{seconds:.2f}s"
+    if seconds >= 0.1:
+        return f"{seconds:.3f}s"
+    if seconds >= 0.01:
+        return f"{seconds:.4f}s"
+    return f"{seconds:.2f}s"
+
+
 def _confidence_style(count: int) -> str:
     """Return a Rich style modifier based on sample count (data confidence).
 
@@ -1950,7 +1973,7 @@ def _build_levels_row(
             row1_cells.append(Text(level_str, style=capped_style))
             if level in all_levels:
                 avg_bt, count = all_levels[level]
-                bt_str = f"{avg_bt:.1f}s" if avg_bt < 100 else f"{avg_bt:.0f}s"
+                bt_str = _format_base_time(avg_bt)
                 row2_cells.append(Text(bt_str.center(_LEVEL_COL_WIDTH), style=capped_style))
                 row3_cells.append(Text(str(count).center(_LEVEL_COL_WIDTH), style=capped_style))
             else:
@@ -1995,7 +2018,7 @@ def _build_levels_row(
             if is_peak:
                 bt_style = f"underline {bt_style}"
 
-            bt_str = f"{avg_bt:.1f}s" if avg_bt < 100 else f"{avg_bt:.0f}s"
+            bt_str = _format_base_time(avg_bt)
             bt_padded = bt_str.center(_LEVEL_COL_WIDTH)
             row2_cells.append(Text(bt_padded, style=bt_style))
 

@@ -1061,7 +1061,7 @@ class TestFormatThroughputLevels:
         assert result != ""  # Not empty string
         text = _render_to_text(result)
         assert "1" in text
-        assert "2.5s" in text
+        assert "2.50s" in text
 
     def test_multiple_levels_with_peak(self):
         """Multiple levels show level numbers and base times."""
@@ -1074,8 +1074,8 @@ class TestFormatThroughputLevels:
         assert " 3 " in text
         assert " 4 " in text
         # Base times should appear
-        assert "1.3s" in text  # Peak level's time
-        assert "6.2s" in text  # Worst level's time
+        assert "1.30s" in text  # Peak level's time
+        assert "6.20s" in text  # Worst level's time
 
     def test_max_workers_shows_empty_slots(self):
         """max_workers > max level shows placeholders for empty slots."""
@@ -1085,8 +1085,8 @@ class TestFormatThroughputLevels:
         # Levels 3, 4, 5 have no data → show "···" placeholders
         assert "···" in text
         # But levels 1 and 2 should have times
-        assert "2.0s" in text
-        assert "3.0s" in text
+        assert "2.00s" in text
+        assert "3.00s" in text
 
     def test_max_workers_zero_uses_max_level(self):
         """max_workers=0 defaults to highest level in data."""
@@ -1095,8 +1095,8 @@ class TestFormatThroughputLevels:
         text = _render_to_text(result)
         # Positions 1, 2, 3 — level 2 missing (placeholder)
         assert "···" in text
-        assert "2.0s" in text
-        assert "4.0s" in text
+        assert "2.00s" in text
+        assert "4.00s" in text
 
     def test_color_gradient_best_is_green(self):
         """Best level (lowest base time) should get green color."""
@@ -1134,8 +1134,8 @@ class TestFormatThroughputLevels:
         text = _render_to_text(result)
         assert "1" in text
         assert "2" in text
-        assert "2.5s" in text
-        assert "3.0s" in text
+        assert "2.50s" in text
+        assert "3.00s" in text
 
     def test_build_text_with_max_workers(self):
         """build_throughput_levels_text respects max_workers for empty slots."""
@@ -1144,7 +1144,7 @@ class TestFormatThroughputLevels:
         assert result is not None
         text = _render_to_text(result)
         # Level 1 has data, levels 2-4 are placeholders
-        assert "2.0s" in text
+        assert "2.00s" in text
         assert "···" in text
 
     def test_build_text_none_returns_none(self):
@@ -1173,7 +1173,7 @@ class TestFormatThroughputLevels:
         for i in range(1, 21):
             assert str(i) in text
         # Both chunks' base times should appear
-        assert "1.0s" in text
+        assert "1.00s" in text
         assert "20.0s" in text
 
     def test_color_consistent_across_chunks(self):
@@ -1225,7 +1225,30 @@ class TestFormatThroughputLevels:
         result = format_throughput_levels(levels, peak_concurrency=2, max_workers=3)
         text = _render_to_text(result)
         # All same time → no division error, all levels shown
-        assert "3.0s" in text
+        assert "3.00s" in text
+
+    def test_format_base_time_adaptive_precision(self):
+        """_format_base_time scales decimal places with magnitude."""
+        from shared.throttling import _format_base_time
+
+        # >= 100s: no decimals
+        assert _format_base_time(123.456) == "123s"
+        assert _format_base_time(100.0) == "100s"
+        # 10-100s: 1 decimal
+        assert _format_base_time(42.16) == "42.2s"
+        assert _format_base_time(10.0) == "10.0s"
+        # 1-10s: 2 decimals
+        assert _format_base_time(3.456) == "3.46s"
+        assert _format_base_time(1.0) == "1.00s"
+        # 0.1-1s: 3 decimals
+        assert _format_base_time(0.134) == "0.134s"
+        assert _format_base_time(0.1) == "0.100s"
+        # 0.01-0.1s: 4 decimals
+        assert _format_base_time(0.0567) == "0.0567s"
+        assert _format_base_time(0.01) == "0.0100s"
+        # < 0.01s: 2 decimals (floor)
+        assert _format_base_time(0.005) == "0.01s"
+        assert _format_base_time(0.0) == "0.00s"
 
 
 class TestExploreCap:
