@@ -5,7 +5,7 @@ This module handles extraction of code elements from JavaScript and TypeScript:
 - Functions (regular and async)
 - Arrow functions
 - Variables and constants
-- TypeScript interfaces, type aliases, and enums
+- TypeScript interfaces, type aliases, enums, and namespaces/modules
 - Import statements as elements
 """
 
@@ -109,15 +109,20 @@ def extract_javascript_elements(
                 if value_node and value_node.type == "arrow_function":
                     elements.append(_extract_js_arrow_function(decl, name, lines))
                 elif value_node and value_node.type == "call_expression":
-                    # Check for React wrapper patterns: memo(), forwardRef(), lazy()
-                    elem = _extract_react_wrapped_component(decl, name, value_node, lines)
-                    if elem:
-                        elements.append(elem)
+                    # Check for require() calls: const x = require('mod')
+                    req_elem = _extract_js_require_import(node, decl, name, value_node, lines)
+                    if req_elem:
+                        elements.append(req_elem)
                     else:
-                        # Not a React wrapper - extract as variable with usefulness filter
-                        elem = _extract_js_variable(decl, name, value_node, lines, is_const)
+                        # Check for React wrapper patterns: memo(), forwardRef(), lazy()
+                        elem = _extract_react_wrapped_component(decl, name, value_node, lines)
                         if elem:
                             elements.append(elem)
+                        else:
+                            # Not a React wrapper - extract as variable with usefulness filter
+                            elem = _extract_js_variable(decl, name, value_node, lines, is_const)
+                            if elem:
+                                elements.append(elem)
                 elif value_node:
                     # Other value types (literals, objects, arrays, etc.)
                     elem = _extract_js_variable(decl, name, value_node, lines, is_const)
@@ -131,6 +136,15 @@ def extract_javascript_elements(
                 name = get_node_text(name_node) if name_node else "unknown"
                 if value_node and value_node.type == "arrow_function":
                     elements.append(_extract_js_arrow_function(decl, name, lines))
+                elif value_node and value_node.type == "call_expression":
+                    # Check for require() calls: var x = require('mod')
+                    req_elem = _extract_js_require_import(node, decl, name, value_node, lines)
+                    if req_elem:
+                        elements.append(req_elem)
+                    else:
+                        elem = _extract_js_variable(decl, name, value_node, lines, is_const=False)
+                        if elem:
+                            elements.append(elem)
                 elif value_node:
                     elem = _extract_js_variable(decl, name, value_node, lines, is_const=False)
                     if elem:
@@ -142,6 +156,11 @@ def extract_javascript_elements(
             elements.append(_extract_ts_type_alias(node, lines))
         elif node.type == "enum_declaration":
             elements.append(_extract_ts_enum(node, lines))
+        # TypeScript namespace/module declarations
+        # tree-sitter uses 'internal_module' for 'namespace' keyword
+        # and 'module' for 'module' keyword (they're synonyms in TS)
+        elif node.type in ("internal_module", "module") and _is_namespace_node(node):
+            elements.append(_extract_ts_namespace(node, lines))
         # Import statements
         elif node.type == "import_statement":
             elements.append(_extract_js_import(node, lines))
@@ -352,7 +371,8 @@ def _extract_js_assignment_function(
 
     # Build signature from the full assignment
     left_text = get_node_text(left)
-    signature = f"{'async ' if is_async else ''}{left_text} = function{params}"
+    func_name_part = f" {func_name}" if func_name else ""
+    signature = f"{'async ' if is_async else ''}{left_text} = function{func_name_part}{params}"
     if return_type:
         signature += f": {return_type}"
 
@@ -599,6 +619,68 @@ def _extract_ts_enum(node: Node, _lines: list[str]) -> ExtractedElement:
     )
 
 
+def _is_namespace_node(node: Node) -> bool:
+    """Check if a node is a namespace/module declaration (not a keyword token).
+
+    Tree-sitter TypeScript uses 'module' as both a node type for the
+    ``module Foo { }`` declaration *and* as a keyword token child inside it.
+    We only want the declaration node (which has a ``statement_block`` body),
+    not the bare keyword.
+    """
+    return any(child.type == "statement_block" for child in node.children)
+
+
+def _extract_ts_namespace(node: Node, _lines: list[str]) -> ExtractedElement:
+    """Extract a TypeScript namespace or module declaration.
+
+    Both ``namespace Foo { }`` and ``module Foo { }`` produce these nodes.
+    Tree-sitter represents ``namespace`` as ``internal_module`` and
+    ``module`` as ``module``.
+
+    Args:
+        node: An internal_module or module node from tree-sitter.
+        lines: Source code lines.
+
+    Returns:
+        ExtractedElement with element_type="namespace".
+    """
+    # The name is the identifier child (e.g., 'util', 'InternalModule')
+    name = "unknown"
+    for child in node.children:
+        if child.type == "identifier":
+            name = get_node_text(child)
+            break
+        # Ambient module declarations can use string names: module "foo" { }
+        if child.type == "string":
+            name = get_node_text(child).strip("'\"")
+            break
+
+    # If inside an export_statement, include the 'export' keyword in raw_code
+    parent = node.parent
+    if parent and parent.type == "export_statement":
+        start_node = parent
+    else:
+        # Non-exported namespace may be wrapped in expression_statement
+        start_node = parent if parent and parent.type == "expression_statement" else node
+
+    line_start = start_node.start_point[0] + 1
+    line_end = node.end_point[0] + 1
+    raw_code = start_node.text.decode("utf-8") if start_node.text else ""
+
+    signature = f"namespace {name}"
+
+    return ExtractedElement(
+        element_type="namespace",
+        name=name,
+        line_start=line_start,
+        line_end=line_end,
+        raw_code=raw_code,
+        byte_offset=start_node.start_byte,
+        signature=signature,
+        node=node,
+    )
+
+
 def _extract_js_import(node: Node, _lines: list[str]) -> ExtractedElement:
     """Extract an import statement as an element.
 
@@ -632,6 +714,85 @@ def _extract_js_import(node: Node, _lines: list[str]) -> ExtractedElement:
         byte_offset=node.start_byte,
         signature=signature,
         node=node,
+    )
+
+
+def _find_require_module(value_node: Node) -> str | None:
+    """Extract the module path from a require() call expression.
+
+    Handles both direct require() and chained patterns:
+    - require('http') -> 'http'
+    - require('debug')('express:view') -> 'debug'
+
+    Args:
+        value_node: A call_expression node.
+
+    Returns:
+        The module path string, or None if not a require() call.
+    """
+    if value_node.type != "call_expression":
+        return None
+
+    func_node = get_child_by_field(value_node, "function")
+    if not func_node:
+        return None
+
+    # Direct require(): require('http')
+    if func_node.type == "identifier" and get_node_text(func_node) == "require":
+        args_node = get_child_by_field(value_node, "arguments")
+        if args_node:
+            for arg in args_node.children:
+                if arg.type == "string":
+                    return get_node_text(arg).strip("'\"")
+        return None
+
+    # Chained require(): require('debug')('express:view')
+    # The func_node is itself a call_expression: require('debug')
+    if func_node.type == "call_expression":
+        return _find_require_module(func_node)
+
+    return None
+
+
+def _extract_js_require_import(
+    decl_stmt: Node, decl_node: Node, name: str, value_node: Node, _lines: list[str]
+) -> ExtractedElement | None:
+    """Extract a CommonJS require() call as an import element.
+
+    Handles:
+    - var http = require('http')
+    - const express = require('express')
+    - var debug = require('debug')('express:view')
+
+    Args:
+        decl_stmt: The lexical_declaration or variable_declaration node.
+        decl_node: The variable_declarator node.
+        name: The variable name.
+        value_node: The call_expression node.
+        lines: Source code lines.
+
+    Returns:
+        ExtractedElement with element_type="import", or None if not a require().
+    """
+    module = _find_require_module(value_node)
+    if not module:
+        return None
+
+    line_start = decl_stmt.start_point[0] + 1
+    line_end = decl_stmt.end_point[0] + 1
+    raw_code = decl_stmt.text.decode("utf-8") if decl_stmt.text else ""
+
+    signature = raw_code.strip()
+
+    return ExtractedElement(
+        element_type="import",
+        name=module,  # Use module path as the name (consistent with ES6 imports)
+        line_start=line_start,
+        line_end=line_end,
+        raw_code=raw_code,
+        byte_offset=decl_stmt.start_byte,
+        signature=signature,
+        node=decl_node,
     )
 
 

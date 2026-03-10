@@ -694,7 +694,7 @@ class TreeSitterParser:
         elements contain B, the tightest (smallest span) wins.
         """
         # Types that can contain other elements
-        _CONTAINER_TYPES = {"class", "function", "method", "trait", "enum", "interface"}
+        _CONTAINER_TYPES = {"class", "function", "method", "trait", "enum", "interface", "namespace"}
 
         # Build list of potential parents (containers with known element_ids)
         containers = [

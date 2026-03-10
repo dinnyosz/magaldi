@@ -127,6 +127,10 @@ class JavaScriptParser(TreeSitterParser):
                 enum_elem = self._convert_type_definition(ext, file_info, scope, repository, username, lines)
                 elements.append(enum_elem)
 
+            elif ext.element_type == "namespace":
+                ns_elem = self._convert_namespace(ext, file_info, scope, repository, username, lines)
+                elements.append(ns_elem)
+
         # Set parent IDs
         self._set_hierarchy(elements, file_element)
 
@@ -347,6 +351,41 @@ class JavaScriptParser(TreeSitterParser):
         )
         elem.element_id = generate_element_id(
             scope, repository, username, file_info.relative_path, "method", ext.name, ext.get_byte_offset()
+        )
+        return elem
+
+    def _convert_namespace(
+        self,
+        ext: ExtractedElement,
+        file_info: FileInfo,
+        scope: str,
+        repository: str,
+        username: str,
+        lines: list[str],
+    ) -> CodeElement:
+        """Convert extracted namespace/module to CodeElement.
+
+        Namespaces are containers at level 1 (same as classes). Inner elements
+        get parented to them via ``_set_hierarchy`` line-range containment.
+        """
+        elem = CodeElement(
+            scope=scope,
+            repository=repository,
+            username=username,
+            relative_path=file_info.relative_path,
+            element_type="namespace",
+            name=ext.name,
+            language=file_info.language,
+            line_start=ext.line_start,
+            line_end=ext.line_end,
+            raw_code=ext.raw_code,
+            signature=ext.signature,
+            docstring=extract_preceding_doc_comment(lines, ext.line_start, file_info.language),
+            level=1,
+        )
+        elem.element_id = generate_element_id(
+            scope, repository, username, file_info.relative_path,
+            "namespace", ext.name, ext.get_byte_offset()
         )
         return elem
 
