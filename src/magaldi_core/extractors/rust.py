@@ -834,7 +834,12 @@ def _extract_rust_impl(node: Node, _lines: list[str]) -> ExtractedElement | None
             # For impl Trait for Type<'a> or impl<'a> Type<'a>
             for gt_child in child.children:
                 if gt_child.type == "type_identifier":
-                    if has_for or impl_type is None:
+                    if has_for:
+                        # "impl Trait for GenericType<...>" — preserve trait name
+                        if impl_type is not None:
+                            trait_name = impl_type
+                        impl_type = get_node_text(gt_child)
+                    elif impl_type is None:
                         impl_type = get_node_text(gt_child)
                     else:
                         trait_name = impl_type

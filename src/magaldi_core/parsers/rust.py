@@ -316,13 +316,13 @@ class RustParser(TreeSitterParser):
         lines: list[str],
         parent: CodeElement | None = None,
     ) -> CodeElement:
-        """Convert extracted constant to CodeElement."""
+        """Convert extracted constant or variable to CodeElement."""
         elem = CodeElement(
             scope=scope,
             repository=repository,
             username=username,
             relative_path=file_info.relative_path,
-            element_type="constant",
+            element_type=ext.element_type,
             name=ext.name,
             language="rust",
             line_start=ext.line_start,
@@ -334,7 +334,7 @@ class RustParser(TreeSitterParser):
             parent_id=parent.element_id if parent else None,
         )
         elem.element_id = generate_element_id(
-            scope, repository, username, file_info.relative_path, "constant", ext.name, ext.get_byte_offset()
+            scope, repository, username, file_info.relative_path, ext.element_type, ext.name, ext.get_byte_offset()
         )
         return elem
 
