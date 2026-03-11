@@ -591,6 +591,29 @@ _YELLOW_BG = "\033[43;30m" # yellow background, black text
 _RED_FG = "\033[31m"       # red text
 _RESET = "\033[0m"
 
+# Short labels for source/reason
+_SOURCE_ABBREV = {
+    "single_letter": "H:SL",
+    "throwaway_name": "H:TN",
+    "throwaway_call_result": "H:TCR",
+    "short_call_result": "H:SCR",
+    "out_of_range": "F:rng",
+    "uniform_scores": "F:uni",
+}
+
+
+def _short_source(source: str) -> str:
+    """Shorten source label for display."""
+    if source in _SOURCE_ABBREV:
+        return _SOURCE_ABBREV[source]
+    if source.startswith("heuristic_disagreement"):
+        return "F:hd"
+    if source.startswith("constant_scored_low"):
+        return "F:csl"
+    if source.startswith("wrong_dim_count"):
+        return "F:dim"
+    return source[:5]
+
 
 def _print_progress_line(
     current: int,
@@ -620,6 +643,7 @@ def _print_progress_line(
     value = value.ljust(50)
 
     scores_str = ",".join(str(s) for s in scores) if scores else "-" * (NUM_SCORES * 2 - 1)
+    src = _short_source(source)
 
     # Color the decision tag
     if decision == "KEEP":
@@ -637,8 +661,8 @@ def _print_progress_line(
         f"[{current:>5}/{total}] {tag} {scores_str:<20} "
         f"{name} = {value} "
         f"{variable['file_path']:<30.30} "
-        f"| {source:<14} "
-        f"| {_format_duration(elapsed)} ~{_format_duration(eta)} "
+        f"{src:<5} "
+        f"{_format_duration(elapsed)} ~{_format_duration(eta)} "
         f"{rate:.1f}/s"
     )
 
@@ -734,7 +758,7 @@ def run_generation(args: argparse.Namespace) -> None:
             scores = tuple(1 for _ in range(NUM_SCORES))
             heuristic_count += 1
             decision = "DROP"
-            source = f"H:{heuristic_reason[:12]}"
+            source = heuristic_reason
         else:
             # Score with teacher model
             scores = score_variable_with_teacher(
@@ -759,7 +783,7 @@ def run_generation(args: argparse.Namespace) -> None:
                 filtered_count += 1
                 _print_progress_line(
                     i + 1, len(to_score), variable, scores, "FILT",
-                    reason[:14], start_time,
+                    reason, start_time,
                 )
                 continue
 
