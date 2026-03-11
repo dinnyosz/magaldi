@@ -367,6 +367,14 @@ def run_variable_scoring(
     variables, heuristic_drops = apply_heuristic_filter(variables)
     heuristic_count = total_before_heuristic - len(variables)
 
+    if heuristic_count > 0:
+        pct = heuristic_count / total_before_heuristic * 100
+        console.print(
+            f"  [dim]Heuristic pre-filter:[/] [red]{heuristic_count}[/] "
+            f"[dim]of {total_before_heuristic} dropped ({pct:.0f}%),[/] "
+            f"[green]{len(variables)}[/] [dim]remaining for LLM scoring[/]"
+        )
+
     # Remove heuristic-dropped variables from parsing_result immediately
     if heuristic_drops:
         for pf in parsing_result.parsed_files:

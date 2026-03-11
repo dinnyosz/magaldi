@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from magaldi_core.variable_scoring.heuristic_filter import (
+    _normalize_raw_code,
     apply_heuristic_filter,
     should_drop_variable,
 )
@@ -258,3 +259,165 @@ class TestEdgeCases:
         )"""
         drop, _ = should_drop_variable("config", code)
         assert not drop  # Multi-line, not a simple call
+
+
+class TestNormalizeRawCode:
+    """Test _normalize_raw_code strips language-specific prefixes."""
+
+    # Python — already starts with name, no-op
+    def test_python_no_change(self):
+        assert _normalize_raw_code("data", "data = load()") == "data = load()"
+
+    def test_python_type_annotation(self):
+        assert _normalize_raw_code("result", "result: str = compute()") == "result: str = compute()"
+
+    # Rust
+    def test_rust_let(self):
+        assert _normalize_raw_code("data", "let data = load();") == "data = load();"
+
+    def test_rust_let_mut(self):
+        assert _normalize_raw_code("tmp", "let mut tmp = process(x);") == "tmp = process(x);"
+
+    def test_rust_let_with_type(self):
+        assert _normalize_raw_code("count", "let count: usize = 0;") == "count: usize = 0;"
+
+    # PHP
+    def test_php_dollar_prefix(self):
+        assert _normalize_raw_code("data", "$data = load()") == "data = load()"
+
+    def test_php_dollar_with_call(self):
+        assert _normalize_raw_code("result", "$result = $db->query($sql)") == "result = $db->query($sql)"
+
+    # Java
+    def test_java_private_int(self):
+        assert _normalize_raw_code("count", "private int count = 0;") == "count = 0;"
+
+    def test_java_public_static_final(self):
+        assert _normalize_raw_code("data", "public static final String data = load();") == 'data = load();'
+
+    def test_java_private_field(self):
+        assert _normalize_raw_code("name", 'private String name = "default";') == 'name = "default";'
+
+    # JS/TS — variable_declarator already strips const/let/var
+    def test_js_already_stripped(self):
+        assert _normalize_raw_code("data", "data = load()") == "data = load()"
+
+    # Edge cases
+    def test_no_match_returns_original(self):
+        """If name isn't found in code, return as-is."""
+        code = "something_else = 42"
+        assert _normalize_raw_code("data", code) == code
+
+    def test_empty_raw_code(self):
+        assert _normalize_raw_code("foo", "") == ""
+
+    def test_name_with_whitespace_prefix(self):
+        """Leading whitespace is stripped."""
+        assert _normalize_raw_code("data", "  data = 1") == "data = 1"
+
+
+class TestRustVariableDrops:
+    """Verify heuristic rules work with Rust raw_code format."""
+
+    def test_rust_let_throwaway_dropped(self):
+        drop, reason = should_drop_variable("tmp", "let tmp = process(data);")
+        assert drop
+        assert reason == "throwaway_name"
+
+    def test_rust_let_mut_throwaway_dropped(self):
+        drop, reason = should_drop_variable("result", "let mut result = compute();")
+        assert drop
+        assert reason == "throwaway_name"
+
+    def test_rust_let_single_letter_dropped(self):
+        drop, reason = should_drop_variable("x", "let x = 0;")
+        assert drop
+        assert reason == "single_letter"
+
+    def test_rust_let_framework_kept(self):
+        drop, _ = should_drop_variable("client", "let client = HttpClient::new();")
+        assert not drop
+
+    def test_rust_let_constant_kept(self):
+        drop, _ = should_drop_variable("MAX_RETRIES", "let MAX_RETRIES = 3;")
+        assert not drop
+
+    def test_rust_short_call_result_dropped(self):
+        drop, reason = should_drop_variable("foo", "let foo = bar();")
+        assert drop
+        assert "call_result" in reason
+
+
+class TestPHPVariableDrops:
+    """Verify heuristic rules work with PHP raw_code format."""
+
+    def test_php_throwaway_dropped(self):
+        drop, reason = should_drop_variable("data", "$data = load()")
+        assert drop
+        assert reason == "throwaway_name"
+
+    def test_php_result_dropped(self):
+        drop, reason = should_drop_variable("result", "$result = compute()")
+        assert drop
+        assert reason == "throwaway_name"
+
+    def test_php_single_letter_dropped(self):
+        drop, reason = should_drop_variable("i", "$i = 0")
+        assert drop
+        assert reason == "single_letter"
+
+    def test_php_framework_kept(self):
+        drop, _ = should_drop_variable("app", "$app = new Application()")
+        assert not drop
+
+    def test_php_short_call_result_dropped(self):
+        drop, reason = should_drop_variable("foo", "$foo = bar()")
+        assert drop
+        assert "call_result" in reason
+
+
+class TestJavaVariableDrops:
+    """Verify heuristic rules work with Java raw_code format."""
+
+    def test_java_throwaway_dropped(self):
+        drop, reason = should_drop_variable("result", "int result = compute();")
+        assert drop
+        assert reason == "throwaway_name"
+
+    def test_java_private_throwaway_dropped(self):
+        drop, reason = should_drop_variable("data", "private String data = load();")
+        assert drop
+        assert reason == "throwaway_name"
+
+    def test_java_framework_kept(self):
+        drop, _ = should_drop_variable("logger", "private static final Logger logger = LoggerFactory.getLogger(Foo.class);")
+        assert not drop
+
+    def test_java_constant_kept(self):
+        drop, _ = should_drop_variable("MAX_SIZE", "public static final int MAX_SIZE = 100;")
+        assert not drop
+
+    def test_java_short_call_result_dropped(self):
+        drop, reason = should_drop_variable("foo", "final Foo foo = create();")
+        assert drop
+        assert "call_result" in reason
+
+
+class TestGenericTypeAnnotations:
+    """Verify type annotations with generics work correctly."""
+
+    def test_python_generic_type(self):
+        drop, _ = should_drop_variable("data", "data: list[str] = load()")
+        assert drop
+
+    def test_typescript_generic_type(self):
+        drop, _ = should_drop_variable("data", "data: Map<string, number> = load()")
+        assert drop
+
+    def test_java_generic_field(self):
+        drop, _ = should_drop_variable("items", "private List<String> items = new ArrayList<>();")
+        assert drop
+
+    def test_rust_generic_type(self):
+        drop, _ = should_drop_variable("data", "let data: Vec<String> = load();")
+        assert drop

@@ -91,12 +91,44 @@ _FRAMEWORK_PATTERNS: frozenset[str] = frozenset({
 })
 
 
+def _normalize_raw_code(name: str, raw_code: str) -> str:
+    """Strip language-specific prefixes so raw_code starts with the variable name.
+
+    Different languages produce raw_code with various prefixes:
+    - Rust: ``let data = ...`` or ``let mut data = ...``
+    - PHP: ``$data = ...`` (name stored without ``$``)
+    - Java: ``private static final int data = ...``
+    - Python/JS/TS/Bash: already start with the name
+
+    Returns the stripped code, or the original if no normalization applies.
+    """
+    code = raw_code.strip()
+
+    # Fast path: already starts with name (Python, JS/TS, Bash)
+    if code.startswith(name):
+        return code
+
+    # PHP: $name → strip the leading $
+    if code.startswith(f"${name}"):
+        return code[1:]
+
+    # Rust/Java/etc: find `name` after language prefixes.
+    # Look for the variable name followed by an assignment, type annotation,
+    # or statement terminator.
+    for suffix in (" =", "=", ":", ";", "\n"):
+        idx = code.find(f"{name}{suffix}")
+        if idx >= 0:
+            return code[idx:]
+
+    return code
+
+
 def _is_simple_assignment(name: str, raw_code: str) -> bool:
     """Check if raw_code is a simple single-line assignment.
 
     Multi-line code, dict/list literals, or complex expressions are NOT simple.
     """
-    code = raw_code.strip()
+    code = _normalize_raw_code(name, raw_code)
     if not code.startswith(name):
         return False
 
@@ -107,7 +139,7 @@ def _is_simple_assignment(name: str, raw_code: str) -> bool:
 
     # Pattern: name = expr or name: Type = expr
     return bool(re.match(
-        rf"^{re.escape(name)}\s*(?::\s*[\w\[\], |]+\s*)?=\s*.+",
+        rf"^{re.escape(name)}\s*(?::\s*[\w\[\], |<>?]+\s*)?=\s*.+",
         code,
     ))
 
@@ -117,15 +149,15 @@ def _is_function_call_result(raw_code: str, name: str) -> bool:
 
     Only matches single-line assignments where the RHS is a plain call.
     """
-    code = raw_code.strip()
+    code = _normalize_raw_code(name, raw_code)
     # Must be single-line
     if "\n" in code:
         return False
 
     # Pattern: name = func(...) or name: Type = func(...)
-    # Allow optional type annotation
+    # Allow optional type annotation (including generics like Map<K, V>)
     return bool(re.match(
-        rf"^{re.escape(name)}\s*(?::\s*[\w\[\], |]+\s*)?=\s*[\w.]+\([^)]*\)\s*$",
+        rf"^{re.escape(name)}\s*(?::\s*[\w\[\], |<>?]+\s*)?=\s*[\w.]+\([^)]*\)\s*;?\s*$",
         code,
     ))
 
