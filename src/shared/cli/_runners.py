@@ -363,6 +363,7 @@ def run_variable_scoring(
     config: MagaldiConfig,
     workers: int = 0,
     repo_path: str | None = None,
+    debug_scoring: bool = False,
 ) -> ScoringResult:
     """Run Phase 4: Variable Scoring.
 
@@ -375,6 +376,7 @@ def run_variable_scoring(
         config: Magaldi configuration.
         workers: Max parallel workers (0=auto).
         repo_path: Repository root path for writing scoring log file.
+        debug_scoring: Write all batch prompts + LLM responses to log file.
 
     Returns:
         ScoringResult with statistics.
@@ -446,7 +448,7 @@ def run_variable_scoring(
     model_config = config.llm.get_variable_scoring_model()
     model_name = model_config.name
 
-    scoring_config = VariableScoringConfig()
+    scoring_config = VariableScoringConfig(debug_log=debug_scoring)
 
     # Score cache: reuse scores from previous runs for unchanged variables
     from magaldi_core.variable_scoring.models import VariableScore
@@ -586,7 +588,7 @@ def run_variable_scoring(
         console.print("  [bold dim]───────────────────────────────────────[/]")
 
     # Write scoring debug log to file (all batch prompts + responses)
-    if result.debug_log and repo_path:
+    if scoring_config.debug_log and result.debug_log and repo_path:
         _write_scoring_log(result, repo_path, parsing_result, scoring_config)
 
     # Apply threshold + attach scores to elements for Phase 5 storage

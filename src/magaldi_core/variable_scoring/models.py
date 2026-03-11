@@ -53,6 +53,7 @@ class VariableScoringConfig:
     token_budget: int = 1200
     max_retries: int = 2
     timeout: int = 180  # 3 minutes — matches ProcessingConfig.summarize_timeout
+    debug_log: bool = False  # Write all batch prompts + LLM responses to logs/
 
 
 @dataclass

@@ -161,9 +161,10 @@ def _run_extraction_only(
 @click.option("--workers", "-w", default=0, type=int, help="Max parallel workers (0=auto based on context tier)")
 @click.option("--force-clean", is_flag=True, help="Delete all indexed data for this repo/user before parsing")
 @click.option("--use-docstrings/--no-use-docstrings", default=True, help="Use docstrings as summaries instead of LLM (default: enabled)")
+@click.option("--debug-scoring", is_flag=True, help="Log variable scoring prompts and LLM responses to logs/")
 def parse(
     repo_path: str, user: str, skip_ai: bool, features: bool, glossary: bool, skip_tests: bool, skip_resolve: bool,
-    dry_run: bool, llm_url: str | None, workers: int, force_clean: bool, use_docstrings: bool
+    dry_run: bool, llm_url: str | None, workers: int, force_clean: bool, use_docstrings: bool, debug_scoring: bool
 ) -> None:
     """Parse a repository and index its code elements.
 
@@ -291,7 +292,9 @@ def parse(
             scoring_model = config.llm.get_variable_scoring_model().name
             console.print(f"\n[bold blue]Phase 4:[/] Variable Scoring [dim]({scoring_model})[/]")
             run_logger.start_phase("Phase 4: Variable Scoring")
-            scoring_result = run_variable_scoring(parsing_result, config, workers, repo_path=repo_path)
+            scoring_result = run_variable_scoring(
+                parsing_result, config, workers, repo_path=repo_path, debug_scoring=debug_scoring,
+            )
             print_scoring_result(scoring_result)
             run_logger.end_phase({
                 "kept": scoring_result.kept,
