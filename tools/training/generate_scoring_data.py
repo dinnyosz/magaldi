@@ -7,10 +7,10 @@ outputs ChatML JSONL for fine-tuning.
 
 Usage:
     python tools/training/generate_scoring_data.py \
-      --repos /path/to/repo1 /path/to/repo2 \
+      --repos-dir test_repos \
+      --sample-size 3000 \
       --teacher-model qwen3-coder:30b \
       --output-dir tools/training/data/variable_scorer \
-      --validation-split 0.1 \
       --resume
 """
 
@@ -708,26 +708,115 @@ def _print_scoring_summary(
 # =============================================================================
 
 
+def discover_repos(repos_dir: str) -> list[str]:
+    """Find all subdirectories with magaldi.yaml in the given directory."""
+    repos_path = Path(repos_dir)
+    if not repos_path.is_dir():
+        logger.error("Repos directory not found: %s", repos_dir)
+        sys.exit(1)
+
+    repos = []
+    for child in sorted(repos_path.iterdir()):
+        if child.is_dir() and (child / "magaldi.yaml").exists():
+            repos.append(str(child))
+
+    if not repos:
+        logger.error("No repos with magaldi.yaml found in %s", repos_dir)
+        sys.exit(1)
+
+    return repos
+
+
+def sample_variables_evenly(
+    per_repo_vars: dict[str, list[dict]],
+    sample_size: int,
+    seed: int = 42,
+) -> list[dict]:
+    """Sample variables evenly across repos up to sample_size.
+
+    Each repo contributes at most ceil(sample_size / num_repos) variables.
+    If a repo has fewer, the remainder is redistributed to other repos.
+    """
+    rng = random.Random(seed)
+    repos = sorted(per_repo_vars.keys())
+    num_repos = len(repos)
+    per_repo_budget = sample_size // num_repos
+
+    # Shuffle each repo's variables
+    for repo in repos:
+        rng.shuffle(per_repo_vars[repo])
+
+    # First pass: take up to per_repo_budget from each
+    sampled: list[dict] = []
+    leftover_repos: list[str] = []
+    remaining = sample_size
+
+    for repo in repos:
+        available = per_repo_vars[repo]
+        take = min(per_repo_budget, len(available), remaining)
+        sampled.extend(available[:take])
+        remaining -= take
+        if len(available) > take:
+            leftover_repos.append(repo)
+
+    # Second pass: fill remaining budget from repos that have more
+    if remaining > 0 and leftover_repos:
+        rng.shuffle(leftover_repos)
+        for repo in leftover_repos:
+            already_taken = min(per_repo_budget, len(per_repo_vars[repo]))
+            available = per_repo_vars[repo][already_taken:]
+            take = min(len(available), remaining)
+            sampled.extend(available[:take])
+            remaining -= take
+            if remaining <= 0:
+                break
+
+    rng.shuffle(sampled)
+    return sampled
+
+
 def run_generation(args: argparse.Namespace) -> None:
     """Main data generation pipeline."""
     output_dir = Path(args.output_dir)
     raw_dir = output_dir / "raw"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Step 1: Parse all repos and collect variables
-    all_variables: list[dict] = []
-    for repo_path in args.repos:
+    # Step 1: Discover repos and parse variables
+    repo_paths = discover_repos(args.repos_dir)
+    logger.info("Found %d repos in %s", len(repo_paths), args.repos_dir)
+
+    per_repo_vars: dict[str, list[dict]] = {}
+    for repo_path in repo_paths:
+        repo_name = Path(repo_path).name
         try:
             variables = extract_variables_from_repo(repo_path)
-            all_variables.extend(variables)
+            per_repo_vars[repo_name] = variables
         except Exception:
             logger.error("Failed to parse repo: %s", repo_path, exc_info=True)
 
-    logger.info("Total variables extracted: %d from %d repos", len(all_variables), len(args.repos))
+    total_available = sum(len(v) for v in per_repo_vars.values())
+    logger.info(
+        "Total variables available: %d from %d repos",
+        total_available, len(per_repo_vars),
+    )
 
-    if not all_variables:
-        logger.error("No variables extracted. Check repo paths and magaldi.yaml configs.")
+    if not per_repo_vars:
+        logger.error("No variables extracted from any repo.")
         sys.exit(1)
+
+    # Step 2: Sample evenly across repos
+    sample_size = min(args.sample_size, total_available)
+    all_variables = sample_variables_evenly(per_repo_vars, sample_size, args.seed)
+
+    # Print per-repo sample counts
+    repo_counts: dict[str, int] = {}
+    for v in all_variables:
+        repo_counts[v["repo_name"]] = repo_counts.get(v["repo_name"], 0) + 1
+    logger.info(
+        "Sampled %d variables from %d repos: %s",
+        len(all_variables), len(repo_counts),
+        ", ".join(f"{k}={v}" for k, v in sorted(repo_counts.items())),
+    )
 
     # Step 2: Load existing results for resume
     existing: dict[str, RawScoringResult] = {}
@@ -911,10 +1000,15 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--repos",
-        nargs="+",
+        "--repos-dir",
         required=True,
-        help="Paths to repos to parse (each must have magaldi.yaml)",
+        help="Directory containing repos to parse (each subdir with magaldi.yaml)",
+    )
+    parser.add_argument(
+        "--sample-size",
+        type=int,
+        default=3000,
+        help="Total variables to sample across all repos (default: 3000)",
     )
     parser.add_argument(
         "--teacher-model",
