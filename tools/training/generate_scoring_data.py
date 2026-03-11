@@ -630,7 +630,7 @@ def _print_progress_line(
     eta = (total - current) / rate if rate > 0 else 0
 
     # Truncate variable name and value for display
-    name = variable["name"][:25].ljust(25)
+    name = variable["name"][:20].ljust(20)
     raw_code = variable.get("raw_code", "")
     # Extract the value part (after the = sign), collapse to one line
     if "=" in raw_code:
@@ -638,9 +638,15 @@ def _print_progress_line(
     else:
         value = raw_code.strip()
     value = " ".join(value.split())  # collapse newlines/whitespace
-    if len(value) > 50:
-        value = value[:47] + "..."
-    value = value.ljust(50)
+    if len(value) > 30:
+        value = value[:27] + "..."
+    value = value.ljust(30)
+
+    # Right-align path so filename is always visible (truncate directory prefix)
+    fpath = variable["file_path"]
+    if len(fpath) > 25:
+        fpath = "…" + fpath[-(24):]
+    fpath = fpath.rjust(25)
 
     scores_str = ",".join(str(s) for s in scores) if scores else "-" * (NUM_SCORES * 2 - 1)
     src = _short_source(source)
@@ -659,8 +665,8 @@ def _print_progress_line(
 
     print(
         f"[{current:>5}/{total}] {tag} {scores_str:<20} "
-        f"{name} = {value} "
-        f"{variable['file_path']:<30.30} "
+        f"{name}= {value} "
+        f"{fpath} "
         f"{src:<5} "
         f"{_format_duration(elapsed)} ~{_format_duration(eta)} "
         f"{rate:.1f}/s"
