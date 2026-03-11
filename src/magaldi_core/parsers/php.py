@@ -162,60 +162,10 @@ class PhpParser(TreeSitterParser):
         # Set parent IDs
         self._set_hierarchy(elements, file_element)
 
-        # Resolve same-file and $this->method() calls (Phase 1)
-        # PHP uses both '$this' and 'this' for self-reference
-        self._resolve_calls_in_file_php(elements)
+        # Categorize calls (resolution deferred to Phase 6)
+        self._categorize_calls_in_file(elements)
 
         return elements
-
-    def _resolve_calls_in_file_php(self, elements: list[CodeElement]) -> None:
-        """Resolve calls that can be determined at parse time (Phase 1).
-
-        Resolves:
-        - Same-file bare function calls: func() -> file-level function
-        - $this->method() calls: -> sibling method in same class
-
-        Also categorizes unresolved calls.
-        """
-        from magaldi_core.extractors.call_categorizer import categorize_calls
-
-        # Build lookup for file-level functions
-        file_functions: dict[str, str] = {
-            e.name: e.element_id
-            for e in elements
-            if e.element_type == "function"
-        }
-
-        # Build lookup for methods grouped by parent class
-        class_methods: dict[str, dict[str, str]] = {}
-        for e in elements:
-            if e.element_type == "method" and e.parent_id:
-                if e.parent_id not in class_methods:
-                    class_methods[e.parent_id] = {}
-                class_methods[e.parent_id][e.name] = e.element_id
-
-        # Resolve calls in each element
-        for elem in elements:
-            if not elem.calls:
-                continue
-
-            for call in elem.calls:
-                if call.resolved_id:
-                    continue
-
-                # Strategy 1: Same-file bare function call
-                if call.receiver is None and call.name in file_functions:
-                    call.resolved_id = file_functions[call.name]
-                    continue
-
-                # Strategy 2: $this->method() call within class (PHP uses '$this' or 'this')
-                if call.receiver in ("$this", "this") and elem.parent_id:
-                    sibling_methods = class_methods.get(elem.parent_id, {})
-                    if call.name in sibling_methods:
-                        call.resolved_id = sibling_methods[call.name]
-
-            # Categorize all calls (resolved and unresolved)
-            categorize_calls(elem.calls, "php", elem.parameters)
 
     def _convert_import(
         self,

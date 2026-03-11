@@ -142,8 +142,8 @@ class PythonParser(TreeSitterParser):
         # Set parent IDs for elements without explicit parents
         self._set_hierarchy(elements, file_element)
 
-        # Resolve same-file and self-method calls (Phase 1)
-        self._resolve_calls_in_file(elements, self_keyword="self")
+        # Categorize calls (resolution deferred to Phase 6)
+        self._categorize_calls_in_file(elements)
 
         # === EXTENDED CODE INTELLIGENCE EXTRACTION ===
         self._extract_extended_intelligence(elements, file_element, content, lines)

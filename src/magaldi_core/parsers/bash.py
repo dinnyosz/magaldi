@@ -118,7 +118,7 @@ class BashParser(TreeSitterParser):
             )
             elements.append(elem)
 
-        # Resolve same-file function calls
-        self._resolve_calls_in_file(elements)
+        # Categorize calls (resolution deferred to Phase 6)
+        self._categorize_calls_in_file(elements)
 
         return elements

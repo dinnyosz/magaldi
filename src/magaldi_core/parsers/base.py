@@ -755,64 +755,15 @@ class TreeSitterParser:
                 best_parent.element_id if best_parent else file_element.element_id
             )
 
-    def _resolve_calls_in_file(
-        self,
-        elements: list[CodeElement],
-        self_keyword: str = "self",
-    ) -> None:
-        """Resolve calls that can be determined at parse time (Phase 1).
+    def _categorize_calls_in_file(self, elements: list[CodeElement]) -> None:
+        """Categorize all calls in parsed elements without resolving.
 
-        Resolves:
-        - Same-file bare function calls: func() -> file-level function
-        - Self-method calls: self.method() -> sibling method in same class
-
-        Also categorizes unresolved calls.
-
-        Args:
-            elements: List of code elements to process.
-            self_keyword: The keyword used for self-reference (e.g., 'self', 'this', '$this').
+        Call resolution is deferred to Phase 6 (call_resolution.py).
+        Only assigns categories (builtin, stdlib, external, untyped, etc.)
+        based on receiver and name patterns.
         """
         from magaldi_core.extractors.call_categorizer import categorize_calls
 
-        # Build lookup for file-level functions
-        file_functions: dict[str, str] = {
-            e.name: e.element_id
-            for e in elements
-            if e.element_type == "function"
-        }
-
-        # Build lookup for methods grouped by parent class
-        class_methods: dict[str, dict[str, str]] = {}
-        for e in elements:
-            if e.element_type == "method" and e.parent_id:
-                if e.parent_id not in class_methods:
-                    class_methods[e.parent_id] = {}
-                class_methods[e.parent_id][e.name] = e.element_id
-
-        # Resolve calls in each element
         for elem in elements:
-            if not elem.calls:
-                continue
-
-            for call in elem.calls:
-                if call.resolved_id:
-                    continue
-
-                # Strategy 1: Same-file bare function call
-                if call.receiver is None and call.name in file_functions:
-                    call.resolved_id = file_functions[call.name]
-                    continue
-
-                # Strategy 2: Self-method call within class
-                # Handle multiple possible self keywords (e.g., PHP uses both '$this' and 'this')
-                self_keywords = [self_keyword] if isinstance(self_keyword, str) else self_keyword
-                if isinstance(self_keyword, str):
-                    self_keywords = [self_keyword]
-
-                if call.receiver in self_keywords and elem.parent_id:
-                    sibling_methods = class_methods.get(elem.parent_id, {})
-                    if call.name in sibling_methods:
-                        call.resolved_id = sibling_methods[call.name]
-
-            # Categorize all calls (resolved and unresolved)
-            categorize_calls(elem.calls, self.language, elem.parameters)
+            if elem.calls:
+                categorize_calls(elem.calls, self.language, elem.parameters)
