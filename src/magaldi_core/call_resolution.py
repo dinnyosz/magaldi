@@ -1,14 +1,13 @@
-"""Cross-file call resolution.
+"""Call resolution.
 
-This module resolves function/method calls that reference elements in other files,
-using import information, type annotations, and embedding similarity.
-
-**Parse-time resolution** (parsers/base.py, strategies 1-2):
-  - Same-file bare function calls
-  - Self-method calls (self.method(), this.method(), $this->method())
+This module resolves function/method calls to their target elements,
+using same-file lookups, import information, type annotations, and
+embedding similarity.
 
 **Static resolution** (this module, ``resolve_all_calls``):
-  - Import + type-annotation resolution (strategies 3-5)
+  - Same-file resolution
+      Bare function calls, self/this method calls within the same file
+  - Import + type-annotation resolution
       Bare calls via imports, module method calls, type-annotated method calls
   - Return-type propagation
       result = get_user(); result.save()

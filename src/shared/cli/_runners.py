@@ -1225,6 +1225,7 @@ def run_call_resolution(
             try:
                 (
                     total_calls,
+                    same_file_resolved,
                     import_resolved,
                     type_resolved,
                     constructor_resolved,
@@ -1236,10 +1237,11 @@ def run_call_resolution(
                     on_step=lambda msg: console.print(f"    [dim]{msg}[/]"),
                 )
                 total_resolved = (
-                    import_resolved + type_resolved + constructor_resolved
-                    + scope_resolved + super_resolved
+                    same_file_resolved + import_resolved + type_resolved
+                    + constructor_resolved + scope_resolved + super_resolved
                 )
                 console.print(f"  Full pass: {total_resolved}/{total_calls} resolved")
+                console.print(f"    via same-file: {same_file_resolved}")
                 console.print(f"    via imports: {import_resolved}")
                 console.print(f"    via types: {type_resolved}")
                 console.print(f"    via constructors: {constructor_resolved}")
