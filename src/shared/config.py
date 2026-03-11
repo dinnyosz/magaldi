@@ -52,6 +52,7 @@ class SearchBackendConfig:
     bulk_timeout: int = 300  # 5 minutes for bulk operations (delete_by_query, update_by_query)
     retry_on_timeout: bool = True
     max_retries: int = 3
+    pool_maxsize: int = 16  # urllib3 connection pool size (must >= worker thread count)
 
     @property
     def url(self) -> str:

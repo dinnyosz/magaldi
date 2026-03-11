@@ -25,6 +25,7 @@ class OpenSearchClient:
         timeout: int = 30,
         retry_on_timeout: bool = True,
         max_retries: int = 3,
+        pool_maxsize: int = 16,
     ) -> None:
         self._client = OpenSearch(
             hosts=[{"host": host, "port": port}],
@@ -35,6 +36,7 @@ class OpenSearchClient:
             timeout=timeout,
             retry_on_timeout=retry_on_timeout,
             max_retries=max_retries,
+            pool_maxsize=pool_maxsize,
         )
 
     # --- Index management ---

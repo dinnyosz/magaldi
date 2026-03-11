@@ -26,12 +26,14 @@ class ElasticSearchClient:
         timeout: int = 30,
         retry_on_timeout: bool = True,
         max_retries: int = 3,
+        pool_maxsize: int = 16,
     ) -> None:
         self._client = Elasticsearch(
             hosts=[{"host": host, "port": port, "scheme": scheme}],
             timeout=timeout,
             retry_on_timeout=retry_on_timeout,
             max_retries=max_retries,
+            connections_per_node=pool_maxsize,
         )
 
     # --- Index management ---

@@ -216,13 +216,16 @@ def parse(
         if force_clean and not dry_run:
             console.print("[yellow]Force clean:[/] Deleting existing index data...")
             from shared.db.store import Repository
-            repo = Repository(config)
-            deleted = repo.delete_by_repository(
-                scope=discovery_result.scope,
-                repository=discovery_result.repository,
-                username=user,
-            )
-            console.print(f"  Deleted {deleted} documents")
+            clean_repo = Repository(config)
+            try:
+                deleted = clean_repo.delete_by_repository(
+                    scope=discovery_result.scope,
+                    repository=discovery_result.repository,
+                    username=user,
+                )
+                console.print(f"  Deleted {deleted} documents")
+            finally:
+                clean_repo.close()
 
         # Phase 2: Change Detection
         console.print("\n[bold blue]Phase 2:[/] Change Detection")
@@ -361,62 +364,64 @@ def parse(
             if len(failed_elements) > 10:
                 console.print(f"    [dim]... and {len(failed_elements) - 10} more errors[/]")
 
-        # Hierarchy Extraction (CLI commands, routes)
+        # Hierarchy Extraction (CLI commands, routes) + Call Resolution
+        # Use a single Repository instance for phases that need the search backend
         if not dry_run and indexed > 0:
             from shared.db.store import Repository
             repo = Repository(config)
-
-            # Refresh index so Phase 5's bulk writes are searchable.
-            # The bulk buffer flushes with refresh=False for performance,
-            # so data isn't visible to queries until the next auto-refresh
-            # (default 1s).  For fast repos (especially with --skip-ai),
-            # Phase 6 can start before auto-refresh fires, causing 0 results.
-            repo.refresh()
-
-            run_logger.start_phase("Hierarchy Extraction")
-            console.print("\n  [bold]Hierarchy Extraction[/]")
             try:
-                # Use repository name as CLI entry point fallback
-                cli_entry_point = discovery_result.repository
-                rel_indexed, ref_indexed = run_hierarchy_extraction(
-                    discovery_result.scope,
-                    discovery_result.repository,
-                    user,
-                    repo,
-                    cli_entry_point=cli_entry_point,
-                )
-                if rel_indexed > 0 or ref_indexed > 0:
-                    console.print(f"  Indexed {rel_indexed} relationships, {ref_indexed} external refs")
-                else:
-                    console.print("  [dim]No CLI/route hierarchies found[/]")
-                run_logger.end_phase({"relationships": rel_indexed, "external_refs": ref_indexed})
-            except Exception as e:
-                console.print(f"  [yellow]Warning: Hierarchy extraction failed: {rich_escape(str(e))}[/]")
-                run_logger.log_error("hierarchy_extraction", str(e))
-                run_logger.end_phase({"error": str(e)})
+                # Refresh index so Phase 5's bulk writes are searchable.
+                # The bulk buffer flushes with refresh=False for performance,
+                # so data isn't visible to queries until the next auto-refresh
+                # (default 1s).  For fast repos (especially with --skip-ai),
+                # Phase 6 can start before auto-refresh fires, causing 0 results.
+                repo.refresh()
 
-        # Phase 6: Call Resolution (static + embedding + semantic relationships)
-        if not dry_run and indexed > 0:
-            console.print("\n[bold blue]Phase 6:[/] Call Resolution")
-            run_logger.start_phase("Phase 6: Call Resolution")
-            try:
-                run_call_resolution(
-                    repo,
-                    discovery_result.scope,
-                    discovery_result.repository,
-                    user,
-                    skip_resolve=skip_resolve,
-                    console=console,
-                    max_workers=workers,
-                )
-                run_logger.end_phase()
-            except Exception as e:
-                console.print(f"  [yellow]Warning: Call resolution failed: {rich_escape(str(e))}[/]")
-                run_logger.log_error("call_resolution", str(e))
-                run_logger.end_phase({"error": str(e)})
+                run_logger.start_phase("Hierarchy Extraction")
+                console.print("\n  [bold]Hierarchy Extraction[/]")
+                try:
+                    # Use repository name as CLI entry point fallback
+                    cli_entry_point = discovery_result.repository
+                    rel_indexed, ref_indexed = run_hierarchy_extraction(
+                        discovery_result.scope,
+                        discovery_result.repository,
+                        user,
+                        repo,
+                        cli_entry_point=cli_entry_point,
+                    )
+                    if rel_indexed > 0 or ref_indexed > 0:
+                        console.print(f"  Indexed {rel_indexed} relationships, {ref_indexed} external refs")
+                    else:
+                        console.print("  [dim]No CLI/route hierarchies found[/]")
+                    run_logger.end_phase({"relationships": rel_indexed, "external_refs": ref_indexed})
+                except Exception as e:
+                    console.print(f"  [yellow]Warning: Hierarchy extraction failed: {rich_escape(str(e))}[/]")
+                    run_logger.log_error("hierarchy_extraction", str(e))
+                    run_logger.end_phase({"error": str(e)})
 
-            # Refresh after call resolution writes (bulk buffer uses refresh=False)
-            repo.refresh()
+                # Phase 6: Call Resolution (static + embedding + semantic relationships)
+                console.print("\n[bold blue]Phase 6:[/] Call Resolution")
+                run_logger.start_phase("Phase 6: Call Resolution")
+                try:
+                    run_call_resolution(
+                        repo,
+                        discovery_result.scope,
+                        discovery_result.repository,
+                        user,
+                        skip_resolve=skip_resolve,
+                        console=console,
+                        max_workers=workers,
+                    )
+                    run_logger.end_phase()
+                except Exception as e:
+                    console.print(f"  [yellow]Warning: Call resolution failed: {rich_escape(str(e))}[/]")
+                    run_logger.log_error("call_resolution", str(e))
+                    run_logger.end_phase({"error": str(e)})
+
+                # Refresh after call resolution writes (bulk buffer uses refresh=False)
+                repo.refresh()
+            finally:
+                repo.close()
 
         # Phase 7: Feature Extraction (opt-in with --features)
         if features and not skip_ai and not dry_run and processed > 0:

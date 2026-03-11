@@ -65,22 +65,26 @@ def run_change_detection(
 
     total_files = discovery_result.total_files
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[bold blue]Hashing files[/]"),
-        BarColumn(),
-        TaskProgressColumn(),
-        TextColumn("({task.completed}/{task.total})"),
-        TimeElapsedColumn(),
-        console=console,
-        transient=True,
-    ) as progress:
-        task = progress.add_task("hashing", total=total_files)
+    try:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[bold blue]Hashing files[/]"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TextColumn("({task.completed}/{task.total})"),
+            TimeElapsedColumn(),
+            console=console,
+            transient=True,
+        ) as progress:
+            task = progress.add_task("hashing", total=total_files)
 
-        def on_progress(completed: int, total: int) -> None:
-            progress.update(task, completed=completed, total=total)
+            def on_progress(completed: int, total: int) -> None:
+                progress.update(task, completed=completed, total=total)
 
-        return detect_changes(discovery_result, file_state_repo, on_progress)
+            return detect_changes(discovery_result, file_state_repo, on_progress)
+    finally:
+        if hasattr(file_state_repo, "close"):
+            file_state_repo.close()
 
 
 def run_parsing(manifest: ChangeManifest) -> ParsingResult:
@@ -390,8 +394,9 @@ def run_variable_scoring(
 
     cached_scores: dict[str, VariableScore] = {}
     cache_count = 0
+    score_cache_repo: Repository | None = None
     try:
-        repo = Repository(config)
+        score_cache_repo = Repository(config)
         # Build element_id -> content_hash mapping for validation
         elem_hashes: dict[str, str | None] = {}
         for pf in parsing_result.parsed_files:
@@ -400,7 +405,7 @@ def run_variable_scoring(
                     elem_hashes[elem.element_id] = elem.content_hash
 
         all_ids = [eid for eid, _, _, _ in variables]
-        cached_state = repo.get_variable_scoring_state(all_ids)
+        cached_state = score_cache_repo.get_variable_scoring_state(all_ids)
 
         for eid, state in cached_state.items():
             if (
@@ -427,6 +432,9 @@ def run_variable_scoring(
     except Exception:  # noqa: BLE001
         # Cache lookup is best-effort — continue without cache on any error
         pass
+    finally:
+        if score_cache_repo is not None:
+            score_cache_repo.close()
 
     # If all variables are cached, skip LLM entirely
     if not variables and cached_scores:
@@ -1018,6 +1026,9 @@ def run_processing(
     api_processed = result.elements_processed - result.elements_skipped
     avg_wall = elapsed / api_processed if api_processed > 0 else 0.0
 
+    # Close the repository client to release connections
+    repo.close()
+
     # Total deleted = from deleted files + stale elements from modified files
     total_deleted = deleted_from_files + result.elements_deleted
     return (result.elements_processed, result.elements_skipped, result.indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, result.failed_elements, total_deleted)
@@ -1166,6 +1177,9 @@ def run_hierarchy_extraction(
     # Index new relationships and external refs
     rel_result = rel_repo.bulk_index_relationships(all_relationships)
     ref_result = rel_repo.bulk_index_external_refs(all_external_refs)
+
+    # Close the relationships repository client
+    rel_repo.close()
 
     return (rel_result["indexed"], ref_result["indexed"])
 

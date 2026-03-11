@@ -34,6 +34,7 @@ def create_client(config: SearchBackendConfig) -> SearchClient:
             timeout=config.timeout,
             retry_on_timeout=config.retry_on_timeout,
             max_retries=config.max_retries,
+            pool_maxsize=config.pool_maxsize,
         )
     elif config.type == "elasticsearch":
         from shared.db.backends.elasticsearch import ElasticSearchClient
@@ -45,6 +46,7 @@ def create_client(config: SearchBackendConfig) -> SearchClient:
             timeout=config.timeout,
             retry_on_timeout=config.retry_on_timeout,
             max_retries=config.max_retries,
+            pool_maxsize=config.pool_maxsize,
         )
     else:
         raise ValueError(
