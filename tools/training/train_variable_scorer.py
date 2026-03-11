@@ -89,19 +89,41 @@ def train_mlx(
         val_count = convert_jsonl_to_chatml(Path(val_data), val_mlx_path)
         logger.info("Converted %d train, %d val examples", train_count, val_count)
 
-        # Build lora config YAML for mlx-lm
-        lora_config = {
-            "lora_layers": training_cfg.get("lora_rank", 16),
+        # Build mlx-lm config YAML (LoRA params + training params in one file)
+        lora_alpha = training_cfg.get("lora_alpha", 32)
+        iters = epochs * (train_count // (batch_size * grad_accum) + 1)
+        steps_per_eval = max(1, iters // 5)  # eval ~5 times during training
+
+        mask_prompt = training_cfg.get("mask_prompt", True)
+
+        mlx_config = {
+            "model": base_model,
+            "data": tmpdir,
+            "train": True,
+            "fine_tune_type": "lora",
+            "num_layers": lora_rank,
+            "batch_size": batch_size,
+            "iters": iters,
+            "val_batches": -1,  # use entire validation set
+            "learning_rate": lr,
+            "steps_per_report": 1,
+            "steps_per_eval": steps_per_eval,
+            "grad_accumulation_steps": grad_accum,
+            "max_seq_length": max_seq_len,
+            "mask_prompt": mask_prompt,
+            "seed": seed,
             "lora_parameters": {
                 "rank": lora_rank,
-                "alpha": training_cfg.get("lora_alpha", 32),
+                "alpha": lora_alpha,
                 "dropout": training_cfg.get("lora_dropout", 0.05),
-                "scale": training_cfg.get("lora_alpha", 32) / lora_rank,
+                "scale": lora_alpha / lora_rank,
             },
         }
-        lora_config_path = tmpdir_path / "lora_config.yaml"
-        with open(lora_config_path, "w") as f:
-            yaml.dump(lora_config, f)
+        if mask_prompt:
+            logger.info("mask_prompt=True: loss computed only on assistant responses")
+        mlx_config_path = tmpdir_path / "mlx_config.yaml"
+        with open(mlx_config_path, "w") as f:
+            yaml.dump(mlx_config, f)
 
         # Create output directory
         output_path = Path(output_dir)
@@ -110,15 +132,8 @@ def train_mlx(
         # Build mlx-lm lora command
         cmd = [
             sys.executable, "-m", "mlx_lm.lora",
-            "--model", base_model,
-            "--data", tmpdir,
-            "--train",
+            "--config", str(mlx_config_path),
             "--adapter-path", str(output_path / "adapters"),
-            "--iters", str(epochs * (train_count // (batch_size * grad_accum) + 1)),
-            "--batch-size", str(batch_size),
-            "--learning-rate", str(lr),
-            "--seed", str(seed),
-            "--lora-layers", str(lora_rank),
         ]
 
         logger.info("Running mlx-lm LoRA training: %s", " ".join(cmd))

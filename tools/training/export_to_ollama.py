@@ -94,30 +94,40 @@ def convert_to_gguf(
             )
             f16_path.rename(gguf_path)
     else:
-        # Method 2: Direct conversion using python
-        # Try using mlx-lm's built-in GGUF export if available
-        try:
+        # Method 2: Use mlx-lm fuse --export-gguf with base model + adapters
+        # This requires the adapter path to exist alongside the base model
+        adapter_path = Path(model_dir).parent / "adapters"
+        base_model_cfg = None
+
+        # Read the adapter config to find the base model
+        adapter_config = adapter_path / "adapter_config.json"
+        if adapter_path.exists() and adapter_config.exists():
+            import json
+            with open(adapter_config) as f:
+                cfg = json.load(f)
+            base_model_cfg = cfg.get("model", None)
+
+        if adapter_path.exists():
+            # Use mlx-lm fuse with adapters → direct GGUF export
             cmd = [
-                sys.executable, "-m", "mlx_lm.convert",
-                "--hf-path", model_dir,
-                "--mlx-path", str(output_path / "mlx_temp"),
-                "-q",  # quantize
+                sys.executable, "-m", "mlx_lm.fuse",
+                "--model", base_model_cfg or model_dir,
+                "--adapter-path", str(adapter_path),
+                "--export-gguf",
+                "--gguf-path", str(gguf_path),
             ]
-            logger.info("Converting with mlx-lm: %s", " ".join(cmd))
+            logger.info("Converting to GGUF with mlx-lm fuse: %s", " ".join(cmd))
             result = subprocess.run(cmd, check=False, capture_output=True, text=True)
             if result.returncode != 0:
-                raise RuntimeError(result.stderr)
-
-            logger.warning(
-                "mlx-lm convert produces MLX format, not GGUF. "
-                "For Ollama, please provide --llama-cpp-path."
-            )
-            return output_path / "mlx_temp"
-        except Exception as e:
+                logger.error("mlx-lm fuse --export-gguf failed: %s", result.stderr)
+                logger.info("stdout: %s", result.stdout)
+                sys.exit(1)
+        else:
             logger.error(
-                "No conversion method available. Install llama.cpp and "
-                "provide --llama-cpp-path, or install mlx-lm. Error: %s",
-                e,
+                "No conversion method available. Either:\n"
+                "  1. Provide --llama-cpp-path pointing to llama.cpp checkout\n"
+                "  2. Ensure adapter path exists at %s for mlx-lm fuse",
+                adapter_path,
             )
             sys.exit(1)
 
@@ -134,7 +144,25 @@ def create_modelfile(
     """Generate an Ollama Modelfile."""
     modelfile_path = Path(output_dir) / "Modelfile"
 
+    # Qwen3 ChatML template. The model generates <think>...</think> as part
+    # of its output (trained with empty think tags for non-reasoning tasks).
+    # The template just provides the ChatML framing.
+    template = (
+        '{{- if .System }}<|im_start|>system\n'
+        '{{ .System }}<|im_end|>\n'
+        '{{ end }}'
+        '{{- range .Messages }}'
+        '{{- if eq .Role "user" }}<|im_start|>user\n'
+        '{{ .Content }}<|im_end|>\n'
+        '{{ else if eq .Role "assistant" }}<|im_start|>assistant\n'
+        '{{ .Content }}<|im_end|>\n'
+        '{{ end }}'
+        '{{- end }}<|im_start|>assistant\n'
+    )
+
     content = f"""FROM {gguf_path.resolve()}
+
+TEMPLATE \"\"\"{template}\"\"\"
 
 PARAMETER temperature {temperature}
 PARAMETER top_p 0.95
@@ -184,10 +212,13 @@ def run_smoke_test(ollama_name: str) -> None:
 4. [src/app.py] logger = logging.getLogger(__name__)
 5. [src/handlers.py] result = process_data(input_file)"""
 
-    from magaldi_core.variable_scoring.prompts import SYSTEM_PROMPT
+    # Import training prompt (7-dimension) for testing
+    training_dir = Path(__file__).resolve().parent
+    sys.path.insert(0, str(training_dir))
+    from generate_scoring_data import TEACHER_SYSTEM_PROMPT
 
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": TEACHER_SYSTEM_PROMPT},
         {"role": "user", "content": test_prompt},
     ]
 
@@ -198,7 +229,7 @@ def run_smoke_test(ollama_name: str) -> None:
             model=f"ollama_chat/{ollama_name}",
             messages=messages,
             temperature=0.1,
-            max_tokens=200,
+            max_tokens=300,
             api_base="http://localhost:11434",
             timeout=60,
             think=False,
@@ -207,10 +238,13 @@ def run_smoke_test(ollama_name: str) -> None:
         content = response.choices[0].message.content or ""
         logger.info("Model output:\n%s", content)
 
-        # Check format
-        score_pattern = re.compile(r"(\d+)\.\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)")
+        # Check format: expect 7 comma-separated scores per line
+        score_pattern = re.compile(
+            r"(\d+)\.\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)"
+            r"\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)"
+        )
         matches = list(score_pattern.finditer(content))
-        logger.info("Parsed %d/5 scores", len(matches))
+        logger.info("Parsed %d/5 score lines (7 dims each)", len(matches))
 
         if len(matches) >= 4:
             logger.info("Smoke test PASSED")
@@ -224,8 +258,7 @@ def run_smoke_test(ollama_name: str) -> None:
         # Quick sanity checks
         for match in matches:
             idx = int(match.group(1))
-            scores = (int(match.group(2)), int(match.group(3)),
-                      int(match.group(4)), int(match.group(5)))
+            scores = tuple(int(match.group(i)) for i in range(2, 9))
             max_s = max(scores)
 
             if idx == 1 and max_s < 5:  # MAX_RETRIES should be high

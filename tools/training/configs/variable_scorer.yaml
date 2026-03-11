@@ -1,17 +1,18 @@
 training:
   backend: mlx
-  base_model: Qwen/Qwen3-0.6B-Instruct
+  base_model: Qwen/Qwen3-0.6B
   lora_rank: 16
   lora_alpha: 32
-  lora_dropout: 0.05
+  lora_dropout: 0.1
   lora_target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
-  learning_rate: 2.0e-4
+  learning_rate: 5.0e-5
   weight_decay: 0.01
   warmup_ratio: 0.03
-  epochs: 3
+  epochs: 5
   batch_size: 4
-  gradient_accumulation_steps: 4
+  gradient_accumulation_steps: 1
   max_seq_len: 2048
+  mask_prompt: true
   seed: 42
 
 data_generation:

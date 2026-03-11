@@ -507,6 +507,11 @@ def format_training_example(
         response_lines.append(f"{i + 1}. {scores_str}")
     assistant_content = "\n".join(response_lines)
 
+    # Qwen3 is a thinking model — it always generates <think>...</think>
+    # before the assistant response. Include empty think tags so the model
+    # learns to skip thinking and output scores directly.
+    assistant_content = f"<think>\n\n</think>\n\n{assistant_content}"
+
     return {
         "conversations": [
             {"role": "system", "content": TEACHER_SYSTEM_PROMPT},
