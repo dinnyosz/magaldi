@@ -291,7 +291,7 @@ def parse(
             scoring_model = config.llm.get_variable_scoring_model().name
             console.print(f"\n[bold blue]Phase 4:[/] Variable Scoring [dim]({scoring_model})[/]")
             run_logger.start_phase("Phase 4: Variable Scoring")
-            scoring_result = run_variable_scoring(parsing_result, config, workers)
+            scoring_result = run_variable_scoring(parsing_result, config, workers, repo_path=repo_path)
             print_scoring_result(scoring_result)
             run_logger.end_phase({
                 "kept": scoring_result.kept,

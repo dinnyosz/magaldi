@@ -195,8 +195,8 @@ def _score_batch(
     # Estimate response tokens
     response_tokens = len(output) // 4
 
-    # Capture debug output for the first successful batch
-    if debug_log is not None and len(debug_log) == 0:
+    # Capture debug output for every batch (written to log file)
+    if debug_log is not None:
         debug_log.append((user_prompt, output))
 
     # Parse scores

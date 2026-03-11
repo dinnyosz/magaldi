@@ -33,7 +33,11 @@ if TYPE_CHECKING:
     from magaldi_core.code_parser import ParsingResult
     from magaldi_core.discovery import DiscoveryResult
     from magaldi_core.processor import ProgressState, TimingStats
-    from magaldi_core.variable_scoring.models import ScoringProgressState, ScoringResult
+    from magaldi_core.variable_scoring.models import (
+        ScoringProgressState,
+        ScoringResult,
+        VariableScoringConfig,
+    )
     from shared.config import MagaldiConfig
     from shared.db.store import Repository
 
@@ -308,10 +312,57 @@ def _build_scoring_display(state: ScoringProgressState, num_workers: int) -> Ren
     return Group(*parts)
 
 
+def _write_scoring_log(
+    result: ScoringResult,
+    repo_path: str,
+    parsing_result: ParsingResult,
+    scoring_config: VariableScoringConfig,
+) -> None:
+    """Write all batch prompts and LLM responses to a log file.
+
+    Creates a file in {repo_path}/logs/ with every batch's prompt, raw LLM
+    response, and parsed scores for debugging scoring quality.
+    """
+    from datetime import datetime
+    from pathlib import Path
+
+    log_dir = Path(repo_path) / "logs"
+    log_dir.mkdir(exist_ok=True)
+
+    safe_scope = parsing_result.scope.replace("/", "_").replace("\\", "_")
+    safe_repo = parsing_result.repository.replace("/", "_").replace("\\", "_")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_path = log_dir / f"variable_scoring_{safe_scope}_{safe_repo}_{ts}.log"
+
+    lines: list[str] = []
+    lines.append(f"Variable Scoring Log — {datetime.now().isoformat()}")
+    lines.append(f"Model: {result.model_name}")
+    lines.append(f"Threshold: {scoring_config.threshold}")
+    lines.append(f"Batches: {len(result.debug_log)}")
+    lines.append(f"Total variables scored by LLM: {result.llm_scored or len(result.scores)}")
+    lines.append("")
+
+    for batch_num, (user_prompt, llm_output) in enumerate(result.debug_log, 1):
+        lines.append(f"{'═' * 60}")
+        lines.append(f"  Batch {batch_num}")
+        lines.append(f"{'═' * 60}")
+        lines.append("")
+        lines.append("── PROMPT ──")
+        lines.append(user_prompt)
+        lines.append("")
+        lines.append("── RESPONSE ──")
+        lines.append(llm_output)
+        lines.append("")
+
+    log_path.write_text("\n".join(lines), encoding="utf-8")
+    console.print(f"  [dim]Scoring log:[/] {log_path}")
+
+
 def run_variable_scoring(
     parsing_result: ParsingResult,
     config: MagaldiConfig,
     workers: int = 0,
+    repo_path: str | None = None,
 ) -> ScoringResult:
     """Run Phase 4: Variable Scoring.
 
@@ -323,6 +374,7 @@ def run_variable_scoring(
         parsing_result: Result from Phase 3 (modified in place).
         config: Magaldi configuration.
         workers: Max parallel workers (0=auto).
+        repo_path: Repository root path for writing scoring log file.
 
     Returns:
         ScoringResult with statistics.
@@ -532,6 +584,10 @@ def run_variable_scoring(
                     console.print(f"    [dim]│ ... ({len(code_lines) - 6} more lines)[/]")
             console.print()
         console.print("  [bold dim]───────────────────────────────────────[/]")
+
+    # Write scoring debug log to file (all batch prompts + responses)
+    if result.debug_log and repo_path:
+        _write_scoring_log(result, repo_path, parsing_result, scoring_config)
 
     # Apply threshold + attach scores to elements for Phase 5 storage
     _apply_scores_to_elements(parsing_result, result.scores, scoring_config.threshold)

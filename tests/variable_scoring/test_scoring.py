@@ -1270,8 +1270,8 @@ class TestDebugLog:
         assert "x = 1" in prompt
         assert "9,2,1,8" in response
 
-    def test_debug_log_only_first_batch(self):
-        """Verify debug_log only captures one batch even with multiple."""
+    def test_debug_log_captures_all_batches(self):
+        """Verify debug_log captures every batch for file logging."""
         variables = [
             (f"eid{i}", "f.py", f"var_{i}", f"var_{i} = {i}" * 50)
             for i in range(6)
@@ -1289,7 +1289,7 @@ class TestDebugLog:
         result = score_variables(variables, mock_client, config=config, max_workers=1)
 
         assert result.batch_count > 1
-        assert len(result.debug_log) == 1  # Only first batch
+        assert len(result.debug_log) == result.batch_count  # All batches captured
 
     def test_debug_log_empty_on_empty_input(self):
         """Verify debug_log is empty when no variables."""
