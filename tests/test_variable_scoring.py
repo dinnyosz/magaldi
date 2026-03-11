@@ -31,17 +31,17 @@ class TestBuildUserPrompt:
         assert '2. [src/utils.py] tmp = []' in prompt
 
     def test_truncates_long_code(self):
-        """Code longer than 120 chars should be truncated."""
-        long_code = "x = " + "a" * 200
+        """Code longer than 300 chars should be truncated."""
+        long_code = "x = " + "a" * 400
         variables = [(1, "test.py", "x", long_code)]
         prompt = build_user_prompt(variables)
         # The code line should end with ...
         lines = prompt.split("\n")
         code_line = lines[-1]
         assert code_line.endswith("...")
-        # Truncated code should be <= 120 chars (excluding the "1. [test.py] " prefix)
+        # Truncated code should be <= 300 chars (excluding the "1. [test.py] " prefix)
         code_part = code_line.split("] ", 1)[1]
-        assert len(code_part) <= 120
+        assert len(code_part) <= 300
 
     def test_replaces_newlines_in_code(self):
         """Newlines in raw code should be replaced with spaces."""

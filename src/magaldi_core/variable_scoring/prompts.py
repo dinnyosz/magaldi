@@ -66,8 +66,8 @@ def build_user_prompt(variables: list[tuple[int, str, str, str]]) -> str:
     for idx, file_path, _name, raw_code in variables:
         # Truncate long code to keep prompt compact
         code = raw_code.replace("\n", " ").strip()
-        if len(code) > 120:
-            code = code[:117] + "..."
+        if len(code) > 300:
+            code = code[:297] + "..."
         lines.append(f"{idx}. [{file_path}] {code}")
 
     return "\n".join(lines)
