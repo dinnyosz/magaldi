@@ -30,18 +30,29 @@ class TestBuildUserPrompt:
         assert '1. [src/main.py] MAX_RETRIES = 3' in prompt
         assert '2. [src/utils.py] tmp = []' in prompt
 
-    def test_truncates_long_code(self):
-        """Code longer than 300 chars should be truncated."""
+    def test_no_truncation_within_budget(self):
+        """Code under the token budget should NOT be truncated."""
         long_code = "x = " + "a" * 400
         variables = [(1, "test.py", "x", long_code)]
         prompt = build_user_prompt(variables)
-        # The code line should end with ...
+        lines = prompt.split("\n")
+        code_line = lines[-1]
+        # 400 chars is well within default budget (1200 tokens ≈ 4600 chars)
+        assert not code_line.endswith("...")
+        code_part = code_line.split("] ", 1)[1]
+        assert code_part == long_code
+
+    def test_truncates_when_exceeding_budget(self):
+        """Code exceeding the token budget should be truncated."""
+        # Use a tiny budget to force truncation
+        long_code = "x = " + "a" * 2000
+        variables = [(1, "test.py", "x", long_code)]
+        prompt = build_user_prompt(variables, token_budget=200)
         lines = prompt.split("\n")
         code_line = lines[-1]
         assert code_line.endswith("...")
-        # Truncated code should be <= 300 chars (excluding the "1. [test.py] " prefix)
         code_part = code_line.split("] ", 1)[1]
-        assert len(code_part) <= 300
+        assert len(code_part) <= 200 * 4  # token_budget * 4 chars/token
 
     def test_replaces_newlines_in_code(self):
         """Newlines in raw code should be replaced with spaces."""

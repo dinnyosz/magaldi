@@ -51,23 +51,31 @@ Correct output (scores only, no code):
 """
 
 
-def build_user_prompt(variables: list[tuple[int, str, str, str]]) -> str:
+def build_user_prompt(
+    variables: list[tuple[int, str, str, str]],
+    token_budget: int = 1200,
+) -> str:
     """Build the user prompt listing variables to score.
 
     Args:
         variables: List of (index, file_path, name, raw_code) tuples.
+        token_budget: Token budget per batch. Only truncate a variable if it
+            alone would exceed the budget (~4 chars/token).
 
     Returns:
         Formatted user prompt.
     """
+    # Only truncate if a single variable is so large it would blow the budget.
+    # Leave room for system prompt overhead, line prefix, and other variables.
+    max_chars = token_budget * 4 - 200  # ~4 chars/token, minus overhead
+
     # /no_think disables Qwen3's thinking mode via soft-switch.
     # This is a fallback for servers that don't honor chat_template_kwargs.
     lines = ["/no_think\nScore these variables:"]
     for idx, file_path, _name, raw_code in variables:
-        # Truncate long code to keep prompt compact
         code = raw_code.replace("\n", " ").strip()
-        if len(code) > 300:
-            code = code[:297] + "..."
+        if len(code) > max_chars:
+            code = code[: max_chars - 3] + "..."
         lines.append(f"{idx}. [{file_path}] {code}")
 
     return "\n".join(lines)

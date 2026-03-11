@@ -157,7 +157,7 @@ def _score_batch(
     """
     # Build the prompt
     prompt_vars = [(idx, fp, name, code) for idx, _eid, fp, name, code in batch]
-    user_prompt = build_user_prompt(prompt_vars)
+    user_prompt = build_user_prompt(prompt_vars, token_budget=config.token_budget)
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},

@@ -126,16 +126,26 @@ class TestBuildUserPrompt:
         assert "1. [src/a.py] x = 1" in prompt
         assert "2. [src/b.py] y = 'hello'" in prompt
 
-    def test_truncates_long_code(self):
+    def test_no_truncation_within_budget(self):
+        """Code under the token budget should NOT be truncated."""
         long_code = "x = " + "a" * 400
         variables = [(1, "f.py", "x", long_code)]
         prompt = build_user_prompt(variables)
-        # Should be truncated to 300 chars (297 + "...")
-        # Find the variable line (contains "[f.py]")
+        var_line = [line for line in prompt.split("\n") if "[f.py]" in line][0]
+        code_part = var_line.split("] ", 1)[1]
+        # 400 chars is well within default budget — no truncation
+        assert not code_part.endswith("...")
+        assert code_part == long_code
+
+    def test_truncates_when_exceeding_budget(self):
+        """Code exceeding the token budget should be truncated."""
+        long_code = "x = " + "a" * 2000
+        variables = [(1, "f.py", "x", long_code)]
+        prompt = build_user_prompt(variables, token_budget=200)
         var_line = [line for line in prompt.split("\n") if "[f.py]" in line][0]
         code_part = var_line.split("] ", 1)[1]
         assert code_part.endswith("...")
-        assert len(code_part) <= 300
+        assert len(code_part) <= 200 * 4
 
     def test_multiline_code_collapsed(self):
         code = "x = {\n    'a': 1,\n    'b': 2\n}"
