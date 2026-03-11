@@ -6,7 +6,7 @@ false DROPs are bad (we lose elements permanently).
 
 Rules applied (in order):
 1. Single-character names (a-z, _) -> DROP
-2. Known throwaway names with simple assignments -> DROP
+2. Known throwaway names -> DROP (regardless of code shape)
 3. Generic function-call results (lowercase, not framework names) -> DROP
 """
 
@@ -15,12 +15,13 @@ from __future__ import annotations
 import re
 
 # Names that are almost always throwaway locals.
-# Only dropped when the raw_code is a simple single-line assignment.
+# Dropped unconditionally (UPPER_CASE and dunder guards run first).
 _THROWAWAY_NAMES: frozenset[str] = frozenset({
     "i", "j", "k", "n", "m", "x", "y", "z",
     "tmp", "temp",
     "result", "results", "res",
     "response", "resp",
+    "request", "req",
     "data", "val", "value", "values",
     "err", "error",
     "ret", "rv", "retval",
@@ -28,18 +29,24 @@ _THROWAWAY_NAMES: frozenset[str] = frozenset({
     "buf", "buffer",
     "line", "lines",
     "item", "items", "elem",
-    "obj",
+    "obj", "instance",
     "key", "keys",
     "idx", "index",
     "count", "total", "num",
+    "len", "length", "offset",
     "msg", "message",
     "path", "name", "text", "body",
     "row", "col",
-    "args", "kwargs",
+    "args", "kwargs", "params", "props",
     "match", "matches",
     "parts", "tokens",
     "entry", "entries",
     "chunk", "node",
+    "inner", "parsed",
+    "func", "foo",
+    "meta", "metadata",
+    "desc",
+    "expected", "actual",
 })
 
 # Names that suggest framework/infrastructure instances — never drop these
@@ -123,26 +130,6 @@ def _normalize_raw_code(name: str, raw_code: str) -> str:
     return code
 
 
-def _is_simple_assignment(name: str, raw_code: str) -> bool:
-    """Check if raw_code is a simple single-line assignment.
-
-    Multi-line code, dict/list literals, or complex expressions are NOT simple.
-    """
-    code = _normalize_raw_code(name, raw_code)
-    if not code.startswith(name):
-        return False
-
-    # Multi-line → likely complex (dict literal, list comprehension, etc.)
-    lines = code.split("\n")
-    if len(lines) > 2:
-        return False
-
-    # Pattern: name = expr or name: Type = expr
-    return bool(re.match(
-        rf"^{re.escape(name)}\s*(?::\s*[\w\[\], |<>?]+\s*)?=\s*.+",
-        code,
-    ))
-
 
 def _is_function_call_result(raw_code: str, name: str) -> bool:
     """Check if raw_code is ``name = func(...)`` or ``name = obj.method(...)``.
@@ -197,8 +184,10 @@ def should_drop_variable(name: str, raw_code: str) -> tuple[bool, str]:
     if len(name) <= 1:
         return True, "single_letter"
 
-    # Rule 2: Known throwaway names with simple assignments
-    if name.lower() in _THROWAWAY_NAMES and _is_simple_assignment(name, raw_code):
+    # Rule 2: Known throwaway names — always drop
+    # These names are generic locals regardless of code shape.
+    # UPPER_CASE constants and dunder names are already kept above.
+    if name.lower() in _THROWAWAY_NAMES:
         return True, "throwaway_name"
 
     # Rule 3: Generic function-call results

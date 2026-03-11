@@ -61,26 +61,113 @@ class TestThrowawayNameDrop:
         assert drop
         assert reason == "throwaway_name"
 
-    def test_throwaway_multiline_kept(self):
-        """Multi-line assignments with throwaway names are kept (might be dicts/lists)."""
+    def test_throwaway_multiline_dropped(self):
+        """Multi-line assignments with throwaway names are still dropped."""
         code = """data = {
             'host': 'localhost',
             'port': 8080,
             'debug': True,
         }"""
-        drop, _ = should_drop_variable("data", code)
-        assert not drop
+        drop, reason = should_drop_variable("data", code)
+        assert drop
+        assert reason == "throwaway_name"
 
     def test_throwaway_with_type_annotation(self):
         drop, _ = should_drop_variable("result", "result: str = compute()")
         assert drop
+
+    def test_request_dropped(self):
+        drop, reason = should_drop_variable("req", "req = build_request()")
+        assert drop
+        assert reason == "throwaway_name"
+
+    def test_request_full_dropped(self):
+        drop, reason = should_drop_variable("request", "request = make_request()")
+        assert drop
+        assert reason == "throwaway_name"
+
+    def test_params_dropped(self):
+        drop, reason = should_drop_variable("params", "params = parse_args()")
+        assert drop
+        assert reason == "throwaway_name"
+
+    def test_props_dropped(self):
+        drop, reason = should_drop_variable("props", "props = get_properties()")
+        assert drop
+        assert reason == "throwaway_name"
+
+    def test_instance_dropped(self):
+        drop, reason = should_drop_variable("instance", "instance = create()")
+        assert drop
+        assert reason == "throwaway_name"
+
+    def test_len_dropped(self):
+        drop, reason = should_drop_variable("len", "len = len(items)")
+        assert drop
+        assert reason == "throwaway_name"
+
+    def test_length_dropped(self):
+        drop, reason = should_drop_variable("length", "length = len(items)")
+        assert drop
+        assert reason == "throwaway_name"
+
+    def test_offset_dropped(self):
+        drop, reason = should_drop_variable("offset", "offset = calculate_offset()")
+        assert drop
+        assert reason == "throwaway_name"
+
+    def test_inner_dropped(self):
+        drop, reason = should_drop_variable("inner", "inner = unwrap(outer)")
+        assert drop
+        assert reason == "throwaway_name"
+
+    def test_parsed_dropped(self):
+        drop, reason = should_drop_variable("parsed", "parsed = parse(raw)")
+        assert drop
+        assert reason == "throwaway_name"
+
+    def test_func_dropped(self):
+        drop, reason = should_drop_variable("func", "func = get_handler()")
+        assert drop
+        assert reason == "throwaway_name"
+
+    def test_foo_dropped(self):
+        drop, reason = should_drop_variable("foo", "foo = 42")
+        assert drop
+        assert reason == "throwaway_name"
+
+    def test_meta_dropped(self):
+        drop, reason = should_drop_variable("meta", "meta = extract_metadata()")
+        assert drop
+        assert reason == "throwaway_name"
+
+    def test_metadata_dropped(self):
+        drop, reason = should_drop_variable("metadata", "metadata = {}")
+        assert drop
+        assert reason == "throwaway_name"
+
+    def test_desc_dropped(self):
+        drop, reason = should_drop_variable("desc", 'desc = "some description"')
+        assert drop
+        assert reason == "throwaway_name"
+
+    def test_expected_dropped(self):
+        drop, reason = should_drop_variable("expected", "expected = compute_expected()")
+        assert drop
+        assert reason == "throwaway_name"
+
+    def test_actual_dropped(self):
+        drop, reason = should_drop_variable("actual", "actual = run_test()")
+        assert drop
+        assert reason == "throwaway_name"
 
 
 class TestFunctionCallResultDrop:
     """Rule 3: Generic function-call results with lowercase names."""
 
     def test_generic_short_name_call(self):
-        drop, reason = should_drop_variable("foo", "foo = bar()")
+        """Short generic name that isn't a throwaway — caught by Rule 3."""
+        drop, reason = should_drop_variable("zap", "zap = bar()")
         assert drop
         assert "call_result" in reason
 
@@ -225,7 +312,7 @@ class TestEdgeCases:
     """Edge cases and boundary conditions."""
 
     def test_empty_raw_code(self):
-        drop, _ = should_drop_variable("foo", "")
+        drop, _ = should_drop_variable("processor", "")
         assert not drop  # Can't determine pattern, keep it
 
     def test_short_name_call_dropped(self):
@@ -247,9 +334,10 @@ class TestEdgeCases:
         assert not drop  # Longer than 4, not throwaway
 
     def test_raw_code_no_assignment(self):
-        """Variable with no = sign (e.g. declaration only)."""
-        drop, _ = should_drop_variable("tmp", "tmp: int")
-        assert not drop  # Not a simple assignment pattern
+        """Variable with no = sign — still dropped if throwaway name."""
+        drop, reason = should_drop_variable("tmp", "tmp: int")
+        assert drop
+        assert reason == "throwaway_name"
 
     def test_call_with_multiline_args(self):
         """Function call with multi-line arguments should not match simple call."""
@@ -343,7 +431,7 @@ class TestRustVariableDrops:
         assert not drop
 
     def test_rust_short_call_result_dropped(self):
-        drop, reason = should_drop_variable("foo", "let foo = bar();")
+        drop, reason = should_drop_variable("zap", "let zap = bar();")
         assert drop
         assert "call_result" in reason
 
@@ -371,7 +459,7 @@ class TestPHPVariableDrops:
         assert not drop
 
     def test_php_short_call_result_dropped(self):
-        drop, reason = should_drop_variable("foo", "$foo = bar()")
+        drop, reason = should_drop_variable("zap", "$zap = bar()")
         assert drop
         assert "call_result" in reason
 
@@ -398,7 +486,7 @@ class TestJavaVariableDrops:
         assert not drop
 
     def test_java_short_call_result_dropped(self):
-        drop, reason = should_drop_variable("foo", "final Foo foo = create();")
+        drop, reason = should_drop_variable("zap", "final Zap zap = create();")
         assert drop
         assert "call_result" in reason
 
