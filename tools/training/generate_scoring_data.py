@@ -529,6 +529,7 @@ def build_training_batches(
     - 10% max batches (21-30)
     """
     rng = random.Random(seed)
+    results = list(results)  # copy to avoid mutating caller's list
     rng.shuffle(results)
 
     # Define batch size distribution
@@ -608,12 +609,12 @@ def _print_progress_line(
     # Truncate variable name and value for display
     name = variable["name"][:25].ljust(25)
     raw_code = variable.get("raw_code", "")
-    # Extract the value part (after the = sign)
+    # Extract the value part (after the = sign), collapse to one line
     if "=" in raw_code:
         value = raw_code.split("=", 1)[1].strip()
     else:
         value = raw_code.strip()
-    # Truncate long values
+    value = " ".join(value.split())  # collapse newlines/whitespace
     if len(value) > 50:
         value = value[:47] + "..."
     value = value.ljust(50)
@@ -636,7 +637,7 @@ def _print_progress_line(
         f"[{current:>5}/{total}] {tag} {scores_str:<20} "
         f"{name} = {value} "
         f"{variable['file_path']:<30.30} "
-        f"| {source:<20} "
+        f"| {source:<14} "
         f"| {_format_duration(elapsed)} ~{_format_duration(eta)} "
         f"{rate:.1f}/s"
     )
@@ -733,7 +734,7 @@ def run_generation(args: argparse.Namespace) -> None:
             scores = tuple(1 for _ in range(NUM_SCORES))
             heuristic_count += 1
             decision = "DROP"
-            source = f"heuristic ({heuristic_reason})"
+            source = f"H:{heuristic_reason[:12]}"
         else:
             # Score with teacher model
             scores = score_variable_with_teacher(
@@ -748,7 +749,7 @@ def run_generation(args: argparse.Namespace) -> None:
                 failed_count += 1
                 _print_progress_line(
                     i + 1, len(to_score), variable, None, "FAIL",
-                    "teacher error", start_time,
+                    "T:err", start_time,
                 )
                 continue
 
@@ -758,14 +759,14 @@ def run_generation(args: argparse.Namespace) -> None:
                 filtered_count += 1
                 _print_progress_line(
                     i + 1, len(to_score), variable, scores, "FILT",
-                    reason, start_time,
+                    reason[:14], start_time,
                 )
                 continue
 
             teacher_count += 1
             max_s = max(scores)
             decision = "KEEP" if max_s >= threshold else "DROP"
-            source = "teacher"
+            source = "T"
 
         # Track keep/drop
         if decision == "KEEP":
