@@ -274,12 +274,13 @@ class TestBashParser:
         assert "kubectl" in call_names
         assert "helm" in call_names
 
-    def test_same_file_call_resolution(self):
+    def test_same_file_call_extracted_not_resolved(self):
+        """Same-file calls extracted but not resolved at parse time (deferred to Phase 6)."""
         code = 'helper() {\n    echo "helping"\n}\nmain() {\n    helper\n}\n'
         elements = self._parse(code)
         main_func = next(e for e in elements if e.name == "main")
         helper_call = next(c for c in main_func.calls if c.name == "helper")
-        assert helper_call.resolved_id is not None
+        assert helper_call.resolved_id is None
 
     def test_empty_script(self):
         elements = self._parse("")
@@ -343,11 +344,11 @@ cleanup() {
         assert "helm" in deploy_calls
         assert "notify_team" in deploy_calls
 
-        # Cross-function call resolution
+        # Cross-function calls extracted (resolution deferred to Phase 6)
         tests_func = next(f for f in funcs if f.name == "run_tests")
         deploy_call = next((c for c in tests_func.calls if c.name == "deploy_to_k8s"), None)
         assert deploy_call is not None
-        assert deploy_call.resolved_id is not None
+        assert deploy_call.resolved_id is None
 
     def test_language_is_bash(self):
         code = '#!/bin/bash\nfoo() { echo 1; }\n'

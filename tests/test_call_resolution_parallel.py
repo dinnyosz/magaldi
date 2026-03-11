@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 from magaldi_core.call_resolution import (
     _parallel_map,
-    _process_file_group_strategies_3_5,
+    _process_file_group,
     resolve_all_calls,
 )
 
@@ -74,7 +74,7 @@ class TestParallelMap:
 
 
 # =============================================================================
-# _process_file_group_strategies_3_5 tests
+# _process_file_group tests
 # =============================================================================
 
 
@@ -84,10 +84,11 @@ class TestProcessFileGroup:
     def test_empty_group(self):
         """Empty element list returns zeroes."""
         repo = MagicMock()
-        total, imp, typ = _process_file_group_strategies_3_5(
+        total, sf, imp, typ = _process_file_group(
             [], repo, "scope", "repo", "main"
         )
         assert total == 0
+        assert sf == 0
         assert imp == 0
         assert typ == 0
 
@@ -98,6 +99,7 @@ class TestProcessFileGroup:
             {"name": "helper", "module": "utils", "alias": None, "line": 1}
         ]
         # _lookup_element_by_import will be called — mock it
+        repo.get_elements_by_file.return_value = []
         with patch("magaldi_core.call_resolution._lookup_element_by_import") as mock_lookup, \
              patch("magaldi_core.call_resolution._build_import_map") as mock_build:
             mock_build.return_value = {"helper": {"name": "helper", "module": "utils"}}
@@ -113,7 +115,7 @@ class TestProcessFileGroup:
                 ],
             }]
 
-            total, imp, typ = _process_file_group_strategies_3_5(
+            total, sf, imp, typ = _process_file_group(
                 elements, repo, "scope", "repo", "main"
             )
 
@@ -126,6 +128,7 @@ class TestProcessFileGroup:
         """All elements from the same file share one import map (one get_file_imports call)."""
         repo = MagicMock()
         repo.get_file_imports.return_value = []
+        repo.get_elements_by_file.return_value = []
 
         elements = [
             {
@@ -138,7 +141,7 @@ class TestProcessFileGroup:
             for i in range(5)
         ]
 
-        _process_file_group_strategies_3_5(elements, repo, "scope", "repo", "main")
+        _process_file_group(elements, repo, "scope", "repo", "main")
 
         # get_file_imports should be called exactly once for the shared file
         repo.get_file_imports.assert_called_once_with("app.py", "scope", "repo", "main")
@@ -157,6 +160,7 @@ class TestResolveAllCallsParallel:
         repo = MagicMock()
         repo.find_all_elements_with_calls.return_value = elements
         repo.get_file_imports.return_value = []
+        repo.get_elements_by_file.return_value = []
         repo.get_documents_batch.return_value = {}
         return repo
 
@@ -164,11 +168,12 @@ class TestResolveAllCallsParallel:
         """max_workers=1 uses sequential processing (default behavior)."""
         repo = self._make_repo([])
 
-        total, imp, typ, con, sco, sup = resolve_all_calls(
+        total, sf, imp, typ, con, sco, sup = resolve_all_calls(
             repo, "scope", "repo", "main", max_workers=1
         )
 
         assert total == 0
+        assert sf == 0
         assert imp == 0
 
     def test_max_workers_gt_1_produces_same_results(self):
@@ -225,12 +230,12 @@ class TestResolveAllCallsParallel:
             on_step=lambda msg: steps.append(msg),
         )
 
-        assert len(steps) >= 5  # 3-5, 5.5, 5.6, 5.7, 5.8
-        assert any("3-5" in s for s in steps)
-        assert any("5.5" in s for s in steps)
-        assert any("5.6" in s for s in steps)
-        assert any("5.7" in s for s in steps)
-        assert any("5.8" in s for s in steps)
+        assert len(steps) >= 5
+        assert any("Same-file" in s for s in steps)
+        assert any("Return-type" in s for s in steps)
+        assert any("Constructor" in s for s in steps)
+        assert any("Scope" in s for s in steps)
+        assert any("Super" in s for s in steps)
 
     def test_on_step_none_does_not_crash(self):
         """on_step=None should work fine (default)."""

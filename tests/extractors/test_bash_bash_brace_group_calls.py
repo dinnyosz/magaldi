@@ -116,10 +116,11 @@ class TestBashBraceGroupCalls:
         main_func = next(e for e in elements if e.name == "main_func")
         helper_call = next((c for c in main_func.calls if c.name == "helper"), None)
         assert helper_call is not None, "main_func should call helper"
-        assert helper_call.resolved_id is not None, "Call to helper should be resolved"
+        # Resolution deferred to Phase 6; at parse time call is extracted but unresolved
+        assert helper_call.resolved_id is None
 
-    def test_file_level_calls_resolved_in_brace_group(self):
-        """Top-level calls inside { ... } should resolve to functions."""
+    def test_file_level_calls_extracted_in_brace_group(self):
+        """Top-level calls inside { ... } should be extracted (resolution deferred to Phase 6)."""
         code = (
             "#!/usr/bin/env bash\n"
             "{\n"
@@ -133,7 +134,8 @@ class TestBashBraceGroupCalls:
         file_elem = next(e for e in elements if e.element_type == "file")
         setup_call = next((c for c in file_elem.calls if c.name == "setup"), None)
         assert setup_call is not None, "File should have top-level call to setup"
-        assert setup_call.resolved_id is not None, "Call to setup should be resolved"
+        # Resolution deferred to Phase 6; at parse time call is extracted but unresolved
+        assert setup_call.resolved_id is None
 
 
 class TestBashSubshellExtraction:

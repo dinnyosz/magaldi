@@ -53,15 +53,18 @@ def make_file_info(path: str, language: str) -> FileInfo:
 
 
 # =============================================================================
-# PHASE 1: PYTHON RESOLUTION TESTS
+# PARSE-TIME CATEGORIZATION TESTS (PYTHON)
 # =============================================================================
 
 
-class TestPythonPhase1Resolution:
-    """Test Phase 1 resolution for Python."""
+class TestPythonParseTimeCategorization:
+    """Test that Python parser categorizes calls without resolving them.
 
-    def test_same_file_function_call_resolved(self, python_parser):
-        """Test that bare function calls to same-file functions are resolved."""
+    Resolution is deferred to Phase 6 (call_resolution.py).
+    """
+
+    def test_same_file_function_call_extracted_not_resolved(self, python_parser):
+        """Bare function calls to same-file functions are extracted but not resolved at parse time."""
         code = '''
 def helper():
     pass
@@ -72,17 +75,15 @@ def main():
         file_info = make_file_info("test.py", "python")
         elements = python_parser.parse(code, file_info, "test", "repo", "main")
 
-        # Find the main function
         main_func = next(e for e in elements if e.name == "main" and e.element_type == "function")
-        helper_func = next(e for e in elements if e.name == "helper" and e.element_type == "function")
 
-        # Check that helper() call is resolved
         assert len(main_func.calls) == 1
         assert main_func.calls[0].name == "helper"
-        assert main_func.calls[0].resolved_id == helper_func.element_id
+        assert main_func.calls[0].resolved_id is None  # Not resolved at parse time
+        assert main_func.calls[0].category == "unknown"
 
-    def test_self_method_call_resolved(self, python_parser):
-        """Test that self.method() calls are resolved to sibling methods."""
+    def test_self_method_call_extracted_not_resolved(self, python_parser):
+        """self.method() calls are extracted and categorized but not resolved at parse time."""
         code = '''
 class MyClass:
     def process(self):
@@ -94,18 +95,16 @@ class MyClass:
         file_info = make_file_info("test.py", "python")
         elements = python_parser.parse(code, file_info, "test", "repo", "main")
 
-        # Find the methods
         process_method = next(e for e in elements if e.name == "process" and e.element_type == "method")
-        validate_method = next(e for e in elements if e.name == "validate" and e.element_type == "method")
 
-        # Check that self.validate() call is resolved
         assert len(process_method.calls) == 1
         assert process_method.calls[0].name == "validate"
         assert process_method.calls[0].receiver == "self"
-        assert process_method.calls[0].resolved_id == validate_method.element_id
+        assert process_method.calls[0].resolved_id is None  # Not resolved at parse time
+        assert process_method.calls[0].category == "untyped"
 
     def test_external_call_not_resolved(self, python_parser):
-        """Test that external calls (like os.path.join) are not resolved."""
+        """External calls (like os.path.join) are not resolved."""
         code = '''
 import os
 
@@ -117,14 +116,13 @@ def main():
 
         main_func = next(e for e in elements if e.name == "main" and e.element_type == "function")
 
-        # External call should not be resolved
         assert len(main_func.calls) >= 1
         join_call = next((c for c in main_func.calls if c.name == "join"), None)
         if join_call:
             assert join_call.resolved_id is None
 
-    def test_builtin_call_not_resolved(self, python_parser):
-        """Test that builtin calls (like len, print) are not resolved."""
+    def test_builtin_call_categorized(self, python_parser):
+        """Builtin calls (like len, print) are categorized as builtin."""
         code = '''
 def main():
     x = [1, 2, 3]
@@ -135,21 +133,20 @@ def main():
 
         main_func = next(e for e in elements if e.name == "main" and e.element_type == "function")
 
-        # Builtin calls should not be resolved
         for call in main_func.calls:
             assert call.resolved_id is None
 
 
 # =============================================================================
-# PHASE 1: JAVASCRIPT RESOLUTION TESTS
+# PARSE-TIME CATEGORIZATION TESTS (JAVASCRIPT)
 # =============================================================================
 
 
-class TestJavaScriptPhase1Resolution:
-    """Test Phase 1 resolution for JavaScript."""
+class TestJavaScriptParseTimeCategorization:
+    """Test that JS parser categorizes calls without resolving them."""
 
-    def test_same_file_function_call_resolved(self, javascript_parser):
-        """Test that bare function calls to same-file functions are resolved."""
+    def test_same_file_function_call_extracted_not_resolved(self, javascript_parser):
+        """Bare function calls to same-file functions are extracted but not resolved at parse time."""
         code = '''
 function helper() {
     return true;
@@ -163,15 +160,14 @@ function main() {
         elements = javascript_parser.parse(code, file_info, "test", "repo", "main")
 
         main_func = next(e for e in elements if e.name == "main" and e.element_type == "function")
-        helper_func = next(e for e in elements if e.name == "helper" and e.element_type == "function")
 
         assert len(main_func.calls) >= 1
         helper_call = next((c for c in main_func.calls if c.name == "helper"), None)
         assert helper_call is not None
-        assert helper_call.resolved_id == helper_func.element_id
+        assert helper_call.resolved_id is None
 
-    def test_this_method_call_resolved(self, javascript_parser):
-        """Test that this.method() calls are resolved to sibling methods."""
+    def test_this_method_call_extracted_not_resolved(self, javascript_parser):
+        """this.method() calls are extracted and categorized but not resolved at parse time."""
         code = '''
 class MyClass {
     process() {
@@ -187,24 +183,23 @@ class MyClass {
         elements = javascript_parser.parse(code, file_info, "test", "repo", "main")
 
         process_method = next(e for e in elements if e.name == "process" and e.element_type == "method")
-        validate_method = next(e for e in elements if e.name == "validate" and e.element_type == "method")
 
         validate_call = next((c for c in process_method.calls if c.name == "validate"), None)
         assert validate_call is not None
         assert validate_call.receiver == "this"
-        assert validate_call.resolved_id == validate_method.element_id
+        assert validate_call.resolved_id is None
 
 
 # =============================================================================
-# PHASE 1: PHP RESOLUTION TESTS
+# PARSE-TIME CATEGORIZATION TESTS (PHP)
 # =============================================================================
 
 
-class TestPhpPhase1Resolution:
-    """Test Phase 1 resolution for PHP."""
+class TestPhpParseTimeCategorization:
+    """Test that PHP parser categorizes calls without resolving them."""
 
-    def test_same_file_function_call_resolved(self, php_parser):
-        """Test that bare function calls to same-file functions are resolved."""
+    def test_same_file_function_call_extracted_not_resolved(self, php_parser):
+        """Bare function calls to same-file functions are extracted but not resolved at parse time."""
         code = '''<?php
 function helper() {
     return true;
@@ -218,15 +213,14 @@ function main() {
         elements = php_parser.parse(code, file_info, "test", "repo", "main")
 
         main_func = next((e for e in elements if e.name == "main" and e.element_type == "function"), None)
-        helper_func = next((e for e in elements if e.name == "helper" and e.element_type == "function"), None)
 
-        if main_func and helper_func and main_func.calls:
+        if main_func and main_func.calls:
             helper_call = next((c for c in main_func.calls if c.name == "helper"), None)
             if helper_call:
-                assert helper_call.resolved_id == helper_func.element_id
+                assert helper_call.resolved_id is None
 
-    def test_this_method_call_resolved(self, php_parser):
-        """Test that $this->method() calls are resolved to sibling methods."""
+    def test_this_method_call_extracted_not_resolved(self, php_parser):
+        """$this->method() calls are extracted and categorized but not resolved at parse time."""
         code = '''<?php
 class MyClass {
     public function process() {
@@ -242,26 +236,24 @@ class MyClass {
         elements = php_parser.parse(code, file_info, "test", "repo", "main")
 
         process_method = next((e for e in elements if e.name == "process" and e.element_type == "method"), None)
-        validate_method = next((e for e in elements if e.name == "validate" and e.element_type == "method"), None)
 
-        if process_method and validate_method and process_method.calls:
+        if process_method and process_method.calls:
             validate_call = next((c for c in process_method.calls if c.name == "validate"), None)
             if validate_call:
-                # PHP extractor returns "this" (without the $)
                 assert validate_call.receiver in ("$this", "this")
-                assert validate_call.resolved_id == validate_method.element_id
+                assert validate_call.resolved_id is None
 
 
 # =============================================================================
-# PHASE 1: RUST RESOLUTION TESTS
+# PARSE-TIME CATEGORIZATION TESTS (RUST)
 # =============================================================================
 
 
-class TestRustPhase1Resolution:
-    """Test Phase 1 resolution for Rust."""
+class TestRustParseTimeCategorization:
+    """Test that Rust parser categorizes calls without resolving them."""
 
-    def test_same_file_function_call_resolved(self, rust_parser):
-        """Test that bare function calls to same-file functions are resolved."""
+    def test_same_file_function_call_extracted_not_resolved(self, rust_parser):
+        """Bare function calls to same-file functions are extracted but not resolved at parse time."""
         code = '''
 fn helper() -> bool {
     true
@@ -275,12 +267,219 @@ fn main() {
         elements = rust_parser.parse(code, file_info, "test", "repo", "main")
 
         main_func = next((e for e in elements if e.name == "main" and e.element_type == "function"), None)
-        helper_func = next((e for e in elements if e.name == "helper" and e.element_type == "function"), None)
 
-        if main_func and helper_func and main_func.calls:
+        if main_func and main_func.calls:
             helper_call = next((c for c in main_func.calls if c.name == "helper"), None)
             if helper_call:
-                assert helper_call.resolved_id == helper_func.element_id
+                assert helper_call.resolved_id is None
+
+
+# =============================================================================
+# SAME-FILE RESOLUTION TESTS (via _process_file_group)
+# =============================================================================
+
+
+class TestSameFileResolution:
+    """Test strategies 1-2 (same-file resolution) in _process_file_group."""
+
+    def test_bare_function_call_resolved(self):
+        """Strategy 1: bare function call to same-file function is resolved."""
+        from unittest.mock import MagicMock
+        from magaldi_core.call_resolution import _process_file_group
+
+        repo = MagicMock()
+        repo.get_file_imports.return_value = []
+        repo.get_elements_by_file.return_value = [
+            {"name": "helper", "element_type": "function",
+             "element_id": "s:r:main:test.py:function:helper:1", "parent_id": None},
+            {"name": "main", "element_type": "function",
+             "element_id": "s:r:main:test.py:function:main:5", "parent_id": None},
+        ]
+
+        elements = [{
+            "element_id": "s:r:main:test.py:function:main:5",
+            "relative_path": "test.py",
+            "language": "python",
+            "parameters": [],
+            "parent_id": None,
+            "calls": [
+                {"name": "helper", "receiver": None, "category": "unknown", "line": 6},
+            ],
+        }]
+
+        total, sf, imp, typ = _process_file_group(
+            elements, repo, "s", "r", "main"
+        )
+
+        assert sf == 1
+        assert elements[0]["calls"][0]["resolved_id"] == "s:r:main:test.py:function:helper:1"
+        assert elements[0]["calls"][0]["category"] == "resolved"
+
+    def test_self_method_call_resolved(self):
+        """Strategy 2: self.method() call resolved to sibling method."""
+        from unittest.mock import MagicMock
+        from magaldi_core.call_resolution import _process_file_group
+
+        repo = MagicMock()
+        repo.get_file_imports.return_value = []
+        repo.get_elements_by_file.return_value = [
+            {"name": "process", "element_type": "method",
+             "element_id": "s:r:main:t.py:method:process:10",
+             "parent_id": "s:r:main:t.py:class:MyClass:1"},
+            {"name": "validate", "element_type": "method",
+             "element_id": "s:r:main:t.py:method:validate:20",
+             "parent_id": "s:r:main:t.py:class:MyClass:1"},
+        ]
+
+        elements = [{
+            "element_id": "s:r:main:t.py:method:process:10",
+            "relative_path": "t.py",
+            "language": "python",
+            "parameters": [],
+            "parent_id": "s:r:main:t.py:class:MyClass:1",
+            "calls": [
+                {"name": "validate", "receiver": "self", "category": "untyped", "line": 12},
+            ],
+        }]
+
+        total, sf, imp, typ = _process_file_group(
+            elements, repo, "s", "r", "main"
+        )
+
+        assert sf == 1
+        assert elements[0]["calls"][0]["resolved_id"] == "s:r:main:t.py:method:validate:20"
+        assert elements[0]["calls"][0]["category"] == "resolved"
+
+    def test_this_method_call_resolved_javascript(self):
+        """Strategy 2: this.method() call resolved for JavaScript."""
+        from unittest.mock import MagicMock
+        from magaldi_core.call_resolution import _process_file_group
+
+        repo = MagicMock()
+        repo.get_file_imports.return_value = []
+        repo.get_elements_by_file.return_value = [
+            {"name": "process", "element_type": "method",
+             "element_id": "s:r:main:t.js:method:process:10",
+             "parent_id": "s:r:main:t.js:class:MyClass:1"},
+            {"name": "validate", "element_type": "method",
+             "element_id": "s:r:main:t.js:method:validate:20",
+             "parent_id": "s:r:main:t.js:class:MyClass:1"},
+        ]
+
+        elements = [{
+            "element_id": "s:r:main:t.js:method:process:10",
+            "relative_path": "t.js",
+            "language": "javascript",
+            "parameters": [],
+            "parent_id": "s:r:main:t.js:class:MyClass:1",
+            "calls": [
+                {"name": "validate", "receiver": "this", "category": "untyped", "line": 12},
+            ],
+        }]
+
+        total, sf, imp, typ = _process_file_group(
+            elements, repo, "s", "r", "main"
+        )
+
+        assert sf == 1
+        assert elements[0]["calls"][0]["resolved_id"] == "s:r:main:t.js:method:validate:20"
+
+    def test_php_this_method_call_resolved(self):
+        """Strategy 2: $this->method() call resolved for PHP."""
+        from unittest.mock import MagicMock
+        from magaldi_core.call_resolution import _process_file_group
+
+        repo = MagicMock()
+        repo.get_file_imports.return_value = []
+        repo.get_elements_by_file.return_value = [
+            {"name": "process", "element_type": "method",
+             "element_id": "s:r:main:t.php:method:process:10",
+             "parent_id": "s:r:main:t.php:class:MyClass:1"},
+            {"name": "validate", "element_type": "method",
+             "element_id": "s:r:main:t.php:method:validate:20",
+             "parent_id": "s:r:main:t.php:class:MyClass:1"},
+        ]
+
+        elements = [{
+            "element_id": "s:r:main:t.php:method:process:10",
+            "relative_path": "t.php",
+            "language": "php",
+            "parameters": [],
+            "parent_id": "s:r:main:t.php:class:MyClass:1",
+            "calls": [
+                {"name": "validate", "receiver": "$this", "category": "untyped", "line": 12},
+            ],
+        }]
+
+        total, sf, imp, typ = _process_file_group(
+            elements, repo, "s", "r", "main"
+        )
+
+        assert sf == 1
+        assert elements[0]["calls"][0]["resolved_id"] == "s:r:main:t.php:method:validate:20"
+
+    def test_same_file_function_wins_over_import(self):
+        """Strategy 1 runs before strategy 3 — same-file function shadows import."""
+        from unittest.mock import MagicMock, patch
+        from magaldi_core.call_resolution import _process_file_group
+
+        repo = MagicMock()
+        repo.get_elements_by_file.return_value = [
+            {"name": "helper", "element_type": "function",
+             "element_id": "s:r:main:test.py:function:helper:1", "parent_id": None},
+        ]
+
+        with patch("magaldi_core.call_resolution._build_import_map") as mock_build:
+            mock_build.return_value = {"helper": {"name": "helper", "module": "utils"}}
+            repo.get_file_imports.return_value = [
+                {"name": "helper", "module": "utils", "alias": None, "line": 1}
+            ]
+
+            elements = [{
+                "element_id": "s:r:main:test.py:function:main:5",
+                "relative_path": "test.py",
+                "language": "python",
+                "parameters": [],
+                "parent_id": None,
+                "calls": [
+                    {"name": "helper", "receiver": None, "category": "unknown", "line": 6},
+                ],
+            }]
+
+            total, sf, imp, typ = _process_file_group(
+                elements, repo, "s", "r", "main"
+            )
+
+            # Same-file resolution wins (strategy 1 before strategy 3)
+            assert sf == 1
+            assert imp == 0
+            assert elements[0]["calls"][0]["resolved_id"] == "s:r:main:test.py:function:helper:1"
+
+    def test_no_self_resolution_for_bash(self):
+        """Bash has no self-keywords, so strategy 2 never matches."""
+        from unittest.mock import MagicMock
+        from magaldi_core.call_resolution import _process_file_group
+
+        repo = MagicMock()
+        repo.get_file_imports.return_value = []
+        repo.get_elements_by_file.return_value = []
+
+        elements = [{
+            "element_id": "s:r:main:t.sh:function:fn1:10",
+            "relative_path": "t.sh",
+            "language": "bash",
+            "parameters": [],
+            "parent_id": None,
+            "calls": [
+                {"name": "other", "receiver": "self", "category": "untyped", "line": 12},
+            ],
+        }]
+
+        total, sf, imp, typ = _process_file_group(
+            elements, repo, "s", "r", "main"
+        )
+
+        assert sf == 0
 
 
 # =============================================================================
