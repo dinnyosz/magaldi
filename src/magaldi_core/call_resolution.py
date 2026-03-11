@@ -3,23 +3,27 @@
 This module resolves function/method calls that reference elements in other files,
 using import information, type annotations, and embedding similarity.
 
-Strategy 1-2 (at parse time, in parsers/base.py):
-- Same-file bare function calls
-- Self-method calls (self.method(), this.method(), $this->method())
+**Parse-time resolution** (parsers/base.py, strategies 1-2):
+  - Same-file bare function calls
+  - Self-method calls (self.method(), this.method(), $this->method())
 
-Strategy 3-5 (this module, resolve_all_calls):
-- Import-based calls (from utils import process; process())
-- Module method calls (import utils; utils.process())
-- Type-annotated calls (repo: Repository; repo.get_document())
-- Return-type propagation (result = get_user(); result.save())
-- Constructor-based inference (repo = Repository(); repo.get())
-- Scope-aware binding (conn = db.connect(); conn.cursor(); with/for/except)
+**Static resolution** (this module, ``resolve_all_calls``):
+  - Import + type-annotation resolution (strategies 3-5)
+      Bare calls via imports, module method calls, type-annotated method calls
+  - Return-type propagation
+      result = get_user(); result.save()
+  - Constructor inference
+      repo = Repository(); repo.get()
+  - Scope-aware bindings
+      conn = db.connect(); conn.cursor(); with/for/except patterns
+  - Super/parent calls
+      super().method(), parent::method()
 
-Strategy 6 (this module, resolve_calls_by_embedding):
-- RRF-scored embedding + name + receiver affinity for untyped calls
+**Embedding resolution** (this module, ``resolve_calls_by_embedding``):
+  - RRF-scored embedding + name + receiver affinity for remaining untyped calls
 
-Semantic relationships (compute_semantic_relationships):
-- Pre-compute top-K similar functions for each element via vector similarity
+**Semantic relationships** (``compute_semantic_relationships``):
+  - Pre-compute top-K similar functions for each element via vector similarity
 """
 
 from __future__ import annotations
@@ -244,7 +248,7 @@ def resolve_all_calls(
     _step = on_step or (lambda _msg: None)
 
     # Get ALL elements with calls (not just unresolved)
-    _step("Strategies 3-5: imports + type annotations")
+    _step("Import + type-annotation resolution")
     elements = repo.find_all_elements_with_calls(scope, repository, username)
     logger.info(f"Full resolution: found {len(elements)} elements with calls")
 
@@ -261,7 +265,7 @@ def resolve_all_calls(
         ),
         groups,
         max_workers=max_workers,
-        desc="strategies 3-5",
+        desc="import+type resolution",
     )
 
     for total_p, imp_r, type_r in results:
@@ -275,7 +279,7 @@ def resolve_all_calls(
     repo.refresh()
 
     # Strategy 5.5: Return-type propagation
-    _step("Strategy 5.5: return-type propagation")
+    _step("Return-type propagation")
     elements = repo.find_all_elements_with_calls(scope, repository, username)
     return_type_count = _resolve_via_return_types(
         repo, elements, scope, repository, username,
@@ -286,7 +290,7 @@ def resolve_all_calls(
     repo.refresh()
 
     # Strategy 5.6: Constructor-based type inference
-    _step("Strategy 5.6: constructor inference")
+    _step("Constructor inference")
     elements = repo.find_all_elements_with_calls(scope, repository, username)
     constructor_count = _resolve_via_constructors(
         repo, elements, scope, repository, username,
@@ -297,7 +301,7 @@ def resolve_all_calls(
     repo.refresh()
 
     # Strategy 5.7: Scope-aware type binding (AST-based)
-    _step("Strategy 5.7: scope-aware bindings")
+    _step("Scope-aware bindings")
     elements = repo.find_all_elements_with_calls(scope, repository, username)
     scope_count = _resolve_via_scope_bindings(
         repo, elements, scope, repository, username,
@@ -308,7 +312,7 @@ def resolve_all_calls(
     repo.refresh()
 
     # Strategy 5.8: super()/parent:: call resolution
-    _step("Strategy 5.8: super/parent calls")
+    _step("Super/parent calls")
     elements = repo.find_all_elements_with_calls(scope, repository, username)
     super_count = _resolve_via_super(
         repo, elements, scope, repository, username,
@@ -1092,7 +1096,7 @@ def _resolve_via_return_types(
         ),
         work_items,
         max_workers=max_workers,
-        desc="strategy 5.5",
+        desc="return-type propagation",
     )
 
     return_type_resolved = sum(results)
@@ -1303,7 +1307,7 @@ def _resolve_via_constructors(
         ),
         work_items,
         max_workers=max_workers,
-        desc="strategy 5.6",
+        desc="constructor inference",
     )
 
     constructor_resolved = sum(results)
@@ -1433,7 +1437,7 @@ def _resolve_via_super(
         ),
         candidates,
         max_workers=max_workers,
-        desc="strategy 5.8",
+        desc="super/parent calls",
     )
 
     resolved_count = sum(results)
@@ -1598,7 +1602,7 @@ def _resolve_via_scope_bindings(
         ),
         work_items,
         max_workers=max_workers,
-        desc="strategy 5.7",
+        desc="scope-aware bindings",
     )
 
     scope_resolved = sum(results)
