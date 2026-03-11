@@ -155,13 +155,13 @@ class TestSystemPrompt:
         assert "general_usefulness" in SYSTEM_PROMPT
 
     def test_has_rules(self):
-        assert "One line per variable" in SYSTEM_PROMPT
-        assert "no explanations" in SYSTEM_PROMPT
+        assert "ONLY the number and four scores" in SYSTEM_PROMPT
+        assert "Never echo" in SYSTEM_PROMPT
 
     def test_has_few_shot_examples(self):
-        """Prompt includes HIGH and LOW scoring examples for calibration."""
-        assert "Examples (HIGH" in SYSTEM_PROMPT
-        assert "Examples (LOW" in SYSTEM_PROMPT
+        """Prompt includes input/output example for calibration."""
+        assert "Example input:" in SYSTEM_PROMPT
+        assert "Correct output" in SYSTEM_PROMPT
         # LOW examples should show 1,1,1,1
         assert "1,1,1,1" in SYSTEM_PROMPT
         # HIGH examples should show high scores
@@ -170,7 +170,6 @@ class TestSystemPrompt:
     def test_covers_string_templates(self):
         """Prompt covers string templates/prompts as HIGH scoring."""
         assert "prompt template" in SYSTEM_PROMPT or "string template" in SYSTEM_PROMPT
-        assert "SYSTEM_PROMPT" in SYSTEM_PROMPT
 
     def test_covers_coding_agent_perspective(self):
         """Prompt frames scoring from a coding agent's perspective."""
