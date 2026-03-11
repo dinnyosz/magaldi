@@ -89,32 +89,56 @@ def _parallel_map(
     return results
 
 
-def _process_file_group_strategies_3_5(
+def _process_file_group(
     elements: list[dict],
     repo: Repository,
     scope: str,
     repository: str,
     username: str,
-) -> tuple[int, int, int]:
-    """Process a group of elements from the same file for strategies 3-5.
+) -> tuple[int, int, int, int]:
+    """Process a group of elements from the same file for strategies 1-5.
 
-    All elements share the same ``relative_path`` so the import map is
-    built once and reused.  Each element's calls are written back via
-    ``repo.store_calls`` (thread-safe when a bulk buffer is active).
+    All elements share the same ``relative_path`` so the import map and
+    file-level lookups are built once and reused.  Each element's calls
+    are written back via ``repo.store_calls`` (thread-safe when a bulk
+    buffer is active).
 
     Returns:
-        ``(total_processed, import_resolved, type_resolved)``
+        ``(total_processed, same_file_resolved, import_resolved, type_resolved)``
     """
+    from magaldi_core.extractors.call_categorizer import SELF_REFERENCES
+
     total_processed = 0
+    same_file_resolved = 0
     import_resolved = 0
     type_resolved = 0
 
     if not elements:
-        return total_processed, import_resolved, type_resolved
+        return total_processed, same_file_resolved, import_resolved, type_resolved
 
-    # All elements in this group share the same file — build import map once
+    # All elements in this group share the same file — build lookups once
     relative_path = elements[0].get("relative_path", "")
     language = elements[0].get("language", "python")
+
+    # Strategy 1-2 setup: file-level function and class method lookups
+    file_targets = repo.get_elements_by_file(
+        relative_path, scope, repository, username,
+    )
+    file_functions: dict[str, str] = {
+        e["name"]: e["element_id"]
+        for e in file_targets
+        if e.get("element_type") == "function"
+    }
+    class_methods: dict[str, dict[str, str]] = {}
+    for e in file_targets:
+        if e.get("element_type") == "method" and e.get("parent_id"):
+            parent = e["parent_id"]
+            if parent not in class_methods:
+                class_methods[parent] = {}
+            class_methods[parent][e["name"]] = e["element_id"]
+    self_keywords = SELF_REFERENCES.get(language, set())
+
+    # Strategy 3-5 setup: import map
     file_imports = repo.get_file_imports(relative_path, scope, repository, username)
     import_map = _build_import_map(
         file_imports, repo, scope, repository, username,
@@ -124,6 +148,7 @@ def _process_file_group_strategies_3_5(
     for elem in elements:
         element_id = elem.get("element_id", "")
         elem_language = elem.get("language", language)
+        parent_id = elem.get("parent_id")
         parameters = elem.get("parameters", [])
 
         # Build param type map for type-based resolution
@@ -147,7 +172,7 @@ def _process_file_group_strategies_3_5(
             resolved_id = None
 
             # Reset resolved categories back to their base category so
-            # strategies 5.5/5.6/5.7 can re-process them on subsequent runs
+            # subsequent strategies can re-process them on re-runs
             if category in (
                 "resolved", "return_type_resolved", "constructor_resolved",
                 "scope_resolved", "super_resolved", "embedding_resolved",
@@ -160,8 +185,23 @@ def _process_file_group_strategies_3_5(
                     category = "untyped"
                 call["category"] = category
 
+            # Strategy 1: Same-file bare function call
+            if receiver is None and name in file_functions:
+                resolved_id = file_functions[name]
+                if resolved_id:
+                    same_file_resolved += 1
+                    call["category"] = "resolved"
+
+            # Strategy 2: Self-method call within class
+            elif receiver in self_keywords and parent_id:
+                sibling_methods = class_methods.get(parent_id, {})
+                if name in sibling_methods:
+                    resolved_id = sibling_methods[name]
+                    same_file_resolved += 1
+                    call["category"] = "resolved"
+
             # Strategy 3: Bare call matching an import
-            if receiver is None and name in import_map:
+            elif receiver is None and name in import_map:
                 import_info = import_map[name]
                 resolved_id = _lookup_element_by_import(
                     repo, import_info, name, scope, repository, username,
@@ -194,8 +234,7 @@ def _process_file_group_strategies_3_5(
                     type_resolved += 1
                     call["category"] = "resolved"
 
-            # Update if a new resolution was found; preserve old resolution
-            # if no strategy matched (e.g., same-file bare calls from Strategy 1-2)
+            # Update if a new resolution was found
             if resolved_id:
                 if resolved_id != old_resolved_id:
                     call["resolved_id"] = resolved_id
@@ -208,7 +247,7 @@ def _process_file_group_strategies_3_5(
         if updated:
             repo.store_calls(element_id, calls)
 
-    return total_processed, import_resolved, type_resolved
+    return total_processed, same_file_resolved, import_resolved, type_resolved
 
 
 def resolve_all_calls(
@@ -218,15 +257,16 @@ def resolve_all_calls(
     username: str = "main",
     max_workers: int = 1,
     on_step: Callable[[str], None] | None = None,
-) -> tuple[int, int, int, int, int, int]:
+) -> tuple[int, int, int, int, int, int, int]:
     """Full call resolution pass - re-resolves ALL calls in the repository.
 
     Used during partial parsing to ensure call graphs are complete even when
     only some files were re-parsed. Clears existing resolved_ids and re-resolves
     to handle renamed/moved functions.
 
-    When *max_workers* > 1, per-file groups (strategies 3-5) and per-candidate
-    processing (strategies 5.5-5.8) are executed in parallel threads.
+    When *max_workers* > 1, per-file groups (strategies 1-5) and per-candidate
+    processing (return-type, constructor, scope, super) are executed in
+    parallel threads.
 
     Args:
         repo: Repository instance.
@@ -238,17 +278,18 @@ def resolve_all_calls(
             each resolution strategy starts.  Useful for CLI progress display.
 
     Returns:
-        Tuple of (total_calls_processed, import_resolved, type_resolved,
-        constructor_resolved, scope_resolved, super_resolved).
+        Tuple of (total_calls_processed, same_file_resolved, import_resolved,
+        type_resolved, constructor_resolved, scope_resolved, super_resolved).
     """
     total_processed = 0
+    same_file_resolved = 0
     import_resolved = 0
     type_resolved = 0
 
     _step = on_step or (lambda _msg: None)
 
     # Get ALL elements with calls (not just unresolved)
-    _step("Import + type-annotation resolution")
+    _step("Same-file + import + type-annotation resolution")
     elements = repo.find_all_elements_with_calls(scope, repository, username)
     logger.info(f"Full resolution: found {len(elements)} elements with calls")
 
@@ -260,25 +301,26 @@ def resolve_all_calls(
     groups = list(file_groups.values())
 
     results = _parallel_map(
-        lambda group: _process_file_group_strategies_3_5(
+        lambda group: _process_file_group(
             group, repo, scope, repository, username,
         ),
         groups,
         max_workers=max_workers,
-        desc="import+type resolution",
+        desc="same-file+import+type resolution",
     )
 
-    for total_p, imp_r, type_r in results:
+    for total_p, sf_r, imp_r, type_r in results:
         total_processed += total_p
+        same_file_resolved += sf_r
         import_resolved += imp_r
         type_resolved += type_r
 
-    # Flush bulk buffer and refresh index so writes from strategies 3-5
+    # Flush bulk buffer and refresh index so writes from strategies 1-5
     # are visible to subsequent strategy queries
     repo.flush()
     repo.refresh()
 
-    # Strategy 5.5: Return-type propagation
+    # Return-type propagation
     _step("Return-type propagation")
     elements = repo.find_all_elements_with_calls(scope, repository, username)
     return_type_count = _resolve_via_return_types(
@@ -289,7 +331,7 @@ def resolve_all_calls(
     repo.flush()
     repo.refresh()
 
-    # Strategy 5.6: Constructor-based type inference
+    # Constructor-based type inference
     _step("Constructor inference")
     elements = repo.find_all_elements_with_calls(scope, repository, username)
     constructor_count = _resolve_via_constructors(
@@ -300,7 +342,7 @@ def resolve_all_calls(
     repo.flush()
     repo.refresh()
 
-    # Strategy 5.7: Scope-aware type binding (AST-based)
+    # Scope-aware type binding (AST-based)
     _step("Scope-aware bindings")
     elements = repo.find_all_elements_with_calls(scope, repository, username)
     scope_count = _resolve_via_scope_bindings(
@@ -311,7 +353,7 @@ def resolve_all_calls(
     repo.flush()
     repo.refresh()
 
-    # Strategy 5.8: super()/parent:: call resolution
+    # super()/parent:: call resolution
     _step("Super/parent calls")
     elements = repo.find_all_elements_with_calls(scope, repository, username)
     super_count = _resolve_via_super(
@@ -320,16 +362,18 @@ def resolve_all_calls(
     )
 
     total_resolved = (
-        import_resolved + type_resolved + return_type_count
+        same_file_resolved + import_resolved + type_resolved + return_type_count
         + constructor_count + scope_count + super_count
     )
     logger.info(
         f"Full resolution: resolved {total_resolved}/{total_processed} calls "
-        f"({import_resolved} via imports, {type_resolved} via type annotations, "
-        f"{return_type_count} via return-type, {constructor_count} via constructors, "
-        f"{scope_count} via scope analysis, {super_count} via super)"
+        f"({same_file_resolved} via same-file, {import_resolved} via imports, "
+        f"{type_resolved} via type annotations, {return_type_count} via return-type, "
+        f"{constructor_count} via constructors, {scope_count} via scope analysis, "
+        f"{super_count} via super)"
     )
-    return total_processed, import_resolved, type_resolved, constructor_count, scope_count, super_count
+    return (total_processed, same_file_resolved, import_resolved, type_resolved,
+            constructor_count, scope_count, super_count)
 
 
 def resolve_cross_file_calls(
