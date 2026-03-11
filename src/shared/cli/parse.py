@@ -364,7 +364,7 @@ def parse(
             if len(failed_elements) > 10:
                 console.print(f"    [dim]... and {len(failed_elements) - 10} more errors[/]")
 
-        # Hierarchy Extraction (CLI commands, routes) + Call Resolution
+        # Phase 6: Analysis (hierarchy extraction + call resolution)
         # Use a single Repository instance for phases that need the search backend
         if not dry_run and indexed > 0:
             from shared.db.store import Repository
@@ -377,7 +377,9 @@ def parse(
                 # Phase 6 can start before auto-refresh fires, causing 0 results.
                 repo.refresh()
 
-                run_logger.start_phase("Hierarchy Extraction")
+                console.print("\n[bold blue]Phase 6:[/] Analysis")
+                run_logger.start_phase("Phase 6: Analysis")
+
                 console.print("\n  [bold]Hierarchy Extraction[/]")
                 try:
                     # Use repository name as CLI entry point fallback
@@ -393,15 +395,10 @@ def parse(
                         console.print(f"  Indexed {rel_indexed} relationships, {ref_indexed} external refs")
                     else:
                         console.print("  [dim]No CLI/route hierarchies found[/]")
-                    run_logger.end_phase({"relationships": rel_indexed, "external_refs": ref_indexed})
                 except Exception as e:
                     console.print(f"  [yellow]Warning: Hierarchy extraction failed: {rich_escape(str(e))}[/]")
                     run_logger.log_error("hierarchy_extraction", str(e))
-                    run_logger.end_phase({"error": str(e)})
 
-                # Phase 6: Call Resolution (static + embedding + semantic relationships)
-                console.print("\n[bold blue]Phase 6:[/] Call Resolution")
-                run_logger.start_phase("Phase 6: Call Resolution")
                 try:
                     run_call_resolution(
                         repo,

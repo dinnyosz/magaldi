@@ -600,11 +600,12 @@ def watch(
                                 tier_summary.get("output", []),
                             )
 
-                    # Hierarchy Extraction
+                    # Phase 6: Analysis (hierarchy extraction + call resolution)
                     if indexed > 0:
                         from shared.db.store import Repository
                         repo = Repository(config)
-                        run_logger.start_phase("Initial Hierarchy Extraction")
+                        run_logger.start_phase("Initial Analysis")
+
                         console.print("\n  [bold]Hierarchy Extraction[/]")
                         try:
                             cli_entry_point = discovery_result.repository
@@ -620,11 +621,8 @@ def watch(
                         except Exception as e:
                             console.print(f"  [yellow]Warning: Hierarchy extraction failed: {rich_escape(str(e))}[/]")
                             run_logger.log_error("watch_hierarchy", str(e))
-                        run_logger.end_phase()
 
-                        # Call Resolution
                         from shared.cli._runners import run_call_resolution
-                        run_logger.start_phase("Initial Call Resolution")
                         try:
                             run_call_resolution(
                                 repo,
