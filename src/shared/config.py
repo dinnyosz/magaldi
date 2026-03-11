@@ -201,13 +201,18 @@ class LLMConfig:
             url="http://localhost:8000",
             dimensions=1024,
         ),
+        "lmstudio-qwen3-4b": ModelConfig(
+            name="qwen3-4b",
+            provider="lmstudio",
+            url="http://localhost:1234",
+        ),
     })
 
     # Which models to use for each purpose (reference by name)
     summarize_model: str = "qwen3.5-4b"
     summarize_model_small: str = "qwen3.5-small"
     embed_model: str = "qwen3-embed"
-    variable_scoring_model: str = "qwen3.5-4b"  # Defaults to main model
+    variable_scoring_model: str = "lmstudio-qwen3-4b"
 
     # Generation settings (defaults, can be overridden per-model)
     # Based on Qwen3.5 "Thinking Mode for Precise Coding Tasks" preset:

@@ -132,30 +132,25 @@ class TestLLMConfigDefaults:
         assert model.dimensions == 1024
 
     def test_default_variable_scoring_model_reference(self):
-        """Test that variable_scoring_model defaults to main summarize model."""
+        """Test that variable_scoring_model defaults to lmstudio-qwen3-4b."""
         config = LLMConfig()
-        assert config.variable_scoring_model == "qwen3.5-4b"
+        assert config.variable_scoring_model == "lmstudio-qwen3-4b"
 
     def test_default_variable_scoring_model_name(self):
         """Test that the referenced variable scoring model has correct name."""
         config = LLMConfig()
         model = config.get_variable_scoring_model()
-        assert model.name == "mlx-community/Qwen3-4B-Instruct-2507-4bit"
-
-    def test_variable_scoring_model_override(self):
-        """Test that variable_scoring_model can reference a different model."""
-        config = LLMConfig()
-        config.models["lmstudio-qwen3"] = ModelConfig(
-            name="qwen3-4b",
-            provider="lmstudio",
-            url="http://localhost:1234",
-        )
-        config.variable_scoring_model = "lmstudio-qwen3"
-        model = config.get_variable_scoring_model()
         assert model.name == "qwen3-4b"
         assert model.provider == "lmstudio"
-        # Summarize model should be unchanged
-        assert config.get_summarize_model().name == "mlx-community/Qwen3-4B-Instruct-2507-4bit"
+
+    def test_variable_scoring_model_independent_from_summarize(self):
+        """Test that variable_scoring_model is independent from summarize_model."""
+        config = LLMConfig()
+        scoring = config.get_variable_scoring_model()
+        summarize = config.get_summarize_model()
+        assert scoring.name != summarize.name
+        assert scoring.provider == "lmstudio"
+        assert summarize.provider == "vllm-mlx"
 
     def test_aggregation_context_size_default(self):
         """Should have default aggregation context size."""
