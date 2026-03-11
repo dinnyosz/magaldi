@@ -288,7 +288,7 @@ def parse(
 
         # Phase 4: Variable Scoring (LLM-based preflight)
         if not dry_run and not skip_ai:
-            scoring_model = config.llm.get_summarize_model().name
+            scoring_model = config.llm.get_variable_scoring_model().name
             console.print(f"\n[bold blue]Phase 4:[/] Variable Scoring [dim]({scoring_model})[/]")
             run_logger.start_phase("Phase 4: Variable Scoring")
             scoring_result = run_variable_scoring(parsing_result, config, workers)

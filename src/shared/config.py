@@ -207,6 +207,7 @@ class LLMConfig:
     summarize_model: str = "qwen3.5-4b"
     summarize_model_small: str = "qwen3.5-small"
     embed_model: str = "qwen3-embed"
+    variable_scoring_model: str = "qwen3.5-4b"  # Defaults to main model
 
     # Generation settings (defaults, can be overridden per-model)
     # Based on Qwen3.5 "Thinking Mode for Precise Coding Tasks" preset:
@@ -242,6 +243,10 @@ class LLMConfig:
     def get_embed_model(self) -> ModelConfig:
         """Get the embedding model config."""
         return self.get_model(self.embed_model)
+
+    def get_variable_scoring_model(self) -> ModelConfig:
+        """Get the variable scoring model config."""
+        return self.get_model(self.variable_scoring_model)
 
     def get_model_for_element_type(self, element_type: str) -> ModelConfig:
         """Get the appropriate model for an element type.
@@ -892,6 +897,7 @@ def _apply_env_overrides(config: MagaldiConfig) -> MagaldiConfig:
         "MAGALDI_LLM_SUMMARIZE_MODEL": ("llm", "summarize_model"),
         "MAGALDI_LLM_SUMMARIZE_MODEL_SMALL": ("llm", "summarize_model_small"),
         "MAGALDI_LLM_EMBED_MODEL": ("llm", "embed_model"),
+        "MAGALDI_LLM_VARIABLE_SCORING_MODEL": ("llm", "variable_scoring_model"),
         # Logging
         "MAGALDI_LOG_LEVEL": ("logging", "level"),
         # Web
@@ -938,6 +944,11 @@ def _validate_config(config: MagaldiConfig) -> None:
         config.llm.get_embed_model()
     except KeyError as e:
         errors.append(f"Invalid embed_model reference: {e}")
+
+    try:
+        config.llm.get_variable_scoring_model()
+    except KeyError as e:
+        errors.append(f"Invalid variable_scoring_model reference: {e}")
 
     # Port range checks
     if not (1 <= config.search_backend.port <= 65535):

@@ -390,8 +390,8 @@ def run_variable_scoring(
             dropped=heuristic_count,
         )
 
-    # Create LLM client using the main model (small model scores everything 1,1,1,1)
-    model_config = config.llm.get_summarize_model()
+    # Create LLM client using the variable scoring model (small model scores everything 1,1,1,1)
+    model_config = config.llm.get_variable_scoring_model()
     model_name = model_config.name
 
     scoring_config = VariableScoringConfig()
@@ -959,7 +959,7 @@ def run_processing(
         if not skip_ai:
             import contextlib
             with contextlib.suppress(Exception):
-                _score_model = config.llm.get_summarize_model().name
+                _score_model = config.llm.get_variable_scoring_model().name
 
         result = process_elements(
             parsing_result.parsed_files,
