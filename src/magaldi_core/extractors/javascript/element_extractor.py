@@ -33,6 +33,11 @@ from magaldi_core.extractors.types import (
 )
 
 
+# Node types that represent destructuring patterns (not named variables).
+# These produce huge text when used as names and should be skipped.
+_DESTRUCTURE_PATTERN_TYPES = frozenset({"object_pattern", "array_pattern"})
+
+
 def extract_javascript_elements(
     tree: Tree, lines: list[str], _file_path: str | None = None
 ) -> list[ExtractedElement]:
@@ -105,6 +110,9 @@ def extract_javascript_elements(
             for decl in get_children_by_type(node, "variable_declarator"):
                 name_node = get_child_by_field(decl, "name")
                 value_node = get_child_by_field(decl, "value")
+                # Skip destructuring patterns — they don't represent a single named variable
+                if name_node and name_node.type in _DESTRUCTURE_PATTERN_TYPES:
+                    continue
                 name = get_node_text(name_node) if name_node else "unknown"
                 if value_node and value_node.type == "arrow_function":
                     elements.append(_extract_js_arrow_function(decl, name, lines))
@@ -135,6 +143,9 @@ def extract_javascript_elements(
             for decl in get_children_by_type(node, "variable_declarator"):
                 name_node = get_child_by_field(decl, "name")
                 value_node = get_child_by_field(decl, "value")
+                # Skip destructuring patterns — they don't represent a single named variable
+                if name_node and name_node.type in _DESTRUCTURE_PATTERN_TYPES:
+                    continue
                 name = get_node_text(name_node) if name_node else "unknown"
                 if value_node and value_node.type == "arrow_function":
                     elements.append(_extract_js_arrow_function(decl, name, lines))

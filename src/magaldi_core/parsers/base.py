@@ -194,16 +194,32 @@ def generate_element_id(
 
     Uses byte_offset instead of line number to handle minified files where
     multiple elements may be on the same line.
+
+    Safety: OpenSearch doc IDs must be ≤512 bytes. If the name would push the
+    total over that limit, it is truncated and a short hash suffix is appended
+    to preserve uniqueness.
     """
-    return ":".join([
-        scope,
-        repository,
-        username,
-        relative_path,
-        element_type,
-        name,
-        str(byte_offset),
-    ])
+    # Build everything except the name to calculate budget
+    prefix = ":".join([scope, repository, username, relative_path, element_type])
+    suffix = str(byte_offset)
+    # Overhead: 2 colons separating prefix:name:suffix
+    overhead = len(prefix.encode("utf-8")) + len(suffix.encode("utf-8")) + 2
+    max_name_bytes = 512 - overhead
+
+    if max_name_bytes < 16:
+        # Extreme case — use hash of name for safety
+        import hashlib
+        name = hashlib.sha256(name.encode("utf-8")).hexdigest()[:32]
+    elif len(name.encode("utf-8")) > max_name_bytes:
+        # Truncate name and append short hash to preserve uniqueness
+        import hashlib
+        name_hash = hashlib.sha256(name.encode("utf-8")).hexdigest()[:8]
+        # Leave room for _<8-char-hash> suffix
+        truncate_budget = max_name_bytes - 9  # 1 underscore + 8 hex chars
+        truncated = name.encode("utf-8")[:truncate_budget].decode("utf-8", errors="ignore")
+        name = f"{truncated}_{name_hash}"
+
+    return ":".join([prefix, name, suffix])
 
 
 # =============================================================================
