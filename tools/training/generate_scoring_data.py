@@ -669,7 +669,8 @@ def _print_progress_line(
         f"{fpath} "
         f"{src:<5} "
         f"{_format_duration(elapsed)} ~{_format_duration(eta)} "
-        f"{rate:.1f}/s"
+        f"{rate:.1f}/s",
+        flush=True,
     )
 
 
