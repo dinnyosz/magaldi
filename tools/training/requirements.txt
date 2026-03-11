@@ -1,0 +1,12 @@
+# Training-only deps (install in dedicated venv or alongside magaldi)
+mlx>=0.22.0
+mlx-lm>=0.22.0
+transformers>=4.46.0
+datasets>=3.0.0
+tokenizers>=0.20.0
+safetensors>=0.4.0
+pyyaml>=6.0
+rich>=13.0.0
+litellm>=1.0.0
+# Unsloth (NVIDIA GPU alternative — see README)
+# pip install unsloth
