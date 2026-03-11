@@ -236,6 +236,7 @@ def score_variables(
     on_progress: Callable[[ScoringProgressState], None] | None = None,
     progress_state: ScoringProgressState | None = None,
     worker_status: ScoringWorkerStatus | None = None,
+    on_batch_logged: Callable[[str, str], None] | None = None,
 ) -> ScoringResult:
     """Score variables using the LLM and return scoring results.
 
@@ -250,6 +251,7 @@ def score_variables(
         on_progress: Optional callback called after each batch completes.
         progress_state: Optional shared progress state for live display.
         worker_status: Optional shared worker status for live display.
+        on_batch_logged: Optional callback with (user_prompt, llm_output) after each batch.
 
     Returns:
         ScoringResult with scores and statistics.
@@ -339,6 +341,18 @@ def score_variables(
     total_prompt_tokens = 0
     total_response_tokens = 0
 
+    _notified_count = 0
+
+    def _notify_batch_logged() -> None:
+        """Flush any new debug_log entries to on_batch_logged callback."""
+        nonlocal _notified_count
+        if not on_batch_logged:
+            return
+        while _notified_count < len(debug_log):
+            prompt, output = debug_log[_notified_count]
+            on_batch_logged(prompt, output)
+            _notified_count += 1
+
     if effective_workers <= 1:
         # Sequential processing for single batch
         for batch_num, batch in enumerate(batches):
@@ -352,6 +366,7 @@ def score_variables(
             total_response_tokens += batch_resp_tok
             all_scores.update(batch_scores)
             _collect_batch_sample(batch, batch_scores)
+            _notify_batch_logged()
             if worker_status is not None:
                 worker_status.clear(0)
             _update_progress(batch, batch_scores, batch_time)
@@ -425,6 +440,7 @@ def score_variables(
             try:
                 all_scores.update(batch_scores)
                 _collect_batch_sample(batch, batch_scores)
+                _notify_batch_logged()
                 _update_progress(batch, batch_scores, runtime)
             except Exception:
                 result.errors += 1

@@ -312,50 +312,53 @@ def _build_scoring_display(state: ScoringProgressState, num_workers: int) -> Ren
     return Group(*parts)
 
 
-def _write_scoring_log(
-    result: ScoringResult,
-    repo_path: str,
-    parsing_result: ParsingResult,
-    scoring_config: VariableScoringConfig,
-) -> None:
-    """Write all batch prompts and LLM responses to a log file.
+class _ScoringLogWriter:
+    """Incrementally writes scoring batch prompts + responses to a log file.
 
-    Creates a file in {repo_path}/logs/ with every batch's prompt, raw LLM
-    response, and parsed scores for debugging scoring quality.
+    Creates the file immediately and appends after each batch completes,
+    so partial results are available even if the run is interrupted.
     """
-    from datetime import datetime
-    from pathlib import Path
 
-    log_dir = Path(repo_path) / "logs"
-    log_dir.mkdir(exist_ok=True)
+    def __init__(self, repo_path: str, parsing_result: ParsingResult, scoring_config: VariableScoringConfig, model_name: str) -> None:
+        from datetime import datetime
+        from pathlib import Path
 
-    safe_scope = parsing_result.scope.replace("/", "_").replace("\\", "_")
-    safe_repo = parsing_result.repository.replace("/", "_").replace("\\", "_")
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_path = log_dir / f"variable_scoring_{safe_scope}_{safe_repo}_{ts}.log"
+        log_dir = Path(repo_path) / "logs"
+        log_dir.mkdir(exist_ok=True)
 
-    lines: list[str] = []
-    lines.append(f"Variable Scoring Log — {datetime.now().isoformat()}")
-    lines.append(f"Model: {result.model_name}")
-    lines.append(f"Threshold: {scoring_config.threshold}")
-    lines.append(f"Batches: {len(result.debug_log)}")
-    lines.append(f"Total variables scored by LLM: {result.llm_scored or len(result.scores)}")
-    lines.append("")
+        safe_scope = parsing_result.scope.replace("/", "_").replace("\\", "_")
+        safe_repo = parsing_result.repository.replace("/", "_").replace("\\", "_")
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.log_path = log_dir / f"variable_scoring_{safe_scope}_{safe_repo}_{ts}.log"
+        self._batch_num = 0
 
-    for batch_num, (user_prompt, llm_output) in enumerate(result.debug_log, 1):
-        lines.append(f"{'═' * 60}")
-        lines.append(f"  Batch {batch_num}")
-        lines.append(f"{'═' * 60}")
-        lines.append("")
-        lines.append("── PROMPT ──")
-        lines.append(user_prompt)
-        lines.append("")
-        lines.append("── RESPONSE ──")
-        lines.append(llm_output)
-        lines.append("")
+        # Write header immediately
+        header = (
+            f"Variable Scoring Log — {datetime.now().isoformat()}\n"
+            f"Model: {model_name}\n"
+            f"Threshold: {scoring_config.threshold}\n"
+            "\n"
+        )
+        self.log_path.write_text(header, encoding="utf-8")
+        console.print(f"  [dim]Scoring log:[/] {self.log_path}")
 
-    log_path.write_text("\n".join(lines), encoding="utf-8")
-    console.print(f"  [dim]Scoring log:[/] {log_path}")
+    def append_batch(self, user_prompt: str, llm_output: str) -> None:
+        """Append a single batch's prompt + response to the log file."""
+        self._batch_num += 1
+        entry = (
+            f"{'═' * 60}\n"
+            f"  Batch {self._batch_num}\n"
+            f"{'═' * 60}\n"
+            "\n"
+            "── PROMPT ──\n"
+            f"{user_prompt}\n"
+            "\n"
+            "── RESPONSE ──\n"
+            f"{llm_output}\n"
+            "\n"
+        )
+        with open(self.log_path, "a", encoding="utf-8") as f:
+            f.write(entry)
 
 
 def run_variable_scoring(
@@ -524,6 +527,11 @@ def run_variable_scoring(
     llm_client = SummarizationLLMClient.from_model_config(model_config)
     effective_workers = workers if workers > 0 else 12
 
+    # Create scoring log writer if debug mode enabled
+    scoring_log: _ScoringLogWriter | None = None
+    if scoring_config.debug_log and repo_path:
+        scoring_log = _ScoringLogWriter(repo_path, parsing_result, scoring_config, model_name)
+
     # Create shared state for live display
     worker_status = ScoringWorkerStatus()
     progress_state = ScoringProgressState(
@@ -552,6 +560,7 @@ def run_variable_scoring(
             on_progress=on_progress,
             progress_state=progress_state,
             worker_status=worker_status,
+            on_batch_logged=scoring_log.append_batch if scoring_log else None,
         )
 
     # Merge cached scores into LLM result
@@ -589,12 +598,6 @@ def run_variable_scoring(
             console.print()
         console.print("  [bold dim]───────────────────────────────────────[/]")
 
-    # Write scoring debug log to file (all batch prompts + responses)
-    if scoring_config.debug_log and repo_path:
-        if result.debug_log:
-            _write_scoring_log(result, repo_path, parsing_result, scoring_config)
-        else:
-            console.print("  [dim]Scoring log: skipped (all scores from cache, no LLM calls)[/]")
 
     # Apply threshold + attach scores to elements for Phase 5 storage
     _apply_scores_to_elements(parsing_result, result.scores, scoring_config.threshold)
