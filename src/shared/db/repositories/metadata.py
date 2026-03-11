@@ -679,8 +679,11 @@ class MetadataRepository:
     ) -> list[str]:
         """Find file paths that have elements missing required embeddings.
 
-        Returns file paths where at least one element has summary_embedding
-        but is missing caller_embedding. These files need re-processing.
+        Returns file paths where at least one element has ``calls`` and
+        ``summary_embedding`` but is missing ``caller_embedding``.  Only
+        elements with calls are expected to have ``caller_embedding``; elements
+        without calls (variables, constants, classes, etc.) intentionally never
+        get one, so they should *not* trigger re-processing.
 
         Args:
             scope: Repository scope.
@@ -703,6 +706,7 @@ class MetadataRepository:
                             {"term": {"repository": repository}},
                             {"term": {"username": username}},
                             {"exists": {"field": "summary_embedding"}},
+                            {"exists": {"field": "calls"}},
                         ],
                         "must_not": [
                             {"exists": {"field": "caller_embedding"}},
