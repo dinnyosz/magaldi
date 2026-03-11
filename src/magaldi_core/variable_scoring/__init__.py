@@ -51,8 +51,9 @@ def _build_batches(
 ) -> list[list[tuple[int, str, str, str, str]]]:
     """Build dynamic batches of variables based on estimated token count.
 
-    Each batch fits within the token budget. Variables are accumulated until
-    the budget would be exceeded, then a new batch is started.
+    Variables are sorted by estimated token size (smallest first) so that
+    small variables pack tightly into full batches instead of being stranded
+    in tiny batches after a large variable forces a break.
 
     Args:
         variables: List of (element_id, file_path, name, raw_code) tuples.
@@ -63,12 +64,19 @@ def _build_batches(
         (index, element_id, file_path, name, raw_code) tuples.
         Index is 1-based within each batch.
     """
+    # Sort by estimated token size (smallest first) for better packing.
+    # Without sorting, a large variable in the middle of small ones forces
+    # a batch break, leaving a half-empty batch of small variables.
+    sorted_vars = sorted(
+        variables, key=lambda v: _estimate_tokens(v[3], v[1])
+    )
+
     batches: list[list[tuple[int, str, str, str, str]]] = []
     current_batch: list[tuple[int, str, str, str, str]] = []
     current_tokens = 0
     batch_idx = 1
 
-    for element_id, file_path, name, raw_code in variables:
+    for element_id, file_path, name, raw_code in sorted_vars:
         var_tokens = _estimate_tokens(raw_code, file_path)
 
         if current_tokens + var_tokens > token_budget and current_batch:
