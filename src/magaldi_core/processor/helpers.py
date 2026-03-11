@@ -554,6 +554,7 @@ def _index_element(
     file_hash: str | None = None,
     element_count: int | None = None,
     craft_reason: str | None = None,
+    score_model: str | None = None,
 ) -> bool:
     """Index element to search backend with summary and all embeddings.
 
@@ -608,6 +609,7 @@ def _index_element(
         summary_embedding=summary_embedding,
         code_embedding=code_embedding,
         caller_embedding=caller_embedding,
+        score_model=score_model,
     )
 
 
@@ -624,6 +626,7 @@ def _process_single_element(
     worker_status: WorkerStatus,
     on_status_change: Callable[[], None] | None = None,
     cached_embeddings: dict[str, list[float] | None] | None = None,
+    score_model: str | None = None,
 ) -> ProcessedElement:
     """Process a single element: summarize -> embed -> index.
 
@@ -756,7 +759,7 @@ def _process_single_element(
         if element.element_type == "file" and element_counts:
             element_count = element_counts.get(element.relative_path)
 
-        _index_element(element, summary, summary_embedding, code_embedding, caller_embedding, repo, file_hash, element_count, craft_reason=craft_reason)
+        _index_element(element, summary, summary_embedding, code_embedding, caller_embedding, repo, file_hash, element_count, craft_reason=craft_reason, score_model=score_model)
 
         worker_status.clear(worker_id)
         wall_time = time.time() - start_wall

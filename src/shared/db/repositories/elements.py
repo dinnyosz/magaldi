@@ -388,6 +388,47 @@ class ElementRepository:
 
         return result
 
+    def get_variable_scoring_state(
+        self, element_ids: list[str],
+    ) -> dict[str, dict]:
+        """Fetch cached variable scores for skip logic.
+
+        Returns content_hash, variable_score, and score_model for each
+        element that exists in the index.  Used by Phase 4 to avoid
+        re-scoring variables that haven't changed since the last run.
+
+        Args:
+            element_ids: Element IDs to look up.
+
+        Returns:
+            Dict mapping element_id to
+            ``{content_hash, variable_score, score_model}``.
+        """
+        if not element_ids:
+            return {}
+
+        client = self._get_client()
+
+        response = client.mget(
+            INDEX_NAME,
+            element_ids,
+            source=["content_hash", "variable_score", "score_model"],
+        )
+
+        result = {}
+        for doc in response["docs"]:
+            if doc.get("found", False):
+                source = doc.get("_source", {})
+                score_data = source.get("variable_score")
+                if score_data is not None:
+                    result[doc["_id"]] = {
+                        "content_hash": source.get("content_hash"),
+                        "variable_score": score_data,
+                        "score_model": source.get("score_model"),
+                    }
+
+        return result
+
     def index_element_complete(
         self,
         element: CodeElement,
@@ -401,6 +442,7 @@ class ElementRepository:
         summary_embedding: list[float] | None = None,
         code_embedding: list[float] | None = None,
         caller_embedding: list[float] | None = None,
+        score_model: str | None = None,
     ) -> bool:
         """Index element with all data in a single bulk operation.
 
@@ -470,6 +512,12 @@ class ElementRepository:
             doc["code_embedding"] = code_embedding
         if caller_embedding is not None:
             doc["caller_embedding"] = caller_embedding
+
+        # Variable scoring (cached for skip logic on subsequent runs)
+        if element.variable_score is not None:
+            doc["variable_score"] = element.variable_score
+        if score_model is not None:
+            doc["score_model"] = score_model
 
         # Enhanced context fields
         if element.class_attributes:

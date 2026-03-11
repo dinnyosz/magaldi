@@ -273,6 +273,7 @@ def process_elements(
     worker_status: WorkerStatus | None = None,
     timing_stats: TimingStats | None = None,
     magaldi_config: MagaldiConfig | None = None,
+    score_model: str | None = None,
 ) -> ProcessingResult:
     """Process elements: summarize -> embed -> index (atomic per element).
 
@@ -691,6 +692,7 @@ def process_elements(
                 worker_status=worker_status,
                 on_status_change=on_status_change,
                 cached_embeddings=cached_embeddings.get(element.element_id),
+                score_model=score_model,
             )
         finally:
             release_worker_id(wid)

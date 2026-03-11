@@ -199,6 +199,12 @@ class Repository:
         """Get minimal processing state for skip-ai mode (no embeddings)."""
         return self._elements.get_element_processing_state_light(element_ids)
 
+    def get_variable_scoring_state(
+        self, element_ids: list[str],
+    ) -> dict[str, dict]:
+        """Fetch cached variable scores for Phase 4 skip logic."""
+        return self._elements.get_variable_scoring_state(element_ids)
+
     def index_element_complete(
         self,
         element: CodeElement,
@@ -212,6 +218,7 @@ class Repository:
         summary_embedding: list[float] | None = None,
         code_embedding: list[float] | None = None,
         caller_embedding: list[float] | None = None,
+        score_model: str | None = None,
     ) -> bool:
         """Index element with all data in a single bulk operation."""
         return self._elements.index_element_complete(
@@ -225,6 +232,7 @@ class Repository:
             summary_embedding=summary_embedding,
             code_embedding=code_embedding,
             caller_embedding=caller_embedding,
+            score_model=score_model,
         )
 
     def find_elements_by_content_hash(

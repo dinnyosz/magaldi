@@ -380,9 +380,76 @@ def run_variable_scoring(
 
     # Create LLM client using the main model (small model scores everything 1,1,1,1)
     model_config = config.llm.get_summarize_model()
-    llm_client = SummarizationLLMClient.from_model_config(model_config)
+    model_name = model_config.name
 
     scoring_config = VariableScoringConfig()
+
+    # Score cache: reuse scores from previous runs for unchanged variables
+    from magaldi_core.variable_scoring.models import VariableScore
+    from shared.db.repositories import Repository
+
+    cached_scores: dict[str, VariableScore] = {}
+    cache_count = 0
+    try:
+        repo = Repository(config)
+        # Build element_id -> content_hash mapping for validation
+        elem_hashes: dict[str, str | None] = {}
+        for pf in parsing_result.parsed_files:
+            for elem in pf.elements:
+                if elem.element_type in ("variable", "constant"):
+                    elem_hashes[elem.element_id] = elem.content_hash
+
+        all_ids = [eid for eid, _, _, _ in variables]
+        cached_state = repo.get_variable_scoring_state(all_ids)
+
+        for eid, state in cached_state.items():
+            if (
+                state.get("score_model") == model_name
+                and state.get("content_hash") == elem_hashes.get(eid)
+                and state.get("variable_score")
+            ):
+                score_data = state["variable_score"]
+                cached_scores[eid] = VariableScore(
+                    config_value=score_data.get("config_value", 1),
+                    architectural_role=score_data.get("architectural_role", 1),
+                    data_definition=score_data.get("data_definition", 1),
+                    general_usefulness=score_data.get("general_usefulness", 1),
+                )
+
+        cache_count = len(cached_scores)
+        # Filter out cached variables — only send uncached to LLM
+        if cached_scores:
+            variables = [
+                (eid, fp, name, code)
+                for eid, fp, name, code in variables
+                if eid not in cached_scores
+            ]
+    except Exception:  # noqa: BLE001
+        # Cache lookup is best-effort — continue without cache on any error
+        pass
+
+    # If all variables are cached, skip LLM entirely
+    if not variables and cached_scores:
+        # Apply threshold to cached scores
+        result = ScoringResult(total_variables=total_before_heuristic)
+        all_scores = dict(cached_scores)
+        for _eid, score in all_scores.items():
+            if score.passes_threshold(scoring_config.threshold):
+                result.kept += 1
+            else:
+                result.dropped += 1
+        result.scores = all_scores
+        result.heuristic_dropped = heuristic_count
+        result.cached_scores = cache_count
+        result.llm_scored = 0
+        result.dropped += heuristic_count
+        result.model_name = model_name
+
+        # Still need to remove low-scoring and attach scores
+        _apply_scores_to_elements(parsing_result, all_scores, scoring_config.threshold)
+        return result
+
+    llm_client = SummarizationLLMClient.from_model_config(model_config)
     effective_workers = workers if workers > 0 else 12
 
     # Create shared state for live display
@@ -415,6 +482,18 @@ def run_variable_scoring(
             worker_status=worker_status,
         )
 
+    # Merge cached scores into LLM result
+    if cached_scores:
+        result.scores.update(cached_scores)
+        # Recount kept/dropped with merged scores
+        result.kept = 0
+        result.dropped = 0
+        for _eid, score in result.scores.items():
+            if score.passes_threshold(scoring_config.threshold):
+                result.kept += 1
+            else:
+                result.dropped += 1
+
     # Print batch samples: random variables with scores across batches
     if result.batch_samples:
         console.print()
@@ -438,26 +517,52 @@ def run_variable_scoring(
             console.print()
         console.print("  [bold dim]───────────────────────────────────────[/]")
 
-    # Remove variables that scored below threshold from parsing_result
-    dropped_ids = {
-        eid for eid, score in result.scores.items()
-        if not score.passes_threshold(scoring_config.threshold)
-    }
+    # Apply threshold + attach scores to elements for Phase 5 storage
+    _apply_scores_to_elements(parsing_result, result.scores, scoring_config.threshold)
 
-    if dropped_ids:
-        for pf in parsing_result.parsed_files:
-            pf.elements = [
-                elem for elem in pf.elements
-                if elem.element_id not in dropped_ids
-            ]
-
-    # Update result with heuristic stats
+    # Update result with optimization stats
     result.heuristic_dropped = heuristic_count
+    result.cached_scores = cache_count
     result.llm_scored = len(variables)
     result.total_variables = total_before_heuristic
     result.dropped += heuristic_count  # Add heuristic drops to total
+    result.model_name = model_name
 
     return result
+
+
+def _apply_scores_to_elements(
+    parsing_result: ParsingResult,
+    scores: dict,
+    threshold: int,
+) -> None:
+    """Remove below-threshold variables and attach scores to kept elements.
+
+    Modifies *parsing_result* in place:
+    - Removes elements whose score is below *threshold*
+    - Sets ``variable_score`` dict on kept variable/constant elements for
+      Phase 5 to persist into OpenSearch.
+    """
+    dropped_ids = {
+        eid for eid, score in scores.items()
+        if not score.passes_threshold(threshold)
+    }
+
+    for pf in parsing_result.parsed_files:
+        pf.elements = [
+            elem for elem in pf.elements
+            if elem.element_id not in dropped_ids
+        ]
+        # Attach scores to surviving variable/constant elements
+        for elem in pf.elements:
+            if elem.element_id in scores:
+                score = scores[elem.element_id]
+                elem.variable_score = {
+                    "config_value": score.config_value,
+                    "architectural_role": score.architectural_role,
+                    "data_definition": score.data_definition,
+                    "general_usefulness": score.general_usefulness,
+                }
 
 
 def run_processing(
@@ -833,6 +938,13 @@ def run_processing(
             # Let Rich handle refresh at configured rate
             pass
 
+        # Derive score_model for caching variable scores in Phase 5
+        _score_model = None
+        if not skip_ai:
+            import contextlib
+            with contextlib.suppress(Exception):
+                _score_model = config.llm.get_summarize_model().name
+
         result = process_elements(
             parsing_result.parsed_files,
             manifest.scope,
@@ -846,6 +958,7 @@ def run_processing(
             worker_status,
             timing_stats,
             magaldi_config=config if not dry_run else None,
+            score_model=_score_model,
         )
 
     # Check for processing errors (including stalls)
