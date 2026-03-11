@@ -109,14 +109,27 @@ def print_scoring_result(result: ScoringResult) -> None:
         f"[green]{result.kept} kept[/]",
         f"[red]{result.dropped} dropped[/]",
         f"of {result.total_variables} variables",
-        f"in {result.batch_count} batches",
     ]
+    if result.batch_count > 0:
+        parts.append(f"in {result.batch_count} batches")
     if result.elapsed > 0:
         parts.append(f"{format_duration(result.elapsed)} elapsed")
     if result.errors > 0:
         parts.append(f"[yellow]{result.errors} errors[/]")
 
     console.print(f"  {' | '.join(parts)}")
+
+    # Show optimization stats when relevant
+    detail_parts: list[str] = []
+    if result.heuristic_dropped > 0:
+        pct = result.heuristic_dropped / result.total_variables * 100
+        detail_parts.append(f"heuristic pre-filter: {result.heuristic_dropped} ({pct:.0f}%)")
+    if result.cached_scores > 0:
+        detail_parts.append(f"cached: {result.cached_scores}")
+    if result.llm_scored > 0 and (result.heuristic_dropped > 0 or result.cached_scores > 0):
+        detail_parts.append(f"LLM scored: {result.llm_scored}")
+    if detail_parts:
+        console.print(f"  [dim]{' | '.join(detail_parts)}[/]")
 
 
 def print_processing_result(

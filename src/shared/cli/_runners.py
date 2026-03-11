@@ -356,6 +356,28 @@ def run_variable_scoring(
     if not variables:
         return ScoringResult()
 
+    # Heuristic pre-filter: drop obvious low-value variables before LLM
+    from magaldi_core.variable_scoring.heuristic_filter import apply_heuristic_filter
+
+    total_before_heuristic = len(variables)
+    variables, heuristic_drops = apply_heuristic_filter(variables)
+    heuristic_count = total_before_heuristic - len(variables)
+
+    # Remove heuristic-dropped variables from parsing_result immediately
+    if heuristic_drops:
+        for pf in parsing_result.parsed_files:
+            pf.elements = [
+                elem for elem in pf.elements
+                if elem.element_id not in heuristic_drops
+            ]
+
+    if not variables:
+        return ScoringResult(
+            total_variables=total_before_heuristic,
+            heuristic_dropped=heuristic_count,
+            dropped=heuristic_count,
+        )
+
     # Create LLM client using the main model (small model scores everything 1,1,1,1)
     model_config = config.llm.get_summarize_model()
     llm_client = SummarizationLLMClient.from_model_config(model_config)
@@ -428,6 +450,12 @@ def run_variable_scoring(
                 elem for elem in pf.elements
                 if elem.element_id not in dropped_ids
             ]
+
+    # Update result with heuristic stats
+    result.heuristic_dropped = heuristic_count
+    result.llm_scored = len(variables)
+    result.total_variables = total_before_heuristic
+    result.dropped += heuristic_count  # Add heuristic drops to total
 
     return result
 

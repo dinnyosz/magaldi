@@ -62,6 +62,9 @@ class ScoringResult:
     total_variables: int = 0
     kept: int = 0
     dropped: int = 0
+    heuristic_dropped: int = 0  # Dropped by pre-filter (before LLM)
+    cached_scores: int = 0  # Reused from previous run cache
+    llm_scored: int = 0  # Actually sent to LLM
     batch_count: int = 0
     elapsed: float = 0.0
     errors: int = 0
