@@ -517,6 +517,8 @@ def run_variable_scoring(
 
         # Still need to remove low-scoring and attach scores
         _apply_scores_to_elements(parsing_result, all_scores, scoring_config.threshold)
+        if scoring_config.debug_log:
+            console.print("  [dim]Scoring log: skipped (all scores from cache, no LLM calls)[/]")
         return result
 
     llm_client = SummarizationLLMClient.from_model_config(model_config)
@@ -588,8 +590,11 @@ def run_variable_scoring(
         console.print("  [bold dim]───────────────────────────────────────[/]")
 
     # Write scoring debug log to file (all batch prompts + responses)
-    if scoring_config.debug_log and result.debug_log and repo_path:
-        _write_scoring_log(result, repo_path, parsing_result, scoring_config)
+    if scoring_config.debug_log and repo_path:
+        if result.debug_log:
+            _write_scoring_log(result, repo_path, parsing_result, scoring_config)
+        else:
+            console.print("  [dim]Scoring log: skipped (all scores from cache, no LLM calls)[/]")
 
     # Apply threshold + attach scores to elements for Phase 5 storage
     _apply_scores_to_elements(parsing_result, result.scores, scoring_config.threshold)
