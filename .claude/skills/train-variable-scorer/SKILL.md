@@ -48,7 +48,7 @@ config_path      = "tools/training/configs/variable_scorer.yaml"
 output_model_dir = "tools/training/models/variable-scorer-v3"
 ollama_name      = (from config: export.ollama_model_name)
 quantization     = (from config: export.quantization)
-llama_cpp_path   = "~/llama.cpp"  (ask user if not found)
+llama_cpp_path   = "tools/llama.cpp"
 eval_limit       = 50
 cache            = true  (always use cache by default)
 ```
@@ -257,6 +257,6 @@ This is simpler and more reliable than nested subagents because:
 
 - Always use `.venv/bin/python` (not `python`) — the venv has all dependencies
 - The project root is `/Users/dinnyosz/code/magaldi`
-- llama.cpp is typically at `~/llama.cpp` — verify with `ls ~/llama.cpp/convert_hf_to_gguf.py`
+- llama.cpp is at `tools/llama.cpp` — verify with `ls tools/llama.cpp/convert_hf_to_gguf.py`
 - Training on Apple Silicon (M-series) via MLX — no GPU needed
 - The `--cache` flag on Step 1 is safe to always use — it reuses already-scored variables from `raw/`

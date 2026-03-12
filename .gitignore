@@ -163,3 +163,12 @@ node_modules/
 *.pem
 *.key
 secrets/
+
+# =============================================================================
+# TRAINING PIPELINE
+# =============================================================================
+
+tools/training/data/
+tools/training/models/
+tools/training/exports/
+tools/llama.cpp/
