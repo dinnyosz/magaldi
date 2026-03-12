@@ -1,0 +1,28 @@
+training:
+  backend: mlx
+  base_model: Qwen/Qwen2.5-0.5B-Instruct
+  lora_rank: 16
+  lora_alpha: 32
+  lora_dropout: 0.1
+  lora_target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  learning_rate: 3.0e-5
+  weight_decay: 0.01
+  warmup_ratio: 0.1
+  epochs: 5
+  batch_size: 2
+  gradient_accumulation_steps: 2
+  max_seq_len: 2048
+  mask_prompt: true
+  seed: 42
+
+data_generation:
+  teacher_model: qwen3-coder:30b
+  ollama_url: http://localhost:11434
+  mode: individual
+  validation_split: 0.1
+  temperature: 0.2
+  timeout: 120
+
+export:
+  quantization: Q4_K_M
+  ollama_model_name: magaldi-scorer
