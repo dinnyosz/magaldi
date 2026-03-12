@@ -596,6 +596,7 @@ class LLMClient:
         min_p: float | None = None,
         presence_penalty: float | None = None,
         repetition_penalty: float | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Build the kwargs dict for litellm.completion().
 
@@ -617,6 +618,10 @@ class LLMClient:
             "max_tokens": max_tokens,
             "timeout": effective_timeout,
         }
+
+        # Structured output via JSON schema
+        if response_format is not None:
+            kwargs["response_format"] = response_format
 
         # Optional sampling parameters (from model-specific configs)
         # For Ollama, presence_penalty must go through extra_body — LiteLLM's
@@ -787,6 +792,7 @@ class LLMClient:
         min_p: float | None = None,
         presence_penalty: float | None = None,
         repetition_penalty: float | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> str:
         """Generate text completion from messages (system + user).
 
@@ -809,6 +815,11 @@ class LLMClient:
             min_p: Min-p sampling parameter.
             presence_penalty: Presence penalty (0.0 to 2.0).
             repetition_penalty: Repetition penalty.
+            response_format: Structured output format. Pass a JSON schema dict
+                to constrain the model's output to a specific structure.
+                Supported by Ollama, OpenAI, and other providers via LiteLLM.
+                Example: {"type": "json_object"} for freeform JSON, or
+                {"type": "json_schema", "json_schema": {...}} for strict schema.
 
         Returns:
             Generated text.
@@ -826,7 +837,8 @@ class LLMClient:
         def _do_generate() -> str:
             kwargs = self._build_kwargs(use_model, messages,
                                         temperature, top_p, max_tokens, timeout, num_ctx,
-                                        top_k, min_p, presence_penalty, repetition_penalty)
+                                        top_k, min_p, presence_penalty, repetition_penalty,
+                                        response_format)
 
             try:
                 response = completion(**kwargs)

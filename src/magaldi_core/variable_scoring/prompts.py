@@ -2,59 +2,64 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 SYSTEM_PROMPT = """\
-You are scoring variables for a coding agent's search index. The agent uses this \
-index to find relevant code when navigating a codebase. Score each variable on \
-seven dimensions (1-10) as comma-separated integers:
-config_value,architectural_role,data_definition,general_usefulness,value_complexity,naming_quality,scope_significance
+Score variables for a code search index. For each variable, score seven dimensions (1-10).
 
-Ask: "If a coding agent searched for how this system works, would finding this \
-variable help?" If no, score 1,1,1,1,1,1,1.
+Ask: "Would a coding agent benefit from finding this variable?" If no, score all 1s.
 
-Scoring dimensions:
-- config_value: Configuration, feature flag, tuning parameter, URL, path, prompt \
-template, SQL/query string, default value, __all__ export list
-- architectural_role: Infrastructure (DB connection, router, logger, app instance, \
-middleware, compiled regex, decorator, sentinel)
-- data_definition: Data structure, schema, type alias, enum, named tuple, mapping, \
-protocol, TypeVar
-- general_usefulness: Would a coding agent benefit from finding this while working?
-- value_complexity: How complex/interesting is the assigned value? Simple literal=1, \
-function call=3, multi-element collection/dict/config=7, complex expression/template=9
-- naming_quality: How descriptive/self-documenting is the name? Single letter=1, \
-abbreviation=3, clear descriptive name=7, fully qualified domain name=9
-- scope_significance: Module-level constant=9, class attribute=6, function local=2, \
-loop/temp variable=1
+Dimensions:
+- config_value: Config, feature flag, URL, path, prompt template, SQL, __all__
+- architectural_role: DB connection, router, logger, app instance, middleware, sentinel
+- data_definition: Schema, type alias, enum, named tuple, mapping, protocol
+- general_usefulness: Would a coding agent benefit from finding this?
+- value_complexity: Simple literal=1, function call=3, collection/config=7, complex=9
+- naming_quality: Single letter=1, abbreviation=3, descriptive=7, domain-specific=9
+- scope_significance: Module-level=9, class attribute=6, function local=2, temp=1
 
-Rules:
-- Output ONLY the number and seven scores per line. Never echo the variable code.
-- Format: N. score,score,score,score,score,score,score
-- Most variables should score LOW. Only ~30% of variables are worth keeping.
-- Score 1,1,1,1,1,1,1 for: loop counters, temp variables, function/method call results, \
-short names (i, j, x, tmp, res, val, err, _), intermediate computations, \
-local assignments inside functions
-- Score 1,1,1,1,1,1,1 for: generic assignments like result = func(), data = obj.method(), \
-response = requests.get(), items = process(), client = Client()
-- Score HIGH only for: module-level constants, string templates/prompts, framework \
-instances, DB connections, loggers, type aliases, enums, compiled patterns, \
-configuration dicts/lists, query strings, export lists, sentinels
-
-Example input:
-1. [src/app.py] MAX_RETRIES = 3
-2. [src/app.py] app = Flask(__name__)
-3. [src/app.py] result = process_items(data)
-4. [src/db.py] engine = create_engine(DATABASE_URL)
-5. [src/db.py] logger = logging.getLogger(__name__)
-6. [src/db.py] data = json.loads(payload)
-
-Correct output (scores only, no code):
-1. 9,1,1,8,2,8,9
-2. 1,10,1,9,3,7,9
-3. 1,1,1,1,2,2,2
-4. 1,9,1,9,4,7,9
-5. 1,9,1,7,3,7,9
-6. 1,1,1,1,2,1,2\
+Most variables should score LOW (~30% are worth keeping).
+LOW: loop counters, temp vars, generic call results (result=func(), data=obj.method())
+HIGH: module constants, framework instances, DB connections, loggers, type aliases, \
+config dicts, query strings, export lists\
 """
+
+# JSON schema for structured output — enforces format at the inference level.
+# Each variable gets 7 integer scores keyed by its 1-based index.
+SCORING_JSON_SCHEMA: dict[str, Any] = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "variable_scores",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "additionalProperties": {
+                "type": "object",
+                "properties": {
+                    "cv": {"type": "integer"},
+                    "ar": {"type": "integer"},
+                    "dd": {"type": "integer"},
+                    "gu": {"type": "integer"},
+                    "vc": {"type": "integer"},
+                    "nq": {"type": "integer"},
+                    "ss": {"type": "integer"},
+                },
+                "required": ["cv", "ar", "dd", "gu", "vc", "nq", "ss"],
+            },
+        },
+    },
+}
+
+# Compact key → VariableScore field name mapping
+_SCORE_KEY_MAP: dict[str, str] = {
+    "cv": "config_value",
+    "ar": "architectural_role",
+    "dd": "data_definition",
+    "gu": "general_usefulness",
+    "vc": "value_complexity",
+    "nq": "naming_quality",
+    "ss": "scope_significance",
+}
 
 
 def build_user_prompt(
@@ -81,9 +86,7 @@ def build_user_prompt(
     # consuming the entire budget. Batch-level packing is done upstream.
     max_code_chars = token_budget * 4 - 200  # ~4 chars/token, minus overhead
 
-    # /no_think disables Qwen3's thinking mode via soft-switch.
-    # This is a fallback for servers that don't honor chat_template_kwargs.
-    lines = ["/no_think\nScore these variables:"]
+    lines = ["Score these variables:"]
     for idx, file_path, _name, raw_code in variables:
         code = raw_code.replace("\n", " ").strip()
         if len(code) > max_code_chars:

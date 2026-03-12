@@ -29,6 +29,7 @@ from magaldi_core.variable_scoring.models import (
     VariableScoringConfig,
 )
 from magaldi_core.variable_scoring.prompts import (
+    SCORING_JSON_SCHEMA,
     SYSTEM_PROMPT,
     build_user_prompt,
 )
@@ -107,8 +108,63 @@ def _strip_think_tags(output: str) -> str:
     return re.sub(r"<think>.*?</think>", "", output, flags=re.DOTALL).strip()
 
 
-def _parse_scores(output: str, batch_size: int) -> list[VariableScore | None]:
-    """Parse LLM output into variable scores.
+def _parse_json_scores(output: str, batch_size: int) -> list[VariableScore | None]:
+    """Parse JSON structured output into variable scores.
+
+    Expected format:
+        {"1": {"cv": 9, "ar": 2, "dd": 1, "gu": 8, "vc": 3, "nq": 7, "ss": 9}, ...}
+
+    Falls back to _parse_text_scores if JSON parsing fails.
+
+    Args:
+        output: Raw LLM output (should be valid JSON).
+        batch_size: Expected number of scores.
+
+    Returns:
+        List of VariableScore (or None for missing entries).
+    """
+    import json
+
+    def _clamp(val: int) -> int:
+        return min(10, max(1, val))
+
+    try:
+        data = json.loads(output)
+    except (json.JSONDecodeError, TypeError):
+        # Not valid JSON — fall back to text parsing
+        return _parse_text_scores(output, batch_size)
+
+    if not isinstance(data, dict):
+        return _parse_text_scores(output, batch_size)
+
+    scores: list[VariableScore | None] = [None] * batch_size
+
+    for key, score_dict in data.items():
+        try:
+            idx = int(key)
+        except (ValueError, TypeError):
+            continue
+        if not (1 <= idx <= batch_size):
+            continue
+        if not isinstance(score_dict, dict):
+            continue
+
+        with contextlib.suppress(ValueError, TypeError):
+            scores[idx - 1] = VariableScore(
+                config_value=_clamp(int(score_dict.get("cv", 1))),
+                architectural_role=_clamp(int(score_dict.get("ar", 1))),
+                data_definition=_clamp(int(score_dict.get("dd", 1))),
+                general_usefulness=_clamp(int(score_dict.get("gu", 1))),
+                value_complexity=_clamp(int(score_dict.get("vc", 1))),
+                naming_quality=_clamp(int(score_dict.get("nq", 1))),
+                scope_significance=_clamp(int(score_dict.get("ss", 1))),
+            )
+
+    return scores
+
+
+def _parse_text_scores(output: str, batch_size: int) -> list[VariableScore | None]:
+    """Parse text-format LLM output into variable scores (legacy/fallback).
 
     Expected format (7 dimensions):
         1. 9,2,1,8,3,7,9
@@ -174,6 +230,25 @@ def _parse_scores(output: str, batch_size: int) -> list[VariableScore | None]:
     return scores
 
 
+def _parse_scores(output: str, batch_size: int) -> list[VariableScore | None]:
+    """Parse LLM output into variable scores.
+
+    Tries JSON parsing first (structured output), then falls back to
+    text-based regex parsing (legacy format).
+
+    Args:
+        output: Raw LLM output text (JSON or text format).
+        batch_size: Expected number of scores.
+
+    Returns:
+        List of VariableScore (or None for unparseable entries).
+    """
+    stripped = output.strip()
+    if stripped.startswith("{"):
+        return _parse_json_scores(stripped, batch_size)
+    return _parse_text_scores(stripped, batch_size)
+
+
 def _score_batch(
     batch: list[tuple[int, str, str, str, str]],
     llm_client: LLMClient,
@@ -207,8 +282,8 @@ def _score_batch(
     prompt_chars = len(SYSTEM_PROMPT) + len(user_prompt)
     prompt_tokens = prompt_chars // 4
 
-    # Output budget: ~25 tokens per variable (number + 7 scores + commas + newline + slack)
-    output_budget = len(batch) * 25 + 50
+    # Output budget: ~30 tokens per variable for JSON (keys + values + braces)
+    output_budget = len(batch) * 30 + 50
 
     try:
         output = llm_client.generate_from_messages(
@@ -217,6 +292,7 @@ def _score_batch(
             max_tokens=output_budget,
             timeout=config.timeout,
             num_ctx=num_ctx,
+            response_format=SCORING_JSON_SCHEMA,
         )
     except Exception:
         logger.warning(
