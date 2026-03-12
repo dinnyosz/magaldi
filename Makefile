@@ -3,7 +3,7 @@
 
 .PHONY: help setup services services-full services-down \
         test test-cov lint format typecheck check clean dev \
-        ollama-pull db-reset logs
+        ollama-pull llama-build llama-pull llama-setup db-reset logs
 
 # Default target
 help:
@@ -26,8 +26,13 @@ help:
 	@echo "  make typecheck     Run mypy type checker"
 	@echo "  make check         Run all checks (lint, typecheck, test)"
 	@echo ""
+	@echo "LLM Server (llama.cpp):"
+	@echo "  make llama-setup   Build llama.cpp + download models (one-command setup)"
+	@echo "  make llama-build   Clone and build llama.cpp (tools/llama.cpp/)"
+	@echo "  make llama-pull    Download GGUF models to tools/models/"
+	@echo ""
 	@echo "Utilities:"
-	@echo "  make ollama-pull   Pull required Ollama models (local)"
+	@echo "  make ollama-pull   Pull Ollama embedding model"
 	@echo "  make db-reset      Reset database (drops all data)"
 	@echo "  make clean         Remove generated files"
 
@@ -121,12 +126,55 @@ check: lint typecheck test
 # =============================================================================
 
 ollama-pull:
-	@echo "Pulling Ollama models (this may take a while)..."
-	ollama pull qwen3.5:2b
-	ollama pull qwen3.5:4b
+	@echo "Pulling Ollama embedding model..."
 	ollama pull qwen3-embedding:0.6b
 	@echo ""
-	@echo "Models ready!"
+	@echo "Embedding model ready! For LLM models, use: make llama-setup"
+
+# =============================================================================
+# LLAMA.CPP
+# =============================================================================
+
+LLAMA_DIR := tools/llama.cpp
+LLAMA_SERVER := $(LLAMA_DIR)/build/bin/llama-server
+MODELS_DIR := tools/models
+
+llama-build:
+	@if [ ! -d "$(LLAMA_DIR)" ]; then \
+		echo "Cloning llama.cpp..."; \
+		git clone https://github.com/ggml-org/llama.cpp.git $(LLAMA_DIR); \
+	else \
+		echo "Updating llama.cpp..."; \
+		cd $(LLAMA_DIR) && git pull origin master; \
+	fi
+	@echo "Building llama.cpp (Metal)..."
+	@cd $(LLAMA_DIR) && cmake -B build -DGGML_METAL=ON -DLLAMA_CURL=OFF 2>&1 | tail -3
+	@cd $(LLAMA_DIR) && cmake --build build --config Release -j$$(sysctl -n hw.logicalcpu 2>/dev/null || nproc) 2>&1 | tail -5
+	@echo ""
+	@echo "llama-server built: $(LLAMA_SERVER)"
+
+llama-pull:
+	@mkdir -p $(MODELS_DIR)
+	@echo "Downloading GGUF models to $(MODELS_DIR)/..."
+	$(PYTHON) -c "\
+from huggingface_hub import hf_hub_download; \
+models = [ \
+    ('unsloth/Qwen3.5-4B-GGUF', 'Qwen3.5-4B-Q4_K_M.gguf'), \
+    ('unsloth/Qwen3.5-2B-GGUF', 'Qwen3.5-2B-Q4_K_M.gguf'), \
+]; \
+for repo, fname in models: \
+    print(f'  Downloading {fname} from {repo}...'); \
+    hf_hub_download(repo_id=repo, filename=fname, local_dir='$(MODELS_DIR)'); \
+    print(f'  ✓ {fname}'); \
+print(); print('All models downloaded to $(MODELS_DIR)/')"
+
+llama-setup: llama-build llama-pull
+	@echo ""
+	@echo "llama.cpp setup complete!"
+	@echo "  Server:  $(LLAMA_SERVER)"
+	@echo "  Models:  $(MODELS_DIR)/"
+	@echo ""
+	@echo "Start with: magaldi llm serve"
 
 db-reset:
 	@echo "WARNING: This will delete all data!"

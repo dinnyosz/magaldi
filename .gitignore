@@ -172,4 +172,5 @@ tools/training/data/
 tools/training/models/
 tools/training/exports/
 tools/llama.cpp/
+tools/models/
 fused_model/
