@@ -37,29 +37,21 @@ redis:
 
 llm:
   # Named model configurations
-  # All models served by Ollama
+  # Summarization models served by llama-server (llama.cpp router mode)
+  # Start with: magaldi llm serve
   models:
-    qwen3-4b:
-      name: qwen3:4b-instruct
-      provider: ollama
-      url: http://localhost:11434
-    qwen3-small:
-      name: qwen3:1.7b
-      provider: ollama
-      url: http://localhost:11434
-
-    # Fine-tuned variable scorer (Qwen2.5-1.5B v2, LoRA)
-    # Serve with: llama-server -m tools/training/exports/magaldi-variable-scorer-qwen2.5-1.5b-v2-q8_0.gguf --port 8090
-    # Or use llama-cpp backend for direct GGUF loading (no server needed)
-    magaldi-scorer:
-      name: magaldi-scorer
+    qwen3.5-4b:
+      name: Qwen3.5-4B-Q4_K_M
       provider: llamacpp
       url: http://localhost:8090
+      gguf: unsloth/Qwen3.5-4B-GGUF:Qwen3.5-4B-Q4_K_M.gguf
+    qwen3.5-2b:
+      name: Qwen3.5-2B-Q4_K_M
+      provider: llamacpp
+      url: http://localhost:8090
+      gguf: unsloth/Qwen3.5-2B-GGUF:Qwen3.5-2B-Q4_K_M.gguf
 
-    # To use LM Studio instead of Ollama, set provider: lmstudio
-    # and match the model name to LM Studio's /v1/models API identifier.
-
-    # --- Embedding ---
+    # --- Embedding (still on Ollama) ---
     qwen3-embed:
       name: qwen3-embedding:0.6b
       provider: ollama
@@ -67,10 +59,10 @@ llm:
       dimensions: 1024
 
   # Which models to use for each purpose (reference by name above)
-  summarize_model: qwen3-4b           # files, classes, features
-  summarize_model_small: qwen3-small   # functions, methods, variables, constants
+  summarize_model: qwen3.5-4b           # files, classes, features
+  summarize_model_small: qwen3.5-2b     # functions, methods, variables, constants
   embed_model: qwen3-embed
-  variable_scoring_model: magaldi-scorer  # fine-tuned scorer (needs llama-server on :8090)
+  variable_scoring_model: qwen3.5-4b    # variable/constant filtering
 
   # Generation settings
   summarize_temperature: 0.2
