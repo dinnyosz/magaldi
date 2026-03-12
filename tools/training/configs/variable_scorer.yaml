@@ -1,19 +1,23 @@
 training:
   backend: mlx
-  base_model: Qwen/Qwen3-0.6B
-  lora_rank: 16
-  lora_alpha: 32
-  lora_dropout: 0.1
+  base_model: Qwen/Qwen2.5-1.5B-Instruct
+  lora_rank: 8
+  lora_alpha: 16
+  lora_dropout: 0.05
   lora_target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
-  learning_rate: 5.0e-5
+  learning_rate: 2.0e-4
   weight_decay: 0.01
-  warmup_ratio: 0.03
-  epochs: 5
+  warmup_ratio: 0.05
+  num_layers: 28
+  epochs: 3
   batch_size: 4
-  gradient_accumulation_steps: 1
-  max_seq_len: 2048
-  mask_prompt: true
+  gradient_accumulation_steps: 2
+  max_seq_len: 1024
+  mask_prompt: false
   seed: 42
+  lr_schedule:
+    name: cosine_decay
+    warmup_init: 1.0e-6
 
 data_generation:
   teacher_model: qwen3-coder:30b
@@ -22,6 +26,7 @@ data_generation:
   validation_split: 0.1
   temperature: 0.2
   timeout: 120
+  max_trivial_ratio: 0.3
 
 export:
   quantization: Q4_K_M

@@ -75,6 +75,7 @@ def train_mlx(
     grad_accum = training_cfg.get("gradient_accumulation_steps", 4)
     lr = training_cfg.get("learning_rate", 2e-4)
     lora_rank = training_cfg.get("lora_rank", 16)
+    num_layers = training_cfg.get("num_layers", 16)
     seed = training_cfg.get("seed", 42)
     max_seq_len = training_cfg.get("max_seq_len", 2048)
 
@@ -96,12 +97,16 @@ def train_mlx(
 
         mask_prompt = training_cfg.get("mask_prompt", True)
 
+        warmup_ratio = training_cfg.get("warmup_ratio", 0.03)
+        warmup_iters = max(1, int(iters * warmup_ratio))
+
         mlx_config = {
             "model": base_model,
             "data": tmpdir,
             "train": True,
             "fine_tune_type": "lora",
-            "num_layers": lora_rank,
+            "optimizer": "adamw",
+            "num_layers": num_layers,
             "batch_size": batch_size,
             "iters": iters,
             "val_batches": -1,  # use entire validation set
@@ -111,6 +116,7 @@ def train_mlx(
             "grad_accumulation_steps": grad_accum,
             "max_seq_length": max_seq_len,
             "mask_prompt": mask_prompt,
+            "grad_checkpoint": True,
             "seed": seed,
             "lora_parameters": {
                 "rank": lora_rank,
@@ -119,8 +125,27 @@ def train_mlx(
                 "scale": lora_alpha / lora_rank,
             },
         }
+
+        # Add LR schedule if configured (e.g. cosine_decay)
+        lr_schedule_cfg = training_cfg.get("lr_schedule")
+        if lr_schedule_cfg:
+            schedule = {
+                "name": lr_schedule_cfg["name"],
+                "warmup": warmup_iters,
+                "arguments": [lr, iters, lr_schedule_cfg.get("min_lr", 1e-6)],
+            }
+            if "warmup_init" in lr_schedule_cfg:
+                schedule["warmup_init"] = lr_schedule_cfg["warmup_init"]
+            mlx_config["lr_schedule"] = schedule
+            logger.info(
+                "LR schedule: %s, warmup=%d iters, lr=%g -> %g",
+                schedule["name"], warmup_iters, lr, schedule["arguments"][2],
+            )
+
         if mask_prompt:
             logger.info("mask_prompt=True: loss computed only on assistant responses")
+        else:
+            logger.info("mask_prompt=False: loss includes instruction tokens")
         mlx_config_path = tmpdir_path / "mlx_config.yaml"
         with open(mlx_config_path, "w") as f:
             yaml.dump(mlx_config, f)
