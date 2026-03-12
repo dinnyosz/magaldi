@@ -3095,6 +3095,94 @@ class TestElapsedRateETAFallback:
         # avg should be the elapsed-rate, not the near-zero base time
         assert avg > 0.1, f"avg should use elapsed rate, got {avg}"
 
+    def test_elapsed_rate_preserves_real_is_fallback(self):
+        """Elapsed rate override should not mark real measurements as fallback.
+
+        When elapsed_rate > base_time (common with parallelism overhead),
+        the display should still show solid (non-guessed) values for cells
+        that have real measured data.
+        """
+        stats = TimingStats()
+        stats.phase_start = time.time() - 100.0  # 100s elapsed
+        stats.set_totals_by_type_tier({
+            ("file", 32768): 10,
+            ("function", 2048): 50,
+        })
+        # Record 10 file completions with meaningful LLM times
+        # base_time = wall_time / avg_workers = 5.0 / 4.0 = 1.25s
+        for _ in range(10):
+            stats.record(
+                wall_time=5.0,
+                summarize_time=3.0,
+                embed_time=1.0,
+                element_type="file",
+                tier=32768,
+                avg_workers=4.0,
+            )
+        # Record 20 function completions
+        for _ in range(20):
+            stats.record(
+                wall_time=2.0,
+                summarize_time=1.0,
+                embed_time=0.5,
+                element_type="function",
+                tier=2048,
+                avg_workers=4.0,
+            )
+        # elapsed_rate = 100s / 30 completions ≈ 3.33s
+        # file base_time avg = 1.25s, function base_time avg = 0.5s
+        # Both < elapsed_rate, so elapsed_rate would override avg.
+        breakdown = stats.get_eta_breakdown_with_avg()
+        assert len(breakdown) == 2
+
+        # Find file and function entries
+        by_type = {entry[0]: entry for entry in breakdown}
+        assert "file" in by_type
+        assert "function" in by_type
+
+        # File: has real data (10 completions), should NOT be marked as fallback
+        # even though elapsed_rate (3.33s) > base_time (1.25s)
+        _, _, file_avg, file_is_fallback, file_done, file_total = by_type["file"]
+        assert file_done == 10
+        assert file_total == 10
+        assert not file_is_fallback, (
+            f"File with {file_done} real completions should not be marked as fallback "
+            f"(avg={file_avg:.2f}s)"
+        )
+
+        # Function: has real data (20 completions), should NOT be marked as fallback
+        _, _, func_avg, func_is_fallback, func_done, func_total = by_type["function"]
+        assert func_done == 20
+        assert func_total == 50
+        assert not func_is_fallback, (
+            f"Function with {func_done} real completions should not be marked as fallback "
+            f"(avg={func_avg:.2f}s)"
+        )
+
+    def test_elapsed_rate_marks_near_zero_as_fallback(self):
+        """Near-zero base_time (skip_ai) should still be marked as fallback."""
+        stats = TimingStats()
+        stats.phase_start = time.time() - 10.0
+        stats.set_totals_by_type_tier({
+            ("function", 2048): 50,
+        })
+        # Record 25 completions with near-zero time (skip_ai pattern)
+        for _ in range(25):
+            stats.record(
+                wall_time=0.0001,
+                summarize_time=0.0,
+                embed_time=0.0,
+                element_type="function",
+                tier=2048,
+                avg_workers=4.0,
+            )
+        breakdown = stats.get_eta_breakdown_with_avg()
+        assert len(breakdown) == 1
+        _, _, avg, is_fallback, done, total = breakdown[0]
+        # Near-zero base_time should be marked as fallback when elapsed_rate overrides
+        assert is_fallback, "Near-zero base_time should be marked as fallback"
+        assert avg > 0.1, f"avg should use elapsed rate, got {avg}"
+
     def test_eta_fallback_mixed_tiers(self):
         """Skip-ai with multiple tiers: all should get elapsed-rate."""
         stats = TimingStats()
