@@ -501,9 +501,9 @@ class LLMClient:
 
         Handles thinking models where the server may split output into
         ``content`` (actual answer) and ``reasoning_content`` (thinking).
-        When ``content`` is None or empty on a thinking model, falls back to
+        When ``content`` is None on a thinking model, falls back to
         ``reasoning_content`` — some servers put the entire output there
-        when thinking suppression is ignored (especially with structured output).
+        when thinking suppression is ignored.
 
         Args:
             message: The response message object from LiteLLM.
@@ -518,20 +518,18 @@ class LLMClient:
         content = message.content
 
         # Thinking models: server may put output in reasoning_content
-        # when it ignores enable_thinking=False.
-        # Check for None OR empty string — structured output with thinking
-        # models can return content='' with everything in reasoning_content.
-        if not content and self._is_thinking_model:
+        # when it ignores enable_thinking=False
+        if content is None and self._is_thinking_model:
             reasoning = getattr(message, "reasoning_content", None)
             if reasoning:
                 logger.debug(
-                    "Model '%s' returned content=%r but has reasoning_content "
+                    "Model '%s' returned content=None but has reasoning_content "
                     "(%d chars) — using it as fallback",
-                    use_model, content, len(reasoning),
+                    use_model, len(reasoning),
                 )
                 content = reasoning
 
-        if not content:
+        if content is None:
             raise LLMError(f"Empty response from model '{use_model}'")
 
         text = content.strip()
@@ -598,7 +596,6 @@ class LLMClient:
         min_p: float | None = None,
         presence_penalty: float | None = None,
         repetition_penalty: float | None = None,
-        response_format: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Build the kwargs dict for litellm.completion().
 
@@ -620,28 +617,6 @@ class LLMClient:
             "max_tokens": max_tokens,
             "timeout": effective_timeout,
         }
-
-        # Structured output via JSON schema
-        if response_format is not None:
-            if _is_ollama:
-                # Ollama supports structured output via its native `format`
-                # parameter.  We use format="json" to constrain output to
-                # valid JSON tokens.
-                #
-                # Note: Ollama also supports passing a JSON schema dict as
-                # `format` for schema-level enforcement, but this is unreliable
-                # in practice (Ollama ≤0.17.x silently ignores schema dicts
-                # with /api/chat).  Using format="json" is more robust —
-                # the prompt instructs the model on the expected structure.
-                kwargs["format"] = "json"
-
-                # Thinking models + structured output don't mix well.
-                # Force think=False when requesting structured output from
-                # Ollama, regardless of whether _is_thinking_model is set.
-                # Non-thinking models ignore this param harmlessly.
-                kwargs["think"] = False
-            else:
-                kwargs["response_format"] = response_format
 
         # Optional sampling parameters (from model-specific configs)
         # For Ollama, presence_penalty must go through extra_body — LiteLLM's
@@ -812,7 +787,6 @@ class LLMClient:
         min_p: float | None = None,
         presence_penalty: float | None = None,
         repetition_penalty: float | None = None,
-        response_format: dict[str, Any] | None = None,
     ) -> str:
         """Generate text completion from messages (system + user).
 
@@ -835,11 +809,6 @@ class LLMClient:
             min_p: Min-p sampling parameter.
             presence_penalty: Presence penalty (0.0 to 2.0).
             repetition_penalty: Repetition penalty.
-            response_format: Structured output format. Pass a JSON schema dict
-                to constrain the model's output to a specific structure.
-                Supported by Ollama, OpenAI, and other providers via LiteLLM.
-                Example: {"type": "json_object"} for freeform JSON, or
-                {"type": "json_schema", "json_schema": {...}} for strict schema.
 
         Returns:
             Generated text.
@@ -857,8 +826,7 @@ class LLMClient:
         def _do_generate() -> str:
             kwargs = self._build_kwargs(use_model, messages,
                                         temperature, top_p, max_tokens, timeout, num_ctx,
-                                        top_k, min_p, presence_penalty, repetition_penalty,
-                                        response_format)
+                                        top_k, min_p, presence_penalty, repetition_penalty)
 
             try:
                 response = completion(**kwargs)
