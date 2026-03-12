@@ -252,7 +252,7 @@ def llm_serve(
         "--ctx-size", str(ctx_size),
         "--parallel", str(parallel),
         "--models-max", str(models_max),
-        "--flash-attn",
+        "--flash-attn", "on",
         "--n-gpu-layers", "99",
     ]
 
