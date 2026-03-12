@@ -66,7 +66,7 @@ AskUserQuestion({
       },
       {
         label: "variable_scorer_0.5b.yaml",
-        description: "Qwen2.5-0.5B, 5 epochs, rank 16, Q4_K_M → magaldi-scorer-0.5b"
+        description: "Qwen2.5-0.5B, 3 epochs, rank 8, Q4_K_M → magaldi-scorer-0.5b"
       }
     ],
     multiSelect: false
