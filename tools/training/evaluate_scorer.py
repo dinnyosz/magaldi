@@ -1,22 +1,39 @@
 #!/Users/dinnyosz/code/magaldi/.venv/bin/python
-"""Evaluate variable scoring model against teacher labels via Ollama.
+"""Evaluate variable scoring model against teacher labels.
 
-Standalone CLI script that sends validation examples to an Ollama model
+Standalone CLI script that sends validation examples to a model
 and compares predicted scores to the expected scores from training data.
+
+Supports multiple backends:
+  - ollama:     Ollama API (default)
+  - llama-cpp:  llama-cpp-python (direct GGUF loading, no server needed)
+  - openai:     OpenAI-compatible API (llama-server, vllm, etc.)
 
 The validation JSONL uses ChatML-style messages with 7-dimension scores:
   config_value, architectural_role, data_definition, general_usefulness,
   value_complexity, naming_quality, scope_significance
 
 Usage:
+    # Via Ollama:
     python tools/training/evaluate_scorer.py \
       --val-data tools/training/data/variable_scorer/validation.jsonl \
       --model magaldi-scorer \
       --limit 20
 
-    # Evaluate multiple models side by side:
+    # Via llama-cpp-python (direct GGUF):
     python tools/training/evaluate_scorer.py \
-      --val-data tools/training/data/variable_scorer/validation.jsonl \
+      --backend llama-cpp \
+      --gguf /path/to/model.gguf \
+      --limit 20
+
+    # Via OpenAI-compatible server (llama-server, vllm):
+    python tools/training/evaluate_scorer.py \
+      --backend openai \
+      --api-base http://localhost:8090/v1 \
+      --limit 20
+
+    # Evaluate multiple Ollama models side by side:
+    python tools/training/evaluate_scorer.py \
       --model magaldi-scorer qwen3.5:4b \
       --limit 50
 """
@@ -299,7 +316,7 @@ def load_validation_examples(val_path: str, limit: int = 0) -> list[ValidationEx
 
 
 # ============================================================================
-# Ollama API
+# Backend: Ollama API
 # ============================================================================
 
 
@@ -362,6 +379,126 @@ def call_ollama(
 
 
 # ============================================================================
+# Backend: llama-cpp-python (direct GGUF loading)
+# ============================================================================
+
+# Global llama-cpp model instance (loaded once, reused)
+_llama_model = None
+
+
+def _get_llama_model(gguf_path: str):
+    """Load or return cached llama-cpp-python model."""
+    global _llama_model
+    if _llama_model is not None:
+        return _llama_model
+
+    try:
+        from llama_cpp import Llama
+    except ImportError:
+        print(
+            "ERROR: 'llama-cpp-python' package required for llama-cpp backend. "
+            "Install with: pip install llama-cpp-python",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    print(f"Loading GGUF model: {gguf_path}")
+    _llama_model = Llama(
+        model_path=gguf_path,
+        n_ctx=2048,
+        n_gpu_layers=-1,  # Offload all layers to GPU
+        verbose=False,
+    )
+    print("Model loaded.")
+    return _llama_model
+
+
+def call_llama_cpp(
+    gguf_path: str,
+    system_prompt: str,
+    user_prompt: str,
+    var_count: int,
+) -> str | None:
+    """Generate response using llama-cpp-python (direct GGUF inference).
+
+    Returns:
+        The assistant's response text, or None on error.
+    """
+    try:
+        model = _get_llama_model(gguf_path)
+
+        max_tokens = var_count * 25 + 50
+
+        response = model.create_chat_completion(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0,
+            max_tokens=max_tokens,
+        )
+        content = response["choices"][0]["message"]["content"]
+        return content
+    except Exception as e:
+        print(f"WARNING: llama-cpp inference error: {e}", file=sys.stderr)
+        return None
+
+
+# ============================================================================
+# Backend: OpenAI-compatible API (llama-server, vllm, etc.)
+# ============================================================================
+
+
+def call_openai_compat(
+    system_prompt: str,
+    user_prompt: str,
+    api_base: str,
+    var_count: int,
+    model_name: str = "default",
+) -> str | None:
+    """Send a chat completion to an OpenAI-compatible endpoint.
+
+    Works with llama-server, vllm, lm-studio, etc.
+
+    Returns:
+        The assistant's response text, or None on error.
+    """
+    url = f"{api_base}/chat/completions"
+
+    max_tokens = var_count * 25 + 50
+
+    payload = {
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": 0,
+        "max_tokens": max_tokens,
+    }
+
+    try:
+        resp = requests.post(url, json=payload, timeout=120)
+        resp.raise_for_status()
+        data = resp.json()
+        content = data["choices"][0]["message"]["content"]
+        return content
+    except requests.exceptions.ConnectionError:
+        print(
+            f"ERROR: Cannot connect to API at {api_base}. "
+            "Is the server running?",
+            file=sys.stderr,
+        )
+        return None
+    except requests.exceptions.Timeout:
+        print("WARNING: API request timed out", file=sys.stderr)
+        return None
+    except (requests.exceptions.HTTPError, json.JSONDecodeError, KeyError, IndexError) as e:
+        print(f"WARNING: API error: {e}", file=sys.stderr)
+        return None
+
+
+# ============================================================================
 # Evaluation
 # ============================================================================
 
@@ -372,8 +509,22 @@ def evaluate_model(
     ollama_url: str,
     threshold: int = 5,
     verbose: bool = False,
+    backend: str = "ollama",
+    gguf_path: str | None = None,
+    api_base: str | None = None,
 ) -> ModelMetrics:
-    """Run all validation examples through a model and compute metrics."""
+    """Run all validation examples through a model and compute metrics.
+
+    Args:
+        model_name: Model identifier (Ollama model name, or display name for other backends).
+        examples: Validation examples to evaluate.
+        ollama_url: Ollama API base URL (only used for ollama backend).
+        threshold: Keep/drop threshold for any dimension.
+        verbose: Show per-example progress.
+        backend: Inference backend: "ollama", "llama-cpp", or "openai".
+        gguf_path: Path to GGUF file (required for llama-cpp backend).
+        api_base: API base URL (required for openai backend, e.g. "http://localhost:8090/v1").
+    """
     metrics = ModelMetrics(model_name=model_name)
     start_time = time.time()
 
@@ -384,14 +535,32 @@ def evaluate_model(
         if verbose:
             print(f"  [{ex_idx}/{len(examples)}] {example.var_count} variables...", end=" ", flush=True)
 
-        # Call Ollama
-        content = call_ollama(
-            model=model_name,
-            system_prompt=example.system_prompt,
-            user_prompt=example.user_prompt,
-            ollama_url=ollama_url,
-            var_count=example.var_count,
-        )
+        # Dispatch to appropriate backend
+        if backend == "llama-cpp":
+            assert gguf_path, "--gguf is required for llama-cpp backend"
+            content = call_llama_cpp(
+                gguf_path=gguf_path,
+                system_prompt=example.system_prompt,
+                user_prompt=example.user_prompt,
+                var_count=example.var_count,
+            )
+        elif backend == "openai":
+            assert api_base, "--api-base is required for openai backend"
+            content = call_openai_compat(
+                system_prompt=example.system_prompt,
+                user_prompt=example.user_prompt,
+                api_base=api_base,
+                var_count=example.var_count,
+                model_name=model_name,
+            )
+        else:
+            content = call_ollama(
+                model=model_name,
+                system_prompt=example.system_prompt,
+                user_prompt=example.user_prompt,
+                ollama_url=ollama_url,
+                var_count=example.var_count,
+            )
 
         if content is None:
             metrics.api_errors += 1
@@ -621,21 +790,38 @@ def parse_args() -> argparse.Namespace:
     default_val = str(project_root / DEFAULT_VAL_DATA)
 
     parser = argparse.ArgumentParser(
-        description="Evaluate variable scoring model against teacher labels via Ollama.",
+        description="Evaluate variable scoring model against teacher labels.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 Examples:
   %(prog)s --model magaldi-scorer
   %(prog)s --model magaldi-scorer qwen3.5:4b --limit 50
-  %(prog)s --val-data path/to/validation.jsonl --model my-model
+  %(prog)s --backend llama-cpp --gguf /path/to/model.gguf --limit 0
+  %(prog)s --backend openai --api-base http://localhost:8090/v1
 """,
     )
 
     parser.add_argument(
+        "--backend",
+        choices=["ollama", "llama-cpp", "openai"],
+        default="ollama",
+        help="Inference backend (default: ollama)",
+    )
+    parser.add_argument(
         "--model",
         nargs="+",
         default=["magaldi-scorer"],
-        help="Ollama model name(s) to evaluate (default: magaldi-scorer)",
+        help="Model name(s) to evaluate (default: magaldi-scorer). "
+        "For ollama backend, these are Ollama model names. "
+        "For llama-cpp backend, this is just a display label.",
+    )
+    parser.add_argument(
+        "--gguf",
+        help="Path to GGUF file (required for llama-cpp backend)",
+    )
+    parser.add_argument(
+        "--api-base",
+        help="API base URL for openai backend (e.g. http://localhost:8090/v1)",
     )
     parser.add_argument(
         "--limit",
@@ -671,6 +857,14 @@ Examples:
 def main() -> None:
     args = parse_args()
 
+    # Validate backend-specific args
+    if args.backend == "llama-cpp" and not args.gguf:
+        print("ERROR: --gguf is required for llama-cpp backend", file=sys.stderr)
+        sys.exit(1)
+    if args.backend == "openai" and not args.api_base:
+        print("ERROR: --api-base is required for openai backend", file=sys.stderr)
+        sys.exit(1)
+
     # Load validation data
     examples = load_validation_examples(args.val_data, limit=args.limit)
     print(f"Loaded {len(examples)} validation examples from {args.val_data}")
@@ -681,28 +875,39 @@ def main() -> None:
 
     total_vars = sum(ex.var_count for ex in examples)
     print(f"Total variables to score: {total_vars}")
-    print(f"Models to evaluate: {', '.join(args.model)}")
-    print()
+    print(f"Backend: {args.backend}")
 
-    # Check Ollama connectivity
-    try:
-        resp = requests.get(f"{args.ollama_url}/api/tags", timeout=5)
-        resp.raise_for_status()
-        available_models = [m["name"] for m in resp.json().get("models", [])]
-        for model_name in args.model:
-            # Check if model is available (Ollama may use full name with :latest)
-            found = any(
-                model_name == m or model_name == m.split(":")[0]
-                for m in available_models
-            )
-            if not found:
-                print(f"WARNING: Model '{model_name}' not found in Ollama. Available: {', '.join(available_models)}", file=sys.stderr)
-    except Exception:
-        print(f"WARNING: Cannot reach Ollama at {args.ollama_url}. Proceeding anyway...", file=sys.stderr)
+    if args.backend == "llama-cpp":
+        print(f"GGUF: {args.gguf}")
+        # For llama-cpp, only one model (the GGUF) is evaluated
+        model_names = [args.model[0] if args.model else "llama-cpp"]
+    elif args.backend == "openai":
+        print(f"API base: {args.api_base}")
+        model_names = [args.model[0] if args.model else "default"]
+    else:
+        model_names = args.model
+        print(f"Models to evaluate: {', '.join(model_names)}")
+
+        # Check Ollama connectivity
+        try:
+            resp = requests.get(f"{args.ollama_url}/api/tags", timeout=5)
+            resp.raise_for_status()
+            available_models = [m["name"] for m in resp.json().get("models", [])]
+            for model_name in model_names:
+                found = any(
+                    model_name == m or model_name == m.split(":")[0]
+                    for m in available_models
+                )
+                if not found:
+                    print(f"WARNING: Model '{model_name}' not found in Ollama. Available: {', '.join(available_models)}", file=sys.stderr)
+        except Exception:
+            print(f"WARNING: Cannot reach Ollama at {args.ollama_url}. Proceeding anyway...", file=sys.stderr)
+
+    print()
 
     # Evaluate each model
     all_metrics: list[ModelMetrics] = []
-    for model_name in args.model:
+    for model_name in model_names:
         print(f"Evaluating: {model_name}")
         metrics = evaluate_model(
             model_name=model_name,
@@ -710,6 +915,9 @@ def main() -> None:
             ollama_url=args.ollama_url,
             threshold=args.threshold,
             verbose=args.verbose,
+            backend=args.backend,
+            gguf_path=args.gguf,
+            api_base=args.api_base,
         )
         all_metrics.append(metrics)
         print(f"  Done in {metrics.elapsed:.1f}s ({metrics.throughput:.1f} var/s)")
