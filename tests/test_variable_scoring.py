@@ -68,14 +68,21 @@ class TestSystemPrompt:
         """System prompt should mention ~30% keep rate target."""
         assert "30%" in SYSTEM_PROMPT
 
+    def test_has_seven_dimensions(self):
+        """System prompt should reference all 7 scoring dimensions."""
+        assert "seven dimensions" in SYSTEM_PROMPT
+        assert "value_complexity" in SYSTEM_PROMPT
+        assert "naming_quality" in SYSTEM_PROMPT
+        assert "scope_significance" in SYSTEM_PROMPT
+
     def test_has_high_examples(self):
         """System prompt should have HIGH scoring examples."""
         assert "MAX_RETRIES" in SYSTEM_PROMPT
-        assert "9,1,1,8" in SYSTEM_PROMPT
+        assert "9,1,1,8,2,8,9" in SYSTEM_PROMPT
 
     def test_has_low_examples(self):
-        """System prompt should have LOW scoring examples (1,1,1,1)."""
-        assert "1,1,1,1" in SYSTEM_PROMPT
+        """System prompt should have LOW scoring examples."""
+        assert "1,1,1,1,2,2,2" in SYSTEM_PROMPT
         assert "result = process_items(data)" in SYSTEM_PROMPT
 
 
@@ -94,10 +101,10 @@ class TestStripThinkTags:
 
     def test_strips_multiline_think_block(self):
         """Should strip think blocks spanning multiple lines."""
-        text = "<think>\nline 1\nline 2\nline 3\n</think>\n1. 9,1,1,8"
+        text = "<think>\nline 1\nline 2\nline 3\n</think>\n1. 9,1,1,8,2,8,9"
         result = _strip_think_tags(text)
         assert "<think>" not in result
-        assert "1. 9,1,1,8" in result
+        assert "1. 9,1,1,8,2,8,9" in result
 
     def test_strips_multiple_think_blocks(self):
         """Should strip multiple think blocks."""
@@ -106,7 +113,7 @@ class TestStripThinkTags:
 
     def test_preserves_text_without_think_tags(self):
         """Should preserve text that has no think tags."""
-        text = "1. 9,1,1,8\n2. 1,1,1,1"
+        text = "1. 9,1,1,8,2,8,9\n2. 1,1,1,1,1,1,1"
         assert _strip_think_tags(text) == text
 
     def test_returns_empty_for_only_think_content(self):
@@ -118,11 +125,11 @@ class TestStripThinkTags:
         """Think blocks with score-like patterns should be stripped."""
         text = (
             "<think>Let me score:\n"
-            "1. MAX_RETRIES = 3 -> high config value, score 8,1,1,7\n"
-            "2. tmp = [] -> low, score 1,1,1,1\n"
+            "1. MAX_RETRIES = 3 -> high config value, score 8,1,1,7,2,8,9\n"
+            "2. tmp = [] -> low, score 1,1,1,1,1,1,1\n"
             "</think>\n"
-            "1. 8,1,1,7\n"
-            "2. 1,1,1,1"
+            "1. 8,1,1,7,2,8,9\n"
+            "2. 1,1,1,1,1,1,1"
         )
         result = _strip_think_tags(text)
         assert "Let me score" not in result
@@ -139,8 +146,16 @@ class TestStripThinkTags:
 class TestParseScores:
     """Tests for _parse_scores function."""
 
-    def test_parses_standard_format(self):
-        """Should parse standard numbered score format."""
+    def test_parses_7dim_format(self):
+        """Should parse 7-dimension numbered score format."""
+        output = "1. 9,2,1,8,3,7,9\n2. 1,1,1,1,1,1,1\n3. 1,9,1,9,4,8,6"
+        scores = _parse_scores(output, 3)
+        assert scores[0] == VariableScore(9, 2, 1, 8, 3, 7, 9)
+        assert scores[1] == VariableScore(1, 1, 1, 1, 1, 1, 1)
+        assert scores[2] == VariableScore(1, 9, 1, 9, 4, 8, 6)
+
+    def test_parses_legacy_4dim_format(self):
+        """Should parse legacy 4-dimension format with defaults for new dims."""
         output = "1. 9,2,1,8\n2. 1,1,1,1\n3. 1,9,1,9"
         scores = _parse_scores(output, 3)
         assert scores[0] == VariableScore(9, 2, 1, 8)
@@ -149,7 +164,7 @@ class TestParseScores:
 
     def test_returns_none_for_missing_scores(self):
         """Should return None for unparseable lines."""
-        output = "1. 9,2,1,8\n3. 1,1,1,1"  # missing #2
+        output = "1. 9,2,1,8,3,7,9\n3. 1,1,1,1,1,1,1"  # missing #2
         scores = _parse_scores(output, 3)
         assert scores[0] is not None
         assert scores[1] is None  # missing
@@ -157,13 +172,16 @@ class TestParseScores:
 
     def test_clamps_scores_to_range(self):
         """Scores should be clamped to 1-10."""
-        output = "1. 15,0,11,1"
+        output = "1. 15,0,11,1,12,0,11"
         scores = _parse_scores(output, 1)
         assert scores[0] is not None
         assert scores[0].config_value == 10  # clamped from 15
-        assert scores[0].architectural_role == 1  # clamped from 0 (min 1 via max(1,...))
+        assert scores[0].architectural_role == 1  # clamped from 0
         assert scores[0].data_definition == 10  # clamped from 11
         assert scores[0].general_usefulness == 1
+        assert scores[0].value_complexity == 10  # clamped from 12
+        assert scores[0].naming_quality == 1  # clamped from 0
+        assert scores[0].scope_significance == 10  # clamped from 11
 
     def test_handles_think_tags_in_output(self):
         """Should strip think tags before parsing scores."""
@@ -171,8 +189,8 @@ class TestParseScores:
             "<think>Reasoning:\n"
             "1. looks like a config constant\n"
             "2. just a temp var</think>\n"
-            "1. 9,1,1,8\n"
-            "2. 1,1,1,1"
+            "1. 9,1,1,8,2,8,9\n"
+            "2. 1,1,1,1,1,1,1"
         )
         scores = _parse_scores(output, 2)
         # After stripping think tags, should parse correctly
@@ -183,9 +201,9 @@ class TestParseScores:
 
     def test_handles_extra_whitespace(self):
         """Should handle extra whitespace in score format."""
-        output = "1.  9 , 2 , 1 , 8"
+        output = "1.  9 , 2 , 1 , 8 , 3 , 7 , 9"
         scores = _parse_scores(output, 1)
-        assert scores[0] == VariableScore(9, 2, 1, 8)
+        assert scores[0] == VariableScore(9, 2, 1, 8, 3, 7, 9)
 
     def test_empty_output_returns_all_none(self):
         """Empty output should return all None scores."""
@@ -203,17 +221,25 @@ class TestVariableScore:
 
     def test_max_score(self):
         """max_score should return highest dimension."""
-        score = VariableScore(3, 7, 2, 5)
+        score = VariableScore(3, 7, 2, 5, 1, 4, 6)
         assert score.max_score == 7
+
+    def test_max_score_new_dimensions(self):
+        """max_score should consider all 7 dimensions."""
+        score = VariableScore(1, 1, 1, 1, 1, 1, 9)
+        assert score.max_score == 9
 
     def test_passes_threshold_any_high(self):
         """Should pass if any dimension >= threshold."""
         score = VariableScore(1, 1, 1, 5)
         assert score.passes_threshold(5) is True
+        # New dimension high enough
+        score2 = VariableScore(1, 1, 1, 1, 1, 1, 5)
+        assert score2.passes_threshold(5) is True
 
     def test_fails_threshold_all_low(self):
         """Should fail if all dimensions < threshold."""
-        score = VariableScore(1, 1, 1, 4)
+        score = VariableScore(1, 1, 1, 4, 3, 2, 4)
         assert score.passes_threshold(5) is False
 
     def test_default_threshold_is_5(self):
@@ -221,11 +247,15 @@ class TestVariableScore:
         score_pass = VariableScore(general_usefulness=5)
         assert score_pass.passes_threshold() is True
 
-        score_fail = VariableScore(config_value=4, architectural_role=4,
-                                   data_definition=4, general_usefulness=4)
+        score_fail = VariableScore(
+            config_value=4, architectural_role=4,
+            data_definition=4, general_usefulness=4,
+            value_complexity=4, naming_quality=4,
+            scope_significance=4,
+        )
         assert score_fail.passes_threshold() is False
 
     def test_as_tuple(self):
-        """as_tuple should return 4-element tuple."""
-        score = VariableScore(9, 2, 1, 8)
-        assert score.as_tuple() == (9, 2, 1, 8)
+        """as_tuple should return 7-element tuple."""
+        score = VariableScore(9, 2, 1, 8, 3, 7, 9)
+        assert score.as_tuple() == (9, 2, 1, 8, 3, 7, 9)

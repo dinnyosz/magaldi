@@ -13,12 +13,25 @@ if TYPE_CHECKING:
 
 @dataclass
 class VariableScore:
-    """Multi-dimensional score for a variable's usefulness for code discovery."""
+    """Multi-dimensional score for a variable's usefulness for code discovery.
+
+    Seven dimensions scored 1-10:
+    - config_value: Configuration, feature flag, tuning parameter, URL, path
+    - architectural_role: Infrastructure (DB, router, logger, middleware)
+    - data_definition: Data structure, schema, type alias, enum
+    - general_usefulness: Would a coding agent benefit from finding this?
+    - value_complexity: Simple literal=1 → complex expression=9
+    - naming_quality: Single letter=1 → descriptive name=9
+    - scope_significance: Loop/temp=1 → module-level constant=9
+    """
 
     config_value: int = 1
     architectural_role: int = 1
     data_definition: int = 1
     general_usefulness: int = 1
+    value_complexity: int = 1
+    naming_quality: int = 1
+    scope_significance: int = 1
 
     @property
     def max_score(self) -> int:
@@ -28,19 +41,25 @@ class VariableScore:
             self.architectural_role,
             self.data_definition,
             self.general_usefulness,
+            self.value_complexity,
+            self.naming_quality,
+            self.scope_significance,
         )
 
     def passes_threshold(self, threshold: int = 5) -> bool:
         """Check if any dimension scores at or above threshold."""
         return self.max_score >= threshold
 
-    def as_tuple(self) -> tuple[int, int, int, int]:
+    def as_tuple(self) -> tuple[int, int, int, int, int, int, int]:
         """Return scores as a tuple for compact display."""
         return (
             self.config_value,
             self.architectural_role,
             self.data_definition,
             self.general_usefulness,
+            self.value_complexity,
+            self.naming_quality,
+            self.scope_significance,
         )
 
 

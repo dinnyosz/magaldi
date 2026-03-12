@@ -53,6 +53,9 @@ class TestGetVariableScoringState:
                             "architectural_role": 1,
                             "data_definition": 1,
                             "general_usefulness": 8,
+                            "value_complexity": 2,
+                            "naming_quality": 8,
+                            "scope_significance": 9,
                         },
                         "score_model": "qwen3:4b",
                     },
@@ -131,6 +134,9 @@ class TestIndexElementCompleteWithScore:
                 "architectural_role": 1,
                 "data_definition": 1,
                 "general_usefulness": 8,
+                "value_complexity": 2,
+                "naming_quality": 8,
+                "scope_significance": 9,
             },
         )
 
@@ -158,6 +164,9 @@ class TestIndexElementCompleteWithScore:
             "architectural_role": 1,
             "data_definition": 1,
             "general_usefulness": 8,
+            "value_complexity": 2,
+            "naming_quality": 8,
+            "scope_significance": 9,
         }
         assert doc["score_model"] == "qwen3:4b"
 
@@ -274,7 +283,9 @@ class TestApplyScoresToElements:
 
         scores = {
             "id1": VariableScore(config_value=9, architectural_role=1,
-                                 data_definition=1, general_usefulness=8),
+                                 data_definition=1, general_usefulness=8,
+                                 value_complexity=3, naming_quality=7,
+                                 scope_significance=9),
         }
 
         _apply_scores_to_elements(MockResult(), scores, threshold=5)
@@ -282,3 +293,6 @@ class TestApplyScoresToElements:
         assert elem.variable_score is not None
         assert elem.variable_score["config_value"] == 9
         assert elem.variable_score["general_usefulness"] == 8
+        assert elem.variable_score["value_complexity"] == 3
+        assert elem.variable_score["naming_quality"] == 7
+        assert elem.variable_score["scope_significance"] == 9

@@ -484,6 +484,9 @@ def run_variable_scoring(
                     architectural_role=score_data.get("architectural_role", 1),
                     data_definition=score_data.get("data_definition", 1),
                     general_usefulness=score_data.get("general_usefulness", 1),
+                    value_complexity=score_data.get("value_complexity", 1),
+                    naming_quality=score_data.get("naming_quality", 1),
+                    scope_significance=score_data.get("scope_significance", 1),
                 )
 
         cache_count = len(cached_scores)
@@ -644,6 +647,9 @@ def _apply_scores_to_elements(
                     "architectural_role": score.architectural_role,
                     "data_definition": score.data_definition,
                     "general_usefulness": score.general_usefulness,
+                    "value_complexity": score.value_complexity,
+                    "naming_quality": score.naming_quality,
+                    "scope_significance": score.scope_significance,
                 }
 
 

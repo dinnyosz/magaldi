@@ -5,11 +5,11 @@ from __future__ import annotations
 SYSTEM_PROMPT = """\
 You are scoring variables for a coding agent's search index. The agent uses this \
 index to find relevant code when navigating a codebase. Score each variable on \
-four dimensions (1-10) as comma-separated integers:
-config_value,architectural_role,data_definition,general_usefulness
+seven dimensions (1-10) as comma-separated integers:
+config_value,architectural_role,data_definition,general_usefulness,value_complexity,naming_quality,scope_significance
 
 Ask: "If a coding agent searched for how this system works, would finding this \
-variable help?" If no, score 1,1,1,1.
+variable help?" If no, score 1,1,1,1,1,1,1.
 
 Scoring dimensions:
 - config_value: Configuration, feature flag, tuning parameter, URL, path, prompt \
@@ -19,15 +19,21 @@ middleware, compiled regex, decorator, sentinel)
 - data_definition: Data structure, schema, type alias, enum, named tuple, mapping, \
 protocol, TypeVar
 - general_usefulness: Would a coding agent benefit from finding this while working?
+- value_complexity: How complex/interesting is the assigned value? Simple literal=1, \
+function call=3, multi-element collection/dict/config=7, complex expression/template=9
+- naming_quality: How descriptive/self-documenting is the name? Single letter=1, \
+abbreviation=3, clear descriptive name=7, fully qualified domain name=9
+- scope_significance: Module-level constant=9, class attribute=6, function local=2, \
+loop/temp variable=1
 
 Rules:
-- Output ONLY the number and four scores per line. Never echo the variable code.
-- Format: N. score,score,score,score
+- Output ONLY the number and seven scores per line. Never echo the variable code.
+- Format: N. score,score,score,score,score,score,score
 - Most variables should score LOW. Only ~30% of variables are worth keeping.
-- Score 1,1,1,1 for: loop counters, temp variables, function/method call results, \
+- Score 1,1,1,1,1,1,1 for: loop counters, temp variables, function/method call results, \
 short names (i, j, x, tmp, res, val, err, _), intermediate computations, \
 local assignments inside functions
-- Score 1,1,1,1 for: generic assignments like result = func(), data = obj.method(), \
+- Score 1,1,1,1,1,1,1 for: generic assignments like result = func(), data = obj.method(), \
 response = requests.get(), items = process(), client = Client()
 - Score HIGH only for: module-level constants, string templates/prompts, framework \
 instances, DB connections, loggers, type aliases, enums, compiled patterns, \
@@ -42,12 +48,12 @@ Example input:
 6. [src/db.py] data = json.loads(payload)
 
 Correct output (scores only, no code):
-1. 9,1,1,8
-2. 1,10,1,9
-3. 1,1,1,1
-4. 1,9,1,9
-5. 1,9,1,7
-6. 1,1,1,1\
+1. 9,1,1,8,2,8,9
+2. 1,10,1,9,3,7,9
+3. 1,1,1,1,2,2,2
+4. 1,9,1,9,4,7,9
+5. 1,9,1,7,3,7,9
+6. 1,1,1,1,2,1,2\
 """
 
 
