@@ -48,16 +48,8 @@ class TestGetVariableScoringState:
                     "found": True,
                     "_source": {
                         "content_hash": "abc123",
-                        "variable_score": {
-                            "config_value": 9,
-                            "architectural_role": 1,
-                            "data_definition": 1,
-                            "general_usefulness": 8,
-                            "value_complexity": 2,
-                            "naming_quality": 8,
-                            "scope_significance": 9,
-                        },
-                        "score_model": "qwen3:4b",
+                        "variable_score": {"keep": True},
+                        "score_model": "qwen3.5:4b",
                     },
                 },
             ],
@@ -74,8 +66,8 @@ class TestGetVariableScoringState:
         assert "scope:repo:main:file.py:variable:MY_CONST:10" in result
         state = result["scope:repo:main:file.py:variable:MY_CONST:10"]
         assert state["content_hash"] == "abc123"
-        assert state["variable_score"]["config_value"] == 9
-        assert state["score_model"] == "qwen3:4b"
+        assert state["variable_score"]["keep"] is True
+        assert state["score_model"] == "qwen3.5:4b"
 
     def test_skips_elements_without_score(self):
         """Elements without variable_score should not be returned."""
@@ -129,15 +121,7 @@ class TestIndexElementCompleteWithScore:
             line_start=10,
             line_end=10,
             raw_code="MY_CONST = 42",
-            variable_score={
-                "config_value": 9,
-                "architectural_role": 1,
-                "data_definition": 1,
-                "general_usefulness": 8,
-                "value_complexity": 2,
-                "naming_quality": 8,
-                "scope_significance": 9,
-            },
+            variable_score={"keep": True},
         )
 
         from shared.db.repositories.elements import ElementRepository
@@ -153,22 +137,14 @@ class TestIndexElementCompleteWithScore:
         )
         elem_repo.index_element_complete(
             element, "Summary of MY_CONST",
-            score_model="qwen3:4b",
+            score_model="qwen3.5:4b",
         )
 
         # The document passed to index_document should contain variable_score
         call_args = client.index_document.call_args
         doc = call_args[0][2]  # (index_name, doc_id, doc)
-        assert doc["variable_score"] == {
-            "config_value": 9,
-            "architectural_role": 1,
-            "data_definition": 1,
-            "general_usefulness": 8,
-            "value_complexity": 2,
-            "naming_quality": 8,
-            "scope_significance": 9,
-        }
-        assert doc["score_model"] == "qwen3:4b"
+        assert doc["variable_score"] == {"keep": True}
+        assert doc["score_model"] == "qwen3.5:4b"
 
     def test_no_score_no_field(self):
         """Elements without variable_score should not have the field in doc."""
@@ -231,7 +207,7 @@ class TestScoringResultCacheFields:
 class TestApplyScoresToElements:
     """Test the _apply_scores_to_elements helper."""
 
-    def test_removes_below_threshold(self):
+    def test_removes_dropped_elements(self):
         from shared.cli._runners import _apply_scores_to_elements
         from magaldi_core.parsers.base import CodeElement
 
@@ -242,8 +218,8 @@ class TestApplyScoresToElements:
 
         elem_keep = CodeElement(
             element_id="id1", scope="s", repository="r", username="u",
-            relative_path="f.py", element_type="variable", name="KEEP",
-            language="python", line_start=1, line_end=1, raw_code="KEEP = 1",
+            relative_path="f.py", element_type="variable", name="KEEP_VAR",
+            language="python", line_start=1, line_end=1, raw_code="KEEP_VAR = 1",
         )
         elem_drop = CodeElement(
             element_id="id2", scope="s", repository="r", username="u",
@@ -255,8 +231,8 @@ class TestApplyScoresToElements:
             parsed_files = [MockPF([elem_keep, elem_drop])]
 
         scores = {
-            "id1": VariableScore(config_value=9, general_usefulness=8),
-            "id2": VariableScore(config_value=1, general_usefulness=1),
+            "id1": VariableScore(keep=True),
+            "id2": VariableScore(keep=False),
         }
 
         _apply_scores_to_elements(MockResult(), scores, threshold=5)
@@ -282,17 +258,10 @@ class TestApplyScoresToElements:
             parsed_files = [MockPF([elem])]
 
         scores = {
-            "id1": VariableScore(config_value=9, architectural_role=1,
-                                 data_definition=1, general_usefulness=8,
-                                 value_complexity=3, naming_quality=7,
-                                 scope_significance=9),
+            "id1": VariableScore(keep=True),
         }
 
         _apply_scores_to_elements(MockResult(), scores, threshold=5)
 
         assert elem.variable_score is not None
-        assert elem.variable_score["config_value"] == 9
-        assert elem.variable_score["general_usefulness"] == 8
-        assert elem.variable_score["value_complexity"] == 3
-        assert elem.variable_score["naming_quality"] == 7
-        assert elem.variable_score["scope_significance"] == 9
+        assert elem.variable_score["keep"] is True

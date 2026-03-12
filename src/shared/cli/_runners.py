@@ -479,15 +479,21 @@ def run_variable_scoring(
                 and state.get("variable_score")
             ):
                 score_data = state["variable_score"]
-                cached_scores[eid] = VariableScore(
-                    config_value=score_data.get("config_value", 1),
-                    architectural_role=score_data.get("architectural_role", 1),
-                    data_definition=score_data.get("data_definition", 1),
-                    general_usefulness=score_data.get("general_usefulness", 1),
-                    value_complexity=score_data.get("value_complexity", 1),
-                    naming_quality=score_data.get("naming_quality", 1),
-                    scope_significance=score_data.get("scope_significance", 1),
-                )
+                if "keep" in score_data:
+                    # New binary format
+                    cached_scores[eid] = VariableScore(keep=score_data["keep"])
+                else:
+                    # Legacy 7-dimension format: reconstruct binary decision
+                    dim_scores = [
+                        score_data.get("config_value", 1),
+                        score_data.get("architectural_role", 1),
+                        score_data.get("data_definition", 1),
+                        score_data.get("general_usefulness", 1),
+                        score_data.get("value_complexity", 1),
+                        score_data.get("naming_quality", 1),
+                        score_data.get("scope_significance", 1),
+                    ]
+                    cached_scores[eid] = VariableScore(keep=max(dim_scores) >= 5)
 
         cache_count = len(cached_scores)
         # Filter out cached variables — only send uncached to LLM
@@ -589,8 +595,7 @@ def run_variable_scoring(
             console.print(f"  [bold dim]Batch {batch_idx + 1}:[/]")
             for file_path, name, raw_code, score in samples:
                 verdict = "[green]KEEP[/]" if score.passes_threshold() else "[red]DROP[/]"
-                scores_str = ",".join(str(s) for s in score.as_tuple())
-                console.print(f"    {verdict} [{scores_str}] [cyan]{name}[/] [dim]({file_path})[/]")
+                console.print(f"    {verdict} [cyan]{name}[/] [dim]({file_path})[/]")
                 # Show raw_code preserving newlines, indented and truncated
                 code_lines = (raw_code or "").split("\n")
                 for line in code_lines[:6]:
@@ -642,15 +647,7 @@ def _apply_scores_to_elements(
         for elem in pf.elements:
             if elem.element_id in scores:
                 score = scores[elem.element_id]
-                elem.variable_score = {
-                    "config_value": score.config_value,
-                    "architectural_role": score.architectural_role,
-                    "data_definition": score.data_definition,
-                    "general_usefulness": score.general_usefulness,
-                    "value_complexity": score.value_complexity,
-                    "naming_quality": score.naming_quality,
-                    "scope_significance": score.scope_significance,
-                }
+                elem.variable_score = {"keep": score.keep}
 
 
 def run_processing(

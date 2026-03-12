@@ -155,8 +155,9 @@ class CodeElement:
     metrics_summary: dict[str, Any] | None = None  # Aggregated from child elements
 
     # Variable scoring (set by Phase 4 runner, stored in Phase 5)
-    # Dict with keys: config_value, architectural_role, data_definition, general_usefulness
-    variable_score: dict[str, int] | None = None
+    # Binary format: {"keep": True/False}
+    # Legacy format: {"config_value": int, ...} (7 dimension scores)
+    variable_score: dict[str, bool | int] | None = None
 
     def compute_content_hash(self) -> str:
         """Compute SHA256 hash of the element's content for change detection.

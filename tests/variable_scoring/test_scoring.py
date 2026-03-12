@@ -33,65 +33,34 @@ from magaldi_core.variable_scoring.prompts import SYSTEM_PROMPT, build_user_prom
 class TestVariableScore:
     """Tests for VariableScore dataclass."""
 
-    def test_default_scores_are_one(self):
+    def test_default_is_keep(self):
         score = VariableScore()
-        assert score.config_value == 1
-        assert score.architectural_role == 1
-        assert score.data_definition == 1
-        assert score.general_usefulness == 1
-        assert score.value_complexity == 1
-        assert score.naming_quality == 1
-        assert score.scope_significance == 1
+        assert score.keep is True
 
-    def test_max_score(self):
-        score = VariableScore(config_value=3, architectural_role=7, data_definition=2, general_usefulness=5)
-        assert score.max_score == 7
+    def test_explicit_keep(self):
+        score = VariableScore(keep=True)
+        assert score.keep is True
 
-    def test_max_score_includes_new_dimensions(self):
-        score = VariableScore(scope_significance=9)
-        assert score.max_score == 9
+    def test_explicit_drop(self):
+        score = VariableScore(keep=False)
+        assert score.keep is False
 
-    def test_max_score_all_equal(self):
-        score = VariableScore(config_value=4, architectural_role=4, data_definition=4, general_usefulness=4)
-        assert score.max_score == 4
+    def test_passes_threshold_keep(self):
+        assert VariableScore(keep=True).passes_threshold()
 
-    def test_passes_threshold_default(self):
-        # Default threshold is 5; any dimension >= 5 passes
-        assert VariableScore(general_usefulness=5).passes_threshold()
-        assert not VariableScore(general_usefulness=4).passes_threshold()
+    def test_passes_threshold_drop(self):
+        assert not VariableScore(keep=False).passes_threshold()
 
-    def test_passes_threshold_custom(self):
-        score = VariableScore(config_value=3)
-        assert score.passes_threshold(threshold=3)
-        assert not score.passes_threshold(threshold=4)
+    def test_passes_threshold_ignores_threshold_arg(self):
+        # threshold parameter is ignored in binary scoring
+        assert VariableScore(keep=True).passes_threshold(threshold=99)
+        assert not VariableScore(keep=False).passes_threshold(threshold=0)
 
-    def test_passes_threshold_any_dimension(self):
-        # Only config_value is high, rest are 1
-        assert VariableScore(config_value=8).passes_threshold()
-        # Only architectural_role is high
-        assert VariableScore(architectural_role=6).passes_threshold()
-        # Only data_definition is high
-        assert VariableScore(data_definition=10).passes_threshold()
-        # Only scope_significance is high
-        assert VariableScore(scope_significance=9).passes_threshold()
-        # Only naming_quality is high
-        assert VariableScore(naming_quality=7).passes_threshold()
+    def test_verdict_keep(self):
+        assert VariableScore(keep=True).verdict == "KEEP"
 
-    def test_fails_threshold_all_low(self):
-        score = VariableScore(
-            config_value=2, architectural_role=3, data_definition=4,
-            general_usefulness=4, value_complexity=3, naming_quality=4,
-            scope_significance=2,
-        )
-        assert not score.passes_threshold()
-
-    def test_as_tuple(self):
-        score = VariableScore(
-            config_value=1, architectural_role=2, data_definition=3,
-            general_usefulness=4, value_complexity=5, naming_quality=6,
-            scope_significance=7,
-        )
-        assert score.as_tuple() == (1, 2, 3, 4, 5, 6, 7)
+    def test_verdict_drop(self):
+        assert VariableScore(keep=False).verdict == "DROP"
 
 
 class TestVariableScoringConfig:
@@ -133,7 +102,7 @@ class TestBuildUserPrompt:
             (1, "src/config.py", "MAX_RETRIES", "MAX_RETRIES = 3"),
         ]
         prompt = build_user_prompt(variables)
-        assert "Score these variables:" in prompt
+        assert "Classify these variables:" in prompt
         assert "1. [src/config.py] MAX_RETRIES = 3" in prompt
 
     def test_multiple_variables(self):
@@ -177,43 +146,37 @@ class TestBuildUserPrompt:
 class TestSystemPrompt:
     """Tests for system prompt content."""
 
-    def test_has_scoring_dimensions(self):
-        assert "config_value" in SYSTEM_PROMPT
-        assert "architectural_role" in SYSTEM_PROMPT
-        assert "data_definition" in SYSTEM_PROMPT
-        assert "general_usefulness" in SYSTEM_PROMPT
-        assert "value_complexity" in SYSTEM_PROMPT
-        assert "naming_quality" in SYSTEM_PROMPT
-        assert "scope_significance" in SYSTEM_PROMPT
+    def test_has_binary_format(self):
+        """Prompt instructs KEEP or DROP format."""
+        assert "KEEP" in SYSTEM_PROMPT
+        assert "DROP" in SYSTEM_PROMPT
 
     def test_has_rules(self):
-        assert "ONLY the number and seven scores" in SYSTEM_PROMPT
+        assert "ONLY numbered lines" in SYSTEM_PROMPT
         assert "Never echo" in SYSTEM_PROMPT
 
     def test_has_few_shot_examples(self):
         """Prompt includes input/output example for calibration."""
         assert "Example input:" in SYSTEM_PROMPT
         assert "Correct output" in SYSTEM_PROMPT
-        # LOW examples should show 7 ones
-        assert "1,1,1,1,2,2,2" in SYSTEM_PROMPT  # result = process_items(data) — low but not trivial
-        # HIGH examples should show high scores
-        assert "9,1,1,8,2,8,9" in SYSTEM_PROMPT  # config constant
+        assert "1. KEEP" in SYSTEM_PROMPT
+        assert "2. DROP" in SYSTEM_PROMPT
 
     def test_covers_string_templates(self):
-        """Prompt covers string templates/prompts as HIGH scoring."""
-        assert "prompt template" in SYSTEM_PROMPT or "string template" in SYSTEM_PROMPT
+        """Prompt covers string templates/prompts as KEEP items."""
+        assert "string templates" in SYSTEM_PROMPT or "prompts" in SYSTEM_PROMPT
 
     def test_covers_coding_agent_perspective(self):
         """Prompt frames scoring from a coding agent's perspective."""
         assert "coding agent" in SYSTEM_PROMPT
 
     def test_covers_export_lists(self):
-        """Prompt covers __all__ export lists as HIGH scoring."""
+        """Prompt covers __all__ export lists as KEEP items."""
         assert "__all__" in SYSTEM_PROMPT
 
     def test_covers_query_strings(self):
-        """Prompt covers SQL/query strings and sentinels."""
-        assert "query string" in SYSTEM_PROMPT or "SQL" in SYSTEM_PROMPT
+        """Prompt covers query strings and sentinels."""
+        assert "query string" in SYSTEM_PROMPT
         assert "sentinel" in SYSTEM_PROMPT
 
     def test_has_drop_rate_guidance(self):
@@ -311,90 +274,70 @@ class TestBuildBatches:
 class TestParseScores:
     """Tests for _parse_scores."""
 
-    def test_basic_parsing_7dim(self):
-        output = "1. 9,2,1,8,3,7,9\n2. 3,7,1,5,2,4,6"
+    def test_basic_keep_drop(self):
+        output = "1. KEEP\n2. DROP"
         scores = _parse_scores(output, batch_size=2)
         assert scores[0] is not None
-        assert scores[0].config_value == 9
-        assert scores[0].architectural_role == 2
-        assert scores[0].data_definition == 1
-        assert scores[0].general_usefulness == 8
-        assert scores[0].value_complexity == 3
-        assert scores[0].naming_quality == 7
-        assert scores[0].scope_significance == 9
+        assert scores[0].keep is True
         assert scores[1] is not None
-        assert scores[1].config_value == 3
-        assert scores[1].architectural_role == 7
+        assert scores[1].keep is False
 
-    def test_legacy_4dim_parsing(self):
-        """Legacy 4-dimension format should still work."""
-        output = "1. 9,2,1,8\n2. 3,7,1,5"
-        scores = _parse_scores(output, batch_size=2)
-        assert scores[0] is not None
-        assert scores[0].config_value == 9
-        assert scores[0].architectural_role == 2
-        assert scores[0].data_definition == 1
-        assert scores[0].general_usefulness == 8
-        # New dimensions default to 1 in legacy mode
-        assert scores[0].value_complexity == 1
-        assert scores[0].naming_quality == 1
-        assert scores[0].scope_significance == 1
+    def test_case_insensitive(self):
+        output = "1. keep\n2. Drop\n3. KEEP"
+        scores = _parse_scores(output, batch_size=3)
+        assert scores[0] is not None and scores[0].keep is True
+        assert scores[1] is not None and scores[1].keep is False
+        assert scores[2] is not None and scores[2].keep is True
+
+    def test_flexible_separators(self):
+        """Various number-to-decision separators should work."""
+        output = "1. KEEP\n2) DROP\n3: KEEP"
+        scores = _parse_scores(output, batch_size=3)
+        assert scores[0] is not None and scores[0].keep is True
+        assert scores[1] is not None and scores[1].keep is False
+        assert scores[2] is not None and scores[2].keep is True
 
     def test_extra_whitespace(self):
-        output = "1.  9 , 2 , 1 , 8 , 3 , 7 , 9"
-        scores = _parse_scores(output, batch_size=1)
-        assert scores[0] is not None
-        assert scores[0].config_value == 9
-        assert scores[0].scope_significance == 9
+        output = "1.  KEEP\n2.   DROP"
+        scores = _parse_scores(output, batch_size=2)
+        assert scores[0] is not None and scores[0].keep is True
+        assert scores[1] is not None and scores[1].keep is False
 
     def test_missing_line(self):
         # Only line 1 present, batch expects 2
-        output = "1. 5,5,5,5,5,5,5"
+        output = "1. KEEP"
         scores = _parse_scores(output, batch_size=2)
         assert scores[0] is not None
         assert scores[1] is None
 
     def test_out_of_range_index(self):
         # Index 3 but batch_size is 2 — should be ignored
-        output = "3. 5,5,5,5,5,5,5"
+        output = "3. KEEP"
         scores = _parse_scores(output, batch_size=2)
         assert scores[0] is None
         assert scores[1] is None
 
     def test_zero_index_ignored(self):
-        output = "0. 5,5,5,5,5,5,5"
+        output = "0. KEEP"
         scores = _parse_scores(output, batch_size=1)
         assert scores[0] is None
 
-    def test_scores_clamped_to_range(self):
-        # Scores > 10 should be clamped to 10
-        output = "1. 15,0,1,10,12,0,11"
-        scores = _parse_scores(output, batch_size=1)
-        assert scores[0] is not None
-        assert scores[0].config_value == 10  # clamped from 15
-        assert scores[0].architectural_role == 1  # min(10, max(1, 0)) = 1
-        assert scores[0].value_complexity == 10  # clamped from 12
-        assert scores[0].naming_quality == 1  # clamped from 0
-        assert scores[0].scope_significance == 10  # clamped from 11
-
     def test_llm_noise_ignored(self):
         # LLM might add explanations — only scored lines should match
-        output = """Here are the scores:
-1. 8,2,1,7,3,6,9
-2. 1,1,1,1,1,1,1
+        output = """Here are the results:
+1. KEEP
+2. DROP
 Done!"""
         scores = _parse_scores(output, batch_size=2)
-        assert scores[0] is not None
-        assert scores[0].config_value == 8
-        assert scores[1] is not None
-        assert scores[1].config_value == 1
+        assert scores[0] is not None and scores[0].keep is True
+        assert scores[1] is not None and scores[1].keep is False
 
     def test_empty_output(self):
         scores = _parse_scores("", batch_size=3)
         assert all(s is None for s in scores)
 
     def test_batch_size_matches_output_length(self):
-        output = "1. 5,5,5,5,5,5,5\n2. 3,3,3,3,3,3,3\n3. 7,7,7,7,7,7,7"
+        output = "1. KEEP\n2. DROP\n3. KEEP"
         scores = _parse_scores(output, batch_size=3)
         assert len(scores) == 3
         assert all(s is not None for s in scores)
@@ -414,16 +357,15 @@ class TestScoreBatch:
             (2, "eid2", "src/app.py", "i", "i = 0"),
         ]
         mock_client = MagicMock()
-        mock_client.generate_from_messages.return_value = "1. 9,2,1,8,2,8,9\n2. 1,1,1,1,1,1,1"
+        mock_client.generate_from_messages.return_value = "1. KEEP\n2. DROP"
 
         config = VariableScoringConfig()
         result, prompt_tok, resp_tok = _score_batch(batch, mock_client, config, num_ctx=1024)
 
         assert "eid1" in result
-        assert result["eid1"].config_value == 9
-        assert result["eid1"].scope_significance == 9
+        assert result["eid1"].keep is True
         assert "eid2" in result
-        assert result["eid2"].config_value == 1
+        assert result["eid2"].keep is False
         assert prompt_tok > 0
         assert resp_tok > 0
 
@@ -438,7 +380,7 @@ class TestScoreBatch:
         result, prompt_tok, resp_tok = _score_batch(batch, mock_client, config, num_ctx=1024)
 
         assert "eid1" in result
-        assert result["eid1"].general_usefulness == 5  # Default keep score
+        assert result["eid1"].keep is True  # Default: keep on error
         assert prompt_tok > 0
         assert resp_tok == 0  # No response on error
 
@@ -453,12 +395,12 @@ class TestScoreBatch:
         result, _prompt_tok, _resp_tok = _score_batch(batch, mock_client, config, num_ctx=1024)
 
         assert "eid1" in result
-        assert result["eid1"].general_usefulness == 5  # Default keep score
+        assert result["eid1"].keep is True  # Default: keep on unparseable
 
     def test_passes_correct_temperature(self):
         batch = [(1, "eid1", "f.py", "x", "x = 1")]
         mock_client = MagicMock()
-        mock_client.generate_from_messages.return_value = "1. 5,5,5,5,5,5,5"
+        mock_client.generate_from_messages.return_value = "1. KEEP"
 
         config = VariableScoringConfig(temperature=0.3)
         _score_batch(batch, mock_client, config, num_ctx=1024)
@@ -470,7 +412,7 @@ class TestScoreBatch:
         """Timeout from config is propagated to generate_from_messages."""
         batch = [(1, "eid1", "f.py", "x", "x = 1")]
         mock_client = MagicMock()
-        mock_client.generate_from_messages.return_value = "1. 5,5,5,5,5,5,5"
+        mock_client.generate_from_messages.return_value = "1. KEEP"
 
         # Default timeout (180s)
         config = VariableScoringConfig()
@@ -490,13 +432,13 @@ class TestScoreBatch:
             (1, "eid1", "src/config.py", "MAX_RETRIES", "MAX_RETRIES = 3"),
         ]
         mock_client = MagicMock()
-        mock_client.generate_from_messages.return_value = "1. 9,2,1,8,2,8,9"
+        mock_client.generate_from_messages.return_value = "1. KEEP"
 
         config = VariableScoringConfig()
         _result, prompt_tok, resp_tok = _score_batch(batch, mock_client, config, num_ctx=1024)
 
         # Prompt includes system prompt + user prompt, estimated at ~4 chars/token
-        assert prompt_tok > 100  # System prompt alone is ~660 tokens
+        assert prompt_tok > 50  # Binary system prompt is ~220 tokens
         assert resp_tok > 0
 
 
@@ -521,7 +463,7 @@ class TestScoreVariables:
             ("eid2", "f.py", "DB_URL", "DB_URL = 'postgres://...'"),
         ]
         mock_client = MagicMock()
-        mock_client.generate_from_messages.return_value = "1. 9,2,1,8,2,8,9\n2. 8,9,1,7,4,7,9"
+        mock_client.generate_from_messages.return_value = "1. KEEP\n2. KEEP"
 
         result = score_variables(variables, mock_client, max_workers=1)
 
@@ -537,8 +479,7 @@ class TestScoreVariables:
             ("eid2", "f.py", "i", "i = 0"),
         ]
         mock_client = MagicMock()
-        # First var scores high, second all 1s
-        mock_client.generate_from_messages.return_value = "1. 9,2,1,8,2,8,9\n2. 1,1,1,1,1,1,1"
+        mock_client.generate_from_messages.return_value = "1. KEEP\n2. DROP"
 
         result = score_variables(variables, mock_client, max_workers=1)
 
@@ -546,31 +487,26 @@ class TestScoreVariables:
         assert result.kept == 1
         assert result.dropped == 1
 
-    def test_custom_threshold(self):
+    def test_threshold_ignored_in_binary(self):
+        """Threshold is ignored — binary scoring uses KEEP/DROP directly."""
         variables = [("eid1", "f.py", "x", "x = 1")]
         mock_client = MagicMock()
-        mock_client.generate_from_messages.return_value = "1. 3,3,3,3,3,3,3"
+        mock_client.generate_from_messages.return_value = "1. DROP"
 
-        # Default threshold=5 → dropped
-        result = score_variables(variables, mock_client, max_workers=1)
-        assert result.dropped == 1
-
-        # Lower threshold → kept
-        config = VariableScoringConfig(threshold=3)
+        # Even with low threshold, DROP means dropped
+        config = VariableScoringConfig(threshold=1)
         result = score_variables(variables, mock_client, config=config, max_workers=1)
-        assert result.kept == 1
+        assert result.dropped == 1
 
     def test_scores_dict_populated(self):
         variables = [("eid1", "f.py", "x", "x = 1")]
         mock_client = MagicMock()
-        mock_client.generate_from_messages.return_value = "1. 7,3,2,6,4,8,9"
+        mock_client.generate_from_messages.return_value = "1. KEEP"
 
         result = score_variables(variables, mock_client, max_workers=1)
 
         assert "eid1" in result.scores
-        assert result.scores["eid1"].config_value == 7
-        assert result.scores["eid1"].general_usefulness == 6
-        assert result.scores["eid1"].scope_significance == 9
+        assert result.scores["eid1"].keep is True
 
     def test_token_counts_aggregated(self):
         """Token counts are accumulated across batches."""
@@ -579,7 +515,7 @@ class TestScoreVariables:
             ("eid2", "f.py", "DB_URL", "DB_URL = 'postgres://...'"),
         ]
         mock_client = MagicMock()
-        mock_client.generate_from_messages.return_value = "1. 9,2,1,8,2,8,9\n2. 8,9,1,7,4,7,9"
+        mock_client.generate_from_messages.return_value = "1. KEEP\n2. KEEP"
 
         result = score_variables(variables, mock_client, max_workers=1)
 
@@ -600,7 +536,7 @@ class TestScoreVariables:
             # Parse the prompt to figure out how many variables
             content = kwargs.get("messages", [{}])[-1].get("content", "")
             lines = [line for line in content.split("\n") if line and line[0].isdigit()]
-            return "\n".join(f"{i+1}. 5,5,5,5,5,5,5" for i in range(len(lines)))
+            return "\n".join(f"{i+1}. KEEP" for i in range(len(lines)))
 
         mock_client.generate_from_messages.side_effect = mock_generate
 
@@ -766,7 +702,7 @@ class TestScoreVariablesWithProgress:
             ("eid2", "f.py", "y", "y = 2"),
         ]
         mock_client = MagicMock()
-        mock_client.generate_from_messages.return_value = "1. 9,2,1,8,2,8,9\n2. 8,7,1,6,3,7,9"
+        mock_client.generate_from_messages.return_value = "1. KEEP\n2. KEEP"
 
         progress_states: list[ScoringProgressState] = []
 
@@ -806,7 +742,7 @@ class TestScoreVariablesWithProgress:
             ("eid2", "f.py", "y", "y = 2"),
         ]
         mock_client = MagicMock()
-        mock_client.generate_from_messages.return_value = "1. 9,2,1,8,2,8,9\n2. 1,1,1,1,1,1,1"
+        mock_client.generate_from_messages.return_value = "1. KEEP\n2. DROP"
 
         state = ScoringProgressState()
         worker_status = ScoringWorkerStatus()
@@ -832,7 +768,7 @@ class TestScoreVariablesWithProgress:
         ]
         mock_client = MagicMock()
         # First kept (score 9), second dropped (all 1s)
-        mock_client.generate_from_messages.return_value = "1. 9,2,1,8,2,8,9\n2. 1,1,1,1,1,1,1"
+        mock_client.generate_from_messages.return_value = "1. KEEP\n2. DROP"
 
         state = ScoringProgressState()
         worker_status = ScoringWorkerStatus()
@@ -867,7 +803,7 @@ class TestScoreVariablesWithProgress:
             call_count += 1
             content = kwargs.get("messages", [{}])[-1].get("content", "")
             lines = [line for line in content.split("\n") if line and line[0].isdigit()]
-            return "\n".join(f"{i+1}. 5,5,5,5,5,5,5" for i in range(len(lines)))
+            return "\n".join(f"{i+1}. KEEP" for i in range(len(lines)))
 
         mock_client.generate_from_messages.side_effect = mock_generate
 
@@ -895,7 +831,7 @@ class TestScoreVariablesWithProgress:
             ("eid1", "f.py", "x", "x = 1"),
         ]
         mock_client = MagicMock()
-        mock_client.generate_from_messages.return_value = "1. 5,5,5,5,5,5,5"
+        mock_client.generate_from_messages.return_value = "1. KEEP"
 
         state = ScoringProgressState()
         worker_status = ScoringWorkerStatus()
@@ -916,7 +852,7 @@ class TestScoreVariablesWithProgress:
             ("eid2", "f.py", "y", "y = 2"),
         ]
         mock_client = MagicMock()
-        mock_client.generate_from_messages.return_value = "1. 5,5,5,5,5,5,5\n2. 5,5,5,5,5,5,5"
+        mock_client.generate_from_messages.return_value = "1. KEEP\n2. KEEP"
 
         state = ScoringProgressState()
         worker_status = ScoringWorkerStatus()
@@ -934,7 +870,7 @@ class TestScoreVariablesWithProgress:
         """Verify score_variables still works without progress args."""
         variables = [("eid1", "f.py", "x", "x = 1")]
         mock_client = MagicMock()
-        mock_client.generate_from_messages.return_value = "1. 5,5,5,5,5,5,5"
+        mock_client.generate_from_messages.return_value = "1. KEEP"
 
         result = score_variables(variables, mock_client, max_workers=1)
 
@@ -1216,7 +1152,7 @@ class TestScoreVariablesThrottling:
             time.sleep(0.05)  # Simulate slow LLM
             content = kwargs.get("messages", [{}])[-1].get("content", "")
             lines = [line for line in content.split("\n") if line and line[0].isdigit()]
-            return "\n".join(f"{i+1}. 5,5,5,5,5,5,5" for i in range(len(lines)))
+            return "\n".join(f"{i+1}. KEEP" for i in range(len(lines)))
 
         mock_client.generate_from_messages.side_effect = slow_generate
 
@@ -1247,7 +1183,7 @@ class TestScoreVariablesThrottling:
         def mock_generate(**kwargs):
             content = kwargs.get("messages", [{}])[-1].get("content", "")
             lines = [line for line in content.split("\n") if line and line[0].isdigit()]
-            return "\n".join(f"{i+1}. 5,5,5,5,5,5,5" for i in range(len(lines)))
+            return "\n".join(f"{i+1}. KEEP" for i in range(len(lines)))
 
         mock_client.generate_from_messages.side_effect = mock_generate
 
@@ -1314,15 +1250,15 @@ class TestDebugLog:
         """Verify debug_log captures first batch's prompt and response."""
         variables = [("eid1", "f.py", "x", "x = 1")]
         mock_client = MagicMock()
-        mock_client.generate_from_messages.return_value = "1. 9,2,1,8,2,8,9"
+        mock_client.generate_from_messages.return_value = "1. KEEP"
 
         result = score_variables(variables, mock_client, max_workers=1)
 
         assert len(result.debug_log) == 1
         prompt, response = result.debug_log[0]
-        assert "Score these variables:" in prompt
+        assert "Classify these variables:" in prompt
         assert "x = 1" in prompt
-        assert "9,2,1,8,2,8,9" in response
+        assert "KEEP" in response
 
     def test_debug_log_captures_all_batches(self):
         """Verify debug_log captures every batch for file logging."""
@@ -1335,7 +1271,7 @@ class TestDebugLog:
         def mock_generate(**kwargs):
             content = kwargs.get("messages", [{}])[-1].get("content", "")
             lines = [line for line in content.split("\n") if line and line[0].isdigit()]
-            return "\n".join(f"{i+1}. 5,5,5,5,5,5,5" for i in range(len(lines)))
+            return "\n".join(f"{i+1}. KEEP" for i in range(len(lines)))
 
         mock_client.generate_from_messages.side_effect = mock_generate
 

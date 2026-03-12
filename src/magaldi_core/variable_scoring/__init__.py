@@ -10,7 +10,6 @@ semantic approach that can handle novel patterns without maintenance.
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import re
 import time
@@ -108,16 +107,14 @@ def _strip_think_tags(output: str) -> str:
 
 
 def _parse_scores(output: str, batch_size: int) -> list[VariableScore | None]:
-    """Parse LLM output into variable scores.
+    """Parse LLM output into binary keep/drop decisions.
 
-    Expected format (7 dimensions):
-        1. 9,2,1,8,3,7,9
-        2. 1,1,1,1,1,1,1
+    Expected format:
+        1. KEEP
+        2. DROP
 
-    Also accepts legacy 4-dimension format for backward compatibility:
-        1. 9,2,1,8
-
-    Handles various formatting quirks from LLMs.
+    Handles various formatting quirks from LLMs (extra whitespace,
+    punctuation after number, case variations).
 
     Args:
         output: Raw LLM output text.
@@ -130,46 +127,14 @@ def _parse_scores(output: str, batch_size: int) -> list[VariableScore | None]:
     output = _strip_think_tags(output)
 
     scores: list[VariableScore | None] = [None] * batch_size
-    # Match 7 comma-separated scores (primary format)
-    score_pattern_7 = re.compile(
-        r"(\d+)\.\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)"
-    )
-    # Fallback: match 4 comma-separated scores (legacy format)
-    score_pattern_4 = re.compile(
-        r"(\d+)\.\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?!\s*,\s*\d)"
-    )
+    # Match "N. KEEP" or "N. DROP" (case-insensitive, flexible separators)
+    pattern = re.compile(r"(\d+)\s*[.):]\s*(keep|drop)", re.IGNORECASE)
 
-    def _clamp(val: int) -> int:
-        return min(10, max(1, val))
-
-    # Try 7-dimension pattern first
-    matched_indices: set[int] = set()
-    for match in score_pattern_7.finditer(output):
+    for match in pattern.finditer(output):
         idx = int(match.group(1))
         if 1 <= idx <= batch_size:
-            with contextlib.suppress(ValueError, IndexError):
-                scores[idx - 1] = VariableScore(
-                    config_value=_clamp(int(match.group(2))),
-                    architectural_role=_clamp(int(match.group(3))),
-                    data_definition=_clamp(int(match.group(4))),
-                    general_usefulness=_clamp(int(match.group(5))),
-                    value_complexity=_clamp(int(match.group(6))),
-                    naming_quality=_clamp(int(match.group(7))),
-                    scope_significance=_clamp(int(match.group(8))),
-                )
-                matched_indices.add(idx)
-
-    # Fallback: parse any remaining lines with 4-dimension format
-    for match in score_pattern_4.finditer(output):
-        idx = int(match.group(1))
-        if 1 <= idx <= batch_size and idx not in matched_indices:
-            with contextlib.suppress(ValueError, IndexError):
-                scores[idx - 1] = VariableScore(
-                    config_value=_clamp(int(match.group(2))),
-                    architectural_role=_clamp(int(match.group(3))),
-                    data_definition=_clamp(int(match.group(4))),
-                    general_usefulness=_clamp(int(match.group(5))),
-                )
+            decision = match.group(2).upper()
+            scores[idx - 1] = VariableScore(keep=(decision == "KEEP"))
 
     return scores
 
@@ -207,8 +172,8 @@ def _score_batch(
     prompt_chars = len(SYSTEM_PROMPT) + len(user_prompt)
     prompt_tokens = prompt_chars // 4
 
-    # Output budget: ~25 tokens per variable (number + 7 scores + commas + newline + slack)
-    output_budget = len(batch) * 25 + 50
+    # Output budget: ~10 tokens per variable (number + KEEP/DROP + newline)
+    output_budget = len(batch) * 10 + 30
 
     try:
         output = llm_client.generate_from_messages(
@@ -224,9 +189,9 @@ def _score_batch(
             len(batch),
             exc_info=True,
         )
-        # Default: score 5 on general_usefulness (pass threshold)
+        # Default: keep on error (false positives safer than false negatives)
         return (
-            {eid: VariableScore(general_usefulness=5) for _, eid, _, _, _ in batch},
+            {eid: VariableScore(keep=True) for _, eid, _, _, _ in batch},
             prompt_tokens,
             0,
         )
@@ -246,8 +211,8 @@ def _score_batch(
         if parsed[i] is not None:
             result[element_id] = parsed[i]
         else:
-            # Unparseable: default to score 5 (keep)
-            result[element_id] = VariableScore(general_usefulness=5)
+            # Unparseable: default to keep (safe fallback)
+            result[element_id] = VariableScore(keep=True)
 
     return result, prompt_tokens, response_tokens
 
@@ -257,8 +222,8 @@ def _get_context_tier(batch: list[tuple[int, str, str, str, str]]) -> int:
     from shared.ai.context_size import CONTEXT_TIERS
 
     content_chars = sum(len(code) + len(fp) + 20 for _, _, fp, _, code in batch)
-    output_tokens = len(batch) * 25 + 50
-    total_tokens = content_chars // 4 + 900 + output_tokens  # 900 = system prompt (~850 tokens)
+    output_tokens = len(batch) * 10 + 30
+    total_tokens = content_chars // 4 + 250 + output_tokens  # 250 = binary system prompt (~220 tokens)
     num_ctx = CONTEXT_TIERS[0]  # Default to smallest
     for tier in CONTEXT_TIERS:
         if total_tokens < tier:
@@ -485,7 +450,7 @@ def score_variables(
                 result.errors += 1
                 error_scores = {}
                 for _, eid, _, _, _ in batch:
-                    error_scores[eid] = VariableScore(general_usefulness=5)
+                    error_scores[eid] = VariableScore(keep=True)
                 all_scores.update(error_scores)
                 _update_progress(batch, error_scores, runtime, is_error=True)
 
