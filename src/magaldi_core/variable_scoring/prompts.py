@@ -33,7 +33,7 @@ Correct output:
 
 def build_user_prompt(
     variables: list[tuple[int, str, str, str]],
-    token_budget: int = 1200,
+    token_budget: int = 2048,
 ) -> str:
     """Build the user prompt listing variables to score.
 
@@ -44,16 +44,18 @@ def build_user_prompt(
 
     Args:
         variables: List of (index, file_path, name, raw_code) tuples.
-        token_budget: Maximum code chars per individual variable
-            (``token_budget * 4 - 200``). Variables exceeding this are
-            truncated. The overall batch size is controlled upstream.
+        token_budget: Total context window size. Per-variable truncation
+            limit is derived as the content portion of this budget:
+            ``(token_budget - overhead) * 4 - safety_margin``.
+            The overall batch size is controlled upstream.
 
     Returns:
         Formatted user prompt.
     """
     # Per-variable truncation limit: prevent a single huge variable from
-    # consuming the entire budget. Batch-level packing is done upstream.
-    max_code_chars = token_budget * 4 - 200  # ~4 chars/token, minus overhead
+    # consuming the entire budget. Subtract fixed overhead (~270 tokens for
+    # system prompt + header + output base) before converting to chars.
+    max_code_chars = max(200, (token_budget - 270) * 4 - 200)
 
     # /no_think disables Qwen3's thinking mode via soft-switch.
     # This is a fallback for servers that don't honor chat_template_kwargs.

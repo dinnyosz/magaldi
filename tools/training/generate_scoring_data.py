@@ -259,7 +259,7 @@ def score_variable_with_teacher(
     """
     # Build prompt using the same format the student will see
     prompt_vars = [(1, variable["file_path"], variable["name"], variable["raw_code"])]
-    user_prompt = build_user_prompt(prompt_vars, token_budget=1200)
+    user_prompt = build_user_prompt(prompt_vars, token_budget=2048)
 
     messages = [
         {"role": "system", "content": TEACHER_SYSTEM_PROMPT},
@@ -319,7 +319,7 @@ def score_batch_with_teacher(
         (i + 1, v["file_path"], v["name"], v["raw_code"])
         for i, v in enumerate(variables)
     ]
-    user_prompt = build_user_prompt(prompt_vars, token_budget=1200)
+    user_prompt = build_user_prompt(prompt_vars, token_budget=2048)
 
     messages = [
         {"role": "system", "content": TEACHER_SYSTEM_PROMPT},
@@ -494,7 +494,7 @@ def format_training_example(
         (i + 1, v["file_path"], v["name"], v["raw_code"])
         for i, v in enumerate(variables)
     ]
-    user_prompt = build_user_prompt(prompt_vars, token_budget=1200)
+    user_prompt = build_user_prompt(prompt_vars, token_budget=2048)
 
     # Remove /no_think from training data (that's a runtime workaround)
     if user_prompt.startswith("/no_think\n"):

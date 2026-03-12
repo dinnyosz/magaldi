@@ -70,7 +70,7 @@ class TestVariableScoringConfig:
         config = VariableScoringConfig()
         assert config.threshold == 5
         assert config.temperature == 0.1
-        assert config.token_budget == 1200
+        assert config.token_budget == 2048
         assert config.max_retries == 2
         assert config.timeout == 180
 
@@ -129,11 +129,12 @@ class TestBuildUserPrompt:
         """Code exceeding the token budget should be truncated."""
         long_code = "x = " + "a" * 2000
         variables = [(1, "f.py", "x", long_code)]
+        # token_budget=200 → max_code_chars = max(200, (200-270)*4-200) = 200
         prompt = build_user_prompt(variables, token_budget=200)
         var_line = [line for line in prompt.split("\n") if "[f.py]" in line][0]
         code_part = var_line.split("] ", 1)[1]
         assert code_part.endswith("...")
-        assert len(code_part) <= 200 * 4
+        assert len(code_part) <= 200
 
     def test_multiline_code_collapsed(self):
         code = "x = {\n    'a': 1,\n    'b': 2\n}"
@@ -233,22 +234,25 @@ class TestBuildBatches:
         assert len(batches[0]) == 3
 
     def test_splits_when_budget_exceeded(self):
-        # Each variable will use ~22 tokens. Budget of 40 should force split.
+        # Each variable costs ~32 tokens (22 content + 10 output).
+        # Budget 320 → available = 320 - 266 overhead = 54.
+        # Two vars (64) exceed available, so must split.
         variables = [
             ("id1", "f.py", "x", "x = 1"),
             ("id2", "f.py", "y", "y = 2"),
             ("id3", "f.py", "z", "z = 3"),
         ]
-        batches = _build_batches(variables, token_budget=40)
+        batches = _build_batches(variables, token_budget=320)
         assert len(batches) >= 2
 
     def test_indices_reset_per_batch(self):
-        # With tiny budget, each variable gets its own batch
+        # Each 200-char variable costs ~81 tokens (71 content + 10 output).
+        # Budget 350 → available = 350 - 266 = 84. Second var overflows.
         variables = [
             ("id1", "f.py", "a", "a" * 200),
             ("id2", "f.py", "b", "b" * 200),
         ]
-        batches = _build_batches(variables, token_budget=30)
+        batches = _build_batches(variables, token_budget=350)
         assert len(batches) == 2
         # First variable in each batch should have index 1
         assert batches[0][0][0] == 1

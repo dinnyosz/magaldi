@@ -34,6 +34,17 @@ from magaldi_core.variable_scoring.prompts import (
 
 logger = logging.getLogger(__name__)
 
+# Fixed token overheads for context window budgeting.
+# token_budget represents the total context window; these are subtracted
+# to get the available space for variable content.
+_SYSTEM_PROMPT_TOKENS = len(SYSTEM_PROMPT) // 4  # ~226
+_HEADER_TOKENS = 10  # "/no_think\nClassify these variables:"
+_OUTPUT_BASE_TOKENS = 30  # Base overhead for LLM response formatting
+_OUTPUT_PER_VAR_TOKENS = 10  # ~10 tokens per variable in output (N. KEEP/DROP\n)
+
+# Fixed overhead = system prompt + header + output base
+_FIXED_OVERHEAD_TOKENS = _SYSTEM_PROMPT_TOKENS + _HEADER_TOKENS + _OUTPUT_BASE_TOKENS
+
 
 def _estimate_tokens(raw_code: str, file_path: str) -> int:
     """Estimate token count for a single variable entry in the prompt.
@@ -56,13 +67,21 @@ def _build_batches(
 
     Args:
         variables: List of (element_id, file_path, name, raw_code) tuples.
-        token_budget: Maximum content tokens per batch.
+        token_budget: Total context window size (system + content + output).
+            Fixed overhead for the system prompt, header, and output base
+            is subtracted internally. Each variable also reserves
+            ~10 tokens for its output line (N. KEEP/DROP).
 
     Returns:
         List of batches, where each batch is a list of
         (index, element_id, file_path, name, raw_code) tuples.
         Index is 1-based within each batch.
     """
+    # Subtract fixed overhead (system prompt + header + output base) from
+    # the total budget. What remains is available for variable content +
+    # per-variable output tokens.
+    available = max(50, token_budget - _FIXED_OVERHEAD_TOKENS)
+
     # Sort by estimated token size (smallest first) for better packing.
     # Without sorting, a large variable in the middle of small ones forces
     # a batch break, leaving a half-empty batch of small variables.
@@ -76,9 +95,10 @@ def _build_batches(
     batch_idx = 1
 
     for element_id, file_path, name, raw_code in sorted_vars:
-        var_tokens = _estimate_tokens(raw_code, file_path)
+        # Each variable costs its content tokens + output tokens (~10)
+        var_tokens = _estimate_tokens(raw_code, file_path) + _OUTPUT_PER_VAR_TOKENS
 
-        if current_tokens + var_tokens > token_budget and current_batch:
+        if current_tokens + var_tokens > available and current_batch:
             batches.append(current_batch)
             current_batch = []
             current_tokens = 0
@@ -217,19 +237,19 @@ def _score_batch(
     return result, prompt_tokens, response_tokens
 
 
-def _get_context_tier(batch: list[tuple[int, str, str, str, str]]) -> int:
-    """Calculate the context tier for a batch."""
+def _snap_to_context_tier(token_budget: int) -> int:
+    """Snap a token budget to the smallest CONTEXT_TIER that fits.
+
+    Since token_budget represents the total context window, we simply find
+    the smallest tier >= token_budget. If token_budget already equals a
+    tier (e.g. 2048), this is a no-op.
+    """
     from shared.ai.context_size import CONTEXT_TIERS
 
-    content_chars = sum(len(code) + len(fp) + 20 for _, _, fp, _, code in batch)
-    output_tokens = len(batch) * 10 + 30
-    total_tokens = content_chars // 4 + 250 + output_tokens  # 250 = binary system prompt (~220 tokens)
-    num_ctx = CONTEXT_TIERS[0]  # Default to smallest
     for tier in CONTEXT_TIERS:
-        if total_tokens < tier:
-            num_ctx = tier
-            break
-    return num_ctx  # type: ignore[no-any-return]
+        if token_budget <= tier:
+            return tier  # type: ignore[no-any-return]
+    return CONTEXT_TIERS[-1]  # type: ignore[no-any-return]
 
 
 def score_variables(
@@ -336,6 +356,9 @@ def score_variables(
         if on_progress:
             on_progress(progress_state)
 
+    # Compute context tier once from budget (all batches share the same window)
+    num_ctx = _snap_to_context_tier(config.token_budget)
+
     # Process batches in parallel with throttling
     effective_workers = min(max_workers, len(batches))
     if progress_state is not None:
@@ -360,7 +383,6 @@ def score_variables(
     if effective_workers <= 1:
         # Sequential processing for single batch
         for batch_num, batch in enumerate(batches):
-            num_ctx = _get_context_tier(batch)
             if worker_status is not None:
                 worker_status.set(0, batch_num + 1, len(batch))
             batch_start = time.time()
@@ -379,8 +401,6 @@ def score_variables(
 
         from shared.parallel_processor import ThrottleContext, run_throttled_tier
         from shared.throttling import ThroughputTracker
-
-        tier_for_timeout = _get_context_tier(batches[0])
 
         # Throughput tracker with 3min window (matches other processors)
         throughput_tracker = ThroughputTracker(window_seconds=180.0)
@@ -402,7 +422,7 @@ def score_variables(
 
         # Items for run_throttled_tier: (batch, batch_num, num_ctx) tuples
         batch_items = [
-            (batch, batch_num, _get_context_tier(batch))
+            (batch, batch_num, num_ctx)
             for batch_num, batch in enumerate(batches)
         ]
 
@@ -469,12 +489,12 @@ def score_variables(
             tier_timeout=0,  # Set by run_throttled_tier
             base_workers=effective_workers,
             throughput_tracker=throughput_tracker,
-            tier=tier_for_timeout,
+            tier=num_ctx,
         )
 
         run_throttled_tier(
             items=batch_items,
-            tier=tier_for_timeout,
+            tier=num_ctx,
             effective_workers=effective_workers,
             process_fn=process_fn,
             throttle_ctx=throttle_ctx,
