@@ -446,8 +446,8 @@ class LLMClient:
             max_retries: Maximum retry attempts for transient failures.
             model_name: Original model name for thinking model detection.
                 When the LiteLLM identifier differs from the actual model
-                (e.g., "openai/default" for vllm-mlx serving "qwen3-4b"), pass
-                the real name here so thinking model detection works correctly.
+                (e.g., "openai/Qwen3.5-4B-Q4_K_M" for llamacpp), pass the
+                real name here so thinking model detection works correctly.
 
         Prefer ``from_model_config()`` when a ``ModelConfig`` is available —
         it handles all provider-specific translation automatically.
@@ -657,11 +657,11 @@ class LLMClient:
                 # Native /api/chat supports "think" parameter directly
                 kwargs["think"] = False
             elif _is_local:
-                # Local servers (LM Studio, llama.cpp, vllm-mlx)
-                # Strategy 1: API param (works for vllm-mlx)
+                # Local servers (LM Studio, llama.cpp)
+                # Strategy 1: API param (chat_template_kwargs)
                 kwargs["extra_body"] = kwargs.get("extra_body", {})
                 kwargs["extra_body"]["chat_template_kwargs"] = {"enable_thinking": False}
-                # Strategy 2: /no_think in system message (works for LM Studio llama.cpp)
+                # Strategy 2: /no_think in system message (works for LM Studio, llama.cpp)
                 # Qwen3 models honor /no_think as a chat template directive
                 msgs = kwargs["messages"]
                 if msgs and msgs[0].get("role") == "system":

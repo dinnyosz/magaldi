@@ -31,11 +31,16 @@ make format                 # Format with ruff
 make typecheck              # Run mypy on src/magaldi
 make check                  # All: lint + typecheck + test
 
-# Pull Ollama models (for AI features)
-make ollama-pull            # qwen3.5:2b, qwen3.5:4b, qwen3-embedding:0.6b
+# Pull Ollama embedding model
+make ollama-pull            # qwen3-embedding:0.6b
 
-# Use llama.cpp server for summarization (better batching)
-./tools/benchmark-llama-server.sh --model qwen3.5:4b
+# Build llama.cpp + download GGUF models (for LLM inference)
+make llama-setup            # One-command: build + pull models
+
+# Start/stop llama-server (router mode — serves all models)
+magaldi llm serve           # Start server
+magaldi llm status          # Show loaded models
+magaldi llm stop            # Stop server
 ```
 
 ## Architecture

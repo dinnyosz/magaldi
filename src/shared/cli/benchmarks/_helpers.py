@@ -28,7 +28,7 @@ def parse_model_spec_to_config(spec: str, ollama_url: str | None = None) -> Mode
     from shared.config import ModelConfig
 
     # Check for explicit provider prefix
-    for prefix in ["lmstudio:", "openai:", "anthropic:", "vllm-mlx:", "vllm:", "llamacpp:"]:
+    for prefix in ["lmstudio:", "openai:", "anthropic:", "llamacpp:"]:
         if spec.startswith(prefix):
             provider = prefix[:-1]
             model_name = spec[len(prefix):]
@@ -102,7 +102,7 @@ def check_backend_connections(
                 console.print(f"[red]Cannot connect to Ollama at {url}[/]")
                 available_models_by_provider[provider] = []
 
-        elif provider in ("lmstudio", "llamacpp", "vllm-mlx"):
+        elif provider in ("lmstudio", "llamacpp"):
             try:
                 import requests
                 api_url = f"{url.rstrip('/')}/v1/models"

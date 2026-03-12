@@ -459,7 +459,7 @@ class TestModelConfig:
         assert cfg.is_thinking_model() is True
 
     def test_is_thinking_model_hf_qwen3(self):
-        cfg = ModelConfig(name="mlx-community/Qwen3-4B-Instruct-2507-4bit", provider="vllm-mlx")
+        cfg = ModelConfig(name="Qwen3-4B-Instruct", provider="llamacpp")
         assert cfg.is_thinking_model() is True
 
     def test_is_thinking_model_deepseek_r1(self):
@@ -490,9 +490,9 @@ class TestModelConfig:
         cfg = ModelConfig(name="qwen3:4b", provider="ollama")
         assert cfg.get_litellm_model() == "ollama_chat/qwen3:4b"
 
-    def test_get_litellm_model_vllm_mlx(self):
-        cfg = ModelConfig(name="mlx-community/Qwen3-4B", provider="vllm-mlx")
-        assert cfg.get_litellm_model() == "openai/default"
+    def test_get_litellm_model_llamacpp_gguf(self):
+        cfg = ModelConfig(name="Qwen3.5-4B-Q4_K_M", provider="llamacpp")
+        assert cfg.get_litellm_model() == "openai/Qwen3.5-4B-Q4_K_M"
 
     def test_get_litellm_model_llamacpp(self):
         cfg = ModelConfig(name="qwen3:4b", provider="llamacpp")
@@ -506,9 +506,9 @@ class TestModelConfig:
         cfg = ModelConfig(name="qwen3:4b", provider="ollama", url="http://localhost:11434")
         assert cfg.get_api_base() == "http://localhost:11434"
 
-    def test_get_api_base_vllm_mlx(self):
-        cfg = ModelConfig(name="model", provider="vllm-mlx", url="http://localhost:8000")
-        assert cfg.get_api_base() == "http://localhost:8000/v1"
+    def test_get_api_base_llamacpp(self):
+        cfg = ModelConfig(name="model", provider="llamacpp", url="http://localhost:8090")
+        assert cfg.get_api_base() == "http://localhost:8090/v1"
 
     def test_get_api_base_openai(self):
         cfg = ModelConfig(name="gpt-4o", provider="openai")

@@ -1170,7 +1170,7 @@ def compute_effective_base_workers(base_workers: int, total_elements: int) -> in
 
     A minimum of 3 workers (or base_workers if lower) is always allowed,
     since fewer workers provide no meaningful exploration signal and modern
-    inference servers (vllm-mlx, vLLM) batch parallel requests efficiently.
+    inference servers (llama.cpp, vLLM) batch parallel requests efficiently.
 
     Args:
         base_workers: Original max workers (from config or tier).

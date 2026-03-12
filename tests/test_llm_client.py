@@ -686,11 +686,11 @@ class TestThinkingModelDetection:
         call_kwargs = mock_comp.call_args.kwargs
         assert call_kwargs.get("think") is False
 
-    def test_vllm_mlx_default_model_no_model_name_no_think(self):
-        """Without model_name, openai/default doesn't detect thinking model."""
+    def test_llamacpp_no_model_name_no_think(self):
+        """Without model_name, openai/model doesn't detect thinking model for non-thinking model."""
         client = LLMClient(
-            model="openai/default",
-            api_base="http://localhost:8000/v1",
+            model="openai/Qwen3.5-4B-Q4_K_M",
+            api_base="http://localhost:8090/v1",
         )
 
         mock_response = MagicMock()
@@ -702,16 +702,16 @@ class TestThinkingModelDetection:
 
         call_kwargs = mock_comp.call_args.kwargs
         assert "think" not in call_kwargs
-        # No chat_template_kwargs either
+        # No chat_template_kwargs either (Qwen3.5 is non-thinking)
         extra = call_kwargs.get("extra_body", {})
         assert "chat_template_kwargs" not in extra
 
-    def test_vllm_mlx_with_model_name_sends_think_false(self):
-        """With model_name hint, vllm-mlx correctly disables thinking."""
+    def test_llamacpp_with_thinking_model_name(self):
+        """With model_name hint for thinking model, llamacpp disables thinking."""
         client = LLMClient(
-            model="openai/default",
-            api_base="http://localhost:8000/v1",
-            model_name="mlx-community/Qwen3-4B-Instruct-2507-4bit",
+            model="openai/Qwen3-4B-Instruct",
+            api_base="http://localhost:8090/v1",
+            model_name="Qwen3-4B-Instruct",
         )
 
         mock_response = MagicMock()
@@ -728,11 +728,11 @@ class TestThinkingModelDetection:
         extra = call_kwargs.get("extra_body", {})
         assert extra.get("chat_template_kwargs") == {"enable_thinking": False}
 
-    def test_vllm_mlx_generate_also_detects_thinking(self):
+    def test_llamacpp_generate_also_detects_thinking(self):
         """The generate() method should also detect thinking models via model_name."""
         client = LLMClient(
-            model="openai/default",
-            api_base="http://localhost:8000/v1",
+            model="openai/Qwen3-1.7B-4bit",
+            api_base="http://localhost:8090/v1",
             model_name="Qwen3-1.7B-4bit",
         )
 
@@ -775,12 +775,12 @@ class TestThinkingModelDetection:
         client_not = LLMClient(model="ollama/llama-3.1:8b")
         assert client_not._is_thinking_model is False
 
-        # Via model_name (vllm-mlx path)
-        client_vllm = LLMClient(
-            model="openai/default",
-            model_name="mlx-community/Qwen3-4B-Instruct-2507-4bit",
+        # Via model_name (llamacpp path)
+        client_llama = LLMClient(
+            model="openai/Qwen3-4B-Instruct",
+            model_name="Qwen3-4B-Instruct",
         )
-        assert client_vllm._is_thinking_model is True
+        assert client_llama._is_thinking_model is True
 
     def test_qwen3_5_not_thinking_model(self):
         """qwen3.5 has reasoning disabled by default — NOT a thinking model."""
@@ -1073,18 +1073,18 @@ class TestFromModelConfig:
         assert client.model_name == "qwen3:4b"
         assert client._is_thinking_model is True
 
-    def test_llm_client_from_model_config_vllm_mlx(self):
+    def test_llm_client_from_model_config_llamacpp(self):
         from shared.config import ModelConfig
         cfg = ModelConfig(
-            name="mlx-community/Qwen3-4B-Instruct-2507-4bit",
-            provider="vllm-mlx",
-            url="http://localhost:8000",
+            name="Qwen3.5-4B-Q4_K_M",
+            provider="llamacpp",
+            url="http://localhost:8090",
         )
         client = LLMClient.from_model_config(cfg)
-        assert client.model == "openai/default"
-        assert client.api_base == "http://localhost:8000/v1"
-        assert client.model_name == "mlx-community/Qwen3-4B-Instruct-2507-4bit"
-        assert client._is_thinking_model is True
+        assert client.model == "openai/Qwen3.5-4B-Q4_K_M"
+        assert client.api_base == "http://localhost:8090/v1"
+        assert client.model_name == "Qwen3.5-4B-Q4_K_M"
+        assert client._is_thinking_model is False
 
     def test_llm_client_from_model_config_openai(self):
         from shared.config import ModelConfig
@@ -1095,13 +1095,13 @@ class TestFromModelConfig:
         assert client.api_key == "sk-test"
         assert client._is_thinking_model is False
 
-    def test_llm_client_from_model_config_disables_thinking(self):
-        """from_model_config should produce a client that sends think=False."""
+    def test_llm_client_from_model_config_llamacpp_thinking(self):
+        """from_model_config with a thinking model should send think=False."""
         from shared.config import ModelConfig
         cfg = ModelConfig(
-            name="mlx-community/Qwen3-4B-Instruct-2507-4bit",
-            provider="vllm-mlx",
-            url="http://localhost:8000",
+            name="Qwen3-4B-Instruct",
+            provider="llamacpp",
+            url="http://localhost:8090",
         )
         client = LLMClient.from_model_config(cfg)
 
@@ -1129,15 +1129,15 @@ class TestFromModelConfig:
         assert client.api_base == "http://localhost:11434"
         assert client.dimensions == 1024
 
-    def test_embedding_client_from_model_config_vllm_mlx(self):
+    def test_embedding_client_from_model_config_llamacpp(self):
         from shared.config import ModelConfig
         cfg = ModelConfig(
-            name="mlx-community/Qwen3-Embedding-0.6B-4bit",
-            provider="vllm-mlx",
-            url="http://localhost:8000",
+            name="Qwen3-Embedding-0.6B",
+            provider="llamacpp",
+            url="http://localhost:8090",
             dimensions=1024,
         )
         client = EmbeddingClient.from_model_config(cfg)
-        assert client.model == "openai/default"
-        assert client.api_base == "http://localhost:8000/v1"
+        assert client.model == "openai/Qwen3-Embedding-0.6B"
+        assert client.api_base == "http://localhost:8090/v1"
         assert client.dimensions == 1024

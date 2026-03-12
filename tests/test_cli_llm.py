@@ -1,20 +1,66 @@
-"""Tests for the magaldi llm CLI command."""
+"""Tests for the magaldi llm CLI command (llama-server backend)."""
 
 from __future__ import annotations
 
-from shared.cli.llm import ServerPlan, _build_server_plans
+from pathlib import Path
+from unittest.mock import patch
+
+from shared.cli.llm import (
+    DEFAULT_CTX_SIZE,
+    DEFAULT_MODELS_MAX,
+    DEFAULT_PARALLEL,
+    DEFAULT_PORT,
+    MODELS_DIR,
+    _format_size,
+    _generate_presets,
+    _get_llamacpp_models,
+    _get_llamacpp_port,
+    _logfile,
+    _pidfile,
+)
 from shared.config import LLMConfig, ModelConfig
 
 # =============================================================================
-# _build_server_plans
+# Helper functions
 # =============================================================================
 
 
-class TestBuildServerPlans:
-    """Test server plan generation from config."""
+class TestHelpers:
+    """Test helper functions."""
 
-    def test_no_vllm_models_returns_empty(self) -> None:
-        """Config with only Ollama models returns no plans."""
+    def test_pidfile_path(self) -> None:
+        pf = _pidfile(8090)
+        assert pf.name == "llama-server-8090.pid"
+
+    def test_logfile_path(self) -> None:
+        lf = _logfile(8090)
+        assert lf.name == "llama-server-8090.log"
+
+    def test_format_size_gb(self) -> None:
+        assert _format_size(2_740_000_000) == "2.6 GB"
+
+    def test_format_size_mb(self) -> None:
+        assert _format_size(150_000_000) == "143 MB"
+
+    def test_format_size_kb(self) -> None:
+        assert _format_size(500_000) == "488 KB"
+
+    def test_defaults(self) -> None:
+        assert DEFAULT_PORT == 8090
+        assert DEFAULT_PARALLEL == 4
+        assert DEFAULT_MODELS_MAX == 2
+        assert DEFAULT_CTX_SIZE == 8192
+
+
+# =============================================================================
+# _get_llamacpp_models
+# =============================================================================
+
+
+class TestGetLlamacppModels:
+    """Test llamacpp model filtering from config."""
+
+    def test_no_llamacpp_models_returns_empty(self) -> None:
         config = LLMConfig(
             models={
                 "qwen3-4b": ModelConfig(
@@ -24,72 +70,9 @@ class TestBuildServerPlans:
                 ),
             }
         )
-        plans = _build_server_plans(config)
-        assert plans == []
+        assert _get_llamacpp_models(config) == []
 
-    def test_single_llm_model(self) -> None:
-        """Single vllm-mlx LLM model creates one plan."""
-        config = LLMConfig(
-            models={
-                "qwen3-4b": ModelConfig(
-                    name="mlx-community/Qwen3-4B-Instruct-2507-4bit",
-                    provider="vllm-mlx",
-                    url="http://localhost:8000",
-                ),
-            }
-        )
-        plans = _build_server_plans(config)
-        assert len(plans) == 1
-        assert plans[0].port == 8000
-        assert plans[0].llm_model == "mlx-community/Qwen3-4B-Instruct-2507-4bit"
-        assert plans[0].embedding_model is None
-
-    def test_llm_with_embedding_same_port(self) -> None:
-        """LLM + embedding on same port creates one plan with embed pre-loaded."""
-        config = LLMConfig(
-            models={
-                "qwen3-4b": ModelConfig(
-                    name="mlx-community/Qwen3-4B-Instruct-2507-4bit",
-                    provider="vllm-mlx",
-                    url="http://localhost:8000",
-                ),
-                "qwen3-embed": ModelConfig(
-                    name="mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ",
-                    provider="vllm-mlx",
-                    url="http://localhost:8000",
-                    dimensions=1024,
-                ),
-            }
-        )
-        plans = _build_server_plans(config)
-        assert len(plans) == 1
-        assert plans[0].port == 8000
-        assert plans[0].llm_model == "mlx-community/Qwen3-4B-Instruct-2507-4bit"
-        assert plans[0].embedding_model == "mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ"
-
-    def test_different_ports_create_multiple_plans(self) -> None:
-        """Models on different ports create separate plans."""
-        config = LLMConfig(
-            models={
-                "qwen3-4b": ModelConfig(
-                    name="mlx-community/Qwen3-4B-Instruct-2507-4bit",
-                    provider="vllm-mlx",
-                    url="http://localhost:8000",
-                ),
-                "qwen3-small": ModelConfig(
-                    name="mlx-community/Qwen3-1.7B-4bit",
-                    provider="vllm-mlx",
-                    url="http://localhost:8001",
-                ),
-            }
-        )
-        plans = _build_server_plans(config)
-        assert len(plans) == 2
-        ports = {p.port for p in plans}
-        assert ports == {8000, 8001}
-
-    def test_mixed_providers_only_vllm(self) -> None:
-        """Only vllm-mlx models are included in plans."""
+    def test_filters_llamacpp_only(self) -> None:
         config = LLMConfig(
             models={
                 "ollama-model": ModelConfig(
@@ -97,159 +80,203 @@ class TestBuildServerPlans:
                     provider="ollama",
                     url="http://localhost:11434",
                 ),
-                "vllm-model": ModelConfig(
-                    name="mlx-community/Qwen3-4B-Instruct-2507-4bit",
-                    provider="vllm-mlx",
-                    url="http://localhost:8000",
+                "llamacpp-model": ModelConfig(
+                    name="Qwen3.5-4B-Q4_K_M",
+                    provider="llamacpp",
+                    url="http://localhost:8090",
                 ),
                 "cloud-model": ModelConfig(
                     name="gpt-4o-mini",
                     provider="openai",
                     url="",
-                    api_key="sk-...",
                 ),
             }
         )
-        plans = _build_server_plans(config)
-        assert len(plans) == 1
-        assert plans[0].llm_model == "mlx-community/Qwen3-4B-Instruct-2507-4bit"
+        models = _get_llamacpp_models(config)
+        assert len(models) == 1
+        assert models[0].name == "Qwen3.5-4B-Q4_K_M"
 
-    def test_only_embedding_models_skipped(self) -> None:
-        """Port with only embedding models (no LLM) is skipped."""
+    def test_multiple_llamacpp_models(self) -> None:
         config = LLMConfig(
             models={
-                "embed-only": ModelConfig(
-                    name="mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ",
-                    provider="vllm-mlx",
-                    url="http://localhost:8000",
-                    dimensions=1024,
+                "qwen3.5-4b": ModelConfig(
+                    name="Qwen3.5-4B-Q4_K_M",
+                    provider="llamacpp",
+                    url="http://localhost:8090",
+                ),
+                "qwen3.5-2b": ModelConfig(
+                    name="Qwen3.5-2B-Q4_K_M",
+                    provider="llamacpp",
+                    url="http://localhost:8090",
                 ),
             }
         )
-        plans = _build_server_plans(config)
-        assert plans == []
+        models = _get_llamacpp_models(config)
+        assert len(models) == 2
 
-    def test_default_port_when_missing(self) -> None:
-        """URL without port defaults to 8000."""
+
+# =============================================================================
+# _get_llamacpp_port
+# =============================================================================
+
+
+class TestGetLlamacppPort:
+    """Test port extraction from config."""
+
+    def test_returns_port_from_config(self) -> None:
+        config = LLMConfig(
+            models={
+                "qwen3.5-4b": ModelConfig(
+                    name="Qwen3.5-4B-Q4_K_M",
+                    provider="llamacpp",
+                    url="http://localhost:8090",
+                ),
+            }
+        )
+        assert _get_llamacpp_port(config) == 8090
+
+    def test_returns_default_when_no_llamacpp(self) -> None:
+        config = LLMConfig(
+            models={
+                "ollama": ModelConfig(
+                    name="qwen3:4b",
+                    provider="ollama",
+                    url="http://localhost:11434",
+                ),
+            }
+        )
+        assert _get_llamacpp_port(config) == DEFAULT_PORT
+
+    def test_custom_port(self) -> None:
         config = LLMConfig(
             models={
                 "model": ModelConfig(
-                    name="mlx-community/Qwen3-4B-Instruct-2507-4bit",
-                    provider="vllm-mlx",
-                    url="http://localhost",
+                    name="Qwen3.5-4B-Q4_K_M",
+                    provider="llamacpp",
+                    url="http://localhost:9999",
                 ),
             }
         )
-        plans = _build_server_plans(config)
-        assert len(plans) == 1
-        assert plans[0].port == 8000
+        assert _get_llamacpp_port(config) == 9999
 
-    def test_multiple_llm_models_same_port_uses_first(self) -> None:
-        """Multiple LLM models on same port uses first as primary."""
+
+# =============================================================================
+# _generate_presets
+# =============================================================================
+
+
+class TestGeneratePresets:
+    """Test INI presets file generation."""
+
+    def test_generates_presets_with_num_ctx(self, tmp_path: Path) -> None:
         config = LLMConfig(
             models={
-                "primary": ModelConfig(
-                    name="mlx-community/Qwen3-4B-Instruct-2507-4bit",
-                    provider="vllm-mlx",
-                    url="http://localhost:8000",
-                ),
-                "secondary": ModelConfig(
-                    name="mlx-community/Qwen3-1.7B-4bit",
-                    provider="vllm-mlx",
-                    url="http://localhost:8000",
+                "qwen3.5-4b": ModelConfig(
+                    name="Qwen3.5-4B-Q4_K_M",
+                    provider="llamacpp",
+                    url="http://localhost:8090",
+                    num_ctx=16384,
                 ),
             }
         )
-        plans = _build_server_plans(config)
-        assert len(plans) == 1
-        # First model becomes primary
-        assert plans[0].llm_model == "mlx-community/Qwen3-4B-Instruct-2507-4bit"
+        with patch("shared.cli.llm._presets_file", return_value=tmp_path / "presets.ini"):
+            path = _generate_presets(config)
+            content = path.read_text()
+            assert "[model:Qwen3.5-4B-Q4_K_M]" in content
+            assert "n_ctx = 16384" in content
 
-
-# =============================================================================
-# ServerPlan
-# =============================================================================
-
-
-class TestServerPlan:
-    """Test ServerPlan methods."""
-
-    def test_pidfile_path(self) -> None:
-        plan = ServerPlan(port=8000, host="0.0.0.0", llm_model="test")
-        assert plan.pidfile.name == "vllm-mlx-8000.pid"
-
-    def test_logfile_path(self) -> None:
-        plan = ServerPlan(port=8001, host="0.0.0.0", llm_model="test")
-        assert plan.logfile.name == "vllm-mlx-8001.log"
-
-    def test_health_url(self) -> None:
-        plan = ServerPlan(port=8000, host="0.0.0.0", llm_model="test")
-        assert plan.health_url() == "http://0.0.0.0:8000/health"
-
-    def test_is_running_false_when_no_server(self) -> None:
-        """is_running returns False when nothing is listening."""
-        plan = ServerPlan(port=19999, host="127.0.0.1", llm_model="test")
-        assert plan.is_running() is False
-
-    def test_get_pid_none_when_no_pidfile(self) -> None:
-        """get_pid returns None when no pidfile exists."""
-        plan = ServerPlan(port=8000, host="0.0.0.0", llm_model="test")
-        # Ensure pidfile doesn't exist
-        plan.pidfile.unlink(missing_ok=True)
-        assert plan.get_pid() is None
-
-    def test_continuous_batching_default_true(self) -> None:
-        plan = ServerPlan(port=8000, host="0.0.0.0", llm_model="test")
-        assert plan.continuous_batching is True
-
-
-# =============================================================================
-# ModelConfig vllm-mlx integration
-# =============================================================================
-
-
-class TestModelConfigVllmMlx:
-    """Test ModelConfig with vllm-mlx provider."""
-
-    def test_get_litellm_model_always_default(self) -> None:
-        """vllm-mlx always returns openai/default regardless of name."""
-        cfg = ModelConfig(
-            name="mlx-community/Qwen3-4B-Instruct-2507-4bit",
-            provider="vllm-mlx",
-            url="http://localhost:8000",
+    def test_empty_presets_when_no_num_ctx(self, tmp_path: Path) -> None:
+        config = LLMConfig(
+            models={
+                "qwen3.5-4b": ModelConfig(
+                    name="Qwen3.5-4B-Q4_K_M",
+                    provider="llamacpp",
+                    url="http://localhost:8090",
+                ),
+            }
         )
-        assert cfg.get_litellm_model() == "openai/default"
+        with patch("shared.cli.llm._presets_file", return_value=tmp_path / "presets.ini"):
+            path = _generate_presets(config)
+            content = path.read_text()
+            assert "[model:Qwen3.5-4B-Q4_K_M]" in content
+
+    def test_skips_non_llamacpp_models(self, tmp_path: Path) -> None:
+        config = LLMConfig(
+            models={
+                "ollama-model": ModelConfig(
+                    name="qwen3:4b",
+                    provider="ollama",
+                    url="http://localhost:11434",
+                    num_ctx=8192,
+                ),
+            }
+        )
+        with patch("shared.cli.llm._presets_file", return_value=tmp_path / "presets.ini"):
+            path = _generate_presets(config)
+            content = path.read_text()
+            assert "qwen3:4b" not in content
+
+
+# =============================================================================
+# ModelConfig with llamacpp + gguf
+# =============================================================================
+
+
+class TestModelConfigLlamacpp:
+    """Test ModelConfig with llamacpp provider and gguf field."""
+
+    def test_get_litellm_model(self) -> None:
+        cfg = ModelConfig(
+            name="Qwen3.5-4B-Q4_K_M",
+            provider="llamacpp",
+            url="http://localhost:8090",
+        )
+        assert cfg.get_litellm_model() == "openai/Qwen3.5-4B-Q4_K_M"
 
     def test_get_api_base(self) -> None:
-        """vllm-mlx appends /v1 to URL."""
         cfg = ModelConfig(
-            name="mlx-community/Qwen3-4B-Instruct-2507-4bit",
-            provider="vllm-mlx",
-            url="http://localhost:8000",
+            name="Qwen3.5-4B-Q4_K_M",
+            provider="llamacpp",
+            url="http://localhost:8090",
         )
-        assert cfg.get_api_base() == "http://localhost:8000/v1"
+        assert cfg.get_api_base() == "http://localhost:8090/v1"
 
     def test_get_api_base_strips_trailing_slash(self) -> None:
-        """Trailing slash is stripped before appending /v1."""
         cfg = ModelConfig(
-            name="mlx-community/Qwen3-4B-Instruct-2507-4bit",
-            provider="vllm-mlx",
-            url="http://localhost:8000/",
+            name="Qwen3.5-4B-Q4_K_M",
+            provider="llamacpp",
+            url="http://localhost:8090/",
         )
-        assert cfg.get_api_base() == "http://localhost:8000/v1"
+        assert cfg.get_api_base() == "http://localhost:8090/v1"
+
+    def test_gguf_field(self) -> None:
+        cfg = ModelConfig(
+            name="Qwen3.5-4B-Q4_K_M",
+            provider="llamacpp",
+            url="http://localhost:8090",
+            gguf="unsloth/Qwen3.5-4B-GGUF:Qwen3.5-4B-Q4_K_M.gguf",
+        )
+        assert cfg.gguf == "unsloth/Qwen3.5-4B-GGUF:Qwen3.5-4B-Q4_K_M.gguf"
+
+    def test_gguf_default_none(self) -> None:
+        cfg = ModelConfig(name="qwen3:4b", provider="ollama")
+        assert cfg.gguf is None
 
     def test_ollama_provider_unchanged(self) -> None:
-        """Ollama provider still works as before."""
         cfg = ModelConfig(name="qwen3:4b-instruct", provider="ollama")
         assert cfg.get_litellm_model() == "ollama_chat/qwen3:4b-instruct"
         assert cfg.get_api_base() == "http://localhost:11434"
 
-    def test_llamacpp_provider_unchanged(self) -> None:
-        """llamacpp provider still works as before."""
+    def test_is_not_thinking_model_qwen35(self) -> None:
+        """Qwen3.5 GGUF model is NOT a thinking model."""
         cfg = ModelConfig(
-            name="qwen3:4b-instruct",
+            name="Qwen3.5-4B-Q4_K_M",
             provider="llamacpp",
-            url="http://localhost:8080",
+            url="http://localhost:8090",
         )
-        assert cfg.get_litellm_model() == "openai/qwen3:4b-instruct"
-        assert cfg.get_api_base() == "http://localhost:8080/v1"
+        assert cfg.is_thinking_model() is False
+
+    def test_models_dir_exists(self) -> None:
+        """MODELS_DIR points to tools/models/ relative to project root."""
+        assert MODELS_DIR.name == "models"
+        assert MODELS_DIR.parent.name == "tools"

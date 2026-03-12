@@ -201,17 +201,6 @@ def check_model_availability(config: MagaldiConfig, skip_ai: bool) -> list[str]:
                 )
             except Exception:
                 pass  # Server is running but endpoint may not exist
-        elif model_cfg.provider == "vllm-mlx":
-            # Check if vllm-mlx server is running
-            try:
-                requests.get(f"{model_cfg.url.rstrip('/')}/health", timeout=5)
-            except requests.exceptions.ConnectionError:
-                errors.append(
-                    f"Cannot connect to vllm-mlx at {model_cfg.url} for {purpose} model. "
-                    f"Start with: magaldi llm serve"
-                )
-            except Exception:
-                pass  # Server is running but endpoint may differ
 
     # Warmup Ollama tiered models (create aliases if they don't exist)
     if not errors and ollama_models_to_warmup:

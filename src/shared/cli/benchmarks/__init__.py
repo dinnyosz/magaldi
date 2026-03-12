@@ -156,7 +156,7 @@ def benchmark_models(
             for mc in missing_models:
                 if mc.provider == "ollama":
                     console.print(f"  ollama pull {mc.name}")
-                elif mc.provider == "vllm-mlx":
+                elif mc.provider == "llamacpp":
                     console.print(f"  magaldi llm serve  # (model: {mc.name})")
             sys.exit(1)
 

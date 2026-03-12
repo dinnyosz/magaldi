@@ -1,364 +1,163 @@
 """LLM server commands for the Magaldi CLI.
 
-Manages vllm-mlx servers based on the magaldi.yaml configuration.
-Groups models by URL (port) and spawns one vllm-mlx server per unique port,
-with the LLM model as the primary and embedding models pre-loaded.
+Manages a llama-server (llama.cpp) instance in router mode, serving all GGUF
+models from a shared directory with automatic hot-swapping and LRU eviction.
 
 Usage:
-    magaldi llm serve          # Start all configured vllm-mlx servers
-    magaldi llm serve --port 8000  # Start only the server on port 8000
-    magaldi llm status         # Show status of running servers
-    magaldi llm stop           # Stop all managed servers
+    magaldi llm serve          # Start llama-server in router mode
+    magaldi llm stop           # Stop the running server
+    magaldi llm status         # Show server + loaded models
+    magaldi llm logs           # Follow server logs
+    magaldi llm models         # List available GGUF models
+    magaldi llm pull           # Download configured models from HuggingFace
+
+Example magaldi.yaml:
+    llm:
+      models:
+        qwen3.5-4b:
+          name: Qwen3.5-4B-Q4_K_M
+          provider: llamacpp
+          url: http://localhost:8090
+          gguf: unsloth/Qwen3.5-4B-GGUF:Qwen3.5-4B-Q4_K_M.gguf
+        qwen3.5-2b:
+          name: Qwen3.5-2B-Q4_K_M
+          provider: llamacpp
+          url: http://localhost:8090
+          gguf: unsloth/Qwen3.5-2B-GGUF:Qwen3.5-2B-Q4_K_M.gguf
+        qwen3-embed:
+          name: qwen3-embedding:0.6b
+          provider: ollama
+          url: http://localhost:11434
+          dimensions: 1024
 """
 
 from __future__ import annotations
 
+import configparser
 import contextlib
 import os
 import signal
 import subprocess
-import sys
 import time
-from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import urlparse
 
 import click
 import requests
 from rich.markup import escape as rich_escape
+from rich.table import Table
 
 from shared.cli._shared import console, main
 from shared.config import LLMConfig, ModelConfig, load_config
 
-# PID file directory
+# Directories
 PIDFILE_DIR = Path.home() / ".magaldi" / "pids"
+PRESETS_DIR = Path.home() / ".magaldi"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+MODELS_DIR = PROJECT_ROOT / "tools" / "models"
+LLAMA_SERVER = PROJECT_ROOT / "tools" / "llama.cpp" / "build" / "bin" / "llama-server"
+
+# Defaults
+DEFAULT_PORT = 8090
+DEFAULT_PARALLEL = 4
+DEFAULT_MODELS_MAX = 2
+DEFAULT_CTX_SIZE = 8192
 
 
-@dataclass
-class ServerPlan:
-    """Plan for a single vllm-mlx server instance."""
+# =============================================================================
+# HELPERS
+# =============================================================================
 
-    port: int
-    host: str
-    llm_model: str  # HuggingFace MLX model repo for the LLM
-    embedding_model: str | None = None  # HuggingFace MLX model repo for embeddings
-    continuous_batching: bool = True
-    model_configs: list[ModelConfig] = field(default_factory=list)  # source configs
 
-    @property
-    def pidfile(self) -> Path:
-        return PIDFILE_DIR / f"vllm-mlx-{self.port}.pid"
+def _pidfile(port: int) -> Path:
+    return PIDFILE_DIR / f"llama-server-{port}.pid"
 
-    @property
-    def logfile(self) -> Path:
-        return PIDFILE_DIR / f"vllm-mlx-{self.port}.log"
 
-    def health_url(self) -> str:
-        return f"http://{self.host}:{self.port}/health"
+def _logfile(port: int) -> Path:
+    return PIDFILE_DIR / f"llama-server-{port}.log"
 
-    def is_running(self) -> bool:
-        """Check if server is already running on this port."""
+
+def _presets_file() -> Path:
+    return PRESETS_DIR / "llama-presets.ini"
+
+
+def _get_pid(port: int) -> int | None:
+    """Read PID from pidfile, return None if stale or missing."""
+    pf = _pidfile(port)
+    if pf.exists():
         try:
-            r = requests.get(self.health_url(), timeout=3)
-            return r.status_code == 200
-        except Exception:
-            return False
-
-    def get_pid(self) -> int | None:
-        """Read PID from pidfile."""
-        if self.pidfile.exists():
-            try:
-                pid = int(self.pidfile.read_text().strip())
-                # Check if process is actually alive
-                os.kill(pid, 0)
-                return pid
-            except (ValueError, ProcessLookupError, PermissionError):
-                # Stale pidfile
-                self.pidfile.unlink(missing_ok=True)
-        return None
+            pid = int(pf.read_text().strip())
+            os.kill(pid, 0)  # Check if alive
+            return pid
+        except (ValueError, ProcessLookupError, PermissionError):
+            pf.unlink(missing_ok=True)
+    return None
 
 
-def _build_server_plans(llm_config: LLMConfig) -> list[ServerPlan]:
-    """Build server plans from LLM config.
-
-    Groups vllm-mlx models by port. Each unique port gets one server.
-    The first LLM model (non-embedding) on a port becomes the primary model.
-    Embedding models on the same port are pre-loaded via --embedding-model.
-    """
-    # Collect all vllm-mlx models
-    vllm_models: list[tuple[str, ModelConfig]] = []
-    for ref_name, model_cfg in llm_config.models.items():
-        if model_cfg.provider == "vllm-mlx":
-            vllm_models.append((ref_name, model_cfg))
-
-    if not vllm_models:
-        return []
-
-    # Group by (host, port)
-    groups: dict[tuple[str, int], list[tuple[str, ModelConfig]]] = {}
-    for ref_name, model_cfg in vllm_models:
-        parsed = urlparse(model_cfg.url)
-        host = parsed.hostname or "0.0.0.0"
-        port = parsed.port or 8000
-        key = (host, port)
-        groups.setdefault(key, []).append((ref_name, model_cfg))
-
-    plans: list[ServerPlan] = []
-    for (host, port), models in groups.items():
-        # Separate LLM and embedding models
-        llm_models = []
-        embed_models = []
-        for ref_name, cfg in models:
-            if cfg.dimensions is not None:
-                embed_models.append((ref_name, cfg))
-            else:
-                llm_models.append((ref_name, cfg))
-
-        if not llm_models:
-            console.print(
-                f"  [yellow]Warning: Port {port} has only embedding models, "
-                f"needs at least one LLM model[/]"
-            )
-            continue
-
-        # Primary LLM model — name is the HuggingFace MLX repo
-        primary_ref, primary_cfg = llm_models[0]
-
-        # Embedding model (first one, if any)
-        embed_name = None
-        if embed_models:
-            _embed_ref, embed_cfg = embed_models[0]
-            embed_name = embed_cfg.name
-
-        plan = ServerPlan(
-            port=port,
-            host=host,
-            llm_model=primary_cfg.name,
-            embedding_model=embed_name,
-            model_configs=[cfg for _, cfg in models],
-        )
-        plans.append(plan)
-
-        if len(llm_models) > 1:
-            extra = [ref for ref, _ in llm_models[1:]]
-            console.print(
-                f"  [dim]Note: Port {port} has multiple LLM models. "
-                f"Primary: {primary_ref}. Others ignored: {', '.join(extra)}[/]"
-            )
-            console.print(
-                "  [dim](vllm-mlx serves one LLM per process — "
-                "use different ports for multiple models)[/]"
-            )
-
-    return plans
-
-
-def _find_vllm_python() -> str:
-    """Find a Python interpreter that has vllm-mlx installed.
-
-    Checks sys.executable first, then looks for a .venv in the project root.
-    Falls back to sys.executable if nothing better is found.
-    """
-    # Check if current Python has vllm_mlx
+def _is_healthy(port: int) -> bool:
+    """Check if llama-server is responding on the given port."""
     try:
-        result = subprocess.run(
-            [sys.executable, "-c", "import vllm_mlx"],
-            capture_output=True, timeout=5,
-        )
-        if result.returncode == 0:
-            return sys.executable
+        r = requests.get(f"http://localhost:{port}/health", timeout=3)
+        return r.status_code == 200
     except Exception:
-        pass
-
-    # Look for .venv in common locations
-    for candidate_dir in [Path.cwd(), Path(__file__).resolve().parent.parent.parent.parent]:
-        venv_python = candidate_dir / ".venv" / "bin" / "python"
-        if venv_python.exists():
-            try:
-                result = subprocess.run(
-                    [str(venv_python), "-c", "import vllm_mlx"],
-                    capture_output=True, timeout=5,
-                )
-                if result.returncode == 0:
-                    return str(venv_python)
-            except Exception:
-                pass
-
-    # Fallback
-    return sys.executable
-
-
-def _start_server(plan: ServerPlan, metal_memory_fraction: float = 0.35) -> bool:
-    """Start a vllm-mlx server as a background process."""
-    if plan.is_running():
-        console.print(f"  [green]Already running[/] on port {plan.port}")
-        return True
-
-    python_bin = _find_vllm_python()
-
-    # Build command using the newer vllm_mlx.cli entrypoint which supports
-    # KV cache quantization, paged cache, chunked prefill, and other options.
-    cmd = [
-        python_bin, "-m", "vllm_mlx.cli", "serve",
-        plan.llm_model,
-        "--port", str(plan.port),
-        "--host", plan.host,
-    ]
-
-    if plan.continuous_batching:
-        cmd.append("--continuous-batching")
-
-    if plan.embedding_model:
-        cmd.extend(["--embedding-model", plan.embedding_model])
-
-    # -- KV cache quantization --
-    # 4-bit quantization reduces KV cache memory ~4x vs fp16.
-    # Lower min-quantize-tokens from default 256→0 so even short sequences
-    # (variable scoring batches) get quantized.
-    cmd.extend([
-        "--kv-cache-quantization",
-        "--kv-cache-quantization-bits", "4",
-        "--kv-cache-min-quantize-tokens", "0",
-    ])
-
-    # -- Paged KV cache --
-    # Allocates KV cache in small blocks instead of monolithically per
-    # sequence.  Blocks are reused/freed dynamically, putting a hard ceiling
-    # on total memory.  max-cache-blocks × block-size = max cached tokens.
-    # 256 blocks × 64 tokens = 16K tokens max across all sequences.
-    cmd.extend([
-        "--use-paged-cache",
-        "--max-cache-blocks", "256",
-    ])
-
-    # -- Prefix cache --
-    # Enabled: useful for shared system prompts (summarization, variable scoring).
-    # Previously disabled due to "Out of cache blocks" with paged cache, but
-    # re-enabled to test with higher max-num-seqs.
-
-    # -- Reasoning parser --
-    # Extract <think>...</think> into reasoning_content field server-side.
-    _REASONING_PARSERS = {"qwen3": "qwen3", "deepseek-r1": "deepseek_r1"}
-    primary_cfg = next((c for c in plan.model_configs if c.dimensions is None), None)
-    if primary_cfg and primary_cfg.is_thinking_model():
-        base = primary_cfg.name.split("/")[-1].lower()
-        for family, parser in _REASONING_PARSERS.items():
-            if base.startswith(family):
-                cmd.extend(["--reasoning-parser", parser])
-                break
-
-    # -- Concurrency & scheduling --
-    # Limit concurrent sequences.  vllm-mlx hits a Metal command buffer race
-    # condition (_MTLCommandBuffer addCompletedHandler assertion) when running
-    # multiple sequences.  This is a known MLX thread-safety issue (mlx #3078).
-    # Higher values (4, 8) crash due to MLX Metal race condition (mlx #3078).
-    # 2 is the highest stable value on 48GB M4 Pro.
-    cmd.extend(["--max-num-seqs", "2"])
-
-    # Chunked prefill: split long prompts into chunks so active requests
-    # aren't starved while a big prompt is being prefilled.
-    cmd.extend(["--chunked-prefill-tokens", "512"])
-
-    # -- Metal memory cap --
-    # vllm-mlx hardcodes mx.set_memory_limit(90% of device) which lets a 2.5GB
-    # 4-bit model balloon to 36GB+.  We patch batched.py to read from env vars
-    # instead.  The caller passes the fraction based on model role: 35% for the
-    # LLM server, 15% for the embeddings-only server, reserving ~50% for the
-    # OS and magaldi parse process.
-    env = os.environ.copy()
-    env["MAGALDI_METAL_MEMORY_FRACTION"] = str(metal_memory_fraction)
-    env["MAGALDI_METAL_CACHE_GB"] = "4"
-    env["MAGALDI_METAL_PRESSURE_GB"] = "20"
-
-    # Ensure pid directory exists
-    PIDFILE_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Start as background process
-    console.print(f"  Starting vllm-mlx on port {plan.port}...")
-    console.print(f"    LLM model:        {plan.llm_model}")
-    if plan.embedding_model:
-        console.print(f"    Embed model:      {plan.embedding_model}")
-    console.print(f"    Batching:         {'continuous' if plan.continuous_batching else 'single'}")
-    console.print("    KV cache:         4-bit quantized, paged (256 blocks)")
-    console.print("    Prefix cache:     enabled")
-    console.print(f"    Metal memory:     {metal_memory_fraction:.0%} of device")
-    console.print("    Metal cache:      4 GB")
-    console.print("    Max sequences:    2")
-    console.print("    Chunked prefill:  512 tokens")
-    # Show reasoning parser if detected
-    for part_idx, part in enumerate(cmd):
-        if part == "--reasoning-parser" and part_idx + 1 < len(cmd):
-            console.print(f"    Reasoning parser: {cmd[part_idx + 1]}")
-            break
-    console.print(f"    Log: {plan.logfile}")
-
-    with open(plan.logfile, "w") as log_f:
-        proc = subprocess.Popen(
-            cmd,
-            env=env,
-            stdout=log_f,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,  # Detach from parent
-        )
-
-    # Write PID
-    plan.pidfile.write_text(str(proc.pid))
-
-    # Wait for health check
-    console.print("    Waiting for server to be ready...", end=" ")
-    for _attempt in range(60):  # up to 60 seconds
-        time.sleep(1)
-        if plan.is_running():
-            console.print("[green]Ready![/]")
-            return True
-        # Check if process died
-        if proc.poll() is not None:
-            console.print("[red]Process exited![/]")
-            console.print(f"    Check log: {plan.logfile}")
-            plan.pidfile.unlink(missing_ok=True)
-            return False
-
-    console.print("[yellow]Timeout (server may still be loading model)[/]")
-    console.print(f"    Check: curl {plan.health_url()}")
-    return True  # Process is alive, just slow to load
-
-
-def _stop_server(plan: ServerPlan) -> bool:
-    """Stop a vllm-mlx server by PID."""
-    pid = plan.get_pid()
-    if pid is None:
-        if plan.is_running():
-            console.print(
-                f"  [yellow]Port {plan.port}: running but no PID file "
-                f"(not managed by magaldi)[/]"
-            )
-            return False
-        console.print(f"  [dim]Port {plan.port}: not running[/]")
-        return True
-
-    console.print(f"  Stopping vllm-mlx on port {plan.port} (PID {pid})...", end=" ")
-    try:
-        os.kill(pid, signal.SIGTERM)
-        # Wait for graceful shutdown
-        for _ in range(10):
-            time.sleep(0.5)
-            try:
-                os.kill(pid, 0)  # Check if still alive
-            except ProcessLookupError:
-                break
-        else:
-            # Force kill if still alive
-            with contextlib.suppress(ProcessLookupError):
-                os.kill(pid, signal.SIGKILL)
-        console.print("[green]Stopped[/]")
-    except ProcessLookupError:
-        console.print("[dim]Already stopped[/]")
-    except PermissionError:
-        console.print("[red]Permission denied[/]")
         return False
 
-    plan.pidfile.unlink(missing_ok=True)
-    return True
+
+def _get_llamacpp_models(llm_config: LLMConfig) -> list[ModelConfig]:
+    """Get all llamacpp models from config."""
+    return [
+        cfg for cfg in llm_config.models.values()
+        if cfg.provider == "llamacpp"
+    ]
+
+
+def _get_llamacpp_port(llm_config: LLMConfig) -> int:
+    """Get the port from the first llamacpp model, or default."""
+    for cfg in llm_config.models.values():
+        if cfg.provider == "llamacpp":
+            from urllib.parse import urlparse
+            parsed = urlparse(cfg.url)
+            if parsed.port:
+                return parsed.port
+    return DEFAULT_PORT
+
+
+def _generate_presets(llm_config: LLMConfig) -> Path:
+    """Generate a llama-server presets INI file from config.
+
+    The presets file lets us set per-model context sizes and other params.
+    Format: [model:<model-id>] sections with key=value pairs.
+    """
+    presets = configparser.ConfigParser()
+
+    for cfg in _get_llamacpp_models(llm_config):
+        section = f"model:{cfg.name}"
+        presets[section] = {}
+        if cfg.num_ctx:
+            presets[section]["n_ctx"] = str(cfg.num_ctx)
+
+    presets_path = _presets_file()
+    presets_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(presets_path, "w") as f:
+        presets.write(f)
+
+    return presets_path
+
+
+def _list_gguf_files() -> list[Path]:
+    """List all .gguf files in the models directory."""
+    if not MODELS_DIR.exists():
+        return []
+    return sorted(MODELS_DIR.glob("*.gguf"))
+
+
+def _format_size(size_bytes: int) -> str:
+    """Format file size in human-readable form."""
+    if size_bytes >= 1_073_741_824:
+        return f"{size_bytes / 1_073_741_824:.1f} GB"
+    elif size_bytes >= 1_048_576:
+        return f"{size_bytes / 1_048_576:.0f} MB"
+    else:
+        return f"{size_bytes / 1024:.0f} KB"
 
 
 # =============================================================================
@@ -368,165 +167,281 @@ def _stop_server(plan: ServerPlan) -> bool:
 
 @main.group()
 def llm() -> None:
-    """Manage local LLM servers (vllm-mlx)."""
+    """Manage local LLM server (llama.cpp)."""
     pass
 
 
 @llm.command("serve")
 @click.option(
     "--port", "-p", type=int, default=None,
-    help="Only start the server on this port",
+    help=f"Server port (default: {DEFAULT_PORT})",
 )
 @click.option(
-    "--no-batch", is_flag=True,
-    help="Disable continuous batching (single-user mode)",
+    "--parallel", type=int, default=None,
+    help=f"Number of parallel request slots (default: {DEFAULT_PARALLEL})",
 )
-def llm_serve(port: int | None, no_batch: bool) -> None:
-    """Start vllm-mlx servers based on config.
+@click.option(
+    "--models-max", type=int, default=None,
+    help=f"Max models loaded simultaneously (default: {DEFAULT_MODELS_MAX})",
+)
+@click.option(
+    "--ctx-size", type=int, default=None,
+    help=f"Default context size per slot (default: {DEFAULT_CTX_SIZE})",
+)
+def llm_serve(
+    port: int | None,
+    parallel: int | None,
+    models_max: int | None,
+    ctx_size: int | None,
+) -> None:
+    """Start llama-server in router mode.
 
-    Reads vllm-mlx model definitions from magaldi.yaml, groups them by port,
-    and spawns one vllm-mlx server per unique port. Servers run as background
-    processes with PID files in ~/.magaldi/pids/.
+    Serves all GGUF models from tools/models/ with automatic hot-swapping.
+    Models are loaded on first request and evicted LRU when --models-max
+    is reached. Use `magaldi llm pull` to download models first.
 
     \b
-    Example magaldi.yaml:
-        llm:
-          models:
-            qwen3-4b:
-              name: mlx-community/Qwen3-4B-Instruct-2507-4bit
-              provider: vllm-mlx
-              url: http://localhost:8000
-            qwen3-embed:
-              name: mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ
-              provider: vllm-mlx
-              url: http://localhost:8000
-              dimensions: 1024
+    Prerequisites:
+        make llama-setup     # Build llama.cpp + download models
     """
-    config = load_config()
-    plans = _build_server_plans(config.llm)
-
-    if not plans:
-        console.print("[yellow]No vllm-mlx models found in config.[/]")
-        console.print("Set provider: vllm-mlx and name to the HuggingFace MLX repo in your magaldi.yaml")
+    # Check llama-server binary
+    if not LLAMA_SERVER.exists():
+        console.print("[red]llama-server not found.[/]")
+        console.print(f"  Expected: {LLAMA_SERVER}")
+        console.print("  Run: [bold]make llama-setup[/]")
         return
 
-    if port is not None:
-        plans = [p for p in plans if p.port == port]
-        if not plans:
-            console.print(f"[red]No vllm-mlx models configured for port {port}[/]")
+    # Check models directory
+    gguf_files = _list_gguf_files()
+    if not gguf_files:
+        console.print("[red]No GGUF models found.[/]")
+        console.print(f"  Expected in: {MODELS_DIR}")
+        console.print("  Run: [bold]make llama-pull[/] or [bold]magaldi llm pull[/]")
+        return
+
+    # Load config for port and presets
+    config = load_config()
+    port = port or _get_llamacpp_port(config.llm)
+    parallel = parallel or DEFAULT_PARALLEL
+    models_max = models_max or DEFAULT_MODELS_MAX
+    ctx_size = ctx_size or DEFAULT_CTX_SIZE
+
+    # Check if already running
+    existing_pid = _get_pid(port)
+    if existing_pid is not None:
+        if _is_healthy(port):
+            console.print(f"[green]llama-server already running[/] on port {port} (PID {existing_pid})")
             return
+        else:
+            # PID exists but not healthy — stale process
+            console.print(f"[yellow]Stale process detected (PID {existing_pid}), cleaning up...[/]")
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.kill(existing_pid, signal.SIGTERM)
+            _pidfile(port).unlink(missing_ok=True)
+            time.sleep(1)
 
-    if no_batch:
-        for plan in plans:
-            plan.continuous_batching = False
+    # Generate presets file for per-model config
+    presets_path = _generate_presets(config.llm)
 
-    console.print(f"[bold blue]Starting {len(plans)} vllm-mlx server(s)[/]")
+    # Build command
+    cmd = [
+        str(LLAMA_SERVER),
+        "--models-dir", str(MODELS_DIR),
+        "--port", str(port),
+        "--host", "0.0.0.0",
+        "--ctx-size", str(ctx_size),
+        "--parallel", str(parallel),
+        "--models-max", str(models_max),
+        "--flash-attn",
+        "--n-gpu-layers", "99",
+    ]
+
+    # Add presets if we generated any model-specific config
+    if presets_path.stat().st_size > 0:
+        cmd.extend(["--models-preset", str(presets_path)])
+
+    # Ensure directories exist
+    PIDFILE_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Print startup info
+    console.print("[bold blue]Starting llama-server (router mode)[/]")
+    console.print()
+    console.print(f"  Port:           {port}")
+    console.print(f"  Models dir:     {MODELS_DIR}")
+    console.print(f"  Models found:   {len(gguf_files)}")
+    for gf in gguf_files:
+        console.print(f"    - {gf.stem}  ({_format_size(gf.stat().st_size)})")
+    console.print(f"  Max loaded:     {models_max}")
+    console.print(f"  Parallel slots: {parallel}")
+    console.print(f"  Context size:   {ctx_size}")
+    console.print("  Flash attention: on")
+    console.print("  GPU layers:     99 (full offload)")
+    console.print(f"  Log:            {_logfile(port)}")
     console.print()
 
-    success_count = 0
-    for plan in plans:
-        # Allocate more Metal memory to the LLM server (has chat model),
-        # less to the embeddings-only server.  35% + 15% = 50% total,
-        # leaving ~50% for the OS and magaldi parse process.
-        has_llm = any(c.dimensions is None for c in plan.model_configs)
-        fraction = 0.35 if has_llm else 0.15
-        if _start_server(plan, metal_memory_fraction=fraction):
-            success_count += 1
-        console.print()
-
-    if success_count == len(plans):
-        console.print(f"[bold green]All {success_count} server(s) started[/]")
-    else:
-        console.print(
-            f"[yellow]{success_count}/{len(plans)} server(s) started[/]"
+    # Start as background process
+    logfile = _logfile(port)
+    with open(logfile, "w") as log_f:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=log_f,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
         )
+
+    # Write PID
+    _pidfile(port).write_text(str(proc.pid))
+
+    # Wait for health check
+    console.print("  Waiting for server...", end=" ")
+    for _attempt in range(30):  # up to 30 seconds
+        time.sleep(1)
+        if _is_healthy(port):
+            console.print("[green]Ready![/]")
+            console.print()
+            console.print(f"  API: http://localhost:{port}/v1/models")
+            console.print(f"  Health: http://localhost:{port}/health")
+            return
+        # Check if process died
+        if proc.poll() is not None:
+            console.print("[red]Process exited![/]")
+            console.print(f"  Check log: {logfile}")
+            _pidfile(port).unlink(missing_ok=True)
+            return
+
+    console.print("[yellow]Timeout (server may still be loading)[/]")
+    console.print(f"  Check: curl http://localhost:{port}/health")
 
 
 @llm.command("stop")
 @click.option(
     "--port", "-p", type=int, default=None,
-    help="Only stop the server on this port",
+    help="Port of the server to stop",
 )
 def llm_stop(port: int | None) -> None:
-    """Stop managed vllm-mlx servers."""
-    config = load_config()
-    plans = _build_server_plans(config.llm)
+    """Stop the llama-server."""
+    if port is None:
+        config = load_config()
+        port = _get_llamacpp_port(config.llm)
 
-    if port is not None:
-        plans = [p for p in plans if p.port == port]
-
-    if not plans:
-        # Also check for any orphaned pid files
+    pid = _get_pid(port)
+    if pid is None:
+        # Check for orphaned pidfiles
         if PIDFILE_DIR.exists():
-            pidfiles = list(PIDFILE_DIR.glob("vllm-mlx-*.pid"))
+            pidfiles = list(PIDFILE_DIR.glob("llama-server-*.pid"))
             if pidfiles:
-                console.print("[yellow]Found orphaned PID files:[/]")
+                console.print("[yellow]Found orphaned PID files, cleaning up...[/]")
                 for pf in pidfiles:
-                    port_str = pf.stem.replace("vllm-mlx-", "")
-                    plan = ServerPlan(port=int(port_str), host="0.0.0.0", llm_model="")
-                    _stop_server(plan)
+                    port_str = pf.stem.replace("llama-server-", "")
+                    orphan_pid = _get_pid(int(port_str))
+                    if orphan_pid:
+                        _stop_pid(orphan_pid, int(port_str))
+                    else:
+                        pf.unlink(missing_ok=True)
                 return
-        console.print("[dim]No vllm-mlx servers to stop[/]")
+        console.print(f"[dim]No llama-server running on port {port}[/]")
         return
 
-    console.print(f"[bold blue]Stopping {len(plans)} vllm-mlx server(s)[/]")
-    for plan in plans:
-        _stop_server(plan)
+    _stop_pid(pid, port)
+
+
+def _stop_pid(pid: int, port: int) -> None:
+    """Stop a process by PID with graceful shutdown."""
+    console.print(f"  Stopping llama-server on port {port} (PID {pid})...", end=" ")
+    try:
+        os.kill(pid, signal.SIGTERM)
+        for _ in range(10):
+            time.sleep(0.5)
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+        else:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+        console.print("[green]Stopped[/]")
+    except ProcessLookupError:
+        console.print("[dim]Already stopped[/]")
+    except PermissionError:
+        console.print("[red]Permission denied[/]")
+        return
+
+    _pidfile(port).unlink(missing_ok=True)
 
 
 @llm.command("status")
-def llm_status() -> None:
-    """Show status of vllm-mlx servers."""
-    config = load_config()
-    plans = _build_server_plans(config.llm)
+@click.option(
+    "--port", "-p", type=int, default=None,
+    help="Port of the server to check",
+)
+def llm_status(port: int | None) -> None:
+    """Show llama-server status and loaded models."""
+    if port is None:
+        config = load_config()
+        port = _get_llamacpp_port(config.llm)
 
-    if not plans:
-        console.print("[dim]No vllm-mlx models configured[/]")
-        console.print("Set provider: vllm-mlx and name to the HuggingFace MLX repo in your magaldi.yaml")
+    pid = _get_pid(port)
+    healthy = _is_healthy(port)
+
+    # Server status
+    if pid and healthy:
+        console.print(f"[green]● llama-server running[/] on port {port} (PID {pid})")
+    elif pid:
+        console.print(f"[yellow]● llama-server starting[/] on port {port} (PID {pid})")
+    else:
+        console.print(f"[red]○ llama-server not running[/] on port {port}")
+        console.print("  Run: [bold]magaldi llm serve[/]")
         return
 
-    from rich.table import Table
+    console.print()
 
-    table = Table(title="vllm-mlx Servers")
-    table.add_column("Port", style="cyan")
-    table.add_column("Status")
-    table.add_column("PID", style="dim")
-    table.add_column("LLM Model")
-    table.add_column("Embed Model", style="dim")
-    table.add_column("Engine")
+    # Query loaded models
+    try:
+        r = requests.get(f"http://localhost:{port}/v1/models", timeout=5)
+        if r.status_code != 200:
+            console.print(f"  [yellow]Could not fetch models (HTTP {r.status_code})[/]")
+            return
 
-    for plan in plans:
-        pid = plan.get_pid()
-        running = plan.is_running()
+        data = r.json()
+        models = data.get("data", [])
 
-        if running:
-            status = "[green]● Running[/]"
-            # Try to get engine info from health endpoint
-            try:
-                r = requests.get(plan.health_url(), timeout=3)
-                health = r.json()
-                engine = health.get("engine_type", "unknown")
-            except Exception:
-                engine = "unknown"
-        else:
-            status = "[red]○ Stopped[/]"
-            engine = "-"
+        if not models:
+            console.print("  No models available (is --models-dir correct?)")
+            return
 
-        table.add_row(
-            str(plan.port),
-            status,
-            str(pid) if pid else "-",
-            plan.llm_model,
-            plan.embedding_model or "-",
-            engine,
-        )
+        table = Table(title="Models")
+        table.add_column("Model ID", style="cyan")
+        table.add_column("Status")
+        table.add_column("Backend", style="dim")
 
-    console.print(table)
+        for model in models:
+            model_id = model.get("id", "unknown")
+            # Router mode provides status and path fields
+            status = model.get("status", "loaded")
+
+            if status == "loaded":
+                status_str = "[green]● loaded[/]"
+            elif status == "loading":
+                status_str = "[yellow]◌ loading[/]"
+            else:
+                # Unloaded but available
+                status_str = "[dim]○ available[/]"
+
+            backend = model.get("meta", {}).get("ggml.backend", "metal") if isinstance(model.get("meta"), dict) else "-"
+
+            table.add_row(model_id, status_str, str(backend))
+
+        console.print(table)
+
+    except requests.ConnectionError:
+        console.print("  [red]Could not connect to server[/]")
+    except Exception as e:
+        console.print(f"  [red]Error: {rich_escape(str(e))}[/]")
 
 
 @llm.command("logs")
 @click.option(
-    "--port", "-p", type=int, required=True,
+    "--port", "-p", type=int, default=None,
     help="Port of the server to show logs for",
 )
 @click.option(
@@ -537,22 +452,25 @@ def llm_status() -> None:
     "--lines", "-n", type=int, default=50,
     help="Number of lines to show (default: 50)",
 )
-def llm_logs(port: int, follow: bool, lines: int) -> None:
-    """Show logs for a vllm-mlx server."""
-    logfile = PIDFILE_DIR / f"vllm-mlx-{port}.log"
+def llm_logs(port: int | None, follow: bool, lines: int) -> None:
+    """Show logs for the llama-server."""
+    if port is None:
+        config = load_config()
+        port = _get_llamacpp_port(config.llm)
+
+    logfile = _logfile(port)
 
     if not logfile.exists():
         console.print(f"[red]No log file found for port {port}[/]")
+        console.print(f"  Expected: {logfile}")
         return
 
     if follow:
-        # Use tail -f
         with contextlib.suppress(KeyboardInterrupt):
             subprocess.run(
                 ["tail", "-f", "-n", str(lines), str(logfile)],
             )
     else:
-        # Show last N lines
         try:
             result = subprocess.run(
                 ["tail", "-n", str(lines), str(logfile)],
@@ -561,3 +479,133 @@ def llm_logs(port: int, follow: bool, lines: int) -> None:
             console.print(result.stdout, end="")
         except Exception as e:
             console.print(f"[red]Error reading log: {rich_escape(str(e))}[/]")
+
+
+@llm.command("models")
+def llm_models() -> None:
+    """List available GGUF models in tools/models/."""
+    gguf_files = _list_gguf_files()
+
+    if not gguf_files:
+        console.print("[yellow]No GGUF models found.[/]")
+        console.print(f"  Directory: {MODELS_DIR}")
+        console.print("  Run: [bold]magaldi llm pull[/] or [bold]make llama-pull[/]")
+        return
+
+    # Check if server is running to show loaded status
+    config = load_config()
+    port = _get_llamacpp_port(config.llm)
+    loaded_models: set[str] = set()
+
+    if _is_healthy(port):
+        try:
+            r = requests.get(f"http://localhost:{port}/v1/models", timeout=3)
+            if r.status_code == 200:
+                for model in r.json().get("data", []):
+                    if model.get("status") == "loaded":
+                        loaded_models.add(model.get("id", ""))
+        except Exception:
+            pass
+
+    table = Table(title=f"GGUF Models ({MODELS_DIR})")
+    table.add_column("Model", style="cyan")
+    table.add_column("Size", justify="right")
+    table.add_column("Status")
+
+    for gf in gguf_files:
+        stem = gf.stem
+        size = _format_size(gf.stat().st_size)
+        if stem in loaded_models:
+            status = "[green]● loaded[/]"
+        elif _is_healthy(port):
+            status = "[dim]○ available[/]"
+        else:
+            status = "[dim]- server offline[/]"
+
+        table.add_row(stem, size, status)
+
+    console.print(table)
+
+
+@llm.command("pull")
+@click.option(
+    "--model", "-m", type=str, default=None,
+    help="Pull a specific model by config name (e.g., qwen3.5-4b)",
+)
+def llm_pull(model: str | None) -> None:
+    """Download GGUF models from HuggingFace.
+
+    Downloads models configured with `gguf:` field in magaldi.yaml.
+    The gguf field format is: <repo_id>:<filename>
+
+    \b
+    Example config:
+        llm:
+          models:
+            qwen3.5-4b:
+              name: Qwen3.5-4B-Q4_K_M
+              provider: llamacpp
+              url: http://localhost:8090
+              gguf: unsloth/Qwen3.5-4B-GGUF:Qwen3.5-4B-Q4_K_M.gguf
+    """
+    config = load_config()
+
+    # Collect models with gguf field
+    to_pull: list[tuple[str, ModelConfig]] = []
+    for ref_name, cfg in config.llm.models.items():
+        if cfg.provider == "llamacpp" and hasattr(cfg, "gguf") and cfg.gguf and (model is None or ref_name == model):
+            to_pull.append((ref_name, cfg))
+
+    if not to_pull:
+        if model:
+            console.print(f"[red]Model '{model}' not found or has no gguf field[/]")
+        else:
+            console.print("[yellow]No models with gguf field found in config.[/]")
+        console.print()
+        console.print("Add gguf field to your model config:")
+        console.print('  gguf: "unsloth/Qwen3.5-4B-GGUF:Qwen3.5-4B-Q4_K_M.gguf"')
+        return
+
+    # Ensure models directory
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+
+    try:
+        from huggingface_hub import hf_hub_download
+    except ImportError:
+        console.print("[red]huggingface_hub not installed.[/]")
+        console.print("  Run: pip install huggingface-hub")
+        return
+
+    console.print(f"[bold blue]Downloading {len(to_pull)} model(s) to {MODELS_DIR}[/]")
+    console.print()
+
+    for ref_name, cfg in to_pull:
+        gguf_spec = cfg.gguf  # type: ignore[attr-defined]
+        if ":" not in gguf_spec:
+            console.print(f"  [red]{ref_name}: invalid gguf format '{gguf_spec}' (expected repo:filename)[/]")
+            continue
+
+        repo_id, filename = gguf_spec.rsplit(":", 1)
+
+        # Check if already downloaded
+        target = MODELS_DIR / filename
+        if target.exists():
+            console.print(f"  [dim]{filename} already exists ({_format_size(target.stat().st_size)})[/]")
+            continue
+
+        console.print(f"  Downloading {filename} from {repo_id}...")
+        try:
+            hf_hub_download(
+                repo_id=repo_id,
+                filename=filename,
+                local_dir=str(MODELS_DIR),
+            )
+            if target.exists():
+                console.print(f"  [green]  {filename} ({_format_size(target.stat().st_size)})[/]")
+            else:
+                console.print(f"  [green]  {filename} downloaded[/]")
+        except Exception as e:
+            console.print(f"  [red]  Failed: {rich_escape(str(e))}[/]")
+
+    console.print()
+    console.print("[green]Done.[/] Start with: [bold]magaldi llm serve[/]")

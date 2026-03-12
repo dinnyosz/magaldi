@@ -77,8 +77,8 @@ class ModelConfig:
     Encapsulates everything needed to connect to and use a model.
     """
 
-    name: str  # Model name (e.g., "qwen3.5:4b", "mlx-community/Qwen3-4B-Instruct-2507-4bit")
-    provider: str = "ollama"  # ollama, lmstudio, llamacpp, vllm-mlx, openai, anthropic
+    name: str  # Model name (e.g., "qwen3.5:4b", "Qwen3.5-4B-Q4_K_M")
+    provider: str = "ollama"  # ollama, llamacpp, lmstudio, openai, anthropic
     url: str = "http://localhost:11434"  # API endpoint
     api_key: str | None = None  # For cloud providers
 
@@ -87,6 +87,11 @@ class ModelConfig:
     max_tokens: int | None = None
     dimensions: int | None = None  # For embedding models
     num_ctx: int | None = None  # Context window size (Ollama num_ctx)
+
+    # GGUF download spec for llamacpp models: "repo_id:filename"
+    # Example: "unsloth/Qwen3.5-4B-GGUF:Qwen3.5-4B-Q4_K_M.gguf"
+    # Used by `magaldi llm pull` to download models from HuggingFace.
+    gguf: str | None = None
 
     def get_litellm_model(self) -> str:
         """Get the full LiteLLM model identifier.
@@ -104,9 +109,6 @@ class ModelConfig:
             # The ollama/ prefix uses /v1/chat/completions (OpenAI-compat) which
             # does NOT support the "think" parameter for disabling reasoning.
             return f"ollama_chat/{self.name}"
-        elif self.provider == "vllm-mlx":
-            # vllm-mlx serves one model per process; API uses "default"
-            return "openai/default"
         elif self.provider == "lmstudio":
             # LM Studio has a dedicated LiteLLM provider
             return f"lm_studio/{self.name}"
@@ -121,7 +123,7 @@ class ModelConfig:
         """Get the API base URL."""
         if self.provider == "ollama":
             return self.url
-        elif self.provider in ("lmstudio", "llamacpp", "vllm-mlx"):
+        elif self.provider in ("lmstudio", "llamacpp"):
             return f"{self.url.rstrip('/')}/v1"
         elif self.provider == "openai":
             return None
