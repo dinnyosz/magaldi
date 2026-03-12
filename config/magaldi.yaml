@@ -48,6 +48,14 @@ llm:
       provider: ollama
       url: http://localhost:11434
 
+    # Fine-tuned variable scorer (Qwen2.5-1.5B v2, LoRA)
+    # Serve with: llama-server -m tools/training/exports/magaldi-variable-scorer-qwen2.5-1.5b-v2-q8_0.gguf --port 8090
+    # Or use llama-cpp backend for direct GGUF loading (no server needed)
+    magaldi-scorer:
+      name: magaldi-scorer
+      provider: llamacpp
+      url: http://localhost:8090
+
     # To use LM Studio instead of Ollama, set provider: lmstudio
     # and match the model name to LM Studio's /v1/models API identifier.
 
@@ -62,6 +70,7 @@ llm:
   summarize_model: qwen3-4b           # files, classes, features
   summarize_model_small: qwen3-small   # functions, methods, variables, constants
   embed_model: qwen3-embed
+  variable_scoring_model: magaldi-scorer  # fine-tuned scorer (needs llama-server on :8090)
 
   # Generation settings
   summarize_temperature: 0.2

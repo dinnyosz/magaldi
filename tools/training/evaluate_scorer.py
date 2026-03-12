@@ -32,6 +32,11 @@ Usage:
       --api-base http://localhost:8090/v1 \
       --limit 20
 
+    # Validate using the production prompt pipeline (end-to-end):
+    python tools/training/evaluate_scorer.py \
+      --backend openai --api-base http://localhost:8090/v1 \
+      --use-production-prompt --limit 20
+
     # Evaluate multiple Ollama models side by side:
     python tools/training/evaluate_scorer.py \
       --model magaldi-scorer qwen3.5:4b \
@@ -79,6 +84,10 @@ SCORE_LINE_RE = re.compile(
 
 # Default validation data path relative to project root
 DEFAULT_VAL_DATA = "tools/training/data/variable_scorer/validation.jsonl"
+
+# Regex to extract variables from training user prompts:
+# Lines like "1. [src/app.py] MAX_RETRIES = 3"
+_VAR_LINE_RE = re.compile(r"^(\d+)\.\s*\[([^\]]+)\]\s*(.+)$", re.MULTILINE)
 
 
 # ============================================================================
@@ -313,6 +322,68 @@ def load_validation_examples(val_path: str, limit: int = 0) -> list[ValidationEx
                 break
 
     return examples
+
+
+# ============================================================================
+# Production prompt transformation
+# ============================================================================
+
+
+def apply_production_prompts(examples: list[ValidationExample]) -> list[ValidationExample]:
+    """Replace training prompts with production pipeline prompts.
+
+    Uses the SYSTEM_PROMPT from magaldi_core.variable_scoring.prompts and
+    rebuilds user prompts via build_user_prompt() (which adds /no_think prefix).
+    This validates that the model works with the exact prompt pipeline used
+    in production (Phase 4 of ``magaldi parse``).
+
+    Args:
+        examples: Validation examples loaded from training data.
+
+    Returns:
+        New list of examples with production prompts substituted.
+    """
+    try:
+        from magaldi_core.variable_scoring.prompts import SYSTEM_PROMPT, build_user_prompt
+    except ImportError:
+        print(
+            "ERROR: Could not import production prompts. "
+            "Make sure magaldi is installed: pip install -e .",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    transformed: list[ValidationExample] = []
+
+    for example in examples:
+        # Extract variables from the training user prompt
+        # Format: "N. [path] code"  (possibly preceded by /no_think header)
+        variables: list[tuple[int, str, str, str]] = []
+        for match in _VAR_LINE_RE.finditer(example.user_prompt):
+            idx = int(match.group(1))
+            file_path = match.group(2)
+            raw_code = match.group(3).strip()
+            # Extract variable name (first token before = or first word)
+            name = raw_code.split("=")[0].strip().split()[-1] if "=" in raw_code else raw_code.split()[0]
+            variables.append((idx, file_path, name, raw_code))
+
+        if not variables:
+            # Can't parse variables — keep original
+            transformed.append(example)
+            continue
+
+        # Rebuild using production pipeline
+        prod_user_prompt = build_user_prompt(variables)
+
+        transformed.append(ValidationExample(
+            system_prompt=SYSTEM_PROMPT,
+            user_prompt=prod_user_prompt,
+            expected_output=example.expected_output,
+            expected_scores=example.expected_scores,
+            var_count=example.var_count,
+        ))
+
+    return transformed
 
 
 # ============================================================================
@@ -850,6 +921,13 @@ Examples:
         action="store_true",
         help="Show per-example progress",
     )
+    parser.add_argument(
+        "--use-production-prompt",
+        action="store_true",
+        help="Replace training prompts with production pipeline prompts "
+        "(SYSTEM_PROMPT + build_user_prompt from magaldi_core). "
+        "Validates that the model works end-to-end with the production code.",
+    )
 
     return parser.parse_args()
 
@@ -872,6 +950,11 @@ def main() -> None:
     if not examples:
         print(f"ERROR: No validation examples found in {args.val_data}", file=sys.stderr)
         sys.exit(1)
+
+    # Optionally replace training prompts with production pipeline prompts
+    if args.use_production_prompt:
+        examples = apply_production_prompts(examples)
+        print("Using PRODUCTION prompts (magaldi_core.variable_scoring.prompts)")
 
     total_vars = sum(ex.var_count for ex in examples)
     print(f"Total variables to score: {total_vars}")
