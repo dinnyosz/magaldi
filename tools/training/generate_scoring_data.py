@@ -520,7 +520,8 @@ def _estimate_variable_tokens(result: RawScoringResult) -> int:
     """Estimate total token cost for one variable in a conversation.
 
     Includes both the user-prompt line and the assistant score line.
-    Uses ~4 chars per token heuristic.
+    Uses ~3 chars per token — conservative ratio because code (brackets,
+    underscores, paths, operators) tokenizes less efficiently than prose.
     """
     # User line: "N. [file_path] raw_code\n"
     code = result.raw_code.replace("\n", " ").strip()
@@ -529,13 +530,14 @@ def _estimate_variable_tokens(result: RawScoringResult) -> int:
     # Assistant line: "N. s,s,s,s,s,s,s\n" — 7 scores, each 1-2 digits
     response_chars = len(f"1. {','.join(str(s) for s in result.scores)}\n")
 
-    return (user_chars + response_chars) // 4 + 5  # +5 for tokenizer overhead
+    return (user_chars + response_chars) // 3 + 5  # +5 for tokenizer overhead
 
 
 def _estimate_system_prompt_tokens() -> int:
     """Estimate token cost of the system prompt + ChatML framing."""
-    # System prompt chars + ChatML overhead (role tags, separators, etc.)
-    return len(TEACHER_SYSTEM_PROMPT) // 4 + 30
+    # ~3 chars/token for code-heavy content + ChatML overhead
+    # (<|im_start|>system, <|im_end|>, role tags per message ≈ 25 tokens)
+    return len(TEACHER_SYSTEM_PROMPT) // 3 + 25
 
 
 def _is_trivial(result: RawScoringResult) -> bool:
