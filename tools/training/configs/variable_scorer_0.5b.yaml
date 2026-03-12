@@ -25,4 +25,4 @@ data_generation:
 
 export:
   quantization: Q4_K_M
-  ollama_model_name: magaldi-scorer
+  ollama_model_name: magaldi-scorer-0.5b
