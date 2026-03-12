@@ -591,11 +591,22 @@ class BenchmarkClient:
     - Tokens per second (output_tokens / wall_time)
 
     Model format: "provider/model" (e.g., "ollama/qwen2.5-coder:3b", "openai/gpt-4o")
+
+    Thinking model suppression, parameter routing, and content extraction
+    match the production LLMClient (shared.ai.llm_client) so benchmark
+    results are representative of actual parse behaviour.
     """
 
     # Models that use thinking/reasoning tags by default.
-    # All Qwen3 variants (qwen3, qwen3.5, etc.) think by default in Ollama.
-    THINKING_MODELS = ("qwen3", "deepseek-r1", "deepseek-coder-v2", "nemotron", "lfm2.5-thinking", "sam860/lfm2.5")
+    # qwen3 thinks by default; qwen3.5+ has reasoning disabled by default.
+    THINKING_MODELS = ("qwen3", "deepseek-r1", "deepseek-coder-v2", "nemotron")
+
+    # Models that are NOT thinking models despite matching a THINKING_MODELS prefix.
+    NON_THINKING_MODELS = ("qwen3.5", "qwen3.6", "qwen3.7", "qwen3.8", "qwen3.9",
+                           "qwen3-embedding", "qwen3-coder")
+
+    # Compiled regex for stripping <think> blocks from output
+    _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
     def __init__(
         self,
@@ -619,6 +630,17 @@ class BenchmarkClient:
         litellm.telemetry = False
         # Drop unsupported parameters (e.g., presence_penalty for Ollama)
         litellm.drop_params = True
+
+    @staticmethod
+    def _is_thinking_model(model: str) -> bool:
+        """Check if a model is a thinking model (needs thinking suppression).
+
+        Matches the logic in LLMClient._check_is_thinking_model().
+        """
+        base = model.split("/")[-1].lower()
+        if any(base.startswith(ntm) for ntm in BenchmarkClient.NON_THINKING_MODELS):
+            return False
+        return any(base.startswith(tm) for tm in BenchmarkClient.THINKING_MODELS)
 
     def check_connection(self) -> bool:
         """Check if the API is reachable."""
@@ -684,19 +706,6 @@ class BenchmarkClient:
             elapsed = time.perf_counter() - start
             return False, elapsed, str(e)
 
-    # Common stop sequences to prevent models from continuing past intended response
-    STOP_SEQUENCES = [
-        "<|im_start|>",      # ChatML format
-        "<|im_end|>",        # ChatML end
-        "<|assistant|>",     # Phi format
-        "<|user|>",          # Phi format
-        "<|eot_id|>",        # Llama 3 format
-        "<|start_header_id|>",  # Llama 3 format
-        "[INST]",            # Mistral format
-        "### Human:",        # Alpaca format
-        "### User:",         # Alpaca format
-    ]
-
     def generate(
         self,
         model: str,
@@ -711,84 +720,124 @@ class BenchmarkClient:
         timeout: int = 120,
         api_base: str | None = None,
         api_key: str | None = None,
-        stop: list[str] | None = None,
     ) -> BenchmarkResult:
         """Generate completion and return timing metrics.
+
+        Parameter routing, thinking suppression, and content extraction
+        mirror LLMClient._build_kwargs() / _extract_content() so that
+        benchmark results are comparable to actual parse behaviour.
 
         Args:
             model: Model name in LiteLLM format (e.g., "ollama/qwen2.5-coder:3b").
             prompt: The prompt to send.
             temperature: Sampling temperature.
             top_p: Nucleus sampling parameter.
-            top_k: Top-k sampling parameter (passed via extra params).
-            min_p: Min-p sampling parameter (passed via extra params).
-            repetition_penalty: Repetition penalty (maps to frequency_penalty).
+            top_k: Top-k sampling parameter (passed via extra_body).
+            min_p: Min-p sampling parameter (passed via extra_body).
+            repetition_penalty: Repetition penalty (passed via extra_body).
             presence_penalty: Presence penalty.
             max_tokens: Maximum tokens to generate.
             timeout: Request timeout in seconds.
             api_base: Override the client's api_base for this call.
             api_key: Override the client's api_key for this call.
-            stop: Custom stop sequences. If None, uses STOP_SEQUENCES.
 
         Returns:
             BenchmarkResult with timing and token information.
         """
         start = time.perf_counter()
 
-        # Build kwargs for litellm
+        _is_ollama = model.startswith(("ollama/", "ollama_chat/"))
+        _is_local = model.startswith(("openai/", "lm_studio/")) and (api_base or self.api_base)
+
+        # Build kwargs for litellm — no stop sequences (matches parse)
         kwargs: dict = {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": temperature,
             "max_tokens": max_tokens,
             "timeout": timeout,
-            "stop": stop if stop is not None else self.STOP_SEQUENCES,
         }
 
         # Add optional parameters
         if top_p is not None:
             kwargs["top_p"] = top_p
-        if presence_penalty is not None:
-            kwargs["presence_penalty"] = presence_penalty
-        if repetition_penalty is not None:
-            # Map to frequency_penalty (OpenAI-style)
-            kwargs["frequency_penalty"] = min(2.0, (repetition_penalty - 1.0) * 2)
 
-        # Pass provider-specific params via extra_body (Ollama native API)
-        extra_body: dict = {}
-        if top_k is not None:
-            extra_body["top_k"] = top_k
-        if min_p is not None:
-            extra_body["min_p"] = min_p
+        # Presence penalty: route through extra_body for Ollama (LiteLLM's
+        # ollama_chat provider doesn't support it top-level), top-level otherwise.
+        if presence_penalty is not None and presence_penalty != 0.0:
+            if _is_ollama:
+                kwargs.setdefault("extra_body", {})
+                kwargs["extra_body"]["presence_penalty"] = presence_penalty
+            else:
+                kwargs["presence_penalty"] = presence_penalty
+
+        # Repetition penalty: pass via extra_body (Ollama native format),
+        # matching LLMClient._build_kwargs().
+        if repetition_penalty is not None and repetition_penalty != 1.0:
+            kwargs.setdefault("extra_body", {})
+            kwargs["extra_body"]["repetition_penalty"] = repetition_penalty
+
+        # Provider-specific sampling params via extra_body
+        if top_k is not None or min_p is not None:
+            kwargs.setdefault("extra_body", {})
+            if top_k is not None:
+                kwargs["extra_body"]["top_k"] = top_k
+            if min_p is not None:
+                kwargs["extra_body"]["min_p"] = min_p
 
         # Add api_base (call param overrides instance)
         effective_api_base = api_base or self.api_base
         if effective_api_base:
             kwargs["api_base"] = effective_api_base
 
-        # Add api_key (call param overrides instance)
+        # Add api_key (call param overrides instance).
+        # For openai/ prefix with api_base (local servers), LiteLLM requires
+        # an api_key even though the server doesn't need auth.
         effective_api_key = api_key or self.api_key
         if effective_api_key:
             kwargs["api_key"] = effective_api_key
+        elif model.startswith("openai/") and effective_api_base:
+            kwargs["api_key"] = "not-needed"
 
-        # Disable thinking/reasoning for Ollama models.
-        # Uses ollama_chat/ prefix which routes to native /api/chat supporting "think".
-        # Always pass think=False for benchmarks — we want pure summarization output.
-        if model.startswith("ollama_chat/"):
+        # --- Thinking model suppression (matches LLMClient._build_kwargs()) ---
+        is_thinking = self._is_thinking_model(model)
+
+        if is_thinking and model.startswith("ollama_chat/"):
+            # Native /api/chat supports "think" parameter directly
             kwargs["think"] = False
-
-        if extra_body:
-            kwargs["extra_body"] = extra_body
+        elif _is_local:
+            # Local servers (LM Studio, llama.cpp) — always disable thinking
+            # Strategy 1: API param (chat_template_kwargs)
+            kwargs.setdefault("extra_body", {})
+            kwargs["extra_body"]["chat_template_kwargs"] = {"enable_thinking": False}
+            # Strategy 2: /no_think in system message (works for llama.cpp, LM Studio)
+            msgs = kwargs["messages"]
+            msgs = [{"role": "system", "content": "/no_think"}] + msgs
+            kwargs["messages"] = msgs
+        elif is_thinking:
+            # Cloud thinking models — disable via extra_body
+            kwargs.setdefault("extra_body", {})
+            kwargs["extra_body"]["chat_template_kwargs"] = {"enable_thinking": False}
 
         try:
             response = self._litellm.completion(**kwargs)
             total_time = time.perf_counter() - start
 
-            # Extract response text
-            content = response.choices[0].message.content
+            # Extract response text — mirrors LLMClient._extract_content().
+            # Falls back to reasoning_content when content is empty (llama-server
+            # with Qwen3.5 GGUF may split output into reasoning_content even when
+            # thinking suppression is requested).
+            message = response.choices[0].message
+            content = message.content
+            if not content:
+                reasoning = getattr(message, "reasoning_content", None)
+                if isinstance(reasoning, str) and reasoning.strip():
+                    content = reasoning
             if content is None:
                 content = ""
-            response_text = content.strip()
+            # Always strip <think> tags — they can leak through even when
+            # thinking is disabled (matches LLMClient._extract_content())
+            response_text = self._THINK_RE.sub("", content).strip()
 
             # Extract token counts from usage
             usage = response.usage
