@@ -113,7 +113,7 @@ class TestFeatureProcessingConfig:
         """Test that default values are set correctly."""
         config = FeatureProcessingConfig()
 
-        assert config.summarize_model == "qwen3:4b-instruct"
+        assert config.summarize_model == "qwen3.5:4b"
         assert config.embed_model == "qwen3-embedding:0.6b"
         assert config.api_base == "http://localhost:11434"
         assert config.provider == "ollama"

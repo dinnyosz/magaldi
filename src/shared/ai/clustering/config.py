@@ -28,7 +28,7 @@ def _get_model_display_name(model_name: str, provider: str, num_ctx: int) -> str
 class FeatureProcessingConfig:
     """Configuration for feature processing."""
 
-    summarize_model: str = "qwen3:4b-instruct"
+    summarize_model: str = "qwen3.5:4b"
     embed_model: str = "qwen3-embedding:0.6b"
     api_base: str = "http://localhost:11434"  # API base URL (for Ollama or custom endpoints)
     provider: str = "ollama"  # LLM provider: ollama, openai, anthropic, etc.

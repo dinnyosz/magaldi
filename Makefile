@@ -122,8 +122,8 @@ check: lint typecheck test
 
 ollama-pull:
 	@echo "Pulling Ollama models (this may take a while)..."
-	ollama pull qwen3:1.7b
-	ollama pull qwen3:4b-instruct
+	ollama pull qwen3.5:2b
+	ollama pull qwen3.5:4b
 	ollama pull qwen3-embedding:0.6b
 	@echo ""
 	@echo "Models ready!"

@@ -92,13 +92,13 @@ class TestLLMConfigDefaults:
     def test_default_summarize_model_reference(self):
         """Test that summarize_model is a reference key to named model."""
         config = LLMConfig()
-        assert config.summarize_model == "qwen3.5-4b"
+        assert config.summarize_model == "qwen3-4b"
 
     def test_default_summarize_model_name(self):
         """Test that the referenced summarize model has correct name."""
         config = LLMConfig()
         model = config.get_summarize_model()
-        assert model.name == "mlx-community/Qwen3-4B-Instruct-2507-4bit"
+        assert model.name == "qwen3:4b-instruct"
 
     def test_default_summarize_temperature(self):
         """Qwen3.5 precise coding preset: temp=0.6."""
@@ -123,7 +123,7 @@ class TestLLMConfigDefaults:
         """Test that the referenced embed model has correct name."""
         config = LLMConfig()
         model = config.get_embed_model()
-        assert model.name == "mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ"
+        assert model.name == "qwen3-embedding:0.6b"
 
     def test_default_embed_dimensions(self):
         """Test that embed model has correct dimensions."""
@@ -132,25 +132,16 @@ class TestLLMConfigDefaults:
         assert model.dimensions == 1024
 
     def test_default_variable_scoring_model_reference(self):
-        """Test that variable_scoring_model defaults to lmstudio-qwen3-4b."""
+        """Test that variable_scoring_model defaults to qwen3-4b."""
         config = LLMConfig()
-        assert config.variable_scoring_model == "lmstudio-qwen3-4b"
+        assert config.variable_scoring_model == "qwen3-4b"
 
     def test_default_variable_scoring_model_name(self):
         """Test that the referenced variable scoring model has correct name."""
         config = LLMConfig()
         model = config.get_variable_scoring_model()
-        assert model.name == "qwen3-4b"
-        assert model.provider == "lmstudio"
-
-    def test_variable_scoring_model_independent_from_summarize(self):
-        """Test that variable_scoring_model is independent from summarize_model."""
-        config = LLMConfig()
-        scoring = config.get_variable_scoring_model()
-        summarize = config.get_summarize_model()
-        assert scoring.name != summarize.name
-        assert scoring.provider == "lmstudio"
-        assert summarize.provider == "vllm-mlx"
+        assert model.name == "qwen3:4b-instruct"
+        assert model.provider == "ollama"
 
     def test_aggregation_context_size_default(self):
         """Should have default aggregation context size."""
@@ -256,7 +247,7 @@ class TestEnvOverrides:
         config = load_config(FIXTURES_DIR / "minimal.yaml")
         # The env override changes the model reference key, not the model name
         # Note: This requires the referenced model to exist in config.llm.models
-        assert config.llm.summarize_model == "qwen3.5-4b"  # Default from dataclass
+        assert config.llm.summarize_model == "qwen3-4b"  # Default from dataclass
 
     def test_env_overrides_log_level(self):
         os.environ["MAGALDI_LOG_LEVEL"] = "WARNING"

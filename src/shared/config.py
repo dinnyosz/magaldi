@@ -163,56 +163,50 @@ class LLMConfig:
     Example config.yaml:
         llm:
           models:
-            qwen3.5-4b:
-              name: mlx-community/Qwen3-4B-Instruct-2507-4bit
-              provider: vllm-mlx
-              url: http://localhost:8000
-            qwen3.5-small:
-              name: mlx-community/Qwen3-1.7B-4bit
-              provider: vllm-mlx
-              url: http://localhost:8001
+            qwen3-4b:
+              name: qwen3:4b-instruct
+              provider: ollama
+              url: http://localhost:11434
+            qwen3-1.7b:
+              name: qwen3:1.7b
+              provider: ollama
+              url: http://localhost:11434
             qwen3-embed:
-              name: mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ
-              provider: vllm-mlx
-              url: http://localhost:8000
+              name: qwen3-embedding:0.6b
+              provider: ollama
+              url: http://localhost:11434
               dimensions: 1024
 
-          summarize_model: qwen3.5-4b
-          summarize_model_small: qwen3.5-small
+          summarize_model: qwen3-4b
+          summarize_model_small: qwen3-1.7b
           embed_model: qwen3-embed
     """
 
     # Named model configurations
-    # Default to vllm-mlx for Apple Silicon (continuous batching, faster parallel processing)
     models: dict[str, ModelConfig] = field(default_factory=lambda: {
-        "qwen3.5-4b": ModelConfig(
-            name="mlx-community/Qwen3-4B-Instruct-2507-4bit",
-            provider="vllm-mlx",
-            url="http://localhost:8000",
+        "qwen3-4b": ModelConfig(
+            name="qwen3:4b-instruct",
+            provider="ollama",
+            url="http://localhost:11434",
         ),
-        "qwen3.5-small": ModelConfig(
-            name="mlx-community/Qwen3-1.7B-4bit",
-            provider="vllm-mlx",
-            url="http://localhost:8001",
+        "qwen3-1.7b": ModelConfig(
+            name="qwen3:1.7b",
+            provider="ollama",
+            url="http://localhost:11434",
         ),
         "qwen3-embed": ModelConfig(
-            name="mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ",
-            provider="vllm-mlx",
-            url="http://localhost:8000",
+            name="qwen3-embedding:0.6b",
+            provider="ollama",
+            url="http://localhost:11434",
             dimensions=1024,
-        ),
-        "lmstudio-qwen3-4b": ModelConfig(
-            name="qwen3-4b",
-            provider="lmstudio",
-            url="http://localhost:1234",
         ),
     })
 
     # Which models to use for each purpose (reference by name)
-    summarize_model: str = "qwen3.5-4b"
-    summarize_model_small: str = "qwen3.5-small"
+    summarize_model: str = "qwen3-4b"
+    summarize_model_small: str = "qwen3-1.7b"
     embed_model: str = "qwen3-embed"
-    variable_scoring_model: str = "lmstudio-qwen3-4b"
+    variable_scoring_model: str = "qwen3-4b"
 
     # Generation settings (defaults, can be overridden per-model)
     # Based on Qwen3.5 "Thinking Mode for Precise Coding Tasks" preset:
