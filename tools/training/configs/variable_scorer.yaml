@@ -8,7 +8,6 @@ training:
   learning_rate: 2.0e-4
   weight_decay: 0.01
   warmup_ratio: 0.05
-  num_layers: 28
   epochs: 3
   batch_size: 4
   gradient_accumulation_steps: 2

@@ -9,8 +9,8 @@ training:
   weight_decay: 0.01
   warmup_ratio: 0.05
   epochs: 3
-  batch_size: 4
-  gradient_accumulation_steps: 2
+  batch_size: 2
+  gradient_accumulation_steps: 4
   max_seq_len: 1024
   mask_prompt: false
   seed: 42
