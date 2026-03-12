@@ -19,9 +19,11 @@ data_generation:
   teacher_model: qwen3-coder:30b
   ollama_url: http://localhost:11434
   mode: individual
+  sample_size: 10000
   validation_split: 0.1
   temperature: 0.2
   timeout: 120
+  max_trivial_ratio: 0.3
 
 export:
   quantization: Q4_K_M

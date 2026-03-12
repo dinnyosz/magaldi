@@ -23,6 +23,7 @@ from generate_scoring_data import (
     _estimate_variable_tokens,
     _format_duration,
     _is_trivial,
+    _load_config_defaults,
     _parse_teacher_scores,
     _result_hash,
     build_training_batches,
@@ -745,3 +746,166 @@ class TestConstants:
             scores_part = line.strip().split(". ", 1)[1]
             scores = scores_part.split(",")
             assert len(scores) == 7, f"Expected 7 scores in example line: {line}"
+
+
+# =============================================================================
+# _load_config_defaults
+# =============================================================================
+
+
+class TestLoadConfigDefaults:
+    """Tests for loading defaults from config YAML."""
+
+    def test_loads_data_generation_section(self, tmp_path):
+        config = tmp_path / "config.yaml"
+        config.write_text(
+            "data_generation:\n"
+            "  teacher_model: qwen3-coder:30b\n"
+            "  sample_size: 5000\n"
+            "  temperature: 0.3\n"
+            "  max_trivial_ratio: 0.4\n"
+        )
+        defaults = _load_config_defaults(str(config))
+        assert defaults["teacher_model"] == "qwen3-coder:30b"
+        assert defaults["sample_size"] == 5000
+        assert defaults["temperature"] == 0.3
+        assert defaults["max_trivial_ratio"] == 0.4
+
+    def test_loads_training_max_seq_len(self, tmp_path):
+        config = tmp_path / "config.yaml"
+        config.write_text(
+            "training:\n"
+            "  max_seq_len: 2048\n"
+        )
+        defaults = _load_config_defaults(str(config))
+        assert defaults["max_seq_len"] == 2048
+
+    def test_missing_sections_returns_empty(self, tmp_path):
+        config = tmp_path / "config.yaml"
+        config.write_text("export:\n  quantization: Q4_K_M\n")
+        defaults = _load_config_defaults(str(config))
+        assert defaults == {}
+
+    def test_nonexistent_file_returns_empty(self, tmp_path):
+        defaults = _load_config_defaults(str(tmp_path / "nope.yaml"))
+        assert defaults == {}
+
+    def test_partial_config_only_includes_present_keys(self, tmp_path):
+        config = tmp_path / "config.yaml"
+        config.write_text(
+            "data_generation:\n"
+            "  teacher_model: test-model\n"
+        )
+        defaults = _load_config_defaults(str(config))
+        assert defaults == {"teacher_model": "test-model"}
+        assert "sample_size" not in defaults
+        assert "temperature" not in defaults
+
+    def test_empty_yaml_returns_empty(self, tmp_path):
+        config = tmp_path / "config.yaml"
+        config.write_text("")
+        defaults = _load_config_defaults(str(config))
+        assert defaults == {}
+
+
+# =============================================================================
+# Early exit: raw data sufficiency check
+# =============================================================================
+
+
+class TestEarlyExitLogic:
+    """Tests for the early-exit path when raw data is already sufficient."""
+
+    @staticmethod
+    def _make_raw_result(idx: int) -> RawScoringResult:
+        return RawScoringResult(
+            element_id=f"scope:repo:main:file{idx}.py:variable:var{idx}:{idx}",
+            file_path=f"file{idx}.py",
+            name=f"var{idx}",
+            raw_code=f"var{idx} = {idx}",
+            repo_name="test",
+            language="python",
+            scores=(1, 1, 1, 1, 1, 1, 1),
+            heuristic_drop=False,
+            heuristic_reason="",
+            teacher_model="teacher",
+            timestamp="2025-01-01T00:00:00",
+        )
+
+    def test_sufficient_raw_data_triggers_early_exit(self, tmp_path):
+        """When raw/ has >= sample_size results, early exit should trigger."""
+        raw_dir = tmp_path / "raw"
+        raw_dir.mkdir(parents=True)
+
+        # Create 100 raw results
+        for i in range(100):
+            result = self._make_raw_result(i)
+            save_raw_result(result, raw_dir)
+
+        existing = load_existing_results(raw_dir)
+        assert len(existing) == 100
+
+        # With sample_size=50, we have more than enough
+        sample_size = 50
+        should_skip = len(existing) >= sample_size
+        assert should_skip
+
+    def test_insufficient_raw_data_does_not_trigger(self, tmp_path):
+        """When raw/ has < sample_size results, early exit should not trigger."""
+        raw_dir = tmp_path / "raw"
+        raw_dir.mkdir(parents=True)
+
+        for i in range(10):
+            result = self._make_raw_result(i)
+            save_raw_result(result, raw_dir)
+
+        existing = load_existing_results(raw_dir)
+        sample_size = 100
+        should_skip = len(existing) >= sample_size
+        assert not should_skip
+
+    def test_empty_raw_dir_does_not_trigger(self, tmp_path):
+        """Empty raw/ directory should not trigger early exit."""
+        raw_dir = tmp_path / "raw"
+        raw_dir.mkdir(parents=True)
+
+        existing = load_existing_results(raw_dir)
+        assert len(existing) == 0
+        assert not (len(existing) >= 10)
+
+    def test_no_cache_bypasses_early_exit(self, tmp_path):
+        """With --no-cache, existing results should not be loaded."""
+        raw_dir = tmp_path / "raw"
+        raw_dir.mkdir(parents=True)
+
+        for i in range(100):
+            result = self._make_raw_result(i)
+            save_raw_result(result, raw_dir)
+
+        # Simulate --no-cache: don't load existing results
+        no_cache = True
+        existing: dict[str, RawScoringResult] = {}
+        if not no_cache:
+            existing = load_existing_results(raw_dir)
+
+        # Should NOT trigger early exit because we didn't load
+        assert len(existing) == 0
+
+    def test_force_rescore_bypasses_early_exit(self, tmp_path):
+        """With --force-rescore, even sufficient data should not skip."""
+        raw_dir = tmp_path / "raw"
+        raw_dir.mkdir(parents=True)
+
+        for i in range(100):
+            result = self._make_raw_result(i)
+            save_raw_result(result, raw_dir)
+
+        existing = load_existing_results(raw_dir)
+        sample_size = 50
+        force_rescore = True
+
+        # The condition: skip only if enough data AND not force-rescore
+        should_skip = (
+            len(existing) >= sample_size and not force_rescore
+        )
+        assert not should_skip

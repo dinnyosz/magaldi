@@ -83,15 +83,16 @@ After the user picks a config, read it and populate all parameters:
 
 ```
 repos_dir        = "test_repos"
-sample_size      = 10000
-teacher_model    = (from config: data_generation.teacher_model)
 config_path      = (user's chosen config path)
 output_model_dir = "tools/training/models/variable-scorer-v3"
 ollama_name      = (from config: export.ollama_model_name)
 quantization     = (from config: export.quantization)
 llama_cpp_path   = "tools/llama.cpp"
 eval_limit       = 50
-cache            = true  (always use cache by default)
+# These are read from config, but can be overridden by CLI flags:
+# sample_size    = (from config: data_generation.sample_size, default 10000)
+# teacher_model  = (from config: data_generation.teacher_model)
+# Cache is ON by default (no flag needed). Use --no-cache to disable.
 ```
 
 If the user specified overrides in their message (e.g. "train with 5000 samples"),
@@ -190,19 +191,25 @@ Total time: 1h 47m
 ```bash
 .venv/bin/python tools/training/generate_scoring_data.py \
   --repos-dir {repos_dir} \
-  --sample-size {sample_size} \
-  --teacher-model {teacher_model} \
-  --output-dir tools/training/data/variable_scorer \
   --config {config_path} \
-  --cache \
+  --output-dir tools/training/data/variable_scorer \
   --seed 42 \
   -v 2>&1
 ```
 
+Note: `--config` loads `sample_size`, `teacher_model`, `max_trivial_ratio`, etc. from the
+config YAML's `data_generation` section. CLI flags override config values.
+
+Cache is ON by default — previously scored results in `raw/` are reused automatically.
+If raw/ already has >= sample_size results, repo parsing and teacher scoring are skipped
+entirely (fast path). Use `--force-rescore` to re-parse repos and score new variables,
+or `--no-cache` to start completely fresh.
+
 **Progress parsing**: Each scored variable outputs a progress line like:
 `[  123/10000] KEEP 9,1,1,8,2,8,9  MAX_RETRIES ...`
 
-Extract current/total from `[N/TOTAL]` pattern.
+Extract current/total from `[N/TOTAL]` pattern. If the early-exit path triggers,
+look for `"Raw data sufficient"` message instead — scoring was skipped.
 
 **Completion**: Look for the `Output` section with `Train:` and `Validation:` lines.
 
@@ -280,6 +287,7 @@ and asks the user to pick one before starting. Key sections in each config:
 - `training.epochs` — Number of training epochs
 - `training.max_seq_len` — Token budget for batch packing
 - `data_generation.teacher_model` — Ollama model for scoring
+- `data_generation.sample_size` — Number of variables to sample (default 10000)
 - `data_generation.max_trivial_ratio` — Rebalancing threshold
 - `export.quantization` — GGUF quantization type
 - `export.ollama_model_name` — Name to register in Ollama

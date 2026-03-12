@@ -900,147 +900,167 @@ def run_generation(args: argparse.Namespace) -> None:
     raw_dir = output_dir / "raw"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Step 1: Discover repos and parse variables
-    repo_paths = discover_repos(args.repos_dir)
-    logger.info("Found %d repos in %s", len(repo_paths), args.repos_dir)
-
-    per_repo_vars: dict[str, list[dict]] = {}
-    for repo_path in repo_paths:
-        repo_name = Path(repo_path).name
-        try:
-            variables = extract_variables_from_repo(repo_path)
-            per_repo_vars[repo_name] = variables
-        except Exception:
-            logger.error("Failed to parse repo: %s", repo_path, exc_info=True)
-
-    total_available = sum(len(v) for v in per_repo_vars.values())
-    logger.info(
-        "Total variables available: %d from %d repos",
-        total_available, len(per_repo_vars),
-    )
-
-    if not per_repo_vars:
-        logger.error("No variables extracted from any repo.")
-        sys.exit(1)
-
-    # Step 2: Sample evenly across repos
-    sample_size = min(args.sample_size, total_available)
-    all_variables = sample_variables_evenly(per_repo_vars, sample_size, args.seed)
-
-    # Print per-repo sample counts
-    repo_counts: dict[str, int] = {}
-    for v in all_variables:
-        repo_counts[v["repo_name"]] = repo_counts.get(v["repo_name"], 0) + 1
-    logger.info(
-        "Sampled %d variables from %d repos: %s",
-        len(all_variables), len(repo_counts),
-        ", ".join(f"{k}={v}" for k, v in sorted(repo_counts.items())),
-    )
-
-    # Step 2: Load existing results for resume
+    # Step 1: Check existing raw data before expensive repo parsing
     existing: dict[str, RawScoringResult] = {}
-    if args.cache:
+    if not args.no_cache:
         existing = load_existing_results(raw_dir)
-        logger.info("Loaded %d existing results for resume", len(existing))
+        if existing:
+            logger.info("Loaded %d existing results from raw/", len(existing))
 
-    # Step 3: Score variables with teacher model
-    to_score = [v for v in all_variables if v["element_id"] not in existing]
-    logger.info(
-        "Variables to score: %d (skipping %d already scored)",
-        len(to_score),
-        len(all_variables) - len(to_score),
-    )
+    # Early exit: if we already have enough raw data, skip parsing + scoring
+    if existing and len(existing) >= args.sample_size and not args.force_rescore:
+        logger.info(
+            "Already have %d raw results (>= sample_size %d). "
+            "Skipping repo parsing and scoring. "
+            "Use --force-rescore to re-score anyway, or --no-cache to start fresh.",
+            len(existing),
+            args.sample_size,
+        )
+        print(
+            f"\n{'='*80}\n"
+            f"Raw data sufficient: {len(existing)} scored variables "
+            f"(requested {args.sample_size})\n"
+            f"Skipping repo parsing and teacher scoring — "
+            f"proceeding to training data assembly.\n"
+            f"{'='*80}\n"
+        )
+    else:
+        # Step 2: Discover repos and parse variables
+        repo_paths = discover_repos(args.repos_dir)
+        logger.info("Found %d repos in %s", len(repo_paths), args.repos_dir)
 
-    scored_count = 0
-    heuristic_count = 0
-    teacher_count = 0
-    failed_count = 0
-    filtered_count = 0
-    keep_count = 0
-    drop_count = 0
-    start_time = time.time()
-    threshold = 5
+        per_repo_vars: dict[str, list[dict]] = {}
+        for repo_path in repo_paths:
+            repo_name = Path(repo_path).name
+            try:
+                variables = extract_variables_from_repo(repo_path)
+                per_repo_vars[repo_name] = variables
+            except Exception:
+                logger.error("Failed to parse repo: %s", repo_path, exc_info=True)
 
-    for i, variable in enumerate(to_score):
-        # Check heuristic filter
-        heuristic_drop, heuristic_reason = should_drop_variable(
-            variable["name"], variable["raw_code"]
+        total_available = sum(len(v) for v in per_repo_vars.values())
+        logger.info(
+            "Total variables available: %d from %d repos",
+            total_available, len(per_repo_vars),
         )
 
-        if heuristic_drop:
-            # Known junk — assign all-1s without calling teacher
-            scores = tuple(1 for _ in range(NUM_SCORES))
-            heuristic_count += 1
-            decision = "DROP"
-            source = heuristic_reason
-        else:
-            # Score with teacher model
-            scores = score_variable_with_teacher(
-                variable,
-                teacher_model=args.teacher_model,
-                ollama_url=args.ollama_url,
-                temperature=args.temperature,
-                timeout=args.timeout,
+        if not per_repo_vars:
+            logger.error("No variables extracted from any repo.")
+            sys.exit(1)
+
+        # Step 3: Sample evenly across repos
+        sample_size = min(args.sample_size, total_available)
+        all_variables = sample_variables_evenly(per_repo_vars, sample_size, args.seed)
+
+        # Print per-repo sample counts
+        repo_counts: dict[str, int] = {}
+        for v in all_variables:
+            repo_counts[v["repo_name"]] = repo_counts.get(v["repo_name"], 0) + 1
+        logger.info(
+            "Sampled %d variables from %d repos: %s",
+            len(all_variables), len(repo_counts),
+            ", ".join(f"{k}={v}" for k, v in sorted(repo_counts.items())),
+        )
+
+        # Step 4: Determine what still needs scoring
+        to_score = [v for v in all_variables if v["element_id"] not in existing]
+        logger.info(
+            "Variables to score: %d (skipping %d already scored)",
+            len(to_score),
+            len(all_variables) - len(to_score),
+        )
+
+        # Step 5: Score variables with teacher model
+        scored_count = 0
+        heuristic_count = 0
+        teacher_count = 0
+        failed_count = 0
+        filtered_count = 0
+        keep_count = 0
+        drop_count = 0
+        start_time = time.time()
+        threshold = 5
+
+        for i, variable in enumerate(to_score):
+            # Check heuristic filter
+            heuristic_drop, heuristic_reason = should_drop_variable(
+                variable["name"], variable["raw_code"]
             )
 
-            if scores is None:
-                failed_count += 1
-                _print_progress_line(
-                    i + 1, len(to_score), variable, None, "FAIL",
-                    "T:err", start_time,
+            if heuristic_drop:
+                # Known junk — assign all-1s without calling teacher
+                scores = tuple(1 for _ in range(NUM_SCORES))
+                heuristic_count += 1
+                decision = "DROP"
+                source = heuristic_reason
+            else:
+                # Score with teacher model
+                scores = score_variable_with_teacher(
+                    variable,
+                    teacher_model=args.teacher_model,
+                    ollama_url=args.ollama_url,
+                    temperature=args.temperature,
+                    timeout=args.timeout,
                 )
-                continue
 
-            # Validate scores
-            valid, reason = validate_scores(variable, scores)
-            if not valid:
-                filtered_count += 1
-                _print_progress_line(
-                    i + 1, len(to_score), variable, scores, "FILT",
-                    reason, start_time,
-                )
-                continue
+                if scores is None:
+                    failed_count += 1
+                    _print_progress_line(
+                        i + 1, len(to_score), variable, None, "FAIL",
+                        "T:err", start_time,
+                    )
+                    continue
 
-            teacher_count += 1
-            max_s = max(scores)
-            decision = "KEEP" if max_s >= threshold else "DROP"
-            source = "T"
+                # Validate scores
+                valid, reason = validate_scores(variable, scores)
+                if not valid:
+                    filtered_count += 1
+                    _print_progress_line(
+                        i + 1, len(to_score), variable, scores, "FILT",
+                        reason, start_time,
+                    )
+                    continue
 
-        # Track keep/drop
-        if decision == "KEEP":
-            keep_count += 1
-        else:
-            drop_count += 1
+                teacher_count += 1
+                max_s = max(scores)
+                decision = "KEEP" if max_s >= threshold else "DROP"
+                source = "T"
 
-        # Save raw result
-        result = RawScoringResult(
-            element_id=variable["element_id"],
-            file_path=variable["file_path"],
-            name=variable["name"],
-            raw_code=variable["raw_code"],
-            repo_name=variable["repo_name"],
-            language=variable["language"],
-            scores=scores,
-            heuristic_drop=heuristic_drop,
-            heuristic_reason=heuristic_reason,
-            teacher_model=args.teacher_model,
-            timestamp=datetime.now().isoformat(),
+            # Track keep/drop
+            if decision == "KEEP":
+                keep_count += 1
+            else:
+                drop_count += 1
+
+            # Save raw result
+            result = RawScoringResult(
+                element_id=variable["element_id"],
+                file_path=variable["file_path"],
+                name=variable["name"],
+                raw_code=variable["raw_code"],
+                repo_name=variable["repo_name"],
+                language=variable["language"],
+                scores=scores,
+                heuristic_drop=heuristic_drop,
+                heuristic_reason=heuristic_reason,
+                teacher_model=args.teacher_model,
+                timestamp=datetime.now().isoformat(),
+            )
+            save_raw_result(result, raw_dir)
+            existing[result.element_id] = result
+            scored_count += 1
+
+            _print_progress_line(
+                i + 1, len(to_score), variable, scores, decision,
+                source, start_time,
+            )
+
+        elapsed = time.time() - start_time
+        _print_scoring_summary(
+            elapsed, scored_count, heuristic_count, teacher_count,
+            failed_count, filtered_count, keep_count, drop_count,
+            len(to_score),
         )
-        save_raw_result(result, raw_dir)
-        existing[result.element_id] = result
-        scored_count += 1
-
-        _print_progress_line(
-            i + 1, len(to_score), variable, scores, decision,
-            source, start_time,
-        )
-
-    elapsed = time.time() - start_time
-    _print_scoring_summary(
-        elapsed, scored_count, heuristic_count, teacher_count,
-        failed_count, filtered_count, keep_count, drop_count,
-        len(to_score),
-    )
 
     # Step 4: Assemble all results and build training data
     all_results = list(existing.values())
@@ -1147,11 +1167,57 @@ def run_generation(args: argparse.Namespace) -> None:
 # =============================================================================
 
 
+def _load_config_defaults(config_path: str) -> dict:
+    """Load data_generation + training defaults from a YAML config file.
+
+    Returns a flat dict of param_name -> value that can be used as CLI defaults.
+    Only includes keys that are present in the config.
+    """
+    import yaml
+
+    path = Path(config_path)
+    if not path.exists():
+        logger.warning("Config file not found: %s", config_path)
+        return {}
+
+    with open(path) as f:
+        config = yaml.safe_load(f) or {}
+
+    defaults: dict = {}
+    dg = config.get("data_generation", {})
+    training = config.get("training", {})
+
+    # Map config keys -> CLI arg names
+    _config_map = {
+        # data_generation section
+        "teacher_model": ("teacher_model", dg),
+        "ollama_url": ("ollama_url", dg),
+        "validation_split": ("validation_split", dg),
+        "temperature": ("temperature", dg),
+        "timeout": ("timeout", dg),
+        "max_trivial_ratio": ("max_trivial_ratio", dg),
+        "sample_size": ("sample_size", dg),
+        # training section (for max_seq_len)
+        "max_seq_len": ("max_seq_len", training),
+    }
+
+    for arg_name, (key, section) in _config_map.items():
+        if key in section:
+            defaults[arg_name] = section[key]
+
+    return defaults
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Generate training data for the variable scorer model."
     )
 
+    parser.add_argument(
+        "--config",
+        help="Path to training config YAML. Values from data_generation section "
+             "are used as defaults (CLI flags override).",
+    )
     parser.add_argument(
         "--repos-dir",
         required=True,
@@ -1160,18 +1226,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--sample-size",
         type=int,
-        default=10000,
-        help="Total variables to sample across all repos (default: 10000)",
+        default=None,
+        help="Total variables to sample across all repos (default: 10000, or from config)",
     )
     parser.add_argument(
         "--teacher-model",
-        default="qwen3-coder:30b",
-        help="Ollama teacher model name (default: qwen3-coder:30b)",
+        default=None,
+        help="Ollama teacher model name (default: qwen3-coder:30b, or from config)",
     )
     parser.add_argument(
         "--ollama-url",
-        default="http://localhost:11434",
-        help="Ollama API URL (default: http://localhost:11434)",
+        default=None,
+        help="Ollama API URL (default: http://localhost:11434, or from config)",
     )
     parser.add_argument(
         "--output-dir",
@@ -1181,36 +1247,47 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--validation-split",
         type=float,
-        default=0.1,
-        help="Fraction of data to hold out for validation (default: 0.1)",
+        default=None,
+        help="Fraction of data to hold out for validation (default: 0.1, or from config)",
     )
     parser.add_argument(
         "--temperature",
         type=float,
-        default=0.2,
-        help="Teacher model temperature (default: 0.2)",
+        default=None,
+        help="Teacher model temperature (default: 0.2, or from config)",
     )
     parser.add_argument(
         "--timeout",
         type=int,
-        default=120,
-        help="Teacher model timeout in seconds (default: 120)",
+        default=None,
+        help="Teacher model timeout in seconds (default: 120, or from config)",
+    )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Ignore previously scored results and start fresh (default: cache is ON)",
     )
     parser.add_argument(
         "--cache",
         action="store_true",
-        help="Reuse previously scored results from raw/ (skips re-scoring known variables)",
+        help="(Deprecated, now the default) Reuse previously scored results from raw/",
+    )
+    parser.add_argument(
+        "--force-rescore",
+        action="store_true",
+        help="Force repo parsing and scoring even if raw/ already has enough data. "
+             "Useful to add new repos or increase sample size.",
     )
     parser.add_argument(
         "--max-seq-len",
         type=int,
-        default=1024,
-        help="Max sequence length in tokens for batch packing (default: 1024)",
+        default=None,
+        help="Max sequence length in tokens for batch packing (default: 1024, or from config)",
     )
     parser.add_argument(
         "--max-trivial-ratio",
         type=float,
-        default=0.3,
+        default=None,
         help="Max fraction of trivial (all-1s) examples in training data (default: 0.3). "
              "Set to 1.0 to disable rebalancing.",
     )
@@ -1226,7 +1303,30 @@ def parse_args() -> argparse.Namespace:
         help="Enable verbose logging",
     )
 
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    # Load config defaults, then apply hardcoded defaults for anything still None
+    config_defaults = {}
+    if args.config:
+        config_defaults = _load_config_defaults(args.config)
+
+    _hardcoded_defaults = {
+        "sample_size": 10000,
+        "teacher_model": "qwen3-coder:30b",
+        "ollama_url": "http://localhost:11434",
+        "validation_split": 0.1,
+        "temperature": 0.2,
+        "timeout": 120,
+        "max_seq_len": 1024,
+        "max_trivial_ratio": 0.3,
+    }
+
+    # Priority: CLI flag > config file > hardcoded default
+    for param, hardcoded in _hardcoded_defaults.items():
+        if getattr(args, param) is None:
+            setattr(args, param, config_defaults.get(param, hardcoded))
+
+    return args
 
 
 def main() -> None:
