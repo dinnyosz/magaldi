@@ -57,25 +57,31 @@ def build_user_prompt(
 ) -> str:
     """Build the user prompt listing variables to score.
 
+    Variables should already be batched to fit within the token budget
+    (by ``_build_batches`` in production or ``build_training_batches`` in
+    training). This function only truncates individual variables whose
+    raw code alone exceeds ``max_code_chars``.
+
     Args:
         variables: List of (index, file_path, name, raw_code) tuples.
-        token_budget: Token budget per batch. Only truncate a variable if it
-            alone would exceed the budget (~4 chars/token).
+        token_budget: Maximum code chars per individual variable
+            (``token_budget * 4 - 200``). Variables exceeding this are
+            truncated. The overall batch size is controlled upstream.
 
     Returns:
         Formatted user prompt.
     """
-    # Only truncate if a single variable is so large it would blow the budget.
-    # Leave room for system prompt overhead, line prefix, and other variables.
-    max_chars = token_budget * 4 - 200  # ~4 chars/token, minus overhead
+    # Per-variable truncation limit: prevent a single huge variable from
+    # consuming the entire budget. Batch-level packing is done upstream.
+    max_code_chars = token_budget * 4 - 200  # ~4 chars/token, minus overhead
 
     # /no_think disables Qwen3's thinking mode via soft-switch.
     # This is a fallback for servers that don't honor chat_template_kwargs.
     lines = ["/no_think\nScore these variables:"]
     for idx, file_path, _name, raw_code in variables:
         code = raw_code.replace("\n", " ").strip()
-        if len(code) > max_chars:
-            code = code[: max_chars - 3] + "..."
+        if len(code) > max_code_chars:
+            code = code[: max_code_chars - 3] + "..."
         lines.append(f"{idx}. [{file_path}] {code}")
 
     return "\n".join(lines)

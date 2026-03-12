@@ -6,12 +6,8 @@ components of tools/training/generate_scoring_data.py.
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
 
 # Add training tools to path
 _project_root = Path(__file__).resolve().parents[1]
@@ -22,6 +18,9 @@ from generate_scoring_data import (
     NUM_SCORES,
     RawScoringResult,
     TEACHER_SYSTEM_PROMPT,
+    _batch_to_example,
+    _estimate_system_prompt_tokens,
+    _estimate_variable_tokens,
     _format_duration,
     _parse_teacher_scores,
     _result_hash,
@@ -254,16 +253,120 @@ class TestFormatTrainingExample:
 # =============================================================================
 
 
-class TestBuildTrainingBatches:
-    """Tests for batch building with varied sizes."""
+class TestEstimateTokens:
+    """Tests for token estimation helpers."""
 
-    def _make_results(self, n: int) -> list[RawScoringResult]:
+    def _make_result(self, raw_code: str = "x = 1", file_path: str = "a.py") -> RawScoringResult:
+        return RawScoringResult(
+            element_id="scope:repo:main:a.py:variable:x:1",
+            file_path=file_path,
+            name="x",
+            raw_code=raw_code,
+            repo_name="test",
+            language="python",
+            scores=(1, 1, 1, 1, 1, 1, 1),
+            heuristic_drop=False,
+            heuristic_reason="",
+            teacher_model="test",
+            timestamp="2025-01-01",
+        )
+
+    def test_estimate_variable_tokens_positive(self):
+        result = self._make_result("MAX_RETRIES = 3")
+        tokens = _estimate_variable_tokens(result)
+        assert tokens > 0
+
+    def test_longer_code_more_tokens(self):
+        short = self._make_result("x = 1")
+        long_code = self._make_result(
+            "CORS_ORIGINS = ['http://localhost:3000', 'https://myapp.com', 'https://staging.myapp.com']"
+        )
+        assert _estimate_variable_tokens(long_code) > _estimate_variable_tokens(short)
+
+    def test_longer_path_more_tokens(self):
+        short_path = self._make_result("x = 1", file_path="a.py")
+        long_path = self._make_result("x = 1", file_path="src/very/deep/nested/module/config.py")
+        assert _estimate_variable_tokens(long_path) > _estimate_variable_tokens(short_path)
+
+    def test_multiline_code_collapsed(self):
+        """Newlines in raw_code are replaced with spaces for estimation."""
+        result = self._make_result("ITEMS = [\n    'a',\n    'b',\n]")
+        tokens = _estimate_variable_tokens(result)
+        # Should still produce a positive estimate after collapsing
+        assert tokens > 0
+        # Should be similar to (but not necessarily identical to) the manually
+        # collapsed version, since replace("\n", " ") preserves leading spaces
+        result_flat = self._make_result("ITEMS = [ 'a', 'b', ]")
+        flat_tokens = _estimate_variable_tokens(result_flat)
+        # Within 50% of each other
+        assert abs(tokens - flat_tokens) / max(tokens, flat_tokens) < 0.5
+
+    def test_system_prompt_tokens_positive(self):
+        tokens = _estimate_system_prompt_tokens()
+        assert tokens > 0
+
+    def test_system_prompt_tokens_plausible_range(self):
+        """System prompt should be roughly 300-600 tokens."""
+        tokens = _estimate_system_prompt_tokens()
+        assert 200 < tokens < 800
+
+
+class TestBatchToExample:
+    """Tests for _batch_to_example helper."""
+
+    def test_produces_valid_chatml(self):
+        results = [
+            RawScoringResult(
+                element_id="scope:repo:main:a.py:variable:x:1",
+                file_path="a.py",
+                name="x",
+                raw_code="x = 1",
+                repo_name="test",
+                language="python",
+                scores=(9, 1, 1, 8, 2, 8, 9),
+                heuristic_drop=False,
+                heuristic_reason="",
+                teacher_model="test",
+                timestamp="2025-01-01",
+            )
+        ]
+        example = _batch_to_example(results)
+        assert "conversations" in example
+        assert len(example["conversations"]) == 3
+        roles = [m["role"] for m in example["conversations"]]
+        assert roles == ["system", "user", "assistant"]
+
+    def test_scores_match_input(self):
+        results = [
+            RawScoringResult(
+                element_id="scope:repo:main:a.py:variable:x:1",
+                file_path="a.py",
+                name="x",
+                raw_code="x = 1",
+                repo_name="test",
+                language="python",
+                scores=(9, 8, 7, 6, 5, 4, 3),
+                heuristic_drop=False,
+                heuristic_reason="",
+                teacher_model="test",
+                timestamp="2025-01-01",
+            )
+        ]
+        example = _batch_to_example(results)
+        assistant = example["conversations"][2]["content"]
+        assert "9,8,7,6,5,4,3" in assistant
+
+
+class TestBuildTrainingBatches:
+    """Tests for batch building with token-budget packing."""
+
+    def _make_results(self, n: int, raw_code: str | None = None) -> list[RawScoringResult]:
         return [
             RawScoringResult(
                 element_id=f"scope:repo:main:file{i}.py:variable:var{i}:{i}",
                 file_path=f"file{i}.py",
                 name=f"var{i}",
-                raw_code=f"var{i} = {i}",
+                raw_code=raw_code or f"var{i} = {i}",
                 repo_name="test-repo",
                 language="python",
                 scores=(1, 1, 1, 1, 1, 1, 1),
@@ -277,7 +380,7 @@ class TestBuildTrainingBatches:
 
     def test_all_variables_included(self):
         results = self._make_results(50)
-        batches = build_training_batches(results, seed=42)
+        batches = build_training_batches(results, seed=42, max_seq_len=1024)
 
         # Sum of all batch sizes should equal total results
         total = sum(
@@ -288,21 +391,124 @@ class TestBuildTrainingBatches:
 
     def test_single_variable_produces_batch(self):
         results = self._make_results(1)
-        batches = build_training_batches(results, seed=42)
+        batches = build_training_batches(results, seed=42, max_seq_len=1024)
         assert len(batches) == 1
 
     def test_deterministic_with_seed(self):
         results = self._make_results(20)
-        batches1 = build_training_batches(results, seed=42)
-        batches2 = build_training_batches(results, seed=42)
+        batches1 = build_training_batches(results, seed=42, max_seq_len=1024)
+        batches2 = build_training_batches(results, seed=42, max_seq_len=1024)
         assert batches1 == batches2
 
     def test_different_seeds_different_order(self):
         results = self._make_results(20)
-        batches1 = build_training_batches(results, seed=42)
-        batches2 = build_training_batches(results, seed=99)
+        batches1 = build_training_batches(results, seed=42, max_seq_len=1024)
+        batches2 = build_training_batches(results, seed=99, max_seq_len=1024)
         # Very likely different (not guaranteed but extremely unlikely with 20 items)
         assert batches1 != batches2
+
+    def test_smaller_budget_produces_more_batches(self):
+        """A tighter token budget should produce more, smaller batches."""
+        results = self._make_results(30)
+        batches_large = build_training_batches(results, seed=42, max_seq_len=2048)
+        batches_small = build_training_batches(results, seed=42, max_seq_len=512)
+        assert len(batches_small) > len(batches_large)
+
+    def test_no_batch_exceeds_budget(self):
+        """Each batch's estimated tokens should fit within max_seq_len."""
+        results = self._make_results(50)
+        max_seq_len = 1024
+        batches = build_training_batches(results, seed=42, max_seq_len=max_seq_len)
+
+        system_tokens = _estimate_system_prompt_tokens()
+        header_tokens = 8
+        available = max_seq_len - system_tokens - header_tokens
+
+        for batch in batches:
+            assistant_content = batch["conversations"][2]["content"]
+            batch_size = len(assistant_content.strip().split("\n"))
+            # For non-oversized batches (>1 variable), total tokens should be <= available
+            # Single-variable batches are allowed even if they're oversized
+            if batch_size > 1:
+                # Re-estimate: sum up token costs from user+assistant lines
+                user_content = batch["conversations"][1]["content"]
+                # Rough estimate: total chars / 4
+                total_chars = len(user_content) + len(assistant_content)
+                estimated_tokens = total_chars // 4 + 5 * batch_size
+                # Allow some margin for estimation imprecision
+                assert estimated_tokens <= available * 1.2, (
+                    f"Batch with {batch_size} vars estimated at {estimated_tokens} "
+                    f"tokens exceeds budget {available}"
+                )
+
+    def test_oversized_variable_gets_solo_batch(self):
+        """A variable whose code alone exceeds the budget is placed alone."""
+        # Create one very long variable and several short ones
+        long_code = "HUGE_DICT = {" + ", ".join(f"'key_{i}': 'value_{i}'" for i in range(200)) + "}"
+        results = self._make_results(5)
+        results.append(
+            RawScoringResult(
+                element_id="scope:repo:main:big.py:variable:HUGE_DICT:1",
+                file_path="big.py",
+                name="HUGE_DICT",
+                raw_code=long_code,
+                repo_name="test-repo",
+                language="python",
+                scores=(9, 1, 1, 8, 2, 8, 9),
+                heuristic_drop=False,
+                heuristic_reason="",
+                teacher_model="test",
+                timestamp="2025-01-01",
+            )
+        )
+        # Use a small budget so the big variable definitely exceeds it
+        batches = build_training_batches(results, seed=42, max_seq_len=256)
+
+        # The big variable should be in a solo batch
+        solo_batches = [
+            b for b in batches
+            if len(b["conversations"][2]["content"].strip().split("\n")) == 1
+            and "HUGE_DICT" in b["conversations"][1]["content"]
+        ]
+        assert len(solo_batches) == 1
+
+    def test_all_variables_included_with_oversized(self):
+        """Even oversized variables are included (not skipped)."""
+        long_code = "BIG = " + "x" * 5000
+        results = self._make_results(3)
+        results.append(
+            RawScoringResult(
+                element_id="scope:repo:main:big.py:variable:BIG:1",
+                file_path="big.py",
+                name="BIG",
+                raw_code=long_code,
+                repo_name="test-repo",
+                language="python",
+                scores=(5, 5, 5, 5, 5, 5, 5),
+                heuristic_drop=False,
+                heuristic_reason="",
+                teacher_model="test",
+                timestamp="2025-01-01",
+            )
+        )
+        batches = build_training_batches(results, seed=42, max_seq_len=512)
+
+        total = sum(
+            len(b["conversations"][2]["content"].strip().split("\n"))
+            for b in batches
+        )
+        assert total == 4
+
+    def test_empty_results(self):
+        batches = build_training_batches([], seed=42, max_seq_len=1024)
+        assert batches == []
+
+    def test_does_not_mutate_input(self):
+        """The function should not modify the caller's list."""
+        results = self._make_results(10)
+        original_ids = [r.element_id for r in results]
+        build_training_batches(results, seed=42, max_seq_len=1024)
+        assert [r.element_id for r in results] == original_ids
 
 
 # =============================================================================
@@ -417,9 +623,9 @@ class TestConstants:
         # Find the "Correct output" example lines
         lines = TEACHER_SYSTEM_PROMPT.split("\n")
         example_lines = [
-            l for l in lines
-            if l.strip() and l.strip()[0].isdigit() and "." in l and "," in l
-            and not l.strip().startswith("1. [")  # skip input examples
+            ln for ln in lines
+            if ln.strip() and ln.strip()[0].isdigit() and "." in ln and "," in ln
+            and not ln.strip().startswith("1. [")  # skip input examples
         ]
         for line in example_lines:
             # Extract scores after "N. "

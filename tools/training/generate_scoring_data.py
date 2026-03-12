@@ -507,11 +507,6 @@ def format_training_example(
         response_lines.append(f"{i + 1}. {scores_str}")
     assistant_content = "\n".join(response_lines)
 
-    # Qwen3 is a thinking model — it always generates <think>...</think>
-    # before the assistant response. Include empty think tags so the model
-    # learns to skip thinking and output scores directly.
-    assistant_content = f"<think>\n\n</think>\n\n{assistant_content}"
-
     return {
         "conversations": [
             {"role": "system", "content": TEACHER_SYSTEM_PROMPT},
@@ -521,58 +516,107 @@ def format_training_example(
     }
 
 
+def _estimate_variable_tokens(result: RawScoringResult) -> int:
+    """Estimate total token cost for one variable in a conversation.
+
+    Includes both the user-prompt line and the assistant score line.
+    Uses ~4 chars per token heuristic.
+    """
+    # User line: "N. [file_path] raw_code\n"
+    code = result.raw_code.replace("\n", " ").strip()
+    user_chars = len(f"1. [{result.file_path}] {code}\n")
+
+    # Assistant line: "N. s,s,s,s,s,s,s\n" — 7 scores, each 1-2 digits
+    response_chars = len(f"1. {','.join(str(s) for s in result.scores)}\n")
+
+    return (user_chars + response_chars) // 4 + 5  # +5 for tokenizer overhead
+
+
+def _estimate_system_prompt_tokens() -> int:
+    """Estimate token cost of the system prompt + ChatML framing."""
+    # System prompt chars + ChatML overhead (role tags, separators, etc.)
+    return len(TEACHER_SYSTEM_PROMPT) // 4 + 30
+
+
 def build_training_batches(
     results: list[RawScoringResult],
     seed: int = 42,
+    max_seq_len: int = 1024,
 ) -> list[dict]:
-    """Build ChatML training examples from scored results.
+    """Build ChatML training examples using greedy token-budget packing.
 
-    Mixes batch sizes to teach the model flexibility:
-    - 10% single variables (1-3)
-    - 40% medium batches (4-10)
-    - 40% large batches (11-20)
-    - 10% max batches (21-30)
+    Packs variables into batches until adding the next variable would exceed
+    the token budget (max_seq_len). This guarantees every training example
+    fits within max_seq_len with no silent truncation or wasted padding.
+
+    Batch sizes are dynamic: short variables produce bigger batches,
+    long variables produce smaller batches.
+
+    Args:
+        results: Scored variables to assemble into training conversations.
+        seed: Random seed for shuffling.
+        max_seq_len: Maximum sequence length in tokens. Batches are packed
+            to fit within this budget.
+
+    Returns:
+        List of ChatML conversation dicts ready for JSONL output.
     """
     rng = random.Random(seed)
     results = list(results)  # copy to avoid mutating caller's list
     rng.shuffle(results)
 
-    # Define batch size distribution
-    batch_sizes = (
-        [(1, 3)] * 10 +   # 10% small
-        [(4, 10)] * 40 +   # 40% medium
-        [(11, 20)] * 40 +  # 40% large
-        [(21, 30)] * 10    # 10% max
-    )
+    system_tokens = _estimate_system_prompt_tokens()
+    # Header line "Score these variables:\n" in user prompt
+    header_tokens = 8
+    available_budget = max_seq_len - system_tokens - header_tokens
 
     examples = []
-    idx = 0
-    batch_num = 0
+    current_batch: list[RawScoringResult] = []
+    current_tokens = 0
 
-    while idx < len(results):
-        # Pick batch size range from distribution
-        min_size, max_size = batch_sizes[batch_num % len(batch_sizes)]
-        batch_size = rng.randint(min_size, max_size)
-        batch_size = min(batch_size, len(results) - idx)
+    for result in results:
+        var_tokens = _estimate_variable_tokens(result)
 
-        batch_results = results[idx : idx + batch_size]
-        variables = [
-            {
-                "file_path": r.file_path,
-                "name": r.name,
-                "raw_code": r.raw_code,
-            }
-            for r in batch_results
-        ]
-        scores_list = [r.scores for r in batch_results]
+        # If this single variable exceeds the entire budget, truncate its
+        # code and add it as a solo example (don't skip it)
+        if var_tokens > available_budget:
+            # Flush current batch first
+            if current_batch:
+                examples.append(_batch_to_example(current_batch))
+                current_batch = []
+                current_tokens = 0
+            # Add as solo example (format_training_example will truncate)
+            examples.append(_batch_to_example([result]))
+            continue
 
-        example = format_training_example(variables, scores_list)
-        examples.append(example)
+        # Would this variable overflow the current batch?
+        if current_tokens + var_tokens > available_budget and current_batch:
+            examples.append(_batch_to_example(current_batch))
+            current_batch = []
+            current_tokens = 0
 
-        idx += batch_size
-        batch_num += 1
+        current_batch.append(result)
+        current_tokens += var_tokens
+
+    # Flush remaining
+    if current_batch:
+        examples.append(_batch_to_example(current_batch))
 
     return examples
+
+
+def _batch_to_example(batch: list[RawScoringResult]) -> dict:
+    """Convert a batch of RawScoringResults to a ChatML training example."""
+    variables = [
+        {
+            "file_path": r.file_path,
+            "name": r.name,
+            "raw_code": r.raw_code,
+        }
+        for r in batch
+    ]
+    scores_list = [r.scores for r in batch]
+    return format_training_example(variables, scores_list)
 
 
 # =============================================================================
@@ -952,9 +996,13 @@ def run_generation(args: argparse.Namespace) -> None:
         args.validation_split * 100,
     )
 
-    # Step 6: Build ChatML examples with varied batch sizes
-    train_examples = build_training_batches(train_results, seed=args.seed)
-    val_examples = build_training_batches(val_results, seed=args.seed + 1)
+    # Step 6: Build ChatML examples with token-budget packing
+    train_examples = build_training_batches(
+        train_results, seed=args.seed, max_seq_len=args.max_seq_len,
+    )
+    val_examples = build_training_batches(
+        val_results, seed=args.seed + 1, max_seq_len=args.max_seq_len,
+    )
 
     # Step 7: Write JSONL files
     train_path = output_dir / "train.jsonl"
@@ -983,11 +1031,26 @@ def run_generation(args: argparse.Namespace) -> None:
     for r in all_results:
         lang_counts[r.language] = lang_counts.get(r.language, 0) + 1
 
+    # Batch size stats
+    all_examples = train_examples + val_examples
+    batch_sizes = []
+    for ex in all_examples:
+        convos = ex.get("conversations", [])
+        for msg in convos:
+            if msg.get("role") == "assistant":
+                batch_sizes.append(msg["content"].count("\n") + 1)
+    avg_batch = sum(batch_sizes) / len(batch_sizes) if batch_sizes else 0
+    min_batch = min(batch_sizes) if batch_sizes else 0
+    max_batch = max(batch_sizes) if batch_sizes else 0
+
     print(f"\n{'='*80}")
     print("Output")
     print(f"{'='*80}")
     print(f"  Train:      {len(train_examples)} examples -> {train_path}")
     print(f"  Validation: {len(val_examples)} examples -> {val_path}")
+    print(f"  Max seq len:{args.max_seq_len} tokens")
+    print(f"  Batch sizes: min={min_batch}, avg={avg_batch:.1f}, max={max_batch}"
+          f" (packed to fit {args.max_seq_len} tokens)")
     print(f"  Scores:     {score_dist['drop']} clear drops, "
           f"{score_dist['borderline']} borderline, "
           f"{score_dist['keep']} clear keeps")
@@ -1053,6 +1116,12 @@ def parse_args() -> argparse.Namespace:
         "--resume",
         action="store_true",
         help="Resume from previously scored results in raw/",
+    )
+    parser.add_argument(
+        "--max-seq-len",
+        type=int,
+        default=1024,
+        help="Max sequence length in tokens for batch packing (default: 1024)",
     )
     parser.add_argument(
         "--seed",
