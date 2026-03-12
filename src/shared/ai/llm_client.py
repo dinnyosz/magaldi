@@ -501,9 +501,9 @@ class LLMClient:
 
         Handles thinking models where the server may split output into
         ``content`` (actual answer) and ``reasoning_content`` (thinking).
-        When ``content`` is None on a thinking model, falls back to
+        When ``content`` is None or empty on a thinking model, falls back to
         ``reasoning_content`` — some servers put the entire output there
-        when thinking suppression is ignored.
+        when thinking suppression is ignored (especially with structured output).
 
         Args:
             message: The response message object from LiteLLM.
@@ -518,18 +518,20 @@ class LLMClient:
         content = message.content
 
         # Thinking models: server may put output in reasoning_content
-        # when it ignores enable_thinking=False
-        if content is None and self._is_thinking_model:
+        # when it ignores enable_thinking=False.
+        # Check for None OR empty string — structured output with thinking
+        # models can return content='' with everything in reasoning_content.
+        if not content and self._is_thinking_model:
             reasoning = getattr(message, "reasoning_content", None)
             if reasoning:
                 logger.debug(
-                    "Model '%s' returned content=None but has reasoning_content "
+                    "Model '%s' returned content=%r but has reasoning_content "
                     "(%d chars) — using it as fallback",
-                    use_model, len(reasoning),
+                    use_model, content, len(reasoning),
                 )
                 content = reasoning
 
-        if content is None:
+        if not content:
             raise LLMError(f"Empty response from model '{use_model}'")
 
         text = content.strip()
@@ -621,7 +623,25 @@ class LLMClient:
 
         # Structured output via JSON schema
         if response_format is not None:
-            kwargs["response_format"] = response_format
+            if _is_ollama:
+                # Ollama supports structured output via its native `format`
+                # parameter.  We use format="json" to constrain output to
+                # valid JSON tokens.
+                #
+                # Note: Ollama also supports passing a JSON schema dict as
+                # `format` for schema-level enforcement, but this is unreliable
+                # in practice (Ollama ≤0.17.x silently ignores schema dicts
+                # with /api/chat).  Using format="json" is more robust —
+                # the prompt instructs the model on the expected structure.
+                kwargs["format"] = "json"
+
+                # Thinking models + structured output don't mix well.
+                # Force think=False when requesting structured output from
+                # Ollama, regardless of whether _is_thinking_model is set.
+                # Non-thinking models ignore this param harmlessly.
+                kwargs["think"] = False
+            else:
+                kwargs["response_format"] = response_format
 
         # Optional sampling parameters (from model-specific configs)
         # For Ollama, presence_penalty must go through extra_body — LiteLLM's

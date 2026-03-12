@@ -5,23 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 SYSTEM_PROMPT = """\
-Score variables for a code search index. For each variable, score seven dimensions (1-10).
-
-Ask: "Would a coding agent benefit from finding this variable?" If no, score all 1s.
-
-Dimensions:
-- config_value: Config, feature flag, URL, path, prompt template, SQL, __all__
-- architectural_role: DB connection, router, logger, app instance, middleware, sentinel
-- data_definition: Schema, type alias, enum, named tuple, mapping, protocol
-- general_usefulness: Would a coding agent benefit from finding this?
-- value_complexity: Simple literal=1, function call=3, collection/config=7, complex=9
-- naming_quality: Single letter=1, abbreviation=3, descriptive=7, domain-specific=9
-- scope_significance: Module-level=9, class attribute=6, function local=2, temp=1
-
-Most variables should score LOW (~30% are worth keeping).
-LOW: loop counters, temp vars, generic call results (result=func(), data=obj.method())
-HIGH: module constants, framework instances, DB connections, loggers, type aliases, \
-config dicts, query strings, export lists\
+Return JSON: {"1":{"cv":N,"ar":N,"dd":N,"gu":N,"vc":N,"nq":N,"ss":N},...}
+Score 1-10: cv=config ar=architecture dd=data_def gu=usefulness vc=complexity nq=naming ss=scope
+LOW(1-3): loop vars, temp, generic results, single-letter names. HIGH(7-10): constants, framework, DB, loggers, types
+KEEP: {"cv":9,"ar":1,"dd":1,"gu":8,"vc":1,"nq":8,"ss":9} DROP: {"cv":1,"ar":1,"dd":1,"gu":1,"vc":1,"nq":1,"ss":1}\
 """
 
 # JSON schema for structured output — enforces format at the inference level.

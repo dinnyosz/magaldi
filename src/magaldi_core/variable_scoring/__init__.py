@@ -128,8 +128,20 @@ def _parse_json_scores(output: str, batch_size: int) -> list[VariableScore | Non
     def _clamp(val: int) -> int:
         return min(10, max(1, val))
 
+    # Strip markdown code fences (```json ... ```) that some models add
+    # even when constrained to JSON output.
+    cleaned = output.strip()
+    if cleaned.startswith("```"):
+        # Remove opening fence (```json or ```)
+        first_newline = cleaned.find("\n")
+        if first_newline != -1:
+            cleaned = cleaned[first_newline + 1:]
+        # Remove closing fence
+        if cleaned.rstrip().endswith("```"):
+            cleaned = cleaned.rstrip()[:-3].rstrip()
+
     try:
-        data = json.loads(output)
+        data = json.loads(cleaned)
     except (json.JSONDecodeError, TypeError):
         # Not valid JSON — fall back to text parsing
         return _parse_text_scores(output, batch_size)
@@ -244,7 +256,7 @@ def _parse_scores(output: str, batch_size: int) -> list[VariableScore | None]:
         List of VariableScore (or None for unparseable entries).
     """
     stripped = output.strip()
-    if stripped.startswith("{"):
+    if stripped.startswith("{") or stripped.startswith("```"):
         return _parse_json_scores(stripped, batch_size)
     return _parse_text_scores(stripped, batch_size)
 

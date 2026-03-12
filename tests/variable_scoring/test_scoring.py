@@ -182,31 +182,35 @@ class TestBuildUserPrompt:
 class TestSystemPrompt:
     """Tests for system prompt content."""
 
-    def test_has_scoring_dimensions(self):
-        assert "config_value" in SYSTEM_PROMPT
-        assert "architectural_role" in SYSTEM_PROMPT
-        assert "data_definition" in SYSTEM_PROMPT
-        assert "general_usefulness" in SYSTEM_PROMPT
-        assert "value_complexity" in SYSTEM_PROMPT
-        assert "naming_quality" in SYSTEM_PROMPT
-        assert "scope_significance" in SYSTEM_PROMPT
+    def test_has_scoring_dimension_keys(self):
+        """Prompt references all 7 compact dimension keys."""
+        for key in ("cv", "ar", "dd", "gu", "vc", "nq", "ss"):
+            assert key in SYSTEM_PROMPT, f"Missing dimension key '{key}' in SYSTEM_PROMPT"
 
-    def test_covers_coding_agent_perspective(self):
-        """Prompt frames scoring from a coding agent's perspective."""
-        assert "coding agent" in SYSTEM_PROMPT
+    def test_has_json_format_example(self):
+        """Prompt includes JSON format example to anchor model output."""
+        assert '{"1":{' in SYSTEM_PROMPT
+        assert '"cv":N' in SYSTEM_PROMPT
 
-    def test_covers_export_lists(self):
-        """Prompt covers __all__ export lists as HIGH scoring."""
-        assert "__all__" in SYSTEM_PROMPT
+    def test_has_keep_drop_examples(self):
+        """Prompt includes KEEP and DROP scoring examples."""
+        assert "KEEP" in SYSTEM_PROMPT
+        assert "DROP" in SYSTEM_PROMPT
 
-    def test_covers_query_strings(self):
-        """Prompt covers SQL and sentinels."""
-        assert "SQL" in SYSTEM_PROMPT
-        assert "sentinel" in SYSTEM_PROMPT
+    def test_has_low_high_guidance(self):
+        """Prompt distinguishes LOW and HIGH scoring variables."""
+        assert "LOW" in SYSTEM_PROMPT
+        assert "HIGH" in SYSTEM_PROMPT
 
-    def test_has_drop_rate_guidance(self):
-        """Prompt guides model that most variables should be dropped."""
-        assert "30%" in SYSTEM_PROMPT
+    def test_prompt_is_concise(self):
+        """Prompt must be short enough for format=json to work with Ollama.
+
+        Longer prompts cause models to ignore format constraints.
+        """
+        assert len(SYSTEM_PROMPT) < 500, (
+            f"SYSTEM_PROMPT is {len(SYSTEM_PROMPT)} chars — "
+            "must be <500 for Ollama format=json to work reliably"
+        )
 
     def test_json_schema_has_all_dimensions(self):
         """JSON schema includes all 7 score dimensions."""
@@ -366,6 +370,30 @@ class TestParseScores:
         scores = _parse_scores(output, batch_size=1)
         assert scores[0] is not None
         assert scores[0].config_value == 9
+
+    def test_json_with_markdown_code_fence(self):
+        """JSON wrapped in markdown code fences should be parsed correctly."""
+        output = '```json\n{"1": {"cv": 9, "ar": 2, "dd": 1, "gu": 8, "vc": 3, "nq": 7, "ss": 9}}\n```'
+        scores = _parse_scores(output, batch_size=1)
+        assert scores[0] is not None
+        assert scores[0].config_value == 9
+        assert scores[0].general_usefulness == 8
+
+    def test_json_with_plain_code_fence(self):
+        """JSON wrapped in plain code fences (no language tag)."""
+        output = '```\n{"1": {"cv": 5, "ar": 5, "dd": 5, "gu": 5, "vc": 5, "nq": 5, "ss": 5}}\n```'
+        scores = _parse_scores(output, batch_size=1)
+        assert scores[0] is not None
+        assert scores[0].config_value == 5
+
+    def test_json_code_fence_multiple_variables(self):
+        """Code-fenced JSON with multiple variables."""
+        output = '```json\n{"1": {"cv": 9, "ar": 2, "dd": 1, "gu": 8, "vc": 3, "nq": 7, "ss": 9}, "2": {"cv": 1, "ar": 1, "dd": 1, "gu": 1, "vc": 1, "nq": 1, "ss": 1}}\n```'
+        scores = _parse_scores(output, batch_size=2)
+        assert scores[0] is not None
+        assert scores[0].config_value == 9
+        assert scores[1] is not None
+        assert scores[1].max_score == 1
 
     def test_text_format_basic_7dim(self):
         """Legacy text format still works via auto-detection."""
