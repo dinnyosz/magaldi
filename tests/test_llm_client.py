@@ -686,8 +686,13 @@ class TestThinkingModelDetection:
         call_kwargs = mock_comp.call_args.kwargs
         assert call_kwargs.get("think") is False
 
-    def test_llamacpp_no_model_name_no_think(self):
-        """Without model_name, openai/model doesn't detect thinking model for non-thinking model."""
+    def test_llamacpp_non_thinking_model_still_disables_thinking(self):
+        """Local servers always get enable_thinking=False even for non-thinking models.
+
+        llama-server + Qwen3.5 GGUF chat templates may enable thinking by default
+        (unlike Ollama). Sending enable_thinking=False is harmless for models that
+        don't support it, but prevents empty content when the template does think.
+        """
         client = LLMClient(
             model="openai/Qwen3.5-4B-Q4_K_M",
             api_base="http://localhost:8090/v1",
@@ -701,10 +706,10 @@ class TestThinkingModelDetection:
             client.generate_from_messages([{"role": "user", "content": "test"}])
 
         call_kwargs = mock_comp.call_args.kwargs
-        assert "think" not in call_kwargs
-        # No chat_template_kwargs either (Qwen3.5 is non-thinking)
+        assert "think" not in call_kwargs  # think= is Ollama-only
+        # Local servers always get chat_template_kwargs to suppress thinking
         extra = call_kwargs.get("extra_body", {})
-        assert "chat_template_kwargs" not in extra
+        assert extra.get("chat_template_kwargs") == {"enable_thinking": False}
 
     def test_llamacpp_with_thinking_model_name(self):
         """With model_name hint for thinking model, llamacpp disables thinking."""
@@ -747,8 +752,12 @@ class TestThinkingModelDetection:
         extra = call_kwargs.get("extra_body", {})
         assert extra.get("chat_template_kwargs") == {"enable_thinking": False}
 
-    def test_non_thinking_model_no_extra_params(self):
-        """Non-thinking model should not get any think params."""
+    def test_non_thinking_local_model_still_disables_thinking(self):
+        """Non-thinking model on local server still gets enable_thinking=False.
+
+        This is harmless for models that don't support thinking, but prevents
+        issues with GGUF chat templates that enable thinking by default.
+        """
         client = LLMClient(
             model="openai/default",
             api_base="http://localhost:8000/v1",
@@ -763,9 +772,10 @@ class TestThinkingModelDetection:
             client.generate_from_messages([{"role": "user", "content": "test"}])
 
         call_kwargs = mock_comp.call_args.kwargs
-        assert "think" not in call_kwargs
+        assert "think" not in call_kwargs  # think= is Ollama-only
+        # Local servers always get chat_template_kwargs
         extra = call_kwargs.get("extra_body", {})
-        assert "chat_template_kwargs" not in extra
+        assert extra.get("chat_template_kwargs") == {"enable_thinking": False}
 
     def test_is_thinking_model_flag_set_on_init(self):
         """_is_thinking_model should be set during __init__, not per-call."""
@@ -877,20 +887,26 @@ class TestThinkingModelDetection:
 
         assert result == ""
 
-    def test_non_thinking_model_preserves_think_tags(self):
-        """Non-thinking models should NOT have <think> tags stripped."""
+    def test_think_tags_always_stripped(self):
+        """<think> tags are always stripped, even for non-thinking models.
+
+        llama-server GGUF chat templates may emit <think> tags even for models
+        not flagged as thinking models. Always stripping prevents these from
+        polluting downstream parsers (variable scoring, summarization).
+        """
         client = LLMClient(model="ollama/llama-3.1:8b", api_base="http://localhost:11434")
 
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = (
-            "<think>This is literal text, not a thinking tag</think>"
+            "<think>reasoning text</think>Actual output"
         )
 
         with patch("shared.ai.llm_client.completion", return_value=mock_response):
             result = client.generate("test")
 
-        assert "<think>" in result
+        assert "<think>" not in result
+        assert result == "Actual output"
 
     def test_thinking_model_falls_back_to_reasoning_content(self):
         """When content=None, thinking model should use reasoning_content."""
@@ -935,8 +951,12 @@ class TestThinkingModelDetection:
 
         assert result == "actual scores"
 
-    def test_non_thinking_model_no_reasoning_fallback(self):
-        """Non-thinking model should NOT fall back to reasoning_content."""
+    def test_any_model_falls_back_to_reasoning_content(self):
+        """Any model should fall back to reasoning_content when content is empty.
+
+        llama-server GGUF chat templates may produce reasoning_content even for
+        models not flagged as thinking. Falling back prevents silent data loss.
+        """
         client = LLMClient(model="ollama/llama-3.1:8b", api_base="http://localhost:11434")
 
         mock_response = MagicMock()
@@ -944,8 +964,10 @@ class TestThinkingModelDetection:
         mock_response.choices[0].message.content = None
         mock_response.choices[0].message.reasoning_content = "some reasoning"
 
-        with patch("shared.ai.llm_client.completion", return_value=mock_response), pytest.raises(LLMError, match="Empty response"):
-            client.generate("test")
+        with patch("shared.ai.llm_client.completion", return_value=mock_response):
+            result = client.generate("test")
+
+        assert result == "some reasoning"
 
 
 class TestPresencePenaltyRouting:

@@ -501,40 +501,45 @@ class LLMClient:
 
         Handles thinking models where the server may split output into
         ``content`` (actual answer) and ``reasoning_content`` (thinking).
-        When ``content`` is None on a thinking model, falls back to
-        ``reasoning_content`` — some servers put the entire output there
-        when thinking suppression is ignored.
+        Falls back to ``reasoning_content`` when ``content`` is empty —
+        this covers cases where the server ignores enable_thinking=False
+        (e.g., llama-server with Qwen3.5 GGUF chat templates that enable
+        thinking by default).
 
         Args:
             message: The response message object from LiteLLM.
             use_model: Model identifier (for error messages).
 
         Returns:
-            Extracted text with <think> tags stripped for thinking models.
+            Extracted text with <think> tags stripped if present.
 
         Raises:
             LLMError: If no usable content is found.
         """
         content = message.content
 
-        # Thinking models: server may put output in reasoning_content
-        # when it ignores enable_thinking=False
-        if content is None and self._is_thinking_model:
+        # Fallback to reasoning_content for ANY model when content is empty.
+        # llama-server with Qwen3.5 GGUF may split output into reasoning_content
+        # even when the model isn't flagged as a thinking model, because the GGUF
+        # chat template enables thinking by default (unlike Ollama's version).
+        if not content:
             reasoning = getattr(message, "reasoning_content", None)
-            if reasoning:
-                logger.debug(
-                    "Model '%s' returned content=None but has reasoning_content "
-                    "(%d chars) — using it as fallback",
+            if isinstance(reasoning, str) and reasoning.strip():
+                logger.warning(
+                    "Model '%s' returned empty content but has reasoning_content "
+                    "(%d chars) — using it as fallback. "
+                    "Consider enabling thinking suppression for this model.",
                     use_model, len(reasoning),
                 )
                 content = reasoning
 
-        if content is None:
+        if not content:
             raise LLMError(f"Empty response from model '{use_model}'")
 
         text = content.strip()
-        if self._is_thinking_model:
-            text = self._strip_think_tags(text)
+        # Always strip <think> tags — they can appear even in non-thinking models
+        # when the server doesn't honor enable_thinking=False
+        text = self._think_re.sub("", text).strip()
         return text
 
     @classmethod
@@ -651,27 +656,36 @@ class LLMClient:
         # Helper to check if model is a local server (not cloud)
         _is_local = use_model.startswith(("openai/", "lm_studio/")) and self.api_base
 
-        # Disable thinking mode for models that use it by default
-        if self._is_thinking_model:
-            if use_model.startswith("ollama_chat/"):
-                # Native /api/chat supports "think" parameter directly
-                kwargs["think"] = False
-            elif _is_local:
-                # Local servers (LM Studio, llama.cpp)
-                # Strategy 1: API param (chat_template_kwargs)
-                kwargs["extra_body"] = kwargs.get("extra_body", {})
-                kwargs["extra_body"]["chat_template_kwargs"] = {"enable_thinking": False}
-                # Strategy 2: /no_think in system message (works for LM Studio, llama.cpp)
-                # Qwen3 models honor /no_think as a chat template directive
-                msgs = kwargs["messages"]
-                if msgs and msgs[0].get("role") == "system":
-                    content = msgs[0]["content"]
-                    if "/no_think" not in content:
-                        msgs = [{"role": "system", "content": f"/no_think\n{content}"}] + msgs[1:]
-                        kwargs["messages"] = msgs
-                else:
-                    msgs = [{"role": "system", "content": "/no_think"}] + msgs
+        # Disable thinking mode for local servers.
+        # Always send enable_thinking=False for llamacpp/local servers because:
+        # - Qwen3.5 GGUF chat templates may enable thinking by default on
+        #   llama-server even though Ollama's Qwen3.5 has it disabled.
+        # - Harmless for models that don't support thinking (param is ignored).
+        # - Without this, the model wastes token budget on reasoning_content
+        #   and returns empty content, causing parsers to fail silently.
+        if self._is_thinking_model and use_model.startswith("ollama_chat/"):
+            # Native /api/chat supports "think" parameter directly
+            kwargs["think"] = False
+        elif _is_local:
+            # Local servers (LM Studio, llama.cpp) — always disable thinking
+            # Strategy 1: API param (chat_template_kwargs)
+            kwargs["extra_body"] = kwargs.get("extra_body", {})
+            kwargs["extra_body"]["chat_template_kwargs"] = {"enable_thinking": False}
+            # Strategy 2: /no_think in system message (works for LM Studio, llama.cpp)
+            # Qwen3 models honor /no_think as a chat template directive
+            msgs = kwargs["messages"]
+            if msgs and msgs[0].get("role") == "system":
+                content = msgs[0]["content"]
+                if "/no_think" not in content:
+                    msgs = [{"role": "system", "content": f"/no_think\n{content}"}] + msgs[1:]
                     kwargs["messages"] = msgs
+            else:
+                msgs = [{"role": "system", "content": "/no_think"}] + msgs
+                kwargs["messages"] = msgs
+        elif self._is_thinking_model:
+            # Cloud thinking models — disable via extra_body
+            kwargs["extra_body"] = kwargs.get("extra_body", {})
+            kwargs["extra_body"]["chat_template_kwargs"] = {"enable_thinking": False}
 
         # Context window for local providers
         # Note: Only Ollama supports per-request context sizing via num_ctx.
