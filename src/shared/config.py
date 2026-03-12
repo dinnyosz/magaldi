@@ -165,36 +165,40 @@ class LLMConfig:
     Example config.yaml:
         llm:
           models:
-            qwen3-4b:
-              name: qwen3:4b-instruct
-              provider: ollama
-              url: http://localhost:11434
-            qwen3-1.7b:
-              name: qwen3:1.7b
-              provider: ollama
-              url: http://localhost:11434
+            qwen3.5-4b:
+              name: Qwen3.5-4B-Q4_K_M
+              provider: llamacpp
+              url: http://localhost:8090
+              gguf: unsloth/Qwen3.5-4B-GGUF:Qwen3.5-4B-Q4_K_M.gguf
+            qwen3.5-2b:
+              name: Qwen3.5-2B-Q4_K_M
+              provider: llamacpp
+              url: http://localhost:8090
+              gguf: unsloth/Qwen3.5-2B-GGUF:Qwen3.5-2B-Q4_K_M.gguf
             qwen3-embed:
               name: qwen3-embedding:0.6b
               provider: ollama
               url: http://localhost:11434
               dimensions: 1024
 
-          summarize_model: qwen3-4b
-          summarize_model_small: qwen3-1.7b
+          summarize_model: qwen3.5-4b
+          summarize_model_small: qwen3.5-2b
           embed_model: qwen3-embed
     """
 
     # Named model configurations
     models: dict[str, ModelConfig] = field(default_factory=lambda: {
-        "qwen3-4b": ModelConfig(
-            name="qwen3:4b-instruct",
-            provider="ollama",
-            url="http://localhost:11434",
+        "qwen3.5-4b": ModelConfig(
+            name="Qwen3.5-4B-Q4_K_M",
+            provider="llamacpp",
+            url="http://localhost:8090",
+            gguf="unsloth/Qwen3.5-4B-GGUF:Qwen3.5-4B-Q4_K_M.gguf",
         ),
-        "qwen3-1.7b": ModelConfig(
-            name="qwen3:1.7b",
-            provider="ollama",
-            url="http://localhost:11434",
+        "qwen3.5-2b": ModelConfig(
+            name="Qwen3.5-2B-Q4_K_M",
+            provider="llamacpp",
+            url="http://localhost:8090",
+            gguf="unsloth/Qwen3.5-2B-GGUF:Qwen3.5-2B-Q4_K_M.gguf",
         ),
         "qwen3-embed": ModelConfig(
             name="qwen3-embedding:0.6b",
@@ -205,10 +209,10 @@ class LLMConfig:
     })
 
     # Which models to use for each purpose (reference by name)
-    summarize_model: str = "qwen3-4b"
-    summarize_model_small: str = "qwen3-1.7b"
+    summarize_model: str = "qwen3.5-4b"
+    summarize_model_small: str = "qwen3.5-2b"
     embed_model: str = "qwen3-embed"
-    variable_scoring_model: str = "qwen3-4b"
+    variable_scoring_model: str = "qwen3.5-4b"
 
     # Generation settings (defaults, can be overridden per-model)
     # Based on Qwen3.5 "Thinking Mode for Precise Coding Tasks" preset:

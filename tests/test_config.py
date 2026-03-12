@@ -92,13 +92,14 @@ class TestLLMConfigDefaults:
     def test_default_summarize_model_reference(self):
         """Test that summarize_model is a reference key to named model."""
         config = LLMConfig()
-        assert config.summarize_model == "qwen3-4b"
+        assert config.summarize_model == "qwen3.5-4b"
 
     def test_default_summarize_model_name(self):
         """Test that the referenced summarize model has correct name."""
         config = LLMConfig()
         model = config.get_summarize_model()
-        assert model.name == "qwen3:4b-instruct"
+        assert model.name == "Qwen3.5-4B-Q4_K_M"
+        assert model.provider == "llamacpp"
 
     def test_default_summarize_temperature(self):
         """Qwen3.5 precise coding preset: temp=0.6."""
@@ -132,16 +133,16 @@ class TestLLMConfigDefaults:
         assert model.dimensions == 1024
 
     def test_default_variable_scoring_model_reference(self):
-        """Test that variable_scoring_model defaults to qwen3-4b."""
+        """Test that variable_scoring_model defaults to qwen3.5-4b."""
         config = LLMConfig()
-        assert config.variable_scoring_model == "qwen3-4b"
+        assert config.variable_scoring_model == "qwen3.5-4b"
 
     def test_default_variable_scoring_model_name(self):
         """Test that the referenced variable scoring model has correct name."""
         config = LLMConfig()
         model = config.get_variable_scoring_model()
-        assert model.name == "qwen3:4b-instruct"
-        assert model.provider == "ollama"
+        assert model.name == "Qwen3.5-4B-Q4_K_M"
+        assert model.provider == "llamacpp"
 
     def test_aggregation_context_size_default(self):
         """Should have default aggregation context size."""
@@ -247,7 +248,7 @@ class TestEnvOverrides:
         config = load_config(FIXTURES_DIR / "minimal.yaml")
         # The env override changes the model reference key, not the model name
         # Note: This requires the referenced model to exist in config.llm.models
-        assert config.llm.summarize_model == "qwen3-4b"  # Default from dataclass
+        assert config.llm.summarize_model == "qwen3.5-4b"  # Default from dataclass
 
     def test_env_overrides_log_level(self):
         os.environ["MAGALDI_LOG_LEVEL"] = "WARNING"
