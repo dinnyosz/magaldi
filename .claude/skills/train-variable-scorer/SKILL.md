@@ -36,15 +36,56 @@ Invoked by `/train-variable-scorer` or when the user asks to "train the scorer",
 
 ## Orchestrator Workflow
 
-### 1. Gather parameters
+### 1. Auto-detect configs and ask user
 
-Before starting, check if the user specified any overrides. Use these defaults otherwise:
+Before starting, discover available training configs and let the user choose:
+
+**Step 1a: Scan for configs**
+
+List all YAML files matching `tools/training/configs/variable_scorer*.yaml`.
+For each config, read the file and extract a summary:
+- `training.base_model` — the model being fine-tuned
+- `training.epochs` — number of epochs
+- `training.lora_rank` — LoRA rank
+- `export.ollama_model_name` — what it'll be registered as
+
+**Step 1b: Ask the user which config to use**
+
+Use `AskUserQuestion` to present the available configs. Format each option with
+the key details so the user can make an informed choice. Example:
+
+```
+AskUserQuestion({
+  questions: [{
+    question: "Which training config should I use?",
+    header: "Config",
+    options: [
+      {
+        label: "variable_scorer.yaml (Recommended)",
+        description: "Qwen2.5-1.5B, 3 epochs, rank 8, Q4_K_M → magaldi-scorer"
+      },
+      {
+        label: "variable_scorer_0.5b.yaml",
+        description: "Qwen2.5-0.5B, 5 epochs, rank 16, Q4_K_M → magaldi-scorer"
+      }
+    ],
+    multiSelect: false
+  }]
+})
+```
+
+If only one config exists, skip the question and use it directly (but still
+inform the user which config was selected).
+
+**Step 1c: Set parameters**
+
+After the user picks a config, read it and populate all parameters:
 
 ```
 repos_dir        = "test_repos"
 sample_size      = 10000
 teacher_model    = (from config: data_generation.teacher_model)
-config_path      = "tools/training/configs/variable_scorer.yaml"
+config_path      = (user's chosen config path)
 output_model_dir = "tools/training/models/variable-scorer-v3"
 ollama_name      = (from config: export.ollama_model_name)
 quantization     = (from config: export.quantization)
@@ -53,7 +94,8 @@ eval_limit       = 50
 cache            = true  (always use cache by default)
 ```
 
-Read the config YAML to fill in values from `data_generation` and `export` sections.
+If the user specified overrides in their message (e.g. "train with 5000 samples"),
+apply those on top of the config values.
 
 ### 2. Initialize tracking
 
@@ -151,7 +193,7 @@ Total time: 1h 47m
   --sample-size {sample_size} \
   --teacher-model {teacher_model} \
   --output-dir tools/training/data/variable_scorer \
-  --config tools/training/configs/variable_scorer.yaml \
+  --config {config_path} \
   --cache \
   --seed 42 \
   -v 2>&1
@@ -231,8 +273,8 @@ from the output.
 
 ## Configuration Reference
 
-The skill reads `tools/training/configs/variable_scorer.yaml` for all parameters.
-Key sections:
+The skill auto-detects all `tools/training/configs/variable_scorer*.yaml` files
+and asks the user to pick one before starting. Key sections in each config:
 
 - `training.base_model` — HuggingFace model name
 - `training.epochs` — Number of training epochs
