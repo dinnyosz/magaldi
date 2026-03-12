@@ -42,7 +42,7 @@ Before starting, check if the user specified any overrides. Use these defaults o
 
 ```
 repos_dir        = "test_repos"
-sample_size      = 3000
+sample_size      = 10000
 teacher_model    = (from config: data_generation.teacher_model)
 config_path      = "tools/training/configs/variable_scorer.yaml"
 output_model_dir = "tools/training/models/variable-scorer-v3"
@@ -50,7 +50,7 @@ ollama_name      = (from config: export.ollama_model_name)
 quantization     = (from config: export.quantization)
 llama_cpp_path   = "~/llama.cpp"  (ask user if not found)
 eval_limit       = 50
-resume           = true  (always resume by default)
+cache            = true  (always use cache by default)
 ```
 
 Read the config YAML to fill in values from `data_generation` and `export` sections.
@@ -127,7 +127,7 @@ After all steps complete, post a summary:
 ```
 Training pipeline complete!
 
-*Data*: 3,000 variables scored, 2,700 train / 300 val examples
+*Data*: 10,000 variables scored, 9,000 train / 1,000 val examples
 *Training*: 3 epochs, final val loss: 0.072
 *Model*: magaldi-scorer registered in Ollama (Q4_K_M, 892 MB)
 *Evaluation*:
@@ -152,13 +152,13 @@ Total time: 1h 47m
   --teacher-model {teacher_model} \
   --output-dir tools/training/data/variable_scorer \
   --config tools/training/configs/variable_scorer.yaml \
-  --resume \
+  --cache \
   --seed 42 \
   -v 2>&1
 ```
 
 **Progress parsing**: Each scored variable outputs a progress line like:
-`[  123/3000] KEEP 9,1,1,8,2,8,9  MAX_RETRIES ...`
+`[  123/10000] KEEP 9,1,1,8,2,8,9  MAX_RETRIES ...`
 
 Extract current/total from `[N/TOTAL]` pattern.
 
@@ -226,7 +226,7 @@ from the output.
 - If any step fails (non-zero exit code), stop the pipeline immediately
 - Post the last 20 lines of output to help diagnose
 - Ask the user: "Step N failed. Want me to show the full output, retry, or skip?"
-- For Step 1 with `--resume`: suggest re-running (resume picks up where it left off)
+- For Step 1 with `--cache`: suggest re-running (cache reuses already-scored variables)
 - For Step 2: suggest checking GPU/memory and retrying with smaller batch size
 
 ## Configuration Reference
@@ -259,4 +259,4 @@ This is simpler and more reliable than nested subagents because:
 - The project root is `/Users/dinnyosz/code/magaldi`
 - llama.cpp is typically at `~/llama.cpp` — verify with `ls ~/llama.cpp/convert_hf_to_gguf.py`
 - Training on Apple Silicon (M-series) via MLX — no GPU needed
-- The `--resume` flag on Step 1 is safe to always use — it skips already-scored variables
+- The `--cache` flag on Step 1 is safe to always use — it reuses already-scored variables from `raw/`

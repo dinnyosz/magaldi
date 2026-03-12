@@ -8,10 +8,10 @@ outputs ChatML JSONL for fine-tuning.
 Usage:
     python tools/training/generate_scoring_data.py \
       --repos-dir test_repos \
-      --sample-size 3000 \
+      --sample-size 10000 \
       --teacher-model qwen3-coder:30b \
       --output-dir tools/training/data/variable_scorer \
-      --resume
+      --cache
 """
 
 from __future__ import annotations
@@ -939,7 +939,7 @@ def run_generation(args: argparse.Namespace) -> None:
 
     # Step 2: Load existing results for resume
     existing: dict[str, RawScoringResult] = {}
-    if args.resume:
+    if args.cache:
         existing = load_existing_results(raw_dir)
         logger.info("Loaded %d existing results for resume", len(existing))
 
@@ -1160,8 +1160,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--sample-size",
         type=int,
-        default=3000,
-        help="Total variables to sample across all repos (default: 3000)",
+        default=10000,
+        help="Total variables to sample across all repos (default: 10000)",
     )
     parser.add_argument(
         "--teacher-model",
@@ -1197,9 +1197,9 @@ def parse_args() -> argparse.Namespace:
         help="Teacher model timeout in seconds (default: 120)",
     )
     parser.add_argument(
-        "--resume",
+        "--cache",
         action="store_true",
-        help="Resume from previously scored results in raw/",
+        help="Reuse previously scored results from raw/ (skips re-scoring known variables)",
     )
     parser.add_argument(
         "--max-seq-len",

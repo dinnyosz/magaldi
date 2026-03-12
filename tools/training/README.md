@@ -26,7 +26,7 @@ python tools/training/generate_scoring_data.py \
   --repos /path/to/repo1 /path/to/repo2 \
   --teacher-model qwen3-coder:30b \
   --output-dir tools/training/data/variable_scorer \
-  --resume
+  --cache
 ```
 
 The script:
@@ -36,7 +36,7 @@ The script:
 - Quality-filters results (range check, heuristic agreement, constant sanity)
 - Outputs ChatML JSONL with varied batch sizes for training
 
-Use `--resume` to continue from where you left off (results cached in `raw/`).
+Use `--cache` to reuse previously scored results from `raw/` (skips re-scoring known variables).
 
 ### 2. Train
 
