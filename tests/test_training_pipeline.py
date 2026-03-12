@@ -22,11 +22,13 @@ from generate_scoring_data import (
     _estimate_system_prompt_tokens,
     _estimate_variable_tokens,
     _format_duration,
+    _is_trivial,
     _parse_teacher_scores,
     _result_hash,
     build_training_batches,
     format_training_example,
     load_existing_results,
+    rebalance_results,
     save_raw_result,
     validate_batch_scores,
     validate_scores,
@@ -509,6 +511,117 @@ class TestBuildTrainingBatches:
         original_ids = [r.element_id for r in results]
         build_training_batches(results, seed=42, max_seq_len=1024)
         assert [r.element_id for r in results] == original_ids
+
+
+# =============================================================================
+# rebalance_results
+# =============================================================================
+
+
+class TestRebalanceResults:
+    """Tests for training data rebalancing."""
+
+    def _make_result(
+        self, name: str, scores: tuple[int, ...] = (1, 1, 1, 1, 1, 1, 1)
+    ) -> RawScoringResult:
+        return RawScoringResult(
+            element_id=f"scope:repo:main:a.py:variable:{name}:1",
+            file_path="a.py",
+            name=name,
+            raw_code=f"{name} = 1",
+            repo_name="test",
+            language="python",
+            scores=scores,
+            heuristic_drop=False,
+            heuristic_reason="",
+            teacher_model="test",
+            timestamp="2025-01-01",
+        )
+
+    def _make_mixed_results(
+        self, n_trivial: int, n_non_trivial: int
+    ) -> list[RawScoringResult]:
+        """Create a mix of trivial and non-trivial results."""
+        results = []
+        for i in range(n_trivial):
+            results.append(self._make_result(f"triv_{i}", (1, 1, 1, 1, 1, 1, 1)))
+        for i in range(n_non_trivial):
+            results.append(self._make_result(f"keep_{i}", (9, 1, 1, 8, 2, 8, 9)))
+        return results
+
+    def test_is_trivial_all_ones(self):
+        r = self._make_result("x", (1, 1, 1, 1, 1, 1, 1))
+        assert _is_trivial(r)
+
+    def test_is_trivial_not_all_ones(self):
+        r = self._make_result("x", (1, 1, 1, 1, 1, 1, 2))
+        assert not _is_trivial(r)
+
+    def test_no_rebalancing_when_ratio_is_1(self):
+        results = self._make_mixed_results(50, 50)
+        rebalanced = rebalance_results(results, max_trivial_ratio=1.0)
+        assert len(rebalanced) == 100
+
+    def test_undersamples_trivial_to_target_ratio(self):
+        # 70 trivial + 30 non-trivial = 70% trivial
+        results = self._make_mixed_results(70, 30)
+        rebalanced = rebalance_results(results, max_trivial_ratio=0.3, seed=42)
+
+        trivial_count = sum(1 for r in rebalanced if _is_trivial(r))
+        non_trivial_count = sum(1 for r in rebalanced if not _is_trivial(r))
+
+        # All non-trivial should be kept
+        assert non_trivial_count == 30
+        # Trivial ratio should be <= 0.3
+        actual_ratio = trivial_count / len(rebalanced)
+        assert actual_ratio <= 0.31  # small margin for rounding
+
+    def test_preserves_all_non_trivial(self):
+        results = self._make_mixed_results(80, 20)
+        rebalanced = rebalance_results(results, max_trivial_ratio=0.3, seed=42)
+
+        non_trivial_names = {r.name for r in rebalanced if not _is_trivial(r)}
+        expected_names = {f"keep_{i}" for i in range(20)}
+        assert non_trivial_names == expected_names
+
+    def test_no_change_when_already_balanced(self):
+        # 20 trivial + 80 non-trivial = 20% trivial (< 30%)
+        results = self._make_mixed_results(20, 80)
+        rebalanced = rebalance_results(results, max_trivial_ratio=0.3, seed=42)
+        assert len(rebalanced) == 100
+
+    def test_all_trivial_returns_all(self):
+        results = self._make_mixed_results(50, 0)
+        rebalanced = rebalance_results(results, max_trivial_ratio=0.3, seed=42)
+        assert len(rebalanced) == 50
+
+    def test_deterministic_with_seed(self):
+        results = self._make_mixed_results(70, 30)
+        r1 = rebalance_results(results, max_trivial_ratio=0.3, seed=42)
+        r2 = rebalance_results(results, max_trivial_ratio=0.3, seed=42)
+        assert [r.element_id for r in r1] == [r.element_id for r in r2]
+
+    def test_different_seeds_different_sampling(self):
+        results = self._make_mixed_results(70, 30)
+        r1 = rebalance_results(results, max_trivial_ratio=0.3, seed=42)
+        r2 = rebalance_results(results, max_trivial_ratio=0.3, seed=99)
+        # The trivial samples kept should differ
+        trivial_ids_1 = {r.element_id for r in r1 if _is_trivial(r)}
+        trivial_ids_2 = {r.element_id for r in r2 if _is_trivial(r)}
+        assert trivial_ids_1 != trivial_ids_2
+
+    def test_does_not_mutate_input(self):
+        results = self._make_mixed_results(50, 50)
+        original_len = len(results)
+        rebalance_results(results, max_trivial_ratio=0.3, seed=42)
+        assert len(results) == original_len
+
+    def test_keeps_at_least_one_trivial(self):
+        """Even with extreme ratio, keep at least 1 trivial example."""
+        results = self._make_mixed_results(100, 1)
+        rebalanced = rebalance_results(results, max_trivial_ratio=0.01, seed=42)
+        trivial_count = sum(1 for r in rebalanced if _is_trivial(r))
+        assert trivial_count >= 1
 
 
 # =============================================================================

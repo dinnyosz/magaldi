@@ -538,6 +538,75 @@ def _estimate_system_prompt_tokens() -> int:
     return len(TEACHER_SYSTEM_PROMPT) // 4 + 30
 
 
+def _is_trivial(result: RawScoringResult) -> bool:
+    """Check if a result is trivial (all scores are 1)."""
+    return all(s == 1 for s in result.scores)
+
+
+def rebalance_results(
+    results: list[RawScoringResult],
+    max_trivial_ratio: float = 0.3,
+    seed: int = 42,
+) -> list[RawScoringResult]:
+    """Rebalance training data by undersampling trivial (all-1s) examples.
+
+    The raw training data is typically ~49% all-1s variables (trivial).
+    This creates a strong bias toward outputting all-1s. Undersampling
+    trivial examples to ``max_trivial_ratio`` forces the model to learn
+    non-trivial scoring patterns from a more balanced distribution.
+
+    Non-trivial examples are never dropped. Only trivial examples are
+    removed to reach the target ratio.
+
+    Args:
+        results: All scored results (will not be mutated).
+        max_trivial_ratio: Maximum fraction of trivial examples in the
+            output. Set to 1.0 to disable rebalancing.
+        seed: Random seed for reproducible undersampling.
+
+    Returns:
+        Rebalanced list of results.
+    """
+    if max_trivial_ratio >= 1.0:
+        return list(results)
+
+    trivial = [r for r in results if _is_trivial(r)]
+    non_trivial = [r for r in results if not _is_trivial(r)]
+
+    if not non_trivial:
+        return list(results)
+
+    # Calculate how many trivial examples to keep
+    # target: trivial / (trivial + non_trivial) <= max_trivial_ratio
+    # trivial <= max_trivial_ratio * (trivial + non_trivial)
+    # trivial <= max_trivial_ratio * non_trivial / (1 - max_trivial_ratio)
+    max_trivial = int(
+        max_trivial_ratio * len(non_trivial) / (1.0 - max_trivial_ratio)
+    )
+    max_trivial = max(1, max_trivial)  # keep at least 1
+
+    if len(trivial) <= max_trivial:
+        return list(results)
+
+    # Undersample trivial
+    rng = random.Random(seed)
+    rng.shuffle(trivial)
+    kept_trivial = trivial[:max_trivial]
+
+    rebalanced = non_trivial + kept_trivial
+    logger.info(
+        "Rebalanced: %d trivial -> %d (%.0f%%), %d non-trivial kept, "
+        "%d total (was %d)",
+        len(trivial),
+        len(kept_trivial),
+        len(kept_trivial) / len(rebalanced) * 100,
+        len(non_trivial),
+        len(rebalanced),
+        len(results),
+    )
+    return rebalanced
+
+
 def build_training_batches(
     results: list[RawScoringResult],
     seed: int = 42,
@@ -996,6 +1065,14 @@ def run_generation(args: argparse.Namespace) -> None:
         args.validation_split * 100,
     )
 
+    # Step 5b: Rebalance training data (undersample trivial all-1s examples)
+    # Only rebalance training set — validation stays natural for honest eval
+    train_results = rebalance_results(
+        train_results,
+        max_trivial_ratio=args.max_trivial_ratio,
+        seed=args.seed,
+    )
+
     # Step 6: Build ChatML examples with token-budget packing
     train_examples = build_training_batches(
         train_results, seed=args.seed, max_seq_len=args.max_seq_len,
@@ -1027,6 +1104,10 @@ def run_generation(args: argparse.Namespace) -> None:
         else:
             score_dist["borderline"] += 1
 
+    # Training data trivial ratio (after rebalancing)
+    train_trivial = sum(1 for r in train_results if _is_trivial(r))
+    train_trivial_pct = train_trivial / len(train_results) * 100 if train_results else 0
+
     lang_counts: dict[str, int] = {}
     for r in all_results:
         lang_counts[r.language] = lang_counts.get(r.language, 0) + 1
@@ -1051,6 +1132,9 @@ def run_generation(args: argparse.Namespace) -> None:
     print(f"  Max seq len:{args.max_seq_len} tokens")
     print(f"  Batch sizes: min={min_batch}, avg={avg_batch:.1f}, max={max_batch}"
           f" (packed to fit {args.max_seq_len} tokens)")
+    print(f"  Train data: {len(train_results)} vars "
+          f"({train_trivial} trivial = {train_trivial_pct:.0f}%, "
+          f"max_trivial_ratio={args.max_trivial_ratio})")
     print(f"  Scores:     {score_dist['drop']} clear drops, "
           f"{score_dist['borderline']} borderline, "
           f"{score_dist['keep']} clear keeps")
@@ -1122,6 +1206,13 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=1024,
         help="Max sequence length in tokens for batch packing (default: 1024)",
+    )
+    parser.add_argument(
+        "--max-trivial-ratio",
+        type=float,
+        default=0.3,
+        help="Max fraction of trivial (all-1s) examples in training data (default: 0.3). "
+             "Set to 1.0 to disable rebalancing.",
     )
     parser.add_argument(
         "--seed",
