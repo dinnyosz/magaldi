@@ -38,6 +38,7 @@ if TYPE_CHECKING:
         ScoringResult,
         VariableScoringConfig,
     )
+    from shared.cli.parse_logger import LiveProgressWriter
     from shared.config import MagaldiConfig
     from shared.db.store import Repository
 
@@ -367,6 +368,7 @@ def run_variable_scoring(
     workers: int = 0,
     repo_path: str | None = None,
     debug_scoring: bool = False,
+    live_writer: LiveProgressWriter | None = None,
 ) -> ScoringResult:
     """Run Phase 4: Variable Scoring.
 
@@ -560,6 +562,30 @@ def run_variable_scoring(
         nonlocal current_state
         current_state = state
 
+        # Feed live progress writer (throttled internally)
+        if live_writer is not None:
+            elapsed = state.elapsed
+            throughput = state.completed_variables / elapsed if elapsed > 0 else 0.0
+            pct = round(state.completed_batches / state.total_batches * 100, 1) if state.total_batches > 0 else 0.0
+            keep_rate = round(state.kept / state.completed_variables * 100, 1) if state.completed_variables > 0 else 0.0
+            avg_batch = state.avg_batch_time
+            remaining_batches = state.total_batches - state.completed_batches
+            eta = round(avg_batch * remaining_batches / max(state.num_workers, 1), 1) if avg_batch > 0 else None
+            live_writer.update_progress({
+                "completed": state.completed_variables,
+                "total": state.total_variables,
+                "completed_batches": state.completed_batches,
+                "total_batches": state.total_batches,
+                "percentage": pct,
+                "eta_seconds": eta,
+                "elapsed_seconds": round(elapsed, 1),
+                "throughput_per_second": round(throughput, 2),
+                "failed": state.errors,
+                "kept": state.kept,
+                "dropped": state.dropped,
+                "keep_rate_pct": keep_rate,
+            })
+
     with Live(LiveScoringDisplay(), console=console, refresh_per_second=4):
         result = score_variables(
             variables=variables,
@@ -659,6 +685,7 @@ def run_processing(
     workers: int,
     compact: bool = False,
     use_docstrings: bool = True,
+    live_writer: LiveProgressWriter | None = None,
 ) -> tuple[int, int, int, float, float, float, float, TimingStats | None, list[tuple[str, str]], int]:
     """Run unified processing: summarize -> embed -> index.
 
@@ -1018,6 +1045,28 @@ def run_processing(
             nonlocal current_state
             current_state = state
             # Let Rich handle refresh at configured rate (4/sec)
+
+            # Feed live progress writer (throttled internally)
+            if live_writer is not None:
+                elapsed = state.timing.elapsed
+                throughput = state.completed / elapsed if elapsed > 0 else 0.0
+                eta = state.timing.eta_seconds(state.completed, state.total, state.num_workers)
+                type_stats = state.timing.get_type_stats()
+                by_type = {
+                    t: {"done": done, "total": total}
+                    for t, (done, total, *_rest) in type_stats.items()
+                }
+                live_writer.update_progress({
+                    "completed": state.completed,
+                    "total": state.total,
+                    "percentage": round(state.completed / state.total * 100, 1) if state.total > 0 else 0.0,
+                    "eta_seconds": round(eta, 1) if eta else None,
+                    "elapsed_seconds": round(elapsed, 1),
+                    "throughput_per_second": round(throughput, 3),
+                    "failed": state.failed,
+                    "skipped": state.skipped,
+                    "by_type": by_type,
+                })
 
         def on_status_change() -> None:
             # Let Rich handle refresh at configured rate

@@ -14,6 +14,8 @@ Each run gets a timestamped file: `parse_<scope>_<repo>_<YYYYMMDD_HHMMSS>.log`
 from __future__ import annotations
 
 import json
+import os
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -511,3 +513,115 @@ def _format_duration_precise(seconds: float) -> str:
     if hours > 0:
         return f"{hours}:{minutes:02d}:{secs:02d}"
     return f"{minutes}:{secs:02d}.{int(frac * 10)}"
+
+
+class LiveProgressWriter:
+    """Writes periodic progress snapshots to _current_run.json during parse.
+
+    Designed to be read by agents or humans during a running parse to check
+    status without guessing. The file is a single JSON object that gets
+    overwritten atomically on each write.
+
+    - Phase transitions (start/end) write immediately.
+    - Progress updates during long phases are throttled to WRITE_INTERVAL.
+    - File is deleted on normal exit; left on crash so agents can detect stale runs via PID.
+    """
+
+    WRITE_INTERVAL = 30.0  # seconds between disk writes for progress updates
+    FILENAME = "_current_run.json"
+
+    def __init__(
+        self,
+        log_dir: Path,
+        scope: str,
+        repository: str,
+        username: str,
+        mode: str = "parse",
+    ) -> None:
+        self._file_path = log_dir / self.FILENAME
+        self._scope = scope
+        self._repository = repository
+        self._username = username
+        self._mode = mode
+        self._pid = os.getpid()
+        self._run_start = time.time()
+        self._run_start_dt = datetime.now()
+
+        self._current_phase: str | None = None
+        self._completed_phases: list[dict[str, Any]] = []
+        self._progress: dict[str, Any] | None = None
+        self._last_write_time: float = 0.0
+        self._lock = threading.Lock()
+
+        # Write initial state immediately
+        self._write()
+
+    def update_identity(self, scope: str, repository: str) -> None:
+        """Update scope/repository after Phase 1 discovery resolves them."""
+        with self._lock:
+            self._scope = scope
+            self._repository = repository
+            self._write()
+
+    def start_phase(self, name: str) -> None:
+        """Record phase start. Writes immediately."""
+        with self._lock:
+            self._current_phase = name
+            self._progress = None
+            self._write()
+
+    def end_phase(self, duration: float, extra: dict[str, Any] | None = None) -> None:
+        """Record phase end. Writes immediately."""
+        with self._lock:
+            if self._current_phase:
+                entry: dict[str, Any] = {
+                    "name": self._current_phase,
+                    "duration_seconds": round(duration, 2),
+                }
+                if extra:
+                    entry["extra"] = extra
+                self._completed_phases.append(entry)
+            self._current_phase = None
+            self._progress = None
+            self._write()
+
+    def update_progress(self, progress: dict[str, Any]) -> None:
+        """Update progress data. Only writes to disk if WRITE_INTERVAL elapsed."""
+        with self._lock:
+            self._progress = progress
+            now = time.time()
+            if now - self._last_write_time >= self.WRITE_INTERVAL:
+                self._write()
+
+    def cleanup(self) -> None:
+        """Delete the status file on normal exit."""
+        try:
+            self._file_path.unlink(missing_ok=True)
+            self._file_path.with_suffix(".json.tmp").unlink(missing_ok=True)
+        except OSError:
+            pass  # Best-effort cleanup
+
+    def _write(self) -> None:
+        """Write current state to disk atomically. Caller must hold self._lock."""
+        now = datetime.now()
+        data = {
+            "pid": self._pid,
+            "run_start": self._run_start_dt.isoformat(),
+            "scope": self._scope,
+            "repository": self._repository,
+            "username": self._username,
+            "mode": self._mode,
+            "current_phase": self._current_phase,
+            "phase_status": "in_progress" if self._current_phase else "between_phases",
+            "elapsed_seconds": round(time.time() - self._run_start, 1),
+            "completed_phases": self._completed_phases,
+            "progress": self._progress,
+            "updated_at": now.isoformat(),
+        }
+        try:
+            tmp_path = self._file_path.with_suffix(".json.tmp")
+            tmp_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+            os.replace(tmp_path, self._file_path)
+        except OSError:
+            pass  # Best-effort; don't crash the parse for a status write failure
+        self._last_write_time = time.time()

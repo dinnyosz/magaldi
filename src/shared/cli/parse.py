@@ -35,7 +35,7 @@ from shared.cli._runners import (
     run_variable_scoring,
 )
 from shared.cli._shared import check_model_availability, console, main
-from shared.cli.parse_logger import ParseRunLogger
+from shared.cli.parse_logger import LiveProgressWriter, ParseRunLogger
 from shared.config import load_config
 
 if TYPE_CHECKING:
@@ -189,28 +189,33 @@ def parse(
     # Check for magaldi.yaml and offer to create it
     _ensure_repo_config(repo_path)
 
-    # Initialize run logger (will be populated with scope/repo after discovery)
+    # Initialize run logger and live progress writer (populated with scope/repo after discovery)
     run_logger: ParseRunLogger | None = None
+    live_writer: LiveProgressWriter | None = None
 
     try:
         # Phase 1: Discovery
         console.print("[bold blue]Phase 1:[/] Discovery")
+        log_dir = Path(repo_path) / "logs"
+        log_dir.mkdir(exist_ok=True)
         run_logger = ParseRunLogger(repo_path, scope="unknown", repository="unknown", username=user, mode="parse")
+        live_writer = LiveProgressWriter(log_dir, scope="unknown", repository="unknown", username=user)
         run_logger.start_phase("Phase 1: Discovery")
+        live_writer.start_phase("Phase 1: Discovery")
         discovery_result = run_discovery(repo_path, user, skip_tests=skip_tests)
         print_discovery_result(discovery_result)
-        run_logger.end_phase({"files": discovery_result.total_files, "lines": discovery_result.total_lines})
+        phase_duration = run_logger.end_phase({"files": discovery_result.total_files, "lines": discovery_result.total_lines})
+        live_writer.end_phase(phase_duration, {"files": discovery_result.total_files, "lines": discovery_result.total_lines})
         run_logger.log_discovery(discovery_result)
 
-        # Now that we know scope/repo, update the logger
+        # Now that we know scope/repo, update the logger and live writer
         run_logger.scope = discovery_result.scope
         run_logger.repository = discovery_result.repository
+        live_writer.update_identity(discovery_result.scope, discovery_result.repository)
         # Update log path with actual scope/repo
         ts = run_logger.run_start_dt.strftime("%Y%m%d_%H%M%S")
         safe_scope = discovery_result.scope.replace("/", "_").replace("\\", "_")
         safe_repo = discovery_result.repository.replace("/", "_").replace("\\", "_")
-        log_dir = Path(repo_path) / "logs"
-        log_dir.mkdir(exist_ok=True)
         run_logger.log_path = log_dir / f"parse_{safe_scope}_{safe_repo}_{ts}.log"
 
         # Force clean: Delete existing index data before change detection
@@ -231,13 +236,12 @@ def parse(
         # Phase 2: Change Detection
         console.print("\n[bold blue]Phase 2:[/] Change Detection")
         run_logger.start_phase("Phase 2: Change Detection")
+        live_writer.start_phase("Phase 2: Change Detection")
         manifest = run_change_detection(discovery_result, config, dry_run)
         print_change_manifest(manifest)
-        run_logger.end_phase({
-            "new": len(manifest.new_files),
-            "modified": len(manifest.modified_files),
-            "deleted": len(manifest.deleted_files),
-        })
+        p2_extra = {"new": len(manifest.new_files), "modified": len(manifest.modified_files), "deleted": len(manifest.deleted_files)}
+        phase_duration = run_logger.end_phase(p2_extra)
+        live_writer.end_phase(phase_duration, p2_extra)
         run_logger.log_manifest(manifest)
 
         if manifest.files_to_parse == 0:
@@ -253,18 +257,19 @@ def parse(
             if run_logger.has_errors:
                 log_path = run_logger.write()
                 console.print(f"\n  [dim]Log:[/] {log_path}")
+            if live_writer is not None:
+                live_writer.cleanup()
             return
 
         # Phase 3: Parsing
         console.print("\n[bold blue]Phase 3:[/] Parsing")
         run_logger.start_phase("Phase 3: Parsing")
+        live_writer.start_phase("Phase 3: Parsing")
         parsing_result = run_parsing(manifest)
         print_parsing_result(parsing_result, skip_ai=skip_ai)
-        run_logger.end_phase({
-            "files": len(parsing_result.parsed_files),
-            "elements": parsing_result.total_elements,
-            "failed_files": len(parsing_result.failed_files),
-        })
+        p3_extra = {"files": len(parsing_result.parsed_files), "elements": parsing_result.total_elements, "failed_files": len(parsing_result.failed_files)}
+        phase_duration = run_logger.end_phase(p3_extra)
+        live_writer.end_phase(phase_duration, p3_extra)
 
         # Log parsing failures
         for file_info, error in parsing_result.failed_files:
@@ -292,15 +297,15 @@ def parse(
             scoring_model = config.llm.get_variable_scoring_model().name
             console.print(f"\n[bold blue]Phase 4:[/] Variable Scoring [dim]({scoring_model})[/]")
             run_logger.start_phase("Phase 4: Variable Scoring")
+            live_writer.start_phase("Phase 4: Variable Scoring")
             scoring_result = run_variable_scoring(
                 parsing_result, config, workers, repo_path=repo_path, debug_scoring=debug_scoring,
+                live_writer=live_writer,
             )
             print_scoring_result(scoring_result)
-            run_logger.end_phase({
-                "kept": scoring_result.kept,
-                "dropped": scoring_result.dropped,
-                "errors": scoring_result.errors,
-            })
+            p4_extra = {"kept": scoring_result.kept, "dropped": scoring_result.dropped, "errors": scoring_result.errors}
+            phase_duration = run_logger.end_phase(p4_extra)
+            live_writer.end_phase(phase_duration, p4_extra)
             run_logger.log_scoring_stats(scoring_result)
             # Log token usage for variable scoring
             if scoring_result.prompt_tokens > 0 or scoring_result.response_tokens > 0:
@@ -331,16 +336,14 @@ def parse(
         # Phase 5: Processing (summarize -> embed -> index)
         console.print("\n[bold blue]Phase 5:[/] Processing")
         run_logger.start_phase("Phase 5: Processing")
+        live_writer.start_phase("Phase 5: Processing")
         processed, skipped, indexed, avg_wall, avg_summ, avg_embed, elapsed, timing_stats, failed_elements, deleted = run_processing(
-            parsing_result, manifest, config, dry_run, skip_ai, workers, use_docstrings=use_docstrings
+            parsing_result, manifest, config, dry_run, skip_ai, workers, use_docstrings=use_docstrings,
+            live_writer=live_writer,
         )
-        run_logger.end_phase({
-            "processed": processed,
-            "skipped": skipped,
-            "indexed": indexed,
-            "deleted": deleted,
-            "failed": len(failed_elements),
-        })
+        p5_extra = {"processed": processed, "skipped": skipped, "indexed": indexed, "deleted": deleted, "failed": len(failed_elements)}
+        phase_duration = run_logger.end_phase(p5_extra)
+        live_writer.end_phase(phase_duration, p5_extra)
         run_logger.log_processing_stats(
             processed, skipped, indexed, deleted, failed_elements,
             avg_wall, avg_summ, avg_embed, elapsed,
@@ -382,6 +385,7 @@ def parse(
 
                 console.print("\n[bold blue]Phase 6:[/] Analysis")
                 run_logger.start_phase("Phase 6: Analysis")
+                live_writer.start_phase("Phase 6: Analysis")
 
                 console.print("\n  [bold]Hierarchy Extraction[/]")
                 try:
@@ -412,11 +416,13 @@ def parse(
                         console=console,
                         max_workers=workers,
                     )
-                    run_logger.end_phase()
+                    phase_duration = run_logger.end_phase()
+                    live_writer.end_phase(phase_duration)
                 except Exception as e:
                     console.print(f"  [yellow]Warning: Call resolution failed: {rich_escape(str(e))}[/]")
                     run_logger.log_error("call_resolution", str(e))
-                    run_logger.end_phase({"error": str(e)})
+                    phase_duration = run_logger.end_phase({"error": str(e)})
+                    live_writer.end_phase(phase_duration, {"error": str(e)})
 
                 # Refresh after call resolution writes (bulk buffer uses refresh=False)
                 repo.refresh()
@@ -427,6 +433,7 @@ def parse(
         if features and not skip_ai and not dry_run and processed > 0:
             console.print("\n[bold blue]Phase 7:[/] Feature Extraction")
             run_logger.start_phase("Phase 7: Feature Extraction")
+            live_writer.start_phase("Phase 7: Feature Extraction")
             try:
                 feature_result = run_feature_extraction(
                     discovery_result.scope,
@@ -441,16 +448,19 @@ def parse(
                     token_usage = feature_result.get("token_usage")
                     if token_usage:
                         run_logger.log_token_usage("Phase 7: Feature Extraction", token_usage)
-                run_logger.end_phase()
+                phase_duration = run_logger.end_phase()
+                live_writer.end_phase(phase_duration)
             except Exception as e:
                 console.print(f"  [yellow]Warning: Feature extraction failed: {rich_escape(str(e))}[/]")
                 run_logger.log_error("feature_extraction", str(e))
-                run_logger.end_phase({"error": str(e)})
+                phase_duration = run_logger.end_phase({"error": str(e)})
+                live_writer.end_phase(phase_duration, {"error": str(e)})
 
         # Phase 8: Glossary Extraction (opt-in with --glossary)
         if glossary and not skip_ai and not dry_run and processed > 0:
             console.print("\n[bold blue]Phase 8:[/] Glossary Extraction")
             run_logger.start_phase("Phase 8: Glossary Extraction")
+            live_writer.start_phase("Phase 8: Glossary Extraction")
             try:
                 glossary_result = run_glossary_extraction(
                     scope=discovery_result.scope,
@@ -464,11 +474,13 @@ def parse(
                     token_usage = glossary_result.get("token_usage")
                     if token_usage:
                         run_logger.log_token_usage("Phase 8: Glossary Extraction", token_usage)
-                run_logger.end_phase()
+                phase_duration = run_logger.end_phase()
+                live_writer.end_phase(phase_duration)
             except Exception as e:
                 console.print(f"  [yellow]Warning: Glossary extraction failed: {rich_escape(str(e))}[/]")
                 run_logger.log_error("glossary_extraction", str(e))
-                run_logger.end_phase({"error": str(e)})
+                phase_duration = run_logger.end_phase({"error": str(e)})
+                live_writer.end_phase(phase_duration, {"error": str(e)})
 
         print_summary(discovery_result, manifest, processed, indexed, skip_ai)
         print_phase_timings(run_logger)
@@ -478,6 +490,10 @@ def parse(
         if run_logger.has_errors or run_logger.has_budget_exceeded:
             console.print(f"  [dim]Log:[/] {log_path}")
 
+        # Clean up live progress file on successful completion
+        if live_writer is not None:
+            live_writer.cleanup()
+
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted, cancelling workers...[/]")
         if run_logger is not None:
@@ -485,6 +501,10 @@ def parse(
             import contextlib
             with contextlib.suppress(Exception):
                 run_logger.write()
+        if live_writer is not None:
+            import contextlib
+            with contextlib.suppress(Exception):
+                live_writer.cleanup()
         # Force immediate exit - os._exit skips Python cleanup (no threading errors)
         import os
         sys.stdout.flush()
@@ -496,6 +516,7 @@ def parse(
             run_logger.log_error("discovery", str(e))
             log_path = run_logger.write()
             console.print(f"  [dim]Log:[/] {log_path}")
+        # Leave _current_run.json on error for crash detection
         sys.exit(1)
     except Exception as e:
         console.print(f"\n[red]Error:[/] {rich_escape(str(e))}")
@@ -503,6 +524,7 @@ def parse(
             run_logger.log_error("parse", str(e))
             log_path = run_logger.write()
             console.print(f"  [dim]Log:[/] {log_path}")
+        # Leave _current_run.json on error for crash detection
         if "--dry-run" not in sys.argv:
             console.print("[dim]Hint: Use --dry-run to test without database[/]")
         sys.exit(1)
