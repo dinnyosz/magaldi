@@ -153,6 +153,9 @@ class ModelConfig:
         # Check exclusions first (qwen3.5 matches "qwen3" prefix but is NOT a thinking model)
         if any(base.startswith(ntm) for ntm in self._NON_THINKING_MODELS):
             return False
+        # Instruct models have thinking disabled at the model level
+        if "instruct" in base:
+            return False
         return any(base.startswith(tm) for tm in self._THINKING_MODELS)
 
 

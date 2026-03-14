@@ -476,9 +476,14 @@ class LLMClient:
 
         qwen3 uses thinking by default and needs think=False.
         qwen3.5+ has reasoning disabled by default — NOT a thinking model.
+        Instruct variants (e.g., Qwen3-4B-Instruct-2507-4bit) have thinking
+        disabled at the model level — NOT a thinking model.
         """
         # Check exclusions first (qwen3.5 matches "qwen3" prefix but is NOT a thinking model)
         if any(base.startswith(ntm) for ntm in LLMClient.NON_THINKING_MODELS):
+            return False
+        # Instruct models have thinking disabled at the model level
+        if "instruct" in base:
             return False
         return any(base.startswith(tm) for tm in LLMClient.THINKING_MODELS)
 
@@ -693,8 +698,8 @@ class LLMClient:
             else:
                 msgs = [{"role": "system", "content": "/no_think"}] + msgs
                 kwargs["messages"] = msgs
-        elif _is_local:
-            # Local servers (LM Studio, llama.cpp) — always disable thinking
+        elif self._is_thinking_model and _is_local:
+            # Local servers (LM Studio, llama.cpp) with thinking models
             # Strategy 1: API param (chat_template_kwargs)
             kwargs["extra_body"] = kwargs.get("extra_body", {})
             kwargs["extra_body"]["chat_template_kwargs"] = {"enable_thinking": False}
