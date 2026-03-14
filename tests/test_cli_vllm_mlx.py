@@ -8,7 +8,6 @@ from click.testing import CliRunner
 
 from shared.cli.vllm_mlx import DEFAULT_PORT, PREFIX
 
-
 # =============================================================================
 # CONSTANTS
 # =============================================================================

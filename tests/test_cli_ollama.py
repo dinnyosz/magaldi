@@ -4,10 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from shared.cli.ollama_cli import _format_size, _get_ollama_url
-
 
 # =============================================================================
 # HELPERS
@@ -79,10 +76,10 @@ class TestOllamaStatus:
         console = MagicMock()
 
         with patch("shared.cli.ollama_cli.console", console):
-            from shared.cli.ollama_cli import ollama_status
-
             # Invoke via click's testing
             from click.testing import CliRunner
+
+            from shared.cli.ollama_cli import ollama_status
 
             runner = CliRunner()
             result = runner.invoke(ollama_status, ["--url", "http://localhost:11434"])

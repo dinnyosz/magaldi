@@ -23,7 +23,6 @@ from rich.table import Table
 
 from shared.cli._server_utils import (
     PIDFILE_DIR,
-    format_size,
     get_pid,
     get_port_from_config,
     is_healthy,

@@ -3,11 +3,7 @@
 from __future__ import annotations
 
 import os
-import signal
-from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from shared.cli._server_utils import (
     PIDFILE_DIR,
@@ -20,7 +16,6 @@ from shared.cli._server_utils import (
     stop_server,
     tail_log,
 )
-
 
 # =============================================================================
 # PATH HELPERS
@@ -131,9 +126,9 @@ class TestStopServer:
             ProcessLookupError,  # _stop_pid: os.kill(12345, 0) -> dead
         ]
 
-        with patch("shared.cli._server_utils.PIDFILE_DIR", tmp_path):
-            with patch("shared.cli._server_utils.time.sleep"):
-                stop_server("test-server", 9999, console)
+        with patch("shared.cli._server_utils.PIDFILE_DIR", tmp_path), \
+             patch("shared.cli._server_utils.time.sleep"):
+            stop_server("test-server", 9999, console)
 
         # PID file should be cleaned up
         assert not pf.exists()

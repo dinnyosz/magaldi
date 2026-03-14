@@ -18,7 +18,6 @@ from rich.table import Table
 from shared.cli._shared import console, main
 from shared.config import load_config
 
-
 # =============================================================================
 # CLI COMMANDS
 # =============================================================================
