@@ -38,9 +38,19 @@ make ollama-pull            # qwen3-embedding:0.6b
 make llama-setup            # One-command: build + pull models
 
 # Start/stop llama-server (router mode — serves all models)
-magaldi llm serve           # Start server
-magaldi llm status          # Show loaded models
-magaldi llm stop            # Stop server
+magaldi llamacpp serve      # Start llama.cpp server
+magaldi llamacpp status     # Show loaded models
+magaldi llamacpp stop       # Stop server
+
+# Manage Ollama models and tiers
+magaldi ollama status       # Show Ollama connection + models
+magaldi ollama pull         # Pull configured Ollama models
+magaldi ollama warmup       # Create tiered model aliases
+
+# Start/stop vllm-mlx server (MLX inference for Apple Silicon)
+magaldi vllm-mlx serve     # Start vllm-mlx server
+magaldi vllm-mlx status    # Show server status
+magaldi vllm-mlx stop      # Stop server
 ```
 
 ## Architecture

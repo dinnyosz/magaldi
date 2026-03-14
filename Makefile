@@ -161,6 +161,8 @@ from huggingface_hub import hf_hub_download; \
 models = [ \
     ('unsloth/Qwen3.5-4B-GGUF', 'Qwen3.5-4B-Q4_K_M.gguf'), \
     ('unsloth/Qwen3.5-2B-GGUF', 'Qwen3.5-2B-Q4_K_M.gguf'), \
+    ('unsloth/Qwen3-4B-GGUF', 'Qwen3-4B-Q4_K_M.gguf'), \
+    ('unsloth/Qwen3-1.7B-GGUF', 'Qwen3-1.7B-Q4_K_M.gguf'), \
 ]; \
 for repo, fname in models: \
     print(f'  Downloading {fname} from {repo}...'); \
@@ -174,7 +176,7 @@ llama-setup: llama-build llama-pull
 	@echo "  Server:  $(LLAMA_SERVER)"
 	@echo "  Models:  $(MODELS_DIR)/"
 	@echo ""
-	@echo "Start with: magaldi llm serve"
+	@echo "Start with: magaldi llamacpp serve"
 
 db-reset:
 	@echo "WARNING: This will delete all data!"
