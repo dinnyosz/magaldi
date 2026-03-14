@@ -111,7 +111,15 @@ def vllm_mlx_serve(
             time.sleep(1)
 
     # Build command
-    cmd = ["vllm-mlx", "serve", model, "--port", str(port)]
+    cmd = [
+        "vllm-mlx", "serve", model,
+        "--port", str(port),
+        "--continuous-batching",
+        "--enable-prefix-cache",
+        "--kv-cache-quantization",
+        "--kv-cache-quantization-bits", "8",
+        "--chunked-prefill-tokens", "512",
+    ]
 
     if embedding_model:
         cmd.extend(["--embedding-model", embedding_model])
@@ -122,11 +130,15 @@ def vllm_mlx_serve(
     # Print startup info
     console.print("[bold blue]Starting vllm-mlx server[/]")
     console.print()
-    console.print(f"  Model:    {model}")
-    console.print(f"  Port:     {port}")
+    console.print(f"  Model:          {model}")
+    console.print(f"  Port:           {port}")
     if embedding_model:
-        console.print(f"  Embeddings: {embedding_model}")
-    console.print(f"  Log:      {logfile(PREFIX, port)}")
+        console.print(f"  Embeddings:     {embedding_model}")
+    console.print("  Cont. batching: on")
+    console.print("  Prefix cache:   on")
+    console.print("  KV cache quant: 8-bit")
+    console.print("  Chunked prefill: 512 tokens")
+    console.print(f"  Log:            {logfile(PREFIX, port)}")
     console.print()
 
     # Start as background process
