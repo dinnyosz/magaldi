@@ -64,6 +64,17 @@ llm:
       url: http://localhost:11434
       dimensions: 1024
 
+    # --- vllm-mlx models (for benchmarking / future use) ---
+    qwen3-4b-mlx:
+      name: mlx-community/Qwen3-4B-Instruct-2507-4bit
+      provider: vllm-mlx
+      url: http://localhost:8000
+    qwen3-embed-mlx:
+      name: mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ
+      provider: vllm-mlx
+      url: http://localhost:8000
+      dimensions: 1024
+
   # Which models to use for each purpose (reference by name above)
   summarize_model: qwen3-4b             # files, classes, features
   summarize_model_small: qwen3-1.7b     # functions, methods, variables, constants

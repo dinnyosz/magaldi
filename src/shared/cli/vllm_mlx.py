@@ -112,13 +112,12 @@ def vllm_mlx_serve(
 
     # Build command
     # --enable-prefix-cache is already on by default
-    # --kv-cache-quantization-bits defaults to 8 when quantization is enabled
+    # NOTE: --chunked-prefill-tokens causes 'list has no attribute shape'
+    #       crash in vllm-mlx 0.2.6. Omitted until upstream fix.
     cmd = [
         "vllm-mlx", "serve", model,
         "--port", str(port),
         "--continuous-batching",
-        "--kv-cache-quantization",
-        "--chunked-prefill-tokens", "512",
     ]
 
     if embedding_model:
@@ -135,8 +134,6 @@ def vllm_mlx_serve(
     if embedding_model:
         console.print(f"  Embeddings:     {embedding_model}")
     console.print("  Cont. batching: on")
-    console.print("  KV cache quant: 8-bit")
-    console.print("  Chunked prefill: 512 tokens")
     console.print(f"  Log:            {logfile(PREFIX, port)}")
     console.print()
 
