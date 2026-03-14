@@ -24,7 +24,7 @@ from shared.cli import (
     benchmarks,  # noqa: F401
     feature_commands,  # noqa: F401
     glossary_commands,  # noqa: F401
-    llm,  # noqa: F401
+    llamacpp,  # noqa: F401
     parse,  # noqa: F401
     prompt_improver,  # noqa: F401
     watch,  # noqa: F401

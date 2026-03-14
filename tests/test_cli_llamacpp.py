@@ -1,11 +1,11 @@
-"""Tests for the magaldi llm CLI command (llama-server backend)."""
+"""Tests for the magaldi llamacpp CLI command (llama-server backend)."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from unittest.mock import patch
 
-from shared.cli.llm import (
+from shared.cli.llamacpp import (
     DEFAULT_CTX_SIZE,
     DEFAULT_MODELS_MAX,
     DEFAULT_PARALLEL,
@@ -49,7 +49,7 @@ class TestHelpers:
         assert DEFAULT_PORT == 8090
         assert DEFAULT_PARALLEL == 4
         assert DEFAULT_MODELS_MAX == 2
-        assert DEFAULT_CTX_SIZE == 8192
+        assert DEFAULT_CTX_SIZE == 131072
 
 
 # =============================================================================
@@ -179,7 +179,7 @@ class TestGeneratePresets:
                 ),
             }
         )
-        with patch("shared.cli.llm._presets_file", return_value=tmp_path / "presets.ini"):
+        with patch("shared.cli.llamacpp._presets_file", return_value=tmp_path / "presets.ini"):
             path = _generate_presets(config)
             content = path.read_text()
             assert "[model:Qwen3.5-4B-Q4_K_M]" in content
@@ -195,7 +195,7 @@ class TestGeneratePresets:
                 ),
             }
         )
-        with patch("shared.cli.llm._presets_file", return_value=tmp_path / "presets.ini"):
+        with patch("shared.cli.llamacpp._presets_file", return_value=tmp_path / "presets.ini"):
             path = _generate_presets(config)
             content = path.read_text()
             assert "[model:Qwen3.5-4B-Q4_K_M]" in content
@@ -211,7 +211,7 @@ class TestGeneratePresets:
                 ),
             }
         )
-        with patch("shared.cli.llm._presets_file", return_value=tmp_path / "presets.ini"):
+        with patch("shared.cli.llamacpp._presets_file", return_value=tmp_path / "presets.ini"):
             path = _generate_presets(config)
             content = path.read_text()
             assert "qwen3:4b" not in content

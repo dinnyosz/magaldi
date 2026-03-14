@@ -1,15 +1,15 @@
-"""LLM server commands for the Magaldi CLI.
+"""llama.cpp server commands for the Magaldi CLI.
 
 Manages a llama-server (llama.cpp) instance in router mode, serving all GGUF
 models from a shared directory with automatic hot-swapping and LRU eviction.
 
 Usage:
-    magaldi llm serve          # Start llama-server in router mode
-    magaldi llm stop           # Stop the running server
-    magaldi llm status         # Show server + loaded models
-    magaldi llm logs           # Follow server logs
-    magaldi llm models         # List available GGUF models
-    magaldi llm pull           # Download configured models from HuggingFace
+    magaldi llamacpp serve     # Start llama-server in router mode
+    magaldi llamacpp stop      # Stop the running server
+    magaldi llamacpp status    # Show server + loaded models
+    magaldi llamacpp logs      # Follow server logs
+    magaldi llamacpp models    # List available GGUF models
+    magaldi llamacpp pull      # Download configured models from HuggingFace
 
 Example magaldi.yaml:
     llm:
@@ -60,7 +60,7 @@ LLAMA_SERVER = PROJECT_ROOT / "tools" / "llama.cpp" / "build" / "bin" / "llama-s
 DEFAULT_PORT = 8090
 DEFAULT_PARALLEL = 4
 DEFAULT_MODELS_MAX = 2
-DEFAULT_CTX_SIZE = 8192
+DEFAULT_CTX_SIZE = 131072  # 4 slots × 32k each (ctx-size is total, divided by --parallel)
 
 
 # =============================================================================
@@ -166,12 +166,12 @@ def _format_size(size_bytes: int) -> str:
 
 
 @main.group()
-def llm() -> None:
-    """Manage local LLM server (llama.cpp)."""
+def llamacpp() -> None:
+    """Manage llama.cpp server."""
     pass
 
 
-@llm.command("serve")
+@llamacpp.command("serve")
 @click.option(
     "--port", "-p", type=int, default=None,
     help=f"Server port (default: {DEFAULT_PORT})",
@@ -198,7 +198,7 @@ def llm_serve(
 
     Serves all GGUF models from tools/models/ with automatic hot-swapping.
     Models are loaded on first request and evicted LRU when --models-max
-    is reached. Use `magaldi llm pull` to download models first.
+    is reached. Use `magaldi llamacpp pull` to download models first.
 
     \b
     Prerequisites:
@@ -216,7 +216,7 @@ def llm_serve(
     if not gguf_files:
         console.print("[red]No GGUF models found.[/]")
         console.print(f"  Expected in: {MODELS_DIR}")
-        console.print("  Run: [bold]make llama-pull[/] or [bold]magaldi llm pull[/]")
+        console.print("  Run: [bold]make llama-pull[/] or [bold]magaldi llamacpp pull[/]")
         return
 
     # Load config for port and presets
@@ -254,6 +254,7 @@ def llm_serve(
         "--models-max", str(models_max),
         "--flash-attn", "on",
         "--n-gpu-layers", "99",
+        "-sps", "0.4",
     ]
 
     # Add presets if we generated any model-specific config
@@ -313,7 +314,7 @@ def llm_serve(
     console.print(f"  Check: curl http://localhost:{port}/health")
 
 
-@llm.command("stop")
+@llamacpp.command("stop")
 @click.option(
     "--port", "-p", type=int, default=None,
     help="Port of the server to stop",
@@ -369,7 +370,7 @@ def _stop_pid(pid: int, port: int) -> None:
     _pidfile(port).unlink(missing_ok=True)
 
 
-@llm.command("status")
+@llamacpp.command("status")
 @click.option(
     "--port", "-p", type=int, default=None,
     help="Port of the server to check",
@@ -390,7 +391,7 @@ def llm_status(port: int | None) -> None:
         console.print(f"[yellow]● llama-server starting[/] on port {port} (PID {pid})")
     else:
         console.print(f"[red]○ llama-server not running[/] on port {port}")
-        console.print("  Run: [bold]magaldi llm serve[/]")
+        console.print("  Run: [bold]magaldi llamacpp serve[/]")
         return
 
     console.print()
@@ -439,7 +440,7 @@ def llm_status(port: int | None) -> None:
         console.print(f"  [red]Error: {rich_escape(str(e))}[/]")
 
 
-@llm.command("logs")
+@llamacpp.command("logs")
 @click.option(
     "--port", "-p", type=int, default=None,
     help="Port of the server to show logs for",
@@ -481,7 +482,7 @@ def llm_logs(port: int | None, follow: bool, lines: int) -> None:
             console.print(f"[red]Error reading log: {rich_escape(str(e))}[/]")
 
 
-@llm.command("models")
+@llamacpp.command("models")
 def llm_models() -> None:
     """List available GGUF models in tools/models/."""
     gguf_files = _list_gguf_files()
@@ -489,7 +490,7 @@ def llm_models() -> None:
     if not gguf_files:
         console.print("[yellow]No GGUF models found.[/]")
         console.print(f"  Directory: {MODELS_DIR}")
-        console.print("  Run: [bold]magaldi llm pull[/] or [bold]make llama-pull[/]")
+        console.print("  Run: [bold]magaldi llamacpp pull[/] or [bold]make llama-pull[/]")
         return
 
     # Check if server is running to show loaded status
@@ -527,7 +528,7 @@ def llm_models() -> None:
     console.print(table)
 
 
-@llm.command("pull")
+@llamacpp.command("pull")
 @click.option(
     "--model", "-m", type=str, default=None,
     help="Pull a specific model by config name (e.g., qwen3.5-4b)",
@@ -608,4 +609,19 @@ def llm_pull(model: str | None) -> None:
             console.print(f"  [red]  Failed: {rich_escape(str(e))}[/]")
 
     console.print()
-    console.print("[green]Done.[/] Start with: [bold]magaldi llm serve[/]")
+    console.print("[green]Done.[/] Start with: [bold]magaldi llamacpp serve[/]")
+
+
+# =============================================================================
+# DEPRECATED ALIAS: magaldi llm → magaldi llamacpp
+# =============================================================================
+
+
+@main.group(hidden=True, deprecated=True)
+def llm() -> None:
+    """[Deprecated] Use 'magaldi llamacpp' instead."""
+    pass
+
+
+for _name, _cmd in llamacpp.commands.items():
+    llm.add_command(_cmd, _name)
