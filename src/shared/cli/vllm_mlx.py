@@ -111,13 +111,13 @@ def vllm_mlx_serve(
             time.sleep(1)
 
     # Build command
+    # --enable-prefix-cache is already on by default
+    # --kv-cache-quantization-bits defaults to 8 when quantization is enabled
     cmd = [
         "vllm-mlx", "serve", model,
         "--port", str(port),
         "--continuous-batching",
-        "--enable-prefix-cache",
         "--kv-cache-quantization",
-        "--kv-cache-quantization-bits", "8",
         "--chunked-prefill-tokens", "512",
     ]
 
@@ -135,7 +135,6 @@ def vllm_mlx_serve(
     if embedding_model:
         console.print(f"  Embeddings:     {embedding_model}")
     console.print("  Cont. batching: on")
-    console.print("  Prefix cache:   on")
     console.print("  KV cache quant: 8-bit")
     console.print("  Chunked prefill: 512 tokens")
     console.print(f"  Log:            {logfile(PREFIX, port)}")
