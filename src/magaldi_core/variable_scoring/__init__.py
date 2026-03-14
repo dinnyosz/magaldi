@@ -115,15 +115,25 @@ def _build_batches(
 
 
 def _strip_think_tags(output: str) -> str:
-    """Strip <think>...</think> blocks from LLM output.
+    """Strip <think>...</think> blocks and leaked thinking from LLM output.
 
     Qwen3 and other thinking models may emit reasoning in <think> tags
     even when thinking is disabled (e.g. server doesn't honor
     chat_template_kwargs). The reasoning text can contain numbered patterns
     that confuse the score parser, or consume the token budget so actual
     scores never appear.
+
+    Also handles "leaked thinking" where the model outputs reasoning text
+    followed by a lone </think> tag (without opening <think>). This happens
+    when Ollama's template hardcodes the <think> primer but think=false puts
+    everything into the content field instead of splitting it.
     """
-    return re.sub(r"<think>.*?</think>", "", output, flags=re.DOTALL).strip()
+    # First: strip matched <think>...</think> pairs
+    output = re.sub(r"<think>.*?</think>", "", output, flags=re.DOTALL).strip()
+    # Second: strip leaked thinking (everything before a lone </think>)
+    if "</think>" in output:
+        output = output.split("</think>", 1)[1].strip()
+    return output
 
 
 def _parse_scores(output: str, batch_size: int) -> list[VariableScore | None]:

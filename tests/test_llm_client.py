@@ -969,6 +969,93 @@ class TestThinkingModelDetection:
 
         assert result == "some reasoning"
 
+    def test_falls_back_to_thinking_field(self):
+        """When content is empty and no reasoning_content, fall back to thinking field.
+
+        Ollama returns thinking content in a 'thinking' field (not 'reasoning_content').
+        When the model spends its entire token budget on thinking and returns empty
+        content, we should use the thinking field as fallback.
+        """
+        client = LLMClient(model="ollama_chat/qwen3:4b", api_base="http://localhost:11434")
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = None
+        mock_response.choices[0].message.reasoning_content = None
+        mock_response.choices[0].message.thinking = "1. KEEP\n2. DROP\n3. KEEP"
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response):
+            result = client.generate("test")
+
+        assert "1. KEEP" in result
+        assert "2. DROP" in result
+
+    def test_strips_leaked_thinking_with_lone_close_tag(self):
+        """Should strip leaked thinking before a lone </think> tag.
+
+        When Ollama's template hardcodes <think> but think=false puts everything
+        into content, the output has reasoning + </think> + actual answer.
+        """
+        client = LLMClient(model="ollama_chat/qwen3:4b", api_base="http://localhost:11434")
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = (
+            "We are classifying variables.\n"
+            "1. MAX = 3 -> KEEP\n"
+            "</think>\n"
+            "1. KEEP\n"
+            "2. DROP"
+        )
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response):
+            result = client.generate("test")
+
+        assert "We are classifying" not in result
+        assert "1. KEEP" in result
+        assert "2. DROP" in result
+
+    def test_ollama_qwen3_sends_no_think_in_system_message(self):
+        """Ollama Qwen3 should get /no_think prepended to system message.
+
+        Ollama's Qwen3 template hardcodes <think> primer regardless of
+        think=false, so /no_think as a soft-switch is needed as fallback.
+        """
+        client = LLMClient(model="ollama_chat/qwen3:4b", api_base="http://localhost:11434")
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "1. KEEP"
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response) as mock_comp:
+            client.generate_from_messages(
+                [{"role": "system", "content": "Score variables"}, {"role": "user", "content": "test"}]
+            )
+
+        call_kwargs = mock_comp.call_args[1]
+        assert call_kwargs["think"] is False
+        # System message should have /no_think prepended
+        sys_msg = call_kwargs["messages"][0]
+        assert sys_msg["role"] == "system"
+        assert sys_msg["content"].startswith("/no_think\n")
+
+    def test_ollama_qwen3_no_think_not_duplicated(self):
+        """If system message already has /no_think, don't add it again."""
+        client = LLMClient(model="ollama_chat/qwen3:4b", api_base="http://localhost:11434")
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "1. KEEP"
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response) as mock_comp:
+            client.generate_from_messages(
+                [{"role": "system", "content": "/no_think\nScore variables"}, {"role": "user", "content": "test"}]
+            )
+
+        call_kwargs = mock_comp.call_args[1]
+        sys_content = call_kwargs["messages"][0]["content"]
+        assert sys_content.count("/no_think") == 1
+
 
 class TestPresencePenaltyRouting:
     """Tests for presence_penalty routing to extra_body for Ollama."""

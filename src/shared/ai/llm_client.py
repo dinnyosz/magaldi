@@ -483,7 +483,7 @@ class LLMClient:
         return any(base.startswith(tm) for tm in LLMClient.THINKING_MODELS)
 
     def _strip_think_tags(self, text: str) -> str:
-        """Strip <think>...</think> blocks from model output.
+        """Strip <think>...</think> blocks and leaked thinking from output.
 
         Thinking models (Qwen3, DeepSeek-R1) may still emit <think> tags even
         when thinking is disabled via API params — e.g. when the inference
@@ -492,9 +492,16 @@ class LLMClient:
         scoring, summarization) and avoids wasting the tight token budget on
         hidden reasoning.
 
-        Only called when ``_is_thinking_model`` is True.
+        Also handles "leaked thinking" where the model outputs reasoning
+        followed by a lone ``</think>`` (without ``<think>``).  This happens
+        on Ollama when the template hardcodes the ``<think>`` primer but
+        ``think=false`` puts everything into the content field.
         """
-        return self._think_re.sub("", text).strip()
+        text = self._think_re.sub("", text).strip()
+        # Strip leaked thinking (everything before a lone </think>)
+        if "</think>" in text:
+            text = text.split("</think>", 1)[1].strip()
+        return text
 
     def _extract_content(self, message: Any, use_model: str) -> str:
         """Extract text content from an LLM response message.
@@ -518,15 +525,21 @@ class LLMClient:
         """
         content = message.content
 
-        # Fallback to reasoning_content for ANY model when content is empty.
-        # llama-server with Qwen3.5 GGUF may split output into reasoning_content
-        # even when the model isn't flagged as a thinking model, because the GGUF
-        # chat template enables thinking by default (unlike Ollama's version).
+        # Fallback to reasoning/thinking content for ANY model when content is empty.
+        # Servers may split output into separate fields depending on provider:
+        # - llama-server: reasoning_content (via LiteLLM mapping)
+        # - Ollama: thinking (native /api/chat field, mapped by LiteLLM)
+        # This covers cases where the GGUF chat template enables thinking by
+        # default and the model spends its entire token budget on reasoning,
+        # returning empty content.
         if not content:
+            # Try reasoning_content (llama-server) then thinking (Ollama)
             reasoning = getattr(message, "reasoning_content", None)
+            if not (isinstance(reasoning, str) and reasoning.strip()):
+                reasoning = getattr(message, "thinking", None)
             if isinstance(reasoning, str) and reasoning.strip():
                 logger.warning(
-                    "Model '%s' returned empty content but has reasoning_content "
+                    "Model '%s' returned empty content but has reasoning/thinking "
                     "(%d chars) — using it as fallback. "
                     "Consider enabling thinking suppression for this model.",
                     use_model, len(reasoning),
@@ -537,9 +550,9 @@ class LLMClient:
             raise LLMError(f"Empty response from model '{use_model}'")
 
         text = content.strip()
-        # Always strip <think> tags — they can appear even in non-thinking models
-        # when the server doesn't honor enable_thinking=False
-        text = self._think_re.sub("", text).strip()
+        # Always strip thinking content — covers both matched <think>...</think>
+        # pairs and leaked thinking (content before a lone </think> tag).
+        text = self._strip_think_tags(text)
         return text
 
     @classmethod
@@ -666,6 +679,20 @@ class LLMClient:
         if self._is_thinking_model and use_model.startswith("ollama_chat/"):
             # Native /api/chat supports "think" parameter directly
             kwargs["think"] = False
+            # Also prepend /no_think to system message as a fallback.
+            # Ollama's Qwen3 template hardcodes <think> primer regardless of
+            # think=false, so the model still enters thinking mode and wastes
+            # the entire token budget on reasoning, returning empty content.
+            # /no_think is a soft-switch that Qwen3 honors at the prompt level.
+            msgs = kwargs["messages"]
+            if msgs and msgs[0].get("role") == "system":
+                content = msgs[0]["content"]
+                if "/no_think" not in content:
+                    msgs = [{"role": "system", "content": f"/no_think\n{content}"}] + msgs[1:]
+                    kwargs["messages"] = msgs
+            else:
+                msgs = [{"role": "system", "content": "/no_think"}] + msgs
+                kwargs["messages"] = msgs
         elif _is_local:
             # Local servers (LM Studio, llama.cpp) — always disable thinking
             # Strategy 1: API param (chat_template_kwargs)

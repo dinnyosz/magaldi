@@ -136,6 +136,48 @@ class TestStripThinkTags:
         lines = [line for line in result.strip().split("\n") if line.strip()]
         assert len(lines) == 2
 
+    def test_strips_leaked_thinking_with_lone_close_tag(self):
+        """Should strip leaked thinking before a lone </think> tag.
+
+        When Ollama's template hardcodes <think> primer but think=false puts
+        everything into content, the output has reasoning followed by </think>
+        then the actual answer — without an opening <think> tag.
+        """
+        text = (
+            "We are given 8 variables to classify.\n"
+            "1. MAX_RETRIES = 3 -> KEEP\n"
+            "2. result = foo() -> DROP\n"
+            "</think>\n"
+            "1. KEEP\n"
+            "2. DROP"
+        )
+        result = _strip_think_tags(text)
+        assert "We are given" not in result
+        assert "1. KEEP" in result
+        assert "2. DROP" in result
+
+    def test_strips_leaked_thinking_preserves_scores(self):
+        """Leaked thinking with scores inside should not confuse parser."""
+        text = (
+            "Let me classify each:\n"
+            "1. KEEP (constant)\n"
+            "2. DROP (temp)\n"
+            "3. KEEP (config)\n"
+            "</think>\n"
+            "1. KEEP\n"
+            "2. DROP\n"
+            "3. KEEP"
+        )
+        result = _strip_think_tags(text)
+        # Only scores after </think> should remain
+        lines = [line for line in result.strip().split("\n") if line.strip()]
+        assert len(lines) == 3
+
+    def test_no_lone_close_tag_leaves_content_intact(self):
+        """Text without </think> should pass through unchanged."""
+        text = "1. KEEP\n2. DROP\n3. KEEP"
+        assert _strip_think_tags(text) == text
+
 
 # =============================================================================
 # SCORE PARSING TESTS
