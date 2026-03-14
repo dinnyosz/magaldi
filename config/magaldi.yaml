@@ -38,6 +38,7 @@ redis:
 llm:
   # Named model configurations
   # All models served via Ollama
+  # Use -instruct variants (no-think Modelfiles) for structured output tasks
   models:
     qwen3.5-4b:
       name: qwen3.5:4b
@@ -48,11 +49,11 @@ llm:
       provider: ollama
       url: http://localhost:11434
     qwen3-4b:
-      name: qwen3:4b
+      name: qwen3:4b-instruct-2k
       provider: ollama
       url: http://localhost:11434
     qwen3-1.7b:
-      name: qwen3:1.7b
+      name: qwen3:1.7b-2k
       provider: ollama
       url: http://localhost:11434
 
