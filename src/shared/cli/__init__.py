@@ -25,6 +25,7 @@ from shared.cli import (
     feature_commands,  # noqa: F401
     glossary_commands,  # noqa: F401
     llamacpp,  # noqa: F401
+    ollama_cli,  # noqa: F401
     parse,  # noqa: F401
     prompt_improver,  # noqa: F401
     watch,  # noqa: F401
