@@ -49,11 +49,11 @@ llm:
       provider: ollama
       url: http://localhost:11434
     qwen3-4b:
-      name: qwen3:4b-instruct-2k
+      name: qwen3:4b-instruct
       provider: ollama
       url: http://localhost:11434
     qwen3-1.7b:
-      name: qwen3:1.7b-2k
+      name: qwen3:1.7b-instruct
       provider: ollama
       url: http://localhost:11434
 
