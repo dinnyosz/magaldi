@@ -28,6 +28,7 @@ from shared.cli import (
     ollama_cli,  # noqa: F401
     parse,  # noqa: F401
     prompt_improver,  # noqa: F401
+    vllm_mlx,  # noqa: F401
     watch,  # noqa: F401
     web,  # noqa: F401
 )
