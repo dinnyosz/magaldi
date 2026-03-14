@@ -78,7 +78,7 @@ class ModelConfig:
     """
 
     name: str  # Model name (e.g., "qwen3.5:4b", "Qwen3.5-4B-Q4_K_M")
-    provider: str = "ollama"  # ollama, llamacpp, lmstudio, openai, anthropic
+    provider: str = "ollama"  # ollama, llamacpp, vllm-mlx, lmstudio, openai, anthropic
     url: str = "http://localhost:11434"  # API endpoint
     api_key: str | None = None  # For cloud providers
 
@@ -90,7 +90,7 @@ class ModelConfig:
 
     # GGUF download spec for llamacpp models: "repo_id:filename"
     # Example: "unsloth/Qwen3.5-4B-GGUF:Qwen3.5-4B-Q4_K_M.gguf"
-    # Used by `magaldi llm pull` to download models from HuggingFace.
+    # Used by `magaldi llamacpp pull` to download models from HuggingFace.
     gguf: str | None = None
 
     def get_litellm_model(self) -> str:
@@ -112,7 +112,8 @@ class ModelConfig:
         elif self.provider == "lmstudio":
             # LM Studio has a dedicated LiteLLM provider
             return f"lm_studio/{self.name}"
-        elif self.provider == "llamacpp":
+        elif self.provider in ("llamacpp", "vllm-mlx"):
+            # Both use OpenAI-compatible API
             return f"openai/{self.name}"
         elif self.provider == "openai":
             return self.name
@@ -123,7 +124,7 @@ class ModelConfig:
         """Get the API base URL."""
         if self.provider == "ollama":
             return self.url
-        elif self.provider in ("lmstudio", "llamacpp"):
+        elif self.provider in ("lmstudio", "llamacpp", "vllm-mlx"):
             return f"{self.url.rstrip('/')}/v1"
         elif self.provider == "openai":
             return None

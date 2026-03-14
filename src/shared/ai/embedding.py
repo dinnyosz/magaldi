@@ -130,8 +130,8 @@ class CodeEmbeddingClient:
             # LM Studio has a dedicated LiteLLM provider
             full_model = f"lm_studio/{model}"
             api_base = url if (url and url.endswith("/v1")) else f"{url}/v1" if url else None
-        elif provider == "llamacpp":
-            # llama.cpp server exposes OpenAI-compatible API
+        elif provider in ("llamacpp", "vllm-mlx"):
+            # OpenAI-compatible API servers
             full_model = f"openai/{model}"
             api_base = url  # Should include /v1 suffix
         elif provider == "openai":

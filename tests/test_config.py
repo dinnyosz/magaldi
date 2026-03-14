@@ -511,6 +511,18 @@ class TestModelConfig:
         cfg = ModelConfig(name="model", provider="llamacpp", url="http://localhost:8090")
         assert cfg.get_api_base() == "http://localhost:8090/v1"
 
+    def test_get_litellm_model_vllm_mlx(self):
+        cfg = ModelConfig(name="mlx-community/Qwen3-4B-4bit", provider="vllm-mlx")
+        assert cfg.get_litellm_model() == "openai/mlx-community/Qwen3-4B-4bit"
+
+    def test_get_api_base_vllm_mlx(self):
+        cfg = ModelConfig(name="model", provider="vllm-mlx", url="http://localhost:8000")
+        assert cfg.get_api_base() == "http://localhost:8000/v1"
+
+    def test_get_api_base_vllm_mlx_trailing_slash(self):
+        cfg = ModelConfig(name="model", provider="vllm-mlx", url="http://localhost:8000/")
+        assert cfg.get_api_base() == "http://localhost:8000/v1"
+
     def test_get_api_base_openai(self):
         cfg = ModelConfig(name="gpt-4o", provider="openai")
         assert cfg.get_api_base() is None
