@@ -3902,3 +3902,112 @@ class TestContentHashIncludesDocstring:
             docstring="Return one",
         )
         assert elem_no_doc.compute_content_hash() != elem_with_doc.compute_content_hash()
+
+
+# =============================================================================
+# TIER FLATTENING FOR NON-TIERED PROVIDERS
+# =============================================================================
+
+
+class TestTierFlatteningForNonTieredProviders:
+    """Non-tiered providers (llamacpp, vllm-mlx) should assign all LLM elements
+    to the max tier (32768) since they use a fixed context window.
+    Handcrafted elements keep their sub-tiers regardless of provider.
+    """
+
+    def test_llamacpp_all_llm_elements_get_max_tier(self):
+        """With llamacpp provider, all non-handcrafted elements get 32768 tier."""
+        from shared.ai.context_size import (
+            CONTEXT_TIERS,
+            CRAFT_REASON_TO_TIER,
+            HANDCRAFTED_TIER,
+            compute_element_num_ctx,
+        )
+        from shared.config import ModelConfig
+
+        config = ProcessingConfig(
+            summarize_model=ModelConfig(name="model", provider="llamacpp"),
+        )
+        use_tiered = config.summarize_model.supports_tiered_context()
+        assert not use_tiered
+
+        # Simulate the tier assignment logic from process_elements()
+        elements = [
+            # Function with >5 lines to avoid handcrafted threshold
+            CodeElement(element_id="s:r:u:a.py:function:medium_fn:1",
+                        element_type="function", name="medium_fn",
+                        raw_code="def medium():\n" + "    x = 1\n" * 10),
+            CodeElement(element_id="s:r:u:big_file.py:file:big_file.py:1",
+                        element_type="file", name="big_file.py",
+                        raw_code="x = 1\n" * 5000),  # ~30k chars → would be 16k tier with Ollama
+            CodeElement(element_id="s:r:u:a.py:import:os:1",
+                        element_type="import", name="os",
+                        raw_code="import os"),
+        ]
+
+        context_sizes: dict[str, int] = {}
+        for elem in elements:
+            craft_reason = _get_craft_reason(elem, config)
+            if craft_reason is not None:
+                context_sizes[elem.element_id] = CRAFT_REASON_TO_TIER.get(
+                    craft_reason, HANDCRAFTED_TIER
+                )
+            elif use_tiered:
+                char_count = len(elem.raw_code or "")
+                context_sizes[elem.element_id] = compute_element_num_ctx(
+                    elem.element_type, char_count
+                )
+            else:
+                context_sizes[elem.element_id] = CONTEXT_TIERS[-1]
+
+        # LLM elements should all be 32768 (flat tier for non-tiered provider)
+        assert context_sizes[elements[0].element_id] == 32768  # medium function
+        assert context_sizes[elements[1].element_id] == 32768  # big file
+        # Import is handcrafted — keeps its craft sub-tier
+        assert context_sizes[elements[2].element_id] != 32768
+
+    def test_ollama_elements_get_per_element_tiers(self):
+        """With Ollama provider, elements get per-element tier assignment."""
+        from shared.ai.context_size import (
+            CONTEXT_TIERS,
+            CRAFT_REASON_TO_TIER,
+            HANDCRAFTED_TIER,
+            compute_element_num_ctx,
+        )
+        from shared.config import ModelConfig
+
+        config = ProcessingConfig(
+            summarize_model=ModelConfig(name="qwen3.5:4b", provider="ollama"),
+        )
+        use_tiered = config.summarize_model.supports_tiered_context()
+        assert use_tiered
+
+        elements = [
+            # Function with >5 lines to avoid handcrafted threshold
+            CodeElement(element_id="s:r:u:a.py:function:medium_fn:1",
+                        element_type="function", name="medium_fn",
+                        raw_code="def medium():\n" + "    x = 1\n" * 10),
+            CodeElement(element_id="s:r:u:big_file.py:file:big_file.py:1",
+                        element_type="file", name="big_file.py",
+                        raw_code="x = 1\n" * 5000),
+        ]
+
+        context_sizes: dict[str, int] = {}
+        for elem in elements:
+            craft_reason = _get_craft_reason(elem, config)
+            if craft_reason is not None:
+                context_sizes[elem.element_id] = CRAFT_REASON_TO_TIER.get(
+                    craft_reason, HANDCRAFTED_TIER
+                )
+            elif use_tiered:
+                char_count = len(elem.raw_code or "")
+                context_sizes[elem.element_id] = compute_element_num_ctx(
+                    elem.element_type, char_count
+                )
+            else:
+                context_sizes[elem.element_id] = CONTEXT_TIERS[-1]
+
+        # Medium function should get a small tier (not 32k)
+        assert context_sizes[elements[0].element_id] < 32768
+        # Big file SHOULD be a large tier (16k or 32k)
+        assert context_sizes[elements[1].element_id] >= 16384

@@ -573,19 +573,27 @@ def process_elements(
     # Handcrafted elements get craft sub-tiers (test/import/small/docstring)
     # so they batch separately from LLM elements and get their own exploration cycle
     # skip_ai: no LLM/embedding work, tier separation is unnecessary — pass empty
+    #
+    # Non-tiered providers (llamacpp, vllm-mlx, etc.): all LLM elements get the
+    # max tier (32k) since the server uses a fixed context window. This eliminates
+    # unnecessary drain/warmup cycles and consolidates ETA tracking into one column.
     element_context_sizes: dict[str, int] = {}
     if not config.skip_ai:
+        use_tiered = config.summarize_model.supports_tiered_context()
         for elem in elements_to_process:
             craft_reason = _get_craft_reason(elem, config)
             if craft_reason is not None:
                 element_context_sizes[elem.element_id] = CRAFT_REASON_TO_TIER.get(
                     craft_reason, HANDCRAFTED_TIER
                 )
-            else:
+            elif use_tiered:
                 char_count = len(elem.raw_code or "")
                 element_context_sizes[elem.element_id] = compute_element_num_ctx(
                     elem.element_type, char_count
                 )
+            else:
+                # Non-tiered provider: fixed context window, no benefit from tier separation
+                element_context_sizes[elem.element_id] = CONTEXT_TIERS[-1]
 
     # Initialize tracking structures (use provided or create new)
     # Pass per-element context sizes for tier batching (minimizes model reloads)

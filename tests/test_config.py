@@ -534,3 +534,28 @@ class TestModelConfig:
     def test_get_api_base_openai(self):
         cfg = ModelConfig(name="gpt-4o", provider="openai")
         assert cfg.get_api_base() is None
+
+    def test_supports_tiered_context_ollama(self):
+        """Ollama supports tiered model aliases with different KV cache configs."""
+        cfg = ModelConfig(name="qwen3.5:4b", provider="ollama")
+        assert cfg.supports_tiered_context() is True
+
+    def test_supports_tiered_context_llamacpp(self):
+        """llama.cpp uses fixed context window — no tiered context support."""
+        cfg = ModelConfig(name="qwen3.5:4b", provider="llamacpp")
+        assert cfg.supports_tiered_context() is False
+
+    def test_supports_tiered_context_vllm_mlx(self):
+        """vllm-mlx uses fixed context window — no tiered context support."""
+        cfg = ModelConfig(name="model", provider="vllm-mlx")
+        assert cfg.supports_tiered_context() is False
+
+    def test_supports_tiered_context_lmstudio(self):
+        """LM Studio uses fixed context window — no tiered context support."""
+        cfg = ModelConfig(name="model", provider="lmstudio")
+        assert cfg.supports_tiered_context() is False
+
+    def test_supports_tiered_context_openai(self):
+        """Cloud providers don't use tiered context."""
+        cfg = ModelConfig(name="gpt-4o", provider="openai")
+        assert cfg.supports_tiered_context() is False

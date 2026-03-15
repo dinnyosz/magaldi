@@ -135,6 +135,16 @@ class ModelConfig:
         else:
             return self.url
 
+    def supports_tiered_context(self) -> bool:
+        """Whether this provider benefits from per-request context sizing.
+
+        Only Ollama supports tiered model aliases with different KV cache configs.
+        All other providers (llamacpp, vllm-mlx, lmstudio, etc.) use a fixed
+        context window set at model load time — tier separation adds overhead
+        (drain/warmup cycles, fragmented ETA) with no benefit.
+        """
+        return self.provider == "ollama"
+
     # Models that use thinking/reasoning tags (<think>...</think>) by default.
     # qwen3 thinks by default but qwen3.5+ has reasoning disabled by default.
     _THINKING_MODELS = ("qwen3", "deepseek-r1", "deepseek-coder-v2", "nemotron")
