@@ -625,12 +625,14 @@ class LLMClient:
         Centralises auth, thinking-model suppression, and num_ctx handling
         so that generate() and generate_from_messages() stay thin.
         """
-        # For local providers (Ollama), disable client-side timeout.
-        # Ollama queues requests internally and may take arbitrarily long
-        # when saturated — client-side timeouts cause spurious failures.
-        # LiteLLM clamps None/0 to 600s, so we use a large sentinel instead.
+        # For local providers (Ollama, llama.cpp, vllm-mlx), disable client-side
+        # timeout. Local servers queue requests internally and may take
+        # arbitrarily long when saturated — client-side timeouts cause spurious
+        # failures. LiteLLM clamps None/0 to 600s, so we use a large sentinel.
         _is_ollama = use_model.startswith(("ollama/", "ollama_chat/"))
-        effective_timeout: float = 86400.0 if _is_ollama else float(timeout)
+        _is_local_openai = use_model.startswith("openai/") and self.api_base is not None
+        _is_local = _is_ollama or _is_local_openai
+        effective_timeout: float = 86400.0 if _is_local else float(timeout)
 
         kwargs: dict[str, Any] = {
             "model": use_model,
@@ -1035,10 +1037,17 @@ class EmbeddingClient:
             LLMError: If embedding generation fails after retries.
         """
         def _do_embed() -> list[float]:
+            # Local servers may queue — disable client-side timeout
+            _is_local = (
+                self.model.startswith(("ollama/", "ollama_chat/"))
+                or (self.model.startswith("openai/") and self.api_base is not None)
+            )
+            effective_timeout: float = 86400.0 if _is_local else float(timeout)
+
             kwargs: dict[str, Any] = {
                 "model": self.model,
                 "input": [text],
-                "timeout": timeout,
+                "timeout": effective_timeout,
             }
 
             if self.api_base:
@@ -1090,10 +1099,17 @@ class EmbeddingClient:
         await _get_or_create_session_async()
 
         async def _do_embed() -> list[float]:
+            # Local servers may queue — disable client-side timeout
+            _is_local = (
+                self.model.startswith(("ollama/", "ollama_chat/"))
+                or (self.model.startswith("openai/") and self.api_base is not None)
+            )
+            effective_timeout: float = 86400.0 if _is_local else float(timeout)
+
             kwargs: dict[str, Any] = {
                 "model": self.model,
                 "input": [text],
-                "timeout": timeout,
+                "timeout": effective_timeout,
             }
 
             if self.api_base:
@@ -1142,10 +1158,17 @@ class EmbeddingClient:
             return []
 
         def _do_embed_batch() -> list[list[float]]:
+            # Local servers may queue — disable client-side timeout
+            _is_local = (
+                self.model.startswith(("ollama/", "ollama_chat/"))
+                or (self.model.startswith("openai/") and self.api_base is not None)
+            )
+            effective_timeout: float = 86400.0 if _is_local else float(timeout)
+
             kwargs: dict[str, Any] = {
                 "model": self.model,
                 "input": texts,
-                "timeout": timeout,
+                "timeout": effective_timeout,
             }
 
             if self.api_base:
