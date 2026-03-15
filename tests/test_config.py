@@ -456,12 +456,20 @@ class TestModelConfig:
     """Tests for ModelConfig methods."""
 
     def test_is_thinking_model_ollama_qwen3(self):
-        cfg = ModelConfig(name="qwen3:4b-instruct", provider="ollama")
+        cfg = ModelConfig(name="qwen3:4b", provider="ollama")
         assert cfg.is_thinking_model() is True
 
+    def test_is_not_thinking_model_ollama_qwen3_instruct(self):
+        cfg = ModelConfig(name="qwen3:4b-instruct", provider="ollama")
+        assert cfg.is_thinking_model() is False
+
     def test_is_thinking_model_hf_qwen3(self):
-        cfg = ModelConfig(name="Qwen3-4B-Instruct", provider="llamacpp")
+        cfg = ModelConfig(name="Qwen3-4B", provider="llamacpp")
         assert cfg.is_thinking_model() is True
+
+    def test_is_not_thinking_model_hf_qwen3_instruct(self):
+        cfg = ModelConfig(name="Qwen3-4B-Instruct", provider="llamacpp")
+        assert cfg.is_thinking_model() is False
 
     def test_is_thinking_model_deepseek_r1(self):
         cfg = ModelConfig(name="deepseek-r1:7b", provider="ollama")

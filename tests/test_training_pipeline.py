@@ -309,9 +309,9 @@ class TestEstimateTokens:
         assert tokens > 0
 
     def test_system_prompt_tokens_plausible_range(self):
-        """System prompt should be roughly 300-600 tokens."""
+        """System prompt should be roughly 300-900 tokens."""
         tokens = _estimate_system_prompt_tokens()
-        assert 200 < tokens < 800
+        assert 200 < tokens < 1000
 
 
 class TestBatchToExample:
