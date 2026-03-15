@@ -575,25 +575,30 @@ def process_elements(
     # skip_ai: no LLM/embedding work, tier separation is unnecessary — pass empty
     #
     # Non-tiered providers (llamacpp, vllm-mlx, etc.): all LLM elements get the
-    # max tier (32k) since the server uses a fixed context window. This eliminates
-    # unnecessary drain/warmup cycles and consolidates ETA tracking into one column.
-    element_context_sizes: dict[str, int] = {}
+    # max tier (32k) for batching since the server uses a fixed context window.
+    # However, we still compute *natural* tiers (based on actual code size) for
+    # ETA tracking — otherwise the ETA system can't distinguish a 2k function
+    # from a 32k file and cross-type fallback estimates are wildly wrong.
+    element_context_sizes: dict[str, int] = {}  # For batching (DependencyTracker)
+    element_natural_tiers: dict[str, int] = {}  # For ETA tracking (TimingStats)
     if not config.skip_ai:
         use_tiered = config.summarize_model.supports_tiered_context()
         for elem in elements_to_process:
             craft_reason = _get_craft_reason(elem, config)
             if craft_reason is not None:
-                element_context_sizes[elem.element_id] = CRAFT_REASON_TO_TIER.get(
-                    craft_reason, HANDCRAFTED_TIER
-                )
-            elif use_tiered:
-                char_count = len(elem.raw_code or "")
-                element_context_sizes[elem.element_id] = compute_element_num_ctx(
-                    elem.element_type, char_count
-                )
+                tier = CRAFT_REASON_TO_TIER.get(craft_reason, HANDCRAFTED_TIER)
+                element_context_sizes[elem.element_id] = tier
+                element_natural_tiers[elem.element_id] = tier
             else:
-                # Non-tiered provider: fixed context window, no benefit from tier separation
-                element_context_sizes[elem.element_id] = CONTEXT_TIERS[-1]
+                # Always compute natural tier based on actual code size
+                char_count = len(elem.raw_code or "")
+                natural_tier = compute_element_num_ctx(elem.element_type, char_count)
+                element_natural_tiers[elem.element_id] = natural_tier
+                if use_tiered:
+                    element_context_sizes[elem.element_id] = natural_tier
+                else:
+                    # Non-tiered provider: flat tier for batching, natural for ETA
+                    element_context_sizes[elem.element_id] = CONTEXT_TIERS[-1]
 
     # Initialize tracking structures (use provided or create new)
     # Pass per-element context sizes for tier batching (minimizes model reloads)
@@ -620,12 +625,14 @@ def process_elements(
     timing_stats.set_totals_by_type(totals_by_type)
 
     # Count elements by (type, tier) for tier-aware ETA
+    # Uses natural tiers (based on actual code size) so ETA fallback can
+    # use tier ratios to scale estimates across types — even when batching
+    # uses flat tiers (non-Ollama providers).
     # skip_ai: no tiers, skip this computation entirely
     if not config.skip_ai:
-        # element_context_sizes already has craft sub-tiers for handcrafted elements
         totals_by_type_tier: dict[tuple[str, int], int] = {}
         for elem in elements_to_process:
-            ctx_size = element_context_sizes.get(elem.element_id, 2048)
+            ctx_size = element_natural_tiers.get(elem.element_id, 2048)
             if is_handcrafted_tier(ctx_size):
                 tier = ctx_size  # Keep craft sub-tier as-is
             else:
@@ -848,8 +855,13 @@ def process_elements(
                 element = future_to_element.pop(future)
                 processed = future.result()
 
-                # Get element's tier for accurate ETA tracking
-                element_tier = dependency_tracker._get_tier(element.element_id)
+                # Get element's natural tier for accurate ETA tracking.
+                # Uses natural tier (based on code size) not batching tier, so
+                # ETA fallback can use tier ratios across types even with flat batching.
+                element_tier = element_natural_tiers.get(
+                    element.element_id,
+                    dependency_tracker._get_tier(element.element_id),
+                )
 
                 # Use peak allowed workers for throughput calculation
                 # max(start, end) reflects the peak concurrency the element competed with

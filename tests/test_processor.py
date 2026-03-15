@@ -3911,79 +3911,79 @@ class TestContentHashIncludesDocstring:
 
 class TestTierFlatteningForNonTieredProviders:
     """Non-tiered providers (llamacpp, vllm-mlx) should assign all LLM elements
-    to the max tier (32768) since they use a fixed context window.
+    to the max tier (32768) for batching, but preserve natural tiers for ETA.
     Handcrafted elements keep their sub-tiers regardless of provider.
     """
 
-    def test_llamacpp_all_llm_elements_get_max_tier(self):
-        """With llamacpp provider, all non-handcrafted elements get 32768 tier."""
+    @staticmethod
+    def _compute_tiers(config, elements):
+        """Simulate the tier assignment logic from process_elements().
+
+        Returns (context_sizes, natural_tiers) dicts.
+        """
         from shared.ai.context_size import (
             CONTEXT_TIERS,
             CRAFT_REASON_TO_TIER,
             HANDCRAFTED_TIER,
             compute_element_num_ctx,
         )
+
+        use_tiered = config.summarize_model.supports_tiered_context()
+        context_sizes: dict[str, int] = {}
+        natural_tiers: dict[str, int] = {}
+
+        for elem in elements:
+            craft_reason = _get_craft_reason(elem, config)
+            if craft_reason is not None:
+                tier = CRAFT_REASON_TO_TIER.get(craft_reason, HANDCRAFTED_TIER)
+                context_sizes[elem.element_id] = tier
+                natural_tiers[elem.element_id] = tier
+            else:
+                char_count = len(elem.raw_code or "")
+                natural_tier = compute_element_num_ctx(elem.element_type, char_count)
+                natural_tiers[elem.element_id] = natural_tier
+                if use_tiered:
+                    context_sizes[elem.element_id] = natural_tier
+                else:
+                    context_sizes[elem.element_id] = CONTEXT_TIERS[-1]
+
+        return context_sizes, natural_tiers
+
+    def test_llamacpp_batching_tiers_are_flat(self):
+        """With llamacpp, batching tiers are all 32768 for LLM elements."""
         from shared.config import ModelConfig
 
         config = ProcessingConfig(
             summarize_model=ModelConfig(name="model", provider="llamacpp"),
         )
-        use_tiered = config.summarize_model.supports_tiered_context()
-        assert not use_tiered
-
-        # Simulate the tier assignment logic from process_elements()
         elements = [
-            # Function with >5 lines to avoid handcrafted threshold
             CodeElement(element_id="s:r:u:a.py:function:medium_fn:1",
                         element_type="function", name="medium_fn",
                         raw_code="def medium():\n" + "    x = 1\n" * 10),
             CodeElement(element_id="s:r:u:big_file.py:file:big_file.py:1",
                         element_type="file", name="big_file.py",
-                        raw_code="x = 1\n" * 5000),  # ~30k chars → would be 16k tier with Ollama
+                        raw_code="x = 1\n" * 5000),
             CodeElement(element_id="s:r:u:a.py:import:os:1",
                         element_type="import", name="os",
                         raw_code="import os"),
         ]
 
-        context_sizes: dict[str, int] = {}
-        for elem in elements:
-            craft_reason = _get_craft_reason(elem, config)
-            if craft_reason is not None:
-                context_sizes[elem.element_id] = CRAFT_REASON_TO_TIER.get(
-                    craft_reason, HANDCRAFTED_TIER
-                )
-            elif use_tiered:
-                char_count = len(elem.raw_code or "")
-                context_sizes[elem.element_id] = compute_element_num_ctx(
-                    elem.element_type, char_count
-                )
-            else:
-                context_sizes[elem.element_id] = CONTEXT_TIERS[-1]
+        context_sizes, natural_tiers = self._compute_tiers(config, elements)
 
-        # LLM elements should all be 32768 (flat tier for non-tiered provider)
-        assert context_sizes[elements[0].element_id] == 32768  # medium function
-        assert context_sizes[elements[1].element_id] == 32768  # big file
+        # Batching: LLM elements all get 32768
+        assert context_sizes[elements[0].element_id] == 32768  # function
+        assert context_sizes[elements[1].element_id] == 32768  # file
         # Import is handcrafted — keeps its craft sub-tier
         assert context_sizes[elements[2].element_id] != 32768
 
-    def test_ollama_elements_get_per_element_tiers(self):
-        """With Ollama provider, elements get per-element tier assignment."""
-        from shared.ai.context_size import (
-            CONTEXT_TIERS,
-            CRAFT_REASON_TO_TIER,
-            HANDCRAFTED_TIER,
-            compute_element_num_ctx,
-        )
+    def test_llamacpp_natural_tiers_preserved_for_eta(self):
+        """With llamacpp, natural tiers reflect actual code size for ETA."""
         from shared.config import ModelConfig
 
         config = ProcessingConfig(
-            summarize_model=ModelConfig(name="qwen3.5:4b", provider="ollama"),
+            summarize_model=ModelConfig(name="model", provider="llamacpp"),
         )
-        use_tiered = config.summarize_model.supports_tiered_context()
-        assert use_tiered
-
         elements = [
-            # Function with >5 lines to avoid handcrafted threshold
             CodeElement(element_id="s:r:u:a.py:function:medium_fn:1",
                         element_type="function", name="medium_fn",
                         raw_code="def medium():\n" + "    x = 1\n" * 10),
@@ -3992,22 +3992,40 @@ class TestTierFlatteningForNonTieredProviders:
                         raw_code="x = 1\n" * 5000),
         ]
 
-        context_sizes: dict[str, int] = {}
-        for elem in elements:
-            craft_reason = _get_craft_reason(elem, config)
-            if craft_reason is not None:
-                context_sizes[elem.element_id] = CRAFT_REASON_TO_TIER.get(
-                    craft_reason, HANDCRAFTED_TIER
-                )
-            elif use_tiered:
-                char_count = len(elem.raw_code or "")
-                context_sizes[elem.element_id] = compute_element_num_ctx(
-                    elem.element_type, char_count
-                )
-            else:
-                context_sizes[elem.element_id] = CONTEXT_TIERS[-1]
+        context_sizes, natural_tiers = self._compute_tiers(config, elements)
 
-        # Medium function should get a small tier (not 32k)
-        assert context_sizes[elements[0].element_id] < 32768
-        # Big file SHOULD be a large tier (16k or 32k)
-        assert context_sizes[elements[1].element_id] >= 16384
+        # Natural tiers: function should be much smaller than file
+        func_tier = natural_tiers[elements[0].element_id]
+        file_tier = natural_tiers[elements[1].element_id]
+        assert func_tier < file_tier, (
+            f"Function natural tier ({func_tier}) should be smaller than "
+            f"file natural tier ({file_tier})"
+        )
+        # Function with ~70 chars should be small (1k or 2k)
+        assert func_tier <= 2048
+        # Big file with ~30k chars should be large (16k+)
+        assert file_tier >= 16384
+
+    def test_ollama_tiers_are_natural(self):
+        """With Ollama, batching tiers equal natural tiers."""
+        from shared.config import ModelConfig
+
+        config = ProcessingConfig(
+            summarize_model=ModelConfig(name="qwen3.5:4b", provider="ollama"),
+        )
+        elements = [
+            CodeElement(element_id="s:r:u:a.py:function:medium_fn:1",
+                        element_type="function", name="medium_fn",
+                        raw_code="def medium():\n" + "    x = 1\n" * 10),
+            CodeElement(element_id="s:r:u:big_file.py:file:big_file.py:1",
+                        element_type="file", name="big_file.py",
+                        raw_code="x = 1\n" * 5000),
+        ]
+
+        context_sizes, natural_tiers = self._compute_tiers(config, elements)
+
+        # Both should be identical for Ollama
+        for elem in elements:
+            assert context_sizes[elem.element_id] == natural_tiers[elem.element_id], (
+                f"Ollama: batching tier should equal natural tier for {elem.name}"
+            )
