@@ -275,7 +275,7 @@ def llm_serve(
         "--n-gpu-layers", "99",
         "-sps", "0.4",
         "--cache-type-k", "q8_0",
-        "--cache-type-v", "q8_0",
+        "--cache-type-v", "q4_0",
         "--cache-reuse", "256",
     ]
 
@@ -299,7 +299,7 @@ def llm_serve(
     console.print(f"  Context size:   {ctx_size}")
     console.print("  Flash attention: on")
     console.print("  GPU layers:     99 (full offload)")
-    console.print("  KV cache type:  q8_0 (K+V)")
+    console.print("  KV cache type:  q8_0 (K) + q4_0 (V)")
     console.print("  Cache reuse:    256 tokens")
     console.print(f"  Log:            {_logfile(port)}")
     console.print()
