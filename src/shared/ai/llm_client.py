@@ -674,13 +674,12 @@ class LLMClient:
         # Helper to check if model is a local server (not cloud)
         _is_local = use_model.startswith(("openai/", "lm_studio/")) and self.api_base
 
-        # Disable thinking mode for local servers.
-        # Always send enable_thinking=False for llamacpp/local servers because:
-        # - Qwen3.5 GGUF chat templates may enable thinking by default on
-        #   llama-server even though Ollama's Qwen3.5 has it disabled.
-        # - Harmless for models that don't support thinking (param is ignored).
-        # - Without this, the model wastes token budget on reasoning_content
-        #   and returns empty content, causing parsers to fail silently.
+        # Disable thinking mode for local and thinking models.
+        # GGUF chat templates on llama-server may enable thinking by default
+        # even for models like Qwen3.5 that Ollama serves without thinking.
+        # Always send enable_thinking=False for local servers — it's harmless
+        # for models that don't support thinking (param is ignored), and
+        # prevents wasting the token budget on reasoning_content.
         if self._is_thinking_model and use_model.startswith("ollama_chat/"):
             # Native /api/chat supports "think" parameter directly
             kwargs["think"] = False
@@ -698,13 +697,23 @@ class LLMClient:
             else:
                 msgs = [{"role": "system", "content": "/no_think"}] + msgs
                 kwargs["messages"] = msgs
-        elif self._is_thinking_model and _is_local:
-            # Local servers (LM Studio, llama.cpp) with thinking models
-            # Strategy 1: API param (chat_template_kwargs)
+        elif _is_local:
+            # Local servers (LM Studio, llama.cpp) — always disable thinking.
+            # Qwen3.5 GGUF templates enable thinking by default on llama-server
+            # even though Ollama's Qwen3.5 Modelfile has it disabled.
             kwargs["extra_body"] = kwargs.get("extra_body", {})
+            # Strategy 1: chat_template_kwargs.enable_thinking=False
+            # Tells llama-server to render the template with thinking off.
             kwargs["extra_body"]["chat_template_kwargs"] = {"enable_thinking": False}
-            # Strategy 2: /no_think in system message (works for LM Studio, llama.cpp)
-            # Qwen3 models honor /no_think as a chat template directive
+            # Strategy 2: reasoning_format=none
+            # Qwen3.5 templates output <think>\n\n</think> even with
+            # enable_thinking=false, and the model still reasons into
+            # reasoning_content. With format=none, any thinking stays in
+            # message.content where _strip_think_tags() removes it.
+            kwargs["extra_body"]["reasoning_format"] = "none"
+            # Strategy 3: /no_think in system message
+            # Qwen3 models honor /no_think as a chat template directive.
+            # Qwen3.5 ignores it but it's harmless.
             msgs = kwargs["messages"]
             if msgs and msgs[0].get("role") == "system":
                 content = msgs[0]["content"]
