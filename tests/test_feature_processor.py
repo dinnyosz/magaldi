@@ -248,14 +248,16 @@ class TestFeatureTimingStats:
         assert eta is None
 
     def test_eta_seconds_with_records(self):
-        """Test ETA calculation with records."""
+        """Test ETA calculation uses elapsed wall-clock rate."""
         stats = FeatureTimingStats()
-        stats.record(2.0, 1.0)  # 3 seconds total per feature
+        stats.phase_start = time.time() - 3.0  # 3 seconds elapsed
+        stats.record(2.0, 1.0)
 
         eta = stats.eta_seconds(completed=1, total=5, num_workers=2)
 
-        # 4 remaining, 3s each, 2 workers = 6 seconds
-        assert eta == 6.0
+        # 3s elapsed / 1 completed * 4 remaining = 12 seconds
+        assert eta is not None
+        assert abs(eta - 12.0) < 0.5
 
     def test_eta_seconds_all_completed(self):
         """Test ETA when all completed."""

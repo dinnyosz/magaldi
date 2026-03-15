@@ -659,36 +659,41 @@ class TestScoringProgressState:
             total_batches=10,
             completed_batches=5,
             num_workers=1,
-            batch_times=[2.0] * 5,  # avg 2s per batch
-        )
-        eta = state.eta_seconds()
-        assert eta is not None
-        # 5 remaining batches * 2s / 1 worker = 10s
-        assert 9.9 <= eta <= 10.1
-
-    def test_eta_seconds_with_parallelism(self):
-        state = ScoringProgressState(
-            total_batches=10,
-            completed_batches=5,
-            num_workers=5,
+            start_time=time.time() - 10.0,  # 10s elapsed
             batch_times=[2.0] * 5,
         )
         eta = state.eta_seconds()
         assert eta is not None
-        # 5 remaining / 5 workers * 2s = 2s
-        assert 1.9 <= eta <= 2.1
+        # 10s elapsed / 5 completed * 5 remaining = 10s
+        assert 9.5 <= eta <= 10.5
+
+    def test_eta_seconds_with_parallelism(self):
+        """Parallelism is implicit in elapsed rate — no separate worker division."""
+        state = ScoringProgressState(
+            total_batches=10,
+            completed_batches=5,
+            num_workers=5,
+            start_time=time.time() - 2.0,  # 2s elapsed (fast due to parallelism)
+            batch_times=[2.0] * 5,
+        )
+        eta = state.eta_seconds()
+        assert eta is not None
+        # 2s elapsed / 5 completed * 5 remaining = 2s
+        assert 1.5 <= eta <= 2.5
 
     def test_eta_caps_workers_at_remaining(self):
+        """With elapsed-rate, near-end ETA is proportional to remaining."""
         state = ScoringProgressState(
             total_batches=10,
             completed_batches=9,
             num_workers=8,
+            start_time=time.time() - 18.0,  # 18s elapsed
             batch_times=[2.0] * 9,
         )
         eta = state.eta_seconds()
         assert eta is not None
-        # 1 remaining / min(8, 1) workers * 2s = 2s
-        assert 1.9 <= eta <= 2.1
+        # 18s elapsed / 9 completed * 1 remaining = 2s
+        assert 1.5 <= eta <= 2.5
 
 
 # =============================================================================
@@ -1213,33 +1218,35 @@ class TestScoreVariablesThrottling:
         # All values should be positive integers
         assert all(w is not None and w >= 1 for w in progress_updates)
 
-    def test_eta_uses_allowed_workers(self):
-        """Verify ETA calculation uses allowed_workers when throttled."""
+    def test_eta_ignores_worker_count(self):
+        """Elapsed-rate ETA doesn't depend on worker count — parallelism is implicit."""
         state = ScoringProgressState(
             total_batches=10,
             completed_batches=5,
             num_workers=8,
+            start_time=time.time() - 10.0,  # 10s elapsed
             batch_times=[2.0] * 5,
-            allowed_workers=2,  # Throttled to 2
+            allowed_workers=2,  # Throttled — ignored by elapsed-rate
         )
         eta = state.eta_seconds()
         assert eta is not None
-        # 5 remaining / min(2, 5) workers * 2s = 5s
-        assert 4.9 <= eta <= 5.1
+        # 10s elapsed / 5 completed * 5 remaining = 10s
+        assert 9.5 <= eta <= 10.5
 
-    def test_eta_uses_num_workers_when_no_throttle(self):
-        """Verify ETA calculation uses num_workers when not throttled."""
+    def test_eta_stable_across_throttle_changes(self):
+        """ETA should be stable regardless of allowed_workers changes."""
         state = ScoringProgressState(
             total_batches=10,
             completed_batches=5,
             num_workers=5,
+            start_time=time.time() - 5.0,  # 5s elapsed
             batch_times=[2.0] * 5,
-            allowed_workers=None,  # No throttle
+            allowed_workers=None,
         )
         eta = state.eta_seconds()
         assert eta is not None
-        # 5 remaining / 5 workers * 2s = 2s
-        assert 1.9 <= eta <= 2.1
+        # 5s elapsed / 5 completed * 5 remaining = 5s
+        assert 4.5 <= eta <= 5.5
 
 
 # =============================================================================

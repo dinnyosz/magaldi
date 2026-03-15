@@ -255,11 +255,13 @@ class LabelingTimingStats:
         return time.time() - self.phase_start
 
     def eta_seconds(self, completed: int, total: int) -> float | None:
-        """Calculate ETA based on average label time."""
-        if self.label_count == 0 or total <= completed:
+        """Estimate time remaining based on elapsed wall-clock rate."""
+        if completed == 0 or self.elapsed <= 0:
             return None
         remaining = total - completed
-        return remaining * self.avg_label_time
+        if remaining <= 0:
+            return 0.0
+        return (self.elapsed / completed) * remaining
 
 
 @dataclass

@@ -274,19 +274,20 @@ class TestLabelingTimingStats:
         stats = LabelingTimingStats()
         stats.record(1.0)
 
-        assert stats.eta_seconds(10, 10) is None
+        assert stats.eta_seconds(10, 10) == 0.0
 
     def test_eta_seconds_with_data(self):
-        """Test ETA calculation."""
+        """Test ETA calculation uses elapsed wall-clock rate."""
         stats = LabelingTimingStats()
+        stats.phase_start = time.time() - 4.0  # 4 seconds elapsed
 
         stats.record(1.0)
         stats.record(1.0)
 
-        # 2 completed, 8 remaining, avg=1.0s per label
+        # 2 completed in 4s elapsed → 2s/item → 8 remaining × 2s = 16s ETA
         eta = stats.eta_seconds(2, 10)
         assert eta is not None
-        assert abs(eta - 8.0) < 0.1
+        assert abs(eta - 16.0) < 0.5
 
 
 # =============================================================================

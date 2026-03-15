@@ -236,31 +236,18 @@ class FeatureTimingStats:
 
         return global_avg
 
-    def eta_seconds(self, completed: int, total: int, num_workers: int = 1) -> float | None:
-        """Calculate ETA based on per-tier average times."""
-        with self._lock:
-            if self.summarize_count == 0:
-                return None
+    def eta_seconds(self, completed: int, total: int, num_workers: int = 1) -> float | None:  # noqa: ARG002
+        """Estimate time remaining based on elapsed wall-clock rate.
 
-            global_avg = (self.total_summarize_time + self.total_embed_time) / self.summarize_count
-
-            # Use tier-aware calculation if available
-            if self.totals_by_tier:
-                total_work_time = 0.0
-                for tier, tot in self.totals_by_tier.items():
-                    done = self.count_by_tier.get(tier, 0)
-                    remaining = tot - done
-                    if remaining > 0:
-                        avg = self._get_avg_for_tier(tier, global_avg)
-                        total_work_time += remaining * avg
-                if total_work_time > 0:
-                    return total_work_time / max(num_workers, 1)
-
-            # Fallback to simple calculation
-            remaining = total - completed
-            if remaining <= 0:
-                return 0.0
-            return (remaining * global_avg) / max(num_workers, 1)
+        Uses elapsed / completed to derive actual throughput, which naturally
+        accounts for parallelism, throttling, warmup, and I/O overhead.
+        """
+        if completed == 0 or self.elapsed <= 0:
+            return None
+        remaining = total - completed
+        if remaining <= 0:
+            return 0.0
+        return (self.elapsed / completed) * remaining
 
     def get_eta_breakdown_with_avg(self, _num_workers: int = 1) -> list[tuple[str, int, float, bool, int, int]]:
         """Get average time per tier for display.

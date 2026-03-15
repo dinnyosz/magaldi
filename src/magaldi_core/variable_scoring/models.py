@@ -152,15 +152,14 @@ class ScoringProgressState:
         return self.elapsed / self.completed_variables
 
     def eta_seconds(self) -> float | None:
-        """Estimate time remaining based on batch throughput."""
+        """Estimate time remaining based on elapsed wall-clock rate.
+
+        Uses elapsed / completed to derive actual throughput, which naturally
+        accounts for parallelism, throttling, warmup, and I/O overhead.
+        """
         if self.completed_batches == 0:
             return None
         remaining_batches = self.total_batches - self.completed_batches
         if remaining_batches <= 0:
             return 0.0
-        # Use allowed_workers (throttled count) for ETA if available
-        workers = self.allowed_workers if self.allowed_workers is not None else self.num_workers
-        effective_workers = min(workers, remaining_batches)
-        if effective_workers <= 0:
-            return None
-        return (remaining_batches / effective_workers) * self.avg_batch_time
+        return (self.elapsed / self.completed_batches) * remaining_batches
