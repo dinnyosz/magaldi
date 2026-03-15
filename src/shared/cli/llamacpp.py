@@ -61,7 +61,7 @@ LLAMA_SERVER = PROJECT_ROOT / "tools" / "llama.cpp" / "build" / "bin" / "llama-s
 # Defaults
 DEFAULT_PORT = 8090
 DEFAULT_PARALLEL = 4
-DEFAULT_MODELS_MAX = 2
+DEFAULT_MODELS_MAX = 3
 DEFAULT_CTX_SIZE = 131072  # 4 slots × 32k each (ctx-size is total, divided by --parallel)
 
 
