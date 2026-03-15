@@ -184,12 +184,12 @@ class LLMConfig:
               url: http://localhost:8090
               gguf: unsloth/Qwen3.5-2B-GGUF:Qwen3.5-2B-Q4_K_M.gguf
             qwen3-embed:
-              name: Qwen3-Embedding-0.6B-Q8_0
+              name: Qwen3-Embedding-0.6B-q8_0
               provider: llamacpp
               url: http://localhost:8090
               dimensions: 1024
               embedding: true
-              gguf: Mungert/Qwen3-Embedding-0.6B-GGUF:Qwen3-Embedding-0.6B-Q8_0.gguf
+              gguf: Mungert/Qwen3-Embedding-0.6B-GGUF:Qwen3-Embedding-0.6B-q8_0.gguf
 
           summarize_model: qwen3.5-4b
           summarize_model_small: qwen3.5-2b
@@ -211,12 +211,12 @@ class LLMConfig:
             gguf="unsloth/Qwen3.5-2B-GGUF:Qwen3.5-2B-Q4_K_M.gguf",
         ),
         "qwen3-embed": ModelConfig(
-            name="Qwen3-Embedding-0.6B-Q8_0",
+            name="Qwen3-Embedding-0.6B-q8_0",
             provider="llamacpp",
             url="http://localhost:8090",
             dimensions=1024,
             embedding=True,
-            gguf="Mungert/Qwen3-Embedding-0.6B-GGUF:Qwen3-Embedding-0.6B-Q8_0.gguf",
+            gguf="Mungert/Qwen3-Embedding-0.6B-GGUF:Qwen3-Embedding-0.6B-q8_0.gguf",
         ),
     })
 

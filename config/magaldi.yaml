@@ -37,17 +37,29 @@ redis:
 
 llm:
   # Named model configurations
-  # All models served via Ollama
-  # Use -instruct variants (no-think Modelfiles) for structured output tasks
+  # Primary inference via llama.cpp (router mode on port 8090)
+  # Ollama/vllm-mlx configs kept for reference but not used by default
   models:
+    # --- llama.cpp models (primary) ---
     qwen3.5-4b:
-      name: qwen3.5:4b
-      provider: ollama
-      url: http://localhost:11434
+      name: Qwen3.5-4B-Q4_K_M
+      provider: llamacpp
+      url: http://localhost:8090
+      gguf: unsloth/Qwen3.5-4B-GGUF:Qwen3.5-4B-Q4_K_M.gguf
     qwen3.5-2b:
-      name: qwen3.5:2b
-      provider: ollama
-      url: http://localhost:11434
+      name: Qwen3.5-2B-Q4_K_M
+      provider: llamacpp
+      url: http://localhost:8090
+      gguf: unsloth/Qwen3.5-2B-GGUF:Qwen3.5-2B-Q4_K_M.gguf
+    qwen3-embed:
+      name: Qwen3-Embedding-0.6B-q8_0
+      provider: llamacpp
+      url: http://localhost:8090
+      dimensions: 1024
+      embedding: true
+      gguf: Mungert/Qwen3-Embedding-0.6B-GGUF:Qwen3-Embedding-0.6B-q8_0.gguf
+
+    # --- Ollama models (kept for CLI compatibility) ---
     qwen3-4b:
       name: qwen3:4b-instruct
       provider: ollama
@@ -56,13 +68,6 @@ llm:
       name: qwen3:1.7b-instruct
       provider: ollama
       url: http://localhost:11434
-
-    # --- Embedding ---
-    qwen3-embed:
-      name: qwen3-embedding:0.6b
-      provider: ollama
-      url: http://localhost:11434
-      dimensions: 1024
 
     # --- vllm-mlx models (for benchmarking / future use) ---
     qwen3-4b-mlx:
@@ -76,10 +81,10 @@ llm:
       dimensions: 1024
 
   # Which models to use for each purpose (reference by name above)
-  summarize_model: qwen3-4b             # files, classes, features
-  summarize_model_small: qwen3-1.7b     # functions, methods, variables, constants
+  summarize_model: qwen3.5-4b           # files, classes, features
+  summarize_model_small: qwen3.5-2b     # functions, methods, variables, constants
   embed_model: qwen3-embed
-  variable_scoring_model: qwen3-4b      # variable/constant filtering
+  variable_scoring_model: qwen3.5-4b    # variable/constant filtering
 
   # Generation settings
   summarize_temperature: 0.2

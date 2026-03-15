@@ -55,7 +55,7 @@ def _default_embed_model() -> ModelConfig:
     """Create default embed model config."""
     from shared.config import ModelConfig
     return ModelConfig(
-        name="Qwen3-Embedding-0.6B-Q8_0", provider="llamacpp", url="http://localhost:8090",
+        name="Qwen3-Embedding-0.6B-q8_0", provider="llamacpp", url="http://localhost:8090",
         dimensions=1024, embedding=True,
     )
 

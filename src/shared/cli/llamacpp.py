@@ -25,12 +25,12 @@ Example magaldi.yaml:
           url: http://localhost:8090
           gguf: unsloth/Qwen3.5-2B-GGUF:Qwen3.5-2B-Q4_K_M.gguf
         qwen3-embed:
-          name: Qwen3-Embedding-0.6B-Q8_0
+          name: Qwen3-Embedding-0.6B-q8_0
           provider: llamacpp
           url: http://localhost:8090
           dimensions: 1024
           embedding: true
-          gguf: Mungert/Qwen3-Embedding-0.6B-GGUF:Qwen3-Embedding-0.6B-Q8_0.gguf
+          gguf: Mungert/Qwen3-Embedding-0.6B-GGUF:Qwen3-Embedding-0.6B-q8_0.gguf
 """
 
 from __future__ import annotations
