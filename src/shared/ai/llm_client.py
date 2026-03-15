@@ -1052,6 +1052,12 @@ class EmbeddingClient:
                 # but LiteLLM requires an API key for openai/ prefix
                 kwargs["api_key"] = "not-needed"
 
+            # LiteLLM sends encoding_format=null by default for openai/ provider.
+            # llama-server rejects null (expects string like "float" or "base64").
+            # Explicitly set to "float" for local servers to avoid 500 errors.
+            if self.model.startswith("openai/") and self.api_base:
+                kwargs["encoding_format"] = "float"
+
             response = embedding(**kwargs)
 
             if not response.data:
@@ -1100,6 +1106,11 @@ class EmbeddingClient:
                 # Local OpenAI-compatible servers (llama.cpp) don't need auth
                 # but LiteLLM requires an API key for openai/ prefix
                 kwargs["api_key"] = "not-needed"
+
+            # LiteLLM sends encoding_format=null by default for openai/ provider.
+            # llama-server rejects null (expects string like "float" or "base64").
+            if self.model.startswith("openai/") and self.api_base:
+                kwargs["encoding_format"] = "float"
 
             response = await aembedding(**kwargs)
 
