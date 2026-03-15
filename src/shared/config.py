@@ -93,6 +93,10 @@ class ModelConfig:
     # Used by `magaldi llamacpp pull` to download models from HuggingFace.
     gguf: str | None = None
 
+    # Embedding model flag — enables /v1/embeddings endpoint in llama.cpp.
+    # When True, presets will include `embedding = true` and `pooling = mean`.
+    embedding: bool = False
+
     def get_litellm_model(self) -> str:
         """Get the full LiteLLM model identifier.
 
@@ -180,10 +184,12 @@ class LLMConfig:
               url: http://localhost:8090
               gguf: unsloth/Qwen3.5-2B-GGUF:Qwen3.5-2B-Q4_K_M.gguf
             qwen3-embed:
-              name: qwen3-embedding:0.6b
-              provider: ollama
-              url: http://localhost:11434
+              name: Qwen3-Embedding-0.6B-Q8_0
+              provider: llamacpp
+              url: http://localhost:8090
               dimensions: 1024
+              embedding: true
+              gguf: Mungert/Qwen3-Embedding-0.6B-GGUF:Qwen3-Embedding-0.6B-Q8_0.gguf
 
           summarize_model: qwen3.5-4b
           summarize_model_small: qwen3.5-2b
@@ -205,10 +211,12 @@ class LLMConfig:
             gguf="unsloth/Qwen3.5-2B-GGUF:Qwen3.5-2B-Q4_K_M.gguf",
         ),
         "qwen3-embed": ModelConfig(
-            name="qwen3-embedding:0.6b",
-            provider="ollama",
-            url="http://localhost:11434",
+            name="Qwen3-Embedding-0.6B-Q8_0",
+            provider="llamacpp",
+            url="http://localhost:8090",
             dimensions=1024,
+            embedding=True,
+            gguf="Mungert/Qwen3-Embedding-0.6B-GGUF:Qwen3-Embedding-0.6B-Q8_0.gguf",
         ),
     })
 

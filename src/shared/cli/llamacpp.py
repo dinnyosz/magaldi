@@ -25,10 +25,12 @@ Example magaldi.yaml:
           url: http://localhost:8090
           gguf: unsloth/Qwen3.5-2B-GGUF:Qwen3.5-2B-Q4_K_M.gguf
         qwen3-embed:
-          name: qwen3-embedding:0.6b
-          provider: ollama
-          url: http://localhost:11434
+          name: Qwen3-Embedding-0.6B-Q8_0
+          provider: llamacpp
+          url: http://localhost:8090
           dimensions: 1024
+          embedding: true
+          gguf: Mungert/Qwen3-Embedding-0.6B-GGUF:Qwen3-Embedding-0.6B-Q8_0.gguf
 """
 
 from __future__ import annotations
@@ -126,6 +128,10 @@ def _generate_presets(llm_config: LLMConfig) -> Path:
 
     The presets file lets us set per-model context sizes and other params.
     Format: [model:<model-id>] sections with key=value pairs.
+
+    Embedding models get additional settings:
+      embedding = true    (enables /v1/embeddings endpoint)
+      pooling = mean      (average token embeddings into single vector)
     """
     presets = configparser.ConfigParser()
 
@@ -134,6 +140,9 @@ def _generate_presets(llm_config: LLMConfig) -> Path:
         presets[section] = {}
         if cfg.num_ctx:
             presets[section]["n_ctx"] = str(cfg.num_ctx)
+        if cfg.embedding:
+            presets[section]["embedding"] = "true"
+            presets[section]["pooling"] = "mean"
 
     presets_path = _presets_file()
     presets_path.parent.mkdir(parents=True, exist_ok=True)

@@ -435,8 +435,8 @@ class TestProcessingConfig:
         assert config.summarize_model.name == "qwen3.5:4b"
         assert config.summarize_model.provider == "llamacpp"
         assert config.summarize_model_small.name == "qwen3.5:2b"
-        assert config.embed_model.name == "qwen3-embedding:0.6b"
-        assert config.embed_model.provider == "ollama"
+        assert config.embed_model.name == "Qwen3-Embedding-0.6B-Q8_0"
+        assert config.embed_model.provider == "llamacpp"
         assert config.skip_ai is False
         assert config.num_workers == 0  # 0 = auto (use tier-based defaults)
 

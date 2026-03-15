@@ -124,7 +124,7 @@ class TestLLMConfigDefaults:
         """Test that the referenced embed model has correct name."""
         config = LLMConfig()
         model = config.get_embed_model()
-        assert model.name == "qwen3-embedding:0.6b"
+        assert model.name == "Qwen3-Embedding-0.6B-Q8_0"
 
     def test_default_embed_dimensions(self):
         """Test that embed model has correct dimensions."""
