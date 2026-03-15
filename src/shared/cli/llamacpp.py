@@ -136,7 +136,9 @@ def _generate_presets(llm_config: LLMConfig) -> Path:
     presets = configparser.ConfigParser()
 
     for cfg in _get_llamacpp_models(llm_config):
-        section = f"model:{cfg.name}"
+        # Section name must match the model ID from --models-dir
+        # (GGUF filename without .gguf extension)
+        section = cfg.name
         presets[section] = {}
         if cfg.num_ctx:
             presets[section]["n_ctx"] = str(cfg.num_ctx)
