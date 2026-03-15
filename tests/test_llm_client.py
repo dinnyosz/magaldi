@@ -785,12 +785,19 @@ class TestThinkingModelDetection:
         client_not = LLMClient(model="ollama/llama-3.1:8b")
         assert client_not._is_thinking_model is False
 
-        # Via model_name (llamacpp path)
-        client_llama = LLMClient(
+        # Via model_name (llamacpp path) — instruct models have thinking disabled
+        client_llama_instruct = LLMClient(
             model="openai/Qwen3-4B-Instruct",
             model_name="Qwen3-4B-Instruct",
         )
-        assert client_llama._is_thinking_model is True
+        assert client_llama_instruct._is_thinking_model is False
+
+        # Non-instruct Qwen3 GGUF IS a thinking model
+        client_llama_gguf = LLMClient(
+            model="openai/Qwen3-4B-Q4_K_M",
+            model_name="Qwen3-4B-Q4_K_M",
+        )
+        assert client_llama_gguf._is_thinking_model is True
 
     def test_qwen3_5_not_thinking_model(self):
         """qwen3.5 has reasoning disabled by default — NOT a thinking model."""
@@ -1055,6 +1062,35 @@ class TestThinkingModelDetection:
         call_kwargs = mock_comp.call_args[1]
         sys_content = call_kwargs["messages"][0]["content"]
         assert sys_content.count("/no_think") == 1
+
+
+    def test_local_server_sends_reasoning_format_none(self):
+        """Local servers should send reasoning_format=none to keep thinking in content.
+
+        Qwen3.5 templates on llama-server output <think></think> even with
+        enable_thinking=false, and the model still reasons into reasoning_content.
+        With reasoning_format=none, thinking stays in message.content where
+        _strip_think_tags() can remove it.
+        """
+        client = LLMClient(
+            model="openai/Qwen3.5-4B-Q4_K_M",
+            api_base="http://localhost:8090/v1",
+            model_name="Qwen3.5-4B-Q4_K_M",
+        )
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "1. KEEP\n2. DROP"
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response) as mock_comp:
+            client.generate_from_messages(
+                [{"role": "user", "content": "test"}]
+            )
+
+        call_kwargs = mock_comp.call_args[1]
+        extra_body = call_kwargs.get("extra_body", {})
+        assert extra_body.get("reasoning_format") == "none"
+        assert extra_body.get("chat_template_kwargs") == {"enable_thinking": False}
 
 
 class TestPresencePenaltyRouting:
