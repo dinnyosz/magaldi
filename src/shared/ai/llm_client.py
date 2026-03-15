@@ -673,6 +673,9 @@ class LLMClient:
 
         # Helper to check if model is a local server (not cloud)
         _is_local = use_model.startswith(("openai/", "lm_studio/")) and self.api_base
+        # llamacpp/vllm-mlx both use openai/ prefix with a local api_base.
+        # LM Studio has its own lm_studio/ prefix.
+        _is_llamacpp = use_model.startswith("openai/") and self.api_base
 
         # Disable thinking mode for local and thinking models.
         # GGUF chat templates on llama-server may enable thinking by default
@@ -697,23 +700,38 @@ class LLMClient:
             else:
                 msgs = [{"role": "system", "content": "/no_think"}] + msgs
                 kwargs["messages"] = msgs
-        elif _is_local:
-            # Local servers (LM Studio, llama.cpp) — always disable thinking.
+        elif _is_llamacpp:
+            # llama-server / vllm-mlx (openai/ prefix + local api_base).
             # Qwen3.5 GGUF templates enable thinking by default on llama-server
             # even though Ollama's Qwen3.5 Modelfile has it disabled.
             kwargs["extra_body"] = kwargs.get("extra_body", {})
             # Strategy 1: chat_template_kwargs.enable_thinking=False
             # Tells llama-server to render the template with thinking off.
             kwargs["extra_body"]["chat_template_kwargs"] = {"enable_thinking": False}
-            # Strategy 2: reasoning_format=none
+            # Strategy 2: reasoning_format=none (llama-server specific)
             # Qwen3.5 templates output <think>\n\n</think> even with
             # enable_thinking=false, and the model still reasons into
             # reasoning_content. With format=none, any thinking stays in
             # message.content where _strip_think_tags() removes it.
+            # NOTE: LM Studio does NOT support this param and will error.
             kwargs["extra_body"]["reasoning_format"] = "none"
             # Strategy 3: /no_think in system message
             # Qwen3 models honor /no_think as a chat template directive.
             # Qwen3.5 ignores it but it's harmless.
+            msgs = kwargs["messages"]
+            if msgs and msgs[0].get("role") == "system":
+                content = msgs[0]["content"]
+                if "/no_think" not in content:
+                    msgs = [{"role": "system", "content": f"/no_think\n{content}"}] + msgs[1:]
+                    kwargs["messages"] = msgs
+            else:
+                msgs = [{"role": "system", "content": "/no_think"}] + msgs
+                kwargs["messages"] = msgs
+        elif _is_local:
+            # LM Studio and other local OpenAI-compatible servers.
+            # LM Studio does NOT support chat_template_kwargs or
+            # reasoning_format — sending them causes request errors.
+            # Use /no_think in system message as a safe fallback.
             msgs = kwargs["messages"]
             if msgs and msgs[0].get("role") == "system":
                 content = msgs[0]["content"]

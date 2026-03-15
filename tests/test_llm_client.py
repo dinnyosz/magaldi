@@ -1093,6 +1093,39 @@ class TestThinkingModelDetection:
         assert extra_body.get("chat_template_kwargs") == {"enable_thinking": False}
 
 
+    def test_lm_studio_does_not_send_reasoning_format(self):
+        """LM Studio should NOT receive reasoning_format or chat_template_kwargs.
+
+        LM Studio errors on unsupported reasoning params (e.g. Qwen3.5-4B
+        returns "Model does not support reasoning configuration"). Only
+        /no_think in system message is safe across all local servers.
+        """
+        client = LLMClient(
+            model="lm_studio/Qwen3.5-4B-Q4_K_M",
+            api_base="http://localhost:1234/v1",
+            model_name="Qwen3.5-4B-Q4_K_M",
+        )
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "1. KEEP\n2. DROP"
+
+        with patch("shared.ai.llm_client.completion", return_value=mock_response) as mock_comp:
+            client.generate_from_messages(
+                [{"role": "user", "content": "test"}]
+            )
+
+        call_kwargs = mock_comp.call_args[1]
+        extra_body = call_kwargs.get("extra_body", {})
+        # Must NOT contain llamacpp-specific params
+        assert "reasoning_format" not in extra_body
+        assert "chat_template_kwargs" not in extra_body
+        # But should still have /no_think in system message
+        msgs = call_kwargs["messages"]
+        assert msgs[0]["role"] == "system"
+        assert "/no_think" in msgs[0]["content"]
+
+
 class TestPresencePenaltyRouting:
     """Tests for presence_penalty routing to extra_body for Ollama."""
 
