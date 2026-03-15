@@ -145,6 +145,14 @@ def _generate_presets(llm_config: LLMConfig) -> Path:
         if cfg.embedding:
             presets[section]["embedding"] = "true"
             presets[section]["pooling"] = "mean"
+            # For embedding models with pooling, the entire input must fit in
+            # a single ubatch (physical batch). Default ubatch-size (512) and
+            # default batch-size (2048) are too small for large code files.
+            # Both must be large enough: ubatch <= batch.
+            # See: https://github.com/ggml-org/llama.cpp/issues/11105
+            batch_size = str(cfg.num_ctx or 16384)
+            presets[section]["batch-size"] = batch_size
+            presets[section]["ubatch-size"] = batch_size
 
     presets_path = _presets_file()
     presets_path.parent.mkdir(parents=True, exist_ok=True)
