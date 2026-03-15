@@ -85,17 +85,20 @@ TIER_COLORS = {
 # Analysis of real data showed exponent ~0.65, compared to sqrt (0.5).
 TIER_SCALING_EXPONENT = 0.65
 
-# Max concurrent workers per tier (inversely proportional to context size)
-# Smaller contexts = more parallelism, larger contexts = less to avoid GPU saturation
-# Tuned for M4 Pro 48GB - adjust for different hardware
+# Max concurrent workers per tier (upper bound for exploration budget)
+# The exploration orchestrator dynamically discovers the optimal concurrency
+# within [1, max_workers] — these values set the search space ceiling.
+# All LLM tiers use the same ceiling; the throttler self-limits based on
+# measured throughput, emergency scale-down, and GSS probing.
+DEFAULT_MAX_WORKERS = 16
 TIER_MAX_WORKERS = {
-    **dict.fromkeys(HANDCRAFTED_TIERS, 16),  # No LLM - maximum parallelism
-    1024: 16,  # Tiny context - maximum parallelism
-    2048: 12,  # Small context - high parallelism
-    4096: 8,   # Medium-small
-    8192: 4,   # Medium
-    16384: 2,  # Large - limited parallelism
-    32768: 1,  # Very large - sequential to avoid OOM
+    **dict.fromkeys(HANDCRAFTED_TIERS, DEFAULT_MAX_WORKERS),  # No LLM - maximum parallelism
+    1024: DEFAULT_MAX_WORKERS,
+    2048: DEFAULT_MAX_WORKERS,
+    4096: DEFAULT_MAX_WORKERS,
+    8192: DEFAULT_MAX_WORKERS,
+    16384: DEFAULT_MAX_WORKERS,
+    32768: DEFAULT_MAX_WORKERS,
 }
 
 # Base timeout per tier in seconds (for 1 worker).
