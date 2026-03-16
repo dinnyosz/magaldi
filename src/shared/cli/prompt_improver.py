@@ -35,12 +35,12 @@ from shared.config import load_config
 @click.option(
     "--model", "-m",
     default=None,
-    help="Override summary model (e.g., 'ollama/qwen3.5:4b', 'qwen3.5:4b').",
+    help="Override summary model (e.g., 'ollama/qwen3:4b', 'qwen3:4b').",
 )
 @click.option(
     "--eval-model", "-e",
     default=None,
-    help="Override evaluation model (e.g., 'qwen3.5:4b').",
+    help="Override evaluation model (e.g., 'qwen3:4b').",
 )
 @click.option(
     "--improver-model", "-i",

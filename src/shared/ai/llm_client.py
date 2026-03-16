@@ -339,10 +339,10 @@ class LLMConfig:
 
     # Model identifier (format: provider/model or just model for OpenAI)
     # Examples:
-    #   - "ollama/qwen3.5:4b"
+    #   - "ollama/qwen3:4b"
     #   - "gpt-4o-mini"
     #   - "claude-3-haiku-20240307"
-    model: str = "ollama/qwen3.5:4b"
+    model: str = "ollama/qwen3:4b"
 
     # API configuration
     api_base: str | None = None  # For Ollama: "http://localhost:11434"

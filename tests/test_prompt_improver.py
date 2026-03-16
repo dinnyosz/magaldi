@@ -555,11 +555,11 @@ class TestPromptImproverRun:
     def mock_config(self) -> MagicMock:
         config = MagicMock()
         config.llm.get_summarize_model.return_value = MagicMock(
-            name="qwen3.5:4b",
+            name="qwen3:4b",
             provider="ollama",
             url="http://localhost:11434",
             api_key=None,
-            get_litellm_model=MagicMock(return_value="ollama_chat/qwen3.5:4b"),
+            get_litellm_model=MagicMock(return_value="ollama_chat/qwen3:4b"),
             get_api_base=MagicMock(return_value="http://localhost:11434"),
         )
         config.llm.summarize_temperature = 0.2

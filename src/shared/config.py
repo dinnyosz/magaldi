@@ -77,7 +77,7 @@ class ModelConfig:
     Encapsulates everything needed to connect to and use a model.
     """
 
-    name: str  # Model name (e.g., "qwen3.5:4b", "Qwen3.5-4B-Q4_K_M")
+    name: str  # Model name (e.g., "qwen3:4b", "Qwen3-4B-Q4_K_M")
     provider: str = "ollama"  # ollama, llamacpp, vllm-mlx, lmstudio, openai, anthropic
     url: str = "http://localhost:11434"  # API endpoint
     api_key: str | None = None  # For cloud providers
@@ -188,19 +188,19 @@ class LLMConfig:
     Example config.yaml:
         llm:
           models:
-            qwen3.5-4b:
-              name: Qwen3.5-4B-Q4_K_M
+            qwen3-4b:
+              name: Qwen3-4B-Q4_K_M
               provider: llamacpp
               url: http://localhost:8090
               num_ctx: 131072
-              gguf: unsloth/Qwen3.5-4B-GGUF:Qwen3.5-4B-Q4_K_M.gguf
-            qwen3.5-2b:
-              name: Qwen3.5-2B-Q4_K_M
+              gguf: unsloth/Qwen3-4B-GGUF:Qwen3-4B-Q4_K_M.gguf
+            qwen3-1.7b:
+              name: Qwen3-1.7B-Q4_K_M
               provider: llamacpp
               url: http://localhost:8090
               num_ctx: 131072
               parallel: 16
-              gguf: unsloth/Qwen3.5-2B-GGUF:Qwen3.5-2B-Q4_K_M.gguf
+              gguf: unsloth/Qwen3-1.7B-GGUF:Qwen3-1.7B-Q4_K_M.gguf
             qwen3-embed:
               name: Qwen3-Embedding-0.6B-q8_0
               provider: llamacpp
@@ -211,27 +211,27 @@ class LLMConfig:
               parallel: 4
               gguf: Mungert/Qwen3-Embedding-0.6B-GGUF:Qwen3-Embedding-0.6B-q8_0.gguf
 
-          summarize_model: qwen3.5-4b
-          summarize_model_small: qwen3.5-2b
+          summarize_model: qwen3-4b
+          summarize_model_small: qwen3-1.7b
           embed_model: qwen3-embed
     """
 
     # Named model configurations
     models: dict[str, ModelConfig] = field(default_factory=lambda: {
-        "qwen3.5-4b": ModelConfig(
-            name="Qwen3.5-4B-Q4_K_M",
+        "qwen3-4b": ModelConfig(
+            name="Qwen3-4B-Q4_K_M",
             provider="llamacpp",
             url="http://localhost:8090",
             num_ctx=131072,
-            gguf="unsloth/Qwen3.5-4B-GGUF:Qwen3.5-4B-Q4_K_M.gguf",
+            gguf="unsloth/Qwen3-4B-GGUF:Qwen3-4B-Q4_K_M.gguf",
         ),
-        "qwen3.5-2b": ModelConfig(
-            name="Qwen3.5-2B-Q4_K_M",
+        "qwen3-1.7b": ModelConfig(
+            name="Qwen3-1.7B-Q4_K_M",
             provider="llamacpp",
             url="http://localhost:8090",
             num_ctx=131072,
             parallel=16,
-            gguf="unsloth/Qwen3.5-2B-GGUF:Qwen3.5-2B-Q4_K_M.gguf",
+            gguf="unsloth/Qwen3-1.7B-GGUF:Qwen3-1.7B-Q4_K_M.gguf",
         ),
         "qwen3-embed": ModelConfig(
             name="Qwen3-Embedding-0.6B-q8_0",
@@ -246,14 +246,13 @@ class LLMConfig:
     })
 
     # Which models to use for each purpose (reference by name)
-    summarize_model: str = "qwen3.5-4b"
-    summarize_model_small: str = "qwen3.5-2b"
+    summarize_model: str = "qwen3-4b"
+    summarize_model_small: str = "qwen3-1.7b"
     embed_model: str = "qwen3-embed"
-    variable_scoring_model: str = "qwen3.5-4b"
+    variable_scoring_model: str = "qwen3-4b"
 
     # Generation settings (defaults, can be overridden per-model)
-    # Based on Qwen3.5 "Thinking Mode for Precise Coding Tasks" preset:
-    # huggingface.co/Qwen/Qwen3.5-4B — temp=0.6, top_p=0.95, top_k=20
+    # Based on Qwen3 recommended sampling — temp=0.6, top_p=0.95, top_k=20
     summarize_temperature: float = 0.6
     summarize_top_p: float = 0.95
     summarize_top_k: int | None = 20

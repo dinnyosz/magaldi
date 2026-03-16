@@ -81,7 +81,7 @@ class TestGetLlamacppModels:
                     url="http://localhost:11434",
                 ),
                 "llamacpp-model": ModelConfig(
-                    name="Qwen3.5-4B-Q4_K_M",
+                    name="Qwen3-4B-Q4_K_M",
                     provider="llamacpp",
                     url="http://localhost:8090",
                 ),
@@ -94,18 +94,18 @@ class TestGetLlamacppModels:
         )
         models = _get_llamacpp_models(config)
         assert len(models) == 1
-        assert models[0].name == "Qwen3.5-4B-Q4_K_M"
+        assert models[0].name == "Qwen3-4B-Q4_K_M"
 
     def test_multiple_llamacpp_models(self) -> None:
         config = LLMConfig(
             models={
-                "qwen3.5-4b": ModelConfig(
-                    name="Qwen3.5-4B-Q4_K_M",
+                "qwen3-4b": ModelConfig(
+                    name="Qwen3-4B-Q4_K_M",
                     provider="llamacpp",
                     url="http://localhost:8090",
                 ),
-                "qwen3.5-2b": ModelConfig(
-                    name="Qwen3.5-2B-Q4_K_M",
+                "qwen3-1.7b": ModelConfig(
+                    name="Qwen3-1.7B-Q4_K_M",
                     provider="llamacpp",
                     url="http://localhost:8090",
                 ),
@@ -126,8 +126,8 @@ class TestGetLlamacppPort:
     def test_returns_port_from_config(self) -> None:
         config = LLMConfig(
             models={
-                "qwen3.5-4b": ModelConfig(
-                    name="Qwen3.5-4B-Q4_K_M",
+                "qwen3-4b": ModelConfig(
+                    name="Qwen3-4B-Q4_K_M",
                     provider="llamacpp",
                     url="http://localhost:8090",
                 ),
@@ -151,7 +151,7 @@ class TestGetLlamacppPort:
         config = LLMConfig(
             models={
                 "model": ModelConfig(
-                    name="Qwen3.5-4B-Q4_K_M",
+                    name="Qwen3-4B-Q4_K_M",
                     provider="llamacpp",
                     url="http://localhost:9999",
                 ),
@@ -171,8 +171,8 @@ class TestGeneratePresets:
     def test_generates_presets_with_num_ctx(self, tmp_path: Path) -> None:
         config = LLMConfig(
             models={
-                "qwen3.5-4b": ModelConfig(
-                    name="Qwen3.5-4B-Q4_K_M",
+                "qwen3-4b": ModelConfig(
+                    name="Qwen3-4B-Q4_K_M",
                     provider="llamacpp",
                     url="http://localhost:8090",
                     num_ctx=16384,
@@ -182,14 +182,14 @@ class TestGeneratePresets:
         with patch("shared.cli.llamacpp._presets_file", return_value=tmp_path / "presets.ini"):
             path = _generate_presets(config)
             content = path.read_text()
-            assert "[Qwen3.5-4B-Q4_K_M]" in content
+            assert "[Qwen3-4B-Q4_K_M]" in content
             assert "n_ctx = 16384" in content
 
     def test_empty_presets_when_no_num_ctx(self, tmp_path: Path) -> None:
         config = LLMConfig(
             models={
-                "qwen3.5-4b": ModelConfig(
-                    name="Qwen3.5-4B-Q4_K_M",
+                "qwen3-4b": ModelConfig(
+                    name="Qwen3-4B-Q4_K_M",
                     provider="llamacpp",
                     url="http://localhost:8090",
                 ),
@@ -198,7 +198,7 @@ class TestGeneratePresets:
         with patch("shared.cli.llamacpp._presets_file", return_value=tmp_path / "presets.ini"):
             path = _generate_presets(config)
             content = path.read_text()
-            assert "[Qwen3.5-4B-Q4_K_M]" in content
+            assert "[Qwen3-4B-Q4_K_M]" in content
 
     def test_skips_non_llamacpp_models(self, tmp_path: Path) -> None:
         config = LLMConfig(
@@ -227,15 +227,15 @@ class TestModelConfigLlamacpp:
 
     def test_get_litellm_model(self) -> None:
         cfg = ModelConfig(
-            name="Qwen3.5-4B-Q4_K_M",
+            name="Qwen3-4B-Q4_K_M",
             provider="llamacpp",
             url="http://localhost:8090",
         )
-        assert cfg.get_litellm_model() == "openai/Qwen3.5-4B-Q4_K_M"
+        assert cfg.get_litellm_model() == "openai/Qwen3-4B-Q4_K_M"
 
     def test_get_api_base(self) -> None:
         cfg = ModelConfig(
-            name="Qwen3.5-4B-Q4_K_M",
+            name="Qwen3-4B-Q4_K_M",
             provider="llamacpp",
             url="http://localhost:8090",
         )
@@ -243,7 +243,7 @@ class TestModelConfigLlamacpp:
 
     def test_get_api_base_strips_trailing_slash(self) -> None:
         cfg = ModelConfig(
-            name="Qwen3.5-4B-Q4_K_M",
+            name="Qwen3-4B-Q4_K_M",
             provider="llamacpp",
             url="http://localhost:8090/",
         )
@@ -251,12 +251,12 @@ class TestModelConfigLlamacpp:
 
     def test_gguf_field(self) -> None:
         cfg = ModelConfig(
-            name="Qwen3.5-4B-Q4_K_M",
+            name="Qwen3-4B-Q4_K_M",
             provider="llamacpp",
             url="http://localhost:8090",
-            gguf="unsloth/Qwen3.5-4B-GGUF:Qwen3.5-4B-Q4_K_M.gguf",
+            gguf="unsloth/Qwen3-4B-GGUF:Qwen3-4B-Q4_K_M.gguf",
         )
-        assert cfg.gguf == "unsloth/Qwen3.5-4B-GGUF:Qwen3.5-4B-Q4_K_M.gguf"
+        assert cfg.gguf == "unsloth/Qwen3-4B-GGUF:Qwen3-4B-Q4_K_M.gguf"
 
     def test_gguf_default_none(self) -> None:
         cfg = ModelConfig(name="qwen3:4b", provider="ollama")

@@ -432,9 +432,9 @@ class TestProcessingConfig:
         config = ProcessingConfig()
 
         # Model configs are now ModelConfig objects
-        assert config.summarize_model.name == "qwen3.5:4b"
+        assert config.summarize_model.name == "qwen3:4b"
         assert config.summarize_model.provider == "llamacpp"
-        assert config.summarize_model_small.name == "qwen3.5:2b"
+        assert config.summarize_model_small.name == "qwen3:1.7b"
         assert config.embed_model.name == "Qwen3-Embedding-0.6B-q8_0"
         assert config.embed_model.provider == "llamacpp"
         assert config.skip_ai is False
@@ -4011,7 +4011,7 @@ class TestTierFlatteningForNonTieredProviders:
         from shared.config import ModelConfig
 
         config = ProcessingConfig(
-            summarize_model=ModelConfig(name="qwen3.5:4b", provider="ollama"),
+            summarize_model=ModelConfig(name="qwen3:4b", provider="ollama"),
         )
         elements = [
             CodeElement(element_id="s:r:u:a.py:function:medium_fn:1",

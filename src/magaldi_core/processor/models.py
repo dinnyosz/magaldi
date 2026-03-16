@@ -39,7 +39,7 @@ def _default_summarize_model() -> ModelConfig:
     """Create default summarize model config."""
     from shared.config import ModelConfig
     return ModelConfig(
-        name="qwen3.5:4b", provider="llamacpp", url="http://localhost:8080"
+        name="qwen3:4b", provider="llamacpp", url="http://localhost:8080"
     )
 
 
@@ -47,7 +47,7 @@ def _default_summarize_model_small() -> ModelConfig:
     """Create default small summarize model config."""
     from shared.config import ModelConfig
     return ModelConfig(
-        name="qwen3.5:2b", provider="llamacpp", url="http://localhost:8081"
+        name="qwen3:1.7b", provider="llamacpp", url="http://localhost:8081"
     )
 
 

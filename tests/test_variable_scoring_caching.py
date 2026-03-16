@@ -49,7 +49,7 @@ class TestGetVariableScoringState:
                     "_source": {
                         "content_hash": "abc123",
                         "variable_score": {"keep": True},
-                        "score_model": "qwen3.5:4b",
+                        "score_model": "qwen3:4b",
                     },
                 },
             ],
@@ -67,7 +67,7 @@ class TestGetVariableScoringState:
         state = result["scope:repo:main:file.py:variable:MY_CONST:10"]
         assert state["content_hash"] == "abc123"
         assert state["variable_score"]["keep"] is True
-        assert state["score_model"] == "qwen3.5:4b"
+        assert state["score_model"] == "qwen3:4b"
 
     def test_skips_elements_without_score(self):
         """Elements without variable_score should not be returned."""
@@ -137,14 +137,14 @@ class TestIndexElementCompleteWithScore:
         )
         elem_repo.index_element_complete(
             element, "Summary of MY_CONST",
-            score_model="qwen3.5:4b",
+            score_model="qwen3:4b",
         )
 
         # The document passed to index_document should contain variable_score
         call_args = client.index_document.call_args
         doc = call_args[0][2]  # (index_name, doc_id, doc)
         assert doc["variable_score"] == {"keep": True}
-        assert doc["score_model"] == "qwen3.5:4b"
+        assert doc["score_model"] == "qwen3:4b"
 
     def test_no_score_no_field(self):
         """Elements without variable_score should not have the field in doc."""
