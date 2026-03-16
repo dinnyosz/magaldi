@@ -36,7 +36,7 @@ Example magaldi.yaml:
           dimensions: 1024
           embedding: true
           num_ctx: 32768
-          parallel: 4
+          parallel: 16
           gguf: Mungert/Qwen3-Embedding-0.6B-GGUF:Qwen3-Embedding-0.6B-q8_0.gguf
 """
 
