@@ -146,6 +146,13 @@ def _generate_presets(llm_config: LLMConfig) -> Path:
     """
     presets = configparser.ConfigParser()
 
+    # Global defaults — lower priority than per-model sections,
+    # but avoids passing these as CLI args (which override everything).
+    presets["*"] = {
+        "ctx-size": str(DEFAULT_CTX_SIZE),
+        "parallel": str(DEFAULT_PARALLEL),
+    }
+
     for cfg in _get_llamacpp_models(llm_config):
         # Section name must match the model ID from --models-dir
         # (GGUF filename without .gguf extension)
@@ -279,13 +286,15 @@ def llm_serve(
     presets_path = _generate_presets(config.llm)
 
     # Build command
+    # NOTE: --parallel and --ctx-size are set in the presets file (global [*]
+    # section) instead of here. CLI args have highest priority in llama.cpp
+    # and would override per-model preset values, preventing models from
+    # having different parallel slot counts.
     cmd = [
         str(LLAMA_SERVER),
         "--models-dir", str(MODELS_DIR),
         "--port", str(port),
         "--host", "0.0.0.0",
-        "--ctx-size", str(ctx_size),
-        "--parallel", str(parallel),
         "--models-max", str(models_max),
         "--flash-attn", "on",
         "--n-gpu-layers", "99",
@@ -337,8 +346,8 @@ def llm_serve(
     for gf in gguf_files:
         console.print(f"    - {gf.stem}  ({_format_size(gf.stat().st_size)})")
     console.print(f"  Max loaded:     {models_max}")
-    console.print(f"  Parallel slots: {parallel}")
-    console.print(f"  Context size:   {ctx_size}")
+    console.print(f"  Parallel slots: {parallel} (default, per-model override via presets)")
+    console.print(f"  Context size:   {ctx_size} (default, per-model override via presets)")
     console.print("  Flash attention: on")
     console.print("  GPU layers:     99 (full offload)")
     console.print("  KV unified:     on (shared pool, not partitioned)")
@@ -752,11 +761,11 @@ def llm_update(jobs: int | None) -> None:
             # Show short log of incoming changes
             log_result = subprocess.run(
                 ["git", "-C", str(llama_dir), "log", "--oneline",
-                 f"{local_sha}..{remote_sha}", "--max-count=10"],
+                 f"{local_sha}..{remote_sha}", "--max-count=50"],
                 capture_output=True, text=True,
             )
             if log_result.stdout.strip():
-                console.print("  New commits:")
+                console.print("  Latest commits:")
                 for line in log_result.stdout.strip().splitlines():
                     console.print(f"    {line}")
 
