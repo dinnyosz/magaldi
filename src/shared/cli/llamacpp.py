@@ -18,11 +18,14 @@ Example magaldi.yaml:
           name: Qwen3.5-4B-Q4_K_M
           provider: llamacpp
           url: http://localhost:8090
+          num_ctx: 131072
           gguf: unsloth/Qwen3.5-4B-GGUF:Qwen3.5-4B-Q4_K_M.gguf
         qwen3.5-2b:
           name: Qwen3.5-2B-Q4_K_M
           provider: llamacpp
           url: http://localhost:8090
+          num_ctx: 131072
+          parallel: 16
           gguf: unsloth/Qwen3.5-2B-GGUF:Qwen3.5-2B-Q4_K_M.gguf
         qwen3-embed:
           name: Qwen3-Embedding-0.6B-q8_0
@@ -30,6 +33,8 @@ Example magaldi.yaml:
           url: http://localhost:8090
           dimensions: 1024
           embedding: true
+          num_ctx: 32768
+          parallel: 4
           gguf: Mungert/Qwen3-Embedding-0.6B-GGUF:Qwen3-Embedding-0.6B-q8_0.gguf
 """
 
@@ -62,7 +67,7 @@ LLAMA_SERVER = PROJECT_ROOT / "tools" / "llama.cpp" / "build" / "bin" / "llama-s
 DEFAULT_PORT = 8090
 DEFAULT_PARALLEL = 8
 DEFAULT_MODELS_MAX = 2
-DEFAULT_CTX_SIZE = 262144  # 8 slots × 32k each (ctx-size is total, divided by --parallel)
+DEFAULT_CTX_SIZE = 131072  # Fallback for models without preset n_ctx (8 slots × 16k each)
 
 
 # =============================================================================
@@ -129,11 +134,13 @@ def _generate_presets(llm_config: LLMConfig) -> Path:
     The presets file lets us set per-model context sizes and other params.
     Format: [model:<model-id>] sections with key=value pairs.
 
+    Per-model overrides (from ModelConfig fields):
+      n_ctx = <num_ctx>   (explicit context size, avoids inheriting global default)
+      parallel = <N>      (per-model parallel slots override)
+
     Embedding models get additional settings:
       embedding = true    (enables /v1/embeddings endpoint)
       pooling = mean      (average token embeddings into single vector)
-      parallel = 4        (4 slots × 8K each — matches embed_max_context)
-      n_ctx = <num_ctx>   (explicit context, avoids inheriting global 262K)
     """
     presets = configparser.ConfigParser()
 
@@ -144,14 +151,11 @@ def _generate_presets(llm_config: LLMConfig) -> Path:
         presets[section] = {}
         if cfg.num_ctx:
             presets[section]["n_ctx"] = str(cfg.num_ctx)
+        if cfg.parallel:
+            presets[section]["parallel"] = str(cfg.parallel)
         if cfg.embedding:
             presets[section]["embedding"] = "true"
             presets[section]["pooling"] = "mean"
-            # Embedding models need fewer parallel slots than completion models.
-            # With n_ctx=32768 and parallel=4, each slot gets 8K of KV cache —
-            # matching embed_max_context (8192 tokens).  Avoids the default
-            # --parallel 8 which would split into 4K slots (too small).
-            presets[section]["parallel"] = "4"
             # For embedding models with pooling, the entire input must fit in
             # a single ubatch (physical batch). Default ubatch-size (512) and
             # default batch-size (2048) are too small for large code files.
@@ -280,6 +284,7 @@ def llm_serve(
         "--models-max", str(models_max),
         "--flash-attn", "on",
         "--n-gpu-layers", "99",
+        "--kv-unified",
         "-sps", "0.4",
         "--cache-type-k", "q8_0",
         "--cache-type-v", "q4_0",
@@ -306,6 +311,7 @@ def llm_serve(
     console.print(f"  Context size:   {ctx_size}")
     console.print("  Flash attention: on")
     console.print("  GPU layers:     99 (full offload)")
+    console.print("  KV unified:     on (shared pool, not partitioned)")
     console.print("  KV cache type:  q8_0 (K) + q4_0 (V)")
     console.print("  Cache reuse:    256 tokens")
     console.print(f"  Log:            {_logfile(port)}")

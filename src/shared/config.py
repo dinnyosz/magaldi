@@ -93,6 +93,11 @@ class ModelConfig:
     # Used by `magaldi llamacpp pull` to download models from HuggingFace.
     gguf: str | None = None
 
+    # llama.cpp parallel slots override (per-model).
+    # When set, the preset will include `parallel = <value>`.
+    # If None, the model inherits the global --parallel default.
+    parallel: int | None = None
+
     # Embedding model flag — enables /v1/embeddings endpoint in llama.cpp.
     # When True, presets will include `embedding = true` and `pooling = mean`.
     embedding: bool = False
@@ -187,11 +192,14 @@ class LLMConfig:
               name: Qwen3.5-4B-Q4_K_M
               provider: llamacpp
               url: http://localhost:8090
+              num_ctx: 131072
               gguf: unsloth/Qwen3.5-4B-GGUF:Qwen3.5-4B-Q4_K_M.gguf
             qwen3.5-2b:
               name: Qwen3.5-2B-Q4_K_M
               provider: llamacpp
               url: http://localhost:8090
+              num_ctx: 131072
+              parallel: 16
               gguf: unsloth/Qwen3.5-2B-GGUF:Qwen3.5-2B-Q4_K_M.gguf
             qwen3-embed:
               name: Qwen3-Embedding-0.6B-q8_0
@@ -200,6 +208,7 @@ class LLMConfig:
               dimensions: 1024
               embedding: true
               num_ctx: 32768
+              parallel: 4
               gguf: Mungert/Qwen3-Embedding-0.6B-GGUF:Qwen3-Embedding-0.6B-q8_0.gguf
 
           summarize_model: qwen3.5-4b
@@ -213,12 +222,15 @@ class LLMConfig:
             name="Qwen3.5-4B-Q4_K_M",
             provider="llamacpp",
             url="http://localhost:8090",
+            num_ctx=131072,
             gguf="unsloth/Qwen3.5-4B-GGUF:Qwen3.5-4B-Q4_K_M.gguf",
         ),
         "qwen3.5-2b": ModelConfig(
             name="Qwen3.5-2B-Q4_K_M",
             provider="llamacpp",
             url="http://localhost:8090",
+            num_ctx=131072,
+            parallel=16,
             gguf="unsloth/Qwen3.5-2B-GGUF:Qwen3.5-2B-Q4_K_M.gguf",
         ),
         "qwen3-embed": ModelConfig(
@@ -228,6 +240,7 @@ class LLMConfig:
             dimensions=1024,
             embedding=True,
             num_ctx=32768,
+            parallel=4,
             gguf="Mungert/Qwen3-Embedding-0.6B-GGUF:Qwen3-Embedding-0.6B-q8_0.gguf",
         ),
     })
