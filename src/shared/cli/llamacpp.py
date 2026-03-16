@@ -19,6 +19,7 @@ Example magaldi.yaml:
           provider: llamacpp
           url: http://localhost:8090
           num_ctx: 32768
+          parallel: 4
           gguf: unsloth/Qwen3-4B-GGUF:Qwen3-4B-Q4_K_M.gguf
         qwen3-1.7b:
           name: Qwen3-1.7B-Q4_K_M
@@ -294,12 +295,14 @@ def llm_serve(
         "--batch-size", "8192",
         "--ubatch-size", "8192",
         "-sps", "0.4",
-        # KV cache: f16 is ~2× faster than quantized (q8_0/q4_0) on Metal.
-        # Quantized KV saves memory but requires dequantization on every
-        # attention op, halving both prompt and generation throughput.
-        # Bench: f16 = 748 pp / 69 tg vs q8_0/q4_0 = 388 pp / 38 tg.
-        "--cache-type-k", "f16",
-        "--cache-type-v", "f16",
+        # KV cache: q8_0 uses half the memory of f16 with negligible
+        # throughput loss at parallel > 1. Single-request f16 is ~15% faster
+        # (819 pp / 78 tg vs 713 pp / 68 tg) but with multiple parallel
+        # slots total throughput converges (480 vs 477 t/s at 16 slots).
+        # The memory savings (~2.3 GB for 4B at 4 slots) allow more
+        # parallel slots and more models loaded simultaneously.
+        "--cache-type-k", "q8_0",
+        "--cache-type-v", "q8_0",
         "--cache-reuse", "256",
         # Disable thinking globally — Qwen3 thinks by default, wasting
         # 2-5× tokens on <think> reasoning before producing actual output.
@@ -339,7 +342,7 @@ def llm_serve(
     console.print("  GPU layers:     99 (full offload)")
     console.print("  KV unified:     on (shared pool, not partitioned)")
     console.print("  Batch size:     8192 (batch + ubatch)")
-    console.print("  KV cache type:  f16 (K) + f16 (V)")
+    console.print("  KV cache type:  q8_0 (K) + q8_0 (V)")
     console.print("  Cache reuse:    256 tokens")
     console.print("  Endpoints:      slots, metrics, props")
     console.print(f"  Log:            {_logfile(port)}")
