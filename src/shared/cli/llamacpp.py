@@ -10,6 +10,7 @@ Usage:
     magaldi llamacpp logs      # Follow server logs
     magaldi llamacpp models    # List available GGUF models
     magaldi llamacpp pull      # Download configured models from HuggingFace
+    magaldi llamacpp update    # Clone/update llama.cpp and rebuild
 
 Example magaldi.yaml:
     llm:
@@ -681,6 +682,155 @@ def llm_pull(model: str | None) -> None:
 
     console.print()
     console.print("[green]Done.[/] Start with: [bold]magaldi llamacpp serve[/]")
+
+
+@llamacpp.command("update")
+@click.option(
+    "--jobs", "-j", type=int, default=None,
+    help="Parallel build jobs (default: number of CPU cores)",
+)
+def llm_update(jobs: int | None) -> None:
+    """Update llama.cpp to the latest version and rebuild.
+
+    Clones the llama.cpp repository if it doesn't exist, or pulls the
+    latest changes from master. Then rebuilds llama-server with Metal
+    support (Apple Silicon GPU offload).
+
+    \b
+    What this does:
+        1. Clone or update llama.cpp in tools/llama.cpp/
+        2. Build with cmake (Metal + Release)
+        3. Verify llama-server binary exists
+
+    The server must be restarted after updating to use the new binary.
+    """
+    llama_dir = PROJECT_ROOT / "tools" / "llama.cpp"
+
+    # Step 1: Clone or pull
+    if not llama_dir.exists():
+        console.print("[bold blue]Cloning llama.cpp...[/]")
+        result = subprocess.run(
+            ["git", "clone", "https://github.com/ggml-org/llama.cpp.git", str(llama_dir)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            console.print(f"[red]Clone failed:[/]\n{result.stderr.strip()}")
+            return
+        console.print("[green]  Cloned successfully[/]")
+    else:
+        console.print("[bold blue]Updating llama.cpp...[/]")
+
+        # Fetch and show what changed
+        fetch_result = subprocess.run(
+            ["git", "-C", str(llama_dir), "fetch", "origin", "master"],
+            capture_output=True,
+            text=True,
+        )
+        if fetch_result.returncode != 0:
+            console.print(f"[red]Fetch failed:[/]\n{fetch_result.stderr.strip()}")
+            return
+
+        # Check current vs remote
+        local_sha = subprocess.run(
+            ["git", "-C", str(llama_dir), "rev-parse", "HEAD"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        remote_sha = subprocess.run(
+            ["git", "-C", str(llama_dir), "rev-parse", "origin/master"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+
+        if local_sha == remote_sha:
+            console.print("[green]  Already up to date[/]")
+            # Still rebuild if binary is missing
+            if LLAMA_SERVER.exists():
+                console.print(f"  Binary: {LLAMA_SERVER}")
+                return
+            console.print("[yellow]  Binary missing, rebuilding...[/]")
+        else:
+            # Show short log of incoming changes
+            log_result = subprocess.run(
+                ["git", "-C", str(llama_dir), "log", "--oneline",
+                 f"{local_sha}..{remote_sha}", "--max-count=10"],
+                capture_output=True, text=True,
+            )
+            if log_result.stdout.strip():
+                console.print("  New commits:")
+                for line in log_result.stdout.strip().splitlines():
+                    console.print(f"    {line}")
+
+            # Pull
+            pull_result = subprocess.run(
+                ["git", "-C", str(llama_dir), "pull", "origin", "master"],
+                capture_output=True, text=True,
+            )
+            if pull_result.returncode != 0:
+                console.print(f"[red]Pull failed:[/]\n{pull_result.stderr.strip()}")
+                return
+            console.print("[green]  Updated successfully[/]")
+
+    console.print()
+
+    # Step 2: Build
+    # Detect CPU count for parallel build
+    if jobs is None:
+        try:
+            result = subprocess.run(
+                ["sysctl", "-n", "hw.logicalcpu"],
+                capture_output=True, text=True,
+            )
+            jobs = int(result.stdout.strip())
+        except (ValueError, FileNotFoundError):
+            jobs = os.cpu_count() or 4
+
+    console.print(f"[bold blue]Building llama.cpp (Metal, {jobs} jobs)...[/]")
+
+    # cmake configure
+    cmake_configure = subprocess.run(
+        ["cmake", "-B", "build", "-DGGML_METAL=ON", "-DLLAMA_CURL=OFF"],
+        cwd=str(llama_dir),
+        capture_output=True,
+        text=True,
+    )
+    if cmake_configure.returncode != 0:
+        console.print("[red]cmake configure failed:[/]")
+        # Show last few lines of stderr
+        for line in cmake_configure.stderr.strip().splitlines()[-10:]:
+            console.print(f"  {line}")
+        return
+
+    # cmake build
+    cmake_build = subprocess.run(
+        ["cmake", "--build", "build", "--config", "Release", f"-j{jobs}"],
+        cwd=str(llama_dir),
+        capture_output=True,
+        text=True,
+    )
+    if cmake_build.returncode != 0:
+        console.print("[red]Build failed:[/]")
+        for line in cmake_build.stderr.strip().splitlines()[-10:]:
+            console.print(f"  {line}")
+        return
+
+    console.print("[green]  Build complete[/]")
+    console.print()
+
+    # Step 3: Verify
+    if LLAMA_SERVER.exists():
+        console.print(f"[green]✓[/] llama-server: {LLAMA_SERVER}")
+    else:
+        console.print("[red]✗ llama-server binary not found after build[/]")
+        console.print(f"  Expected: {LLAMA_SERVER}")
+        return
+
+    # Hint about restart if server is running
+    config = load_config()
+    port = _get_llamacpp_port(config.llm)
+    if _get_pid(port) is not None:
+        console.print()
+        console.print("[yellow]Note:[/] Server is running. Restart to use the new binary:")
+        console.print("  [bold]magaldi llamacpp stop && magaldi llamacpp serve[/]")
 
 
 # =============================================================================

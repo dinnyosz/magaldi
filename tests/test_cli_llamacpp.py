@@ -3,20 +3,25 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+
+from click.testing import CliRunner
 
 from shared.cli.llamacpp import (
     DEFAULT_CTX_SIZE,
     DEFAULT_MODELS_MAX,
     DEFAULT_PARALLEL,
     DEFAULT_PORT,
+    LLAMA_SERVER,
     MODELS_DIR,
+    PROJECT_ROOT,
     _format_size,
     _generate_presets,
     _get_llamacpp_models,
     _get_llamacpp_port,
     _logfile,
     _pidfile,
+    llamacpp,
 )
 from shared.config import LLMConfig, ModelConfig
 
@@ -280,3 +285,229 @@ class TestModelConfigLlamacpp:
         """MODELS_DIR points to tools/models/ relative to project root."""
         assert MODELS_DIR.name == "models"
         assert MODELS_DIR.parent.name == "tools"
+
+
+# =============================================================================
+# llamacpp update
+# =============================================================================
+
+
+class TestUpdate:
+    """Test the llamacpp update subcommand."""
+
+    def _run_update(self, *args: str) -> MagicMock:
+        """Helper that patches subprocess.run and invokes update."""
+        runner = CliRunner()
+        with patch("shared.cli.llamacpp.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout="abc1234\n", stderr=""
+            )
+            result = runner.invoke(llamacpp, ["update", *args])
+        return result  # type: ignore[return-value]
+
+    def test_clones_when_dir_missing(self, tmp_path: Path) -> None:
+        """When tools/llama.cpp doesn't exist, clones from GitHub."""
+        runner = CliRunner()
+        fake_dir = tmp_path / "tools" / "llama.cpp"
+
+        with (
+            patch("shared.cli.llamacpp.PROJECT_ROOT", tmp_path),
+            patch("shared.cli.llamacpp.LLAMA_SERVER", fake_dir / "build" / "bin" / "llama-server"),
+            patch("shared.cli.llamacpp.subprocess.run") as mock_run,
+            patch("shared.cli.llamacpp.load_config") as mock_config,
+            patch("shared.cli.llamacpp._get_pid", return_value=None),
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            mock_config.return_value = MagicMock()
+            mock_config.return_value.llm = LLMConfig(models={})
+
+            result = runner.invoke(llamacpp, ["update"])
+
+            # First call should be git clone
+            first_call = mock_run.call_args_list[0]
+            assert first_call[0][0][0] == "git"
+            assert first_call[0][0][1] == "clone"
+            assert "llama.cpp" in first_call[0][0][2]
+
+    def test_pulls_when_dir_exists(self, tmp_path: Path) -> None:
+        """When tools/llama.cpp exists, fetches and pulls."""
+        runner = CliRunner()
+        fake_dir = tmp_path / "tools" / "llama.cpp"
+        fake_dir.mkdir(parents=True)
+
+        with (
+            patch("shared.cli.llamacpp.PROJECT_ROOT", tmp_path),
+            patch("shared.cli.llamacpp.LLAMA_SERVER", fake_dir / "build" / "bin" / "llama-server"),
+            patch("shared.cli.llamacpp.subprocess.run") as mock_run,
+            patch("shared.cli.llamacpp.load_config") as mock_config,
+            patch("shared.cli.llamacpp._get_pid", return_value=None),
+        ):
+            # Simulate: fetch ok, local != remote, pull ok, cmake ok, build ok
+            mock_run.return_value = MagicMock(returncode=0, stdout="abc1234\n", stderr="")
+            mock_config.return_value = MagicMock()
+            mock_config.return_value.llm = LLMConfig(models={})
+
+            result = runner.invoke(llamacpp, ["update"])
+
+            # First call should be git fetch
+            first_call = mock_run.call_args_list[0]
+            assert first_call[0][0][0] == "git"
+            assert "fetch" in first_call[0][0]
+
+    def test_skips_pull_when_up_to_date_and_binary_exists(self, tmp_path: Path) -> None:
+        """When already on latest commit and binary exists, skips build."""
+        runner = CliRunner()
+        fake_dir = tmp_path / "tools" / "llama.cpp"
+        fake_dir.mkdir(parents=True)
+        fake_server = fake_dir / "build" / "bin" / "llama-server"
+        fake_server.parent.mkdir(parents=True)
+        fake_server.touch()
+
+        same_sha = "abc1234567890\n"
+
+        with (
+            patch("shared.cli.llamacpp.PROJECT_ROOT", tmp_path),
+            patch("shared.cli.llamacpp.LLAMA_SERVER", fake_server),
+            patch("shared.cli.llamacpp.subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout=same_sha, stderr=""
+            )
+
+            result = runner.invoke(llamacpp, ["update"])
+
+            assert "Already up to date" in result.output
+            # Should NOT have cmake calls (only git fetch + 2x rev-parse = 3 calls)
+            assert len(mock_run.call_args_list) == 3
+
+    def test_rebuilds_when_up_to_date_but_binary_missing(self, tmp_path: Path) -> None:
+        """When on latest commit but binary is missing, rebuilds."""
+        runner = CliRunner()
+        fake_dir = tmp_path / "tools" / "llama.cpp"
+        fake_dir.mkdir(parents=True)
+        fake_server = fake_dir / "build" / "bin" / "llama-server"
+
+        same_sha = "abc1234567890\n"
+
+        with (
+            patch("shared.cli.llamacpp.PROJECT_ROOT", tmp_path),
+            patch("shared.cli.llamacpp.LLAMA_SERVER", fake_server),
+            patch("shared.cli.llamacpp.subprocess.run") as mock_run,
+            patch("shared.cli.llamacpp.load_config") as mock_config,
+            patch("shared.cli.llamacpp._get_pid", return_value=None),
+        ):
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout=same_sha, stderr=""
+            )
+            mock_config.return_value = MagicMock()
+            mock_config.return_value.llm = LLMConfig(models={})
+
+            result = runner.invoke(llamacpp, ["update"])
+
+            assert "Binary missing" in result.output
+            # Should have cmake calls after the git checks
+            cmake_calls = [
+                c for c in mock_run.call_args_list
+                if c[0][0][0] == "cmake"
+            ]
+            assert len(cmake_calls) == 2  # configure + build
+
+    def test_warns_if_server_running(self, tmp_path: Path) -> None:
+        """Shows restart hint when server is running."""
+        runner = CliRunner()
+        fake_dir = tmp_path / "tools" / "llama.cpp"
+        fake_dir.mkdir(parents=True)
+        fake_server = fake_dir / "build" / "bin" / "llama-server"
+
+        with (
+            patch("shared.cli.llamacpp.PROJECT_ROOT", tmp_path),
+            patch("shared.cli.llamacpp.LLAMA_SERVER", fake_server),
+            patch("shared.cli.llamacpp.subprocess.run") as mock_run,
+            patch("shared.cli.llamacpp.load_config") as mock_config,
+            patch("shared.cli.llamacpp._get_pid", return_value=12345),
+        ):
+            # Make all subprocess calls succeed, and make binary appear after build
+            def side_effect(cmd, **kwargs):
+                if cmd[0] == "cmake" and "--build" in cmd:
+                    fake_server.parent.mkdir(parents=True, exist_ok=True)
+                    fake_server.touch()
+                return MagicMock(returncode=0, stdout="different_sha\n", stderr="")
+
+            mock_run.side_effect = side_effect
+            mock_config.return_value = MagicMock()
+            mock_config.return_value.llm = LLMConfig(models={})
+
+            result = runner.invoke(llamacpp, ["update"])
+
+            assert "Restart to use the new binary" in result.output
+
+    def test_clone_failure_stops_early(self, tmp_path: Path) -> None:
+        """When git clone fails, command stops without building."""
+        runner = CliRunner()
+
+        with (
+            patch("shared.cli.llamacpp.PROJECT_ROOT", tmp_path),
+            patch("shared.cli.llamacpp.LLAMA_SERVER", tmp_path / "tools" / "llama.cpp" / "build" / "bin" / "llama-server"),
+            patch("shared.cli.llamacpp.subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(
+                returncode=1, stdout="", stderr="fatal: could not connect"
+            )
+
+            result = runner.invoke(llamacpp, ["update"])
+
+            assert "Clone failed" in result.output
+            assert len(mock_run.call_args_list) == 1  # Only the clone attempt
+
+    def test_cmake_configure_failure(self, tmp_path: Path) -> None:
+        """When cmake configure fails, stops before build."""
+        runner = CliRunner()
+        fake_dir = tmp_path / "tools" / "llama.cpp"
+        fake_dir.mkdir(parents=True)
+
+        call_count = 0
+
+        def side_effect(cmd, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if cmd[0] == "cmake":
+                return MagicMock(returncode=1, stdout="", stderr="CMake Error: ...")
+            return MagicMock(returncode=0, stdout="different_sha\n", stderr="")
+
+        with (
+            patch("shared.cli.llamacpp.PROJECT_ROOT", tmp_path),
+            patch("shared.cli.llamacpp.LLAMA_SERVER", fake_dir / "build" / "bin" / "llama-server"),
+            patch("shared.cli.llamacpp.subprocess.run", side_effect=side_effect),
+        ):
+            result = runner.invoke(llamacpp, ["update"])
+
+            assert "cmake configure failed" in result.output
+
+    def test_jobs_option(self, tmp_path: Path) -> None:
+        """The --jobs flag is passed to cmake build."""
+        runner = CliRunner()
+        fake_dir = tmp_path / "tools" / "llama.cpp"
+        fake_dir.mkdir(parents=True)
+
+        with (
+            patch("shared.cli.llamacpp.PROJECT_ROOT", tmp_path),
+            patch("shared.cli.llamacpp.LLAMA_SERVER", fake_dir / "build" / "bin" / "llama-server"),
+            patch("shared.cli.llamacpp.subprocess.run") as mock_run,
+            patch("shared.cli.llamacpp.load_config") as mock_config,
+            patch("shared.cli.llamacpp._get_pid", return_value=None),
+        ):
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout="different_sha\n", stderr=""
+            )
+            mock_config.return_value = MagicMock()
+            mock_config.return_value.llm = LLMConfig(models={})
+
+            result = runner.invoke(llamacpp, ["update", "--jobs", "2"])
+
+            # Find the cmake --build call
+            build_calls = [
+                c for c in mock_run.call_args_list
+                if c[0][0][0] == "cmake" and "--build" in c[0][0]
+            ]
+            assert len(build_calls) == 1
+            assert "-j2" in build_calls[0][0][0]
