@@ -161,9 +161,12 @@ def _generate_presets(llm_config: LLMConfig) -> Path:
             # default batch-size (2048) are too small for large code files.
             # Both must be large enough: ubatch <= batch.
             # See: https://github.com/ggml-org/llama.cpp/issues/11105
-            batch_size = str(cfg.num_ctx or 16384)
-            presets[section]["batch-size"] = batch_size
-            presets[section]["ubatch-size"] = batch_size
+            # We use embed_max_context (8192) as the ceiling — that's the
+            # actual max input size after truncation in the processing pipeline
+            # (see ProcessingConfig.embed_max_context in processor/models.py).
+            embed_batch = 8192
+            presets[section]["batch-size"] = str(embed_batch)
+            presets[section]["ubatch-size"] = str(embed_batch)
 
     presets_path = _presets_file()
     presets_path.parent.mkdir(parents=True, exist_ok=True)
