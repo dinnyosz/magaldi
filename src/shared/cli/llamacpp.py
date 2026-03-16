@@ -18,13 +18,13 @@ Example magaldi.yaml:
           name: Qwen3-4B-Q4_K_M
           provider: llamacpp
           url: http://localhost:8090
-          num_ctx: 131072
+          num_ctx: 32768
           gguf: unsloth/Qwen3-4B-GGUF:Qwen3-4B-Q4_K_M.gguf
         qwen3-1.7b:
           name: Qwen3-1.7B-Q4_K_M
           provider: llamacpp
           url: http://localhost:8090
-          num_ctx: 131072
+          num_ctx: 32768
           parallel: 16
           gguf: unsloth/Qwen3-1.7B-GGUF:Qwen3-1.7B-Q4_K_M.gguf
         qwen3-embed:
@@ -67,7 +67,7 @@ LLAMA_SERVER = PROJECT_ROOT / "tools" / "llama.cpp" / "build" / "bin" / "llama-s
 DEFAULT_PORT = 8090
 DEFAULT_PARALLEL = 4
 DEFAULT_MODELS_MAX = 2
-DEFAULT_CTX_SIZE = 131072
+DEFAULT_CTX_SIZE = 32768
 
 
 # =============================================================================

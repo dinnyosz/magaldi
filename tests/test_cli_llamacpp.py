@@ -47,9 +47,9 @@ class TestHelpers:
 
     def test_defaults(self) -> None:
         assert DEFAULT_PORT == 8090
-        assert DEFAULT_PARALLEL == 8
+        assert DEFAULT_PARALLEL == 4
         assert DEFAULT_MODELS_MAX == 2
-        assert DEFAULT_CTX_SIZE == 262144
+        assert DEFAULT_CTX_SIZE == 32768
 
 
 # =============================================================================
@@ -175,7 +175,7 @@ class TestGeneratePresets:
                     name="Qwen3-4B-Q4_K_M",
                     provider="llamacpp",
                     url="http://localhost:8090",
-                    num_ctx=16384,
+                    num_ctx=32768,
                 ),
             }
         )
@@ -183,7 +183,7 @@ class TestGeneratePresets:
             path = _generate_presets(config)
             content = path.read_text()
             assert "[Qwen3-4B-Q4_K_M]" in content
-            assert "n_ctx = 16384" in content
+            assert "ctx-size = 32768" in content
 
     def test_empty_presets_when_no_num_ctx(self, tmp_path: Path) -> None:
         config = LLMConfig(

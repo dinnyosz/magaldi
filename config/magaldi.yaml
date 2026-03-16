@@ -45,13 +45,13 @@ llm:
       name: Qwen3-4B-Q4_K_M
       provider: llamacpp
       url: http://localhost:8090
-      num_ctx: 131072
+      num_ctx: 32768
       gguf: unsloth/Qwen3-4B-GGUF:Qwen3-4B-Q4_K_M.gguf
     qwen3-1.7b:
       name: Qwen3-1.7B-Q4_K_M
       provider: llamacpp
       url: http://localhost:8090
-      num_ctx: 131072
+      num_ctx: 32768
       parallel: 16
       gguf: unsloth/Qwen3-1.7B-GGUF:Qwen3-1.7B-Q4_K_M.gguf
     qwen3-embed:

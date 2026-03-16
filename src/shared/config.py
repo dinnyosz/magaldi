@@ -192,13 +192,13 @@ class LLMConfig:
               name: Qwen3-4B-Q4_K_M
               provider: llamacpp
               url: http://localhost:8090
-              num_ctx: 131072
+              num_ctx: 32768
               gguf: unsloth/Qwen3-4B-GGUF:Qwen3-4B-Q4_K_M.gguf
             qwen3-1.7b:
               name: Qwen3-1.7B-Q4_K_M
               provider: llamacpp
               url: http://localhost:8090
-              num_ctx: 131072
+              num_ctx: 32768
               parallel: 16
               gguf: unsloth/Qwen3-1.7B-GGUF:Qwen3-1.7B-Q4_K_M.gguf
             qwen3-embed:
@@ -222,14 +222,14 @@ class LLMConfig:
             name="Qwen3-4B-Q4_K_M",
             provider="llamacpp",
             url="http://localhost:8090",
-            num_ctx=131072,
+            num_ctx=32768,
             gguf="unsloth/Qwen3-4B-GGUF:Qwen3-4B-Q4_K_M.gguf",
         ),
         "qwen3-1.7b": ModelConfig(
             name="Qwen3-1.7B-Q4_K_M",
             provider="llamacpp",
             url="http://localhost:8090",
-            num_ctx=131072,
+            num_ctx=32768,
             parallel=16,
             gguf="unsloth/Qwen3-1.7B-GGUF:Qwen3-1.7B-Q4_K_M.gguf",
         ),
@@ -474,32 +474,32 @@ class BenchmarkConfig:
             name="qwen3:1.7b",
             provider="ollama",
             url="http://localhost:11434",
-            num_ctx=16384,
+            num_ctx=32768,
         ),
         "qwen3-4b": ModelConfig(
             name="qwen3:4b-instruct",
             provider="ollama",
             url="http://localhost:11434",
-            num_ctx=16384,
+            num_ctx=32768,
         ),
         # Qwen3.5 family (reasoning disabled by default)
         "qwen3.5-tiny": ModelConfig(
             name="qwen3.5:0.8b",
             provider="ollama",
             url="http://localhost:11434",
-            num_ctx=16384,
+            num_ctx=32768,
         ),
         "qwen3.5-small": ModelConfig(
             name="qwen3.5:2b",
             provider="ollama",
             url="http://localhost:11434",
-            num_ctx=16384,
+            num_ctx=32768,
         ),
         "qwen3.5-4b": ModelConfig(
             name="qwen3.5:4b",
             provider="ollama",
             url="http://localhost:11434",
-            num_ctx=16384,
+            num_ctx=32768,
         ),
         # Eval-only model: larger model not in the benchmark set
         # Using qwen3.5:9b as judge — big enough gap from 2B/4B test models
@@ -509,7 +509,7 @@ class BenchmarkConfig:
             name="qwen3.5:9b",
             provider="ollama",
             url="http://localhost:11434",
-            num_ctx=16384,
+            num_ctx=32768,
         ),
     })
 
