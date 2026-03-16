@@ -66,8 +66,6 @@ LLAMA_SERVER = PROJECT_ROOT / "tools" / "llama.cpp" / "build" / "bin" / "llama-s
 # Defaults — tuned for Apple Silicon M4 Pro (48GB)
 DEFAULT_PORT = 8090
 DEFAULT_PARALLEL = 4
-DEFAULT_THREADS = 4          # P-cores only; more threads = more CPU contention with Metal
-DEFAULT_THREADS_BATCH = 4    # Same for prompt processing
 DEFAULT_MODELS_MAX = 2
 DEFAULT_CTX_SIZE = 131072
 
@@ -223,21 +221,11 @@ def llamacpp() -> None:
     "--ctx-size", type=int, default=None,
     help=f"Default context size per slot (default: {DEFAULT_CTX_SIZE})",
 )
-@click.option(
-    "--threads", "-t", type=int, default=None,
-    help=f"CPU threads for generation (default: {DEFAULT_THREADS})",
-)
-@click.option(
-    "--threads-batch", type=int, default=None,
-    help=f"CPU threads for prompt processing (default: {DEFAULT_THREADS_BATCH})",
-)
 def llm_serve(
     port: int | None,
     parallel: int | None,
     models_max: int | None,
     ctx_size: int | None,
-    threads: int | None,
-    threads_batch: int | None,
 ) -> None:
     """Start llama-server in router mode.
 
@@ -270,8 +258,6 @@ def llm_serve(
     parallel = parallel or DEFAULT_PARALLEL
     models_max = models_max or DEFAULT_MODELS_MAX
     ctx_size = ctx_size or DEFAULT_CTX_SIZE
-    threads = threads or DEFAULT_THREADS
-    threads_batch = threads_batch or DEFAULT_THREADS_BATCH
 
     # Check if already running
     existing_pid = _get_pid(port)
@@ -299,8 +285,6 @@ def llm_serve(
         "--ctx-size", str(ctx_size),
         "--parallel", str(parallel),
         "--models-max", str(models_max),
-        "--threads", str(threads),
-        "--threads-batch", str(threads_batch),
         "--flash-attn", "on",
         "--n-gpu-layers", "99",
         "--kv-unified",
@@ -337,7 +321,6 @@ def llm_serve(
     console.print(f"  Max loaded:     {models_max}")
     console.print(f"  Parallel slots: {parallel}")
     console.print(f"  Context size:   {ctx_size}")
-    console.print(f"  Threads:        {threads} (gen) / {threads_batch} (batch)")
     console.print("  Flash attention: on")
     console.print("  GPU layers:     99 (full offload)")
     console.print("  KV unified:     on (shared pool, not partitioned)")
