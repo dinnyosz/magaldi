@@ -3,3 +3,5 @@ repository: magaldi
 
 exclude_directories:
   - test_repos
+  - tools/llama.cpp
+  - logs
