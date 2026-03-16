@@ -294,8 +294,12 @@ def llm_serve(
         "--batch-size", "8192",
         "--ubatch-size", "8192",
         "-sps", "0.4",
-        "--cache-type-k", "q8_0",
-        "--cache-type-v", "q4_0",
+        # KV cache: f16 is ~2× faster than quantized (q8_0/q4_0) on Metal.
+        # Quantized KV saves memory but requires dequantization on every
+        # attention op, halving both prompt and generation throughput.
+        # Bench: f16 = 748 pp / 69 tg vs q8_0/q4_0 = 388 pp / 38 tg.
+        "--cache-type-k", "f16",
+        "--cache-type-v", "f16",
         "--cache-reuse", "256",
         # Disable thinking globally — Qwen3 thinks by default, wasting
         # 2-5× tokens on <think> reasoning before producing actual output.
@@ -331,7 +335,7 @@ def llm_serve(
     console.print("  GPU layers:     99 (full offload)")
     console.print("  KV unified:     on (shared pool, not partitioned)")
     console.print("  Batch size:     8192 (batch + ubatch)")
-    console.print("  KV cache type:  q8_0 (K) + q4_0 (V)")
+    console.print("  KV cache type:  f16 (K) + f16 (V)")
     console.print("  Cache reuse:    256 tokens")
     console.print("  Endpoints:      slots, metrics, props")
     console.print(f"  Log:            {_logfile(port)}")
