@@ -288,6 +288,11 @@ def llm_serve(
         "--flash-attn", "on",
         "--n-gpu-layers", "99",
         "--kv-unified",
+        # Batch sizes: larger = better GPU utilization on Metal.
+        # Default n_batch=2048/n_ubatch=512 causes excessive CPU↔GPU round-trips.
+        # 8192 keeps the GPU busy processing bigger chunks per dispatch.
+        "--batch-size", "8192",
+        "--ubatch-size", "8192",
         "-sps", "0.4",
         "--cache-type-k", "q8_0",
         "--cache-type-v", "q4_0",
@@ -319,6 +324,7 @@ def llm_serve(
     console.print("  Flash attention: on")
     console.print("  GPU layers:     99 (full offload)")
     console.print("  KV unified:     on (shared pool, not partitioned)")
+    console.print("  Batch size:     8192 (batch + ubatch)")
     console.print("  KV cache type:  q8_0 (K) + q4_0 (V)")
     console.print("  Cache reuse:    256 tokens")
     console.print("  Endpoints:      slots, metrics, props")
