@@ -132,6 +132,8 @@ def _generate_presets(llm_config: LLMConfig) -> Path:
     Embedding models get additional settings:
       embedding = true    (enables /v1/embeddings endpoint)
       pooling = mean      (average token embeddings into single vector)
+      parallel = 4        (4 slots × 8K each — matches embed_max_context)
+      n_ctx = <num_ctx>   (explicit context, avoids inheriting global 262K)
     """
     presets = configparser.ConfigParser()
 
@@ -145,6 +147,11 @@ def _generate_presets(llm_config: LLMConfig) -> Path:
         if cfg.embedding:
             presets[section]["embedding"] = "true"
             presets[section]["pooling"] = "mean"
+            # Embedding models need fewer parallel slots than completion models.
+            # With n_ctx=32768 and parallel=4, each slot gets 8K of KV cache —
+            # matching embed_max_context (8192 tokens).  Avoids the default
+            # --parallel 8 which would split into 4K slots (too small).
+            presets[section]["parallel"] = "4"
             # For embedding models with pooling, the entire input must fit in
             # a single ubatch (physical batch). Default ubatch-size (512) and
             # default batch-size (2048) are too small for large code files.

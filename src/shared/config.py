@@ -199,6 +199,7 @@ class LLMConfig:
               url: http://localhost:8090
               dimensions: 1024
               embedding: true
+              num_ctx: 32768
               gguf: Mungert/Qwen3-Embedding-0.6B-GGUF:Qwen3-Embedding-0.6B-q8_0.gguf
 
           summarize_model: qwen3.5-4b
@@ -226,6 +227,7 @@ class LLMConfig:
             url="http://localhost:8090",
             dimensions=1024,
             embedding=True,
+            num_ctx=32768,
             gguf="Mungert/Qwen3-Embedding-0.6B-GGUF:Qwen3-Embedding-0.6B-q8_0.gguf",
         ),
     })
