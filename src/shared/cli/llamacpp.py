@@ -150,7 +150,7 @@ def _generate_presets(llm_config: LLMConfig) -> Path:
         section = cfg.name
         presets[section] = {}
         if cfg.num_ctx:
-            presets[section]["n_ctx"] = str(cfg.num_ctx)
+            presets[section]["ctx-size"] = str(cfg.num_ctx)
         if cfg.parallel:
             presets[section]["parallel"] = str(cfg.parallel)
         if cfg.embedding:
