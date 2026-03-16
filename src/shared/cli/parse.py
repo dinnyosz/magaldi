@@ -162,9 +162,11 @@ def _run_extraction_only(
 @click.option("--force-clean", is_flag=True, help="Delete all indexed data for this repo/user before parsing")
 @click.option("--use-docstrings/--no-use-docstrings", default=True, help="Use docstrings as summaries instead of LLM (default: enabled)")
 @click.option("--debug-scoring", is_flag=True, help="Log variable scoring prompts and LLM responses to logs/")
+@click.option("--skip-scoring", is_flag=True, help="Skip variable scoring (keep all variables/constants)")
 def parse(
     repo_path: str, user: str, skip_ai: bool, features: bool, glossary: bool, skip_tests: bool, skip_resolve: bool,
-    dry_run: bool, llm_url: str | None, workers: int, force_clean: bool, use_docstrings: bool, debug_scoring: bool
+    dry_run: bool, llm_url: str | None, workers: int, force_clean: bool, use_docstrings: bool, debug_scoring: bool,
+    skip_scoring: bool,
 ) -> None:
     """Parse a repository and index its code elements.
 
@@ -293,7 +295,7 @@ def parse(
                 sys.exit(1)
 
         # Phase 4: Variable Scoring (LLM-based preflight)
-        if not dry_run and not skip_ai:
+        if not dry_run and not skip_ai and not skip_scoring:
             scoring_model = config.llm.get_variable_scoring_model().name
             console.print(f"\n[bold blue]Phase 4:[/] Variable Scoring [dim]({scoring_model})[/]")
             run_logger.start_phase("Phase 4: Variable Scoring")
@@ -332,6 +334,8 @@ def parse(
                 })
         elif skip_ai:
             console.print("\n[bold blue]Phase 4:[/] Variable Scoring [dim](skipped: --skip-ai)[/]")
+        elif skip_scoring:
+            console.print("\n[bold blue]Phase 4:[/] Variable Scoring [dim](skipped: --skip-scoring)[/]")
 
         # Phase 5: Processing (summarize -> embed -> index)
         console.print("\n[bold blue]Phase 5:[/] Processing")

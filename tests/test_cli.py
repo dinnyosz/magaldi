@@ -289,6 +289,48 @@ class TestParseCommand:
         assert result.exit_code == 0
         assert "--user" in result.output
         assert "--dry-run" in result.output
+        assert "--skip-scoring" in result.output
+
+    @patch("shared.cli.parse.load_config")
+    @patch("shared.cli.parse.run_discovery")
+    @patch("shared.cli.parse.run_change_detection")
+    @patch("shared.cli.parse.run_parsing")
+    @patch("shared.cli.parse.run_processing")
+    def test_parse_skip_scoring(
+        self,
+        mock_run_processing,
+        mock_run_parsing,
+        mock_run_change_detection,
+        mock_run_discovery,
+        mock_load_config,
+        cli_runner,
+        mock_config,
+        mock_discovery_result,
+        mock_change_manifest,
+        mock_parsing_result,
+        tmp_path,
+    ):
+        """Test --skip-scoring bypasses variable scoring phase."""
+        repo_path = tmp_path / "test-repo"
+        repo_path.mkdir()
+        (repo_path / "magaldi.yaml").write_text("scope: test")
+
+        mock_load_config.return_value = mock_config
+        mock_run_discovery.return_value = mock_discovery_result
+        mock_run_change_detection.return_value = mock_change_manifest
+        mock_run_parsing.return_value = mock_parsing_result
+        mock_run_processing.return_value = (10, 0, 10, 0.5, 0.3, 0.2, 5.0, None, [], 0)
+
+        result = cli_runner.invoke(main, [
+            "parse",
+            str(repo_path),
+            "--user", "testuser",
+            "--dry-run",
+            "--skip-scoring",
+        ])
+
+        assert result.exit_code == 0
+        assert "skipped: --skip-scoring" in result.output
 
     @patch("shared.cli.parse.load_config")
     @patch("shared.cli.parse.run_discovery")
