@@ -14,19 +14,19 @@ Usage:
 Example magaldi.yaml:
     llm:
       models:
-        qwen3.5-4b:
-          name: Qwen3.5-4B-Q4_K_M
+        qwen3-4b:
+          name: Qwen3-4B-Q4_K_M
           provider: llamacpp
           url: http://localhost:8090
           num_ctx: 131072
-          gguf: unsloth/Qwen3.5-4B-GGUF:Qwen3.5-4B-Q4_K_M.gguf
-        qwen3.5-2b:
-          name: Qwen3.5-2B-Q4_K_M
+          gguf: unsloth/Qwen3-4B-GGUF:Qwen3-4B-Q4_K_M.gguf
+        qwen3-1.7b:
+          name: Qwen3-1.7B-Q4_K_M
           provider: llamacpp
           url: http://localhost:8090
           num_ctx: 131072
           parallel: 16
-          gguf: unsloth/Qwen3.5-2B-GGUF:Qwen3.5-2B-Q4_K_M.gguf
+          gguf: unsloth/Qwen3-1.7B-GGUF:Qwen3-1.7B-Q4_K_M.gguf
         qwen3-embed:
           name: Qwen3-Embedding-0.6B-q8_0
           provider: llamacpp
@@ -292,6 +292,10 @@ def llm_serve(
         "--cache-type-k", "q8_0",
         "--cache-type-v", "q4_0",
         "--cache-reuse", "256",
+        # Monitoring endpoints
+        "--slots",       # expose /slots (on by default, but be explicit)
+        "--metrics",     # enable /metrics (Prometheus-compatible)
+        "--props",       # enable /props
     ]
 
     # Add presets if we generated any model-specific config
@@ -317,6 +321,7 @@ def llm_serve(
     console.print("  KV unified:     on (shared pool, not partitioned)")
     console.print("  KV cache type:  q8_0 (K) + q4_0 (V)")
     console.print("  Cache reuse:    256 tokens")
+    console.print("  Endpoints:      slots, metrics, props")
     console.print(f"  Log:            {_logfile(port)}")
     console.print()
 
@@ -340,8 +345,11 @@ def llm_serve(
         if _is_healthy(port):
             console.print("[green]Ready![/]")
             console.print()
-            console.print(f"  API: http://localhost:{port}/v1/models")
-            console.print(f"  Health: http://localhost:{port}/health")
+            console.print(f"  API:     http://localhost:{port}/v1/models")
+            console.print(f"  Health:  http://localhost:{port}/health")
+            console.print(f"  Slots:   http://localhost:{port}/slots")
+            console.print(f"  Metrics: http://localhost:{port}/metrics")
+            console.print(f"  Props:   http://localhost:{port}/props")
             return
         # Check if process died
         if proc.poll() is not None:
@@ -571,7 +579,7 @@ def llm_models() -> None:
 @llamacpp.command("pull")
 @click.option(
     "--model", "-m", type=str, default=None,
-    help="Pull a specific model by config name (e.g., qwen3.5-4b)",
+    help="Pull a specific model by config name (e.g., qwen3-4b)",
 )
 def llm_pull(model: str | None) -> None:
     """Download GGUF models from HuggingFace.
@@ -583,11 +591,11 @@ def llm_pull(model: str | None) -> None:
     Example config:
         llm:
           models:
-            qwen3.5-4b:
-              name: Qwen3.5-4B-Q4_K_M
+            qwen3-4b:
+              name: Qwen3-4B-Q4_K_M
               provider: llamacpp
               url: http://localhost:8090
-              gguf: unsloth/Qwen3.5-4B-GGUF:Qwen3.5-4B-Q4_K_M.gguf
+              gguf: unsloth/Qwen3-4B-GGUF:Qwen3-4B-Q4_K_M.gguf
     """
     config = load_config()
 
