@@ -303,10 +303,14 @@ def llm_serve(
         "--cache-reuse", "256",
         # Disable thinking globally — Qwen3 thinks by default, wasting
         # 2-5× tokens on <think> reasoning before producing actual output.
-        # With "none", any thinking stays in content (where _strip_think_tags
-        # removes it) instead of being split into reasoning_content.
+        # --reasoning off: disables thinking in the chat template (the actual switch)
+        # --reasoning-budget 0: safety net, immediately ends any thinking
+        # --reasoning-format none: leaves any leaked think tags in content
+        #   (where _strip_think_tags removes them) instead of splitting
+        #   into reasoning_content
+        "--reasoning", "off",
+        "--reasoning-budget", "0",
         "--reasoning-format", "none",
-        "--chat-template-kwargs", '{"enable_thinking":false}',
         # Monitoring endpoints
         "--slots",       # expose /slots (on by default, but be explicit)
         "--metrics",     # enable /metrics (Prometheus-compatible)
