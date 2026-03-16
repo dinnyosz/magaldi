@@ -66,7 +66,7 @@ LLAMA_SERVER = PROJECT_ROOT / "tools" / "llama.cpp" / "build" / "bin" / "llama-s
 # Defaults — tuned for Apple Silicon M4 Pro (48GB)
 DEFAULT_PORT = 8090
 DEFAULT_PARALLEL = 4
-DEFAULT_MODELS_MAX = 2
+DEFAULT_MODELS_MAX = 3
 DEFAULT_CTX_SIZE = 32768
 
 

@@ -48,7 +48,7 @@ class TestHelpers:
     def test_defaults(self) -> None:
         assert DEFAULT_PORT == 8090
         assert DEFAULT_PARALLEL == 4
-        assert DEFAULT_MODELS_MAX == 2
+        assert DEFAULT_MODELS_MAX == 3
         assert DEFAULT_CTX_SIZE == 32768
 
 
