@@ -6,21 +6,25 @@ from dataclasses import dataclass
 
 
 def _get_model_display_name(model_name: str, provider: str, num_ctx: int) -> str:
-    """Get the display name for a model, including tier suffix for Ollama models.
+    """Get the display name for a model, including tier suffix for tiered providers.
 
     Args:
         model_name: Base model name.
-        provider: LLM provider (ollama, openai, etc.).
+        provider: LLM provider (ollama, llamacpp, openai, etc.).
         num_ctx: Context size being used.
 
     Returns:
-        Model name with tier suffix for Ollama models (e.g., "qwen3:4b-instruct-4k"),
+        Model name with tier suffix for tiered providers (e.g., "qwen3:4b-instruct-4k"),
         or the original name for other providers.
     """
     if provider == "ollama":
         from shared.ai.ollama_models import get_tiered_model_name
 
         return get_tiered_model_name(model_name, num_ctx)  # type: ignore[no-any-return]
+    if provider == "llamacpp":
+        from shared.ai.llamacpp_models import get_tiered_model_name as get_llamacpp_tiered_name
+
+        return get_llamacpp_tiered_name(model_name, num_ctx)  # type: ignore[no-any-return]
     return model_name
 
 

@@ -596,6 +596,7 @@ def run_variable_scoring(
             progress_state=progress_state,
             worker_status=worker_status,
             on_batch_logged=scoring_log.append_batch if scoring_log else None,
+            provider=model_config.provider,
         )
 
     # Merge cached scores into LLM result

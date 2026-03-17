@@ -335,6 +335,30 @@ def get_max_workers_for_tier(tier: int) -> int:
     return TIER_MAX_WORKERS.get(tier, 1)
 
 
+def get_tier_effective_workers(tier: int, max_workers: int, provider: str | None = None) -> int:
+    """Get effective worker count for a tier, respecting provider-specific limits.
+
+    For llamacpp, the effective ceiling is the tier's parallel slot count from
+    TIER_PARALLEL (since llama-server can only handle that many concurrent
+    requests per tier alias). The result is capped at max_workers.
+
+    For other providers, returns min(max_workers, TIER_MAX_WORKERS[tier]).
+
+    Args:
+        tier: Context tier (e.g., 2048, 4096).
+        max_workers: CLI-configured maximum worker count.
+        provider: LLM provider (ollama, llamacpp, openai, etc.).
+
+    Returns:
+        Effective worker count for this tier.
+    """
+    if provider == "llamacpp":
+        parallel_limit = TIER_PARALLEL.get(tier)
+        if parallel_limit is not None:
+            return min(max_workers, parallel_limit)
+    return min(max_workers, get_max_workers_for_tier(tier))
+
+
 def group_by_tier(items: list[T], tier_fn: Callable[[T], int]) -> dict[int, list[T]]:
     """Group items by their context tier.
 

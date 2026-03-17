@@ -271,6 +271,7 @@ def score_variables(
     progress_state: ScoringProgressState | None = None,
     worker_status: ScoringWorkerStatus | None = None,
     on_batch_logged: Callable[[str, str], None] | None = None,
+    provider: str | None = None,
 ) -> ScoringResult:
     """Score variables using the LLM and return scoring results.
 
@@ -286,6 +287,7 @@ def score_variables(
         progress_state: Optional shared progress state for live display.
         worker_status: Optional shared worker status for live display.
         on_batch_logged: Optional callback with (user_prompt, llm_output) after each batch.
+        provider: LLM provider (ollama, llamacpp, etc.) for tier-based worker limits.
 
     Returns:
         ScoringResult with scores and statistics.
@@ -370,7 +372,11 @@ def score_variables(
     num_ctx = _snap_to_context_tier(config.token_budget)
 
     # Process batches in parallel with throttling
-    effective_workers = min(max_workers, len(batches))
+    # Cap at tier's parallel slot limit (llamacpp has fixed slots per tier)
+    from shared.ai.context_size import get_tier_effective_workers
+
+    tier_capped_workers = get_tier_effective_workers(num_ctx, max_workers, provider)
+    effective_workers = min(tier_capped_workers, len(batches))
     if progress_state is not None:
         progress_state.num_workers = effective_workers
 

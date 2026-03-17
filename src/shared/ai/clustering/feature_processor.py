@@ -802,6 +802,7 @@ def process_features(
     from shared.ai.context_size import (
         TIER_MAX_WORKERS,
         compute_aggregation_num_ctx,
+        get_tier_effective_workers,
         get_tier_timeout,
         iter_by_tier,
     )
@@ -907,17 +908,18 @@ def process_features(
 
     try:
         for _tier, _tier_max_workers, tier_clusters in tier_groups:
-            # Use full max workers like Phase 4 - time-based throttling handles scaling
-            state["current_workers"] = max_pool_workers
+            # Cap workers at tier's parallel slot limit (llamacpp has fixed slots per tier)
+            tier_workers = get_tier_effective_workers(_tier, max_pool_workers, config.provider)
+            state["current_workers"] = tier_workers
 
             # Reset worker ID pool for this tier
             available_worker_ids.clear()
-            available_worker_ids.extend(range(max_pool_workers))
+            available_worker_ids.extend(range(tier_workers))
 
             run_throttled_tier(
                 items=list(tier_clusters),
                 tier=_tier,
-                effective_workers=max_pool_workers,
+                effective_workers=tier_workers,
                 process_fn=process_wrapper,
                 throttle_ctx=throttle_ctx,
                 get_max_runtime=worker_status.get_max_active_runtime,

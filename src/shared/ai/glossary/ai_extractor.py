@@ -932,10 +932,13 @@ def extract_glossary_from_features_concurrent(
     model_config = config.llm.get_summarize_model()
 
     def get_tiered_model_display(num_ctx: int) -> str:
-        """Get tiered model name for Ollama models."""
+        """Get tiered model name for Ollama/llamacpp models."""
         if model_config.provider == "ollama":
             from shared.ai.ollama_models import get_tiered_model_name
             return get_tiered_model_name(model_config.name, num_ctx)  # type: ignore[no-any-return]
+        if model_config.provider == "llamacpp":
+            from shared.ai.llamacpp_models import get_tiered_model_name as get_llamacpp_tiered_name
+            return get_llamacpp_tiered_name(model_config.name, num_ctx)  # type: ignore[no-any-return]
         return model_config.name  # type: ignore[no-any-return]
 
     def format_ctx(num_ctx: int) -> str:
@@ -1011,6 +1014,7 @@ def extract_glossary_from_features_concurrent(
     from shared.ai.context_size import (
         TIER_MAX_WORKERS,
         compute_aggregation_num_ctx,
+        get_tier_effective_workers,
         get_tier_timeout,
         iter_by_tier,
     )
@@ -1107,18 +1111,19 @@ def extract_glossary_from_features_concurrent(
     )
 
     for _tier, _tier_max_workers, tier_features in tier_groups:
-        # Use full max workers like Phase 4 - time-based throttling handles scaling
-        state["current_workers"] = max_pool_workers
+        # Cap workers at tier's parallel slot limit (llamacpp has fixed slots per tier)
+        tier_workers = get_tier_effective_workers(_tier, max_pool_workers, model_config.provider)
+        state["current_workers"] = tier_workers
 
         # Reset worker ID pool for this tier
         with worker_id_lock:
             available_worker_ids.clear()
-            available_worker_ids.extend(range(max_pool_workers))
+            available_worker_ids.extend(range(tier_workers))
 
         run_throttled_tier(
             items=list(tier_features),
             tier=_tier,
-            effective_workers=max_pool_workers,
+            effective_workers=tier_workers,
             process_fn=process_feature,
             throttle_ctx=throttle_ctx,
             get_max_runtime=worker_status.get_max_active_runtime,
@@ -1331,18 +1336,19 @@ def extract_glossary_from_features_concurrent(
     )
 
     for _tier, _tier_max_workers, tier_items in tier_groups:
-        # Use full max workers like Phase 4 - time-based throttling handles scaling
-        phase2_state["current_workers"] = max_pool_workers
+        # Cap workers at tier's parallel slot limit (llamacpp has fixed slots per tier)
+        tier_workers = get_tier_effective_workers(_tier, max_pool_workers, model_config.provider)
+        phase2_state["current_workers"] = tier_workers
 
         # Reset worker ID pool for this tier
         with worker_id_lock:
             available_worker_ids.clear()
-            available_worker_ids.extend(range(max_pool_workers))
+            available_worker_ids.extend(range(tier_workers))
 
         run_throttled_tier(
             items=list(tier_items),
             tier=_tier,
-            effective_workers=max_pool_workers,
+            effective_workers=tier_workers,
             process_fn=generate_summary_for_term,
             throttle_ctx=throttle_ctx_phase2,
             get_max_runtime=worker_status.get_max_active_runtime,
