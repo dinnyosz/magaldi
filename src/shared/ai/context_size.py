@@ -171,7 +171,9 @@ def get_tier_timeout(tier: int, base_workers: int) -> float:
 # Variable content (estimated typical, e.g. file_summary, class_context,
 #   signature/docstring duplication from raw_code):
 #   file: ~50, class: ~130, function: ~200 (sig+docstring in template AND code),
-#   method: ~240, variable/constant: ~160, interface/trait: ~70, enum/type_alias: ~60
+#   method: ~240, interface/trait: ~70, enum/type_alias: ~60
+#   variable: ~500 (file_summary 200-400 + class_context ~100 + function_context ~100 + usages ~50)
+#   constant: ~400 (file_summary 200-400 + function_context ~100 + usage_examples ~50)
 #
 # Output budget (empirically measured from ~2300 elements, set to max * 1.25):
 #   file/function: max ~400 tokens → 500 budget
@@ -192,8 +194,8 @@ PROMPT_OVERHEAD = {
     "type_alias": 550,  # 133 + 132 + 60 + 200 = 525 → 550
     "function": 1100,   # 177 + 199 + 200 + 500 = 1076 → 1100
     "method": 1050,     # 169 + 206 + 240 + 400 = 1015 → 1050
-    "constant": 650,    # 126 + 136 + 160 + 200 = 622 → 650
-    "variable": 900,    # 129 + 134 + 160 + 450 = 873 → 900
+    "constant": 1050,   # 126 + 136 + 400 + 200 = 862 → 1050 (headroom for long file_summaries)
+    "variable": 1250,   # 129 + 134 + 500 + 450 = 1213 → 1250
     "import": 400,      # 114 + 114 + 60 + 100 = 388 → 400
 }
 

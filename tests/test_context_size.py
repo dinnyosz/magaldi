@@ -20,13 +20,15 @@ from shared.ai.context_size import (
 class TestComputeNumCtx:
     """Tests for compute_num_ctx function."""
 
-    def test_small_variable_returns_1024_tier(self):
-        """Variable with 100 chars should use 1024 context.
+    def test_small_variable_returns_2048_tier(self):
+        """Variable with 100 chars should use 2048 context.
 
-        Calculation: 100/4 = 25 + 550 overhead = 575 < 1024.
+        Calculation: 100/4 = 25 + 1250 overhead = 1275 < 2048.
+        Variable overhead is high because prompts include file_summary,
+        class_context, function_context, and usages (up to ~500 tokens).
         """
         result = compute_num_ctx("variable", 100)
-        assert result == 1024
+        assert result == 2048
 
     def test_medium_function_returns_4096(self):
         """Function with 8000 chars should use 4096 context.
