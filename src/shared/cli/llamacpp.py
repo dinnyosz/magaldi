@@ -359,7 +359,7 @@ def llm_serve(
         "--kv-unified",
         "--cache-type-k", "q8_0",
         "--cache-type-v", "q8_0",
-        "--cache-reuse", "256",
+        "--cache-reuse", "16",
         # Reduce KV cache checkpoints from default 8 to 4 — saves memory
         # per slot with our tiered ctx-size + q8_0 cache setup.
         "--ctx-checkpoints", "4",
