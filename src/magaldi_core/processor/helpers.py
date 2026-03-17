@@ -12,7 +12,7 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from shared.ai.context_size import compute_element_num_ctx
+from shared.ai.context_size import compute_element_num_ctx, compute_prompt_num_ctx
 from shared.ai.embedding import (
     EmbeddingError,
     build_caller_embedding_text,
@@ -427,11 +427,11 @@ def _summarize_element(
     max_tokens = get_max_tokens_for_element_type(
         element.element_type, default=config.summarize_max_tokens
     )
-    # Compute per-element context size for optimal KV cache efficiency
-    num_ctx = compute_element_num_ctx(
-        element.element_type,
-        len(element.raw_code or ""),
-    )
+    # Compute context tier from the actual prompt (not raw_code estimate).
+    # This is more accurate than compute_element_num_ctx because it accounts
+    # for variable-length parent context (file_summary, class_context, etc.)
+    # that the static PROMPT_OVERHEAD can underestimate for large elements.
+    num_ctx = compute_prompt_num_ctx(len(prompt), max_tokens)
     raw_summary = llm_client.generate(
         prompt=prompt,
         temperature=config.summarize_temperature,

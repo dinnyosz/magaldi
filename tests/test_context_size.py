@@ -13,6 +13,7 @@ from shared.ai.context_size import (
     compute_context_sizes,
     compute_element_num_ctx,
     compute_num_ctx,
+    compute_prompt_num_ctx,
     get_tier_timeout,
 )
 
@@ -166,6 +167,78 @@ class TestComputeElementNumCtx:
         assert compute_element_num_ctx("import", 200) == 1024
         # type_alias: 200/4 = 50 + 550 = 600 < 1024
         assert compute_element_num_ctx("type_alias", 200) == 1024
+
+
+class TestComputePromptNumCtx:
+    """Tests for prompt-based context size computation."""
+
+    def test_small_prompt_with_max_tokens(self):
+        """Small prompt + max_tokens should use 1024 tier.
+
+        2000 chars / 4 = 500 tokens + 200 max_tokens = 700 < 1024.
+        """
+        result = compute_prompt_num_ctx(2000, max_tokens=200)
+        assert result == 1024
+
+    def test_medium_prompt_uses_4096(self):
+        """Medium prompt should use 4096 tier.
+
+        8000 chars / 4 = 2000 tokens + 500 max_tokens = 2500 < 4096.
+        """
+        result = compute_prompt_num_ctx(8000, max_tokens=500)
+        assert result == 4096
+
+    def test_large_prompt_uses_8192(self):
+        """Large prompt should use 8192 tier.
+
+        20000 chars / 4 = 5000 tokens + 500 max_tokens = 5500 < 8192.
+        """
+        result = compute_prompt_num_ctx(20000, max_tokens=500)
+        assert result == 8192
+
+    def test_very_large_prompt_uses_16384(self):
+        """Very large prompt should use 16384 tier.
+
+        50000 chars / 4 = 12500 tokens + 500 max_tokens = 13000 < 16384.
+        """
+        result = compute_prompt_num_ctx(50000, max_tokens=500)
+        assert result == 16384
+
+    def test_huge_prompt_uses_largest_tier(self):
+        """Huge prompt should use 32768 tier."""
+        result = compute_prompt_num_ctx(200000, max_tokens=500)
+        assert result == CONTEXT_TIERS[-1]
+
+    def test_max_tokens_affects_tier(self):
+        """Higher max_tokens should push to larger tier.
+
+        3500 chars / 4 = 875 tokens.
+        With 100 max_tokens = 975 < 1024 → 1024.
+        With 500 max_tokens = 1375 < 2048 → 2048.
+        """
+        assert compute_prompt_num_ctx(3500, max_tokens=100) == 1024
+        assert compute_prompt_num_ctx(3500, max_tokens=500) == 2048
+
+    def test_more_accurate_than_estimate(self):
+        """Prompt-based should catch cases where estimate underestimates.
+
+        Simulate: raw_code is 4000 chars but prompt (with parent context)
+        is 20000 chars. Estimate-based would use 4096, prompt-based uses 8192.
+        """
+        # Estimate-based: 4000/4=1000 + 1650 overhead = 2650 → 4096
+        estimate_tier = compute_element_num_ctx("function", 4000)
+        assert estimate_tier == 4096
+
+        # Prompt-based: 20000/4=5000 + 500 = 5500 → 8192
+        prompt_tier = compute_prompt_num_ctx(20000, max_tokens=500)
+        assert prompt_tier == 8192
+        assert prompt_tier > estimate_tier
+
+    def test_returns_valid_tier(self):
+        """Result should always be a valid context tier."""
+        for chars in [100, 500, 2000, 10000, 50000, 200000]:
+            result = compute_prompt_num_ctx(chars, max_tokens=500)
+            assert result in CONTEXT_TIERS
 
 
 class TestComputeAggregationNumCtx:

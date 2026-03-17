@@ -245,6 +245,34 @@ def compute_element_num_ctx(element_type: str, char_count: int) -> int:
     return CONTEXT_TIERS[-1]
 
 
+def compute_prompt_num_ctx(prompt_chars: int, max_tokens: int) -> int:
+    """Compute optimal context tier from an already-built prompt.
+
+    Unlike compute_element_num_ctx (which estimates from raw_code + static
+    overhead), this function uses the actual materialized prompt length.
+    Use this after build_prompt() for accurate tier selection that accounts
+    for variable-length parent context.
+
+    Args:
+        prompt_chars: Character count of the full prompt string.
+        max_tokens: Output token budget (max_tokens for generation).
+
+    Returns:
+        Optimal num_ctx value from CONTEXT_TIERS.
+    """
+    # Estimate tokens: ~4 chars per token for code/mixed content
+    prompt_tokens = prompt_chars // 4
+    total_tokens = prompt_tokens + max_tokens
+
+    # Find smallest tier that fits
+    for tier in CONTEXT_TIERS:
+        if total_tokens < tier:
+            return tier
+
+    # Fallback to largest tier
+    return CONTEXT_TIERS[-1]
+
+
 def compute_num_ctx(element_type: str, max_chars: int) -> int:
     """Compute optimal context size for an element type (legacy).
 
