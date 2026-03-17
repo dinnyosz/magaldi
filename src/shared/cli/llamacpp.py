@@ -338,6 +338,7 @@ def llm_serve(
         "--threads", "6",
         "--flash-attn", "on",
         "--n-gpu-layers", "99",
+        "--mlock",
         # Batch size: n_batch is the logical max batch (prompt tokens per
         # iteration). Embedding models override both batch-size and
         # ubatch-size to 12288 in their preset section (pooling needs
