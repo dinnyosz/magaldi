@@ -574,11 +574,14 @@ def process_elements(
     # so they batch separately from LLM elements and get their own exploration cycle
     # skip_ai: no LLM/embedding work, tier separation is unnecessary — pass empty
     #
-    # Non-tiered providers (llamacpp, vllm-mlx, etc.): all LLM elements get the
+    # Non-tiered providers (vllm-mlx, lmstudio, etc.): all LLM elements get the
     # max tier (32k) for batching since the server uses a fixed context window.
     # However, we still compute *natural* tiers (based on actual code size) for
     # ETA tracking — otherwise the ETA system can't distinguish a 2k function
     # from a 32k file and cross-type fallback estimates are wildly wrong.
+    #
+    # Tiered providers (ollama, llamacpp): elements get natural tiers for both
+    # batching and ETA. Ollama uses model aliases, llamacpp uses GGUF symlinks.
     element_context_sizes: dict[str, int] = {}  # For batching (DependencyTracker)
     element_natural_tiers: dict[str, int] = {}  # For ETA tracking (TimingStats)
     if not config.skip_ai:

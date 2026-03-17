@@ -130,7 +130,7 @@ def _get_llamacpp_port(llm_config: LLMConfig) -> int:
     return DEFAULT_PORT
 
 
-def _generate_presets(llm_config: LLMConfig) -> Path:
+def _generate_presets(llm_config: LLMConfig, create_symlinks: bool = True) -> Path:
     """Generate a llama-server presets INI file from config.
 
     The presets file lets us set per-model context sizes and other params.
@@ -143,7 +143,17 @@ def _generate_presets(llm_config: LLMConfig) -> Path:
     Embedding models get additional settings:
       embedding = true    (enables /v1/embeddings endpoint)
       pooling = mean      (average token embeddings into single vector)
+
+    For non-embedding LLM models, also generates per-tier preset sections
+    and creates symlinked GGUF files so each context tier gets its own
+    model alias with an appropriately sized KV cache.
     """
+    from shared.ai.context_size import CONTEXT_TIERS
+    from shared.ai.llamacpp_models import (
+        ensure_all_tier_symlinks,
+        get_tiered_model_name,
+    )
+
     presets = configparser.ConfigParser()
 
     # Global defaults — lower priority than per-model sections,
@@ -180,6 +190,20 @@ def _generate_presets(llm_config: LLMConfig) -> Path:
             embed_batch = 8192
             presets[section]["batch-size"] = str(embed_batch)
             presets[section]["ubatch-size"] = str(embed_batch)
+        else:
+            # Non-embedding LLM model: generate per-tier preset sections.
+            # Each tier gets a symlinked GGUF with its own ctx-size so the
+            # KV cache is allocated per-tier (like Ollama tiered aliases).
+            base_gguf = MODELS_DIR / f"{cfg.name}.gguf"
+            if create_symlinks and base_gguf.exists():
+                ensure_all_tier_symlinks(base_gguf, MODELS_DIR)
+
+            for tier in CONTEXT_TIERS:
+                tier_name = get_tiered_model_name(cfg.name, tier)
+                presets[tier_name] = {}
+                presets[tier_name]["ctx-size"] = str(tier)
+                if cfg.parallel:
+                    presets[tier_name]["parallel"] = str(cfg.parallel)
 
     presets_path = _presets_file()
     presets_path.parent.mkdir(parents=True, exist_ok=True)
@@ -189,11 +213,19 @@ def _generate_presets(llm_config: LLMConfig) -> Path:
     return presets_path
 
 
-def _list_gguf_files() -> list[Path]:
-    """List all .gguf files in the models directory."""
+def _list_gguf_files(include_tier_symlinks: bool = True) -> list[Path]:
+    """List .gguf files in the models directory.
+
+    Args:
+        include_tier_symlinks: If False, excludes tier symlinks (e.g., Model-4k.gguf).
+    """
     if not MODELS_DIR.exists():
         return []
-    return sorted(MODELS_DIR.glob("*.gguf"))
+    files = sorted(MODELS_DIR.glob("*.gguf"))
+    if not include_tier_symlinks:
+        from shared.ai.llamacpp_models import is_tier_symlink
+        files = [f for f in files if not is_tier_symlink(f)]
+    return files
 
 
 def _format_size(size_bytes: int) -> str:
@@ -344,12 +376,14 @@ def llm_serve(
     PIDFILE_DIR.mkdir(parents=True, exist_ok=True)
 
     # Print startup info
+    base_gguf_files = _list_gguf_files(include_tier_symlinks=False)
+    tier_symlink_count = len(gguf_files) - len(base_gguf_files)
     console.print("[bold blue]Starting llama-server (router mode)[/]")
     console.print()
     console.print(f"  Port:           {port}")
     console.print(f"  Models dir:     {MODELS_DIR}")
-    console.print(f"  Models found:   {len(gguf_files)}")
-    for gf in gguf_files:
+    console.print(f"  Models found:   {len(base_gguf_files)} (+{tier_symlink_count} tier aliases)")
+    for gf in base_gguf_files:
         console.print(f"    - {gf.stem}  ({_format_size(gf.stat().st_size)})")
     console.print(f"  Max loaded:     {models_max}")
     console.print(f"  Parallel slots: {parallel} (default, per-model override via presets)")
@@ -570,11 +604,19 @@ def llm_logs(port: int | None, follow: bool, lines: int) -> None:
 
 
 @llamacpp.command("models")
-def llm_models() -> None:
+@click.option(
+    "--all", "-a", "show_all", is_flag=True,
+    help="Include tier symlinks in listing",
+)
+def llm_models(show_all: bool) -> None:
     """List available GGUF models in tools/models/."""
-    gguf_files = _list_gguf_files()
+    from shared.ai.llamacpp_models import is_tier_symlink
 
-    if not gguf_files:
+    base_files = _list_gguf_files(include_tier_symlinks=False)
+    all_files = _list_gguf_files(include_tier_symlinks=True)
+    tier_count = len(all_files) - len(base_files)
+
+    if not all_files:
         console.print("[yellow]No GGUF models found.[/]")
         console.print(f"  Directory: {MODELS_DIR}")
         console.print("  Run: [bold]magaldi llamacpp pull[/] or [bold]make llama-pull[/]")
@@ -595,14 +637,18 @@ def llm_models() -> None:
         except Exception:
             pass
 
+    display_files = all_files if show_all else base_files
+
     table = Table(title=f"GGUF Models ({MODELS_DIR})")
     table.add_column("Model", style="cyan")
     table.add_column("Size", justify="right")
+    table.add_column("Type")
     table.add_column("Status")
 
-    for gf in gguf_files:
+    for gf in display_files:
         stem = gf.stem
-        size = _format_size(gf.stat().st_size)
+        size = _format_size(gf.stat().st_size) if not gf.is_symlink() else "[dim]symlink[/]"
+        model_type = "[dim]tier alias[/]" if is_tier_symlink(gf) else "base"
         if stem in loaded_models:
             status = "[green]● loaded[/]"
         elif _is_healthy(port):
@@ -610,9 +656,12 @@ def llm_models() -> None:
         else:
             status = "[dim]- server offline[/]"
 
-        table.add_row(stem, size, status)
+        table.add_row(stem, size, model_type, status)
 
     console.print(table)
+
+    if not show_all and tier_count > 0:
+        console.print(f"\n  [dim]{tier_count} tier aliases hidden. Use --all to show.[/]")
 
 
 @llamacpp.command("pull")
@@ -697,6 +746,67 @@ def llm_pull(model: str | None) -> None:
 
     console.print()
     console.print("[green]Done.[/] Start with: [bold]magaldi llamacpp serve[/]")
+
+
+@llamacpp.command("warmup")
+def llm_warmup() -> None:
+    """Create tiered model symlinks for context optimization.
+
+    Creates symlinked GGUF files with tier suffixes (e.g., Model-2k.gguf,
+    Model-4k.gguf) and generates matching preset sections. This enables
+    per-tier KV cache allocation — small functions use less memory than
+    large files.
+
+    \b
+    The symlinks share weights via mmap (no extra disk/memory), only the
+    KV cache differs. Run before `magaldi llamacpp serve` or let serve
+    create them automatically.
+    """
+    from shared.ai.llamacpp_models import ensure_all_tier_symlinks
+
+    config = load_config()
+    models = _get_llamacpp_models(config.llm)
+
+    if not models:
+        console.print("[yellow]No llamacpp models found in config.[/]")
+        return
+
+    console.print("[bold blue]Creating tiered model symlinks[/]")
+    console.print()
+
+    for cfg in models:
+        if cfg.embedding:
+            console.print(f"  {cfg.name}: [dim]skipped (embedding model)[/]")
+            continue
+
+        base_gguf = MODELS_DIR / f"{cfg.name}.gguf"
+        if not base_gguf.exists():
+            console.print(f"  {cfg.name}: [red]GGUF not found[/] ({base_gguf})")
+            continue
+
+        result = ensure_all_tier_symlinks(base_gguf, MODELS_DIR)
+
+        console.print(f"  {cfg.name}:")
+        if result.total_created:
+            console.print(f"    Created: {result.total_created} symlinks")
+        if result.existed:
+            console.print(f"    Existed: {len(result.existed)} (already present)")
+        if result.failed:
+            console.print(f"    [red]Failed: {len(result.failed)}[/]")
+        console.print()
+
+    # Regenerate presets with tier sections
+    presets_path = _generate_presets(config.llm, create_symlinks=False)
+    console.print(f"  Presets: {presets_path}")
+    console.print()
+    console.print("[green]Warmup complete.[/]")
+
+    # Hint about restart if server is running
+    port = _get_llamacpp_port(config.llm)
+    if _get_pid(port) is not None:
+        console.print()
+        console.print("[yellow]Note:[/] Server is running. Restart to use tiered models:")
+        console.print("  [bold]magaldi llamacpp stop && magaldi llamacpp serve[/]")
 
 
 @llamacpp.command("update")

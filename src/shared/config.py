@@ -143,12 +143,14 @@ class ModelConfig:
     def supports_tiered_context(self) -> bool:
         """Whether this provider benefits from per-request context sizing.
 
-        Only Ollama supports tiered model aliases with different KV cache configs.
-        All other providers (llamacpp, vllm-mlx, lmstudio, etc.) use a fixed
-        context window set at model load time — tier separation adds overhead
-        (drain/warmup cycles, fragmented ETA) with no benefit.
+        Ollama uses tiered model aliases with different KV cache configs.
+        llamacpp uses symlinked GGUF files with per-tier preset sections.
+        Both share model weights (mmap) — only the KV cache allocation differs.
+
+        Other providers (vllm-mlx, lmstudio, etc.) use a fixed context window
+        set at model load time — tier separation adds overhead with no benefit.
         """
-        return self.provider == "ollama"
+        return self.provider in ("ollama", "llamacpp")
 
     # Models that use thinking/reasoning tags (<think>...</think>) by default.
     # qwen3 thinks by default but qwen3.5+ has reasoning disabled by default.

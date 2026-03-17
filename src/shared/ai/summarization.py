@@ -195,6 +195,7 @@ class SummarizationLLMClient:
             api_base=api_base,
             api_key=api_key,
             model_name=model,  # Real model name for thinking model detection
+            use_tiered_context=provider in ("ollama", "llamacpp"),
         )
 
     @classmethod

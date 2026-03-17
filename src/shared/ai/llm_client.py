@@ -436,6 +436,7 @@ class LLMClient:
         api_key: str | None = None,
         max_retries: int = 3,
         model_name: str | None = None,
+        use_tiered_context: bool = False,
     ):
         """Initialize LLM client.
 
@@ -448,6 +449,9 @@ class LLMClient:
                 When the LiteLLM identifier differs from the actual model
                 (e.g., "openai/Qwen3.5-4B-Q4_K_M" for llamacpp), pass the
                 real name here so thinking model detection works correctly.
+            use_tiered_context: Enable tiered model resolution for llamacpp.
+                When True and num_ctx is provided, the model name is resolved
+                to a tier-specific alias (e.g., "Model-4k" for num_ctx=4096).
 
         Prefer ``from_model_config()`` when a ``ModelConfig`` is available —
         it handles all provider-specific translation automatically.
@@ -457,6 +461,7 @@ class LLMClient:
         self.api_key = api_key
         self.max_retries = max_retries
         self.model_name = model_name
+        self.use_tiered_context = use_tiered_context
 
         # Extract provider from model string
         self.provider = model.split("/")[0] if "/" in model else "openai"
@@ -576,6 +581,7 @@ class LLMClient:
             api_base=config.get_api_base(),
             api_key=config.api_key,
             model_name=config.name,
+            use_tiered_context=config.supports_tiered_context(),
         )
 
     @classmethod
@@ -826,6 +832,13 @@ class LLMClient:
             from shared.ai.ollama_models import resolve_ollama_model
             use_model, num_ctx = resolve_ollama_model(use_model, self.api_base, num_ctx)
 
+        # For llamacpp, resolve to tiered model name based on num_ctx.
+        # Uses symlinked GGUF aliases with per-tier preset sections.
+        if self.use_tiered_context and use_model.startswith("openai/") and num_ctx:
+            from shared.ai.llamacpp_models import resolve_llamacpp_model
+            base_name = use_model[len("openai/"):]
+            use_model = f"openai/{resolve_llamacpp_model(base_name, num_ctx)}"
+
         def _do_generate() -> str:
             kwargs = self._build_kwargs(use_model, [{"role": "user", "content": prompt}],
                                         temperature, top_p, max_tokens, timeout, num_ctx,
@@ -897,6 +910,12 @@ class LLMClient:
         if use_model.startswith(("ollama/", "ollama_chat/")) and num_ctx:
             from shared.ai.ollama_models import resolve_ollama_model
             use_model, num_ctx = resolve_ollama_model(use_model, self.api_base, num_ctx)
+
+        # For llamacpp, resolve to tiered model name based on num_ctx
+        if use_model.startswith("openai/") and self.api_base and num_ctx:
+            from shared.ai.llamacpp_models import resolve_llamacpp_model
+            base_name = use_model[len("openai/"):]
+            use_model = f"openai/{resolve_llamacpp_model(base_name, num_ctx)}"
 
         def _do_generate() -> str:
             kwargs = self._build_kwargs(use_model, messages,
