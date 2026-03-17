@@ -188,7 +188,13 @@ def build_eta_table(
                     count_str = f"[yellow]{done}[/][dim]/{total}[/]"
                 else:
                     count_str = f"[dim]{done}/{total}[/]"
-                if avg_time > 0:
+                if done >= total and avg_time > 0 and not is_fallback:
+                    # Completed with measured throughput — show actual avg time
+                    cell = f"[dim cyan]{avg_time:.1f}s[/] {count_str}"
+                elif done >= total:
+                    # Completed but only has fallback estimate — just show count
+                    cell = count_str
+                elif avg_time > 0:
                     time_style = "dim cyan" if is_fallback else "cyan"
                     time_str = f"[{time_style}]{avg_time:.1f}s[/]"
                     if is_fallback:

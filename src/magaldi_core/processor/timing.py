@@ -744,17 +744,23 @@ class TimingStats:
 
             breakdown = []
             for (element_type, tier), tot in self.totals_by_type_tier.items():
+                done = self.summarize_counts_by_type_tier.get((element_type, tier), 0)
                 avg, is_fallback = self._get_avg_for_type_tier_with_fallback(element_type, tier, global_avg)
-                # Use max(tier_avg, elapsed_rate) so ETA never underestimates.
-                # Only mark as fallback when the original was already a fallback or
-                # when base_time is near-zero (skip_ai: no LLM, wall_time ≈ 0).
-                # Don't mark real LLM measurements as fallback just because
-                # elapsed_rate > base_time (common with parallelism overhead).
-                if elapsed_rate > avg:
+
+                if done >= tot:
+                    # Cell complete — freeze to actual measured avg, skip
+                    # elapsed_rate override so completed cells don't fluctuate.
+                    pass
+                elif elapsed_rate > avg:
+                    # Use max(tier_avg, elapsed_rate) so ETA never underestimates.
+                    # Only mark as fallback when the original was already a fallback
+                    # or when base_time is near-zero (skip_ai: no LLM, wall_time ≈ 0).
+                    # Don't mark real LLM measurements as fallback just because
+                    # elapsed_rate > base_time (common with parallelism overhead).
                     if is_fallback or avg < 0.01:
                         is_fallback = True
                     avg = elapsed_rate
-                done = self.summarize_counts_by_type_tier.get((element_type, tier), 0)
+
                 # Include all items, even those with no timing data yet (avg=0)
                 breakdown.append((element_type, tier, avg, is_fallback, done, tot))
 
