@@ -35,7 +35,7 @@ Example magaldi.yaml:
           url: http://localhost:8090
           dimensions: 1024
           embedding: true
-          num_ctx: 16384
+          num_ctx: 12288
           parallel: 16
           gguf: Mungert/Qwen3-Embedding-0.6B-GGUF:Qwen3-Embedding-0.6B-q8_0.gguf
 """
@@ -184,10 +184,10 @@ def _generate_presets(llm_config: LLMConfig, create_symlinks: bool = True) -> Pa
             # default batch-size (2048) are too small for large code files.
             # Both must be large enough: ubatch <= batch.
             # See: https://github.com/ggml-org/llama.cpp/issues/11105
-            # We use embed_max_context (8192) as the ceiling — that's the
+            # We use embed_max_context (12288 = 12k) as the ceiling — that's the
             # actual max input size after truncation in the processing pipeline
             # (see ProcessingConfig.embed_max_context in processor/models.py).
-            embed_batch = 8192
+            embed_batch = 12288
             presets[section]["batch-size"] = str(embed_batch)
             presets[section]["ubatch-size"] = str(embed_batch)
         else:

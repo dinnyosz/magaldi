@@ -209,8 +209,8 @@ class LLMConfig:
               url: http://localhost:8090
               dimensions: 1024
               embedding: true
-              num_ctx: 32768
-              parallel: 4
+              num_ctx: 12288
+              parallel: 16
               gguf: Mungert/Qwen3-Embedding-0.6B-GGUF:Qwen3-Embedding-0.6B-q8_0.gguf
 
           summarize_model: qwen3-4b
@@ -241,8 +241,8 @@ class LLMConfig:
             url="http://localhost:8090",
             dimensions=1024,
             embedding=True,
-            num_ctx=32768,
-            parallel=4,
+            num_ctx=12288,
+            parallel=16,
             gguf="Mungert/Qwen3-Embedding-0.6B-GGUF:Qwen3-Embedding-0.6B-q8_0.gguf",
         ),
     })
@@ -263,7 +263,7 @@ class LLMConfig:
     summarize_repetition_penalty: float | None = 1.0
     summarize_max_tokens: int = 512
     summarize_context_window: int = 8192
-    embed_context_window: int = 32768
+    embed_context_window: int = 12288  # 12k — matches embedding preset ctx/batch size
 
     # Context size for aggregation tasks (features, glossary)
     # Uses fixed large context since input size depends on cluster size

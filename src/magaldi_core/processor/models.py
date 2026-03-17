@@ -105,7 +105,7 @@ class ProcessingConfig:
 
     # Embedding settings
     embed_dimensions: int = 1024
-    embed_max_context: int = 8192
+    embed_max_context: int = 12288  # 12k — matches embedding preset batch/ctx size
     embed_timeout: int = 120  # 2 minutes for embedding batches
 
     # Parallel processing (0 = use default of 8 workers)
