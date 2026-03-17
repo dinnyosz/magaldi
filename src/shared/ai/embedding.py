@@ -457,6 +457,10 @@ def validate_context_length(
 ) -> str:
     """Ensure text fits within model context.
 
+    Applies a 25% safety margin to account for chars-per-token estimation
+    variance — the rough ratio (2-3 chars/token) can underestimate actual
+    token count, causing the embedding model to reject the input.
+
     Args:
         text: Input text.
         max_tokens: Maximum allowed tokens.
@@ -465,9 +469,11 @@ def validate_context_length(
     Returns:
         Original or truncated text.
     """
+    # Apply 25% safety margin: target 75% of max to absorb tokenization variance
+    effective_max = int(max_tokens * 0.75)
     estimated = estimate_tokens(text, chars_per_token)
 
-    if estimated <= max_tokens:
+    if estimated <= effective_max:
         return text
 
     # Truncate line by line
@@ -477,7 +483,7 @@ def validate_context_length(
 
     for line in lines:
         line_tokens = estimate_tokens(line, chars_per_token)
-        if token_count + line_tokens <= max_tokens * 0.9:
+        if token_count + line_tokens <= effective_max:
             truncated.append(line)
             token_count += line_tokens
         else:

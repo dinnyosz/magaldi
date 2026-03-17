@@ -232,6 +232,27 @@ class TestValidateContextLength:
         assert len(result) < len(text)
         assert "truncated" in result
 
+    def test_safety_margin_truncates_near_limit(self):
+        """Text near the token limit should be truncated due to 25% safety margin.
+
+        With chars_per_token=2 and max_tokens=100, the effective limit is 75 tokens.
+        75 tokens * 2 chars = 150 chars. Text of 180 chars (~90 estimated tokens)
+        exceeds the effective limit (75) even though it's under the nominal (100).
+        """
+        # 18 lines of 10 chars each = 180 chars = ~90 estimated tokens at 2 chars/token
+        text = "\n".join(["0123456789"] * 18)
+        result = validate_context_length(text, max_tokens=100, chars_per_token=2)
+        assert "truncated" in result
+        # Should keep some content (effective limit allows ~150 chars)
+        assert len(result) > 50
+
+    def test_safety_margin_passes_well_under_limit(self):
+        """Text well under the safety-margined limit passes through unchanged."""
+        # 50 chars = ~25 estimated tokens at 2 chars/token, well under 75 effective
+        text = "Hello world\nSecond line"
+        result = validate_context_length(text, max_tokens=100, chars_per_token=2)
+        assert result == text
+
 
 # =============================================================================
 # EMBEDDING TEXT BUILDING
