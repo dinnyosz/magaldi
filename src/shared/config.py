@@ -209,8 +209,8 @@ class LLMConfig:
               url: http://localhost:8090
               dimensions: 1024
               embedding: true
-              num_ctx: 12288
-              parallel: 16
+              num_ctx: 40960
+              parallel: 3
               gguf: Mungert/Qwen3-Embedding-0.6B-GGUF:Qwen3-Embedding-0.6B-q8_0.gguf
 
           summarize_model: qwen3-4b
@@ -241,8 +241,8 @@ class LLMConfig:
             url="http://localhost:8090",
             dimensions=1024,
             embedding=True,
-            num_ctx=12288,
-            parallel=16,
+            num_ctx=40960,  # 40k total: ~13.6k per slot × 3 parallel (ctx-size / parallel = per-slot context)
+            parallel=3,
             gguf="Mungert/Qwen3-Embedding-0.6B-GGUF:Qwen3-Embedding-0.6B-q8_0.gguf",
         ),
     })

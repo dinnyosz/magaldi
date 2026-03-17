@@ -454,7 +454,11 @@ def _summarize_element(
 def _is_context_overflow_error(error: Exception) -> bool:
     """Check if an error indicates the input exceeds the model's context limit."""
     msg = str(error).lower()
-    return "too large" in msg or "context length" in msg or "maximum context" in msg
+    return (
+        "too large" in msg
+        or "context length" in msg
+        or "max context" in msg  # llama.cpp: "larger than the max context size"
+    )
 
 
 def _embed_with_overflow_retry(
