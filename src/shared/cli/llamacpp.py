@@ -339,11 +339,10 @@ def llm_serve(
         "--flash-attn", "on",
         "--n-gpu-layers", "99",
         # Batch size: n_batch is the logical max batch (prompt tokens per
-        # iteration). n_ubatch is set in presets (not here!) because CLI args
-        # override per-model presets — embedding models need ubatch=8192
-        # (pooling requires entire input in one ubatch) while LLM models
-        # benefit from ubatch=2048 (4-stage pipeline across parallel slots).
-        "--batch-size", "8192",
+        # iteration). Embedding models override both batch-size and
+        # ubatch-size to 12288 in their preset section (pooling needs
+        # full input), so the global default only affects LLM models.
+        "--batch-size", "2048",
         "-sps", "0",
         # KV cache: unified mode shares a single KV cache pool across all
         # parallel slots for each model. With per-tier ctx-size in presets,
@@ -395,7 +394,7 @@ def llm_serve(
     console.print("  Flash attention: on")
     console.print("  GPU layers:     99 (full offload)")
     console.print("  KV unified:     on (shared cache pool per model)")
-    console.print("  Batch size:     8192 (batch) / 256 (ubatch, per-model override via presets)")
+    console.print("  Batch size:     2048 (batch) / 256 (ubatch, per-model override via presets)")
     console.print("  KV cache type:  q8_0 (K + V)")
     console.print("  Cache reuse:    256 tokens")
     console.print("  Endpoints:      slots, metrics, props")
