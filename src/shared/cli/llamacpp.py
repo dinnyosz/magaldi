@@ -339,6 +339,10 @@ def llm_serve(
         "--flash-attn", "on",
         "--n-gpu-layers", "99",
         "--mlock",
+        # Memory fitting: leave 2 GiB headroom per device (default 1 GiB)
+        # so the OS / other processes aren't starved when multiple models
+        # are loaded simultaneously.
+        "--fit-target", "2048",
         # Batch size: n_batch is the logical max batch (prompt tokens per
         # iteration). Embedding models override both batch-size and
         # ubatch-size to 12288 in their preset section (pooling needs
@@ -356,6 +360,9 @@ def llm_serve(
         "--cache-type-k", "q8_0",
         "--cache-type-v", "q8_0",
         "--cache-reuse", "256",
+        # Reduce KV cache checkpoints from default 8 to 4 — saves memory
+        # per slot with our tiered ctx-size + q8_0 cache setup.
+        "--ctx-checkpoints", "4",
         # Disable thinking globally — Qwen3 thinks by default, wasting
         # 2-5× tokens on <think> reasoning before producing actual output.
         # --reasoning off: disables thinking in the chat template (the actual switch)
