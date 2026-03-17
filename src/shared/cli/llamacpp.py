@@ -16,12 +16,12 @@ Example magaldi.yaml:
     llm:
       models:
         qwen3-4b:
-          name: Qwen3-4B-Q4_K_M
+          name: Qwen3-4B-Instruct-2507-Q4_K_M
           provider: llamacpp
           url: http://localhost:8090
           num_ctx: 32768
           parallel: 4
-          gguf: unsloth/Qwen3-4B-GGUF:Qwen3-4B-Q4_K_M.gguf
+          gguf: unsloth/Qwen3-4B-Instruct-2507-GGUF:Qwen3-4B-Instruct-2507-Q4_K_M.gguf
         qwen3-1.7b:
           name: Qwen3-1.7B-Q4_K_M
           provider: llamacpp
@@ -68,7 +68,7 @@ LLAMA_SERVER = PROJECT_ROOT / "tools" / "llama.cpp" / "build" / "bin" / "llama-s
 # Defaults — tuned for Apple Silicon M4 Pro (48GB)
 DEFAULT_PORT = 8090
 DEFAULT_PARALLEL = 4
-DEFAULT_MODELS_MAX = 3
+DEFAULT_MODELS_MAX = 2
 DEFAULT_CTX_SIZE = 40960
 
 
@@ -684,10 +684,10 @@ def llm_pull(model: str | None) -> None:
         llm:
           models:
             qwen3-4b:
-              name: Qwen3-4B-Q4_K_M
+              name: Qwen3-4B-Instruct-2507-Q4_K_M
               provider: llamacpp
               url: http://localhost:8090
-              gguf: unsloth/Qwen3-4B-GGUF:Qwen3-4B-Q4_K_M.gguf
+              gguf: unsloth/Qwen3-4B-Instruct-2507-GGUF:Qwen3-4B-Instruct-2507-Q4_K_M.gguf
     """
     config = load_config()
 
