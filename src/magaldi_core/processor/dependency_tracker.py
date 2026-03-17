@@ -352,8 +352,8 @@ class DependencyTracker:
         Always resets exploration on any tier or model change. Each tier
         is a different model alias (e.g., Model-32k vs Model-16k) that
         requires loading, so throughput characteristics change. Budget
-        is scoped to all remaining elements for the current model key
-        (across all tiers) to avoid undersized budgets on small batches.
+        is scoped to the current (model, tier) batch only — small batches
+        (≤50 elements) skip exploration entirely to avoid waste.
         """
         with self._lock:
             if self._tier_just_changed:
@@ -364,16 +364,17 @@ class DependencyTracker:
                 # Reset exploration on every tier/model change
                 # Each tier = different model alias = different throughput
                 if self._previous_tier is not None:
-                    # Count all remaining elements for the current model
-                    # (across ALL tiers) — budget scoped model-wide
-                    model_elements = 0
-                    if self._current_model is not None:
+                    # Count elements for the current (model, tier) only
+                    # Small batches skip exploration; large batches explore
+                    tier_elements = 0
+                    if self._current_model is not None and self._current_tier is not None:
                         for eid in self._elements:
                             if eid not in self._completed \
-                                    and self._get_model_key(self._elements[eid]) == self._current_model:
-                                model_elements += 1
+                                    and self._get_model_key(self._elements[eid]) == self._current_model \
+                                    and self._get_tier(eid) == self._current_tier:
+                                tier_elements += 1
                     self._exploration.reset(
-                        total_elements=model_elements if model_elements > 0 else None
+                        total_elements=tier_elements if tier_elements > 0 else None
                     )
 
                 return True

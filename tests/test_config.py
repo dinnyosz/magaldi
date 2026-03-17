@@ -541,9 +541,9 @@ class TestModelConfig:
         assert cfg.supports_tiered_context() is True
 
     def test_supports_tiered_context_llamacpp(self):
-        """llama.cpp uses fixed context window — no tiered context support."""
+        """llama.cpp supports tiered context via symlinked GGUF aliases."""
         cfg = ModelConfig(name="qwen3.5:4b", provider="llamacpp")
-        assert cfg.supports_tiered_context() is False
+        assert cfg.supports_tiered_context() is True
 
     def test_supports_tiered_context_vllm_mlx(self):
         """vllm-mlx uses fixed context window — no tiered context support."""

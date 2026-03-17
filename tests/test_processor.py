@@ -3949,8 +3949,12 @@ class TestTierFlatteningForNonTieredProviders:
 
         return context_sizes, natural_tiers
 
-    def test_llamacpp_batching_tiers_are_flat(self):
-        """With llamacpp, batching tiers are all 32768 for LLM elements."""
+    def test_llamacpp_batching_tiers_are_natural(self):
+        """With llamacpp, batching tiers use natural per-element sizing.
+
+        llamacpp supports tiered context via symlinked GGUF aliases with
+        per-tier preset sections, similar to Ollama's tiered model aliases.
+        """
         from shared.config import ModelConfig
 
         config = ProcessingConfig(
@@ -3970,9 +3974,11 @@ class TestTierFlatteningForNonTieredProviders:
 
         context_sizes, natural_tiers = self._compute_tiers(config, elements)
 
-        # Batching: LLM elements all get 32768
-        assert context_sizes[elements[0].element_id] == 32768  # function
-        assert context_sizes[elements[1].element_id] == 32768  # file
+        # Batching: LLM elements get natural tiers (not flat 32768)
+        assert context_sizes[elements[0].element_id] == natural_tiers[elements[0].element_id]  # function
+        assert context_sizes[elements[1].element_id] == natural_tiers[elements[1].element_id]  # file
+        # Small function should be much smaller than large file
+        assert context_sizes[elements[0].element_id] < context_sizes[elements[1].element_id]
         # Import is handcrafted — keeps its craft sub-tier
         assert context_sizes[elements[2].element_id] != 32768
 
