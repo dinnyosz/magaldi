@@ -361,21 +361,20 @@ class DependencyTracker:
                 self._last_ramp_time = 0.0
                 self._last_recommended_workers = 0
 
-                # Reset exploration on every tier/model change
+                # Reset exploration on every tier/model change (including first)
                 # Each tier = different model alias = different throughput
-                if self._previous_tier is not None:
-                    # Count elements for the current (model, tier) only
-                    # Small batches skip exploration; large batches explore
-                    tier_elements = 0
-                    if self._current_model is not None and self._current_tier is not None:
-                        for eid in self._elements:
-                            if eid not in self._completed \
-                                    and self._get_model_key(self._elements[eid]) == self._current_model \
-                                    and self._get_tier(eid) == self._current_tier:
-                                tier_elements += 1
-                    self._exploration.reset(
-                        total_elements=tier_elements if tier_elements > 0 else None
-                    )
+                # Count elements for the current (model, tier) only
+                # Small batches skip exploration; large batches explore
+                tier_elements = 0
+                if self._current_model is not None and self._current_tier is not None:
+                    for eid in self._elements:
+                        if eid not in self._completed \
+                                and self._get_model_key(self._elements[eid]) == self._current_model \
+                                and self._get_tier(eid) == self._current_tier:
+                            tier_elements += 1
+                self._exploration.reset(
+                    total_elements=tier_elements if tier_elements > 0 else None
+                )
 
                 return True
             return False
