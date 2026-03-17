@@ -14,10 +14,12 @@ from typing import TYPE_CHECKING
 
 from shared.ai.context_size import compute_element_num_ctx
 from shared.ai.embedding import (
+    EmbeddingError,
     build_caller_embedding_text,
     build_code_embedding_text,
     build_summary_embedding_text,
     normalize_vector,
+    validate_context_length,
     validate_vector,
 )
 from shared.ai.prompts import get_max_tokens_for_element_type
@@ -449,6 +451,64 @@ def _summarize_element(
     return clean_summary(raw_summary), prompt_tokens, response_tokens
 
 
+def _is_context_overflow_error(error: Exception) -> bool:
+    """Check if an error indicates the input exceeds the model's context limit."""
+    msg = str(error).lower()
+    return "too large" in msg or "context length" in msg or "maximum context" in msg
+
+
+def _embed_with_overflow_retry(
+    text: str,
+    embed_client: CodeEmbeddingClient,
+    timeout: int,
+    max_retries: int = 3,
+) -> list[float]:
+    """Embed text with progressive truncation on context overflow.
+
+    If the embedding model rejects the input as too large (token estimation
+    was too generous), retry with progressively shorter text. Each retry
+    halves the character length, which is more aggressive than re-estimating
+    tokens but guarantees convergence.
+
+    Args:
+        text: Text to embed.
+        embed_client: Embedding client.
+        timeout: Request timeout.
+        max_retries: Max truncation retries (each halves the text).
+
+    Returns:
+        Embedding vector.
+
+    Raises:
+        EmbeddingError: If all retries fail.
+    """
+    current_text = text
+    for attempt in range(max_retries + 1):
+        try:
+            return embed_client.embed_single(current_text, timeout=timeout)
+        except (EmbeddingError, Exception) as e:
+            if not _is_context_overflow_error(e) or attempt == max_retries:
+                raise
+            # Truncate to half the current length
+            max_chars = len(current_text) // 2
+            lines = current_text.split("\n")
+            truncated = []
+            char_count = 0
+            for line in lines:
+                if char_count + len(line) > max_chars:
+                    truncated.append("... (truncated due to context overflow)")
+                    break
+                truncated.append(line)
+                char_count += len(line) + 1  # +1 for newline
+            current_text = "\n".join(truncated)
+            logger.warning(
+                "Embedding input too large, truncating to %d chars (attempt %d/%d)",
+                len(current_text), attempt + 1, max_retries,
+            )
+    # Should not reach here, but satisfy type checker
+    raise EmbeddingError("Embedding failed after truncation retries")
+
+
 def _embed_element(
     element: CodeElement,
     summary_cache: SummaryCache,
@@ -488,7 +548,7 @@ def _embed_element(
             on_stage_change("summ_embed")
         summary_text = build_summary_embedding_text(element, summary_cache, config.embed_max_context)
         summary_start = time.time()
-        summary_embedding = embed_client.embed_single(summary_text, timeout=config.embed_timeout)
+        summary_embedding = _embed_with_overflow_retry(summary_text, embed_client, config.embed_timeout)
         summary_embed_time = time.time() - summary_start
 
         if not validate_vector(summary_embedding, config.embed_dimensions):
@@ -508,7 +568,7 @@ def _embed_element(
             on_stage_change("code_embed")
         code_text = build_code_embedding_text(element, config.embed_max_context)
         code_start = time.time()
-        code_embedding = embed_client.embed_single(code_text, timeout=config.embed_timeout)
+        code_embedding = _embed_with_overflow_retry(code_text, embed_client, config.embed_timeout)
         code_embed_time = time.time() - code_start
 
         if not validate_vector(code_embedding, config.embed_dimensions):
@@ -531,7 +591,7 @@ def _embed_element(
                 on_stage_change("caller_embed")
             caller_text = build_caller_embedding_text(element, summary_cache, config.embed_max_context)
             caller_start = time.time()
-            caller_embedding = embed_client.embed_single(caller_text, timeout=config.embed_timeout)
+            caller_embedding = _embed_with_overflow_retry(caller_text, embed_client, config.embed_timeout)
             caller_embed_time = time.time() - caller_start
 
             if not validate_vector(caller_embedding, config.embed_dimensions):
