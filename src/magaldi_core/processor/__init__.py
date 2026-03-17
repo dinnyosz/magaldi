@@ -623,7 +623,8 @@ def process_elements(
     )
     if timing_stats is None:
         timing_stats = TimingStats()
-    timing_stats.phase_start = time.time()
+    # phase_start is set later, right before the processing loop starts,
+    # so elapsed time doesn't include setup overhead (tier computation, etc.)
     # Wire throughput tracker so DependencyTracker can drive GSS exploration
     dependency_tracker.set_throughput_tracker(timing_stats.throughput_tracker)
     if worker_status is None:
@@ -748,6 +749,11 @@ def process_elements(
     # Flushes automatically after 50 ops or 5 seconds, plus final flush on close.
     _bulk_buf_ctx = repo.bulk_buffer()
     _bulk_buf = _bulk_buf_ctx.__enter__()
+
+    # Start the phase timer right before the processing loop — after all setup
+    # (existing state lookup, tier computation, DependencyTracker creation, etc.)
+    # so elapsed time only measures actual processing work.
+    timing_stats.phase_start = time.time()
 
     try:
         while not dependency_tracker.is_complete():

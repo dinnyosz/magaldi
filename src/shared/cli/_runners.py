@@ -1020,7 +1020,7 @@ def run_processing(
 
     # Create shared state objects
     timing_stats = TimingStats()
-    timing_stats.phase_start = time.time()  # Initialize now so elapsed display is correct
+    timing_stats.phase_start = time.time()  # Temporary — overridden in process_elements() right before the loop
     worker_status = WorkerStatus()
     total = parsing_result.total_elements
 
