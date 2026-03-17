@@ -40,10 +40,12 @@ class DependencyTracker:
     - Level 3 (variables): Ready when parent done
 
     Batching strategy (model+tier based):
-    - Batch by (model, context_tier) to minimize Ollama reloads
+    - Batch by (model, context_tier) to minimize model reloads
     - Priority: same model+tier > same model+different tier > different model
-    - Drains current tasks when model changes
+    - Drains current tasks when model OR tier changes
+    - Each tier = different model alias (e.g., Model-32k vs Model-16k)
     - Warmup limits to 1 task for model/tier transitions
+    - Exploration budget scoped to model key (across all tiers)
     """
 
     # Default worker count when not specified by user
@@ -65,7 +67,6 @@ class DependencyTracker:
         self._current_model: str | None = None  # Current model key ("large" or "small")
         self._current_tier: int | None = None  # Current context tier all workers use
         self._previous_tier: int | None = None  # Previous tier (to detect changes)
-        self._previous_model: str | None = None  # Previous model (to detect model changes)
         self._tier_changing: bool = False  # True when switching model/tier (warmup period)
         self._warmup_task_id: str | None = None  # ID of warmup task (first task of new tier)
         self._tier_just_changed: bool = False  # True when tier changed (for throughput reset)
@@ -283,7 +284,6 @@ class DependencyTracker:
                 self._tier_changing = True
                 self._tier_just_changed = True  # Signal for throughput reset
 
-            self._previous_model = self._current_model
             self._current_model = selected_model
             self._previous_tier = self._current_tier
             self._current_tier = selected_tier
@@ -349,13 +349,11 @@ class DependencyTracker:
         Returns True once per tier change, then clears the flag.
         Also resets ramp cooldown state.
 
-        Exploration reset strategy:
-        - Model change: full reset with budget based on all remaining
-          elements for the new model (across all tiers). Different models
-          have different throughput characteristics.
-        - Tier-only change (same model): keep exploration state. The optimal
-          concurrency is similar across tiers of the same model since the
-          same GPU/weights are used — only KV cache allocation differs.
+        Always resets exploration on any tier or model change. Each tier
+        is a different model alias (e.g., Model-32k vs Model-16k) that
+        requires loading, so throughput characteristics change. Budget
+        is scoped to all remaining elements for the current model key
+        (across all tiers) to avoid undersized budgets on small batches.
         """
         with self._lock:
             if self._tier_just_changed:
@@ -363,12 +361,11 @@ class DependencyTracker:
                 self._last_ramp_time = 0.0
                 self._last_recommended_workers = 0
 
-                model_changed = self._previous_tier is not None and \
-                    self._current_model != self._previous_model
-
-                if model_changed:
-                    # Count all remaining elements for the new model
-                    # (across ALL tiers) — exploration applies model-wide
+                # Reset exploration on every tier/model change
+                # Each tier = different model alias = different throughput
+                if self._previous_tier is not None:
+                    # Count all remaining elements for the current model
+                    # (across ALL tiers) — budget scoped model-wide
                     model_elements = 0
                     if self._current_model is not None:
                         for eid in self._elements:
@@ -378,8 +375,6 @@ class DependencyTracker:
                     self._exploration.reset(
                         total_elements=model_elements if model_elements > 0 else None
                     )
-                # Tier-only change: don't reset exploration — keep GSS state
-                # and throughput data from the previous tier of the same model
 
                 return True
             return False
