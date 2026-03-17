@@ -300,11 +300,12 @@ def llm_serve(
         "--flash-attn", "on",
         "--n-gpu-layers", "99",
         "--kv-unified",
-        # Batch sizes: larger = better GPU utilization on Metal.
-        # Default n_batch=2048/n_ubatch=512 causes excessive CPU↔GPU round-trips.
-        # 8192 keeps the GPU busy processing bigger chunks per dispatch.
+        # Batch sizes: n_batch is the logical max batch (prompt tokens per
+        # iteration), n_ubatch is the physical compute batch sent to Metal.
+        # With parallel slots, ubatch < batch enables pipeline parallelism
+        # across slots (4-stage pipeline: 8192/2048 = 4 stages).
         "--batch-size", "8192",
-        "--ubatch-size", "8192",
+        "--ubatch-size", "2048",
         "-sps", "0.4",
         # KV cache: q8_0 uses half the memory of f16 with negligible
         # throughput loss at parallel > 1. Single-request f16 is ~15% faster
@@ -352,7 +353,7 @@ def llm_serve(
     console.print("  Flash attention: on")
     console.print("  GPU layers:     99 (full offload)")
     console.print("  KV unified:     on (shared pool, not partitioned)")
-    console.print("  Batch size:     8192 (batch + ubatch)")
+    console.print("  Batch size:     8192 (batch) / 2048 (ubatch, 4-stage pipeline)")
     console.print("  KV cache type:  q8_0 (K) + q8_0 (V)")
     console.print("  Cache reuse:    256 tokens")
     console.print("  Endpoints:      slots, metrics, props")
