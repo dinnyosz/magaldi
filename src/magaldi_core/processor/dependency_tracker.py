@@ -57,6 +57,7 @@ class DependencyTracker:
         context_sizes: dict[str, int] | None = None,
         max_num_workers: int | None = None,
         timeout: float = 360.0,  # Default timeout for throttle calculations
+        tier_parallel_limits: dict[int, int] | None = None,
     ) -> None:
         # RLock for reentrant calls (get_parallelism_stats -> get_current_max_workers)
         self._lock = threading.RLock()
@@ -76,6 +77,9 @@ class DependencyTracker:
         # Use provided workers or default
         self._max_num_workers = max_num_workers if max_num_workers else self.DEFAULT_WORKERS
         self._timeout = timeout  # Timeout for throttle calculations
+        # Per-tier parallel slot limits (from llama.cpp presets).
+        # When set, effective max workers for a tier = min(max_num_workers, tier_parallel).
+        self._tier_parallel_limits = tier_parallel_limits
 
         # GSS exploration orchestrator (shared with ThrottleContext)
         # Pass total element count so exploration range is capped for small workloads
@@ -288,8 +292,8 @@ class DependencyTracker:
             self._previous_tier = self._current_tier
             self._current_tier = selected_tier
 
-            # Worker limit: start with configured max, apply throttling
-            worker_limit = self._max_num_workers
+            # Worker limit: start with tier-aware max, apply throttling
+            worker_limit = self._effective_max_workers(selected_tier)
 
             # Apply runtime-based throttle limit if set
             if throttle_limit is not None:
@@ -372,8 +376,12 @@ class DependencyTracker:
                                 and self._get_model_key(self._elements[eid]) == self._current_model \
                                 and self._get_tier(eid) == self._current_tier:
                             tier_elements += 1
+                # Pass tier-limited max_workers so exploration ceiling
+                # respects the server's parallel slot count for this tier
+                effective_workers = self._effective_max_workers(self._current_tier)
                 self._exploration.reset(
-                    total_elements=tier_elements if tier_elements > 0 else None
+                    total_elements=tier_elements if tier_elements > 0 else None,
+                    max_workers=effective_workers,
                 )
 
                 return True
@@ -442,10 +450,23 @@ class DependencyTracker:
         with self._lock:
             return self._current_tier
 
+    def _effective_max_workers(self, tier: int | None = None) -> int:
+        """Get effective max workers for a tier, respecting parallel slot limits.
+
+        Returns min(max_num_workers, tier_parallel_limit) when tier limits are set.
+        """
+        if tier is None:
+            tier = self._current_tier
+        if self._tier_parallel_limits and tier is not None:
+            parallel_limit = self._tier_parallel_limits.get(tier)
+            if parallel_limit is not None:
+                return min(self._max_num_workers, parallel_limit)
+        return self._max_num_workers
+
     def get_current_max_workers(self) -> int:
-        """Get max workers (for status display)."""
+        """Get max workers for current tier (for status display)."""
         with self._lock:
-            return self._max_num_workers
+            return self._effective_max_workers()
 
     def get_parallelism_stats(
         self,

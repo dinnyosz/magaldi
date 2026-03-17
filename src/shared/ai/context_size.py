@@ -101,6 +101,20 @@ TIER_MAX_WORKERS = {
     32768: DEFAULT_MAX_WORKERS,
 }
 
+# Parallel slots per tier for llama.cpp presets.
+# With a fixed 40k context per model alias, parallel determines how many
+# concurrent requests the server handles per tier alias. Lower tiers need
+# less KV cache per slot → can fit more parallel slots.
+# Used as effective max_workers ceiling for llamacpp in DependencyTracker.
+TIER_PARALLEL = {
+    32768: 1,
+    16384: 2,
+    8192: 4,
+    4096: 8,
+    2048: 16,
+    1024: 16,
+}
+
 # Base timeout per tier in seconds (for 1 worker).
 # Actual timeout scales with sqrt(base_workers) via get_tier_timeout().
 # Derived from previous fixed values: old_timeout / sqrt(TIER_MAX_WORKERS[tier]).

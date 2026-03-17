@@ -607,11 +607,19 @@ def process_elements(
     # Pass per-element context sizes for tier batching (minimizes model reloads)
     # Pass num_workers as upper limit (0 or None = use tier defaults)
     max_num_workers = config.num_workers if config.num_workers > 0 else None
+    # For llamacpp, each tier has a different parallel slot count in the server.
+    # Pass these as a ceiling so DependencyTracker doesn't exceed what the
+    # server can handle for each tier alias.
+    tier_parallel_limits: dict[int, int] | None = None
+    if config.summarize_model.provider == "llamacpp":
+        from shared.ai.context_size import TIER_PARALLEL
+        tier_parallel_limits = TIER_PARALLEL
     dependency_tracker = DependencyTracker(
         elements_to_process,
         element_context_sizes,
         max_num_workers=max_num_workers,
         timeout=config.summarize_timeout,  # For throttle calculations
+        tier_parallel_limits=tier_parallel_limits,
     )
     if timing_stats is None:
         timing_stats = TimingStats()

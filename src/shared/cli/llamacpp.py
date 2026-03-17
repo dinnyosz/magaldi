@@ -69,7 +69,7 @@ LLAMA_SERVER = PROJECT_ROOT / "tools" / "llama.cpp" / "build" / "bin" / "llama-s
 DEFAULT_PORT = 8090
 DEFAULT_PARALLEL = 4
 DEFAULT_MODELS_MAX = 3
-DEFAULT_CTX_SIZE = 32768
+DEFAULT_CTX_SIZE = 40960
 
 
 # =============================================================================
@@ -148,7 +148,7 @@ def _generate_presets(llm_config: LLMConfig, create_symlinks: bool = True) -> Pa
     and creates symlinked GGUF files so each context tier gets its own
     model alias with an appropriately sized KV cache.
     """
-    from shared.ai.context_size import CONTEXT_TIERS
+    from shared.ai.context_size import CONTEXT_TIERS, TIER_PARALLEL
     from shared.ai.llamacpp_models import (
         ensure_all_tier_symlinks,
         get_tiered_model_name,
@@ -201,9 +201,11 @@ def _generate_presets(llm_config: LLMConfig, create_symlinks: bool = True) -> Pa
             for tier in CONTEXT_TIERS:
                 tier_name = get_tiered_model_name(cfg.name, tier)
                 presets[tier_name] = {}
-                presets[tier_name]["ctx-size"] = str(tier)
-                if cfg.parallel:
-                    presets[tier_name]["parallel"] = str(cfg.parallel)
+                # All tiers share the same ctx-size (40k default from [*]).
+                # The tier suffix only controls parallel slots — lower tiers
+                # use less KV cache per slot so more slots fit in memory.
+                parallel_slots = TIER_PARALLEL.get(tier, DEFAULT_PARALLEL)
+                presets[tier_name]["parallel"] = str(parallel_slots)
 
     presets_path = _presets_file()
     presets_path.parent.mkdir(parents=True, exist_ok=True)
@@ -335,7 +337,6 @@ def llm_serve(
         "--threads", "6",
         "--flash-attn", "on",
         "--n-gpu-layers", "99",
-        "--kv-unified",
         # Batch size: n_batch is the logical max batch (prompt tokens per
         # iteration). n_ubatch is set in presets (not here!) because CLI args
         # override per-model presets — embedding models need ubatch=8192
@@ -390,7 +391,7 @@ def llm_serve(
     console.print(f"  Context size:   {ctx_size} (default, per-model override via presets)")
     console.print("  Flash attention: on")
     console.print("  GPU layers:     99 (full offload)")
-    console.print("  KV unified:     on (shared pool, not partitioned)")
+    console.print("  KV unified:     off (per-model cache)")
     console.print("  Batch size:     8192 (batch) / 2048 (ubatch, per-model override via presets)")
     console.print("  KV cache type:  q8_0 (K) + q8_0 (V)")
     console.print("  Cache reuse:    256 tokens")

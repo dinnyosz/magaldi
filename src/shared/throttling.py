@@ -1241,20 +1241,25 @@ class ExplorationOrchestrator:
         self._gss: GoldenSectionSearch | None = None
         self._prob_map: ProbabilityMap | None = None
 
-    def reset(self, total_elements: int | None = None) -> None:
+    def reset(
+        self,
+        total_elements: int | None = None,
+        max_workers: int | None = None,
+    ) -> None:
         """Reset on tier change.
 
         Args:
             total_elements: If provided, recalculates base_workers cap for the
                 new tier's element count.  When omitted the previous cap is kept.
+            max_workers: If provided, overrides the original base_workers ceiling
+                for this tier (e.g., from tier-specific parallel slot limits).
         """
         self._gss = None
         self._prob_map = None
         if total_elements is not None:
             self._total_elements = total_elements
-            effective = compute_effective_base_workers(
-                self._original_base_workers, total_elements
-            )
+            ceiling = max_workers if max_workers is not None else self._original_base_workers
+            effective = compute_effective_base_workers(ceiling, total_elements)
             if effective != self.base_workers:
                 fraction = _get_explore_budget_fraction(total_elements)
                 budget = int(total_elements * fraction)
