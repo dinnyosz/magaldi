@@ -350,7 +350,11 @@ def llm_serve(
         # each tier alias gets an appropriately sized shared cache instead
         # of allocating ctx-size/parallel per slot. This significantly
         # reduces memory waste for tiers with many parallel slots.
+        # q8_0 KV cache halves memory vs f16 with negligible quality loss,
+        # allowing more parallel slots or larger contexts in the same budget.
         "--kv-unified",
+        "--cache-type-k", "q8_0",
+        "--cache-type-v", "q8_0",
         "--cache-reuse", "256",
         # Disable thinking globally — Qwen3 thinks by default, wasting
         # 2-5× tokens on <think> reasoning before producing actual output.
@@ -392,7 +396,7 @@ def llm_serve(
     console.print("  GPU layers:     99 (full offload)")
     console.print("  KV unified:     on (shared cache pool per model)")
     console.print("  Batch size:     8192 (batch) / 2048 (ubatch, per-model override via presets)")
-    console.print("  KV cache type:  f16 (default)")
+    console.print("  KV cache type:  q8_0 (K + V)")
     console.print("  Cache reuse:    256 tokens")
     console.print("  Endpoints:      slots, metrics, props")
     console.print(f"  Log:            {_logfile(port)}")
