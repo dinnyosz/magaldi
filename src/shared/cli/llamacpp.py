@@ -201,9 +201,10 @@ def _generate_presets(llm_config: LLMConfig, create_symlinks: bool = True) -> Pa
             for tier in CONTEXT_TIERS:
                 tier_name = get_tiered_model_name(cfg.name, tier)
                 presets[tier_name] = {}
-                # All tiers share the same ctx-size (40k default from [*]).
-                # The tier suffix only controls parallel slots — lower tiers
-                # use less KV cache per slot so more slots fit in memory.
+                # Each tier gets its own ctx-size matching the tier value.
+                # With unified KV cache, this is the total context budget
+                # shared across all parallel slots for this tier alias.
+                presets[tier_name]["ctx-size"] = str(tier)
                 parallel_slots = TIER_PARALLEL.get(tier, DEFAULT_PARALLEL)
                 presets[tier_name]["parallel"] = str(parallel_slots)
 
@@ -344,14 +345,12 @@ def llm_serve(
         # benefit from ubatch=2048 (4-stage pipeline across parallel slots).
         "--batch-size", "8192",
         "-sps", "0.4",
-        # KV cache: q8_0 uses half the memory of f16 with negligible
-        # throughput loss at parallel > 1. Single-request f16 is ~15% faster
-        # (819 pp / 78 tg vs 713 pp / 68 tg) but with multiple parallel
-        # slots total throughput converges (480 vs 477 t/s at 16 slots).
-        # The memory savings (~2.3 GB for 4B at 4 slots) allow more
-        # parallel slots and more models loaded simultaneously.
-        "--cache-type-k", "q8_0",
-        "--cache-type-v", "q8_0",
+        # KV cache: unified mode shares a single KV cache pool across all
+        # parallel slots for each model. With per-tier ctx-size in presets,
+        # each tier alias gets an appropriately sized shared cache instead
+        # of allocating ctx-size/parallel per slot. This significantly
+        # reduces memory waste for tiers with many parallel slots.
+        "--kv-unified",
         "--cache-reuse", "256",
         # Disable thinking globally — Qwen3 thinks by default, wasting
         # 2-5× tokens on <think> reasoning before producing actual output.
@@ -391,9 +390,9 @@ def llm_serve(
     console.print(f"  Context size:   {ctx_size} (default, per-model override via presets)")
     console.print("  Flash attention: on")
     console.print("  GPU layers:     99 (full offload)")
-    console.print("  KV unified:     off (per-model cache)")
+    console.print("  KV unified:     on (shared cache pool per model)")
     console.print("  Batch size:     8192 (batch) / 2048 (ubatch, per-model override via presets)")
-    console.print("  KV cache type:  q8_0 (K) + q8_0 (V)")
+    console.print("  KV cache type:  f16 (default)")
     console.print("  Cache reuse:    256 tokens")
     console.print("  Endpoints:      slots, metrics, props")
     console.print(f"  Log:            {_logfile(port)}")
