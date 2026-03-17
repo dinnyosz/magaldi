@@ -444,11 +444,12 @@ def estimate_tokens(text: str, chars_per_token: int = 2) -> int:
 def chars_per_token_for_language(language: str | None) -> int:
     """Return the appropriate chars-per-token ratio for a language.
 
-    Code languages (Python, JS, etc.) average ~3 chars/token.
-    Non-code content (markdown, yaml, text) averages ~2 chars/token.
+    Uses a conservative 2 chars/token for all content. While code may
+    average ~3 chars/token, certain files (e.g., tokenizer vocab files,
+    data files with short lines) can have ratios close to 1. Using 2
+    universally prevents context overflow at the cost of slightly more
+    aggressive truncation on large code files.
     """
-    if language and language in CODE_LANGUAGES:
-        return 3
     return 2
 
 
