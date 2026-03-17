@@ -95,7 +95,7 @@ def get_model_column_width(config: MagaldiConfig) -> int:
     """Calculate the optimal width for model name columns in CLI displays.
 
     Takes into account all configured models and their potential tiered names
-    (for Ollama models with context tier suffixes like -2k, -4k, -32k).
+    (for Ollama and llamacpp models with context tier suffixes like -2k, -4k, -32k).
 
     Args:
         config: Magaldi configuration with model settings.
@@ -112,8 +112,8 @@ def get_model_column_width(config: MagaldiConfig) -> int:
         config.llm.get_embed_model(),
     ]:
         name = model_cfg.name
-        if model_cfg.provider == "ollama":
-            # For Ollama, add longest tier suffix (-32k = 4 chars)
+        if model_cfg.provider in ("ollama", "llamacpp"):
+            # For tiered providers, add longest tier suffix (-32k = 4 chars)
             model_names.append(name + "-32k")
         else:
             model_names.append(name)

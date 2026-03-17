@@ -1118,3 +1118,102 @@ class TestEnsureRepoConfig:
         # Should show scope and repository prompts
         assert "scope" in result.output.lower()
         assert "repository" in result.output.lower()
+
+
+# =============================================================================
+# MODEL COLUMN WIDTH TESTS
+# =============================================================================
+
+
+class TestGetModelColumnWidth:
+    """Tests for get_model_column_width."""
+
+    def test_llamacpp_includes_tier_suffix(self):
+        """llamacpp models should account for tier suffix in column width."""
+        from shared.cli._shared import get_model_column_width
+        from shared.config import LLMConfig, MagaldiConfig, ModelConfig
+
+        config = MagaldiConfig()
+        config.llm = LLMConfig(
+            models={
+                "big": ModelConfig(
+                    name="Qwen3-4B-Instruct-2507-Q4_K_M",
+                    provider="llamacpp",
+                    url="http://localhost:8080",
+                ),
+            },
+            summarize_model="big",
+            summarize_model_small="big",
+            embed_model="big",
+        )
+
+        width = get_model_column_width(config)
+        # "Qwen3-4B-Instruct-2507-Q4_K_M-32k" = 33 chars + 2 padding = 35
+        full_name = "Qwen3-4B-Instruct-2507-Q4_K_M-32k"
+        assert width >= len(full_name), (
+            f"Column width {width} too small for '{full_name}' ({len(full_name)} chars)"
+        )
+
+    def test_ollama_includes_tier_suffix(self):
+        """Ollama models should account for tier suffix in column width."""
+        from shared.cli._shared import get_model_column_width
+        from shared.config import LLMConfig, MagaldiConfig, ModelConfig
+
+        config = MagaldiConfig()
+        config.llm = LLMConfig(
+            models={
+                "m": ModelConfig(
+                    name="qwen3:4b-instruct",
+                    provider="ollama",
+                    url="http://localhost:11434",
+                ),
+            },
+            summarize_model="m",
+            summarize_model_small="m",
+            embed_model="m",
+        )
+
+        width = get_model_column_width(config)
+        full_name = "qwen3:4b-instruct-32k"
+        assert width >= len(full_name), (
+            f"Column width {width} too small for '{full_name}' ({len(full_name)} chars)"
+        )
+
+    def test_non_tiered_provider_no_suffix(self):
+        """Non-tiered providers should not get tier suffix padding."""
+        from shared.cli._shared import get_model_column_width
+        from shared.config import LLMConfig, MagaldiConfig, ModelConfig
+
+        config = MagaldiConfig()
+        config.llm = LLMConfig(
+            models={
+                "m": ModelConfig(
+                    name="gpt-4o-mini",
+                    provider="openai",
+                ),
+            },
+            summarize_model="m",
+            summarize_model_small="m",
+            embed_model="m",
+        )
+
+        width = get_model_column_width(config)
+        # "gpt-4o-mini" = 11 chars + 2 = 13, but minimum is 20
+        assert width == 20
+
+    def test_minimum_width(self):
+        """Column width should never be less than 20."""
+        from shared.cli._shared import get_model_column_width
+        from shared.config import LLMConfig, MagaldiConfig, ModelConfig
+
+        config = MagaldiConfig()
+        config.llm = LLMConfig(
+            models={
+                "m": ModelConfig(name="x", provider="openai"),
+            },
+            summarize_model="m",
+            summarize_model_small="m",
+            embed_model="m",
+        )
+
+        assert get_model_column_width(config) >= 20
