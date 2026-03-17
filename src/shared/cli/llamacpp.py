@@ -161,10 +161,10 @@ def _generate_presets(llm_config: LLMConfig, create_symlinks: bool = True) -> Pa
     presets["*"] = {
         "ctx-size": str(DEFAULT_CTX_SIZE),
         "parallel": str(DEFAULT_PARALLEL),
-        # ubatch=2048 enables 4-stage pipeline parallelism for LLM models
-        # (batch 8192 / ubatch 2048 = 4 stages across parallel slots).
-        # Embedding models override this to 8192 (pooling needs full input).
-        "ubatch-size": "2048",
+        # ubatch=256 optimizes prefill on Apple Silicon (Metal saturates
+        # earlier on smaller matrix multiplications).
+        # Embedding models override this to 12288 (pooling needs full input).
+        "ubatch-size": "256",
     }
 
     for cfg in _get_llamacpp_models(llm_config):
@@ -395,7 +395,7 @@ def llm_serve(
     console.print("  Flash attention: on")
     console.print("  GPU layers:     99 (full offload)")
     console.print("  KV unified:     on (shared cache pool per model)")
-    console.print("  Batch size:     8192 (batch) / 2048 (ubatch, per-model override via presets)")
+    console.print("  Batch size:     8192 (batch) / 256 (ubatch, per-model override via presets)")
     console.print("  KV cache type:  q8_0 (K + V)")
     console.print("  Cache reuse:    256 tokens")
     console.print("  Endpoints:      slots, metrics, props")
