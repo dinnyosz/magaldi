@@ -65,6 +65,7 @@ class DependencyTracker:
         self._current_model: str | None = None  # Current model key ("large" or "small")
         self._current_tier: int | None = None  # Current context tier all workers use
         self._previous_tier: int | None = None  # Previous tier (to detect changes)
+        self._previous_model: str | None = None  # Previous model (to detect model changes)
         self._tier_changing: bool = False  # True when switching model/tier (warmup period)
         self._warmup_task_id: str | None = None  # ID of warmup task (first task of new tier)
         self._tier_just_changed: bool = False  # True when tier changed (for throughput reset)
@@ -282,6 +283,7 @@ class DependencyTracker:
                 self._tier_changing = True
                 self._tier_just_changed = True  # Signal for throughput reset
 
+            self._previous_model = self._current_model
             self._current_model = selected_model
             self._previous_tier = self._current_tier
             self._current_tier = selected_tier
@@ -345,24 +347,40 @@ class DependencyTracker:
         """Check if tier just changed (for throughput reset).
 
         Returns True once per tier change, then clears the flag.
-        Also resets ramp cooldown state and exploration orchestrator
-        so the new tier starts fresh with a budget cap based on the
-        number of elements in the new tier.
+        Also resets ramp cooldown state.
+
+        Exploration reset strategy:
+        - Model change: full reset with budget based on all remaining
+          elements for the new model (across all tiers). Different models
+          have different throughput characteristics.
+        - Tier-only change (same model): keep exploration state. The optimal
+          concurrency is similar across tiers of the same model since the
+          same GPU/weights are used — only KV cache allocation differs.
         """
         with self._lock:
             if self._tier_just_changed:
                 self._tier_just_changed = False
                 self._last_ramp_time = 0.0
                 self._last_recommended_workers = 0
-                # Count pending elements in the new tier for budget cap
-                tier_elements = 0
-                if self._current_tier is not None:
-                    for eid in self._elements:
-                        if eid not in self._completed and self._get_tier(eid) == self._current_tier:
-                            tier_elements += 1
-                self._exploration.reset(
-                    total_elements=tier_elements if tier_elements > 0 else None
-                )
+
+                model_changed = self._previous_tier is not None and \
+                    self._current_model != self._previous_model
+
+                if model_changed:
+                    # Count all remaining elements for the new model
+                    # (across ALL tiers) — exploration applies model-wide
+                    model_elements = 0
+                    if self._current_model is not None:
+                        for eid in self._elements:
+                            if eid not in self._completed \
+                                    and self._get_model_key(self._elements[eid]) == self._current_model:
+                                model_elements += 1
+                    self._exploration.reset(
+                        total_elements=model_elements if model_elements > 0 else None
+                    )
+                # Tier-only change: don't reset exploration — keep GSS state
+                # and throughput data from the previous tier of the same model
+
                 return True
             return False
 
