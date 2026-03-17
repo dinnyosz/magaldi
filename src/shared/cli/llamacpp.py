@@ -151,6 +151,10 @@ def _generate_presets(llm_config: LLMConfig) -> Path:
     presets["*"] = {
         "ctx-size": str(DEFAULT_CTX_SIZE),
         "parallel": str(DEFAULT_PARALLEL),
+        # ubatch=2048 enables 4-stage pipeline parallelism for LLM models
+        # (batch 8192 / ubatch 2048 = 4 stages across parallel slots).
+        # Embedding models override this to 8192 (pooling needs full input).
+        "ubatch-size": "2048",
     }
 
     for cfg in _get_llamacpp_models(llm_config):
@@ -300,12 +304,12 @@ def llm_serve(
         "--flash-attn", "on",
         "--n-gpu-layers", "99",
         "--kv-unified",
-        # Batch sizes: n_batch is the logical max batch (prompt tokens per
-        # iteration), n_ubatch is the physical compute batch sent to Metal.
-        # With parallel slots, ubatch < batch enables pipeline parallelism
-        # across slots (4-stage pipeline: 8192/2048 = 4 stages).
+        # Batch size: n_batch is the logical max batch (prompt tokens per
+        # iteration). n_ubatch is set in presets (not here!) because CLI args
+        # override per-model presets — embedding models need ubatch=8192
+        # (pooling requires entire input in one ubatch) while LLM models
+        # benefit from ubatch=2048 (4-stage pipeline across parallel slots).
         "--batch-size", "8192",
-        "--ubatch-size", "2048",
         "-sps", "0.4",
         # KV cache: q8_0 uses half the memory of f16 with negligible
         # throughput loss at parallel > 1. Single-request f16 is ~15% faster
@@ -353,7 +357,7 @@ def llm_serve(
     console.print("  Flash attention: on")
     console.print("  GPU layers:     99 (full offload)")
     console.print("  KV unified:     on (shared pool, not partitioned)")
-    console.print("  Batch size:     8192 (batch) / 2048 (ubatch, 4-stage pipeline)")
+    console.print("  Batch size:     8192 (batch) / 2048 (ubatch, per-model override via presets)")
     console.print("  KV cache type:  q8_0 (K) + q8_0 (V)")
     console.print("  Cache reuse:    256 tokens")
     console.print("  Endpoints:      slots, metrics, props")
