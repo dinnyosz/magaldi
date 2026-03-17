@@ -1352,6 +1352,34 @@ class TestExploreCap:
         state = orch.orchestrate({}, None, ThroughputTracker())
         assert state.explore_cap is None
 
+    def test_orchestrator_small_batch_skips_gss_but_explores(self):
+        """Small batches (≤50 elements) skip GSS but still run neighbor exploration."""
+        orch = ExplorationOrchestrator(base_workers=8, total_elements=30)
+        # base_workers capped to 3 for 30 elements (budget=0)
+        assert orch.base_workers <= 3
+
+        tracker = ThroughputTracker()
+        # No data yet — exploration has nothing to work with
+        state = orch.orchestrate({}, None, tracker)
+        assert state.gss_probe is None  # No GSS
+        assert "Exploring" in (state.exploration_status or "")
+
+    def test_orchestrator_small_batch_finds_peak(self):
+        """Small batch neighbor exploration detects peak when data accumulates."""
+        orch = ExplorationOrchestrator(base_workers=8, total_elements=40)
+        assert orch.base_workers <= 3
+
+        tracker = ThroughputTracker()
+        # Simulate data at levels 1 and 2 (enough for peak detection)
+        for _ in range(12):
+            tracker.record_completion(3.0, concurrent_workers=1.0)  # Level 1: 3s
+            tracker.record_completion(2.0, concurrent_workers=2.0)  # Level 2: 1s base (better)
+
+        all_levels = tracker._throughput_by_level.get_all_levels()
+        state = orch.orchestrate(all_levels, tracker.get_peak_concurrency(), tracker)
+        assert state.gss_probe is None  # No GSS
+        assert state.effective_peak == 2  # Peak at level 2
+
 
 class TestExplorationTarget:
     """Tests for ThroughputByLevel.get_exploration_target().
@@ -3140,17 +3168,17 @@ class TestExplorationOrchestratorCap:
         orch = ExplorationOrchestrator(16, total_elements=30)
         assert orch._original_base_workers == 16
 
-    def test_base_workers_1_skips_exploration(self):
-        """With base_workers=1, orchestrate skips exploration entirely."""
+    def test_base_workers_1_skips_gss_but_explores(self):
+        """With base_workers=1, orchestrate skips GSS but allows neighbor exploration."""
         orch = ExplorationOrchestrator(1, total_elements=10)
         tracker = ThroughputTracker(window_seconds=300.0)
         assert orch.base_workers == 1
         state = orch.orchestrate({}, None, tracker)
-        # Should skip: no warmup override, no GSS, just status
+        # Should skip GSS: no warmup override, no GSS probe
         assert state.warmup_override is None
         assert state.gss_probe is None
         assert state.exploration_status is not None
-        assert "Skip" in state.exploration_status
+        assert "Exploring" in state.exploration_status
 
     def test_small_elements_get_minimum_floor(self):
         """With very few elements, the minimum floor of 3 applies."""

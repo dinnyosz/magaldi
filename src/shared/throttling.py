@@ -1295,12 +1295,26 @@ class ExplorationOrchestrator:
         if self._total_elements is not None and self.base_workers < self._original_base_workers:
             state.explore_cap = self.base_workers
 
-        # Skip exploration when budget is too small for meaningful data collection.
-        # base_workers ≤ 3 means GSS has at most a [1, 3] bracket — too narrow
-        # to search meaningfully. Fall through to formula-based throttling which
-        # uses runtime feedback to pick the best worker count dynamically.
+        # Skip GSS for tiny workloads (≤3 base_workers = bracket too narrow)
+        # but still allow neighbor exploration to find the best level from
+        # naturally accumulated data.
         if self.base_workers <= 3 and self._total_elements is not None:
-            state.exploration_status = f"Skipped ({self._total_elements} elements)"
+            state.exploration_status = f"Exploring ({self._total_elements} elements)"
+            effective_peak = legacy_peak
+            explore = throughput_tracker.get_exploration_target(
+                self.base_workers, remaining
+            )
+            explore_phase = throughput_tracker._throughput_by_level.exploration_phase
+
+            state.effective_peak = effective_peak
+            state.exploration_target = explore
+            state.exploration_phase = explore_phase
+            if explore is not None:
+                phase_label = explore_phase or "radius"
+                state.exploration_status = f"Exploring ({phase_label}) →{explore}"
+            elif effective_peak is not None:
+                state.exploration_status = f"Peak@{effective_peak} ✓"
+
             return state
 
         # Build level_data: levels with enough samples for GSS decisions.
