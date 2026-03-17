@@ -156,7 +156,7 @@ def get_tier_timeout(tier: int, base_workers: int) -> float:
     return base * math.sqrt(max(1, base_workers))
 
 # Estimated prompt overhead per element type (tokens), EXCLUDING raw code.
-# Includes: system prompt + user template + typical variable content + output budget.
+# Includes: system prompt + user template + parent context + output budget.
 #
 # System prompts (fixed text, measured):
 #   file: 189, class: 189, interface: 153, trait: 149, enum: 128,
@@ -168,12 +168,22 @@ def get_tier_timeout(tier: int, base_workers: int) -> float:
 #   type_alias: 132, function: 199, method: 206, constant: 136,
 #   variable: 134, import: 114
 #
-# Variable content (estimated typical, e.g. file_summary, class_context,
-#   signature/docstring duplication from raw_code):
-#   file: ~50, class: ~130, function: ~200 (sig+docstring in template AND code),
-#   method: ~240, interface/trait: ~70, enum/type_alias: ~60
-#   variable: ~500 (file_summary 200-400 + class_context ~100 + function_context ~100 + usages ~50)
-#   constant: ~400 (file_summary 200-400 + function_context ~100 + usage_examples ~50)
+# Parent context injected into prompts (bounded by OUTPUT_TOKEN_BUDGETS):
+#   file_summary: up to 500 tokens (P95: ~350), used by all child types
+#   class_context: up to 450 tokens (P95: ~300), used by method/function/variable/constant
+#   function_context: up to 500 tokens (P95: ~300), used by variable/constant
+#   sig/docstring duplication: ~50-100 tokens (in template AND code)
+#
+# Parent context estimates (P95 realistic, not worst-case):
+#   file: ~50 (imports section only, no parent context)
+#   class: ~400 (file_summary 350 + base_classes/attrs ~50)
+#   interface/trait: ~400 (file_summary 350 + base_classes ~50)
+#   enum: ~350 (file_summary 350)
+#   type_alias: ~350 (file_summary 350)
+#   function: ~750 (file_summary 350 + class_context 300 + sig/docstring ~100)
+#   method: ~750 (file_summary 350 + class_context 300 + sig/docstring ~100)
+#   constant: ~700 (file_summary 350 + function_context 300 + usage_examples ~50)
+#   variable: ~1050 (file_summary 350 + class_context 300 + function_context 300 + usages ~100)
 #
 # Output budget (empirically measured from ~2300 elements, set to max * 1.25):
 #   file/function: max ~400 tokens → 500 budget
@@ -187,16 +197,16 @@ def get_tier_timeout(tier: int, base_workers: int) -> float:
 #   import: handcrafted (no LLM) → 100 budget
 PROMPT_OVERHEAD = {
     "file": 950,        # 189 + 200 + 50 + 500 = 939 → 950
-    "class": 1000,      # 189 + 212 + 130 + 450 = 981 → 1000
-    "interface": 700,   # 153 + 166 + 70 + 300 = 689 → 700
-    "trait": 700,       # 149 + 161 + 70 + 300 = 680 → 700
-    "enum": 600,        # 128 + 126 + 60 + 250 = 564 → 600
-    "type_alias": 550,  # 133 + 132 + 60 + 200 = 525 → 550
-    "function": 1100,   # 177 + 199 + 200 + 500 = 1076 → 1100
-    "method": 1050,     # 169 + 206 + 240 + 400 = 1015 → 1050
-    "constant": 1050,   # 126 + 136 + 400 + 200 = 862 → 1050 (headroom for long file_summaries)
-    "variable": 1250,   # 129 + 134 + 500 + 450 = 1213 → 1250
-    "import": 400,      # 114 + 114 + 60 + 100 = 388 → 400
+    "class": 1250,      # 189 + 212 + 400 + 450 = 1251 → 1250
+    "interface": 950,   # 153 + 166 + 400 + 300 = 1019 → 950 (smaller output)
+    "trait": 950,       # 149 + 161 + 400 + 300 = 1010 → 950
+    "enum": 850,        # 128 + 126 + 350 + 250 = 854 → 850
+    "type_alias": 800,  # 133 + 132 + 350 + 200 = 815 → 800
+    "function": 1650,   # 177 + 199 + 750 + 500 = 1626 → 1650
+    "method": 1550,     # 169 + 206 + 750 + 400 = 1525 → 1550
+    "constant": 1150,   # 126 + 136 + 700 + 200 = 1162 → 1150
+    "variable": 1800,   # 129 + 134 + 1050 + 450 = 1763 → 1800
+    "import": 400,      # 114 + 114 + 0 + 100 = 328 → 400 (no parent context)
 }
 
 DEFAULT_OVERHEAD = 800

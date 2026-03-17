@@ -1647,7 +1647,7 @@ class TestPerElementContextSize:
     """Tests for per-element context size computation."""
 
     def test_small_element_uses_smallest_tier(self):
-        """Small elements should use 1024 context tier."""
+        """Small elements should use 2048 context tier."""
         mock_llm = MagicMock()
         mock_llm.generate.return_value = "test summary"
 
@@ -1695,7 +1695,7 @@ class TestPerElementContextSize:
         mock_llm = MagicMock()
         mock_llm.generate.return_value = "test summary"
 
-        # 50000 chars = 12500 tokens + 300 overhead = 12800 → 16384 tier
+        # 50000 chars = 12500 tokens + 950 overhead = 13450 → 16384 tier
         element = CodeElement(
             element_id="test:repo:user:file.py:file:file.py:1",
             element_type="file",
@@ -1781,8 +1781,8 @@ class TestPerElementContextSize:
         mock_llm.generate.return_value = "test summary"
 
         # 5000 chars with different types:
-        # - function: 5000/4=1250 + 800 overhead = 2050 → 4096 tier
-        # - import: 5000/4=1250 + 350 overhead = 1600 → 2048 tier
+        # - function: 5000/4=1250 + 1100 overhead = 2350 → 4096 tier
+        # - import: 5000/4=1250 + 400 overhead = 1650 → 2048 tier
         func_element = CodeElement(
             element_id="test:repo:user:file.py:function:func:1",
             element_type="function",

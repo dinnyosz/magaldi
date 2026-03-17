@@ -110,14 +110,14 @@ class TestComputeElementNumCtx:
         result = compute_element_num_ctx("function", 4000)
         assert result == 4096
 
-    def test_medium_function_uses_4096(self):
-        """A 10000 char function should use 4096 context.
+    def test_medium_function_uses_8192(self):
+        """A 10000 char function should use 8192 context.
 
-        Calculation: 10000/4 = 2500 + 1100 overhead = 3600 total.
-        3600 > 2048 but < 4096, so it uses 4096 tier.
+        Calculation: 10000/4 = 2500 + 1650 overhead = 4150 total.
+        4150 > 4096 but < 8192, so it uses 8192 tier.
         """
         result = compute_element_num_ctx("function", 10000)
-        assert result == 4096
+        assert result == 8192
 
     def test_large_file_uses_32768(self):
         """A 72000 char file should use 32768 context.

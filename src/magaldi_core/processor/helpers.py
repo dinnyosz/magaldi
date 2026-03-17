@@ -458,6 +458,7 @@ def _is_context_overflow_error(error: Exception) -> bool:
         "too large" in msg
         or "context length" in msg
         or "max context" in msg  # llama.cpp: "larger than the max context size"
+        or "context size" in msg  # llama.cpp: "Context size has been exceeded"
     )
 
 
