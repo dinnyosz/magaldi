@@ -13,20 +13,25 @@ if TYPE_CHECKING:
 
 
 def _get_model_display_name(model_config: ModelConfig, num_ctx: int) -> str:
-    """Get the display name for a model, including tier suffix for Ollama models.
+    """Get the display name for a model, including tier suffix for tiered providers.
 
     Args:
         model_config: Model configuration.
         num_ctx: Context size being used.
 
     Returns:
-        Model name with tier suffix for Ollama models (e.g., "qwen3:4b-instruct-4k"),
-        or the original name for other providers.
+        Model name with tier suffix for tiered providers (e.g., "qwen3:4b-instruct-4k"
+        for Ollama, "Qwen3-4B-Q4_K_M-4k" for llamacpp), or the original name for
+        other providers.
     """
     if model_config.provider == "ollama":
         from shared.ai.ollama_models import get_tiered_model_name
 
         return get_tiered_model_name(model_config.name, num_ctx)  # type: ignore[no-any-return]
+    if model_config.provider == "llamacpp":
+        from shared.ai.llamacpp_models import get_tiered_model_name as get_llamacpp_tiered_name
+
+        return get_llamacpp_tiered_name(model_config.name, num_ctx)  # type: ignore[no-any-return]
     return model_config.name  # type: ignore[no-any-return]
 
 
