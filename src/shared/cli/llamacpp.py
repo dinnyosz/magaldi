@@ -344,7 +344,7 @@ def llm_serve(
         # (pooling requires entire input in one ubatch) while LLM models
         # benefit from ubatch=2048 (4-stage pipeline across parallel slots).
         "--batch-size", "8192",
-        "-sps", "0.4",
+        "-sps", "0",
         # KV cache: unified mode shares a single KV cache pool across all
         # parallel slots for each model. With per-tier ctx-size in presets,
         # each tier alias gets an appropriately sized shared cache instead
