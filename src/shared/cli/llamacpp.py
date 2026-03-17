@@ -35,7 +35,7 @@ Example magaldi.yaml:
           url: http://localhost:8090
           dimensions: 1024
           embedding: true
-          num_ctx: 32768
+          num_ctx: 16384
           parallel: 16
           gguf: Mungert/Qwen3-Embedding-0.6B-GGUF:Qwen3-Embedding-0.6B-q8_0.gguf
 """
@@ -296,6 +296,7 @@ def llm_serve(
         "--port", str(port),
         "--host", "0.0.0.0",
         "--models-max", str(models_max),
+        "--threads", "6",
         "--flash-attn", "on",
         "--n-gpu-layers", "99",
         "--kv-unified",
