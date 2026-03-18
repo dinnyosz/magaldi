@@ -161,6 +161,11 @@ def _generate_presets(llm_config: LLMConfig, create_symlinks: bool = True) -> Pa
     presets["*"] = {
         "ctx-size": str(DEFAULT_CTX_SIZE),
         "parallel": str(DEFAULT_PARALLEL),
+        # batch-size MUST be in the preset (not CLI args) because CLI args
+        # override per-model preset values. Embedding models need batch-size
+        # = 12288 (pooling requires full input in one batch), and that override
+        # only works when the global default comes from the preset, not CLI.
+        "batch-size": "2048",
         # ubatch=256 optimizes prefill on Apple Silicon (Metal saturates
         # earlier on smaller matrix multiplications).
         # Embedding models override this to 12288 (pooling needs full input).
@@ -344,11 +349,9 @@ def llm_serve(
         # so the OS / other processes aren't starved when multiple models
         # are loaded simultaneously.
         "--fit-target", "2048",
-        # Batch size: n_batch is the logical max batch (prompt tokens per
-        # iteration). Embedding models override both batch-size and
-        # ubatch-size to 12288 in their preset section (pooling needs
-        # full input), so the global default only affects LLM models.
-        "--batch-size", "2048",
+        # NOTE: --batch-size is in the presets file (global [*] section),
+        # not here. CLI args override per-model preset values, which would
+        # prevent embedding models from using batch-size=12288.
         "-sps", "0",
         # KV cache: unified mode shares a single KV cache pool across all
         # parallel slots for each model. With per-tier ctx-size in presets,
@@ -403,7 +406,7 @@ def llm_serve(
     console.print("  Flash attention: on")
     console.print("  GPU layers:     99 (full offload)")
     console.print("  KV unified:     on (shared cache pool per model)")
-    console.print("  Batch size:     2048 (batch) / 256 (ubatch, per-model override via presets)")
+    console.print("  Batch size:     2048 (batch, per-model override via presets) / 256 (ubatch, per-model override via presets)")
     console.print("  KV cache type:  q8_0 (K + V)")
     console.print("  Cache reuse:    256 tokens")
     console.print("  Endpoints:      slots, metrics, props")

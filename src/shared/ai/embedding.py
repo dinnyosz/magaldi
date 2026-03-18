@@ -444,11 +444,16 @@ def estimate_tokens(text: str, chars_per_token: int = 2) -> int:
 def chars_per_token_for_language(language: str | None) -> int:
     """Return the appropriate chars-per-token ratio for a language.
 
-    Code languages (Python, JS, etc.) average ~3 chars/token.
-    Non-code content (markdown, yaml, text) averages ~2 chars/token.
+    Embedding text is a mix of code AND natural language metadata (summaries,
+    file paths, docstrings). Using 2 chars/token universally is conservative
+    but prevents overflow — short identifiers, operators, and braces in code
+    often tokenize at 1.5-2 chars/token, not the 3-4 typical of prose.
+    Combined with the 25% safety margin in validate_context_length(), this
+    ensures inputs stay within the embedding model's batch/context limit.
     """
-    if language and language in CODE_LANGUAGES:
-        return 3
+    # Use 2 chars/token for all languages — code mixed with metadata
+    # averages closer to 2 than 3, and under-estimating is better than
+    # overflowing the embedding model's context.
     return 2
 
 
