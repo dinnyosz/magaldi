@@ -3507,6 +3507,72 @@ class TestCrossTierThroughputLeak:
         )
         assert levels[4][1] == 1
 
+    def test_tier_change_resets_before_throttle_decision(self):
+        """Tier change should reset throughput data so stale levels from
+        a previous tier don't leak into the new tier's throttle decisions.
+
+        Regression test: previously, all_levels was fetched BEFORE the
+        tier change reset, causing the handcrafted tier's GSS to see
+        stale 2k-tier level data (e.g., peak@15 from 2k tier appearing
+        as the peak during handcrafted tier exploration).
+        """
+        # Setup: two tiers of elements — 2k functions and handcrafted imports
+        file_elem = make_element("s:r:u:a.py:file:a.py:1", "file", None, 0)
+        func_elem = make_element(
+            "s:r:u:a.py:function:fn:5", "function", file_elem.element_id, 2
+        )
+        import_elem = make_element(
+            "s:r:u:a.py:import:os:1", "import", file_elem.element_id, 2
+        )
+
+        context_sizes = {
+            file_elem.element_id: 2048,
+            func_elem.element_id: 2048,
+            import_elem.element_id: 0,  # Handcrafted tier
+        }
+
+        tracker = DependencyTracker(
+            [file_elem, func_elem, import_elem],
+            context_sizes=context_sizes,
+        )
+        stats = TimingStats()
+
+        # Phase 1: Process file element
+        ready = tracker.get_ready_elements(max_count=10)
+        assert len(ready) == 1  # file
+        tracker.did_tier_just_change()  # consume initial flag
+        tracker.mark_complete(file_elem.element_id)
+
+        # Phase 2: Process 2k-tier function, record throughput
+        ready = tracker.get_ready_elements(max_count=10)
+        # Drain may return empty first, then function+import next
+        if not ready:
+            tracker.did_tier_just_change()
+            ready = tracker.get_ready_elements(max_count=10)
+
+        # Record some 2k-tier throughput data
+        stats.record_task_runtime(2.0, 4)
+        stats.record_task_runtime(1.8, 5)
+        levels_before = stats.get_all_throughput_levels()
+        assert len(levels_before) > 0, "Should have 2k-tier level data"
+
+        # Complete 2k elements
+        for elem in ready:
+            tracker.mark_complete(elem.element_id)
+
+        # Phase 3: Tier change to handcrafted
+        # The NEW ordering: check did_tier_just_change BEFORE getting levels
+        ready = tracker.get_ready_elements(max_count=10)
+        if tracker.did_tier_just_change():
+            stats.reset_throughput()
+
+        # After reset, levels should be empty (no stale 2k data)
+        levels_after = stats.get_all_throughput_levels()
+        assert len(levels_after) == 0, (
+            "Throughput levels should be reset on tier change. "
+            f"Stale data: {levels_after}"
+        )
+
 
 # =============================================================================
 # CRAFT REASON CATEGORIZATION TESTS

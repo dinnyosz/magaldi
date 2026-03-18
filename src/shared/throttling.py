@@ -56,6 +56,13 @@ RAMP_UP_FACTOR = 0.25
 # estimates are too optimistic (e.g., first few tasks were easy/small).
 MAX_RAMP_INCREMENT = 1
 
+# Base-time threshold for fast-item ramp bypass. When avg_base_time is
+# below this value, items complete faster than the ramp cycle can react,
+# causing the system to get stuck at 1-2 workers indefinitely (each item
+# finishes before the next +1 increment takes effect). In this regime,
+# jump directly to the target instead of gradual ramping.
+FAST_ITEM_THRESHOLD = 0.5  # seconds
+
 # Threshold for holding ramp-up. If any active task has been running longer
 # than this fraction of timeout, don't ramp up - wait for tasks to complete
 # and provide feedback. This prevents ramping blindly based on stale data.
@@ -1762,6 +1769,18 @@ def compute_throttle_decision(
                 _log_throttle(
                     f"GSS JUMP: target={target_workers} active={active_workers} "
                     f"→ jumping to {effective_workers}"
+                )
+            elif effective_base_time < FAST_ITEM_THRESHOLD:
+                # Fast items: jump directly to target. With base_time < 0.5s,
+                # items complete faster than the ramp cycle can react — gradual
+                # +1 increments never catch up because workers finish before
+                # the next decision. Safe because fast items can't overwhelm
+                # the system (each request is tiny).
+                effective_workers = target_workers
+                reason_suffix = f", fast jump from {active_workers}"
+                _log_throttle(
+                    f"FAST RAMP: base_time={effective_base_time:.2f}s < {FAST_ITEM_THRESHOLD}s "
+                    f"target={target_workers} active={active_workers} → jumping to {effective_workers}"
                 )
             else:
                 # Scaling UP - ramp +1 per decision to avoid overwhelming the system

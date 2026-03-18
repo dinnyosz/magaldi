@@ -774,6 +774,16 @@ def process_elements(
                 time.time()
                 active_workers = worker_status.active_count()
 
+                # Check for pending tier change BEFORE computing throttle stats.
+                # get_ready_elements() sets _tier_just_changed when it detects a
+                # model/tier switch. We consume the flag here so that
+                # timing_stats is reset before all_levels/avg_base_time are read.
+                # On the very first iteration (no tier yet), this is a no-op.
+                if dependency_tracker.did_tier_just_change():
+                    timing_stats.reset_throughput()
+                    current_submit_model = dependency_tracker.get_current_model()
+                    current_submit_tier = dependency_tracker.get_current_tier()
+
                 # Get throughput-based stats for adaptive throttling (with concurrency context)
                 throughput, avg_runtime, completion_count, avg_concurrency, high_load_avg = (
                     timing_stats.get_throughput_stats_with_concurrency()
@@ -803,12 +813,12 @@ def process_elements(
                     throttle_limit=throttle_limit,
                 )
 
-                # Reset throughput history on tier/model change so stale data
-                # from a different tier doesn't pollute throttling decisions
-                if dependency_tracker.did_tier_just_change():
-                    timing_stats.reset_throughput()
-                    current_submit_model = dependency_tracker.get_current_model()
-                    current_submit_tier = dependency_tracker.get_current_tier()
+                # get_ready_elements may trigger a NEW tier change (if the
+                # selected tier differs from the current one). This sets
+                # _tier_just_changed again, which will be consumed at the
+                # TOP of the next loop iteration (above).
+                # No second did_tier_just_change() call here — it would
+                # consume the flag prematurely before the next throttle calc.
 
             # Submit new tasks for ready elements
             # Track allowed workers at start for throughput calculation

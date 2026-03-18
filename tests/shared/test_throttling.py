@@ -3225,3 +3225,115 @@ class TestExplorationOrchestratorCap:
         state = orch.orchestrate({}, None, tracker)
         # Should enter warmup phase (not skip)
         assert state.warmup_override is not None
+
+
+class TestFastItemRamp:
+    """Tests for fast-item ramp bypass (FAST_ITEM_THRESHOLD).
+
+    When items complete faster than the ramp cycle can react (base_time < 0.5s),
+    the throttler should jump directly to the target instead of gradual +1
+    increments that never catch up.
+    """
+
+    def test_fast_items_jump_to_target(self):
+        """With fast base_time, should jump directly to target, not ramp +1."""
+        result = compute_throttle_decision(
+            current_max_runtime=0.2,
+            tier_timeout=60.0,
+            base_workers=16,
+            active_workers=2,
+            avg_base_time=0.05,  # Very fast (handcrafted items)
+            completion_count=50,
+            peak_concurrency=8,
+        )
+        # Should jump to peak (8), not ramp to 3 (2 + 1)
+        assert result.recommended_workers == 8
+
+    def test_fast_items_respect_formula_cap(self):
+        """Fast ramp still respects formula safety cap."""
+        result = compute_throttle_decision(
+            current_max_runtime=0.1,
+            tier_timeout=60.0,
+            base_workers=16,
+            active_workers=1,
+            avg_base_time=0.3,  # Still fast, but formula cap is lower
+            completion_count=50,
+            peak_concurrency=16,
+        )
+        # Formula: 60 * 0.65 / 0.3 = 130, clamped to 16
+        # Should jump to 16 (both peak and formula allow it)
+        assert result.recommended_workers == 16
+
+    def test_slow_items_still_ramp_gradually(self):
+        """With slow base_time (>0.5s), should still ramp +1."""
+        result = compute_throttle_decision(
+            current_max_runtime=5.0,
+            tier_timeout=416.0,
+            base_workers=16,
+            active_workers=3,
+            avg_base_time=2.0,  # Slow (LLM summarization)
+            completion_count=50,
+            peak_concurrency=10,
+        )
+        # Should ramp gradually: 3 + 1 = 4 (not jump to 10)
+        assert result.recommended_workers == 4
+
+    def test_fast_items_with_no_peak(self):
+        """Fast items without peak data should jump to formula target."""
+        result = compute_throttle_decision(
+            current_max_runtime=0.1,
+            tier_timeout=60.0,
+            base_workers=16,
+            active_workers=2,
+            avg_base_time=0.05,
+            completion_count=50,
+            peak_concurrency=None,  # No peak data yet
+        )
+        # Formula: 60 * 0.65 / 0.05 = 780, clamped to 16
+        # No peak → target = 16, fast ramp → jump to 16
+        assert result.recommended_workers == 16
+
+    def test_fast_items_from_zero_workers(self):
+        """From active=0, should start at target (fresh start path)."""
+        result = compute_throttle_decision(
+            current_max_runtime=0.0,
+            tier_timeout=60.0,
+            base_workers=16,
+            active_workers=0,
+            avg_base_time=0.05,
+            completion_count=50,
+            peak_concurrency=8,
+        )
+        # active=0 → fresh start path → goes directly to target
+        assert result.recommended_workers == 8
+
+    def test_boundary_at_threshold(self):
+        """At exactly FAST_ITEM_THRESHOLD, should still use gradual ramp."""
+        from shared.throttling import FAST_ITEM_THRESHOLD
+
+        result = compute_throttle_decision(
+            current_max_runtime=2.0,
+            tier_timeout=416.0,
+            base_workers=16,
+            active_workers=3,
+            avg_base_time=FAST_ITEM_THRESHOLD,  # Exactly at boundary
+            completion_count=50,
+            peak_concurrency=10,
+        )
+        # At boundary, use gradual ramp (not fast jump)
+        assert result.recommended_workers == 4  # 3 + 1
+
+    def test_fast_ramp_with_gss_probe_takes_priority(self):
+        """GSS probe should still take priority over fast ramp."""
+        result = compute_throttle_decision(
+            current_max_runtime=0.1,
+            tier_timeout=60.0,
+            base_workers=16,
+            active_workers=2,
+            avg_base_time=0.05,
+            completion_count=50,
+            peak_concurrency=8,
+            gss_probe=12,  # GSS wants data at level 12
+        )
+        # GSS probe takes priority over both fast ramp and peak
+        assert result.recommended_workers == 12
