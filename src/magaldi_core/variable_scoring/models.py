@@ -42,7 +42,7 @@ class VariableScoringConfig:
 
     threshold: int = 5
     temperature: float = 0.1
-    token_budget: int = 1536  # Total context window (system + content + output), ~75% of 2k tier for headroom
+    token_budget: int = 1792  # Total context window (system + content + output), ~88% of 2k tier
     max_retries: int = 2
     timeout: int = 180  # 3 minutes — matches ProcessingConfig.summarize_timeout
     debug_log: bool = False  # Write all batch prompts + LLM responses to logs/
