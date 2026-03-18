@@ -201,11 +201,12 @@ def _generate_presets(llm_config: LLMConfig, create_symlinks: bool = True) -> Pa
             for tier in CONTEXT_TIERS:
                 tier_name = get_tiered_model_name(cfg.name, tier)
                 presets[tier_name] = {}
-                # Each tier gets its own ctx-size matching the tier value.
-                # With unified KV cache, this is the total context budget
-                # shared across all parallel slots for this tier alias.
-                presets[tier_name]["ctx-size"] = str(tier)
                 parallel_slots = TIER_PARALLEL.get(tier, DEFAULT_PARALLEL)
+                # With unified KV cache (llama.cpp default), ctx-size is the
+                # TOTAL shared KV pool across all parallel slots. To guarantee
+                # each slot can use the full tier context simultaneously:
+                #   ctx-size = tier × parallel_slots
+                presets[tier_name]["ctx-size"] = str(tier * parallel_slots)
                 presets[tier_name]["parallel"] = str(parallel_slots)
 
     presets_path = _presets_file()
