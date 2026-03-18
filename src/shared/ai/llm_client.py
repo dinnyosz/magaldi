@@ -227,7 +227,13 @@ class LLMError(Exception):
 
 
 def _is_retryable_error(e: Exception) -> bool:
-    """Check if an error is retryable (connection/timeout issues)."""
+    """Check if an error is retryable (connection/timeout/KV-pressure issues).
+
+    Context overflow from llama.cpp with unified KV cache is often transient:
+    the shared KV pool is temporarily full because other parallel slots are
+    using it, not because the prompt is inherently too large. Retrying after
+    a backoff delay gives slots time to finish and free KV memory.
+    """
     error_str = str(e).lower()
     retryable_patterns = [
         "connection",
@@ -240,6 +246,7 @@ def _is_retryable_error(e: Exception) -> bool:
         "502",
         "504",
         "429",
+        "context size",  # llama.cpp unified KV cache pressure (transient)
     ]
     return any(pattern in error_str for pattern in retryable_patterns)
 
@@ -296,6 +303,28 @@ def _is_context_overflow(error: Exception) -> bool:
         or "max context" in msg  # llama.cpp: "larger than the max context size"
         or "context size" in msg  # llama.cpp: "Context size has been exceeded"
     )
+
+
+def _parse_actual_tokens(error: Exception) -> int | None:
+    """Try to extract actual token count from a context overflow error.
+
+    llama.cpp errors look like:
+        "request (4390 tokens) exceeds the available context size (4096 tokens)"
+    OpenAI errors look like:
+        "maximum context length is 4096 tokens. However, your messages resulted in 5000 tokens"
+    """
+    import re
+
+    msg = str(error)
+    # llama.cpp: "request (N tokens)"
+    m = re.search(r"request\s*\((\d+)\s*tokens?\)", msg)
+    if m:
+        return int(m.group(1))
+    # OpenAI-style: "resulted in N tokens"
+    m = re.search(r"resulted\s+in\s+(\d+)\s+tokens?", msg)
+    if m:
+        return int(m.group(1))
+    return None
 
 
 async def _retry_with_backoff_async(
@@ -866,9 +895,11 @@ class LLMClient:
                 estimated_prompt_tokens = len(prompt) // CHARS_PER_TOKEN_CODE
                 total_estimated = estimated_prompt_tokens + max_tokens
                 if _is_context_overflow(e):
+                    actual = _parse_actual_tokens(e)
+                    actual_str = f" actual_tokens={actual}" if actual else ""
                     logger.warning(
-                        "Context overflow: model=%s num_ctx=%s estimated_prompt=%d max_tokens=%d total=%d | %s",
-                        use_model, num_ctx, estimated_prompt_tokens, max_tokens, total_estimated, e,
+                        "Context overflow: model=%s num_ctx=%s estimated_prompt=%d max_tokens=%d total=%d%s | %s",
+                        use_model, num_ctx, estimated_prompt_tokens, max_tokens, total_estimated, actual_str, e,
                     )
                 else:
                     logger.warning(
@@ -954,9 +985,11 @@ class LLMClient:
                 estimated_prompt_tokens = sum(len(m.get("content", "")) for m in messages) // CHARS_PER_TOKEN_CODE
                 total_estimated = estimated_prompt_tokens + max_tokens
                 if _is_context_overflow(e):
+                    actual = _parse_actual_tokens(e)
+                    actual_str = f" actual_tokens={actual}" if actual else ""
                     logger.warning(
-                        "Context overflow: model=%s num_ctx=%s estimated_prompt=%d max_tokens=%d total=%d | %s",
-                        use_model, num_ctx, estimated_prompt_tokens, max_tokens, total_estimated, e,
+                        "Context overflow: model=%s num_ctx=%s estimated_prompt=%d max_tokens=%d total=%d%s | %s",
+                        use_model, num_ctx, estimated_prompt_tokens, max_tokens, total_estimated, actual_str, e,
                     )
                 else:
                     logger.warning(

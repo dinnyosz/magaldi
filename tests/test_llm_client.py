@@ -12,6 +12,8 @@ from shared.ai.llm_client import (
     LLMClient,
     LLMConfig,
     LLMError,
+    _is_context_overflow,
+    _parse_actual_tokens,
     create_embedding_client_from_config,
     create_llm_client_from_config,
 )
@@ -37,6 +39,56 @@ class TestLLMError:
         """Test raising and catching LLMError."""
         with pytest.raises(LLMError, match="test"):
             raise LLMError("test error")
+
+
+# =============================================================================
+# CONTEXT OVERFLOW HELPERS
+# =============================================================================
+
+
+class TestIsContextOverflow:
+    """Tests for _is_context_overflow helper."""
+
+    def test_detects_llamacpp_context_size_error(self):
+        err = Exception("the request exceeds the available context size (2048 tokens)")
+        assert _is_context_overflow(err) is True
+
+    def test_detects_openai_context_length(self):
+        err = Exception("maximum context length is 4096 tokens")
+        assert _is_context_overflow(err) is True
+
+    def test_detects_too_large(self):
+        err = Exception("input is too large for the model")
+        assert _is_context_overflow(err) is True
+
+    def test_ignores_unrelated_error(self):
+        err = Exception("connection refused")
+        assert _is_context_overflow(err) is False
+
+
+class TestParseActualTokens:
+    """Tests for _parse_actual_tokens helper."""
+
+    def test_parses_llamacpp_format(self):
+        err = Exception(
+            "the request (4390 tokens) exceeds the available context size (4096 tokens)"
+        )
+        assert _parse_actual_tokens(err) == 4390
+
+    def test_parses_openai_format(self):
+        err = Exception(
+            "maximum context length is 4096 tokens. "
+            "However, your messages resulted in 5000 tokens"
+        )
+        assert _parse_actual_tokens(err) == 5000
+
+    def test_returns_none_for_unrecognized(self):
+        err = Exception("context size has been exceeded")
+        assert _parse_actual_tokens(err) is None
+
+    def test_returns_none_for_unrelated_error(self):
+        err = Exception("connection refused")
+        assert _parse_actual_tokens(err) is None
 
 
 # =============================================================================
