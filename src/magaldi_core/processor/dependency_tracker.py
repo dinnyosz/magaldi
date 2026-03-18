@@ -450,17 +450,24 @@ class DependencyTracker:
         with self._lock:
             return self._current_tier
 
+    # Allow workers to slightly exceed the physical parallel slot count.
+    # llama.cpp queues excess requests efficiently, and the throughput tracker
+    # will self-correct if the overshoot hurts performance.
+    PARALLEL_OVERSHOOT = 1.2
+
     def _effective_max_workers(self, tier: int | None = None) -> int:
         """Get effective max workers for a tier, respecting parallel slot limits.
 
-        Returns min(max_num_workers, tier_parallel_limit) when tier limits are set.
+        Returns min(max_num_workers, tier_parallel_limit * PARALLEL_OVERSHOOT)
+        when tier limits are set.
         """
         if tier is None:
             tier = self._current_tier
         if self._tier_parallel_limits and tier is not None:
             parallel_limit = self._tier_parallel_limits.get(tier)
             if parallel_limit is not None:
-                return min(self._max_num_workers, parallel_limit)
+                boosted = int(parallel_limit * self.PARALLEL_OVERSHOOT)
+                return min(self._max_num_workers, boosted)
         return self._max_num_workers
 
     def get_current_max_workers(self) -> int:

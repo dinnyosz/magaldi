@@ -1210,6 +1210,14 @@ def compute_effective_base_workers(base_workers: int, total_elements: int) -> in
         cost += level_cost
         cap = level
 
+    # Boost by 50%: the budget-based cap is conservative because it assumes
+    # every level needs full statistical significance. In practice, GSS converges
+    # faster, so we allow 50% more headroom for exploration.
+    cap = int(cap * 1.5)
+
+    # Clamp to base_workers (can't exceed the original ceiling)
+    cap = min(cap, base_workers)
+
     # Floor of 3: with fewer workers there's no meaningful exploration,
     # and modern inference servers (vllm-mlx, vLLM) batch parallel requests
     # efficiently even for small element counts.
