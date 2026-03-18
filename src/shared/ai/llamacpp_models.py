@@ -6,9 +6,9 @@ gets its own preset section with a matching ctx-size.
 
 Instead of using one large context window for all requests (wasting KV cache
 memory), we create symlinks for each tier:
-  - Qwen3-4B-Q4_K_M-2k.gguf → Qwen3-4B-Q4_K_M.gguf  (ctx-size=2048)
-  - Qwen3-4B-Q4_K_M-4k.gguf → Qwen3-4B-Q4_K_M.gguf  (ctx-size=4096)
-  - Qwen3-4B-Q4_K_M-8k.gguf → Qwen3-4B-Q4_K_M.gguf  (ctx-size=8192)
+  - Qwen3-4B-Instruct-2507-Q4_K_M-2k.gguf → Qwen3-4B-Instruct-2507-Q4_K_M.gguf  (ctx-size=2048)
+  - Qwen3-4B-Instruct-2507-Q4_K_M-4k.gguf → Qwen3-4B-Instruct-2507-Q4_K_M.gguf  (ctx-size=4096)
+  - Qwen3-4B-Instruct-2507-Q4_K_M-8k.gguf → Qwen3-4B-Instruct-2507-Q4_K_M.gguf  (ctx-size=8192)
   - etc.
 
 The GGUF weights are shared via mmap — symlinks don't duplicate memory.
@@ -34,11 +34,11 @@ def get_tiered_model_name(base_model: str, num_ctx: int) -> str:
     """Get the tiered model alias name for a given context size.
 
     Args:
-        base_model: Base model name (GGUF stem, e.g., "Qwen3-4B-Q4_K_M").
+        base_model: Base model name (GGUF stem, e.g., "Qwen3-4B-Instruct-2507-Q4_K_M").
         num_ctx: Context size (will be rounded up to nearest tier).
 
     Returns:
-        Tiered model name (e.g., "Qwen3-4B-Q4_K_M-4k").
+        Tiered model name (e.g., "Qwen3-4B-Instruct-2507-Q4_K_M-4k").
     """
     tier = CONTEXT_TIERS[-1]  # Default to largest
     for t in CONTEXT_TIERS:
@@ -66,10 +66,10 @@ def get_base_model_name(tiered_model: str) -> str:
     """Extract the base model name from a tiered alias.
 
     Args:
-        tiered_model: Tiered model name (e.g., "Qwen3-4B-Q4_K_M-4k").
+        tiered_model: Tiered model name (e.g., "Qwen3-4B-Instruct-2507-Q4_K_M-4k").
 
     Returns:
-        Base model name (e.g., "Qwen3-4B-Q4_K_M").
+        Base model name (e.g., "Qwen3-4B-Instruct-2507-Q4_K_M").
     """
     return re.sub(r"-\d+k$", "", tiered_model)
 
@@ -98,7 +98,7 @@ def create_tiered_symlink(
 ) -> Path | None:
     """Create a single tiered symlink for a GGUF file.
 
-    Creates a symlink like Qwen3-4B-Q4_K_M-4k.gguf → Qwen3-4B-Q4_K_M.gguf
+    Creates a symlink like Qwen3-4B-Instruct-2507-Q4_K_M-4k.gguf → Qwen3-4B-Instruct-2507-Q4_K_M.gguf
     in the same directory as the base GGUF file.
 
     Args:
@@ -243,11 +243,11 @@ def resolve_llamacpp_model(
     No network calls needed — symlinks and presets handle the rest.
 
     Args:
-        model_name: Base model name (e.g., "Qwen3-4B-Q4_K_M").
+        model_name: Base model name (e.g., "Qwen3-4B-Instruct-2507-Q4_K_M").
         num_ctx: Desired context size.
 
     Returns:
-        Tiered model name (e.g., "Qwen3-4B-Q4_K_M-4k").
+        Tiered model name (e.g., "Qwen3-4B-Instruct-2507-Q4_K_M-4k").
         Returns base model if no num_ctx or already tiered.
     """
     if num_ctx is None:

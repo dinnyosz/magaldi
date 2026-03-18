@@ -21,7 +21,7 @@ def _get_model_display_name(model_config: ModelConfig, num_ctx: int) -> str:
 
     Returns:
         Model name with tier suffix for tiered providers (e.g., "qwen3:4b-instruct-4k"
-        for Ollama, "Qwen3-4B-Q4_K_M-4k" for llamacpp), or the original name for
+        for Ollama, "Qwen3-4B-Instruct-2507-Q4_K_M-4k" for llamacpp), or the original name for
         other providers.
     """
     if model_config.provider == "ollama":

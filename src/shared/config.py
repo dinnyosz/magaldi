@@ -77,7 +77,7 @@ class ModelConfig:
     Encapsulates everything needed to connect to and use a model.
     """
 
-    name: str  # Model name (e.g., "qwen3:4b", "Qwen3-4B-Q4_K_M")
+    name: str  # Model name (e.g., "qwen3:4b", "Qwen3-4B-Instruct-2507-Q4_K_M")
     provider: str = "ollama"  # ollama, llamacpp, vllm-mlx, lmstudio, openai, anthropic
     url: str = "http://localhost:11434"  # API endpoint
     api_key: str | None = None  # For cloud providers
@@ -191,11 +191,11 @@ class LLMConfig:
         llm:
           models:
             qwen3-4b:
-              name: Qwen3-4B-Q4_K_M
+              name: Qwen3-4B-Instruct-2507-Q4_K_M
               provider: llamacpp
               url: http://localhost:8090
               num_ctx: 32768
-              gguf: unsloth/Qwen3-4B-GGUF:Qwen3-4B-Q4_K_M.gguf
+              gguf: unsloth/Qwen3-4B-Instruct-2507-GGUF:Qwen3-4B-Instruct-2507-Q4_K_M.gguf
             qwen3-1.7b:
               name: Qwen3-1.7B-Q4_K_M
               provider: llamacpp
@@ -221,11 +221,11 @@ class LLMConfig:
     # Named model configurations
     models: dict[str, ModelConfig] = field(default_factory=lambda: {
         "qwen3-4b": ModelConfig(
-            name="Qwen3-4B-Q4_K_M",
+            name="Qwen3-4B-Instruct-2507-Q4_K_M",
             provider="llamacpp",
             url="http://localhost:8090",
             num_ctx=32768,
-            gguf="unsloth/Qwen3-4B-GGUF:Qwen3-4B-Q4_K_M.gguf",
+            gguf="unsloth/Qwen3-4B-Instruct-2507-GGUF:Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
         ),
         "qwen3-1.7b": ModelConfig(
             name="Qwen3-1.7B-Q4_K_M",

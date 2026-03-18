@@ -98,7 +98,7 @@ class TestLLMConfigDefaults:
         """Test that the referenced summarize model has correct name."""
         config = LLMConfig()
         model = config.get_summarize_model()
-        assert model.name == "Qwen3-4B-Q4_K_M"
+        assert model.name == "Qwen3-4B-Instruct-2507-Q4_K_M"
         assert model.provider == "llamacpp"
 
     def test_default_summarize_temperature(self):
@@ -141,7 +141,7 @@ class TestLLMConfigDefaults:
         """Test that the referenced variable scoring model has correct name."""
         config = LLMConfig()
         model = config.get_variable_scoring_model()
-        assert model.name == "Qwen3-4B-Q4_K_M"
+        assert model.name == "Qwen3-4B-Instruct-2507-Q4_K_M"
         assert model.provider == "llamacpp"
 
     def test_aggregation_context_size_default(self):

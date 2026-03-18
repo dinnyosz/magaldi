@@ -42,12 +42,12 @@ llm:
   models:
     # --- llama.cpp models (primary) ---
     qwen3-4b:
-      name: Qwen3-4B-Q4_K_M
+      name: Qwen3-4B-Instruct-2507-Q4_K_M
       provider: llamacpp
       url: http://localhost:8090
       num_ctx: 32768
       parallel: 4
-      gguf: unsloth/Qwen3-4B-GGUF:Qwen3-4B-Q4_K_M.gguf
+      gguf: unsloth/Qwen3-4B-Instruct-2507-GGUF:Qwen3-4B-Instruct-2507-Q4_K_M.gguf
     qwen3-1.7b:
       name: Qwen3-1.7B-Q4_K_M
       provider: llamacpp
