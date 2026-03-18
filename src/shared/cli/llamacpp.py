@@ -70,6 +70,7 @@ DEFAULT_PORT = 8090
 DEFAULT_PARALLEL = 4
 DEFAULT_MODELS_MAX = 2
 DEFAULT_CTX_SIZE = 40960
+DEFAULT_SLEEP_IDLE = 60  # seconds of idle before unloading model from memory
 
 
 # =============================================================================
@@ -275,11 +276,16 @@ def llamacpp() -> None:
     "--ctx-size", type=int, default=None,
     help=f"Default context size per slot (default: {DEFAULT_CTX_SIZE})",
 )
+@click.option(
+    "--sleep-idle", type=int, default=None,
+    help=f"Seconds of idle before unloading model from memory (default: {DEFAULT_SLEEP_IDLE}, -1 to disable)",
+)
 def llm_serve(
     port: int | None,
     parallel: int | None,
     models_max: int | None,
     ctx_size: int | None,
+    sleep_idle: int | None,
 ) -> None:
     """Start llama-server in router mode.
 
@@ -312,6 +318,7 @@ def llm_serve(
     parallel = parallel or DEFAULT_PARALLEL
     models_max = models_max or DEFAULT_MODELS_MAX
     ctx_size = ctx_size or DEFAULT_CTX_SIZE
+    sleep_idle = sleep_idle if sleep_idle is not None else DEFAULT_SLEEP_IDLE
 
     # Check if already running
     existing_pid = _get_pid(port)
@@ -381,6 +388,10 @@ def llm_serve(
         "--slots",       # expose /slots (on by default, but be explicit)
         "--metrics",     # enable /metrics (Prometheus-compatible)
         "--props",       # enable /props
+        # Auto-sleep: unload model from memory after N seconds of idle.
+        # Frees VRAM/RAM when no requests are coming in; the model reloads
+        # automatically on the next request.
+        "--sleep-idle-seconds", str(sleep_idle),
     ]
 
     # Add presets if we generated any model-specific config
@@ -409,6 +420,10 @@ def llm_serve(
     console.print("  Batch size:     2048 (batch, per-model override via presets) / 256 (ubatch, per-model override via presets)")
     console.print("  KV cache type:  q8_0 (K + V)")
     console.print("  Cache reuse:    256 tokens")
+    if sleep_idle >= 0:
+        console.print(f"  Sleep idle:     {sleep_idle}s (auto-unload after idle)")
+    else:
+        console.print("  Sleep idle:     disabled")
     console.print("  Endpoints:      slots, metrics, props")
     console.print(f"  Log:            {_logfile(port)}")
     console.print()
