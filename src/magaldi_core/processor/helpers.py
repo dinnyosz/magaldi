@@ -403,6 +403,7 @@ def _summarize_element(
     summary_cache: SummaryCache,
     llm_client: SummarizationLLMClient,
     config: ProcessingConfig,
+    num_ctx: int = 0,
 ) -> tuple[str, int, int]:
     """Generate summary for an element.
 
@@ -411,6 +412,10 @@ def _summarize_element(
         summary_cache: Cache with parent summaries.
         llm_client: LLM client for text generation.
         config: Processing configuration.
+        num_ctx: Pre-estimated context tier from compute_element_num_ctx.
+            When provided, used as the actual tier for the LLM call (so the
+            tier displayed in the CLI matches what llama.cpp/Ollama receives).
+            A debug log is emitted when the prompt-based tier would differ.
 
     Returns:
         Tuple of (summary, prompt_tokens, response_tokens).
@@ -427,11 +432,19 @@ def _summarize_element(
     max_tokens = get_max_tokens_for_element_type(
         element.element_type, default=config.summarize_max_tokens
     )
-    # Compute context tier from the actual prompt (not raw_code estimate).
-    # This is more accurate than compute_element_num_ctx because it accounts
-    # for variable-length parent context (file_summary, class_context, etc.)
-    # that the static PROMPT_OVERHEAD can underestimate for large elements.
-    num_ctx = compute_prompt_num_ctx(len(prompt), max_tokens)
+
+    # Use pre-estimated tier if provided, otherwise fall back to prompt-based
+    if num_ctx > 0:
+        # Log when prompt-based tier would differ from pre-estimate
+        prompt_based_ctx = compute_prompt_num_ctx(len(prompt), max_tokens)
+        if prompt_based_ctx != num_ctx:
+            logger.debug(
+                "Tier difference: %s %s pre-estimated=%d prompt-based=%d",
+                element.element_type, element.name, num_ctx, prompt_based_ctx,
+            )
+    else:
+        num_ctx = compute_prompt_num_ctx(len(prompt), max_tokens)
+
     raw_summary = llm_client.generate(
         prompt=prompt,
         temperature=config.summarize_temperature,
@@ -779,7 +792,7 @@ def _process_single_element(
             summary = _generate_handcrafted_summary(element, craft_reason)
         else:
             api_start = time.time()
-            summary, prompt_tokens, response_tokens = _summarize_element(element, summary_cache, llm_client, config)
+            summary, prompt_tokens, response_tokens = _summarize_element(element, summary_cache, llm_client, config, num_ctx)
             summarize_time = time.time() - api_start
 
             if prompt_tokens > num_ctx:
