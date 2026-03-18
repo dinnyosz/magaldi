@@ -285,6 +285,17 @@ def _retry_with_backoff(
     raise LLMError(f"{operation} failed after {max_retries + 1} attempts: {last_error}") from last_error
 
 
+def _is_context_overflow(error: Exception) -> bool:
+    """Check if an error indicates the input exceeds the model's context limit."""
+    msg = str(error).lower()
+    return (
+        "too large" in msg
+        or "context length" in msg
+        or "max context" in msg  # llama.cpp: "larger than the max context size"
+        or "context size" in msg  # llama.cpp: "Context size has been exceeded"
+    )
+
+
 async def _retry_with_backoff_async(
     fn: Callable[[], Awaitable[T]],
     max_retries: int = 3,
@@ -849,10 +860,19 @@ class LLMClient:
             except Exception as e:
                 debug_kwargs = {k: v for k, v in kwargs.items() if k != "messages"}
                 msg_summary = [(m.get("role"), len(m.get("content", ""))) for m in kwargs.get("messages", [])]
-                logger.warning(
-                    "LiteLLM completion failed: %s | model=%s msgs=%s kwargs=%s",
-                    e, use_model, msg_summary, debug_kwargs,
-                )
+                # Enrich context overflow errors with token estimates
+                estimated_prompt_tokens = len(prompt) // 4
+                total_estimated = estimated_prompt_tokens + max_tokens
+                if _is_context_overflow(e):
+                    logger.warning(
+                        "Context overflow: model=%s num_ctx=%s estimated_prompt=%d max_tokens=%d total=%d | %s",
+                        use_model, num_ctx, estimated_prompt_tokens, max_tokens, total_estimated, e,
+                    )
+                else:
+                    logger.warning(
+                        "LiteLLM completion failed: %s | model=%s msgs=%s kwargs=%s",
+                        e, use_model, msg_summary, debug_kwargs,
+                    )
                 raise
             return self._extract_content(response.choices[0].message, use_model)
 
@@ -928,10 +948,19 @@ class LLMClient:
                 # Log the kwargs that caused the failure (omit message content for brevity)
                 debug_kwargs = {k: v for k, v in kwargs.items() if k != "messages"}
                 msg_summary = [(m.get("role"), len(m.get("content", ""))) for m in kwargs.get("messages", [])]
-                logger.warning(
-                    "LiteLLM completion failed: %s | model=%s msgs=%s kwargs=%s",
-                    e, use_model, msg_summary, debug_kwargs,
-                )
+                # Enrich context overflow errors with token estimates
+                estimated_prompt_tokens = sum(len(m.get("content", "")) for m in messages) // 4
+                total_estimated = estimated_prompt_tokens + max_tokens
+                if _is_context_overflow(e):
+                    logger.warning(
+                        "Context overflow: model=%s num_ctx=%s estimated_prompt=%d max_tokens=%d total=%d | %s",
+                        use_model, num_ctx, estimated_prompt_tokens, max_tokens, total_estimated, e,
+                    )
+                else:
+                    logger.warning(
+                        "LiteLLM completion failed: %s | model=%s msgs=%s kwargs=%s",
+                        e, use_model, msg_summary, debug_kwargs,
+                    )
                 raise
             return self._extract_content(response.choices[0].message, use_model)
 
