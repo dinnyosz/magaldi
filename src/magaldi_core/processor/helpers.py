@@ -12,14 +12,17 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from shared.ai.context_size import compute_element_num_ctx, compute_prompt_num_ctx
+from shared.ai.context_size import (
+    CHARS_PER_TOKEN_CODE,
+    compute_element_num_ctx,
+    compute_prompt_num_ctx,
+)
 from shared.ai.embedding import (
     EmbeddingError,
     build_caller_embedding_text,
     build_code_embedding_text,
     build_summary_embedding_text,
     normalize_vector,
-    validate_context_length,
     validate_vector,
 )
 from shared.ai.prompts import get_max_tokens_for_element_type
@@ -425,7 +428,7 @@ def _summarize_element(
 
     # Build prompt with context
     prompt = build_prompt(element, parent_summaries, config.max_code_tokens)
-    prompt_tokens = len(prompt) // 4
+    prompt_tokens = len(prompt) // CHARS_PER_TOKEN_CODE
 
     # Generate summary (select model and max_tokens based on element type)
     model_config = config.get_model_for_element_type(element.element_type)

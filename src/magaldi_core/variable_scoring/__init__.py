@@ -31,13 +31,14 @@ from magaldi_core.variable_scoring.prompts import (
     SYSTEM_PROMPT,
     build_user_prompt,
 )
+from shared.ai.context_size import CHARS_PER_TOKEN_TEXT
 
 logger = logging.getLogger(__name__)
 
 # Fixed token overheads for context window budgeting.
 # token_budget represents the total context window; these are subtracted
 # to get the available space for variable content.
-_SYSTEM_PROMPT_TOKENS = len(SYSTEM_PROMPT) // 3  # ~300 (natural language ≈ 3 chars/token)
+_SYSTEM_PROMPT_TOKENS = len(SYSTEM_PROMPT) // CHARS_PER_TOKEN_TEXT
 _HEADER_TOKENS = 15  # "/no_think\nClassify these variables:"
 _OUTPUT_BASE_TOKENS = 30  # Base overhead for LLM response formatting
 _OUTPUT_PER_VAR_TOKENS = 10  # ~10 tokens per variable in output (N. KEEP/DROP\n)
@@ -49,10 +50,10 @@ _FIXED_OVERHEAD_TOKENS = _SYSTEM_PROMPT_TOKENS + _HEADER_TOKENS + _OUTPUT_BASE_T
 def _estimate_tokens(raw_code: str, file_path: str) -> int:
     """Estimate token count for a single variable entry in the prompt.
 
-    Uses ~3 chars per token (mixed code + file paths are closer to natural
+    Uses CHARS_PER_TOKEN_TEXT (mixed code + file paths are closer to natural
     language tokenization than pure code).
     """
-    return len(raw_code) // 3 + len(file_path) // 3 + 20
+    return len(raw_code) // CHARS_PER_TOKEN_TEXT + len(file_path) // CHARS_PER_TOKEN_TEXT + 20
 
 
 def _build_batches(
@@ -198,9 +199,9 @@ def _score_batch(
         {"role": "user", "content": user_prompt},
     ]
 
-    # Estimate prompt tokens (system + user message, ~4 chars/token)
+    # Estimate prompt tokens (system + user message)
     prompt_chars = len(SYSTEM_PROMPT) + len(user_prompt)
-    prompt_tokens = prompt_chars // 4
+    prompt_tokens = prompt_chars // CHARS_PER_TOKEN_TEXT
 
     # Output budget: ~10 tokens per variable (number + KEEP/DROP + newline)
     output_budget = len(batch) * 10 + 30
@@ -227,7 +228,7 @@ def _score_batch(
         )
 
     # Estimate response tokens
-    response_tokens = len(output) // 4
+    response_tokens = len(output) // CHARS_PER_TOKEN_TEXT
 
     # Capture debug output for every batch (written to log file)
     if debug_log is not None:

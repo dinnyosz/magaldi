@@ -43,6 +43,8 @@ import litellm
 from litellm import aembedding, completion, embedding
 from litellm.llms.custom_httpx.aiohttp_handler import BaseLLMAIOHTTPHandler
 
+from shared.ai.context_size import CHARS_PER_TOKEN_CODE
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
@@ -861,7 +863,7 @@ class LLMClient:
                 debug_kwargs = {k: v for k, v in kwargs.items() if k != "messages"}
                 msg_summary = [(m.get("role"), len(m.get("content", ""))) for m in kwargs.get("messages", [])]
                 # Enrich context overflow errors with token estimates
-                estimated_prompt_tokens = len(prompt) // 4
+                estimated_prompt_tokens = len(prompt) // CHARS_PER_TOKEN_CODE
                 total_estimated = estimated_prompt_tokens + max_tokens
                 if _is_context_overflow(e):
                     logger.warning(
@@ -949,7 +951,7 @@ class LLMClient:
                 debug_kwargs = {k: v for k, v in kwargs.items() if k != "messages"}
                 msg_summary = [(m.get("role"), len(m.get("content", ""))) for m in kwargs.get("messages", [])]
                 # Enrich context overflow errors with token estimates
-                estimated_prompt_tokens = sum(len(m.get("content", "")) for m in messages) // 4
+                estimated_prompt_tokens = sum(len(m.get("content", "")) for m in messages) // CHARS_PER_TOKEN_CODE
                 total_estimated = estimated_prompt_tokens + max_tokens
                 if _is_context_overflow(e):
                     logger.warning(

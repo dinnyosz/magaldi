@@ -245,13 +245,13 @@ class TestComputeAggregationNumCtx:
     """Tests for aggregation context size computation (features, glossary)."""
 
     def test_small_prompt_uses_smallest_tier(self):
-        """Small prompts should use 1024 tier.
+        """Small prompts should use 2048 tier.
 
-        1000 chars / 3.5 = 286 tokens + 200 overhead = 486 total.
-        With 2x multiplier = 972 < 1024 → 1024 tier.
+        1000 chars // 3 = 333 tokens + 200 overhead = 533 total.
+        With 2x multiplier = 1066 > 1024 → 2048 tier.
         """
         result = compute_aggregation_num_ctx(1000, task_type="feature")
-        assert result == 1024
+        assert result == 2048
 
     def test_medium_prompt_uses_4096(self):
         """Medium prompts should use 4096 tier.

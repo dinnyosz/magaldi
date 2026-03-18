@@ -20,6 +20,12 @@ if TYPE_CHECKING:
 
 T = TypeVar("T")
 
+# Characters per token estimates (single source of truth).
+# Code (identifiers, operators, braces) tokenizes at ~4 chars/token.
+# Natural language (English text, prompts) tokenizes at ~3 chars/token.
+CHARS_PER_TOKEN_CODE = 4
+CHARS_PER_TOKEN_TEXT = 3
+
 # Context size tiers (powers of 2 for memory alignment)
 CONTEXT_TIERS = [1024, 2048, 4096, 8192, 16384, 32768]
 
@@ -231,8 +237,7 @@ def compute_element_num_ctx(element_type: str, char_count: int) -> int:
     Returns:
         Optimal num_ctx value from CONTEXT_TIERS.
     """
-    # Estimate tokens: ~4 chars per token for code
-    estimated_tokens = char_count // 4
+    estimated_tokens = char_count // CHARS_PER_TOKEN_CODE
     overhead = PROMPT_OVERHEAD.get(element_type, DEFAULT_OVERHEAD)
     total_tokens = estimated_tokens + overhead
 
@@ -260,8 +265,7 @@ def compute_prompt_num_ctx(prompt_chars: int, max_tokens: int) -> int:
     Returns:
         Optimal num_ctx value from CONTEXT_TIERS.
     """
-    # Estimate tokens: ~4 chars per token for code/mixed content
-    prompt_tokens = prompt_chars // 4
+    prompt_tokens = prompt_chars // CHARS_PER_TOKEN_CODE
     total_tokens = prompt_tokens + max_tokens
 
     # Find smallest tier that fits
@@ -344,8 +348,7 @@ def compute_aggregation_num_ctx(
         - 2000 char feature summaries → ~570 tokens + 200 overhead = 770
         - With 2x multiplier → 1540 → 2048 tier
     """
-    # Estimate tokens: ~3.5 chars per token for natural language summaries
-    estimated_tokens = int(prompt_chars / 3.5)
+    estimated_tokens = prompt_chars // CHARS_PER_TOKEN_TEXT
     overhead = AGGREGATION_OVERHEAD.get(task_type, 200)
     total_tokens = int((estimated_tokens + overhead) * safety_multiplier)
 
