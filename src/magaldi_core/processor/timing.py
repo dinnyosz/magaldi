@@ -757,8 +757,10 @@ class TimingStats:
                 remaining = tot - done
                 if remaining > 0:
                     avg = self._get_avg_for_type_tier(element_type, tier, global_avg)
-                    # Use max(tier_avg, elapsed_rate) so ETA never underestimates
-                    avg = max(avg, elapsed_rate)
+                    # Only use elapsed_rate when tier-aware estimate is near-zero
+                    # (skip_ai mode). Don't override tier-scaled estimates.
+                    if avg < 0.01 and elapsed_rate > 0:
+                        avg = elapsed_rate
                     eta = remaining * avg if avg > 0 else 0.0
                     breakdown.append((element_type, tier, remaining, tot, eta))
 
@@ -798,15 +800,13 @@ class TimingStats:
                     # Cell complete — freeze to actual measured avg, skip
                     # elapsed_rate override so completed cells don't fluctuate.
                     pass
-                elif elapsed_rate > avg:
-                    # Use max(tier_avg, elapsed_rate) so ETA never underestimates.
-                    # Only mark as fallback when the original was already a fallback
-                    # or when base_time is near-zero (skip_ai: no LLM, wall_time ≈ 0).
-                    # Don't mark real LLM measurements as fallback just because
-                    # elapsed_rate > base_time (common with parallelism overhead).
-                    if is_fallback or avg < 0.01:
-                        is_fallback = True
+                elif avg < 0.01 and elapsed_rate > 0:
+                    # Only use elapsed_rate when the tier-aware estimate is
+                    # effectively zero (skip_ai mode: no LLM, base_time ≈ 0).
+                    # Don't override legitimate tier-scaled or seed estimates
+                    # with a flat global average — that erases tier differences.
                     avg = elapsed_rate
+                    is_fallback = True
 
                 # Include all items, even those with no timing data yet (avg=0)
                 breakdown.append((element_type, tier, avg, is_fallback, done, tot))
