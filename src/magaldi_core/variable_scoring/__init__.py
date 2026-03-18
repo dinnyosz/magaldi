@@ -215,8 +215,8 @@ def _score_batch(
         )
     except Exception:
         logger.warning(
-            "LLM scoring failed for batch of %d variables, defaulting to keep",
-            len(batch),
+            "LLM scoring failed for batch of %d variables (prompt_tokens=%d output_budget=%d total=%d num_ctx=%d), defaulting to keep",
+            len(batch), prompt_tokens, output_budget, prompt_tokens + output_budget, num_ctx,
             exc_info=True,
         )
         # Default: keep on error (false positives safer than false negatives)
