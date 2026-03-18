@@ -37,8 +37,8 @@ logger = logging.getLogger(__name__)
 # Fixed token overheads for context window budgeting.
 # token_budget represents the total context window; these are subtracted
 # to get the available space for variable content.
-_SYSTEM_PROMPT_TOKENS = len(SYSTEM_PROMPT) // 4  # ~226
-_HEADER_TOKENS = 10  # "/no_think\nClassify these variables:"
+_SYSTEM_PROMPT_TOKENS = len(SYSTEM_PROMPT) // 3  # ~300 (natural language ≈ 3 chars/token)
+_HEADER_TOKENS = 15  # "/no_think\nClassify these variables:"
 _OUTPUT_BASE_TOKENS = 30  # Base overhead for LLM response formatting
 _OUTPUT_PER_VAR_TOKENS = 10  # ~10 tokens per variable in output (N. KEEP/DROP\n)
 
@@ -49,10 +49,10 @@ _FIXED_OVERHEAD_TOKENS = _SYSTEM_PROMPT_TOKENS + _HEADER_TOKENS + _OUTPUT_BASE_T
 def _estimate_tokens(raw_code: str, file_path: str) -> int:
     """Estimate token count for a single variable entry in the prompt.
 
-    Uses ~4 chars per token for code + overhead for line number, file path,
-    and formatting.
+    Uses ~3 chars per token (mixed code + file paths are closer to natural
+    language tokenization than pure code).
     """
-    return len(raw_code) // 4 + len(file_path) // 4 + 20
+    return len(raw_code) // 3 + len(file_path) // 3 + 20
 
 
 def _build_batches(
