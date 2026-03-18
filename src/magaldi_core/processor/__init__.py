@@ -659,6 +659,7 @@ def process_elements(
             key = (elem.element_type, tier)
             totals_by_type_tier[key] = totals_by_type_tier.get(key, 0) + 1
         timing_stats.set_totals_by_type_tier(totals_by_type_tier)
+        timing_stats.seed_estimates()
 
     # Track completed/failed counts for progress
     completed_count = 0  # Only count actually processed elements

@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from shared.ai.context_size import TIER_SCALING_EXPONENT, is_handcrafted_tier
+from shared.ai.context_size import TIER_BASE_TIMEOUTS, TIER_SCALING_EXPONENT, is_handcrafted_tier
 from shared.ai.prompts import OUTPUT_TOKEN_BUDGETS
 from shared.throttling import ThroughputTracker
 
@@ -22,6 +22,14 @@ _SMALL_MODEL_TIER_THRESHOLD = 1024
 
 # Default ETA for handcrafted elements (embed + index only, no LLM)
 _HANDCRAFTED_DEFAULT_ETA = 0.1
+
+# Scale factor for deriving seed ETA estimates from TIER_BASE_TIMEOUTS.
+# TIER_BASE_TIMEOUTS are worst-case solo timeouts (~104s for 2k tier).
+# Real per-element time with local Ollama is ~3-5s for 2k tier → factor ~25.
+_SEED_TIMEOUT_SCALE = 25.0
+
+# Small model is roughly 2x faster than the large model for same context
+_SMALL_MODEL_SPEED_FACTOR = 0.5
 
 
 def _uses_small_model(element_type: str, tier: int) -> bool:
@@ -60,6 +68,12 @@ class TimingStats:
     total_base_by_type_tier: dict[tuple[str, int], float] = field(default_factory=dict)  # base time (throughput) for ETA
     summarize_counts_by_type_tier: dict[tuple[str, int], int] = field(default_factory=dict)
     totals_by_type_tier: dict[tuple[str, int], int] = field(default_factory=dict)
+
+    # Seed estimates: (type, tier) -> estimated avg seconds.
+    # Populated by seed_estimates() before processing starts,
+    # used as final fallback in _get_avg_for_type_tier_with_fallback().
+    # Keeps real timing data clean (no synthetic samples in the averages).
+    _seed_estimates: dict[tuple[str, int], float] = field(default_factory=dict)
 
     # Throughput tracker for throttling (5 min window for slow AI tasks)
     throughput_tracker: ThroughputTracker = field(
@@ -121,6 +135,31 @@ class TimingStats:
                     self.total_summarize_by_type_tier[key] = 0.0
                 if key not in self.total_base_by_type_tier:
                     self.total_base_by_type_tier[key] = 0.0
+
+    def seed_estimates(self) -> None:
+        """Populate seed ETA estimates for all (type, tier) combos.
+
+        Derives initial per-element time estimates from TIER_BASE_TIMEOUTS
+        so the ETA table shows values from the start instead of "-".
+        These are used as a final fallback in _get_avg_for_type_tier_with_fallback()
+        and are never mixed into real timing data.
+
+        Must be called after set_totals_by_type_tier().
+        """
+        with self._lock:
+            self._seed_estimates.clear()
+            for (element_type, tier) in self.totals_by_type_tier:
+                if is_handcrafted_tier(tier):
+                    self._seed_estimates[(element_type, tier)] = _HANDCRAFTED_DEFAULT_ETA
+                    continue
+                base_timeout = TIER_BASE_TIMEOUTS.get(tier)
+                if base_timeout is None:
+                    continue
+                seed = base_timeout / _SEED_TIMEOUT_SCALE
+                # Small model is faster than large model
+                if _uses_small_model(element_type, tier):
+                    seed *= _SMALL_MODEL_SPEED_FACTOR
+                self._seed_estimates[(element_type, tier)] = seed
 
     def record(
         self,
@@ -465,7 +504,10 @@ class TimingStats:
         1. Exact (type, tier) match
         2. Same type, closest tier with data
         3. Same model group (large/small), closest tier with data
-        4. Global average
+        4. Per-type average (same model group)
+        5. Same model group average (any type)
+        6. Cross-model fallback with scaling
+        7. Seed estimate from TIER_BASE_TIMEOUTS
 
         Must hold _lock when calling.
         """
@@ -581,7 +623,7 @@ class TimingStats:
                 tr * self.summarize_counts_by_type_tier.get((t, tr), 0)
                 for (t, tr) in same_model_all
             ) / model_count if model_count > 0 else tier
-            tier_ratio = tier / avg_tier if avg_tier > 0 else 1.0
+            tier_ratio = (tier / avg_tier) ** TIER_SCALING_EXPONENT if avg_tier > 0 else 1.0
             return base_avg * tier_ratio, True
 
         # 6. Cross-model fallback - use OTHER model group with scaling
@@ -603,12 +645,17 @@ class TimingStats:
                 tr * self.summarize_counts_by_type_tier.get((t, tr), 0)
                 for (t, tr) in other_model_all
             ) / other_count if other_count > 0 else tier
-            tier_ratio = tier / avg_tier if avg_tier > 0 else 1.0
+            tier_ratio = (tier / avg_tier) ** TIER_SCALING_EXPONENT if avg_tier > 0 else 1.0
             # Apply model scaling: small model ~2x faster than large
             model_scale = 0.5 if is_small else 2.0
             return base_avg * tier_ratio * model_scale, True
 
-        # 7. No data at all - return 0 (display will show "-")
+        # 7. Seed estimate fallback — pre-computed from TIER_BASE_TIMEOUTS
+        seed = self._seed_estimates.get(type_tier_key)
+        if seed is not None:
+            return seed, True
+
+        # 8. No data at all - return 0 (display will show "-")
         return 0.0, True
 
     def eta_seconds(self, completed: int, _total: int, _num_workers: int = 1) -> float | None:
