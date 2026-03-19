@@ -41,9 +41,10 @@ CRAFT_TEST = 1
 CRAFT_IMPORT = 2
 CRAFT_SMALL = 3
 CRAFT_DOCSTRING = 4
+CRAFT_CSS = 5
 
 # All handcrafted tier values (for iteration and membership checks)
-HANDCRAFTED_TIERS = frozenset({HANDCRAFTED_TIER, CRAFT_TEST, CRAFT_IMPORT, CRAFT_SMALL, CRAFT_DOCSTRING})
+HANDCRAFTED_TIERS = frozenset({HANDCRAFTED_TIER, CRAFT_TEST, CRAFT_IMPORT, CRAFT_SMALL, CRAFT_DOCSTRING, CRAFT_CSS})
 
 # Map craft_reason string to tier value
 CRAFT_REASON_TO_TIER = {
@@ -51,6 +52,7 @@ CRAFT_REASON_TO_TIER = {
     "import": CRAFT_IMPORT,
     "small": CRAFT_SMALL,
     "docstring": CRAFT_DOCSTRING,
+    "css": CRAFT_CSS,
 }
 
 
@@ -66,6 +68,7 @@ TIER_ABBREV[CRAFT_TEST] = "test"
 TIER_ABBREV[CRAFT_IMPORT] = "import"
 TIER_ABBREV[CRAFT_SMALL] = "small"
 TIER_ABBREV[CRAFT_DOCSTRING] = "doc"
+TIER_ABBREV[CRAFT_CSS] = "css"
 
 # Suffixes for Ollama tiered model aliases (e.g., "qwen3:4b-instruct-2k")
 TIER_SUFFIXES = {tier: f"-{tier // 1024}k" for tier in CONTEXT_TIERS}
@@ -83,6 +86,7 @@ TIER_COLORS = {
     CRAFT_IMPORT: "dim green",
     CRAFT_SMALL: "dim green",
     CRAFT_DOCSTRING: "dim green",
+    CRAFT_CSS: "dim green",
 }
 
 # Tier scaling exponent for ETA estimation fallback.

@@ -142,6 +142,7 @@ def build_eta_table(
 
     from shared.ai.context_size import (
         CONTEXT_TIERS,
+        CRAFT_CSS,
         CRAFT_DOCSTRING,
         CRAFT_IMPORT,
         CRAFT_SMALL,
@@ -151,7 +152,7 @@ def build_eta_table(
     )
     tier_abbrev = TIER_ABBREV
     # Standard tiers descending + craft sub-tiers at the end
-    craft_tiers = [CRAFT_TEST, CRAFT_IMPORT, CRAFT_SMALL, CRAFT_DOCSTRING]
+    craft_tiers = [CRAFT_TEST, CRAFT_IMPORT, CRAFT_SMALL, CRAFT_DOCSTRING, CRAFT_CSS]
     all_tiers = sorted(CONTEXT_TIERS, reverse=True) + craft_tiers
     type_colors = type_colors or {}
 
