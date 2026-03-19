@@ -5,3 +5,4 @@ exclude_directories:
   - test_repos
   - tools
   - logs
+  - plans/benchmarks
