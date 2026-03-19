@@ -52,6 +52,26 @@ SUPPORTED_EXTENSIONS: dict[str, str] = {
     ".scss": "scss",
     ".html": "html",
     ".htm": "html",
+    # Template formats (single extensions)
+    ".ejs": "ejs",
+    ".hbs": "handlebars",
+    ".handlebars": "handlebars",
+    ".gohtml": "gotemplate",
+    ".tmpl": "gotemplate",
+    ".cshtml": "razor",
+    ".heex": "heex",
+    ".erb": "erb",
+    # SFC formats
+    ".vue": "vue",
+    ".svelte": "svelte",
+}
+
+# Compound extensions that need priority over single-extension matching.
+# Checked before Path.suffix (which only returns the last extension).
+COMPOUND_EXTENSIONS: dict[str, str] = {
+    ".blade.php": "blade",
+    ".html.erb": "erb",
+    ".html.heex": "heex",
 }
 
 # Filenames (without extension) that map to a language
@@ -336,9 +356,16 @@ def _detect_shebang_language(file_path: Path) -> str | None:
 def _detect_file_language(file_path: Path) -> str | None:
     """Detect language from file extension, filename, or shebang.
 
-    Checks SUPPORTED_EXTENSIONS first, then SUPPORTED_FILENAMES for
+    Checks compound extensions first (e.g. .blade.php, .html.erb),
+    then SUPPORTED_EXTENSIONS, then SUPPORTED_FILENAMES for
     files like Dockerfile, then shebang for extensionless files.
     """
+    # Check compound extensions first (Path.suffix only returns last part)
+    name_lower = file_path.name.lower()
+    for compound_ext, lang in COMPOUND_EXTENSIONS.items():
+        if name_lower.endswith(compound_ext):
+            return lang
+
     ext = file_path.suffix.lower()
     if ext in SUPPORTED_EXTENSIONS:
         return SUPPORTED_EXTENSIONS[ext]

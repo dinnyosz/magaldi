@@ -39,6 +39,7 @@ from magaldi_core.parsers import (
     PythonParser,
     RustParser,
     SCSSParser,
+    TemplateParser,
     TomlParser,
     TreeSitterParser,
     YamlParser,
@@ -306,7 +307,9 @@ class ParsingResult:
 # =============================================================================
 
 
-PARSERS: dict[str, TreeSitterParser | PlainTextParser | CSSParser | HtmlParser] = {
+_ParserType = TreeSitterParser | PlainTextParser | CSSParser | HtmlParser | TemplateParser
+
+PARSERS: dict[str, _ParserType] = {
     "python": PythonParser(),
     "javascript": JavaScriptParser("javascript"),
     "typescript": JavaScriptParser("typescript"),
@@ -323,10 +326,18 @@ PARSERS: dict[str, TreeSitterParser | PlainTextParser | CSSParser | HtmlParser] 
     "scss": SCSSParser(),
     "html": HtmlParser(),
     "text": PlainTextParser(),
+    # Backend template formats (all use generic TemplateParser)
+    "blade": TemplateParser(),
+    "erb": TemplateParser(),
+    "ejs": TemplateParser(),
+    "handlebars": TemplateParser(),
+    "gotemplate": TemplateParser(),
+    "razor": TemplateParser(),
+    "heex": TemplateParser(),
 }
 
 
-def get_parser(language: str) -> TreeSitterParser | PlainTextParser | CSSParser | HtmlParser | None:
+def get_parser(language: str) -> _ParserType | None:
     """Get parser for language."""
     return PARSERS.get(language)
 
