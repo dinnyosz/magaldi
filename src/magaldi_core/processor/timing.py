@@ -10,8 +10,20 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from shared.ai.context_size import TIER_BASE_TIMEOUTS, TIER_SCALING_EXPONENT, is_handcrafted_tier
+from shared.ai.context_size import (
+    PROMPT_OVERHEAD,
+    TIER_BASE_TIMEOUTS,
+    TIER_SCALING_EXPONENT,
+    is_handcrafted_tier,
+)
 from shared.ai.prompts import OUTPUT_TOKEN_BUDGETS
+
+# Relative processing cost per element type.
+# LLM inference time = prefill (input) + decode (output).
+# Prefill is parallelized and near-instant; decode is autoregressive and
+# dominates wall-clock time. Weight output heavily.
+_INPUT_WEIGHT = 0.1
+_OUTPUT_WEIGHT = 0.9
 from shared.throttling import ThroughputTracker
 
 # Types that always use the small model (regardless of tier)
@@ -30,6 +42,39 @@ _SEED_TIMEOUT_SCALE = 25.0
 
 # Small model is roughly 2x faster than the large model for same context
 _SMALL_MODEL_SPEED_FACTOR = 0.5
+
+def _type_weight(element_type: str) -> float:
+    """Get relative processing cost for an element type.
+
+    Combines input overhead (PROMPT_OVERHEAD) and output budget
+    (OUTPUT_TOKEN_BUDGETS) weighted 10/90 since decode (output generation)
+    dominates LLM inference time — prefill is parallelized and near-instant.
+
+    Returns an absolute token-cost score (not a ratio).
+
+    Examples (0.1*input + 0.9*output):
+        function: 0.1*1650 + 0.9*500 = 615
+        constant: 0.1*1150 + 0.9*200 = 295  (much lighter)
+        variable: 0.1*1800 + 0.9*450 = 585
+        file:     0.1*950  + 0.9*500 = 545
+        class:    0.1*1250 + 0.9*450 = 530
+        method:   0.1*1550 + 0.9*400 = 515
+    """
+    input_cost = PROMPT_OVERHEAD.get(element_type, 1000)
+    output_cost = OUTPUT_TOKEN_BUDGETS.get(element_type, 300)
+    return _INPUT_WEIGHT * input_cost + _OUTPUT_WEIGHT * output_cost
+
+
+def _type_ratio(target_type: str, source_type: str) -> float:
+    """Get the scaling ratio when using source_type timing to estimate target_type.
+
+    Returns target_weight / source_weight so the estimate accounts for
+    different prompt sizes across element types.
+    """
+    source_weight = _type_weight(source_type)
+    if source_weight <= 0:
+        return 1.0
+    return _type_weight(target_type) / source_weight
 
 
 def _uses_small_model(element_type: str, tier: int) -> bool:
@@ -144,8 +189,15 @@ class TimingStats:
         These are used as a final fallback in _get_avg_for_type_tier_with_fallback()
         and are never mixed into real timing data.
 
+        Factors in:
+        - Tier size (from TIER_BASE_TIMEOUTS)
+        - Model speed (small ~2x faster than large)
+        - Element type cost (output-heavy types like function/file take longer
+          than light types like constant/type_alias)
+
         Must be called after set_totals_by_type_tier().
         """
+        baseline_weight = _type_weight("function")
         with self._lock:
             self._seed_estimates.clear()
             for (element_type, tier) in self.totals_by_type_tier:
@@ -159,6 +211,9 @@ class TimingStats:
                 # Small model is faster than large model
                 if _uses_small_model(element_type, tier):
                     seed *= _SMALL_MODEL_SPEED_FACTOR
+                # Adjust for element type cost relative to function baseline
+                type_adj = _type_weight(element_type) / baseline_weight if baseline_weight > 0 else 1.0
+                seed *= type_adj
                 self._seed_estimates[(element_type, tier)] = seed
 
     def record(
@@ -570,6 +625,7 @@ class TimingStats:
         # 3. Same model group — match by actual model used, not just type
         # A file@1024 uses the small model, so it should look at other small-model
         # (type, tier) combos for fallback, not at class@4096 which uses the large model.
+        # Applies type_ratio to adjust for different prompt overhead across types.
 
         same_model_tiers = [
             (t, tr) for (t, tr) in self.summarize_counts_by_type_tier
@@ -585,10 +641,17 @@ class TimingStats:
             total_count = sum(self.summarize_counts_by_type_tier[key] for key in closest_items)
             base_avg = total_time / total_count
             # Scale by tier ratio (use first closest tier for ratio)
-            # Use empirically-derived exponent for sub-linear scaling
             closest_tier = closest_items[0][1]
             tier_ratio = (tier / closest_tier) ** TIER_SCALING_EXPONENT if closest_tier > 0 else 1.0
-            return base_avg * tier_ratio, True
+            # Adjust for type differences (e.g. constant is lighter than function)
+            # Use weighted average source type weight
+            source_weight_sum = sum(
+                _type_weight(t) * self.summarize_counts_by_type_tier[(t, tr)]
+                for (t, tr) in closest_items
+            )
+            avg_source_weight = source_weight_sum / total_count if total_count > 0 else _type_weight(element_type)
+            type_adj = _type_weight(element_type) / avg_source_weight if avg_source_weight > 0 else 1.0
+            return base_avg * tier_ratio * type_adj, True
 
         # 4. Fall back to per-type average — only same-model tiers
         same_type_any_tier = [
@@ -605,7 +668,8 @@ class TimingStats:
             return type_wall_total / type_count, True
 
         # 5. Fall back to same model group average (any type, any tier in same group)
-        # This is better than global average which mixes large/small models
+        # This is better than global average which mixes large/small models.
+        # Adjusts for type differences via prompt overhead + output budget weights.
         same_model_all = [
             (t, tr) for (t, tr) in self.total_base_by_type_tier
             if _uses_small_model(t, tr) == is_small
@@ -624,10 +688,18 @@ class TimingStats:
                 for (t, tr) in same_model_all
             ) / model_count if model_count > 0 else tier
             tier_ratio = (tier / avg_tier) ** TIER_SCALING_EXPONENT if avg_tier > 0 else 1.0
-            return base_avg * tier_ratio, True
+            # Adjust for type differences
+            source_weight_sum = sum(
+                _type_weight(t) * self.summarize_counts_by_type_tier.get((t, tr), 0)
+                for (t, tr) in same_model_all
+            )
+            avg_source_weight = source_weight_sum / model_count if model_count > 0 else _type_weight(element_type)
+            type_adj = _type_weight(element_type) / avg_source_weight if avg_source_weight > 0 else 1.0
+            return base_avg * tier_ratio * type_adj, True
 
         # 6. Cross-model fallback - use OTHER model group with scaling
-        # Small model (~1.7B) is roughly 2x faster than large model (~4B) for same context
+        # Small model (~1.7B) is roughly 2x faster than large model (~4B) for same context.
+        # Also adjusts for type differences.
         other_model_all = [
             (t, tr) for (t, tr) in self.total_base_by_type_tier
             if _uses_small_model(t, tr) != is_small
@@ -648,7 +720,14 @@ class TimingStats:
             tier_ratio = (tier / avg_tier) ** TIER_SCALING_EXPONENT if avg_tier > 0 else 1.0
             # Apply model scaling: small model ~2x faster than large
             model_scale = 0.5 if is_small else 2.0
-            return base_avg * tier_ratio * model_scale, True
+            # Adjust for type differences
+            source_weight_sum = sum(
+                _type_weight(t) * self.summarize_counts_by_type_tier.get((t, tr), 0)
+                for (t, tr) in other_model_all
+            )
+            avg_source_weight = source_weight_sum / other_count if other_count > 0 else _type_weight(element_type)
+            type_adj = _type_weight(element_type) / avg_source_weight if avg_source_weight > 0 else 1.0
+            return base_avg * tier_ratio * model_scale * type_adj, True
 
         # 7. Seed estimate fallback — pre-computed from TIER_BASE_TIMEOUTS
         seed = self._seed_estimates.get(type_tier_key)

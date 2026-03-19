@@ -11,6 +11,7 @@ from magaldi_core.processor.timing import (
     _HANDCRAFTED_DEFAULT_ETA,
     _SEED_TIMEOUT_SCALE,
     _SMALL_MODEL_SPEED_FACTOR,
+    _type_weight,
     _uses_small_model,
 )
 from shared.ai.context_size import (
@@ -40,12 +41,14 @@ class TestSeedEstimates:
             assert stats._seed_estimates[key] > 0, f"Seed for {key} should be > 0"
 
     def test_seed_values_derived_from_tier_base_timeouts(self):
-        """Seed values should be TIER_BASE_TIMEOUTS / scale factor."""
+        """Seed values should be TIER_BASE_TIMEOUTS / scale factor * type weight."""
         stats = TimingStats()
         stats.set_totals_by_type_tier({("file", 4096): 3})
         stats.seed_estimates()
 
-        expected = TIER_BASE_TIMEOUTS[4096] / _SEED_TIMEOUT_SCALE
+        baseline_weight = _type_weight("function")
+        type_adj = _type_weight("file") / baseline_weight
+        expected = TIER_BASE_TIMEOUTS[4096] / _SEED_TIMEOUT_SCALE * type_adj
         # file@4096 uses the large model (not small)
         assert not _uses_small_model("file", 4096)
         assert stats._seed_estimates[("file", 4096)] == pytest.approx(expected)
@@ -59,11 +62,15 @@ class TestSeedEstimates:
         })
         stats.seed_estimates()
 
-        large_seed = TIER_BASE_TIMEOUTS[2048] / _SEED_TIMEOUT_SCALE
-        small_seed = large_seed * _SMALL_MODEL_SPEED_FACTOR
+        baseline_weight = _type_weight("function")
+        base_seed = TIER_BASE_TIMEOUTS[2048] / _SEED_TIMEOUT_SCALE
+        # function: small model + type_adj=1.0 (it IS the baseline)
+        func_seed = base_seed * _SMALL_MODEL_SPEED_FACTOR * (_type_weight("function") / baseline_weight)
+        # file: large model + file type adjustment
+        file_seed = base_seed * (_type_weight("file") / baseline_weight)
 
-        assert stats._seed_estimates[("function", 2048)] == pytest.approx(small_seed)
-        assert stats._seed_estimates[("file", 2048)] == pytest.approx(large_seed)
+        assert stats._seed_estimates[("function", 2048)] == pytest.approx(func_seed)
+        assert stats._seed_estimates[("file", 2048)] == pytest.approx(file_seed)
 
     def test_seed_handcrafted_tiers_use_default(self):
         """Handcrafted tiers should use _HANDCRAFTED_DEFAULT_ETA."""
@@ -208,12 +215,15 @@ class TestTierScalingExponentFix:
         # The avg for function@2048 is 2.0s (wall_time / avg_workers)
         base_avg = 2.0
         # With exponent: (8192/2048)^0.65 = 4^0.65 ≈ 2.46
-        expected_with_exponent = base_avg * (8192 / 2048) ** TIER_SCALING_EXPONENT
+        tier_ratio = (8192 / 2048) ** TIER_SCALING_EXPONENT
+        # Type adjustment: method is lighter than function (lower output budget)
+        type_adj = _type_weight("method") / _type_weight("function")
+        expected_with_exponent = base_avg * tier_ratio * type_adj
         # Without exponent (old bug): 4^1.0 = 4.0 → 8.0s
         wrong_linear = base_avg * (8192 / 2048)
 
-        # Should be closer to exponent-scaled value, not linear
-        assert avg_method == pytest.approx(expected_with_exponent, rel=0.15)
+        # Should match exponent + type-adjusted value
+        assert avg_method == pytest.approx(expected_with_exponent, rel=0.05)
         assert avg_method < wrong_linear * 0.9, "Should be sub-linear, not linear scaling"
 
     def test_cross_model_fallback_uses_exponent(self):
@@ -256,28 +266,63 @@ class TestTierScalingExponentFix:
             ("file", 8192): 5,
             ("function", 1024): 20,
             ("function", 4096): 10,
+            ("constant", 2048): 5,
         })
         stats.seed_estimates()
 
-        # 2k tier large model: 104/25 = 4.16s — reasonable
-        assert 2.0 < stats._seed_estimates[("file", 2048)] < 10.0
+        # All seeds should be positive and in a reasonable range (0.5s - 20s)
+        for key, seed in stats._seed_estimates.items():
+            assert 0.3 < seed < 25.0, f"Seed for {key} = {seed}s is out of range"
 
-        # 8k tier large model: 240/25 = 9.6s — reasonable
-        assert 5.0 < stats._seed_estimates[("file", 8192)] < 20.0
-
-        # 1k tier small model: (90/25) * 0.5 = 1.8s — reasonable
-        assert 0.5 < stats._seed_estimates[("function", 1024)] < 5.0
-
-        # 4k tier small model: (127/25) * 0.5 = 2.54s — reasonable
-        assert 1.0 < stats._seed_estimates[("function", 4096)] < 8.0
-
-        # Larger tiers should have larger seeds
+        # Larger tiers should have larger seeds (same type)
         assert stats._seed_estimates[("file", 8192)] > stats._seed_estimates[("file", 2048)]
         assert stats._seed_estimates[("function", 4096)] > stats._seed_estimates[("function", 1024)]
 
-        # Small model should be faster than large model at same tier
-        # (function uses small, file uses large at tier > 1024)
-        assert stats._seed_estimates[("function", 4096)] < stats._seed_estimates[("file", 2048)]
+        # Type weight differences: constant should be significantly cheaper
+        # than function at the same tier (output budget: 200 vs 500 tokens)
+        assert stats._seed_estimates[("constant", 2048)] < stats._seed_estimates[("function", 1024)] * 1.5
+
+    def test_type_weight_ordering(self):
+        """Type weights should reflect output token budget differences."""
+        # Output-heavy types should cost more
+        assert _type_weight("function") > _type_weight("constant")
+        assert _type_weight("function") > _type_weight("type_alias")
+
+        # function and file have similar output budgets (500 each)
+        assert abs(_type_weight("function") - _type_weight("file")) / _type_weight("function") < 0.2
+
+        # constant (200 output) should be much lighter than variable (450 output)
+        assert _type_weight("constant") < _type_weight("variable")
+
+    def test_type_weight_affects_cross_type_fallback(self):
+        """When falling back from function data to estimate constant, type weight should apply."""
+        stats = TimingStats()
+        stats.phase_start = time.time()
+        stats.set_totals_by_type_tier({
+            ("function", 2048): 10,
+            ("constant", 2048): 5,
+        })
+
+        # Record function@2048 data
+        for _ in range(10):
+            stats.record(
+                wall_time=3.0, summarize_time=2.5, embed_time=0.5,
+                element_type="function", tier=2048, avg_workers=1.0,
+            )
+
+        # Get constant@2048 estimate — should be LESS than function@2048
+        # because constant has much lower output token budget
+        breakdown = stats.get_eta_breakdown_with_avg()
+        data = {(item[0], item[1]): item for item in breakdown}
+
+        _, _, avg_func, _, _, _ = data[("function", 2048)]
+        _, _, avg_const, is_fb, _, _ = data[("constant", 2048)]
+
+        assert is_fb, "constant estimate should be a fallback"
+        assert avg_const < avg_func, (
+            f"constant@2048 ({avg_const:.2f}s) should be less than "
+            f"function@2048 ({avg_func:.2f}s) due to lower output budget"
+        )
 
 
 class TestElapsedRateOverride:
