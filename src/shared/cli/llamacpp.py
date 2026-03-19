@@ -71,6 +71,8 @@ DEFAULT_PARALLEL = 4
 DEFAULT_MODELS_MAX = 2
 DEFAULT_CTX_SIZE = 40960
 DEFAULT_SLEEP_IDLE = 60  # seconds of idle before unloading model from memory
+DEFAULT_BATCH_SIZE = 2048
+DEFAULT_UBATCH_SIZE = 512
 
 
 # =============================================================================
@@ -166,11 +168,11 @@ def _generate_presets(llm_config: LLMConfig, create_symlinks: bool = True) -> Pa
         # override per-model preset values. Embedding models need batch-size
         # = 12288 (pooling requires full input in one batch), and that override
         # only works when the global default comes from the preset, not CLI.
-        "batch-size": "2048",
-        # ubatch=256 optimizes prefill on Apple Silicon (Metal saturates
-        # earlier on smaller matrix multiplications).
+        "batch-size": str(DEFAULT_BATCH_SIZE),
+        # ubatch=512 for better GPU utilization during prefill-heavy batch
+        # workloads (fewer kernel launches per prompt evaluation).
         # Embedding models override this to 12288 (pooling needs full input).
-        "ubatch-size": "256",
+        "ubatch-size": str(DEFAULT_UBATCH_SIZE),
     }
 
     for cfg in _get_llamacpp_models(llm_config):
@@ -420,9 +422,9 @@ def llm_serve(
     console.print("  Flash attention: on")
     console.print("  GPU layers:     99 (full offload)")
     console.print("  KV unified:     on (shared cache pool per model)")
-    console.print("  Batch size:     2048 (batch, per-model override via presets) / 256 (ubatch, per-model override via presets)")
+    console.print(f"  Batch size:     {DEFAULT_BATCH_SIZE} (batch) / {DEFAULT_UBATCH_SIZE} (ubatch), per-model override via presets")
     console.print("  KV cache type:  q8_0 (K + V)")
-    console.print("  Cache reuse:    256 tokens")
+    console.print("  Cache reuse:    off")
     if sleep_idle >= 0:
         console.print(f"  Sleep idle:     {sleep_idle}s (auto-unload after idle)")
     else:
