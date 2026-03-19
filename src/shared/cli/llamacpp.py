@@ -376,6 +376,7 @@ def llm_serve(
         # Defaults: --cache-reuse 0 (off), --ctx-checkpoints 8.
         "--cache-reuse", "0",
         "--ctx-checkpoints", "1",
+        "--cache-ram", "0",
         # Disable thinking globally — Qwen3 thinks by default, wasting
         # 2-5× tokens on <think> reasoning before producing actual output.
         # --reasoning off: disables thinking in the chat template (the actual switch)
