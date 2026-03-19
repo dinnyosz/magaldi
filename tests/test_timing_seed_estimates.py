@@ -216,13 +216,12 @@ class TestTierScalingExponentFix:
         base_avg = 2.0
         # With exponent: (8192/2048)^0.65 = 4^0.65 ≈ 2.46
         tier_ratio = (8192 / 2048) ** TIER_SCALING_EXPONENT
-        # Type adjustment: method is lighter than function (lower output budget)
-        type_adj = _type_weight("method") / _type_weight("function")
-        expected_with_exponent = base_avg * tier_ratio * type_adj
+        # No type adjustment in fallback steps (real data is better signal)
+        expected_with_exponent = base_avg * tier_ratio
         # Without exponent (old bug): 4^1.0 = 4.0 → 8.0s
         wrong_linear = base_avg * (8192 / 2048)
 
-        # Should match exponent + type-adjusted value
+        # Should match exponent value (no type adjustment)
         assert avg_method == pytest.approx(expected_with_exponent, rel=0.05)
         assert avg_method < wrong_linear * 0.9, "Should be sub-linear, not linear scaling"
 
@@ -288,41 +287,62 @@ class TestTierScalingExponentFix:
         assert _type_weight("function") > _type_weight("constant")
         assert _type_weight("function") > _type_weight("type_alias")
 
-        # function and file have similar output budgets (500 each)
-        assert abs(_type_weight("function") - _type_weight("file")) / _type_weight("function") < 0.2
+        # file has lower PROMPT_OVERHEAD than function (less parent context overhead)
+        assert _type_weight("file") < _type_weight("function")
 
-        # constant (200 output) should be much lighter than variable (450 output)
+        # constant should be lighter than variable
         assert _type_weight("constant") < _type_weight("variable")
 
-    def test_type_weight_affects_cross_type_fallback(self):
-        """When falling back from function data to estimate constant, type weight should apply."""
+    def test_type_weight_affects_seed_estimates(self):
+        """Seed estimates should reflect type weight differences."""
         stats = TimingStats()
         stats.phase_start = time.time()
         stats.set_totals_by_type_tier({
             ("function", 2048): 10,
             ("constant", 2048): 5,
         })
+        stats.seed_estimates()
 
-        # Record function@2048 data
-        for _ in range(10):
+        # Seed for constant should be less than seed for function
+        # because constant has much lower output token budget
+        func_seed = stats._seed_estimates[("function", 2048)]
+        const_seed = stats._seed_estimates[("constant", 2048)]
+
+        assert const_seed < func_seed, (
+            f"constant@2048 seed ({const_seed:.2f}s) should be less than "
+            f"function@2048 seed ({func_seed:.2f}s) due to lower output budget"
+        )
+
+    def test_seed_preferred_over_cross_model_fallback(self):
+        """Seeds should be used before cross-model fallback to avoid file data poisoning."""
+        stats = TimingStats()
+        stats.phase_start = time.time()
+
+        # Only large-model data exists (file@8192)
+        # Need estimate for function@2048 (small model)
+        stats.set_totals_by_type_tier({
+            ("file", 8192): 5,
+            ("function", 2048): 100,
+        })
+        stats.seed_estimates()
+
+        # Record file@8192 data (large model, ~12s per element)
+        for _ in range(5):
             stats.record(
-                wall_time=3.0, summarize_time=2.5, embed_time=0.5,
-                element_type="function", tier=2048, avg_workers=1.0,
+                wall_time=12.0, summarize_time=10.0, embed_time=2.0,
+                element_type="file", tier=8192, avg_workers=1.0,
             )
 
-        # Get constant@2048 estimate — should be LESS than function@2048
-        # because constant has much lower output token budget
+        # function@2048 should use seed estimate, NOT cross-model fallback
+        # Cross-model would give: 12.0 * (2048/8192)^0.65 * 0.5 ≈ 2.6s
+        # which is plausible but seeds are more calibrated per type
         breakdown = stats.get_eta_breakdown_with_avg()
         data = {(item[0], item[1]): item for item in breakdown}
 
-        _, _, avg_func, _, _, _ = data[("function", 2048)]
-        _, _, avg_const, is_fb, _, _ = data[("constant", 2048)]
-
-        assert is_fb, "constant estimate should be a fallback"
-        assert avg_const < avg_func, (
-            f"constant@2048 ({avg_const:.2f}s) should be less than "
-            f"function@2048 ({avg_func:.2f}s) due to lower output budget"
-        )
+        _, _, avg_func, is_fb, _, _ = data[("function", 2048)]
+        assert is_fb, "function estimate should be a fallback"
+        # Should match the seed, not cross-model extrapolation
+        assert avg_func == pytest.approx(stats._seed_estimates[("function", 2048)], rel=0.01)
 
 
 class TestElapsedRateOverride:

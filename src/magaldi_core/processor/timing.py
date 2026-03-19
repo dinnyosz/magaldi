@@ -17,13 +17,6 @@ from shared.ai.context_size import (
     is_handcrafted_tier,
 )
 from shared.ai.prompts import OUTPUT_TOKEN_BUDGETS
-
-# Relative processing cost per element type.
-# LLM inference time = prefill (input) + decode (output).
-# Prefill is parallelized and near-instant; decode is autoregressive and
-# dominates wall-clock time. Weight output heavily.
-_INPUT_WEIGHT = 0.1
-_OUTPUT_WEIGHT = 0.9
 from shared.throttling import ThroughputTracker
 
 # Types that always use the small model (regardless of tier)
@@ -46,35 +39,23 @@ _SMALL_MODEL_SPEED_FACTOR = 0.5
 def _type_weight(element_type: str) -> float:
     """Get relative processing cost for an element type.
 
-    Combines input overhead (PROMPT_OVERHEAD) and output budget
-    (OUTPUT_TOKEN_BUDGETS) weighted 10/90 since decode (output generation)
-    dominates LLM inference time — prefill is parallelized and near-instant.
+    Uses PROMPT_OVERHEAD which includes system prompt + user template +
+    parent context + output budget — the total token cost of processing
+    an element (excluding raw code, which is captured by the tier).
 
-    Returns an absolute token-cost score (not a ratio).
+    Used only for seed estimates (before real data exists) to differentiate
+    between element types. NOT used in the fallback chain where real timing
+    data from other types provides a better signal.
 
-    Examples (0.1*input + 0.9*output):
-        function: 0.1*1650 + 0.9*500 = 615
-        constant: 0.1*1150 + 0.9*200 = 295  (much lighter)
-        variable: 0.1*1800 + 0.9*450 = 585
-        file:     0.1*950  + 0.9*500 = 545
-        class:    0.1*1250 + 0.9*450 = 530
-        method:   0.1*1550 + 0.9*400 = 515
+    Examples:
+        function: 1650  (heavy: large prompt + 500 output budget)
+        method:   1550
+        variable: 1800  (heaviest: deep parent context)
+        constant: 1150  (lighter: small output budget)
+        file:      950  (lightest LLM type: no parent context)
+        class:    1250
     """
-    input_cost = PROMPT_OVERHEAD.get(element_type, 1000)
-    output_cost = OUTPUT_TOKEN_BUDGETS.get(element_type, 300)
-    return _INPUT_WEIGHT * input_cost + _OUTPUT_WEIGHT * output_cost
-
-
-def _type_ratio(target_type: str, source_type: str) -> float:
-    """Get the scaling ratio when using source_type timing to estimate target_type.
-
-    Returns target_weight / source_weight so the estimate accounts for
-    different prompt sizes across element types.
-    """
-    source_weight = _type_weight(source_type)
-    if source_weight <= 0:
-        return 1.0
-    return _type_weight(target_type) / source_weight
+    return float(PROMPT_OVERHEAD.get(element_type, 1000))
 
 
 def _uses_small_model(element_type: str, tier: int) -> bool:
@@ -561,8 +542,8 @@ class TimingStats:
         3. Same model group (large/small), closest tier with data
         4. Per-type average (same model group)
         5. Same model group average (any type)
-        6. Cross-model fallback with scaling
-        7. Seed estimate from TIER_BASE_TIMEOUTS
+        6. Seed estimate from TIER_BASE_TIMEOUTS (preferred over cross-model)
+        7. Cross-model fallback with scaling (last resort)
 
         Must hold _lock when calling.
         """
@@ -625,7 +606,9 @@ class TimingStats:
         # 3. Same model group — match by actual model used, not just type
         # A file@1024 uses the small model, so it should look at other small-model
         # (type, tier) combos for fallback, not at class@4096 which uses the large model.
-        # Applies type_ratio to adjust for different prompt overhead across types.
+        # No type adjustment: real timing data from other types is a better signal
+        # than theoretical weights (e.g. file@8k is 2.6x slower than function@8k
+        # despite similar token budgets — code size dominates, not overhead).
 
         same_model_tiers = [
             (t, tr) for (t, tr) in self.summarize_counts_by_type_tier
@@ -643,15 +626,7 @@ class TimingStats:
             # Scale by tier ratio (use first closest tier for ratio)
             closest_tier = closest_items[0][1]
             tier_ratio = (tier / closest_tier) ** TIER_SCALING_EXPONENT if closest_tier > 0 else 1.0
-            # Adjust for type differences (e.g. constant is lighter than function)
-            # Use weighted average source type weight
-            source_weight_sum = sum(
-                _type_weight(t) * self.summarize_counts_by_type_tier[(t, tr)]
-                for (t, tr) in closest_items
-            )
-            avg_source_weight = source_weight_sum / total_count if total_count > 0 else _type_weight(element_type)
-            type_adj = _type_weight(element_type) / avg_source_weight if avg_source_weight > 0 else 1.0
-            return base_avg * tier_ratio * type_adj, True
+            return base_avg * tier_ratio, True
 
         # 4. Fall back to per-type average — only same-model tiers
         same_type_any_tier = [
@@ -669,7 +644,6 @@ class TimingStats:
 
         # 5. Fall back to same model group average (any type, any tier in same group)
         # This is better than global average which mixes large/small models.
-        # Adjusts for type differences via prompt overhead + output budget weights.
         same_model_all = [
             (t, tr) for (t, tr) in self.total_base_by_type_tier
             if _uses_small_model(t, tr) == is_small
@@ -688,18 +662,19 @@ class TimingStats:
                 for (t, tr) in same_model_all
             ) / model_count if model_count > 0 else tier
             tier_ratio = (tier / avg_tier) ** TIER_SCALING_EXPONENT if avg_tier > 0 else 1.0
-            # Adjust for type differences
-            source_weight_sum = sum(
-                _type_weight(t) * self.summarize_counts_by_type_tier.get((t, tr), 0)
-                for (t, tr) in same_model_all
-            )
-            avg_source_weight = source_weight_sum / model_count if model_count > 0 else _type_weight(element_type)
-            type_adj = _type_weight(element_type) / avg_source_weight if avg_source_weight > 0 else 1.0
-            return base_avg * tier_ratio * type_adj, True
+            return base_avg * tier_ratio, True
 
-        # 6. Cross-model fallback - use OTHER model group with scaling
-        # Small model (~1.7B) is roughly 2x faster than large model (~4B) for same context.
-        # Also adjusts for type differences.
+        # 6. Seed estimate — pre-computed from TIER_BASE_TIMEOUTS with type weight.
+        # Preferred over cross-model fallback because seeds are calibrated per
+        # (type, tier) while cross-model extrapolates from a different model
+        # group (e.g. file@8k on large model → function@2k on small model),
+        # which produces wildly wrong estimates (40h vs 2h actual).
+        seed = self._seed_estimates.get(type_tier_key)
+        if seed is not None:
+            return seed, True
+
+        # 7. Cross-model fallback - use OTHER model group with scaling
+        # Last resort: only used when no seeds exist (e.g. skip_ai mode).
         other_model_all = [
             (t, tr) for (t, tr) in self.total_base_by_type_tier
             if _uses_small_model(t, tr) != is_small
@@ -720,19 +695,7 @@ class TimingStats:
             tier_ratio = (tier / avg_tier) ** TIER_SCALING_EXPONENT if avg_tier > 0 else 1.0
             # Apply model scaling: small model ~2x faster than large
             model_scale = 0.5 if is_small else 2.0
-            # Adjust for type differences
-            source_weight_sum = sum(
-                _type_weight(t) * self.summarize_counts_by_type_tier.get((t, tr), 0)
-                for (t, tr) in other_model_all
-            )
-            avg_source_weight = source_weight_sum / other_count if other_count > 0 else _type_weight(element_type)
-            type_adj = _type_weight(element_type) / avg_source_weight if avg_source_weight > 0 else 1.0
-            return base_avg * tier_ratio * model_scale * type_adj, True
-
-        # 7. Seed estimate fallback — pre-computed from TIER_BASE_TIMEOUTS
-        seed = self._seed_estimates.get(type_tier_key)
-        if seed is not None:
-            return seed, True
+            return base_avg * tier_ratio * model_scale, True
 
         # 8. No data at all - return 0 (display will show "-")
         return 0.0, True
@@ -785,11 +748,15 @@ class TimingStats:
                     if remaining > 0 and avg > 0:
                         total_work_time += remaining * avg
 
-            # Elapsed-rate fallback: when items are near-instant (skip_ai),
-            # base_time ≈ 0 but wall-clock throughput reflects real overhead
-            # (indexing I/O, thread scheduling, futures management).
-            # Use max(tier_eta, elapsed_eta) so the ETA never underestimates.
-            elapsed_eta = 0.0
+            # Elapsed-rate fallback: only used when tier-based estimate is
+            # near-zero (skip_ai mode where base_time ≈ 0).
+            # NOT used as max() with tier-based estimates — that causes massive
+            # overestimates early on when few elements are done (e.g. 2 files
+            # in 44s → elapsed_rate 22s/elem × 17k remaining = 106 hours).
+            if total_work_time > 0:
+                return total_work_time
+
+            # Tier-based estimate is zero — fall back to elapsed rate
             if self.phase_start > 0:
                 total_done = sum(self.summarize_counts_by_type_tier.values())
                 total_remaining = (
@@ -797,15 +764,9 @@ class TimingStats:
                 )
                 elapsed = self.elapsed
                 if total_done > 0 and total_remaining > 0 and elapsed > 0:
-                    elapsed_eta = (elapsed / total_done) * total_remaining
+                    return (elapsed / total_done) * total_remaining
 
-            if total_work_time <= 0 and elapsed_eta <= 0:
-                return None
-
-            # Use whichever is larger: tier-based or elapsed-rate.
-            # For LLM workloads, tier-based dominates (correct).
-            # For skip_ai, elapsed-rate dominates (correct).
-            return max(total_work_time, elapsed_eta)
+            return None
 
     def get_eta_breakdown(self, _num_workers: int = 1) -> list[tuple[str, int, int, int, float]]:
         """Get ETA breakdown per (type, tier) for display.
