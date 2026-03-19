@@ -209,6 +209,72 @@ class TestDocumentSections:
 
 
 # =============================================================================
+# CSS CLASSES AND IDS EXTRACTION
+# =============================================================================
+
+
+class TestCssClassesAndIds:
+    def test_classes_extracted(self, parser, file_info):
+        html = '<div class="container"><p class="text-lg bold">Hi</p></div>'
+        elements = _parse(parser, file_info, html)
+        metrics = elements[0].code_metrics
+        assert metrics is not None
+        assert "css_classes" in metrics
+        assert "container" in metrics["css_classes"]
+        assert "text-lg" in metrics["css_classes"]
+        assert "bold" in metrics["css_classes"]
+
+    def test_ids_extracted(self, parser, file_info):
+        html = '<div id="root"><section id="features">content</section></div>'
+        elements = _parse(parser, file_info, html)
+        metrics = elements[0].code_metrics
+        assert metrics is not None
+        assert "css_ids" in metrics
+        assert "root" in metrics["css_ids"]
+        assert "features" in metrics["css_ids"]
+
+    def test_classes_and_ids_together(self, parser, file_info):
+        html = '<div id="app" class="wrapper"><nav class="sidebar">menu</nav></div>'
+        elements = _parse(parser, file_info, html)
+        metrics = elements[0].code_metrics
+        assert "css_classes" in metrics
+        assert "css_ids" in metrics
+        assert "wrapper" in metrics["css_classes"]
+        assert "sidebar" in metrics["css_classes"]
+        assert "app" in metrics["css_ids"]
+
+    def test_duplicate_classes_deduplicated(self, parser, file_info):
+        html = '<div class="btn"><a class="btn">link</a></div>'
+        elements = _parse(parser, file_info, html)
+        classes = elements[0].code_metrics["css_classes"]
+        assert classes.count("btn") == 1
+
+    def test_classes_sorted(self, parser, file_info):
+        html = '<div class="zebra alpha mango">text</div>'
+        elements = _parse(parser, file_info, html)
+        classes = elements[0].code_metrics["css_classes"]
+        assert classes == sorted(classes)
+
+    def test_no_metrics_for_plain_html(self, parser, file_info):
+        html = "<p>No classes or IDs here</p>"
+        elements = _parse(parser, file_info, html)
+        assert not elements[0].code_metrics
+
+    def test_no_metrics_for_empty(self, parser, file_info):
+        elements = _parse(parser, file_info, "")
+        assert not elements[0].code_metrics
+
+    def test_tailwind_classes_extracted(self, parser, file_info):
+        """Real-world Tailwind CSS classes are captured."""
+        html = '<div class="flex items-center space-x-4 bg-blue-500 hover:bg-blue-700 p-4">content</div>'
+        elements = _parse(parser, file_info, html)
+        classes = elements[0].code_metrics["css_classes"]
+        assert "flex" in classes
+        assert "bg-blue-500" in classes
+        assert "hover:bg-blue-700" in classes
+
+
+# =============================================================================
 # SIZE REDUCTION
 # =============================================================================
 
