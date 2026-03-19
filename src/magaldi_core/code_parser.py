@@ -29,6 +29,7 @@ from magaldi_core.parsers import (
     Call,
     CodeElement,
     DockerfileParser,
+    HtmlParser,
     Import,
     JavaParser,
     JavaScriptParser,
@@ -305,7 +306,7 @@ class ParsingResult:
 # =============================================================================
 
 
-PARSERS: dict[str, TreeSitterParser | PlainTextParser | CSSParser] = {
+PARSERS: dict[str, TreeSitterParser | PlainTextParser | CSSParser | HtmlParser] = {
     "python": PythonParser(),
     "javascript": JavaScriptParser("javascript"),
     "typescript": JavaScriptParser("typescript"),
@@ -320,11 +321,12 @@ PARSERS: dict[str, TreeSitterParser | PlainTextParser | CSSParser] = {
     "bash": BashParser(),
     "css": CSSParser(),
     "scss": SCSSParser(),
+    "html": HtmlParser(),
     "text": PlainTextParser(),
 }
 
 
-def get_parser(language: str) -> TreeSitterParser | PlainTextParser | CSSParser | None:
+def get_parser(language: str) -> TreeSitterParser | PlainTextParser | CSSParser | HtmlParser | None:
     """Get parser for language."""
     return PARSERS.get(language)
 

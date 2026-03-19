@@ -24,6 +24,7 @@ from magaldi_core.parsers.base import (
 from magaldi_core.parsers.bash import BashParser
 from magaldi_core.parsers.css import CSSParser, SCSSParser
 from magaldi_core.parsers.dockerfile import DockerfileParser
+from magaldi_core.parsers.html import HtmlParser
 from magaldi_core.parsers.java import JavaParser
 from magaldi_core.parsers.javascript import JavaScriptParser
 from magaldi_core.parsers.markdown import MarkdownParser
@@ -49,6 +50,7 @@ __all__ = [
     "BashParser",
     "CSSParser",
     "DockerfileParser",
+    "HtmlParser",
     "JavaParser",
     "JavaScriptParser",
     "MarkdownParser",
