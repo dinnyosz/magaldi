@@ -32,8 +32,10 @@ from magaldi_core.parsers.php import PhpParser
 from magaldi_core.parsers.plaintext import PlainTextParser
 from magaldi_core.parsers.python import PythonParser
 from magaldi_core.parsers.rust import RustParser
+from magaldi_core.parsers.svelte import SvelteParser
 from magaldi_core.parsers.template import TemplateParser
 from magaldi_core.parsers.toml_lang import TomlParser
+from magaldi_core.parsers.vue import VueParser
 from magaldi_core.parsers.yaml_lang import YamlParser
 
 __all__ = [
@@ -60,7 +62,9 @@ __all__ = [
     "PythonParser",
     "RustParser",
     "SCSSParser",
+    "SvelteParser",
     "TemplateParser",
     "TomlParser",
+    "VueParser",
     "YamlParser",
 ]

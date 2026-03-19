@@ -39,9 +39,11 @@ from magaldi_core.parsers import (
     PythonParser,
     RustParser,
     SCSSParser,
+    SvelteParser,
     TemplateParser,
     TomlParser,
     TreeSitterParser,
+    VueParser,
     YamlParser,
     generate_element_id,
 )
@@ -307,7 +309,10 @@ class ParsingResult:
 # =============================================================================
 
 
-_ParserType = TreeSitterParser | PlainTextParser | CSSParser | HtmlParser | TemplateParser
+_ParserType = (
+    TreeSitterParser | PlainTextParser | CSSParser | HtmlParser
+    | TemplateParser | VueParser | SvelteParser
+)
 
 PARSERS: dict[str, _ParserType] = {
     "python": PythonParser(),
@@ -334,6 +339,9 @@ PARSERS: dict[str, _ParserType] = {
     "gotemplate": TemplateParser(),
     "razor": TemplateParser(),
     "heex": TemplateParser(),
+    # SFC formats
+    "vue": VueParser(),
+    "svelte": SvelteParser(),
 }
 
 
