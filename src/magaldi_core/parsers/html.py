@@ -85,6 +85,12 @@ class HtmlParser:
             List with a single file-level CodeElement containing
             markdown-converted content as raw_code.
         """
+        # Extract CSS classes and IDs from original HTML before conversion
+        css_classes: list[str] = []
+        css_ids: list[str] = []
+        if content.strip():
+            css_classes, css_ids = _extract_css_classes_and_ids(content)
+
         # Convert HTML → markdown
         md_content = markdownify(
             content,
@@ -98,6 +104,17 @@ class HtmlParser:
         while "\n\n\n" in md_content:
             md_content = md_content.replace("\n\n\n", "\n\n")
         md_content = md_content.strip()
+
+        # Prepend CSS classes/IDs inline so the LLM sees them in context
+        meta_lines: list[str] = []
+        if css_classes:
+            meta_lines.append(f"CSS classes: {', '.join(css_classes)}")
+        if css_ids:
+            meta_lines.append(f"Element IDs: {', '.join(css_ids)}")
+        if meta_lines and md_content:
+            md_content = "\n".join(meta_lines) + "\n\n" + md_content
+        elif meta_lines:
+            md_content = "\n".join(meta_lines)
 
         lines = md_content.split("\n")
         line_count = len(lines)
@@ -121,15 +138,13 @@ class HtmlParser:
             "file", file_element.name, 1,
         )
 
-        # Extract CSS classes and IDs from original HTML as metadata
-        if content.strip():
-            css_classes, css_ids = _extract_css_classes_and_ids(content)
-            if css_classes or css_ids:
-                file_element.code_metrics = {}
-                if css_classes:
-                    file_element.code_metrics["css_classes"] = css_classes
-                if css_ids:
-                    file_element.code_metrics["css_ids"] = css_ids
+        # Store CSS classes and IDs as code_metrics for MCP/search
+        if css_classes or css_ids:
+            file_element.code_metrics = {}
+            if css_classes:
+                file_element.code_metrics["css_classes"] = css_classes
+            if css_ids:
+                file_element.code_metrics["css_ids"] = css_ids
 
         # Extract heading sections from the converted markdown
         if md_content:

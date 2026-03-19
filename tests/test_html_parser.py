@@ -273,6 +273,36 @@ class TestCssClassesAndIds:
         assert "bg-blue-500" in classes
         assert "hover:bg-blue-700" in classes
 
+    def test_classes_inlined_in_raw_code(self, parser, file_info):
+        """CSS classes and IDs appear at the top of raw_code."""
+        html = '<div id="app" class="container wrapper"><p>Hello</p></div>'
+        elements = _parse(parser, file_info, html)
+        raw = elements[0].raw_code
+        lines = raw.split("\n")
+        assert lines[0].startswith("CSS classes:")
+        assert "container" in lines[0]
+        assert "wrapper" in lines[0]
+        assert lines[1].startswith("Element IDs:")
+        assert "app" in lines[1]
+        # Markdown content follows after blank line
+        assert "Hello" in raw
+
+    def test_ids_only_inlined(self, parser, file_info):
+        """When no classes, only IDs line appears."""
+        html = '<div id="main"><p>text</p></div>'
+        elements = _parse(parser, file_info, html)
+        raw = elements[0].raw_code
+        assert raw.startswith("Element IDs: main")
+        assert "CSS classes" not in raw
+
+    def test_no_meta_for_classless_html(self, parser, file_info):
+        """Plain HTML without classes/IDs has no metadata prefix."""
+        html = "<p>Just text</p>"
+        elements = _parse(parser, file_info, html)
+        raw = elements[0].raw_code
+        assert not raw.startswith("CSS classes")
+        assert not raw.startswith("Element IDs")
+
 
 # =============================================================================
 # SIZE REDUCTION
