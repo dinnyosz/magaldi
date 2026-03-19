@@ -616,18 +616,18 @@ def run_variable_scoring(
         console.print()
         console.print(
             f"  [bold dim]─── Variable scoring samples "
-            f"(model={model_config.name}, {len(result.batch_samples)} batches sampled) ───[/]"
+            f"(model={rich_escape(model_config.name)}, {len(result.batch_samples)} batches sampled) ───[/]"
         )
         for batch_idx, samples in enumerate(result.batch_samples):
             console.print(f"  [bold dim]Batch {batch_idx + 1}:[/]")
             for file_path, name, raw_code, score in samples:
                 verdict = "[green]KEEP[/]" if score.passes_threshold() else "[red]DROP[/]"
-                console.print(f"    {verdict} [cyan]{name}[/] [dim]({file_path})[/]")
+                console.print(f"    {verdict} [cyan]{rich_escape(name)}[/] [dim]({rich_escape(file_path)})[/]")
                 # Show raw_code preserving newlines, indented and truncated
                 code_lines = (raw_code or "").split("\n")
                 for line in code_lines[:6]:
                     truncated = line[:100] + "…" if len(line) > 100 else line
-                    console.print(f"    [dim]│[/] {truncated}")
+                    console.print(f"    [dim]│[/] {rich_escape(truncated)}")
                 if len(code_lines) > 6:
                     console.print(f"    [dim]│ ... ({len(code_lines) - 6} more lines)[/]")
             console.print()
@@ -1101,7 +1101,7 @@ def run_processing(
     if result.errors:
         for error in result.errors:
             if "Processing stalled" in error:
-                console.print(f"\n  [red]Warning:[/] {error}")
+                console.print(f"\n  [red]Warning:[/] {rich_escape(error)}")
 
     # Display tier accuracy summary (only when issues detected)
     tier_summary = timing_stats.get_tier_accuracy_summary()
