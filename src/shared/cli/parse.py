@@ -297,7 +297,13 @@ def parse(
         # Phase 4: Variable Scoring (LLM-based preflight)
         if not dry_run and not skip_ai and not skip_scoring:
             scoring_model = config.llm.get_variable_scoring_model().name
-            console.print(f"\n[bold blue]Phase 4:[/] Variable Scoring [dim]({scoring_model})[/]")
+            # Show context tier used for scoring (token_budget snaps to tier)
+            from magaldi_core.variable_scoring.models import VariableScoringConfig as _VSConfig
+            from magaldi_core.variable_scoring import _snap_to_context_tier
+            from shared.ai.context_size import TIER_SUFFIXES
+            _scoring_tier = _snap_to_context_tier(_VSConfig().token_budget)
+            _tier_suffix = TIER_SUFFIXES.get(_scoring_tier, "")
+            console.print(f"\n[bold blue]Phase 4:[/] Variable Scoring [dim]({scoring_model}{_tier_suffix})[/]")
             run_logger.start_phase("Phase 4: Variable Scoring")
             live_writer.start_phase("Phase 4: Variable Scoring")
             scoring_result = run_variable_scoring(
