@@ -188,6 +188,90 @@ def _parse_custom_properties(block_content: str) -> list[tuple[str, str]]:
 
 
 # =============================================================================
+# VALUE DETAIL EXTRACTION
+# =============================================================================
+
+# Properties whose values are worth surfacing in summaries for search
+_COLOR_PROPS = frozenset({"color", "background-color", "background", "border-color",
+                          "outline-color", "fill", "stroke"})
+_DIMENSION_PROPS = frozenset({"width", "height", "max-width", "max-height",
+                              "min-width", "min-height", "gap", "row-gap",
+                              "column-gap", "padding", "margin", "border-radius",
+                              "font-size", "line-height", "letter-spacing",
+                              "top", "right", "bottom", "left"})
+_TIMING_PROPS = frozenset({"transition", "transition-duration", "animation",
+                           "animation-duration", "animation-delay"})
+
+_URL_RE = re.compile(r"""url\(\s*['"]?([^'")]+)['"]?\s*\)""")
+_TIMING_RE = re.compile(r"(\d+\.?\d*m?s)")
+_TRANSFORM_FN_RE = re.compile(r"(\w+)\(([^)]+)\)")
+
+
+def _extract_value_details(
+    declarations: list[tuple[str, str]],
+) -> list[str]:
+    """Extract notable property values for search enrichment.
+
+    Picks up: colors, dimensions, font families, z-index, timing,
+    transform functions, and url() references.
+    Returns a flat list of "prop: value" strings (max ~6).
+    """
+    details: list[str] = []
+    seen: set[str] = set()
+
+    for prop, raw_value in declarations:
+        if prop.startswith("--"):
+            continue
+        value = raw_value.strip().rstrip(";").strip()
+        if not value or len(value) > 80:
+            continue
+
+        key: str | None = None
+
+        # 1. Colors / 2. Dimensions (only if value has a number)
+        if prop in _COLOR_PROPS or (prop in _DIMENSION_PROPS and re.search(r"\d", value)):
+            key = f"{prop}: {value}"
+
+        # 3. Font family names
+        elif prop == "font-family":
+            # Extract first font name, stripping quotes
+            first = value.split(",")[0].strip().strip("'\"")
+            if first:
+                key = f"font-family: {first}"
+
+        # 4. Z-index
+        elif prop == "z-index":
+            key = f"z-index: {value}"
+
+        # 5. Animation/transition timing
+        elif prop in _TIMING_PROPS:
+            timing = _TIMING_RE.search(value)
+            if timing:
+                key = f"{prop}: {value}" if len(value) <= 30 else f"{prop}: {timing.group(1)}"
+
+        # 6. Transform functions
+        elif prop == "transform":
+            fns = _TRANSFORM_FN_RE.findall(value)
+            if fns:
+                key = f"transform: {', '.join(f'{fn}({arg})' for fn, arg in fns[:2])}"
+
+        # 7. URL references
+        elif "url(" in value:
+            url_match = _URL_RE.search(value)
+            if url_match:
+                path = url_match.group(1)
+                key = f"{prop}: url({path})"
+
+        if key and key not in seen:
+            details.append(key)
+            seen.add(key)
+            if len(details) >= 6:
+                break
+
+    return details
+
+
+# =============================================================================
 # SELECTOR HELPERS
 # =============================================================================
 
@@ -228,11 +312,10 @@ def summarize_rule(selector: str, block_content: str) -> str:
     selector = _clean_selector(selector)
     declarations = _parse_declarations(block_content)
 
-    # Collect unique concepts with key value details
+    # Collect unique concepts
     concepts: list[str] = []
     seen: set[str] = set()
     seen_props: set[str] = set()  # Track base property names for dedup
-    color_values: list[str] = []
     for prop, value in declarations:
         if prop.startswith("--"):
             continue  # Custom properties handled separately
@@ -251,11 +334,6 @@ def summarize_rule(selector: str, block_content: str) -> str:
             concepts.append(prop)
             seen.add(prop)
             seen_props.add(prop)
-        # Collect color values for extra detail
-        if prop in ("color", "background-color", "background") and value.strip():
-            val = value.strip().rstrip(";").strip()
-            if len(val) <= 30:
-                color_values.append(f"{prop}: {val}")
 
     if not concepts:
         # Fallback: count declarations
@@ -265,9 +343,10 @@ def summarize_rule(selector: str, block_content: str) -> str:
         return f"Styles {selector} with {n} {'property' if n == 1 else 'properties'}"
 
     base = f"Styles {selector} with {_join_list(concepts)}"
-    # Append key color values for searchability (e.g., "color: #333")
-    if color_values:
-        base += f" ({', '.join(color_values[:3])})"
+    # Append notable values for searchability (colors, dimensions, fonts, etc.)
+    details = _extract_value_details(declarations)
+    if details:
+        base += f" ({', '.join(details)})"
     return base
 
 

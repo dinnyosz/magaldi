@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from magaldi_core.parsers.css_summary import (
+    _extract_value_details,
     _join_list,
     _property_to_concept,
     summarize_at_rule,
@@ -95,13 +96,45 @@ class TestSummarizeRule:
 
     def test_deduplicates_concepts(self):
         result = summarize_rule(".box", "padding: 1rem; padding-top: 2rem;")
-        # "padding" should appear only once
-        assert result.count("padding") == 1
+        # Concept list should mention "padding" only once (shorthand dedup)
+        # Value details may repeat the word in "padding: 1rem"
+        concepts_part = result.split("(")[0] if "(" in result else result
+        assert concepts_part.count("padding") == 1
 
     def test_custom_properties_skipped(self):
         result = summarize_rule(".root", "--color: red; display: flex;")
         # Custom properties should be ignored in rule summary
         assert "flex layout" in result
+
+    def test_value_details_colors(self):
+        result = summarize_rule(".btn", "color: #333; background-color: #007bff;")
+        assert "color: #333" in result
+        assert "background-color: #007bff" in result
+
+    def test_value_details_dimensions(self):
+        result = summarize_rule(".container", "max-width: 1200px; padding: 2rem;")
+        assert "max-width: 1200px" in result
+        assert "padding: 2rem" in result
+
+    def test_value_details_font_family(self):
+        result = summarize_rule(".body", "font-family: 'Inter', sans-serif;")
+        assert "font-family: Inter" in result
+
+    def test_value_details_z_index(self):
+        result = summarize_rule(".modal", "z-index: 9999; position: fixed;")
+        assert "z-index: 9999" in result
+
+    def test_value_details_transition(self):
+        result = summarize_rule(".btn", "transition: 0.3s ease;")
+        assert "0.3s" in result
+
+    def test_value_details_transform(self):
+        result = summarize_rule(".icon", "transform: rotate(45deg);")
+        assert "rotate(45deg)" in result
+
+    def test_value_details_url(self):
+        result = summarize_rule(".hero", "background-image: url('/images/hero.jpg');")
+        assert "/images/hero.jpg" in result
 
 
 # =============================================================================
@@ -290,6 +323,71 @@ class TestJoinList:
     def test_many_truncated(self):
         result = _join_list(["a", "b", "c", "d", "e", "f", "g"])
         assert "and 2 more" in result
+
+
+# =============================================================================
+# VALUE DETAIL EXTRACTION
+# =============================================================================
+
+
+class TestExtractValueDetails:
+    def test_color_values(self):
+        decls = [("color", "#333"), ("background-color", "rgba(0,0,0,0.5)")]
+        details = _extract_value_details(decls)
+        assert "color: #333" in details
+        assert "background-color: rgba(0,0,0,0.5)" in details
+
+    def test_dimension_values(self):
+        decls = [("width", "100%"), ("max-width", "1200px"), ("gap", "24px")]
+        details = _extract_value_details(decls)
+        assert "width: 100%" in details
+        assert "max-width: 1200px" in details
+        assert "gap: 24px" in details
+
+    def test_font_family_extracts_first_name(self):
+        decls = [("font-family", "'Inter', 'Helvetica', sans-serif")]
+        details = _extract_value_details(decls)
+        assert "font-family: Inter" in details
+
+    def test_z_index(self):
+        decls = [("z-index", "9999")]
+        details = _extract_value_details(decls)
+        assert "z-index: 9999" in details
+
+    def test_transition_timing(self):
+        decls = [("transition", "all 0.3s ease")]
+        details = _extract_value_details(decls)
+        assert any("0.3s" in d for d in details)
+
+    def test_transform_functions(self):
+        decls = [("transform", "rotate(45deg) scale(1.2)")]
+        details = _extract_value_details(decls)
+        assert any("rotate(45deg)" in d for d in details)
+        assert any("scale(1.2)" in d for d in details)
+
+    def test_url_references(self):
+        decls = [("background-image", "url('/images/hero.jpg')")]
+        details = _extract_value_details(decls)
+        assert any("/images/hero.jpg" in d for d in details)
+
+    def test_skips_custom_properties(self):
+        decls = [("--custom", "#fff"), ("color", "red")]
+        details = _extract_value_details(decls)
+        assert not any("--custom" in d for d in details)
+        assert "color: red" in details
+
+    def test_max_details_capped(self):
+        decls = [("color", f"#{i:06d}") for i in range(10)]
+        details = _extract_value_details(decls)
+        assert len(details) <= 6
+
+    def test_dimension_without_number_skipped(self):
+        decls = [("width", "auto"), ("height", "100vh")]
+        details = _extract_value_details(decls)
+        # "auto" has no digit, should be skipped
+        assert not any("width: auto" in d for d in details)
+        # "100vh" has digits, should be included
+        assert "height: 100vh" in details
 
 
 # =============================================================================
