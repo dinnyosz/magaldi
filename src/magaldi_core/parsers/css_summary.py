@@ -458,7 +458,7 @@ def summarize_at_rule(name: str, prelude: str, block_content: str | None) -> str
     return f"@{name} {prelude}"
 
 
-def summarize_file(filename: str, element_count: int, language: str = "css") -> str:
+def summarize_file(filename: str, element_count: int, language: str = "css") -> str:  # noqa: ARG001
     """Generate summary for a CSS/SCSS file-level element.
 
     Args:

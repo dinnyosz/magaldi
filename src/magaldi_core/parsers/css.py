@@ -72,7 +72,7 @@ def _has_custom_properties(block_text: str) -> bool:
     return bool(re.search(r"--[\w-]+\s*:", block_text))
 
 
-def _find_end_line(content: str, start_line: int, raw_code: str) -> int:
+def _find_end_line(content: str, start_line: int, raw_code: str) -> int:  # noqa: ARG001
     """Find the end line of a raw_code block starting at start_line."""
     return start_line + raw_code.count("\n")
 
