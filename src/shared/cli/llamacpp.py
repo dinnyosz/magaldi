@@ -370,10 +370,12 @@ def llm_serve(
         "--kv-unified",
         "--cache-type-k", "q8_0",
         "--cache-type-v", "q8_0",
-        "--cache-reuse", "16",
-        # Reduce KV cache checkpoints from default 8 to 4 — saves memory
-        # per slot with our tiered ctx-size + q8_0 cache setup.
-        "--ctx-checkpoints", "4",
+        # Prompt cache reuse disabled: our batch summarization workload sends
+        # thousands of unique prompts with no shared prefix, so cache-reuse
+        # and ctx-checkpoints provide zero benefit (verified 0% hit rate).
+        # Defaults: --cache-reuse 0 (off), --ctx-checkpoints 8.
+        "--cache-reuse", "0",
+        "--ctx-checkpoints", "1",
         # Disable thinking globally — Qwen3 thinks by default, wasting
         # 2-5× tokens on <think> reasoning before producing actual output.
         # --reasoning off: disables thinking in the chat template (the actual switch)
