@@ -235,3 +235,118 @@ class TestSCSSEdgeCases:
         file_id = elements[0].element_id
         for e in elements[1:]:
             assert e.parent_id == file_id
+
+
+# =============================================================================
+# MULTI-LINE MAP VARIABLES
+# =============================================================================
+
+
+class TestSCSSMapVariables:
+    def test_multi_line_map(self, parser, file_info):
+        scss = "$breakpoints: (\n    sm: 640px,\n    md: 768px,\n    lg: 1024px,\n);"
+        elements = _parse(parser, file_info, scss)
+        var = [e for e in elements if e.element_type == "variable" and e.name == "$breakpoints"]
+        assert len(var) == 1
+        assert "SCSS map" in var[0].summary
+        assert "sm" in var[0].summary
+        assert "md" in var[0].summary
+        assert "lg" in var[0].summary
+
+    def test_multi_line_map_line_range(self, parser, file_info):
+        scss = "\n$colors: (\n    primary: #007bff,\n    secondary: #6c757d,\n);\n"
+        elements = _parse(parser, file_info, scss)
+        var = [e for e in elements if e.element_type == "variable"][0]
+        assert var.line_start == 2
+        assert var.line_end >= 5  # Spans multiple lines
+
+    def test_single_line_map(self, parser, file_info):
+        scss = "$sizes: (xs: 4px, sm: 8px, md: 16px);"
+        elements = _parse(parser, file_info, scss)
+        var = [e for e in elements if e.element_type == "variable"][0]
+        assert "SCSS map" in var.summary
+        assert "xs" in var.summary
+
+    def test_list_variable(self, parser, file_info):
+        scss = '$fonts: ("Helvetica", "Arial", sans-serif);'
+        elements = _parse(parser, file_info, scss)
+        var = [e for e in elements if e.element_type == "variable"][0]
+        assert "SCSS list" in var.summary
+
+
+# =============================================================================
+# @USE AND @FORWARD IMPORTS
+# =============================================================================
+
+
+class TestSCSSImports:
+    def test_use_simple(self, parser, file_info):
+        scss = '@use "sass:math";\n.foo { width: 100px; }'
+        elements = _parse(parser, file_info, scss)
+        file_elem = elements[0]
+        assert len(file_elem.imports) == 1
+        assert file_elem.imports[0].name == "math"
+        assert file_elem.imports[0].module == "sass:math"
+
+    def test_use_with_alias(self, parser, file_info):
+        scss = '@use "variables" as vars;\n.foo { color: red; }'
+        elements = _parse(parser, file_info, scss)
+        assert elements[0].imports[0].name == "vars"
+        assert elements[0].imports[0].alias == "vars"
+
+    def test_forward(self, parser, file_info):
+        scss = '@forward "mixins";\n.foo { color: red; }'
+        elements = _parse(parser, file_info, scss)
+        assert len(elements[0].imports) == 1
+        assert elements[0].imports[0].module == "mixins"
+
+    def test_use_stripped_from_css_pass(self, parser, file_info):
+        scss = '@use "sass:math";\n@use "vars" as v;\n.foo { color: red; }'
+        elements = _parse(parser, file_info, scss)
+        # @use should not appear as a css_rule
+        css_rules = [e for e in elements if e.element_type == "css_rule"]
+        for rule in css_rules:
+            assert "@use" not in rule.name
+
+
+# =============================================================================
+# SCSS CONTROL FLOW STRIPPING
+# =============================================================================
+
+
+class TestSCSSControlFlow:
+    def test_each_loop_stripped(self, parser, file_info):
+        scss = '@each $name in (a, b, c) {\n    .#{$name} { color: red; }\n}\n.foo { display: flex; }'
+        elements = _parse(parser, file_info, scss)
+        # @each should be stripped, .foo should remain
+        rules = [e for e in elements if e.element_type == "css_rule"]
+        assert any(".foo" in r.name for r in rules)
+        assert not any("@each" in r.name for r in rules)
+
+    def test_if_conditional_stripped(self, parser, file_info):
+        scss = '@if $dark {\n    body { background: #000; }\n}\n.card { padding: 1rem; }'
+        elements = _parse(parser, file_info, scss)
+        rules = [e for e in elements if e.element_type == "css_rule"]
+        assert any(".card" in r.name for r in rules)
+        assert not any("@if" in r.name for r in rules)
+
+
+# =============================================================================
+# COMMENT HANDLING
+# =============================================================================
+
+
+class TestSCSSComments:
+    def test_single_line_comments_stripped(self, parser, file_info):
+        scss = "// This is a comment\n.foo { color: red; }"
+        elements = _parse(parser, file_info, scss)
+        rules = [e for e in elements if e.element_type == "css_rule"]
+        assert len(rules) == 1
+        # Comment should not leak into rule name
+        assert "//" not in rules[0].name
+
+    def test_block_comments_preserved(self, parser, file_info):
+        scss = "/* Block comment */\n.foo { color: red; }"
+        elements = _parse(parser, file_info, scss)
+        rule = [e for e in elements if e.element_type == "css_rule"][0]
+        assert rule.docstring == "Block comment"

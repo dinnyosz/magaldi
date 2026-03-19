@@ -228,9 +228,11 @@ def summarize_rule(selector: str, block_content: str) -> str:
     selector = _clean_selector(selector)
     declarations = _parse_declarations(block_content)
 
-    # Collect unique concepts
+    # Collect unique concepts with key value details
     concepts: list[str] = []
     seen: set[str] = set()
+    seen_props: set[str] = set()  # Track base property names for dedup
+    color_values: list[str] = []
     for prop, value in declarations:
         if prop.startswith("--"):
             continue  # Custom properties handled separately
@@ -238,6 +240,22 @@ def summarize_rule(selector: str, block_content: str) -> str:
         if concept and concept not in seen:
             concepts.append(concept)
             seen.add(concept)
+            seen_props.add(prop)
+        elif not concept and prop not in seen:
+            # Skip shorthand variants if base property already matched
+            # e.g., skip "padding-top" if "padding" already produced a concept
+            base = prop.rsplit("-", 1)[0] if "-" in prop else None
+            if base and base in seen_props:
+                continue
+            # For unmapped properties, include prop name for searchability
+            concepts.append(prop)
+            seen.add(prop)
+            seen_props.add(prop)
+        # Collect color values for extra detail
+        if prop in ("color", "background-color", "background") and value.strip():
+            val = value.strip().rstrip(";").strip()
+            if len(val) <= 30:
+                color_values.append(f"{prop}: {val}")
 
     if not concepts:
         # Fallback: count declarations
@@ -246,7 +264,11 @@ def summarize_rule(selector: str, block_content: str) -> str:
             return f"Empty rule for {selector}"
         return f"Styles {selector} with {n} {'property' if n == 1 else 'properties'}"
 
-    return f"Styles {selector} with {_join_list(concepts)}"
+    base = f"Styles {selector} with {_join_list(concepts)}"
+    # Append key color values for searchability (e.g., "color: #333")
+    if color_values:
+        base += f" ({', '.join(color_values[:3])})"
+    return base
 
 
 def summarize_media(prelude: str, block_content: str) -> str:
@@ -264,11 +286,26 @@ def summarize_media(prelude: str, block_content: str) -> str:
     condition = prelude.strip("()")
 
     selectors = _extract_selectors_from_block(block_content)
+
+    # Also extract key property changes for detail
+    declarations = _parse_declarations(block_content)
+    key_changes: list[str] = []
+    seen_concepts: set[str] = set()
+    for prop, value in declarations:
+        concept = _property_to_concept(prop, value)
+        if concept and concept not in seen_concepts:
+            key_changes.append(concept)
+            seen_concepts.add(concept)
+
     if selectors:
         sel_list = ", ".join(selectors[:5])
         if len(selectors) > 5:
             sel_list += f" and {len(selectors) - 5} more"
-        return f"Responsive styles for {condition}: adjusts {sel_list}"
+        base = f"Responsive styles for {condition}: adjusts {sel_list}"
+        # Append key property changes for richer search
+        if key_changes:
+            base += f" ({_join_list(key_changes[:4])})"
+        return base
 
     return f"Responsive styles for {condition}"
 
@@ -351,10 +388,35 @@ def summarize_custom_properties(selector: str, block_content: str) -> str:
 def summarize_scss_variable(name: str, value: str) -> str:
     """Generate summary for a SCSS variable ($var: value).
 
+    Handles simple values, maps, and lists:
+      $color: red         → "SCSS variable $color set to red"
+      $breakpoints: (sm: 640px, md: 768px, lg: 1024px)
+        → "SCSS map $breakpoints with keys sm, md, lg"
+      $fonts: ("Helvetica", "Arial", sans-serif)
+        → "SCSS list $fonts with 3 items"
+
     Returns:
-        Summary like "SCSS variable $spacing-unit set to 16px"
+        Human-readable summary for semantic search.
     """
     value = value.strip().rstrip(";").strip()
+
+    # Detect map: (key: value, key: value, ...)
+    if value.startswith("(") and value.endswith(")"):
+        inner = value[1:-1].strip()
+        # Check if it's a map (has key: value pairs)
+        pairs = re.findall(r"([\w-]+)\s*:", inner)
+        if pairs:
+            keys = ", ".join(pairs[:8])
+            extra = f" and {len(pairs) - 8} more" if len(pairs) > 8 else ""
+            return f"SCSS map {name} with keys {keys}{extra}"
+        # Otherwise it's a list
+        items = [i.strip() for i in inner.split(",") if i.strip()]
+        if items:
+            if len(items) <= 4:
+                return f"SCSS list {name}: {', '.join(items)}"
+            return f"SCSS list {name} with {len(items)} items"
+
+    # Simple value
     if len(value) > 60:
         value = value[:57] + "..."
     return f"SCSS variable {name} set to {value}"

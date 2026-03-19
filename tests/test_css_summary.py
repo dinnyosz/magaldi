@@ -207,6 +207,17 @@ class TestSCSSVariableSummary:
         result = summarize_scss_variable("$x", long_val)
         assert "..." in result
 
+    def test_map_variable(self):
+        result = summarize_scss_variable("$breakpoints", "(sm: 640px, md: 768px, lg: 1024px)")
+        assert "SCSS map $breakpoints" in result
+        assert "sm" in result
+        assert "md" in result
+        assert "lg" in result
+
+    def test_list_variable(self):
+        result = summarize_scss_variable("$fonts", '("Helvetica", "Arial", sans-serif)')
+        assert "SCSS list $fonts" in result
+
 
 class TestSCSSMixinSummary:
     def test_mixin_with_properties(self):

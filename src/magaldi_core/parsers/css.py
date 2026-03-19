@@ -293,9 +293,18 @@ class CSSParser:
 # =============================================================================
 
 # Regex patterns for SCSS-specific constructs (not handled by tinycss2)
+
+# Matches both single-line and multi-line variable declarations:
+#   $color: red;
+#   $map: (key: value, ...);
+#   $list: a, b, c !default;
 _SCSS_VARIABLE_RE = re.compile(
-    r"^(\$[\w-]+)\s*:\s*(.+?)(?:\s*!default)?\s*;",
-    re.MULTILINE,
+    r"^(\$[\w-]+)\s*:\s*("
+    r"\([^)]*\)"  # Parenthesized map/list value: (key: val, ...)
+    r"|"
+    r"[^;]+"  # Non-paren value: everything up to ;
+    r")(?:\s*!default)?\s*;",
+    re.MULTILINE | re.DOTALL,
 )
 _SCSS_MIXIN_RE = re.compile(
     r"@mixin\s+([\w-]+)\s*(?:\(([^)]*)\))?\s*\{",
@@ -306,7 +315,24 @@ _SCSS_FUNCTION_RE = re.compile(
     re.MULTILINE,
 )
 _SCSS_INCLUDE_RE = re.compile(r"@include\s+([\w-]+)")
-_SCSS_NESTED_RULE_RE = re.compile(r"&[\w_-]*\s*\{")
+_SCSS_USE_RE = re.compile(
+    r'^@use\s+"([^"]+)"(?:\s+as\s+([\w*]+))?',
+    re.MULTILINE,
+)
+_SCSS_FORWARD_RE = re.compile(
+    r'^@forward\s+"([^"]+)"',
+    re.MULTILINE,
+)
+# Full-line versions (including semicolons) for stripping
+_SCSS_USE_STRIP_RE = re.compile(r"^@use\s+[^\n]*;?", re.MULTILINE)
+_SCSS_FORWARD_STRIP_RE = re.compile(r"^@forward\s+[^\n]*;?", re.MULTILINE)
+# SCSS single-line comments (// ...) — must be stripped before tinycss2
+_SCSS_LINE_COMMENT_RE = re.compile(r"//[^\n]*")
+# SCSS control flow (@each, @for, @while, @if, @else) with braces
+_SCSS_CONTROL_RE = re.compile(
+    r"@(?:each|for|while|if|else\s+if|else)\b[^{]*\{",
+    re.MULTILINE,
+)
 
 
 def _find_matching_brace(content: str, start: int) -> int:
@@ -381,7 +407,7 @@ class SCSSParser(CSSParser):
 
         elements: list[CodeElement] = []
 
-        # 1. Extract SCSS variables (top-level only, before any { })
+        # 1. Extract SCSS variables (single-line and multi-line maps)
         elements.extend(
             self._extract_scss_variables(
                 content, file_info, scope, repository, username,
@@ -404,6 +430,9 @@ class SCSSParser(CSSParser):
                 file_element.element_id,
             )
         )
+
+        # 3b. Extract @use/@forward as imports on the file element
+        self._extract_scss_imports(content, file_element)
 
         # 4. Extract CSS-compatible rules via tinycss2
         # Strip SCSS-only syntax that would confuse tinycss2
@@ -451,7 +480,12 @@ class SCSSParser(CSSParser):
         username: str,
         parent_id: str,
     ) -> list[CodeElement]:
-        """Extract top-level SCSS variables ($name: value;)."""
+        """Extract top-level SCSS variables ($name: value;).
+
+        Handles both single-line and multi-line map/list variables:
+          $color: red;
+          $breakpoints: (sm: 640px, md: 768px, lg: 1024px);
+        """
         from magaldi_core.parsers.css_summary import summarize_scss_variable
 
         elements: list[CodeElement] = []
@@ -460,7 +494,7 @@ class SCSSParser(CSSParser):
             value = m.group(2).strip()
             line_start = _line_number_at(content, m.start())
             raw_code = m.group(0)
-            line_end = line_start  # Variables are single-line
+            line_end = _line_number_at(content, m.end() - 1)  # End of full match
             byte_offset = m.start()
 
             element = CodeElement(
@@ -583,46 +617,103 @@ class SCSSParser(CSSParser):
             elements.append(element)
         return elements
 
+    def _extract_scss_imports(
+        self,
+        content: str,
+        file_element: CodeElement,
+    ) -> None:
+        """Extract @use and @forward statements as imports on the file element."""
+        from magaldi_core.parsers.base import Import
+
+        for m in _SCSS_USE_RE.finditer(content):
+            module = m.group(1)
+            alias = m.group(2)  # May be None
+            line = _line_number_at(content, m.start())
+            # Module name is the last segment (e.g., "sass:math" -> "math")
+            name = module.rsplit("/", 1)[-1].rsplit(":", 1)[-1].lstrip("_")
+            file_element.imports.append(Import(
+                name=alias or name,
+                module=module,
+                alias=alias,
+                line=line,
+            ))
+
+        for m in _SCSS_FORWARD_RE.finditer(content):
+            module = m.group(1)
+            line = _line_number_at(content, m.start())
+            name = module.rsplit("/", 1)[-1].lstrip("_")
+            file_element.imports.append(Import(
+                name=name,
+                module=module,
+                alias=None,
+                line=line,
+            ))
+
     def _strip_scss_syntax(self, content: str) -> str:
         """Strip SCSS-only syntax so tinycss2 can parse the CSS-compatible parts.
 
         Removes:
-        - $variable declarations
+        - // single-line comments (tinycss2 only understands /* */ comments)
+        - $variable declarations (single-line and multi-line maps)
         - @mixin ... { ... } blocks
         - @function ... { ... } blocks
         - @include statements
+        - @use/@forward statements
+        - @each/@for/@while/@if control flow blocks
         - #{interpolation} → placeholder text
+        - %placeholder selectors → .placeholder
 
-        Preserves line count by replacing with blank lines.
+        Preserves line count by replacing with blank lines where possible.
         """
         result = content
 
-        # Replace $variable lines with blanks
-        result = _SCSS_VARIABLE_RE.sub(lambda m: " " * len(m.group(0)), result)
+        # 1. Strip // comments (MUST be first — they confuse everything else)
+        result = _SCSS_LINE_COMMENT_RE.sub(lambda m: " " * len(m.group(0)), result)
 
-        # Replace @mixin blocks with blanks
-        for m in _SCSS_MIXIN_RE.finditer(content):
+        # 2. Replace $variable declarations (including multi-line maps) with blanks
+        result = _SCSS_VARIABLE_RE.sub(
+            lambda m: re.sub(r"[^\n]", " ", m.group(0)), result
+        )
+
+        # 3. Replace @mixin blocks with blanks
+        # Work backwards to avoid position shifting
+        mixin_matches = list(_SCSS_MIXIN_RE.finditer(result))
+        for m in reversed(mixin_matches):
             brace_start = m.end() - 1
-            brace_end = _find_matching_brace(content, brace_start)
-            block = content[m.start() : brace_end + 1]
-            # Preserve line structure
+            brace_end = _find_matching_brace(result, brace_start)
+            block = result[m.start() : brace_end + 1]
             replacement = re.sub(r"[^\n]", " ", block)
             result = result[:m.start()] + replacement + result[brace_end + 1:]
 
-        # Re-scan for @function blocks (positions may have shifted, so re-match)
-        # We work on the original content for matching but replace in result
-        for m in _SCSS_FUNCTION_RE.finditer(content):
+        # 4. Replace @function blocks with blanks
+        func_matches = list(_SCSS_FUNCTION_RE.finditer(result))
+        for m in reversed(func_matches):
             brace_start = m.end() - 1
-            brace_end = _find_matching_brace(content, brace_start)
-            block = content[m.start() : brace_end + 1]
+            brace_end = _find_matching_brace(result, brace_start)
+            block = result[m.start() : brace_end + 1]
             replacement = re.sub(r"[^\n]", " ", block)
-            # Find this block in result (may have been space-padded already)
             result = result[:m.start()] + replacement + result[brace_end + 1:]
 
-        # Replace @include with spaces
+        # 5. Replace @each/@for/@while/@if control flow blocks
+        ctrl_matches = list(_SCSS_CONTROL_RE.finditer(result))
+        for m in reversed(ctrl_matches):
+            brace_start = m.end() - 1
+            brace_end = _find_matching_brace(result, brace_start)
+            block = result[m.start() : brace_end + 1]
+            replacement = re.sub(r"[^\n]", " ", block)
+            result = result[:m.start()] + replacement + result[brace_end + 1:]
+
+        # 6. Replace @include with spaces
         result = _SCSS_INCLUDE_RE.sub(lambda m: " " * len(m.group(0)), result)
 
-        # Replace #{...} interpolation with a safe placeholder
+        # 7. Replace @use/@forward full lines with spaces
+        result = _SCSS_USE_STRIP_RE.sub(lambda m: " " * len(m.group(0)), result)
+        result = _SCSS_FORWARD_STRIP_RE.sub(lambda m: " " * len(m.group(0)), result)
+
+        # 8. Replace %placeholder selectors with .placeholder (valid CSS)
+        result = re.sub(r"%(?=[\w-])", "._ph_", result)
+
+        # 9. Replace #{...} interpolation with a safe placeholder
         result = re.sub(r"#\{[^}]+\}", "INTERP", result)
 
         return result
