@@ -18,7 +18,7 @@ SEARCH_TOOLS = [
                 "element_types": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Filter: file, class, interface, trait, enum, type_alias, function, method, constant, variable, import",
+                    "description": "Filter: file, class, interface, trait, enum, type_alias, function, method, constant, variable, import, css_rule",
                     "default": ["function", "method"],
                 },
                 "include_code": {"type": "boolean", "default": False},

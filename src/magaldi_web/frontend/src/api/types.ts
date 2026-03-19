@@ -21,6 +21,7 @@ export interface DashboardStats {
     variable_count: number
     constant_count: number
     import_count: number
+    css_rule_count: number
     feature_count: number
     subfeature_count: number
   }
@@ -39,6 +40,7 @@ export interface DashboardStats {
     variable_count: number
     constant_count: number
     import_count: number
+    css_rule_count: number
     feature_count: number
     element_count: number
     languages: string[]

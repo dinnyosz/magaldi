@@ -59,6 +59,7 @@ class RepoSummary(BaseModel):
     variable_count: int = 0
     constant_count: int = 0
     import_count: int = 0
+    css_rule_count: int = 0
     feature_count: int = 0
     element_count: int = 0
     languages: list[str] = Field(default_factory=list)
@@ -81,6 +82,7 @@ class DashboardStats(BaseModel):
     variable_count: int = 0
     constant_count: int = 0
     import_count: int = 0
+    css_rule_count: int = 0
     feature_count: int = 0
     subfeature_count: int = 0
 

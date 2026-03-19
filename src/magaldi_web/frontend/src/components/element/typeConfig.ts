@@ -13,6 +13,7 @@ export const typeConfig: Record<string, { icon: string; color: string; label: st
   method: { icon: 'bi-gear', color: 'success', label: 'Method' },
   variable: { icon: 'bi-x-diamond', color: 'secondary', label: 'Variable' },
   constant: { icon: 'bi-hash', color: 'warning', label: 'Constant' },
+  css_rule: { icon: 'bi-palette', color: 'info', label: 'CSS Rule' },
   import: { icon: 'bi-box-arrow-in-right', color: 'secondary', label: 'Import' },
   feature: { icon: 'bi-collection', color: 'info', label: 'Feature' },
   subfeature: { icon: 'bi-collection-fill', color: 'info', label: 'Subfeature' },
@@ -40,5 +41,7 @@ export const languageIcons: Record<string, string> = {
   yaml: 'bi-filetype-yml',
   toml: 'bi-file-earmark-text',
   dockerfile: 'bi-filetype-doc',
+  css: 'bi-filetype-css',
+  scss: 'bi-filetype-sass',
   text: 'bi-file-text',
 }

@@ -43,6 +43,7 @@ const typeConfig: Record<string, TypeConfig> = {
   method: { icon: 'bi-gear', color: 'warning', canHaveCallGraph: true },
   variable: { icon: 'bi-x-diamond', color: 'secondary' },
   constant: { icon: 'bi-hash', color: 'danger' },
+  css_rule: { icon: 'bi-palette', color: 'info' },
   import: { icon: 'bi-box-arrow-in-right', color: 'secondary' },
   feature: { icon: 'bi-collection', color: 'info' },
   subfeature: { icon: 'bi-collection-fill', color: 'info' },
@@ -53,7 +54,7 @@ const defaultTypeConfig: TypeConfig = { icon: 'bi-dot', color: 'secondary' }
 
 // Base types always shown in filters, conditional types only shown if data exists
 const BASE_ELEMENT_TYPES = ['file', 'class', 'function', 'method', 'variable', 'constant', 'feature', 'subfeature']
-const CONDITIONAL_ELEMENT_TYPES = ['interface', 'type_alias', 'trait', 'enum', 'import', 'glossary']
+const CONDITIONAL_ELEMENT_TYPES = ['interface', 'type_alias', 'trait', 'enum', 'css_rule', 'import', 'glossary']
 
 // Simple pluralization for element types
 function pluralize(type: string): string {
