@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 # Re-export classes from parsers package for backward compatibility
 from magaldi_core.parsers import (
     BashParser,
+    CSSParser,
     Call,
     CodeElement,
     DockerfileParser,
@@ -36,6 +37,7 @@ from magaldi_core.parsers import (
     PlainTextParser,
     PythonParser,
     RustParser,
+    SCSSParser,
     TomlParser,
     TreeSitterParser,
     YamlParser,
@@ -303,7 +305,7 @@ class ParsingResult:
 # =============================================================================
 
 
-PARSERS: dict[str, TreeSitterParser | PlainTextParser] = {
+PARSERS: dict[str, TreeSitterParser | PlainTextParser | CSSParser] = {
     "python": PythonParser(),
     "javascript": JavaScriptParser("javascript"),
     "typescript": JavaScriptParser("typescript"),
@@ -316,11 +318,13 @@ PARSERS: dict[str, TreeSitterParser | PlainTextParser] = {
     "toml": TomlParser(),
     "dockerfile": DockerfileParser(),
     "bash": BashParser(),
+    "css": CSSParser(),
+    "scss": SCSSParser(),
     "text": PlainTextParser(),
 }
 
 
-def get_parser(language: str) -> TreeSitterParser | PlainTextParser | None:
+def get_parser(language: str) -> TreeSitterParser | PlainTextParser | CSSParser | None:
     """Get parser for language."""
     return PARSERS.get(language)
 

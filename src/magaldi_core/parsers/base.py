@@ -73,6 +73,7 @@ class CodeElement:
     raw_code: str = ""
     signature: str | None = None
     docstring: str | None = None
+    summary: str | None = None  # Pre-generated summary (e.g., CSS/SCSS heuristic)
 
     # Metadata
     decorators: list[str] = field(default_factory=list)

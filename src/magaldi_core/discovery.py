@@ -48,6 +48,8 @@ SUPPORTED_EXTENSIONS: dict[str, str] = {
     ".sh": "bash",
     ".bash": "bash",
     ".bats": "bash",
+    ".css": "css",
+    ".scss": "scss",
 }
 
 # Filenames (without extension) that map to a language

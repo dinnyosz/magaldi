@@ -22,6 +22,7 @@ from magaldi_core.parsers.base import (
     generate_element_id,
 )
 from magaldi_core.parsers.bash import BashParser
+from magaldi_core.parsers.css import CSSParser, SCSSParser
 from magaldi_core.parsers.dockerfile import DockerfileParser
 from magaldi_core.parsers.java import JavaParser
 from magaldi_core.parsers.javascript import JavaScriptParser
@@ -46,6 +47,7 @@ __all__ = [
     "generate_element_id",
     # Language-specific parsers
     "BashParser",
+    "CSSParser",
     "DockerfileParser",
     "JavaParser",
     "JavaScriptParser",
@@ -54,6 +56,7 @@ __all__ = [
     "PlainTextParser",
     "PythonParser",
     "RustParser",
+    "SCSSParser",
     "TomlParser",
     "YamlParser",
 ]
