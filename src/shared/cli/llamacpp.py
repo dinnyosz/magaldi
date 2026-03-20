@@ -389,6 +389,16 @@ def llm_serve(
         "--reasoning", "off",
         "--reasoning-budget", "0",
         "--reasoning-format", "none",
+        # Speculative decoding: ngram-mod uses a shared hash pool (~16 MB)
+        # to predict next tokens from n-gram patterns in token history.
+        # No draft model needed — works in router mode with zero extra
+        # model memory. Best for structured/repetitive output (summaries,
+        # code). Acceptance rates ~60-70% on predictable content.
+        # --spec-ngram-size-n 24: lookup n-gram length (default 12)
+        # --draft-max 64: max tokens to draft per step (default 16)
+        "--spec-type", "ngram-mod",
+        "--spec-ngram-size-n", "24",
+        "--draft-max", "64",
         # Monitoring endpoints
         "--slots",       # expose /slots (on by default, but be explicit)
         "--metrics",     # enable /metrics (Prometheus-compatible)
@@ -425,6 +435,7 @@ def llm_serve(
     console.print(f"  Batch size:     {DEFAULT_BATCH_SIZE} (batch) / {DEFAULT_UBATCH_SIZE} (ubatch), per-model override via presets")
     console.print("  KV cache type:  q8_0 (K + V)")
     console.print("  Cache reuse:    off")
+    console.print("  Speculative:    ngram-mod (n=24, draft-max=64)")
     if sleep_idle >= 0:
         console.print(f"  Sleep idle:     {sleep_idle}s (auto-unload after idle)")
     else:
