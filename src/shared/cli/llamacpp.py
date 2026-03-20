@@ -231,8 +231,13 @@ def _generate_presets(llm_config: LLMConfig, create_symlinks: bool = True) -> Pa
                 # Speculative decoding: set draft model on each tier section.
                 # Each tier is a separate "model" in llama.cpp's view, so
                 # the draft must be specified per-tier, not just on the base.
+                # ctx-size-draft caps the draft model's KV cache per slot.
+                # Without this, the draft inherits the target's full ctx-size,
+                # causing 3.5 GB × N_slots of KV cache for a tiny 0.6B model.
+                # 2048 tokens is enough context for the draft to predict ahead.
                 if draft_gguf_path:
                     presets[tier_name]["model-draft"] = draft_gguf_path
+                    presets[tier_name]["ctx-size-draft"] = "2048"
 
     presets_path = _presets_file()
     presets_path.parent.mkdir(parents=True, exist_ok=True)
