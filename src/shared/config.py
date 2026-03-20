@@ -102,13 +102,6 @@ class ModelConfig:
     # When True, presets will include `embedding = true` and `pooling = mean`.
     embedding: bool = False
 
-    # Draft model GGUF spec for speculative decoding (llama.cpp only).
-    # Format: "repo_id:filename" (same as `gguf` field).
-    # Example: "unsloth/Qwen3-0.6B-GGUF:Qwen3-0.6B-Q8_0.gguf"
-    # Downloaded by `magaldi llamacpp pull` alongside the main model.
-    # When set, per-model presets will include `model-draft = <path>`.
-    draft: str | None = None
-
     def get_litellm_model(self) -> str:
         """Get the full LiteLLM model identifier.
 

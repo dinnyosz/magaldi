@@ -22,7 +22,6 @@ Example magaldi.yaml:
           num_ctx: 32768
           parallel: 4
           gguf: unsloth/Qwen3-4B-Instruct-2507-GGUF:Qwen3-4B-Instruct-2507-Q4_K_M.gguf
-          draft: unsloth/Qwen3-0.6B-GGUF:Qwen3-0.6B-Q8_0.gguf
         qwen3-1.7b:
           name: Qwen3-1.7B-Q4_K_M
           provider: llamacpp
@@ -69,7 +68,7 @@ LLAMA_SERVER = PROJECT_ROOT / "tools" / "llama.cpp" / "build" / "bin" / "llama-s
 # Defaults — tuned for Apple Silicon M4 Pro (48GB)
 DEFAULT_PORT = 8090
 DEFAULT_PARALLEL = 4
-DEFAULT_MODELS_MAX = 3
+DEFAULT_MODELS_MAX = 2
 DEFAULT_CTX_SIZE = 40960
 DEFAULT_SLEEP_IDLE = 60  # seconds of idle before unloading model from memory
 DEFAULT_BATCH_SIZE = 2048
@@ -186,16 +185,6 @@ def _generate_presets(llm_config: LLMConfig, create_symlinks: bool = True) -> Pa
         if cfg.parallel:
             presets[section]["parallel"] = str(cfg.parallel)
 
-        # Resolve draft model path for speculative decoding.
-        # The draft field holds a gguf spec "repo_id:filename.gguf".
-        # Extract the filename and resolve the absolute path.
-        draft_gguf_path: str | None = None
-        if cfg.draft and ":" in cfg.draft:
-            draft_filename = cfg.draft.rsplit(":", 1)[1]
-            draft_gguf = MODELS_DIR / draft_filename
-            if draft_gguf.exists():
-                draft_gguf_path = str(draft_gguf.resolve())
-
         if cfg.embedding:
             presets[section]["embedding"] = "true"
             presets[section]["pooling"] = "mean"
@@ -228,16 +217,6 @@ def _generate_presets(llm_config: LLMConfig, create_symlinks: bool = True) -> Pa
                 #   ctx-size = tier × parallel_slots
                 presets[tier_name]["ctx-size"] = str(tier * parallel_slots)
                 presets[tier_name]["parallel"] = str(parallel_slots)
-                # Speculative decoding: set draft model on each tier section.
-                # Each tier is a separate "model" in llama.cpp's view, so
-                # the draft must be specified per-tier, not just on the base.
-                # ctx-size-draft caps the draft model's KV cache per slot.
-                # Without this, the draft inherits the target's full ctx-size,
-                # causing 3.5 GB × N_slots of KV cache for a tiny 0.6B model.
-                # 2048 tokens is enough context for the draft to predict ahead.
-                if draft_gguf_path:
-                    presets[tier_name]["model-draft"] = draft_gguf_path
-                    presets[tier_name]["ctx-size-draft"] = "2048"
 
     presets_path = _presets_file()
     presets_path.parent.mkdir(parents=True, exist_ok=True)
@@ -447,15 +426,6 @@ def llm_serve(
     console.print(f"  Batch size:     {DEFAULT_BATCH_SIZE} (batch) / {DEFAULT_UBATCH_SIZE} (ubatch), per-model override via presets")
     console.print("  KV cache type:  q8_0 (K + V)")
     console.print("  Cache reuse:    off")
-    # Show draft model info if any model has speculative decoding configured
-    draft_models = [
-        (cfg.name, cfg.draft.rsplit(":", 1)[1].removesuffix(".gguf"))
-        for cfg in _get_llamacpp_models(config.llm)
-        if cfg.draft and ":" in cfg.draft
-    ]
-    if draft_models:
-        for target, draft in draft_models:
-            console.print(f"  Speculative:    {draft} → {target}")
     if sleep_idle >= 0:
         console.print(f"  Sleep idle:     {sleep_idle}s (auto-unload after idle)")
     else:
@@ -753,14 +723,11 @@ def llm_pull(model: str | None) -> None:
     """
     config = load_config()
 
-    # Collect models with gguf field, plus any draft gguf specs
+    # Collect models with gguf field
     to_pull: list[tuple[str, str]] = []  # (display_name, gguf_spec)
     for ref_name, cfg in config.llm.models.items():
         if cfg.provider == "llamacpp" and cfg.gguf and (model is None or ref_name == model):
             to_pull.append((ref_name, cfg.gguf))
-            # Also pull the draft model GGUF if configured
-            if cfg.draft and ":" in cfg.draft:
-                to_pull.append((f"{ref_name} (draft)", cfg.draft))
 
     if not to_pull:
         if model:
