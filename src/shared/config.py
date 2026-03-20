@@ -102,6 +102,12 @@ class ModelConfig:
     # When True, presets will include `embedding = true` and `pooling = mean`.
     embedding: bool = False
 
+    # Draft model name for speculative decoding (llama.cpp only).
+    # References the `name` of another llamacpp model in the config.
+    # The draft model GGUF is resolved from tools/models/<draft>.gguf.
+    # When set, per-model presets will include `model-draft = <path>`.
+    draft: str | None = None
+
     def get_litellm_model(self) -> str:
         """Get the full LiteLLM model identifier.
 

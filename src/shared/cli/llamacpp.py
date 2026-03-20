@@ -22,6 +22,7 @@ Example magaldi.yaml:
           num_ctx: 32768
           parallel: 4
           gguf: unsloth/Qwen3-4B-Instruct-2507-GGUF:Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+          draft: Qwen3-0.6B-Q8_0
         qwen3-1.7b:
           name: Qwen3-1.7B-Q4_K_M
           provider: llamacpp
@@ -184,6 +185,16 @@ def _generate_presets(llm_config: LLMConfig, create_symlinks: bool = True) -> Pa
             presets[section]["ctx-size"] = str(cfg.num_ctx)
         if cfg.parallel:
             presets[section]["parallel"] = str(cfg.parallel)
+
+        # Resolve draft model path for speculative decoding.
+        # The draft field references the `name` of another llamacpp model,
+        # which maps to a GGUF file in the models directory.
+        draft_gguf_path: str | None = None
+        if cfg.draft:
+            draft_gguf = MODELS_DIR / f"{cfg.draft}.gguf"
+            if draft_gguf.exists():
+                draft_gguf_path = str(draft_gguf.resolve())
+
         if cfg.embedding:
             presets[section]["embedding"] = "true"
             presets[section]["pooling"] = "mean"
@@ -216,6 +227,11 @@ def _generate_presets(llm_config: LLMConfig, create_symlinks: bool = True) -> Pa
                 #   ctx-size = tier × parallel_slots
                 presets[tier_name]["ctx-size"] = str(tier * parallel_slots)
                 presets[tier_name]["parallel"] = str(parallel_slots)
+                # Speculative decoding: set draft model on each tier section.
+                # Each tier is a separate "model" in llama.cpp's view, so
+                # the draft must be specified per-tier, not just on the base.
+                if draft_gguf_path:
+                    presets[tier_name]["model-draft"] = draft_gguf_path
 
     presets_path = _presets_file()
     presets_path.parent.mkdir(parents=True, exist_ok=True)
@@ -389,16 +405,6 @@ def llm_serve(
         "--reasoning", "off",
         "--reasoning-budget", "0",
         "--reasoning-format", "none",
-        # Speculative decoding: ngram-mod uses a shared hash pool (~16 MB)
-        # to predict next tokens from n-gram patterns in token history.
-        # No draft model needed — works in router mode with zero extra
-        # model memory. Best for structured/repetitive output (summaries,
-        # code). Acceptance rates ~60-70% on predictable content.
-        # --spec-ngram-size-n 24: lookup n-gram length (default 12)
-        # --draft-max 64: max tokens to draft per step (default 16)
-        "--spec-type", "ngram-mod",
-        "--spec-ngram-size-n", "24",
-        "--draft-max", "64",
         # Monitoring endpoints
         "--slots",       # expose /slots (on by default, but be explicit)
         "--metrics",     # enable /metrics (Prometheus-compatible)
@@ -435,7 +441,15 @@ def llm_serve(
     console.print(f"  Batch size:     {DEFAULT_BATCH_SIZE} (batch) / {DEFAULT_UBATCH_SIZE} (ubatch), per-model override via presets")
     console.print("  KV cache type:  q8_0 (K + V)")
     console.print("  Cache reuse:    off")
-    console.print("  Speculative:    ngram-mod (n=24, draft-max=64)")
+    # Show draft model info if any model has speculative decoding configured
+    draft_models = [
+        (cfg.name, cfg.draft)
+        for cfg in _get_llamacpp_models(config.llm)
+        if cfg.draft
+    ]
+    if draft_models:
+        for target, draft in draft_models:
+            console.print(f"  Speculative:    {draft} → {target}")
     if sleep_idle >= 0:
         console.print(f"  Sleep idle:     {sleep_idle}s (auto-unload after idle)")
     else:

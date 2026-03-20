@@ -48,6 +48,7 @@ llm:
       num_ctx: 32768
       parallel: 4
       gguf: unsloth/Qwen3-4B-Instruct-2507-GGUF:Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+      draft: Qwen3-0.6B-Q8_0
     qwen3-1.7b:
       name: Qwen3-1.7B-Q4_K_M
       provider: llamacpp
@@ -55,6 +56,11 @@ llm:
       num_ctx: 32768
       parallel: 16
       gguf: unsloth/Qwen3-1.7B-GGUF:Qwen3-1.7B-Q4_K_M.gguf
+    qwen3-0.6b-draft:
+      name: Qwen3-0.6B-Q8_0
+      provider: llamacpp
+      url: http://localhost:8090
+      gguf: unsloth/Qwen3-0.6B-GGUF:Qwen3-0.6B-Q8_0.gguf
     qwen3-embed:
       name: Qwen3-Embedding-0.6B-q8_0
       provider: llamacpp
