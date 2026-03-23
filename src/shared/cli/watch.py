@@ -489,7 +489,7 @@ def _shutdown_watch(
 @click.option("--features", is_flag=True, help="Run feature extraction after changes")
 @click.option("--glossary", is_flag=True, help="Run glossary extraction after changes")
 @click.option("--skip-tests", is_flag=True, help="Skip test files and directories")
-@click.option("--skip-resolve", is_flag=True, help="Skip call resolution phase")
+@click.option("--skip-resolve", is_flag=True, help="Skip call resolution and semantic relationships")
 @click.option("--llm-url", default=None, help="LLM API URL (default: from config)")
 @click.option("--workers", "-w", default=0, type=int, help="Max parallel workers (0=auto)")
 @click.option("--debounce", default=10.0, type=float, help="Seconds to wait after last change before processing")

@@ -1328,7 +1328,7 @@ def run_call_resolution(
         scope: Repository scope.
         repository: Repository name.
         username: Username/branch.
-        skip_resolve: If True, skip call resolution (but still compute semantic relationships).
+        skip_resolve: If True, skip call resolution and semantic relationship computation.
         console: Rich console for output.
         max_workers: Number of threads for parallel call resolution (1 = sequential).
     """
@@ -1404,14 +1404,15 @@ def run_call_resolution(
         repo.flush()
         repo.refresh()
 
-        # Semantic relationships always run (independent of call resolution)
-        from magaldi_core.call_resolution import compute_semantic_relationships
+        if not skip_resolve:
+            # Semantic relationships (depends on call resolution data)
+            from magaldi_core.call_resolution import compute_semantic_relationships
 
-        console.print("\n  [bold]Semantic Relationships[/]")
-        try:
-            elements_processed, total_relationships = compute_semantic_relationships(
-                repo, scope, repository, username,
-            )
-            console.print(f"  Processed {elements_processed} elements, stored {total_relationships} relationships")
-        except Exception as e:
-            console.print(f"  [yellow]Warning: Semantic relationships failed: {rich_escape(str(e))}[/]")
+            console.print("\n  [bold]Semantic Relationships[/]")
+            try:
+                elements_processed, total_relationships = compute_semantic_relationships(
+                    repo, scope, repository, username,
+                )
+                console.print(f"  Processed {elements_processed} elements, stored {total_relationships} relationships")
+            except Exception as e:
+                console.print(f"  [yellow]Warning: Semantic relationships failed: {rich_escape(str(e))}[/]")

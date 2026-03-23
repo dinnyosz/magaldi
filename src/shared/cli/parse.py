@@ -155,7 +155,7 @@ def _run_extraction_only(
 @click.option("--features", is_flag=True, help="Run feature/subfeature extraction")
 @click.option("--glossary", is_flag=True, help="Run glossary extraction")
 @click.option("--skip-tests", is_flag=True, help="Skip test files and directories")
-@click.option("--skip-resolve", is_flag=True, help="Skip call resolution phase (faster for large repos)")
+@click.option("--skip-resolve", is_flag=True, help="Skip call resolution and semantic relationships (faster for large repos)")
 @click.option("--dry-run", is_flag=True, help="Use in-memory storage (no database required)")
 @click.option("--llm-url", default=None, help="LLM API URL (default: from config)")
 @click.option("--workers", "-w", default=0, type=int, help="Max parallel workers (0=auto based on context tier)")
