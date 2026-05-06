@@ -110,6 +110,18 @@ class ModelConfig:
     # Note: the draft model counts against --models-max.
     draft: str | None = None
 
+    # Skip tiered context symlinks/presets for this model.
+    # Large models (14B+, MoE) should run at a single fixed context size
+    # to avoid multiplying KV cache allocations across tiers.
+    no_tiers: bool = False
+
+    # Multimodal projector GGUF spec for vision models (llama.cpp only).
+    # Format: "repo_id:filename" (same as `gguf` field).
+    # Example: "unsloth/gemma-4-26B-A4B-it-GGUF:mmproj-BF16.gguf"
+    # Downloaded by `magaldi llamacpp pull` alongside the main model.
+    # When set, per-model presets will include `mmproj = <path>`.
+    mmproj: str | None = None
+
     def get_litellm_model(self) -> str:
         """Get the full LiteLLM model identifier.
 
@@ -157,7 +169,12 @@ class ModelConfig:
 
         Other providers (vllm-mlx, lmstudio, etc.) use a fixed context window
         set at model load time — tier separation adds overhead with no benefit.
+
+        Models with no_tiers=True (large dense/MoE) run at a single fixed
+        context size to avoid multiplying KV cache allocations across tiers.
         """
+        if self.no_tiers:
+            return False
         return self.provider in ("ollama", "llamacpp")
 
     # Models that use thinking/reasoning tags (<think>...</think>) by default.

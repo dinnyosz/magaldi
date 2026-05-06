@@ -205,6 +205,61 @@ class TestGeneratePresets:
             content = path.read_text()
             assert "[Qwen3-4B-Instruct-2507-Q4_K_M]" in content
 
+    def test_generates_presets_with_mmproj(self, tmp_path: Path) -> None:
+        """mmproj path is written to preset when file exists."""
+        # Create a fake mmproj file in a temporary models dir
+        fake_models_dir = tmp_path / "models"
+        fake_models_dir.mkdir()
+        mmproj_file = fake_models_dir / "mmproj-BF16.gguf"
+        mmproj_file.touch()
+
+        config = LLMConfig(
+            models={
+                "gemma4-26b": ModelConfig(
+                    name="gemma-4-26B-A4B-it-UD-Q4_K_M",
+                    provider="llamacpp",
+                    url="http://localhost:8090",
+                    num_ctx=40960,
+                    no_tiers=True,
+                    mmproj="unsloth/gemma-4-26B-A4B-it-GGUF:mmproj-BF16.gguf",
+                ),
+            }
+        )
+        with (
+            patch("shared.cli.llamacpp._presets_file", return_value=tmp_path / "presets.ini"),
+            patch("shared.cli.llamacpp.MODELS_DIR", fake_models_dir),
+        ):
+            path = _generate_presets(config)
+            content = path.read_text()
+            assert "[gemma-4-26B-A4B-it-UD-Q4_K_M]" in content
+            assert f"mmproj = {mmproj_file.resolve()}" in content
+
+    def test_skips_mmproj_when_file_missing(self, tmp_path: Path) -> None:
+        """mmproj is NOT written to preset when file doesn't exist."""
+        fake_models_dir = tmp_path / "models"
+        fake_models_dir.mkdir()
+        # Don't create the mmproj file
+
+        config = LLMConfig(
+            models={
+                "gemma4-26b": ModelConfig(
+                    name="gemma-4-26B-A4B-it-UD-Q4_K_M",
+                    provider="llamacpp",
+                    url="http://localhost:8090",
+                    num_ctx=40960,
+                    no_tiers=True,
+                    mmproj="unsloth/gemma-4-26B-A4B-it-GGUF:mmproj-BF16.gguf",
+                ),
+            }
+        )
+        with (
+            patch("shared.cli.llamacpp._presets_file", return_value=tmp_path / "presets.ini"),
+            patch("shared.cli.llamacpp.MODELS_DIR", fake_models_dir),
+        ):
+            path = _generate_presets(config)
+            content = path.read_text()
+            assert "mmproj" not in content
+
     def test_skips_non_llamacpp_models(self, tmp_path: Path) -> None:
         config = LLMConfig(
             models={
@@ -266,6 +321,19 @@ class TestModelConfigLlamacpp:
     def test_gguf_default_none(self) -> None:
         cfg = ModelConfig(name="qwen3:4b", provider="ollama")
         assert cfg.gguf is None
+
+    def test_mmproj_field(self) -> None:
+        cfg = ModelConfig(
+            name="gemma-4-26B-A4B-it-UD-Q4_K_M",
+            provider="llamacpp",
+            url="http://localhost:8090",
+            mmproj="unsloth/gemma-4-26B-A4B-it-GGUF:mmproj-BF16.gguf",
+        )
+        assert cfg.mmproj == "unsloth/gemma-4-26B-A4B-it-GGUF:mmproj-BF16.gguf"
+
+    def test_mmproj_default_none(self) -> None:
+        cfg = ModelConfig(name="qwen3:4b", provider="ollama")
+        assert cfg.mmproj is None
 
     def test_ollama_provider_unchanged(self) -> None:
         cfg = ModelConfig(name="qwen3:4b-instruct", provider="ollama")

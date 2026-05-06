@@ -41,6 +41,31 @@ llm:
   # Ollama/vllm-mlx configs kept for reference but not used by default
   models:
     # --- llama.cpp models (primary) ---
+    qwen3-30b:
+      name: Qwen3-30B-A3B-Q4_K_M
+      provider: llamacpp
+      url: http://localhost:8090
+      num_ctx: 40960
+      parallel: 1
+      no_tiers: true
+      gguf: unsloth/Qwen3-30B-A3B-GGUF:Qwen3-30B-A3B-Q4_K_M.gguf
+    gemma4-26b:
+      name: gemma-4-26B-A4B-it-UD-Q4_K_M
+      provider: llamacpp
+      url: http://localhost:8090
+      num_ctx: 40960
+      parallel: 1
+      no_tiers: true
+      gguf: unsloth/gemma-4-26B-A4B-it-GGUF:gemma-4-26B-A4B-it-UD-Q4_K_M.gguf
+      mmproj: unsloth/gemma-4-26B-A4B-it-GGUF:mmproj-BF16.gguf
+    qwen3-14b:
+      name: Qwen3-14B-Q4_K_M
+      provider: llamacpp
+      url: http://localhost:8090
+      num_ctx: 32768
+      parallel: 2
+      no_tiers: true
+      gguf: unsloth/Qwen3-14B-GGUF:Qwen3-14B-Q4_K_M.gguf
     qwen3-4b:
       name: Qwen3-4B-Instruct-2507-Q4_K_M
       provider: llamacpp

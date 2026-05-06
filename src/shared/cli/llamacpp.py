@@ -195,6 +195,15 @@ def _generate_presets(llm_config: LLMConfig, create_symlinks: bool = True) -> Pa
             if draft_gguf.exists():
                 draft_gguf_path = str(draft_gguf.resolve())
 
+        # Resolve mmproj path for vision models.
+        # The mmproj field holds a gguf spec "repo_id:filename.gguf".
+        # Extract the filename and resolve the absolute path.
+        if cfg.mmproj and ":" in cfg.mmproj:
+            mmproj_filename = cfg.mmproj.rsplit(":", 1)[1]
+            mmproj_path = MODELS_DIR / mmproj_filename
+            if mmproj_path.exists():
+                presets[section]["mmproj"] = str(mmproj_path.resolve())
+
         if cfg.embedding:
             presets[section]["embedding"] = "true"
             presets[section]["pooling"] = "mean"
@@ -209,6 +218,11 @@ def _generate_presets(llm_config: LLMConfig, create_symlinks: bool = True) -> Pa
             embed_batch = 12288
             presets[section]["batch-size"] = str(embed_batch)
             presets[section]["ubatch-size"] = str(embed_batch)
+        elif cfg.no_tiers:
+            # Large models (14B+, MoE): single preset, no tier symlinks.
+            # Runs at the fixed num_ctx from config to avoid multiplying
+            # KV cache allocations across tiers.
+            pass
         else:
             # Non-embedding LLM model: generate per-tier preset sections.
             # Each tier gets a symlinked GGUF with its own ctx-size so the
@@ -755,6 +769,8 @@ def llm_pull(model: str | None) -> None:
             to_pull.append((ref_name, cfg.gguf))
             if cfg.draft and ":" in cfg.draft:
                 to_pull.append((f"{ref_name} (draft)", cfg.draft))
+            if cfg.mmproj and ":" in cfg.mmproj:
+                to_pull.append((f"{ref_name} (mmproj)", cfg.mmproj))
 
     if not to_pull:
         if model:
@@ -839,6 +855,10 @@ def llm_warmup() -> None:
     for cfg in models:
         if cfg.embedding:
             console.print(f"  {cfg.name}: [dim]skipped (embedding model)[/]")
+            continue
+
+        if cfg.no_tiers:
+            console.print(f"  {cfg.name}: [dim]skipped (no_tiers)[/]")
             continue
 
         base_gguf = MODELS_DIR / f"{cfg.name}.gguf"
