@@ -63,6 +63,7 @@ PIDFILE_DIR = Path.home() / ".magaldi" / "pids"
 PRESETS_DIR = Path.home() / ".magaldi"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 MODELS_DIR = PROJECT_ROOT / "tools" / "models"
+PROJECTORS_DIR = MODELS_DIR / "projectors"  # mmproj files (kept separate to avoid auto-discovery)
 LLAMA_SERVER = PROJECT_ROOT / "tools" / "llama.cpp" / "build" / "bin" / "llama-server"
 
 # Defaults — tuned for Apple Silicon M4 Pro (48GB)
@@ -198,9 +199,11 @@ def _generate_presets(llm_config: LLMConfig, create_symlinks: bool = True) -> Pa
         # Resolve mmproj path for vision models.
         # The mmproj field holds a gguf spec "repo_id:filename.gguf".
         # Extract the filename and resolve the absolute path.
+        # mmproj files live in PROJECTORS_DIR (not MODELS_DIR) to avoid
+        # being auto-discovered as standalone models by --models-dir.
         if cfg.mmproj and ":" in cfg.mmproj:
             mmproj_filename = cfg.mmproj.rsplit(":", 1)[1]
-            mmproj_path = MODELS_DIR / mmproj_filename
+            mmproj_path = PROJECTORS_DIR / mmproj_filename
             if mmproj_path.exists():
                 presets[section]["mmproj"] = str(mmproj_path.resolve())
 
@@ -762,15 +765,16 @@ def llm_pull(model: str | None) -> None:
     """
     config = load_config()
 
-    # Collect models with gguf field, plus any draft gguf specs
-    to_pull: list[tuple[str, str]] = []  # (display_name, gguf_spec)
+    # Collect models with gguf field, plus any draft/mmproj gguf specs
+    to_pull: list[tuple[str, str, Path]] = []  # (display_name, gguf_spec, target_dir)
     for ref_name, cfg in config.llm.models.items():
         if cfg.provider == "llamacpp" and cfg.gguf and (model is None or ref_name == model):
-            to_pull.append((ref_name, cfg.gguf))
+            to_pull.append((ref_name, cfg.gguf, MODELS_DIR))
             if cfg.draft and ":" in cfg.draft:
-                to_pull.append((f"{ref_name} (draft)", cfg.draft))
+                to_pull.append((f"{ref_name} (draft)", cfg.draft, MODELS_DIR))
             if cfg.mmproj and ":" in cfg.mmproj:
-                to_pull.append((f"{ref_name} (mmproj)", cfg.mmproj))
+                # mmproj files go to projectors/ subdir to avoid auto-discovery
+                to_pull.append((f"{ref_name} (mmproj)", cfg.mmproj, PROJECTORS_DIR))
 
     if not to_pull:
         if model:
@@ -782,8 +786,9 @@ def llm_pull(model: str | None) -> None:
         console.print('  gguf: "unsloth/Qwen3.5-4B-GGUF:Qwen3.5-4B-Q4_K_M.gguf"')
         return
 
-    # Ensure models directory
+    # Ensure directories exist
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    PROJECTORS_DIR.mkdir(parents=True, exist_ok=True)
 
     try:
         from huggingface_hub import hf_hub_download
@@ -795,7 +800,7 @@ def llm_pull(model: str | None) -> None:
     console.print(f"[bold blue]Downloading {len(to_pull)} model(s) to {MODELS_DIR}[/]")
     console.print()
 
-    for ref_name, gguf_spec in to_pull:
+    for ref_name, gguf_spec, target_dir in to_pull:
         if ":" not in gguf_spec:
             console.print(f"  [red]{ref_name}: invalid gguf format '{gguf_spec}' (expected repo:filename)[/]")
             continue
@@ -803,7 +808,7 @@ def llm_pull(model: str | None) -> None:
         repo_id, filename = gguf_spec.rsplit(":", 1)
 
         # Check if already downloaded
-        target = MODELS_DIR / filename
+        target = target_dir / filename
         if target.exists():
             console.print(f"  [dim]{filename} already exists ({_format_size(target.stat().st_size)})[/]")
             continue
@@ -813,7 +818,7 @@ def llm_pull(model: str | None) -> None:
             hf_hub_download(
                 repo_id=repo_id,
                 filename=filename,
-                local_dir=str(MODELS_DIR),
+                local_dir=str(target_dir),
             )
             if target.exists():
                 console.print(f"  [green]  {filename} ({_format_size(target.stat().st_size)})[/]")

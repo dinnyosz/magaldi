@@ -206,11 +206,12 @@ class TestGeneratePresets:
             assert "[Qwen3-4B-Instruct-2507-Q4_K_M]" in content
 
     def test_generates_presets_with_mmproj(self, tmp_path: Path) -> None:
-        """mmproj path is written to preset when file exists."""
-        # Create a fake mmproj file in a temporary models dir
+        """mmproj path is written to preset when file exists in projectors dir."""
         fake_models_dir = tmp_path / "models"
         fake_models_dir.mkdir()
-        mmproj_file = fake_models_dir / "mmproj-BF16.gguf"
+        fake_projectors_dir = fake_models_dir / "projectors"
+        fake_projectors_dir.mkdir()
+        mmproj_file = fake_projectors_dir / "mmproj-BF16.gguf"
         mmproj_file.touch()
 
         config = LLMConfig(
@@ -227,7 +228,7 @@ class TestGeneratePresets:
         )
         with (
             patch("shared.cli.llamacpp._presets_file", return_value=tmp_path / "presets.ini"),
-            patch("shared.cli.llamacpp.MODELS_DIR", fake_models_dir),
+            patch("shared.cli.llamacpp.PROJECTORS_DIR", fake_projectors_dir),
         ):
             path = _generate_presets(config)
             content = path.read_text()
@@ -236,8 +237,8 @@ class TestGeneratePresets:
 
     def test_skips_mmproj_when_file_missing(self, tmp_path: Path) -> None:
         """mmproj is NOT written to preset when file doesn't exist."""
-        fake_models_dir = tmp_path / "models"
-        fake_models_dir.mkdir()
+        fake_projectors_dir = tmp_path / "projectors"
+        fake_projectors_dir.mkdir()
         # Don't create the mmproj file
 
         config = LLMConfig(
@@ -254,7 +255,7 @@ class TestGeneratePresets:
         )
         with (
             patch("shared.cli.llamacpp._presets_file", return_value=tmp_path / "presets.ini"),
-            patch("shared.cli.llamacpp.MODELS_DIR", fake_models_dir),
+            patch("shared.cli.llamacpp.PROJECTORS_DIR", fake_projectors_dir),
         ):
             path = _generate_presets(config)
             content = path.read_text()
