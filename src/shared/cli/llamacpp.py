@@ -250,7 +250,6 @@ def _generate_presets(llm_config: LLMConfig, create_symlinks: bool = True) -> Pa
                 # ctx-size causing ~56 GB of KV allocations for a 0.6B model.
                 if draft_gguf_path:
                     presets[tier_name]["model-draft"] = draft_gguf_path
-                    presets[tier_name]["ctx-size-draft"] = "2048"
 
     presets_path = _presets_file()
     presets_path.parent.mkdir(parents=True, exist_ok=True)
@@ -388,7 +387,7 @@ def llm_serve(
         "--threads", "6",
         "--flash-attn", "on",
         "--n-gpu-layers", "99",
-        "--mlock",
+        # "--mlock",  # disabled: lets macOS page model in/out, reducing peak memory when GPU is shared with diffusers
         # Memory fitting: leave 2 GiB headroom per device (default 1 GiB)
         # so the OS / other processes aren't starved when multiple models
         # are loaded simultaneously.
@@ -397,14 +396,14 @@ def llm_serve(
         # not here. CLI args override per-model preset values, which would
         # prevent embedding models from using batch-size=12288.
         "-sps", "0",
-        # KV cache: unified mode shares a single KV cache pool across all
-        # parallel slots for each model. With per-tier ctx-size in presets,
-        # each tier alias gets an appropriately sized shared cache instead
-        # of allocating ctx-size/parallel per slot. This significantly
-        # reduces memory waste for tiers with many parallel slots.
+        # KV cache: split mode (high-throughput, llama.cpp PR #14363).
+        # Each parallel slot gets its own KV cache buffer, eliminating wasteful
+        # cross-sequence attention compute. This is ideal for magaldi's workload
+        # of many independent parallel requests with no shared prefix.
+        # Requires LLAMA_SET_ROWS=1 env var (set in Popen call below).
+        "--no-kv-unified",
         # q8_0 KV cache halves memory vs f16 with negligible quality loss,
         # allowing more parallel slots or larger contexts in the same budget.
-        "--kv-unified",
         "--cache-type-k", "q8_0",
         "--cache-type-v", "q8_0",
         # Prompt cache reuse disabled: our batch summarization workload sends
@@ -456,7 +455,7 @@ def llm_serve(
     console.print(f"  Context size:   {ctx_size} (default, per-model override via presets)")
     console.print("  Flash attention: on")
     console.print("  GPU layers:     99 (full offload)")
-    console.print("  KV unified:     on (shared cache pool per model)")
+    console.print("  KV split:       on (per-slot cache, high-throughput mode)")
     console.print(f"  Batch size:     {DEFAULT_BATCH_SIZE} (batch) / {DEFAULT_UBATCH_SIZE} (ubatch), per-model override via presets")
     console.print("  KV cache type:  q8_0 (K + V)")
     console.print("  Cache reuse:    off")
@@ -477,6 +476,10 @@ def llm_serve(
     console.print()
 
     # Start as background process
+    # LLAMA_SET_ROWS=1 enables split KV cache (high-throughput mode) where
+    # each parallel slot gets its own KV buffer. Without it, llama-server
+    # falls back to unified mode with a warning. See llama.cpp PR #14363.
+    env = {**os.environ, "LLAMA_SET_ROWS": "1"}
     logfile = _logfile(port)
     with open(logfile, "w") as log_f:
         proc = subprocess.Popen(
@@ -484,6 +487,7 @@ def llm_serve(
             stdout=log_f,
             stderr=subprocess.STDOUT,
             start_new_session=True,
+            env=env,
         )
 
     # Write PID
