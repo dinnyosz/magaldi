@@ -16,6 +16,7 @@ from shared.cli.llamacpp import (
     MODELS_DIR,
     PROJECT_ROOT,
     _active_model_refs,
+    _build_presets,
     _format_size,
     _generate_presets,
     _get_llamacpp_models,
@@ -668,3 +669,106 @@ class TestPull:
         assert result.exit_code == 0
         assert "Failed: boom" in result.output
         assert mock_dl.call_count == 4
+
+
+# =============================================================================
+# presets (export for external llama-server)
+# =============================================================================
+
+
+def _vision_config() -> LLMConfig:
+    return LLMConfig(
+        models={
+            "vision": ModelConfig(
+                name="Vision", provider="llamacpp", url="http://localhost:8090",
+                no_tiers=True, gguf="org/V-GGUF:Vision.gguf", mmproj="org/V-GGUF:mmproj.gguf",
+            ),
+        },
+        summarize_model="vision",
+        summarize_model_small="vision",
+        embed_model="vision",
+        variable_scoring_model="vision",
+    )
+
+
+class TestBuildPresetsWithPrefix:
+    """model_path_prefix writes explicit model paths for remote/Docker servers."""
+
+    def test_every_section_gets_model_path(self, tmp_path: Path) -> None:
+        with patch("shared.cli.llamacpp.MODELS_DIR", tmp_path):
+            presets = _build_presets(_pull_config(), model_path_prefix="/models")
+        # [*] holds global defaults only, no model key
+        for section in presets.sections():
+            if section == "*":
+                continue
+            assert presets[section]["model"].startswith("/models/")
+        assert presets["Small"]["model"] == "/models/Small.gguf"
+        assert presets["Small-1k"]["model"] == "/models/Small.gguf"
+
+    def test_draft_written_without_local_file(self, tmp_path: Path) -> None:
+        with patch("shared.cli.llamacpp.MODELS_DIR", tmp_path):
+            presets = _build_presets(_pull_config(), model_path_prefix="/models")
+        assert presets["Drafted-1k"]["model-draft"] == "/models/Draft.gguf"
+
+    def test_mmproj_under_projectors(self, tmp_path: Path) -> None:
+        with patch("shared.cli.llamacpp.PROJECTORS_DIR", tmp_path / "projectors"):
+            presets = _build_presets(_vision_config(), model_path_prefix="/models")
+        assert presets["Vision"]["mmproj"] == "/models/projectors/mmproj.gguf"
+
+    def test_no_symlinks_created(self, tmp_path: Path) -> None:
+        (tmp_path / "Small.gguf").write_bytes(b"x")
+        with patch("shared.cli.llamacpp.MODELS_DIR", tmp_path):
+            _build_presets(_pull_config(), create_symlinks=True, model_path_prefix="/models")
+        assert [p.name for p in tmp_path.iterdir()] == ["Small.gguf"]
+
+    def test_without_prefix_no_model_key(self, tmp_path: Path) -> None:
+        with (
+            patch("shared.cli.llamacpp.MODELS_DIR", tmp_path),
+            patch("shared.cli.llamacpp.PROJECTORS_DIR", tmp_path / "projectors"),
+        ):
+            presets = _build_presets(_pull_config(), create_symlinks=False)
+        assert all("model" not in presets[s] for s in presets.sections())
+        # Draft file missing locally -> no model-draft
+        assert "model-draft" not in presets["Drafted-1k"]
+
+
+class TestPresetsCommand:
+    """Test the llamacpp presets subcommand."""
+
+    def _run(self, tmp_path: Path, *args: str) -> object:
+        runner = CliRunner()
+        mock_cfg = MagicMock()
+        mock_cfg.llm = _pull_config()
+        with (
+            patch("shared.cli.llamacpp.MODELS_DIR", tmp_path),
+            patch("shared.cli.llamacpp.PROJECTORS_DIR", tmp_path / "projectors"),
+            patch("shared.cli.llamacpp.load_config", return_value=mock_cfg),
+        ):
+            return runner.invoke(llamacpp, ["presets", *args])
+
+    def test_stdout_default(self, tmp_path: Path) -> None:
+        result = self._run(tmp_path, "--models-dir", "/models")
+        assert result.exit_code == 0  # type: ignore[attr-defined]
+        assert "[Big]" in result.output  # type: ignore[attr-defined]
+        assert "model = /models/Big.gguf" in result.output  # type: ignore[attr-defined]
+
+    def test_trailing_slash_stripped(self, tmp_path: Path) -> None:
+        result = self._run(tmp_path, "--models-dir", "/models/")
+        assert "/models//" not in result.output  # type: ignore[attr-defined]
+
+    def test_active_filters_models(self, tmp_path: Path) -> None:
+        result = self._run(tmp_path, "--models-dir", "/models", "--active")
+        assert "[Big]" not in result.output  # type: ignore[attr-defined]
+        assert "[Small]" in result.output  # type: ignore[attr-defined]
+        assert "[Embed]" in result.output  # type: ignore[attr-defined]
+
+    def test_writes_output_file(self, tmp_path: Path) -> None:
+        out = tmp_path / "sub" / "models.ini"
+        result = self._run(tmp_path, "--models-dir", "/models", "-o", str(out))
+        assert result.exit_code == 0  # type: ignore[attr-defined]
+        assert "[Small]" in out.read_text()
+
+    def test_no_models_dir_omits_model_key(self, tmp_path: Path) -> None:
+        result = self._run(tmp_path)
+        assert result.exit_code == 0  # type: ignore[attr-defined]
+        assert "model = " not in result.output  # type: ignore[attr-defined]

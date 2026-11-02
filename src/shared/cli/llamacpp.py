@@ -10,6 +10,7 @@ Usage:
     magaldi llamacpp logs      # Follow server logs
     magaldi llamacpp models    # List available GGUF models
     magaldi llamacpp pull      # Download configured models from HuggingFace
+    magaldi llamacpp presets   # Export presets INI (e.g. for a Docker llama-server)
     magaldi llamacpp update    # Clone/update llama.cpp and rebuild
 
 Example magaldi.yaml:
@@ -145,7 +146,22 @@ def _get_llamacpp_port(llm_config: LLMConfig) -> int:
 
 
 def _generate_presets(llm_config: LLMConfig, create_symlinks: bool = True) -> Path:
-    """Generate a llama-server presets INI file from config.
+    """Generate the llama-server presets INI file from config and write it to disk."""
+    presets = _build_presets(llm_config, create_symlinks=create_symlinks)
+    presets_path = _presets_file()
+    presets_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(presets_path, "w") as f:
+        presets.write(f)
+
+    return presets_path
+
+
+def _build_presets(
+    llm_config: LLMConfig,
+    create_symlinks: bool = True,
+    model_path_prefix: str | None = None,
+) -> configparser.ConfigParser:
+    """Build llama-server presets from config.
 
     The presets file lets us set per-model context sizes and other params.
     Format: [model:<model-id>] sections with key=value pairs.
@@ -161,6 +177,12 @@ def _generate_presets(llm_config: LLMConfig, create_symlinks: bool = True) -> Pa
     For non-embedding LLM models, also generates per-tier preset sections
     and creates symlinked GGUF files so each context tier gets its own
     model alias with an appropriately sized KV cache.
+
+    With model_path_prefix (e.g. "/models" inside a Docker container), every
+    section gets an explicit `model = <prefix>/<file>.gguf` key instead of
+    relying on --models-dir discovery. Tier sections point at the base GGUF,
+    so no symlinks are created, and draft/mmproj paths are written without
+    checking local existence (the files live on the serving host).
     """
     from shared.ai.context_size import CONTEXT_TIERS, TIER_PARALLEL
     from shared.ai.llamacpp_models import (
@@ -191,6 +213,9 @@ def _generate_presets(llm_config: LLMConfig, create_symlinks: bool = True) -> Pa
         # (GGUF filename without .gguf extension)
         section = cfg.name
         presets[section] = {}
+        base_model_path = f"{model_path_prefix}/{cfg.name}.gguf" if model_path_prefix else None
+        if base_model_path:
+            presets[section]["model"] = base_model_path
         if cfg.num_ctx:
             presets[section]["ctx-size"] = str(cfg.num_ctx)
         if cfg.parallel:
@@ -203,7 +228,9 @@ def _generate_presets(llm_config: LLMConfig, create_symlinks: bool = True) -> Pa
         if cfg.draft and ":" in cfg.draft:
             draft_filename = cfg.draft.rsplit(":", 1)[1]
             draft_gguf = MODELS_DIR / draft_filename
-            if draft_gguf.exists():
+            if model_path_prefix:
+                draft_gguf_path = f"{model_path_prefix}/{draft_filename}"
+            elif draft_gguf.exists():
                 draft_gguf_path = str(draft_gguf.resolve())
 
         # Resolve mmproj path for vision models.
@@ -214,7 +241,9 @@ def _generate_presets(llm_config: LLMConfig, create_symlinks: bool = True) -> Pa
         if cfg.mmproj and ":" in cfg.mmproj:
             mmproj_filename = cfg.mmproj.rsplit(":", 1)[1]
             mmproj_path = PROJECTORS_DIR / mmproj_filename
-            if mmproj_path.exists():
+            if model_path_prefix:
+                presets[section]["mmproj"] = f"{model_path_prefix}/{PROJECTORS_DIR.name}/{mmproj_filename}"
+            elif mmproj_path.exists():
                 presets[section]["mmproj"] = str(mmproj_path.resolve())
 
         if cfg.embedding:
@@ -241,12 +270,14 @@ def _generate_presets(llm_config: LLMConfig, create_symlinks: bool = True) -> Pa
             # Each tier gets a symlinked GGUF with its own ctx-size so the
             # KV cache is allocated per-tier (like Ollama tiered aliases).
             base_gguf = MODELS_DIR / f"{cfg.name}.gguf"
-            if create_symlinks and base_gguf.exists():
+            if create_symlinks and not model_path_prefix and base_gguf.exists():
                 ensure_all_tier_symlinks(base_gguf, MODELS_DIR)
 
             for tier in CONTEXT_TIERS:
                 tier_name = get_tiered_model_name(cfg.name, tier)
                 presets[tier_name] = {}
+                if base_model_path:
+                    presets[tier_name]["model"] = base_model_path
                 parallel_slots = TIER_PARALLEL.get(tier, DEFAULT_PARALLEL)
                 # With unified KV cache (llama.cpp default), ctx-size is the
                 # TOTAL shared KV pool across all parallel slots. To guarantee
@@ -261,12 +292,7 @@ def _generate_presets(llm_config: LLMConfig, create_symlinks: bool = True) -> Pa
                 if draft_gguf_path:
                     presets[tier_name]["model-draft"] = draft_gguf_path
 
-    presets_path = _presets_file()
-    presets_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(presets_path, "w") as f:
-        presets.write(f)
-
-    return presets_path
+    return presets
 
 
 def _list_gguf_files(include_tier_symlinks: bool = True) -> list[Path]:
@@ -850,6 +876,56 @@ def llm_pull(model: str | None, active: bool) -> None:
 
     console.print()
     console.print("[green]Done.[/] Start with: [bold]magaldi llamacpp serve[/]")
+
+
+@llamacpp.command("presets")
+@click.option(
+    "--models-dir", "models_dir", type=str, default=None,
+    help="Model directory as seen by llama-server (e.g. /models in Docker). "
+         "Writes explicit model= paths; skips tier symlinks.",
+)
+@click.option(
+    "--output", "-o", type=click.Path(dir_okay=False, path_type=Path), default=None,
+    help="Write INI to this file (default: stdout)",
+)
+@click.option(
+    "--active", is_flag=True,
+    help="Only include models referenced by role settings (summarize_model, embed_model, ...)",
+)
+def llm_presets(models_dir: str | None, output: Path | None, active: bool) -> None:
+    """Export the llama-server presets INI generated from magaldi.yaml.
+
+    Use this when llama-server runs outside `magaldi llamacpp serve`
+    (e.g. a Docker container on another host) so its presets stay in sync
+    with config:
+
+    \b
+        magaldi llamacpp presets --models-dir /models --active -o models.ini
+    """
+    import dataclasses
+    import io
+
+    config = load_config()
+    llm_config = config.llm
+    if active:
+        refs = _active_model_refs(llm_config)
+        llm_config = dataclasses.replace(
+            llm_config,
+            models={k: v for k, v in llm_config.models.items() if k in refs},
+        )
+    prefix = models_dir.rstrip("/") if models_dir else None
+    presets = _build_presets(llm_config, create_symlinks=False, model_path_prefix=prefix)
+
+    buf = io.StringIO()
+    presets.write(buf)
+
+    if output is None:
+        click.echo(buf.getvalue(), nl=False)
+        return
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(buf.getvalue())
+    console.print(f"[green]Wrote presets:[/] {output}")
 
 
 @llamacpp.command("warmup")
