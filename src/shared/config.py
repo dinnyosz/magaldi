@@ -983,6 +983,13 @@ def _apply_env_overrides(config: MagaldiConfig) -> MagaldiConfig:
             section = getattr(config, section_name)
             setattr(section, attr_name, converter(value))
 
+    # Point every llamacpp model at a different server (e.g. a remote host)
+    llamacpp_url = os.environ.get("MAGALDI_LLAMACPP_URL")
+    if llamacpp_url:
+        for model in config.llm.models.values():
+            if model.provider == "llamacpp":
+                model.url = llamacpp_url.rstrip("/")
+
     return config
 
 

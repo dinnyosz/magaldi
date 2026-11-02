@@ -260,6 +260,35 @@ class TestEnvOverrides:
         config = load_config(FIXTURES_DIR / "minimal.yaml")
         assert config.web.port == 9000
 
+    def test_env_overrides_llamacpp_url(self):
+        os.environ["MAGALDI_LLAMACPP_URL"] = "http://10.0.0.5:8090/"
+        config = load_config(FIXTURES_DIR / "minimal.yaml")
+        llamacpp = [m for m in config.llm.models.values() if m.provider == "llamacpp"]
+        assert llamacpp
+        assert all(m.url == "http://10.0.0.5:8090" for m in llamacpp)
+        assert config.llm.get_embed_model().get_api_base() == "http://10.0.0.5:8090/v1"
+
+    def test_env_overrides_llamacpp_url_skips_other_providers(self, tmp_path):
+        cfg = tmp_path / "magaldi.yaml"
+        cfg.write_text(
+            "llm:\n"
+            "  models:\n"
+            "    a:\n      name: A\n      provider: llamacpp\n      url: http://localhost:8090\n"
+            "    b:\n      name: B\n      provider: ollama\n      url: http://localhost:11434\n"
+            "  summarize_model: a\n  summarize_model_small: a\n"
+            "  embed_model: a\n  variable_scoring_model: a\n"
+        )
+        os.environ["MAGALDI_LLAMACPP_URL"] = "http://remote:8090"
+        config = load_config(cfg)
+        assert config.llm.models["a"].url == "http://remote:8090"
+        assert config.llm.models["b"].url == "http://localhost:11434"
+
+    def test_env_overrides_llamacpp_url_empty_ignored(self):
+        os.environ["MAGALDI_LLAMACPP_URL"] = ""
+        config = load_config(FIXTURES_DIR / "minimal.yaml")
+        llamacpp = [m for m in config.llm.models.values() if m.provider == "llamacpp"]
+        assert all(m.url == "http://localhost:8090" for m in llamacpp)
+
 
 # =============================================================================
 # PRIORITY CHAIN

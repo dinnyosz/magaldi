@@ -129,9 +129,15 @@ OpenSearch (security plugin disabled), Redis (no password) and llama.cpp are
 bound to all interfaces with no auth. Fine on a trusted LAN only; otherwise bind
 to `127.0.0.1` and use an SSH tunnel, or firewall the ports.
 
-## Still open (Mac side)
+## Client side (Mac)
 
-- `.env` sets `MAGALDI_ELASTICSEARCH_HOST` / `MAGALDI_REDIS_HOST` to `localhost`;
-  change to `192.168.68.31` to use the remote services.
-- LLM URLs are hardcoded `http://localhost:8090` in `config/magaldi.yaml`; there is
-  no env override yet (planned: `MAGALDI_LLM_URL`).
+Point a local checkout at the remote services via `.env` (gitignored):
+
+```
+MAGALDI_ELASTICSEARCH_HOST=192.168.68.31
+MAGALDI_REDIS_HOST=192.168.68.31
+MAGALDI_LLAMACPP_URL=http://192.168.68.31:8090   # overrides url of every llamacpp model
+```
+
+Then `magaldi parse <repo> --user <name>` runs locally (tree-sitter parsing) and
+uses the remote for storage, queueing, summarization and embeddings.
