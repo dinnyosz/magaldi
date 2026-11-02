@@ -123,6 +123,16 @@ def _get_llamacpp_models(llm_config: LLMConfig) -> list[ModelConfig]:
     ]
 
 
+def _active_model_refs(llm_config: LLMConfig) -> set[str]:
+    """Model refs used by role settings (summarize, embed, variable scoring)."""
+    return {
+        llm_config.summarize_model,
+        llm_config.summarize_model_small,
+        llm_config.embed_model,
+        llm_config.variable_scoring_model,
+    }
+
+
 def _get_llamacpp_port(llm_config: LLMConfig) -> int:
     """Get the port from the first llamacpp model, or default."""
     for cfg in llm_config.models.values():
@@ -751,7 +761,11 @@ def llm_models(show_all: bool) -> None:
     "--model", "-m", type=str, default=None,
     help="Pull a specific model by config name (e.g., qwen3-4b)",
 )
-def llm_pull(model: str | None) -> None:
+@click.option(
+    "--active", is_flag=True,
+    help="Only pull models referenced by role settings (summarize_model, embed_model, ...)",
+)
+def llm_pull(model: str | None, active: bool) -> None:
     """Download GGUF models from HuggingFace.
 
     Downloads models configured with `gguf:` field in magaldi.yaml.
@@ -768,10 +782,13 @@ def llm_pull(model: str | None) -> None:
               gguf: unsloth/Qwen3-4B-Instruct-2507-GGUF:Qwen3-4B-Instruct-2507-Q4_K_M.gguf
     """
     config = load_config()
+    active_refs = _active_model_refs(config.llm) if active else None
 
     # Collect models with gguf field, plus any draft/mmproj gguf specs
     to_pull: list[tuple[str, str, Path]] = []  # (display_name, gguf_spec, target_dir)
     for ref_name, cfg in config.llm.models.items():
+        if active_refs is not None and ref_name not in active_refs:
+            continue
         if cfg.provider == "llamacpp" and cfg.gguf and (model is None or ref_name == model):
             to_pull.append((ref_name, cfg.gguf, MODELS_DIR))
             if cfg.draft and ":" in cfg.draft:
@@ -787,7 +804,7 @@ def llm_pull(model: str | None) -> None:
             console.print("[yellow]No models with gguf field found in config.[/]")
         console.print()
         console.print("Add gguf field to your model config:")
-        console.print('  gguf: "unsloth/Qwen3.5-4B-GGUF:Qwen3.5-4B-Q4_K_M.gguf"')
+        console.print('  gguf: "unsloth/Qwen3-4B-Instruct-2507-GGUF:Qwen3-4B-Instruct-2507-Q4_K_M.gguf"')
         return
 
     # Ensure directories exist

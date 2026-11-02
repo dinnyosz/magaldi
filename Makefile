@@ -154,21 +154,7 @@ llama-build:
 	@echo "llama-server built: $(LLAMA_SERVER)"
 
 llama-pull:
-	@mkdir -p $(MODELS_DIR)
-	@echo "Downloading GGUF models to $(MODELS_DIR)/..."
-	$(PYTHON) -c "\
-from huggingface_hub import hf_hub_download; \
-models = [ \
-    ('unsloth/Qwen3.5-4B-GGUF', 'Qwen3.5-4B-Q4_K_M.gguf'), \
-    ('unsloth/Qwen3.5-2B-GGUF', 'Qwen3.5-2B-Q4_K_M.gguf'), \
-    ('unsloth/Qwen3-4B-GGUF', 'Qwen3-4B-Q4_K_M.gguf'), \
-    ('unsloth/Qwen3-1.7B-GGUF', 'Qwen3-1.7B-Q4_K_M.gguf'), \
-]; \
-for repo, fname in models: \
-    print(f'  Downloading {fname} from {repo}...'); \
-    hf_hub_download(repo_id=repo, filename=fname, local_dir='$(MODELS_DIR)'); \
-    print(f'  ✓ {fname}'); \
-print(); print('All models downloaded to $(MODELS_DIR)/')"
+	$(VENV)/bin/magaldi llamacpp pull --active
 
 llama-setup: llama-build llama-pull
 	@echo ""

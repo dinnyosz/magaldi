@@ -15,6 +15,7 @@ from shared.cli.llamacpp import (
     LLAMA_SERVER,
     MODELS_DIR,
     PROJECT_ROOT,
+    _active_model_refs,
     _format_size,
     _generate_presets,
     _get_llamacpp_models,
@@ -580,3 +581,90 @@ class TestUpdate:
             ]
             assert len(build_calls) == 1
             assert "-j2" in build_calls[0][0][0]
+
+
+# =============================================================================
+# pull
+# =============================================================================
+
+
+def _pull_config() -> LLMConfig:
+    def m(name: str, **kw: object) -> ModelConfig:
+        return ModelConfig(name=name, provider="llamacpp", url="http://localhost:8090", **kw)  # type: ignore[arg-type]
+
+    return LLMConfig(
+        models={
+            "small": m("Small", gguf="org/Small-GGUF:Small.gguf"),
+            "big": m("Big", gguf="org/Big-GGUF:Big.gguf"),
+            "embed": m("Embed", gguf="org/Embed-GGUF:Embed.gguf", embedding=True),
+            "drafted": m("Drafted", gguf="org/D-GGUF:Drafted.gguf", draft="org/Dr-GGUF:Draft.gguf"),
+            "no-gguf": m("NoGguf"),
+            "ollama": ModelConfig(name="x", provider="ollama", url="http://localhost:11434"),
+        },
+        summarize_model="drafted",
+        summarize_model_small="small",
+        embed_model="embed",
+        variable_scoring_model="drafted",
+    )
+
+
+class TestPull:
+    """Test the llamacpp pull subcommand."""
+
+    def _run_pull(self, tmp_path: Path, *args: str) -> tuple[object, list[str]]:
+        runner = CliRunner()
+        mock_cfg = MagicMock()
+        mock_cfg.llm = _pull_config()
+        with (
+            patch("shared.cli.llamacpp.MODELS_DIR", tmp_path),
+            patch("shared.cli.llamacpp.PROJECTORS_DIR", tmp_path / "projectors"),
+            patch("shared.cli.llamacpp.load_config", return_value=mock_cfg),
+            patch("huggingface_hub.hf_hub_download") as mock_dl,
+        ):
+            result = runner.invoke(llamacpp, ["pull", *args])
+        return result, [c.kwargs["filename"] for c in mock_dl.call_args_list]
+
+    def test_active_model_refs(self) -> None:
+        assert _active_model_refs(_pull_config()) == {"drafted", "small", "embed"}
+
+    def test_pull_all_by_default(self, tmp_path: Path) -> None:
+        result, files = self._run_pull(tmp_path)
+        assert result.exit_code == 0  # type: ignore[attr-defined]
+        assert sorted(files) == ["Big.gguf", "Draft.gguf", "Drafted.gguf", "Embed.gguf", "Small.gguf"]
+
+    def test_pull_active_skips_unreferenced(self, tmp_path: Path) -> None:
+        result, files = self._run_pull(tmp_path, "--active")
+        assert result.exit_code == 0  # type: ignore[attr-defined]
+        assert "Big.gguf" not in files
+        assert sorted(files) == ["Draft.gguf", "Drafted.gguf", "Embed.gguf", "Small.gguf"]
+
+    def test_pull_active_with_model_outside_roles(self, tmp_path: Path) -> None:
+        """--active plus -m for unreferenced model pulls nothing."""
+        result, files = self._run_pull(tmp_path, "--active", "-m", "big")
+        assert files == []
+        assert "not found" in result.output  # type: ignore[attr-defined]
+
+    def test_pull_active_with_model_in_roles(self, tmp_path: Path) -> None:
+        _, files = self._run_pull(tmp_path, "--active", "-m", "embed")
+        assert files == ["Embed.gguf"]
+
+    def test_pull_skips_existing(self, tmp_path: Path) -> None:
+        (tmp_path / "Small.gguf").write_bytes(b"x")
+        result, files = self._run_pull(tmp_path, "--active")
+        assert "Small.gguf" not in files
+        assert "already exists" in result.output  # type: ignore[attr-defined]
+
+    def test_pull_download_failure_continues(self, tmp_path: Path) -> None:
+        runner = CliRunner()
+        mock_cfg = MagicMock()
+        mock_cfg.llm = _pull_config()
+        with (
+            patch("shared.cli.llamacpp.MODELS_DIR", tmp_path),
+            patch("shared.cli.llamacpp.PROJECTORS_DIR", tmp_path / "projectors"),
+            patch("shared.cli.llamacpp.load_config", return_value=mock_cfg),
+            patch("huggingface_hub.hf_hub_download", side_effect=RuntimeError("boom")) as mock_dl,
+        ):
+            result = runner.invoke(llamacpp, ["pull", "--active"])
+        assert result.exit_code == 0
+        assert "Failed: boom" in result.output
+        assert mock_dl.call_count == 4
